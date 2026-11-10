@@ -685,7 +685,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 func TestTopbarWorkspaceNameIsTheWorkspacesNameAndTheTitleIsAbsentUntilASummary(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
+	f := newOpenedOwingSummary(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Assert: the name rides its own element, and with no summary yet nothing

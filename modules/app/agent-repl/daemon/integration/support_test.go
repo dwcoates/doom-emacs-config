@@ -89,15 +89,19 @@ func newRegistered(t *testing.T, opts harness.Opts) *fixture {
 func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	t.Helper()
 	f := newRegistered(t, opts)
-	f.open()
-	// AN OPENED WORKSPACE HAS ALL THREE CONNECTIVITY HOPS UP (daemon.md
-	// invariant 11): Emacs holds WatchHostWorkspace and the page holds
-	// WatchWebWorkspace, and a workspace missing either is not connected
-	// however healthy its shim link is. Holding both here is what makes this
-	// fixture the OPENED workspace it claims to be rather than a half-open one
-	// whose footer would read disconnected forever.
-	f.host = f.d.WatchHost(f.ws)
-	f.web = f.d.WatchWeb(f.ws)
+	f.openWatched()
+	return f
+}
+
+// newOpenedOwingSummary is newOpened for a workspace registered with no
+// summary (harness.RegisterOwingSummary): one that owes its summary, as a new
+// workspace does until its agent states its task.
+func newOpenedOwingSummary(t *testing.T, opts harness.Opts) *fixture {
+	t.Helper()
+	d := harness.StartDaemon(t, opts)
+	repo := harness.NewRepo(t)
+	f := &fixture{d: d, repo: repo, ws: harness.RegisterOwingSummary(t, d, repo.Dir), t: t}
+	f.openWatched()
 	return f
 }
 
@@ -112,9 +116,7 @@ func newOpenedOn(t *testing.T, owner *harness.Daemon) *fixture {
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	f := &fixture{d: d, repo: repo, ws: ws, t: t}
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	f.web = f.d.WatchWeb(f.ws)
+	f.openWatched()
 	return f
 }
 
@@ -126,9 +128,7 @@ func newOpenedWithProfile(t *testing.T, opts harness.Opts, profile harness.ShimP
 	t.Helper()
 	f := newRegistered(t, opts)
 	f.d.WriteShimProfile(f.repo.Dir, profile)
-	f.open()
-	f.host = f.d.WatchHost(f.ws)
-	f.web = f.d.WatchWeb(f.ws)
+	f.openWatched()
 	return f
 }
 
@@ -143,10 +143,22 @@ func newOpenedWorktree(t *testing.T, opts harness.Opts, name string) *fixture {
 	dir := worktreeOf(t, repo, name)
 	ws := harness.Register(t, d, dir)
 	f := &fixture{d: d, repo: repo, ws: ws, t: t}
+	f.openWatched()
+	return f
+}
+
+// openWatched opens the workspace and holds both of its frontend watches.
+//
+// AN OPENED WORKSPACE HAS ALL THREE CONNECTIVITY HOPS UP (daemon.md invariant
+// 11): Emacs holds WatchHostWorkspace and the page holds WatchWebWorkspace, and
+// a workspace missing either is not connected however healthy its shim link
+// is. Holding both is what makes a fixture the OPENED workspace it claims to
+// be rather than a half-open one whose footer would read disconnected forever.
+func (f *fixture) openWatched() {
+	f.t.Helper()
 	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	f.web = f.d.WatchWeb(f.ws)
-	return f
 }
 
 // open sends OpenWorkspace and attaches to the spawned fake shim.

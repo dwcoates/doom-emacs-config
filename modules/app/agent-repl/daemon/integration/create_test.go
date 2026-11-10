@@ -71,8 +71,8 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 		t.Fatalf("StartSession request = %v, want fresh for a brand-new workspace", fresh)
 	}
 	turn := shim.ExpectStartTurn()
-	if text(turn.GetSaid()) != "fix the flaky reconnect test" {
-		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim", text(turn.GetSaid()))
+	if want := "fix the flaky reconnect test" + d.OwedSummaryNote(t); text(turn.GetSaid()) != want {
+		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim, closed by the owed-summary note %q", text(turn.GetSaid()), want)
 	}
 	if turn.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED {
 		t.Fatalf("StartTurn.origin = %v, want WORKSPACE_CREATED", turn.GetOrigin())
@@ -705,8 +705,9 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 	if fresh := shim.ExpectStartSession(); fresh.GetFresh() == nil {
 		t.Fatalf("StartSession request = %v, want fresh for a brand-new workspace", fresh)
 	}
-	if turn := shim.ExpectStartTurn(); text(turn.GetSaid()) != "fix the flaky reconnect test" {
-		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim", text(turn.GetSaid()))
+	want := "fix the flaky reconnect test" + d.OwedSummaryNote(t)
+	if turn := shim.ExpectStartTurn(); text(turn.GetSaid()) != want {
+		t.Fatalf("StartTurn.said = %q, want the initial prompt verbatim, closed by the owed-summary note %q", text(turn.GetSaid()), want)
 	}
 }
 

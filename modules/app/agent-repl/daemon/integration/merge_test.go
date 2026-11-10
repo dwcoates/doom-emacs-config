@@ -1205,6 +1205,10 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	// and everything waiting on that turn's end waits forever.
 	d.AwaitWorkspaceLogOperationCount(ws.GetDir(), harness.OpTurnOpened, 1)
 	pushConcludedTurn(shim, mainAgent, name+"-initial")
+	// The initial prompt asked the new workspace's agent for its summary, and
+	// the agent sets it as it answers, so the prompts a test sends next carry
+	// only their own words.
+	harness.SetSummary(t, d, ws, harness.SeededSummary)
 	// A created workspace is an OPENED one, so all three connectivity hops are
 	// up (daemon.md invariant 11): without the two client streams its footer
 	// reads disconnected, which outranks every merge substatus.
