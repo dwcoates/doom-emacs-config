@@ -285,6 +285,10 @@ func (s *fakeServer) UpdateRemoteControlMode(ctx context.Context, req *connect.R
 	return handleUnary[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse](ctx, s, "UpdateRemoteControlMode", req.Msg)
 }
 
+func (s *fakeServer) UpdateQueueBypassMode(ctx context.Context, req *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error) {
+	return handleUnary[v1.UpdateQueueBypassModeRequest, v1.UpdateQueueBypassModeResponse](ctx, s, "UpdateQueueBypassMode", req.Msg)
+}
+
 func (s *fakeServer) RetryVendorError(ctx context.Context, req *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error) {
 	return handleUnary[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse](ctx, s, "RetryVendorError", req.Msg)
 }
