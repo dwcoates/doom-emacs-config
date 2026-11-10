@@ -175,7 +175,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			continue
 		}
 		waiting := &frontendv1.RosterMergeQueueWaiting{
-			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront}
+			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), Placement: waitingPlacement(entry)}
 		// A MERGE ADMITTED BEHIND THE HEAD RACES IT: an active slot, whose
 		// clock ticks from the moment it took that slot.
 		if entry.Admitted {
@@ -687,4 +687,21 @@ func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 		Label: &frontendv1.RosterLabel{Text: label},
 		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
 	}
+}
+
+// waitingPlacement is the label a waiting merge draws after its name
+// (frontend.v1.RosterMergeQueueWaiting.placement): returned for a merge back
+// from a repair out of line, front for one the user put at the front, and
+// none for one put in line at the back. A front merge that stepped aside and
+// came back is drawn returned, the fact that placed it where it stands.
+func waitingPlacement(entry QueueEntry) *frontendv1.RosterMergeQueueWaitingPlacement {
+	switch {
+	case entry.Returned:
+		return &frontendv1.RosterMergeQueueWaitingPlacement{Placement: &frontendv1.RosterMergeQueueWaitingPlacement_Returned{
+			Returned: &frontendv1.RosterMergeQueueWaitingReturned{}}}
+	case entry.PlacedAtFront:
+		return &frontendv1.RosterMergeQueueWaitingPlacement{Placement: &frontendv1.RosterMergeQueueWaitingPlacement_Front{
+			Front: &frontendv1.RosterMergeQueueWaitingFront{}}}
+	}
+	return nil
 }

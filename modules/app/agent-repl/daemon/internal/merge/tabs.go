@@ -106,6 +106,10 @@ type tabState struct {
 	// waiting is a live agentic tab whose agent has an ask open: drawn
 	// waiting on the user. Only conflict resolution and fixing read it.
 	waiting bool
+	// held is an open tab of a merge back in line from a repair out of line,
+	// not taken up again: nothing of it runs (frontend.v1.FeedMergeTabHeld).
+	// Only the tabs a repair leaves open read it (holdRepairTabs).
+	held bool
 	// turnHolder names the merge holding the repository's test turn while a
 	// test run, its round open, waits in line for it; empty otherwise. Only a
 	// run's subtab reads it.
@@ -127,10 +131,19 @@ func (s tabState) badge() (*frontendv1.FeedMergeTabLive, *frontendv1.FeedMergeTa
 	return nil, settled
 }
 
+// heldBadge is the held badge of an open tab whose merge waits in line to be
+// taken up again, nil otherwise.
+func (s tabState) heldBadge() *frontendv1.FeedMergeTabHeld {
+	if s.settled || !s.held {
+		return nil
+	}
+	return &frontendv1.FeedMergeTabHeld{StartedAtMs: s.startedMS}
+}
+
 // waitingOnUser is the waiting badge of a live tab whose agent has an ask
 // open, nil otherwise.
 func (s tabState) waitingOnUser() *frontendv1.FeedMergeTabWaitingOnUser {
-	if s.settled || !s.waiting {
+	if s.settled || s.held || !s.waiting {
 		return nil
 	}
 	return &frontendv1.FeedMergeTabWaitingOnUser{StartedAtMs: s.startedMS}

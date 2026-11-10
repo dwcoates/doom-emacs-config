@@ -282,7 +282,8 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			AsyncName:     c.asyncName,
 			QueuedAt:      entry.EnqueuedAt,
 			PlacedAtFront: entry.Source.Front,
-			Admitted:      entry.State != wsm.MergeQueued,
+			Returned:      entry.Returned,
+			Admitted:      entry.WorkedOn(),
 			SlotSince:     entry.SlotSince,
 		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {

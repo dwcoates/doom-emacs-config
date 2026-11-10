@@ -117,11 +117,35 @@ func (s span) settled() bool { return s.EndedMS != 0 }
 
 // state is the span as the shared badge state, with waiting set for a live
 // unit whose agent has an ask open.
-func (s span) state(waiting bool) tabState {
+func (s span) state(mode tabMode) tabState {
 	if s.settled() {
 		return tabState{startedMS: s.StartedMS, settled: true, endedMS: s.EndedMS, failure: s.Failure}
 	}
-	return tabState{startedMS: s.StartedMS, waiting: waiting}
+	return tabState{startedMS: s.StartedMS, waiting: mode == modeWaitingOnUser, held: mode == modeHeld}
+}
+
+// open reports whether the span stands open: begun and not settled, which is
+// a tab drawn live (or waiting on the user, or held).
+func (s span) open() bool { return s.begun() && !s.settled() }
+
+// tabMode is how a view draws a tab that stands open: running, running with
+// its agent's ask open (waiting on the user), or held while its merge waits in
+// line to be taken up again after a repair out of line.
+type tabMode int
+
+const (
+	modeRunning tabMode = iota
+	modeWaitingOnUser
+	modeHeld
+)
+
+// tabModeOf is the mode of a running tab whose agent has an ask open when
+// WAITING.
+func tabModeOf(waiting bool) tabMode {
+	if waiting {
+		return modeWaitingOnUser
+	}
+	return modeRunning
 }
 
 // relive stands a parent tab live again from nowMS when it had settled (a
@@ -336,15 +360,17 @@ func (v *rebaseView) reachCommit(i int, nowMS int64) {
 }
 
 // rebasingTab builds the rebasing tab's kind arm at WAITING.
-func (v *rebaseView) rebasingTab(waiting bool) *frontendv1.FeedMergeTab {
+func (v *rebaseView) rebasingTab(mode tabMode) *frontendv1.FeedMergeTab {
 	replayed, total := v.progress()
 	inner := &frontendv1.FeedMergeTabRebasing{
 		Progress: &frontendv1.FeedMergeRebaseProgress{Replayed: uint32(replayed), Total: uint32(total)},
 		Lines:    drawnLines(v.Lines),
 	}
-	st := v.Span.state(waiting)
+	st := v.Span.state(mode)
 	if w := st.waitingOnUser(); w != nil {
 		inner.State = &frontendv1.FeedMergeTabRebasing_WaitingOnUser{WaitingOnUser: w}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabRebasing_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabRebasing_Live{Live: live}
 	} else {
@@ -357,16 +383,18 @@ func (v *rebaseView) rebasingTab(waiting bool) *frontendv1.FeedMergeTab {
 }
 
 // commitTab builds commit i's subtab at WAITING.
-func (v *rebaseView) commitTab(i int, waiting bool) *frontendv1.FeedMergeTab {
+func (v *rebaseView) commitTab(i int, mode tabMode) *frontendv1.FeedMergeTab {
 	c := v.Commits[i]
 	inner := &frontendv1.FeedMergeTabRebaseCommit{Lines: textLines(c.Lines)}
 	switch {
 	case !c.Span.begun():
 		inner.State = &frontendv1.FeedMergeTabRebaseCommit_Pending{Pending: &frontendv1.FeedMergeRebaseCommitPending{}}
 	default:
-		st := c.Span.state(waiting)
+		st := c.Span.state(mode)
 		if w := st.waitingOnUser(); w != nil {
 			inner.State = &frontendv1.FeedMergeTabRebaseCommit_WaitingOnUser{WaitingOnUser: w}
+		} else if h := st.heldBadge(); h != nil {
+			inner.State = &frontendv1.FeedMergeTabRebaseCommit_Held{Held: h}
 		} else if live, settled := st.badge(); live != nil {
 			inner.State = &frontendv1.FeedMergeTabRebaseCommit_Live{Live: live}
 		} else {
@@ -394,7 +422,7 @@ func (v *rebaseView) commitLabel(i int) *frontendv1.FeedMergeTabLabel {
 // conflict resolution at WAITING: the files that conflicted, at the
 // resolution's own progress. Only a commit whose conflict was handed to the
 // session has one; drawing any other is a bug of the caller's.
-func (v *rebaseView) resolutionTab(i int, waiting bool) *frontendv1.FeedMergeTab {
+func (v *rebaseView) resolutionTab(i int, mode tabMode) *frontendv1.FeedMergeTab {
 	c := v.Commits[i]
 	if c.Conflict == nil {
 		panic(fmt.Sprintf("merge: commit %d (%s) of replay %d has no conflict resolution to draw", i, c.SHA, v.Replay))
@@ -403,9 +431,11 @@ func (v *rebaseView) resolutionTab(i int, waiting bool) *frontendv1.FeedMergeTab
 	for _, path := range c.Conflict.Files {
 		inner.Files = append(inner.Files, &frontendv1.FeedMergeConflictFile{Path: path})
 	}
-	st := c.Conflict.Span.state(waiting)
+	st := c.Conflict.Span.state(mode)
 	if w := st.waitingOnUser(); w != nil {
 		inner.State = &frontendv1.FeedMergeTabConflictResolution_WaitingOnUser{WaitingOnUser: w}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabConflictResolution_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabConflictResolution_Live{Live: live}
 	} else {
@@ -438,11 +468,13 @@ func drawEach[T any](lines []T, asLine func(T) rebaseLine) []*frontendv1.FeedMer
 }
 
 // testsTab builds the tests tab's kind arm at WAITING.
-func (v *parentView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
+func (v *parentView) testsTab(mode tabMode) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTests{}
-	st := v.Span.state(waiting)
+	st := v.Span.state(mode)
 	if w := st.waitingOnUser(); w != nil {
 		inner.State = &frontendv1.FeedMergeTabTests_WaitingOnUser{WaitingOnUser: w}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabTests_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabTests_Live{Live: live}
 	} else {
@@ -455,11 +487,13 @@ func (v *parentView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 }
 
 // conflictsTab builds the resolving-conflicts tab's kind arm at WAITING.
-func (v *parentView) conflictsTab(waiting bool) *frontendv1.FeedMergeTab {
+func (v *parentView) conflictsTab(mode tabMode) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabResolvingConflicts{}
-	st := v.Span.state(waiting)
+	st := v.Span.state(mode)
 	if w := st.waitingOnUser(); w != nil {
 		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_WaitingOnUser{WaitingOnUser: w}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_Live{Live: live}
 	} else {
@@ -472,11 +506,13 @@ func (v *parentView) conflictsTab(waiting bool) *frontendv1.FeedMergeTab {
 }
 
 // fixingTestsTab builds the fixing-tests tab's kind arm at WAITING.
-func (v *parentView) fixingTestsTab(waiting bool) *frontendv1.FeedMergeTab {
+func (v *parentView) fixingTestsTab(mode tabMode) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabFixingTests{}
-	st := v.Span.state(waiting)
+	st := v.Span.state(mode)
 	if w := st.waitingOnUser(); w != nil {
 		inner.State = &frontendv1.FeedMergeTabFixingTests_WaitingOnUser{WaitingOnUser: w}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabFixingTests_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabFixingTests_Live{Live: live}
 	} else {
@@ -514,6 +550,8 @@ func fixingTab(n int, st tabState, attempt int) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTestsRunFixing{Attempt: &frontendv1.FeedMergeFixAttempt{Attempt: uint32(attempt), MaxAttempts: MaxFixAttempts}}
 	if waiting := st.waitingOnUser(); waiting != nil {
 		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_WaitingOnUser{WaitingOnUser: waiting}
+	} else if h := st.heldBadge(); h != nil {
+		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_Held{Held: h}
 	} else if live, settled := st.badge(); live != nil {
 		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_Live{Live: live}
 	} else {
@@ -527,12 +565,12 @@ func fixingTab(n int, st tabState, attempt int) *frontendv1.FeedMergeTab {
 
 // publishRebasing publishes the rebasing tab at WAITING.
 func (r *run) publishRebasing(waiting bool) {
-	r.publish(rebasingKey(), r.rebasing.rebasingTab(waiting))
+	r.publish(rebasingKey(), r.rebasing.rebasingTab(tabModeOf(waiting)))
 }
 
 // publishCommit publishes commit i's subtab at WAITING.
 func (r *run) publishCommit(i int, waiting bool) {
-	r.publish(commitKey(r.rebasing.Replay, i), r.rebasing.commitTab(i, waiting))
+	r.publish(commitKey(r.rebasing.Replay, i), r.rebasing.commitTab(i, tabModeOf(waiting)))
 }
 
 // publishReplay publishes the rebasing tab and then every subtab of its
@@ -565,13 +603,13 @@ func (p *replay) commitAt() int {
 
 // publishConflicts publishes the resolving-conflicts tab at WAITING.
 func (r *run) publishConflicts(waiting bool) {
-	r.publish(conflictsKey(), r.conflicts.conflictsTab(waiting))
+	r.publish(conflictsKey(), r.conflicts.conflictsTab(tabModeOf(waiting)))
 }
 
 // publishResolution publishes the subtab of commit i's conflict resolution at
 // WAITING.
 func (r *run) publishResolution(i int, waiting bool) {
-	r.publish(resolutionKey(r.rebasing.Replay, i), r.rebasing.resolutionTab(i, waiting))
+	r.publish(resolutionKey(r.rebasing.Replay, i), r.rebasing.resolutionTab(i, tabModeOf(waiting)))
 }
 
 // settleConflictAttempt ends the commit's current resolution attempt with
@@ -624,7 +662,7 @@ func (r *run) openTesting(round tabRound) {
 
 // publishTesting publishes the tests tab at WAITING.
 func (r *run) publishTesting(waiting bool) {
-	r.publish(testsKey(), r.testing.testsTab(waiting))
+	r.publish(testsKey(), r.testing.testsTab(tabModeOf(waiting)))
 }
 
 // settleTesting settles the tests tab: the gate passed, or it gave up with
@@ -667,7 +705,7 @@ func (r *run) testsRound() int {
 
 // publishFixingTests publishes the fixing-tests tab at WAITING.
 func (r *run) publishFixingTests(waiting bool) {
-	r.publish(fixingTestsKey(), r.fixing.fixingTestsTab(waiting))
+	r.publish(fixingTestsKey(), r.fixing.fixingTestsTab(tabModeOf(waiting)))
 }
 
 // publishFixing publishes the subtab of the fixing attempt `attempt` that
@@ -701,4 +739,64 @@ func (r *run) drawFixing(ctx context.Context, round tabRound, n, attempt int, su
 		r.publishFixingTests(waiting)
 		r.publishFixing(n, st, attempt)
 	})
+}
+
+// holdRepairTabs draws, HELD, every tab the progress record DOC of the merge
+// in WS under LEASE stands open: the tabs a repair out of line left open,
+// once the merge is back in line waiting to be taken up again
+// (frontend.v1.FeedMergeTabHeld). Its repairing turn has ended, so nothing
+// of them runs, and only the merge, when it heads its queue, reads whether
+// the repair worked; so they are neither live nor settled. The resumed run
+// draws them live again through its own resume drawing (resumeConflict,
+// resumeFix), from the same record, so a held tab is never left behind.
+func (o *orchestrator) holdRepairTabs(ws ids.WorkspaceID, lease ids.LeaseID, doc progressDoc) {
+	for _, row := range heldTabsOf(doc) {
+		o.publishTab(ws, lease, row.key, row.tab)
+	}
+}
+
+// heldTab is one tab row holdRepairTabs publishes.
+type heldTab struct {
+	key tabKey
+	tab *frontendv1.FeedMergeTab
+}
+
+// heldTabsOf answers every tab DOC stands open, drawn held, parent before
+// the subtabs drawn in it: the rebasing tab and its open commits, the
+// resolving-conflicts tab and its open resolutions, the tests tab, and the
+// fixing-tests tab with the attempt a fixing step stands on.
+func heldTabsOf(doc progressDoc) []heldTab {
+	var out []heldTab
+	if v := doc.Rebasing; v != nil {
+		if v.Span.open() {
+			out = append(out, heldTab{rebasingKey(), v.rebasingTab(modeHeld)})
+		}
+		for i, c := range v.Commits {
+			if c.Span.open() {
+				out = append(out, heldTab{commitKey(v.Replay, i), v.commitTab(i, modeHeld)})
+			}
+		}
+	}
+	if v := doc.Conflicts; v != nil && v.Span.open() {
+		out = append(out, heldTab{conflictsKey(), v.conflictsTab(modeHeld)})
+	}
+	if v := doc.Rebasing; v != nil {
+		for i, c := range v.Commits {
+			if c.Conflict != nil && c.Conflict.Span.open() {
+				out = append(out, heldTab{resolutionKey(v.Replay, i), v.resolutionTab(i, modeHeld)})
+			}
+		}
+	}
+	if v := doc.Testing; v != nil && v.Span.open() {
+		out = append(out, heldTab{testsKey(), v.testsTab(modeHeld)})
+	}
+	if v := doc.Fixing; v != nil && v.Span.open() {
+		out = append(out, heldTab{fixingTestsKey(), v.fixingTestsTab(modeHeld)})
+		if doc.Step == TabFixes {
+			n := doc.Rounds[TabTests]
+			st := tabState{startedMS: doc.Active.round().started.UnixMilli(), held: true}
+			out = append(out, heldTab{fixingKey(n), fixingTab(n, st, doc.FixAttempt)})
+		}
+	}
+	return out
 }

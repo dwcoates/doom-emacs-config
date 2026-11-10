@@ -217,9 +217,9 @@ func TestTheAgenticTabKindsAreTheAgenticArms(t *testing.T) {
 	built := map[string]*frontendv1.FeedMergeTab{
 		TabPick:           pickTab(tabState{}),
 		rowRebaseCommit:   {Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{}}},
-		TabConflicts:      (&parentView{}).conflictsTab(false),
+		TabConflicts:      (&parentView{}).conflictsTab(modeRunning),
 		rowTestsRun:       runTab(1, tabState{}, &frontendv1.FeedMergeTestsRunOutput{}),
-		TabFixes:          (&parentView{}).fixingTestsTab(false),
+		TabFixes:          (&parentView{}).fixingTestsTab(modeRunning),
 		rowTestsRunFixing: fixingTab(1, tabState{}, 1),
 		TabQueue:          {Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}}},
 		TabPreDeploy:      hookPromptTab(tabState{}),

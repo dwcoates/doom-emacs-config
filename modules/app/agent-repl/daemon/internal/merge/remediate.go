@@ -335,6 +335,19 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // chain then stood behind an entry it held no run for (2026-10-31,
 // TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
+	// THE TAKE-BACK LEFT ITS RECORD AND ITS BUBBLE IDENTITY HERE
+	// (recoverResumable): the held tabs are drawn from them. A remediating
+	// merge with neither is a defect, refused before anything is written.
+	o.mu.Lock()
+	doc, resuming := o.resumes[ws]
+	lease, ledgered := o.ledgerOf[ws]
+	o.mu.Unlock()
+	if !resuming || !ledgered {
+		err := fmt.Errorf("merge: the remediating merge of %s returns with no record (%v) or bubble identity (%v) taken back", ws, resuming, ledgered)
+		o.log(ctx, ws).Error(opRemediate, "a remediating merge returns with nothing taken back to resume or draw it from; it stays out of line",
+			dlog.Context{"workspace": string(ws), "repo": string(repo), "recorded": resuming, "ledgered": ledgered})
+		return err
+	}
 	if err := o.lineWrite(repo, func() error {
 		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
 	}); err != nil {
@@ -345,6 +358,9 @@ func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID,
 	o.mu.Unlock()
 	o.log(ctx, ws).Info(opRemediate, "the merge's repairing turn ended; it is back in line, next after the merge being worked on",
 		dlog.Context{"workspace": string(ws), "repo": string(repo)})
+	// ITS REPAIR'S TABS ARE HELD while it waits: nothing of them runs, and
+	// only its resume reads whether the repair worked.
+	o.holdRepairTabs(ws, lease, doc)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}

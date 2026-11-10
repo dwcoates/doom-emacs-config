@@ -1573,8 +1573,61 @@ func TestAWaitingMergeCarriesWhenAndWhereItWasPutInLine(t *testing.T) {
 
 	// Assert.
 	waiting := firstQueue(t, r).GetWaiting()[0]
-	if waiting.GetQueuedAtMs() != queued.UnixMilli() || !waiting.GetPlacedAtFront() {
+	if waiting.GetQueuedAtMs() != queued.UnixMilli() || waiting.GetPlacement().GetFront() == nil {
 		t.Fatalf("waiting = %v, want queued at %d, placed at the front", waiting, queued.UnixMilli())
+	}
+}
+
+func TestAWaitingMergesPlacementSaysWhyItStandsWhereItDoes(t *testing.T) {
+	tests := []struct {
+		name         string
+		front        bool
+		returned     bool
+		wantFront    bool
+		wantReturned bool
+	}{
+		{name: "a merge put in line at the back carries no placement"},
+		{name: "the user's front placement is front", front: true, wantFront: true},
+		{name: "a merge back from a repair is returned", returned: true, wantReturned: true},
+		{name: "a front merge back from a repair is returned", front: true, returned: true, wantReturned: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			line := inLine("w1", "w2")
+			line[1].PlacedAtFront, line[1].Returned = tt.front, tt.returned
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+			// Assert.
+			placement := firstQueue(t, r).GetWaiting()[0].GetPlacement()
+			if (placement.GetFront() != nil) != tt.wantFront || (placement.GetReturned() != nil) != tt.wantReturned {
+				t.Fatalf("placement = %v, want front %v returned %v", placement, tt.wantFront, tt.wantReturned)
+			}
+			if !tt.wantFront && !tt.wantReturned && placement != nil {
+				t.Fatalf("placement = %v, want none", placement)
+			}
+		})
+	}
+}
+
+func TestAReturnedMergeWaitingBehindTheHeadIsNotDrawnRacing(t *testing.T) {
+	// Arrange: the returned merge is admitted in the store, yet waits.
+	r, _ := newResolver(t)
+	line := inLine("w1", "w2")
+	line[0].Admitted = true
+	line[1].Returned = true
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	if waiting := firstQueue(t, r).GetWaiting()[0]; waiting.GetRacing() != nil {
+		t.Fatalf("waiting = %v, want the returned merge drawn waiting, not racing", waiting)
 	}
 }
 

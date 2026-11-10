@@ -97,6 +97,16 @@ func (r *run) resumeRun(ctx context.Context) error {
 		return err
 	}
 	r.source = entry.Source
+	// A MERGE BACK FROM A REPAIR OUT OF LINE IS TAKEN UP HERE, as the head or
+	// racing behind it: from this write on it is worked on
+	// (wsm.MergeQueueEntry.WorkedOn), so the queue redrawn below shows it
+	// running its recorded step again.
+	if entry.Returned {
+		if err := o.deps.DB.TakeUpReturnedMerge(ctx, r.repo, ws); err != nil {
+			r.end(ctx, fmt.Errorf("could not take up the merge back from its repair: %w", err))
+			return err
+		}
+	}
 	job, _, err := o.deps.DB.CreationJob(ctx, ws)
 	if err != nil {
 		r.end(ctx, fmt.Errorf("could not read the requester's creation job: %w", err))
