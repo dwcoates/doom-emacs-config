@@ -1950,10 +1950,10 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
   "A queue with no head and nothing waiting decodes to no head, none waiting,
-not paused, nothing remediating."
+not paused, nothing remediating, nothing in a GitHub merge queue."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
-                 '(:head nil :waiting nil :paused nil :remediating nil))))
+                 '(:head nil :waiting nil :paused nil :remediating nil :github nil))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-failed-arm ()
   "The failed head is retired; its arm is refused as an unknown field."
