@@ -370,6 +370,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Status:      verbsRef.status,
 		Briefs:      merge.BriefsFrom(paths.PromptsDir),
 		MintKey:     prompthandler.MintKey,
+		Now:         time.Now,
 		Log:         p.Surfaces,
 	})
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)

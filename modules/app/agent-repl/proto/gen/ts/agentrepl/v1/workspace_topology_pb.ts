@@ -215,14 +215,14 @@ export type WorkspaceRelationship = Message<"agentrepl.v1.WorkspaceRelationship"
    */
   kind: {
     /**
-     * A CHILD works on part of its parent's work and keeps coordinating with
-     * it. The roster nests it under its parent (under a repository divider
-     * when the parent is of another repository); the parent follows its
-     * questions, its landing and its close without subscribing
-     * (SubscribeWorkspace's events arrive as though the parent had asked for
-     * them). Its TURN ENDS are not followed that way: they are the tightest
-     * coordination, so a parent that needs them subscribes to TURN_ENDED
-     * itself; the parent reviews it and closes it; and the parent cannot be
+     * A CHILD works on part of its parent's work. The roster nests it under
+     * its parent (under a repository divider when the parent is of another
+     * repository); the parent is given ONE update without subscribing, the
+     * child's conclusion: a one-shot child's landing, any other child's first
+     * turn end (owner request, 2026-11-10). Its later turns, questions and
+     * answers are not followed: a parent that drives the child's work turn by
+     * turn subscribes to them itself (SubscribeWorkspace), which replaces the
+     * one update; the parent reviews it and closes it; and the parent cannot be
      * closed, hidden, finished or merged away while the child is open
      * (WorkspaceHasOpenChildren). Its landing target defaults to its parent's
      * branch.

@@ -176,15 +176,16 @@ type Recipient struct {
 // Recipients answers who is told KIND about WS, once each, never its requester
 // and never itself:
 //
-//   - its PARENT (Owner), of its creation only: a parent follows its child's
-//     landing and close without subscribing (wsm.ParentFollowedEvents), so it
-//     is told them there and in no other role here. A MERGE WORKSPACE's parent
+//   - its PARENT (Owner), of its creation only. A one-shot child's landing is
+//     its parent's one update (wsm.ParentFollowedEvents), so the parent is
+//     told that landing there and in no other role here; any other landing
+//     or close reaches it here in its other roles. A MERGE WORKSPACE's parent
 //     is its requester, which follows nothing, so it is told every kind;
 //   - the workspace whose branch it lands into (Branch);
 //   - its context source (Context).
 func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
 	var out []Recipient
-	parentFollows := ws.MergeOf == nil && ws.Parent != nil && kind != Created
+	parentFollows := ws.MergeOf == nil && ws.Parent != nil && kind == Landed && ws.OneShot
 	add := func(id *wsm.WorkspaceID, mark func(*Recipient)) {
 		if id == nil || *id == ws.ID || (ws.RequestedBy != nil && *id == *ws.RequestedBy) || (parentFollows && *id == *ws.Parent) {
 			return

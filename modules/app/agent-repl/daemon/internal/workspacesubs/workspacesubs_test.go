@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -54,6 +55,18 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 type fakeSubscribers struct {
 	subs []wsm.WorkspaceSubscription
 	err  error
+	// updated records each child whose one update was marked spent, and
+	// markErr fails the mark.
+	updated []wsm.WorkspaceID
+	markErr error
+}
+
+func (f *fakeSubscribers) MarkParentUpdated(_ context.Context, child wsm.WorkspaceID, _ time.Time) error {
+	if f.markErr != nil {
+		return f.markErr
+	}
+	f.updated = append(f.updated, child)
+	return nil
 }
 
 func (f *fakeSubscribers) WorkspaceSubscribers(context.Context, wsm.WorkspaceID) ([]wsm.WorkspaceSubscription, error) {
@@ -136,6 +149,7 @@ func newFixture() *fixture {
 			keys++
 			return fmt.Sprintf("%s-%d", prefix, keys), nil
 		},
+		Now: func() time.Time { return time.Unix(1_800_000_000, 0) },
 		Log: f.logs,
 	})
 	return f
@@ -210,7 +224,7 @@ func TestAParentIsToldAsTheParentAndASubscriberAsASubscriber(t *testing.T) {
 		wantNot       string
 	}{
 		{name: "a parent following its child", parentFollows: true,
-			want:    []string{"Your child workspace `followed` changed; as its parent you follow it without subscribing.", "These notices end when the child closes"},
+			want:    []string{"This is your child workspace `followed`'s one update to you, its conclusion", "agent-repld workspace subscribe followed -events turn_ended,needs_input"},
 			wantNot: "unsubscribe"},
 		{name: "a subscriber", parentFollows: false,
 			want:    []string{"A workspace you subscribed to changed.", "unsubscribe through `agent-repld workspace unsubscribe`"},
@@ -562,4 +576,57 @@ func TestEventProtoPanicsOnAnUndeclaredEvent(t *testing.T) {
 
 	// Act
 	EventProto(wsm.WorkspaceEvent(31))
+}
+
+func TestAParentsOneUpdateIsSpentOnceTold(t *testing.T) {
+	tests := []struct {
+		name          string
+		parentFollows bool
+		failSubmit    bool
+		wantSpent     bool
+	}{
+		{name: "a parent's update told is spent", parentFollows: true, wantSpent: true},
+		{name: "a subscriber's notice spends nothing", parentFollows: false, wantSpent: false},
+		{name: "a parent's update that could not be told is not spent", parentFollows: true, failSubmit: true, wantSpent: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			sub := subscribed(watcherA, wsm.WorkspaceEventTurnEnded)
+			sub.ParentFollows = tt.parentFollows
+			f.subs.subs = []wsm.WorkspaceSubscription{sub}
+			if tt.failSubmit {
+				f.prompts.failFor[watcherA] = errors.New("refused")
+			}
+
+			// Act
+			f.s.TurnEnded(followed)
+			f.deliverAll()
+
+			// Assert
+			if spent := len(f.subs.updated) == 1 && f.subs.updated[0] == followed; spent != tt.wantSpent {
+				t.Fatalf("spent = %v (marks %v), want %v", spent, f.subs.updated, tt.wantSpent)
+			}
+		})
+	}
+}
+
+func TestAParentsUpdateThatCannotBeMarkedSpentIsRecorded(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	sub := subscribed(watcherA, wsm.WorkspaceEventTurnEnded)
+	sub.ParentFollows = true
+	f.subs.subs = []wsm.WorkspaceSubscription{sub}
+	f.subs.markErr = errors.New("disk full")
+
+	// Act
+	f.s.TurnEnded(followed)
+	f.deliverAll()
+
+	// Assert
+	if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op,
+		Message: "the parent was told its child's one update but it could not be recorded as spent; the child's next conclusion is told too"}); !ok {
+		t.Fatalf("records = %+v, want the failed mark at error", f.logs.Records())
+	}
 }

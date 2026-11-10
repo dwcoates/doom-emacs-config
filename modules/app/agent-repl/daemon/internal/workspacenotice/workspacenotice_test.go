@@ -131,6 +131,11 @@ func TestRecipients(t *testing.T) {
 		ws.LandsInto = &into
 		return ws
 	}
+	oneShot := func() wsm.Workspace {
+		ws := derived(idp(owner), idp(source), nil)
+		ws.OneShot = true
+		return ws
+	}
 	merge := func() wsm.Workspace {
 		ws := derived(idp(owner), nil, nil)
 		ws.MergeOf = &wsm.MergeOrigin{Requester: owner}
@@ -144,9 +149,12 @@ func TestRecipients(t *testing.T) {
 	}{
 		{name: "a created child tells its parent and a distinct context source", ws: derived(idp(owner), idp(source), nil), kind: Created,
 			want: []Recipient{{Source: owner, Owner: true, Branch: true}, {Source: source, Context: true}}},
-		{name: "a landed child leaves its following parent out", ws: derived(idp(owner), idp(source), nil), kind: Landed,
+		{name: "a landed one-shot child leaves its parent out, whose one update its landing is", ws: oneShot(), kind: Landed,
 			want: []Recipient{{Source: source, Context: true}}},
-		{name: "a child closed without landing leaves its following parent out", ws: derived(idp(owner), idp(owner), nil), kind: ClosedWithoutLanding},
+		{name: "a landed child tells the parent it landed into", ws: derived(idp(owner), idp(source), nil), kind: Landed,
+			want: []Recipient{{Source: owner, Branch: true}, {Source: source, Context: true}}},
+		{name: "a child closed without landing tells its parent in its other roles", ws: derived(idp(owner), idp(owner), nil), kind: ClosedWithoutLanding,
+			want: []Recipient{{Source: owner, Branch: true, Context: true}}},
 		{name: "a workspace that is every source is told once", ws: derived(idp(owner), idp(owner), nil), kind: Created,
 			want: []Recipient{{Source: owner, Owner: true, Branch: true, Context: true}}},
 		{name: "the requester is never told about its own act", ws: derived(idp(owner), idp(requester), idp(requester)), kind: Created,
@@ -227,14 +235,16 @@ func TestDeliverTellsEachEventKindBriefly(t *testing.T) {
 	}
 }
 
-func TestDeliverLandingOfAChildTellsTheParentNothingHere(t *testing.T) {
+func TestDeliverLandingOfAOneShotChildTellsTheParentNothingHere(t *testing.T) {
 	// Arrange
 	f := newFixture()
+	ws := derived(idp(owner), nil, nil)
+	ws.OneShot = true
 
 	// Act
-	f.deliverNow(Event{Kind: Landed, Workspace: derived(idp(owner), nil, nil)})
+	f.deliverNow(Event{Kind: Landed, Workspace: ws})
 
-	// Assert: the parent hears the landing by following its child.
+	// Assert: the landing is the parent's one update, told by its following.
 	if len(f.prompts.got) != 0 {
 		t.Errorf("submissions = %+v, want none", f.prompts.got)
 	}
