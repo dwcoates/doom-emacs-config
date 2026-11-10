@@ -37,6 +37,7 @@ import type {
   RosterMergeQueueSubject,
   RosterMergeQueueRemediating,
   RosterMergeQueueRemediatingReason,
+  RosterMergeQueueWaitingPlacement,
   RosterMergeQueueWaiting,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -392,12 +393,12 @@ export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, 
   return line;
 }
 
-/** The class every queue label wears: `front`, what a remediating merge repairs, a GitHub place. */
+/** The class every queue label wears: `front`, `returned`, what a remediating merge repairs, a GitHub place. */
 export const MERGE_QUEUE_LABEL_CLASS = "sb-mq-label";
 
 /**
  * One queue label after a merge's name (owner request, 2026-11-10): `front`,
- * `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
+ * `returned`, `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
  * alike in the queue's purple. KIND is the label's own class beside
  * MERGE_QUEUE_LABEL_CLASS; TITLE is its hover.
  */
@@ -427,8 +428,28 @@ export function remediatingWords(reason: RosterMergeQueueRemediatingReason): str
 }
 
 /**
+ * The queue label a waiting merge's PLACEMENT draws after its name, per
+ * frontend.v1.RosterMergeQueueWaiting.placement: `front` for the user's front
+ * placement, `returned` for a merge back from repairing out of line, and none
+ * (null) for a merge put in line at the back or a placement this build does not
+ * name.
+ */
+export function placementLabel(
+  placement: RosterMergeQueueWaitingPlacement | undefined,
+): { text: string; kind: string; title: string } | null {
+  switch (placement?.placement.case) {
+    case "front":
+      return { text: "front", kind: "sb-mq-front", title: "put in line at the front" };
+    case "returned":
+      return { text: "returned", kind: "sb-mq-returned", title: "back in line from repairing out of line" };
+    default:
+      return null;
+  }
+}
+
+/**
  * One merge waiting behind the head, indented under the head's name, with no
- * bullet (owner request, 2026-11-06): the credited workspace's name, a front mark when it was put in line at the front, and how
+ * bullet (owner request, 2026-11-06): the credited workspace's name, its placement label (placementLabel), and how
  * long it has waited -- or, for a merge racing the head, how long it has
  * raced. Its place is the line's order; it is not numbered (owner
  * request, 2026-10-27).
@@ -441,8 +462,9 @@ export function drawRosterMergeQueueWaiting(
   const subject = requireMessage(u.subject, `${path}.subject`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_WAITING_CLASS, `${path}.subject`);
   line.append(drawSubjectName(subject, `${path}.subject`));
-  if (u.placedAtFront) {
-    line.appendChild(drawQueueLabel("front", "sb-mq-front", "put in line at the front"));
+  const placement = placementLabel(u.placement);
+  if (placement !== null) {
+    line.appendChild(drawQueueLabel(placement.text, placement.kind, placement.title));
   }
   // A MERGE RACING THE HEAD HOLDS AN ACTIVE SLOT: its clock reads how long it
   // has held that slot, never how long ago it was put in line.

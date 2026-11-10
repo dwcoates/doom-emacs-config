@@ -30,6 +30,7 @@ import {
   RosterMergeQueueRemediatingTestsSchema,
   RosterMergeQueueSubjectSchema,
   RosterMergeQueueWaitingSchema,
+  RosterMergeQueueWaitingPlacementSchema,
   RosterRepoMergeQueueSchema,
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
@@ -38,6 +39,7 @@ import {
   type RosterMergeQueueHead,
   type RosterMergeQueueSubject,
   type RosterMergeQueueWaiting,
+  type RosterMergeQueueWaitingPlacement,
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
@@ -583,15 +585,32 @@ export function conflictsReason() {
   });
 }
 
+/** The placement a waiting merge's INIT names: returned over front, as the daemon resolves it. */
+function placementOf(init: { front?: boolean; returned?: boolean }): RosterMergeQueueWaitingPlacement | undefined {
+  if (init.returned === true) {
+    return create(RosterMergeQueueWaitingPlacementSchema, { placement: { case: "returned", value: {} } });
+  }
+  if (init.front === true) {
+    return create(RosterMergeQueueWaitingPlacementSchema, { placement: { case: "front", value: {} } });
+  }
+  return undefined;
+}
+
 /** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */
 export function waitingMerge(
   id: string,
-  init: { queuedAtMs?: bigint; front?: boolean; subject?: RosterMergeQueueSubject; racingSinceMs?: bigint } = {},
+  init: {
+    queuedAtMs?: bigint;
+    front?: boolean;
+    returned?: boolean;
+    subject?: RosterMergeQueueSubject;
+    racingSinceMs?: bigint;
+  } = {},
 ): RosterMergeQueueWaiting {
   return create(RosterMergeQueueWaitingSchema, {
     subject: init.subject ?? queueSubject(id),
     queuedAtMs: init.queuedAtMs ?? 0n,
-    placedAtFront: init.front ?? false,
+    placement: placementOf(init),
     racing: init.racingSinceMs === undefined ? undefined : { sinceMs: init.racingSinceMs },
   });
 }
