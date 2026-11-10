@@ -3,6 +3,7 @@ package topbar
 import (
 	"agent-repld/internal/wsm"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1382,7 +1383,7 @@ func TestOwnedLinksLeadTheMenuAndReadAsOwned(t *testing.T) {
 	owned2 := Link{Label: "The doc", URL: "https://www.notion.so/doc", Owned: true}
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetSynthesizedTitle(testWS, "Title")
+	h.r.SetSummary(testWS, "Title")
 
 	// Act
 	h.r.SetLinks(testWS, []Link{reference1, owned1, reference2, owned2})

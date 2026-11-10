@@ -27,6 +27,8 @@ import {
   OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
+import styles from "../../src/styles.css?raw";
+import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
 import { appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -563,15 +565,9 @@ describe("a summary menu row's owned tint and service icon", () => {
     expect(() => drawLinkIcon(99 as TopbarTitleLinkIcon)).toThrow(/TopbarTitleLinkIcon/);
   });
 
-  it("tints an owned row lighter than a reference row", () => {
-    const teardown = installStylesheet();
-    try {
-      const owned = cascadedValueIn("topbar-reveal", "topbar-title-link-option is-owned", "background-color");
-      const plain = cascadedValueIn("topbar-reveal", "topbar-title-link-option", "background-color");
-      expect(owned).not.toBe(plain);
-    } finally {
-      teardown();
-    }
+  it("tints an owned row on a ground between the menu's and the topbar's", () => {
+    const rule = withoutBlockComments(styles).match(/\.topbar-title-link-option\.is-owned\s*\{([^}]*)\}/);
+    expect(rule?.[1]).toMatch(/background:\s*color-mix\(in srgb, var\(--bg\) 50%, var\(--sidebar-ground\)\)/);
   });
 });
 
