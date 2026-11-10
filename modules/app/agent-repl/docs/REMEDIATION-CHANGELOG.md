@@ -1368,3 +1368,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Master repair for the bypass-landed test breakage (accept-process-output prewarm, QueueBypass fake, shim and webapp expectations, message audit, land-direct worktree read) and the brief splice that checks only the template
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): The queue-bypass metaprompt section names bypass queue mode as the mode the session runs in
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo rows for the merge-queue stall triage's findings
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): The queue-bypass section names the session's transcript the bypass queue mode session, apart from a non-bypass session
