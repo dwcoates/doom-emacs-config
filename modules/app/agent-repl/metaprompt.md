@@ -349,6 +349,16 @@
   - The directory still holds the session's `.claude` state, so that state is moved aside for the `worktree add` and moved straight back.
 - Work never moves to a side worktree instead: the daemon serves only the workspace's own directory, so tests and merges run from nowhere else.
 
+## Closing after the PR merged
+
+### A workspace whose owned canonical pull request merged may close itself, after telling its parent
+
+- When the workspace's owned canonical pull request has merged into master and no work is pending, the workspace is free to close itself.
+  - Pending work is anything unfinished: an uncommitted change, an unanswered review comment, a running subagent, or a request from the user not yet met.
+  - The workspace first notifies its parent workspace that it is closing, then runs `agent-repld workspace close here`.
+- A workspace with no parent workspace never closes itself automatically.
+  - It reports that its pull request merged and leaves the closing to the user.
+
 ## Tool rejections
 
 ### A rejected tool call stops that call, never the work it served
