@@ -1002,11 +1002,6 @@ func (c *controller) carryConsumed(ws ids.WorkspaceID, move *sealedMove, fields 
 
 // awaitAdoption is the window itself.
 func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, lease, handedHold ids.LeaseID, detached bool, move *sealedMove, fields dlog.Context) adoptionOutcome {
-	// An adoption that already landed needs no window: the headless case claims
-	// serving inside Join, before the push it is answering was even read.
-	if done, _ := c.landed(ctx, ws, handedHold, move, fields); done {
-		return adoptionLanded
-	}
 	// THE WINDOW IS A DEADLINE, NOT A DELAY. The rendezvous closes the moment
 	// every expected participant has adopted, and waiting on it is what lets
 	// the outgoing daemon exit as soon as the successor is serving. Slept out
@@ -1022,10 +1017,24 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 	// the claim alone is not enough). The successor's refusal of a mid-work
 	// adoption is a file it writes beside the carry. Both are reported by
 	// handoverChanges, so the look runs once per change, never on a timer.
-	expired := c.deps.Clock.After(c.deps.AdoptionWindow)
-	done := c.rendezvousDone(ws)
+	//
+	// THE WATCH STANDS BEFORE THE FIRST LOOK, and the window is armed only
+	// after both. A look taken before the watch stood missed a refusal (or a
+	// claim) written in between: no change was ever reported for it, and the
+	// workspace waited out the whole window to be reclaimed as an expiry
+	// (kernelevent.Follow: check after it returns, and after every receive).
 	changes, stopChanges := c.handoverChanges(ctx)
 	defer stopChanges()
+	// An adoption that already landed needs no window: the headless case claims
+	// serving inside Join, before the push it is answering was even read.
+	if done, _ := c.landed(ctx, ws, handedHold, move, fields); done {
+		return adoptionLanded
+	}
+	if move != nil && move.midWork && c.refusedMidWork(ws) {
+		return c.takeBackRefused(ctx, ws, lease, detached, move, fields)
+	}
+	expired := c.deps.Clock.After(c.deps.AdoptionWindow)
+	done := c.rendezvousDone(ws)
 	claimSeen := false
 	for waiting := true; waiting; {
 		select {

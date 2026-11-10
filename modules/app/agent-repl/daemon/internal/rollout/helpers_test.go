@@ -953,6 +953,9 @@ type fakeRegistry struct {
 	asked chan registryCall
 	// deferred records every run that answered bounce.ErrDeferred.
 	deferred []error
+	// onSeal, when set, runs inside every SealMove, so a test acts at the
+	// moment the move is sealed, before the adoption window opens.
+	onSeal func(ws ids.WorkspaceID)
 }
 
 // registryCall is one recorded request.
@@ -979,6 +982,9 @@ func (r *fakeRegistry) SealMove(_ context.Context, ws ids.WorkspaceID) (bounce.H
 	}
 	across := r.across[ws]
 	delete(r.across, ws)
+	if r.onSeal != nil {
+		r.onSeal(ws)
+	}
 	return r.sealed[ws], across, nil
 }
 
