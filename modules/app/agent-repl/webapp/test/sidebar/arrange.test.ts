@@ -147,6 +147,7 @@ describe("the arrangement request", () => {
     ["otherRepository", "own repository"],
     ["anchorElsewhere", "try again"],
     ["noOpenWorkspace", "open workspace"],
+    ["mainWorkspaceNotSortable", "main workspace"],
   ])("says what the %s arm means", (arm, words) => {
     expect(arrangeSidebarRefusal({ case: arm, value: {} } as never)).toContain(words);
   });

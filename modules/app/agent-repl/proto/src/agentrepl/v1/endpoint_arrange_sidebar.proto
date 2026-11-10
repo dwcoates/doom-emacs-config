@@ -54,6 +54,14 @@ message ArrangeSidebarRequest {
     // gathers, in one change.
     ArrangeCreateAgentSubsection create_agent_subsection = 8;
   }
+  // THE REQUEST COMES FROM A WORKSPACE'S AGENT, not from the user's hands
+  // (a drag, the sidebar's menus). THE MAIN WORKSPACE IS NEVER SORTED
+  // AGENTICALLY (owner request, 2026-11-09): a repository's main workspace
+  // sits where the user put it, so an agent's placement (place_workspace,
+  // place_workspaces, create_agent_subsection) that would move a main
+  // workspace's family is refused on main_workspace_not_sortable. The user
+  // arranging a main workspace themselves sends this false and is unaffected.
+  bool by_agent = 9;
 }
 
 // Add a subsection named `name`, CREATED BY workspace `created_by`'s agent,
@@ -272,6 +280,10 @@ message ArrangeSidebarError {
     // An agent-created subsection would hold no open workspace, so the change
     // that created it would delete it.
     ArrangeSidebarNoOpenWorkspace no_open_workspace = 11;
+    // An agent's placement would move a repository's main workspace (or a
+    // family whose root it is), which agents never sort
+    // (ArrangeSidebarRequest.by_agent).
+    ArrangeSidebarMainWorkspaceNotSortable main_workspace_not_sortable = 12;
   }
   // `has_parent` (field 10) is RETIRED and reserved: a family moves whole
   // (owner request, 2026-10-20), so placing a workspace with a recorded
@@ -309,3 +321,5 @@ message ArrangeSidebarOtherRepository {}
 message ArrangeSidebarAnchorElsewhere {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarNoOpenWorkspace {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarMainWorkspaceNotSortable {}

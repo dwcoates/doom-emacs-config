@@ -1537,6 +1537,7 @@ func workspacePlace(c *cliCall, args []string) int {
 			return exitFailure
 		}
 		resp, err := c.client.ArrangeSidebar(c.ctx, connect.NewRequest(&agentreplv1.ArrangeSidebarRequest{
+			ByAgent: true,
 			Change: &agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection{CreateAgentSubsection: &agentreplv1.ArrangeCreateAgentSubsection{
 				CreatedBy: creator, Name: *newName, Workspaces: refs,
 			}}}))
@@ -1551,6 +1552,7 @@ func workspacePlace(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.ArrangeSidebar(c.ctx, connect.NewRequest(&agentreplv1.ArrangeSidebarRequest{
+		ByAgent: true,
 		Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
 			Workspaces: refs,
 			Into:       &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subsection},

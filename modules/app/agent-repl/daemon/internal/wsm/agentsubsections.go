@@ -74,6 +74,9 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 		if err := scanWorkspaceRow(ctx, tx, creator, "repo_id", &creatorRepo); err != nil {
 			return err
 		}
+		if err := refuseMainFamilies(ctx, tx, members); err != nil {
+			return err
+		}
 		root, err := familyRoot(ctx, tx, members[0])
 		if err != nil {
 			return err

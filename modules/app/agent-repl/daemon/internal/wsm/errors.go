@@ -461,3 +461,10 @@ type MergeQueuedError struct {
 func (e *MergeQueuedError) Error() string {
 	return fmt.Sprintf("wsm: workspace %s is already %s in repo %q merge queue at position %d", e.Workspace, e.State, e.Repo, e.Position)
 }
+
+// ErrMainWorkspaceNotSortable refuses an agent's placement that would move a
+// repository's main workspace, or a family whose root it is (a placement
+// moves a family whole). A main workspace sits where the user put it: the
+// user arranges it by hand (a drag, the sidebar's menus), and no agent sorts
+// it into a subsection.
+var ErrMainWorkspaceNotSortable = errors.New("wsm: a repository's main workspace is never sorted by an agent; only the user arranges it")

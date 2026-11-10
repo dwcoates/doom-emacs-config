@@ -563,6 +563,9 @@ type Verbs interface {
 	// (before a root there, before a subsection when into none, or last), and
 	// republishes the roster.
 	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error
+	// PlaceWorkspacesByAgent is PlaceWorkspaces for an agent's request, which
+	// never moves a main workspace's family (wsm.ErrMainWorkspaceNotSortable).
+	PlaceWorkspacesByAgent(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error
 	// SidebarArrangement reads the repository grouping's arrangement, for an
 	// agent organizing it (GetSidebarArrangement).
 	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)

@@ -179,6 +179,11 @@ through `run.sh --call` (a typed `agent-repld` verb comes once they land on mast
   one, use the agent API instead: `agent-repld workspace subsections WS` and
   `agent-repld workspace place WS... -subsection NAME|-new-subsection NAME`
   (the agent-repl-workspaces skill).
+- Set the request's `byAgent: true` on every arrangement an agent sends.
+  The daemon then refuses (`main_workspace_not_sortable`) any placement or
+  `createAgentSubsection` that would move a repository's main workspace, or a
+  family whose root it is: only the user arranges a main workspace, by drag or
+  the sidebar's menus, which send `byAgent` false.
 - Copy every ref verbatim from `GetSidebarArrangement`'s answer. A family
   moves whole: placing any workspace places its root, with every ancestor and
   descendant, and a workspace moves only within its own repository

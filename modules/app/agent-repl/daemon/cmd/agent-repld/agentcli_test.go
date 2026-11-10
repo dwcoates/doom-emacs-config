@@ -2964,3 +2964,31 @@ func TestWorkspaceVerbsSayTheMissingGeometrysRefusalInPlainEnglish(t *testing.T)
 		})
 	}
 }
+
+func TestPlaceMarksEveryArrangementItSendsAsTheAgents(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "into an existing subsection", args: []string{"-subsection", "later"}},
+		{name: "into a new subsection", args: []string{"-new-subsection", "auth work"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.arrangement = subsectionsArrangement()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"place", "here", "peer"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+			}
+			if !only[*agentreplv1.ArrangeSidebarRequest](t, f).GetByAgent() {
+				t.Fatal("the request did not say it came from an agent, so the daemon cannot refuse a main workspace")
+			}
+		})
+	}
+}
