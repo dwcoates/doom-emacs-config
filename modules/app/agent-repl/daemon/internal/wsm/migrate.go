@@ -230,6 +230,7 @@ var migrations = []migration{
 	{To: 122, Name: "gathers", Kind: MigrationAdditive, DDL: turnSuccessionsDDL + gathersDDL},
 	{To: 123, Name: "owed_start_work", Kind: MigrationAdditive, DDL: owedStartWorkDDL},
 	{To: 124, Name: "repository_blocks", Kind: MigrationAdditive, DDL: repositoryBlocksDDL},
+	{To: 125, Name: "merge_queue_returned", Kind: MigrationAdditive, DDL: mergeQueueReturnedDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

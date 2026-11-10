@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 )
@@ -10,13 +11,17 @@ func TestMergeSlotsOf(t *testing.T) {
 	cases := []struct {
 		name   string
 		states []MergeQueueState
-		want   []MergeSlot
+		// returned names the rows marked returned (MergeQueueEntry.Returned).
+		returned []int
+		want     []MergeSlot
 	}{
 		{name: "an empty queue holds no slot", states: nil, want: []MergeSlot{}},
 		{name: "the first merge in line heads it while it waits", states: []MergeQueueState{MergeQueued, MergeQueued}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting}},
 		{name: "an admitted front heads its line", states: []MergeQueueState{MergeAdmitted}, want: []MergeSlot{MergeSlotHead}},
 		{name: "an admitted merge behind the head races", states: []MergeQueueState{MergeAdmitted, MergeAdmitted, MergeQueued}, want: []MergeSlot{MergeSlotHead, MergeSlotRacing, MergeSlotWaiting}},
 		{name: "a requested merge holds no slot and never heads", states: []MergeQueueState{MergeRequested, MergeQueued}, want: []MergeSlot{MergeSlotNone, MergeSlotHead}},
+		{name: "an admitted merge back from a repair waits behind the head", states: []MergeQueueState{MergeAdmitted, MergeAdmitted, MergeQueued}, returned: []int{1}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting, MergeSlotWaiting}},
+		{name: "an admitted merge back from a repair heads a line it stands first in", states: []MergeQueueState{MergeAdmitted, MergeQueued}, returned: []int{0}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting}},
 		{name: "a remediating merge remediates and never heads", states: []MergeQueueState{MergeRemediating, MergeAdmitted}, want: []MergeSlot{MergeSlotRemediating, MergeSlotHead}},
 	}
 	for _, tc := range cases {
@@ -24,7 +29,7 @@ func TestMergeSlotsOf(t *testing.T) {
 			// Arrange
 			rows := make([]slotRow, len(tc.states))
 			for i, state := range tc.states {
-				rows[i] = slotRow{state: state}
+				rows[i] = slotRow{state: state, returned: slices.Contains(tc.returned, i)}
 			}
 
 			// Act
@@ -152,10 +157,19 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			want:  check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["step aside"] }},
 		},
 		{
-			name: "a remediated merge returning behind the worked-on head races from its return",
+			// A RETURNED MERGE IS NOT WORKED ON until it is taken up: it waits
+			// behind the head, admitted, with nothing of it running.
+			name: "a remediated merge returning behind the worked-on head waits from its return",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
 				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
-			want: check{ws: a, slot: MergeSlotRacing, at: func(m map[string]time.Time) time.Time { return m["return"] }},
+			want: check{ws: a, slot: MergeSlotWaiting, at: func(m map[string]time.Time) time.Time { return m["return"] }},
+		},
+		{
+			name: "a returned merge taken up behind the head races from its take-up",
+			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
+				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }},
+				{"take up", func(q *slotQueue, ctx context.Context) error { return q.s.TakeUpReturnedMerge(ctx, q.repo, q.a) }}},
+			want: check{ws: a, slot: MergeSlotRacing, at: func(m map[string]time.Time) time.Time { return m["take up"] }},
 		},
 		{
 			name: "a returned merge takes the head again as the head ahead of it lands",
@@ -169,21 +183,29 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 		{
 			name: "a remediated merge returning into a line with nobody ahead takes the head as it returns",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside},
-				{"b leaves", func(q *slotQueue, ctx context.Context) error { return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "taken off", nil) }},
-				{"c leaves", func(q *slotQueue, ctx context.Context) error { return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off", nil) }},
+				{"b leaves", func(q *slotQueue, ctx context.Context) error {
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "taken off", nil)
+				}},
+				{"c leaves", func(q *slotQueue, ctx context.Context) error {
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off", nil)
+				}},
 				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["return"] }},
 		},
 		{
 			name: "the successor takes the head as the head lands",
 			steps: []step{{"admit a", admit(a)},
-				{"a lands", func(q *slotQueue, ctx context.Context) error { return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil) }}},
+				{"a lands", func(q *slotQueue, ctx context.Context) error {
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil)
+				}}},
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
 		},
 		{
 			name: "a racing successor takes the head as the head lands",
 			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)},
-				{"a lands", func(q *slotQueue, ctx context.Context) error { return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil) }}},
+				{"a lands", func(q *slotQueue, ctx context.Context) error {
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil)
+				}}},
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
 		},
 		{
@@ -201,7 +223,9 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 		{
 			name: "a head a restart returns to its place keeps its head moment",
 			steps: []step{{"admit a", admit(a)},
-				{"restart", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnAdmittedMerge(ctx, q.repo, q.a, NewLeaseID()) }},
+				{"restart", func(q *slotQueue, ctx context.Context) error {
+					return q.s.ReturnAdmittedMerge(ctx, q.repo, q.a, NewLeaseID())
+				}},
 				{"readmit a", admit(a)}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return instant.Add(time.Minute) }},
 		},
@@ -315,4 +339,3 @@ func TestAnUndeclaredSlotRefusesTheQueuesRead(t *testing.T) {
 		t.Fatal("MergeQueue over an undeclared slot = nil, want a decode refusal")
 	}
 }
-

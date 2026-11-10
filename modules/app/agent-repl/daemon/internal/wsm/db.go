@@ -569,10 +569,13 @@ type DB interface {
 	// StepAsideMerge takes the admitted merge out of its line to fix its
 	// failing tests (MergeRemediating).
 	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
-	// ReturnRemediatedMerge puts a remediating merge back in line, admitted,
-	// at the first waiting place: behind every merge the caller names as
-	// being worked on, waiting in line or not.
+	// ReturnRemediatedMerge puts a remediating merge back in line, admitted
+	// and marked returned, at the first waiting place: behind every merge the
+	// caller names as being worked on, waiting in line or not.
 	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error
+	// TakeUpReturnedMerge clears a returned merge's mark as the orchestrator
+	// takes it up again (MergeQueueEntry.Returned).
+	TakeUpReturnedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)

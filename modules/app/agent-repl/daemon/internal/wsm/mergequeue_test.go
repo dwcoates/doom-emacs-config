@@ -2323,6 +2323,144 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	}
 }
 
+func TestReturnRemediatedMergeMarksItReturnedAndNotFront(t *testing.T) {
+	// Arrange
+	s, repo, failed, _, _ := stepAsideFixture(t)
+
+	// Act
+	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got := entryNamed(t, s, repo, failed)
+	if !got.Returned || got.Source.Front {
+		t.Fatalf("returned entry: returned %v, front %v; want returned and not front", got.Returned, got.Source.Front)
+	}
+	if got.WorkedOn() {
+		t.Fatal("the returned merge reads as worked on, want waiting until it is taken up")
+	}
+}
+
+func TestReturnRemediatedMergeKeepsTheUsersFrontPlacement(t *testing.T) {
+	// Arrange: a merge the user put at the front heads, steps aside behind
+	// one other merge, and returns.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	front, next := testWorkspace(t, s), testWorkspace(t, s)
+	frontQueued(t, s, repo, front.ID, instant)
+	queued(t, s, repo, next.ID, instant.Add(time.Minute))
+	if err := s.AdmitMerge(ctx, repo, front.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	if err := s.StepAsideMerge(ctx, repo, front.ID); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+
+	// Act
+	if err := s.ReturnRemediatedMerge(ctx, repo, front.ID, nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got := entryNamed(t, s, repo, front.ID)
+	if !got.Returned || !got.Source.Front {
+		t.Fatalf("returned front entry: returned %v, front %v; want both", got.Returned, got.Source.Front)
+	}
+}
+
+func TestTakeUpReturnedMergeClearsTheMarkSoItIsWorkedOn(t *testing.T) {
+	// Arrange
+	s, repo, failed, _, _ := stepAsideFixture(t)
+	ctx := context.Background()
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed, nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Act
+	if err := s.TakeUpReturnedMerge(ctx, repo, failed); err != nil {
+		t.Fatalf("TakeUpReturnedMerge: %v", err)
+	}
+
+	// Assert
+	got := entryNamed(t, s, repo, failed)
+	if got.Returned || got.State != MergeAdmitted || !got.WorkedOn() {
+		t.Fatalf("taken-up entry: returned %v, state %s, worked on %v; want unmarked, admitted, worked on", got.Returned, got.State, got.WorkedOn())
+	}
+}
+
+func TestTakeUpReturnedMergeRefusesAMergeNotReturnedAndChangesNothing(t *testing.T) {
+	// Arrange: the head is admitted and never stepped aside.
+	s, log := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	queued(t, s, repo, ws.ID, instant)
+	if err := s.AdmitMerge(ctx, repo, ws.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	err := s.TakeUpReturnedMerge(ctx, repo, ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("TakeUpReturnedMerge of a merge never returned = nil, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.take_up_returned_merge", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	if got := entryNamed(t, s, repo, ws.ID); got.State != MergeAdmitted || got.Returned {
+		t.Fatalf("entry after the refusal: state %s, returned %v; want it untouched", got.State, got.Returned)
+	}
+}
+
+func TestMergeQueueEntryWorkedOn(t *testing.T) {
+	cases := []struct {
+		name     string
+		state    MergeQueueState
+		returned bool
+		want     bool
+	}{
+		{"an admitted merge is worked on", MergeAdmitted, false, true},
+		{"an admitted merge back from a repair is not", MergeAdmitted, true, false},
+		{"a waiting merge is not", MergeQueued, false, false},
+		{"a remediating merge is not", MergeRemediating, false, false},
+		{"a requested merge is not", MergeRequested, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			entry := MergeQueueEntry{State: tc.state, Returned: tc.returned}
+
+			// Act
+			got := entry.WorkedOn()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("WorkedOn() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// entryNamed reads ID's entry off REPO's queue.
+func entryNamed(t *testing.T, s *store, repo RepoKey, id WorkspaceID) MergeQueueEntry {
+	t.Helper()
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Workspace == id {
+			return entry
+		}
+	}
+	t.Fatalf("no entry for %s in %+v", id, entries)
+	return MergeQueueEntry{}
+}
+
 func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)

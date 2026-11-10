@@ -46,7 +46,7 @@ then the bubble tab's held state.
     draws `returned`: it is the latest fact and the one that placed it.
   - The store records the two facts separately: `merge_queue.source_front`
     stays the user's placement; the return no longer writes it, and a new
-    `merge_queue.returned` column (layout 114) carries the return.
+    `merge_queue.returned` column (layout 125) carries the return.
   - `agentrepl.v1.MergeQueueStatusEntry.placed_at_front` is left as is; it
     now reads only the user's placement, because the return no longer writes
     the front mark.
