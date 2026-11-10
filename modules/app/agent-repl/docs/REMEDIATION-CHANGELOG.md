@@ -1386,3 +1386,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): Todo rows from the page-unload diagnosis
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A workspace closes once every pull request it owns has merged, and only then; a failed GitHub read is told to no workspace
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): GitHub failure notices an older build queued are dropped before they are delivered
+- 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): A workspace in queue bypass mode is refused one-shots and async merges, and is told to land child work directly instead
