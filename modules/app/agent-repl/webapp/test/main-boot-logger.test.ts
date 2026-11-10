@@ -95,17 +95,17 @@ const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";
 const BOOT_SETTLE_MS = 2000;
 
 /**
- * The boot's failure as the topbar's warning chip shows it, once it stands:
- * the chip's list is opened and the `bootFailed` row's detail read back.
+ * The boot's failure as the topbar's heading shows it, once it stands: the
+ * heading's warning list is opened and the `bootFailed` row's detail read back.
  */
 async function awaitBootFailureChip(): Promise<string> {
   const deadline = Date.now() + BOOT_SETTLE_MS;
   for (;;) {
     const chip = document.querySelector<HTMLElement>(
-      '#topbar .topbar-warnings[data-local-arms~="bootFailed"]',
+      '#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]',
     );
     if (chip !== null) {
-      chip.querySelector<HTMLElement>(".topbar-heading-warnings")?.click();
+      chip.click();
       document
         .querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')
         ?.click();

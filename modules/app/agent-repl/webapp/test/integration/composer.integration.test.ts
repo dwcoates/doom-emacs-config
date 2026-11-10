@@ -520,7 +520,7 @@ describe("command panels", () => {
       "commandActed",
       "askAnswered",
       "responseRevising",
-      "questionForked",
+      "questionSent",
     ]);
   });
 

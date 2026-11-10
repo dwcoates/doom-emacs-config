@@ -4447,8 +4447,8 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
     expect(stylesheet).not.toMatch(/\.topbar-wifi\[data-wifi=/);
   });
 
-  it("makes the mode-off disc white", () => {
-    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-off-disc")).toEqual([255, 255, 255]);
+  it("makes the mode-off disc light grey", () => {
+    expect(rgbOf(declarationsOf(":root") ?? "", "--wifi-mode-off-disc")).toEqual([229, 231, 235]);
   });
 
   it("fills the disc white by default", () => {
@@ -4477,7 +4477,7 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 
   it("holds the pulse still under prefers-reduced-motion", () => {
     expect(stylesheet).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.topbar-queue-bypass\[data-settling\],\s*\.topbar-remote-control\[data-settling\],\s*\.topbar-wifi\[data-settling\] \{ animation: none;/,
     );
   });
 });
