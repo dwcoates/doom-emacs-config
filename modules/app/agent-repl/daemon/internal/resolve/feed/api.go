@@ -589,6 +589,15 @@ type Deps struct {
 	// nil knows no catalog and stamps no commands, which is what a test that
 	// is not about slash commands wants. Production always wires it.
 	Commands func(ids.WorkspaceID) (*conversationv1.SessionCommandCatalog, bool)
+	// AnswerSettled is told every final response the feed records as its
+	// turn's answer: the workspace, its settled markdown and the instant it
+	// settled (epoch ms), live and on every replay alike (selection.go). It is
+	// the composer mentions' source (internal/composermentions), and is
+	// called OFF the resolver's lock, through Go, so it may take its own.
+	//
+	// nil tells nobody, which is what a test that is not about the composer's
+	// completions wants. Production always wires it.
+	AnswerSettled func(ws ids.WorkspaceID, markdown string, settledAtMs int64)
 	// RolledBack is the durable record of rolled-back turns (wsm.DB). nil
 	// records and loads nothing, which is what a test that is not about
 	// surviving a restart wants.
