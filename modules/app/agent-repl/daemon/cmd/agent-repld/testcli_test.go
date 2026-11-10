@@ -254,3 +254,45 @@ func TestTestRunRefusesLoadTheUserDidNotAskFor(t *testing.T) {
 		t.Fatalf("exit %d, request %v, stderr %q; want the refusal and nothing sent", code, daemon.got, errOut)
 	}
 }
+
+func TestTestRunNamesAHandCutWorktreeAndResolvesItsSelectionThere(t *testing.T) {
+	// Arrange: the caller stands in the hand-cut worktree, outside its own.
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-worktree", "/wt/caller", "-go", "pkg=TestA")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if got := daemon.got.GetWorktree().GetDir(); got != "/wt/caller" {
+		t.Fatalf("worktree = %q, want the directory -worktree named", got)
+	}
+	if got := daemon.got.GetRun().GetSelections()[0].GetGoPackage().GetPackageDir(); got != "src/pkg" {
+		t.Fatalf("package dir = %q, want src/pkg: relative to the named worktree", got)
+	}
+}
+
+func TestTestRunWithoutAWorktreeNamesNone(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
+
+	// Act
+	runTestCLI(t, daemon, "run", "-go", "pkg=TestA")
+
+	// Assert
+	if daemon.got.GetWorktree() != nil {
+		t.Fatalf("worktree = %v, want none on a run in the workspace's own worktree", daemon.got.GetWorktree())
+	}
+}
+
+func TestTestRunRefusesASelectionOutsideTheNamedWorktree(t *testing.T) {
+	// Act: the caller stands in /wt/caller/src, which is not in /wt/cut.
+	code, _, errOut := runTestCLI(t, &testRunsDaemon{}, "run", "-worktree", "/wt/cut", "-go", "pkg=TestA")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(errOut, "outside the workspace's worktree") {
+		t.Fatalf("exit %d, stderr %q; want the selection refused as outside the worktree", code, errOut)
+	}
+}

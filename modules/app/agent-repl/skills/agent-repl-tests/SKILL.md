@@ -24,6 +24,13 @@ workspace's own `bin/test-all.sh` with the selection, so the run takes
 background priority, the host's one test-CPU budget, and the runner's own
 log.
 
+A repository's main workspace sits on the main checkout, so the branch it
+works on lives in a git worktree it cut by hand, which no workspace is
+registered at. It runs that worktree's tests with `-worktree DIR`:
+`agent-repld test run -worktree DIR SELECTION...`. Selection paths then lie
+in DIR. The daemon refuses `-worktree` from any workspace but a main one,
+and for a directory that is no worktree of the main workspace's repository.
+
 Name only the tests your own work added or changed. Every other test, and
 the full suite, runs only in the merge queue's gate (the metaprompt's "When
 to run which tests" rules how broad a run is).

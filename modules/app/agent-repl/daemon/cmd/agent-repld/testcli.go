@@ -16,7 +16,7 @@ import (
 // testcli.go — `agent-repld test`: every test run on the host goes through
 // the daemon, the one runner of tests (bin/background.sh refuses any other).
 //
-//	agent-repld test run [-workspace WS] SELECTION... [OPTIONS]
+//	agent-repld test run [-workspace WS] [-worktree DIR] SELECTION... [OPTIONS]
 //	agent-repld test redundancy go|vitest|report [-workspace WS] FLAGS...
 //
 // `run`'s selections are flags, each repeated as needed:
@@ -45,9 +45,12 @@ import (
 //	-stop-at-first-failure   stop repeating at the first failing run
 //	-cpu-load N              hold N busy loops for the run (with -as-user only)
 //	-as-user                 the user asks, not the calling workspace
+//	-worktree DIR            run in DIR, a worktree of the repository that
+//	                         its main workspace cut by hand, in place of the
+//	                         workspace's own (a main workspace only)
 //
 // A path is relative to the working directory (or absolute), and must lie in
-// the workspace's worktree. Each frame of the run's stream is printed as one
+// the worktree the run runs in. Each frame of the run's stream is printed as one
 // line of protojson as it arrives. The command exits 0 when every run passed,
 // exitTestsFailed when one ran and failed, and exitRefused when the daemon or
 // the runner refused it.
@@ -75,6 +78,7 @@ func (t testSelections) empty() bool {
 func testRun(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	workspace := fs.String("workspace", here, "the workspace whose worktree runs the tests")
+	worktree := fs.String("worktree", "", "a worktree of the repository its main workspace cut by hand, run in place of the workspace's own (a main workspace only)")
 	var sel testSelections
 	fs.Var(repeatedFlag{values: &sel.goSel, noun: "selection"}, "go", "a Go package's tests: DIR, or DIR=TestA,TestB/sub/path")
 	fs.Var(repeatedFlag{values: &sel.vitest, noun: "selection"}, "vitest", "a vitest file's tests: FILE, or FILE=full name")
@@ -118,12 +122,21 @@ func testRun(c *cliCall, args []string) int {
 		c.failed("read the working directory: %v", err)
 		return exitFailure
 	}
-	run, err := buildSelections(canonicalDir(ref.GetDir()), canonicalDir(cwd), sel)
+	root := ref.GetDir()
+	if *worktree != "" {
+		if root, err = filepath.Abs(*worktree); err != nil {
+			return c.usageFailed("-worktree %s: %v", *worktree, err)
+		}
+	}
+	run, err := buildSelections(canonicalDir(root), canonicalDir(cwd), sel)
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
 	run.Coverage, run.Record, run.Remeasure = *coverage, *record, *remeasure
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester}
+	if *worktree != "" {
+		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}
+	}
 	if *cpuLoad > 0 {
 		req.CpuLoad = &agentreplv1.RunTestsCpuLoad{Loops: uint32(*cpuLoad)}
 	}
