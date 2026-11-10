@@ -710,19 +710,9 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if *slackThread != "" {
 		req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: *slackThread}
 	}
+	// A DAEMON HANDING OVER names its successor, and the client sends the
+	// same create there once (newRedirectingClient), as it does every call.
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
-	// A DAEMON HANDING OVER CREATES NOTHING NEW: it names its successor, and
-	// the same create is sent there once. A successor that is itself handing
-	// over already is answered as refused, like any other refusal. A failed
-	// call (a dry run's included) carries no answer to read a successor from.
-	if err != nil {
-		return answer(c, resp, err)
-	}
-	if successor := resp.Msg.GetError().GetTransferringAway().GetAddress(); successor != "" {
-		c.noted("the daemon is handing over; sending the create to its successor at %s", successor)
-		c.client = c.deps.client(successor)
-		resp, err = c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
-	}
 	return answer(c, resp, err)
 }
 
