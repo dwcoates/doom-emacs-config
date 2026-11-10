@@ -18,9 +18,13 @@ import (
 
 // stageGroup is the top-level stage a ledger kind is drawn under: a conflict
 // resolution under the rebasing stage and a fixing attempt under the tests
-// stage, as the bubble draws them (frontTabLabel). COLLAPSED reports a stage
-// drawn ONCE over all its rounds, as the bubble's one rebasing and one tests
-// tab are. An unknown kind answers false.
+// stage, the step each serves. The bubble draws them as tabs of their own
+// (frontTabLabel), but a stage is one step of the merge, and the ledger
+// closes the rebasing round failed when its conflict is handed over, so a
+// rebasing stage of its own rounds alone would read failed while the
+// resolution runs. COLLAPSED reports a stage drawn ONCE over all its rounds,
+// as the bubble's one rebasing and one tests tab are. An unknown kind answers
+// false.
 func stageGroup(kind string) (group string, collapsed bool, ok bool) {
 	switch kind {
 	case TabRebasing, TabConflicts:

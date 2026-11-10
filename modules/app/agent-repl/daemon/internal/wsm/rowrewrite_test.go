@@ -8,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/sourcescan"
@@ -200,5 +201,106 @@ func TestOnlyTheSharedLoopRewritesStoredRows(t *testing.T) {
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("%v rewrite stored rows by hand; use rewriteDurableRows", offenders)
+	}
+}
+
+func TestEditFeedRow(t *testing.T) {
+	prompt := &frontendv1.FeedRow{Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{}}}
+	tests := []struct {
+		name        string
+		edit        func(row *frontendv1.FeedRow) (bool, error)
+		wantChanged bool
+		wantTab     bool
+	}{
+		{
+			name: "a row the edit changed is re-encoded as edited",
+			edit: func(row *frontendv1.FeedRow) (bool, error) {
+				row.Row = &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}}
+				return true, nil
+			},
+			wantChanged: true,
+			wantTab:     true,
+		},
+		{
+			name: "a row the edit left alone is answered as it was",
+			edit: func(*frontendv1.FeedRow) (bool, error) { return false, nil },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			raw := marshalled(t, prompt)
+
+			// Act
+			out, changed, err := editFeedRow(raw, tt.edit)
+
+			// Assert
+			if err != nil || changed != tt.wantChanged {
+				t.Fatalf("editFeedRow = (changed %v, %v), want (changed %v, nil)", changed, err, tt.wantChanged)
+			}
+			if !tt.wantChanged && string(out) != string(raw) {
+				t.Fatal("a row the edit left alone was re-encoded")
+			}
+			row := &frontendv1.FeedRow{}
+			if err := proto.Unmarshal(out, row); err != nil {
+				t.Fatal(err)
+			}
+			if (row.GetMergeTab() != nil) != tt.wantTab {
+				t.Fatalf("row = %+v, want a merge tab %v", row, tt.wantTab)
+			}
+		})
+	}
+}
+
+func TestEditFeedRowRefusesARowThatDoesNotDecode(t *testing.T) {
+	// Arrange
+	called := false
+
+	// Act
+	_, _, err := editFeedRow([]byte{0xff, 0xff}, func(*frontendv1.FeedRow) (bool, error) {
+		called = true
+		return true, nil
+	})
+
+	// Assert
+	if err == nil || called {
+		t.Fatalf("editFeedRow = %v, edit called %v; want the decode refused before any edit", err, called)
+	}
+}
+
+func TestEditFeedRowAnswersTheEditsError(t *testing.T) {
+	// Arrange
+	refused := errors.New("the row is not one this step understands")
+
+	// Act
+	out, changed, err := editFeedRow(marshalled(t, &frontendv1.FeedRow{}), func(*frontendv1.FeedRow) (bool, error) {
+		return true, refused
+	})
+
+	// Assert
+	if !errors.Is(err, refused) || changed || out != nil {
+		t.Fatalf("editFeedRow = (%x, %v, %v), want the edit's error and no row", out, changed, err)
+	}
+}
+
+// TestEveryRowRewriteReEncodesThroughEditFeedRow keeps each layout step's row
+// rewrite on editFeedRow: a step decoding and re-encoding a row its own way is
+// a second copy of the skeleton to drift, such as one that re-encodes a row it
+// never changed.
+func TestEveryRowRewriteReEncodesThroughEditFeedRow(t *testing.T) {
+	// Arrange
+	reEncodes := regexp.MustCompile(`proto\.Marshal\(row\)`)
+
+	// Act
+	var offenders []string
+	for _, file := range sourcescan.Production(t) {
+		if file.Name != "rowrewrite.go" && reEncodes.Match(file.Source) {
+			offenders = append(offenders, file.Name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v re-encode stored rows by hand; edit them through editFeedRow", offenders)
 	}
 }

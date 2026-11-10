@@ -1,7 +1,8 @@
 /**
  * step-tabs — the merge bubble's rebase-first tabs: what the rebasing tab
  * draws above its commits, what a commit's subtab carries, what the committing
- * and updating-main tabs carry, and the attempt a fixing sub-subtab names.
+ * and updating-main tabs carry, the files a conflict resolution names, and the
+ * attempt a fixing attempt's subtab names.
  *
  * RESOLVED, REPLACED WHOLE PER PUSH. Each of these tabs carries its content in
  * its own row, so a push redraws it from the message and nothing accumulates
@@ -74,9 +75,8 @@ export function drawFeedMergeRebaseLines(
 }
 
 /**
- * A commit subtab's own content: its narration, oldest first. The conflict
- * section beneath it, when the commit has one, is `drawFeedMergeConflictFiles`
- * over the resolution's rows.
+ * A commit subtab's own content: its narration, oldest first. A conflict the
+ * session resolved is drawn in the resolving-conflicts tab, never here.
  */
 export function drawFeedMergeTabRebaseCommit(u: FeedMergeTabRebaseCommit, path: string): HTMLElement {
   const el = document.createElement("div");
@@ -85,7 +85,7 @@ export function drawFeedMergeTabRebaseCommit(u: FeedMergeTabRebaseCommit, path: 
   return el;
 }
 
-/** The files a commit's replay conflicted in, as its conflict section's heading. */
+/** The files a commit's replay conflicted in, as its conflict resolution's heading. */
 export function drawFeedMergeConflictFiles(files: readonly FeedMergeConflictFile[]): HTMLElement {
   const el = document.createElement("div");
   el.className = "merge-conflict-files list-rows";
@@ -233,7 +233,7 @@ export function drawFeedMergeUpdatingMainStep(u: FeedMergeUpdatingMainStep, path
   }
 }
 
-/** The attempt a fixing sub-subtab is, read off its tab message. */
+/** The attempt a fixing attempt's subtab is, read off its tab message. */
 export function drawFeedMergeTabFixingAttempt(u: FeedMergeTabTestsRunFixing, path: string): HTMLElement {
   return drawFeedMergeFixAttempt(requireMessage(u.attempt, `${path}.attempt`));
 }

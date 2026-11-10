@@ -15,26 +15,34 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// This file is the bubble's two PARENT tabs (frontend.v1.FeedMergeTab): the
-// ONE rebasing tab, whose subtabs are the commits each replay replays, and the
-// ONE tests tab, whose subtabs are the runs of the suites, each with the
-// fixing attempt that followed it as a sub-subtab.
+// This file is the bubble's four PARENT tabs (frontend.v1.FeedMergeTab): the
+// ONE rebasing tab, whose subtabs are the commits each replay replays; the ONE
+// resolving-conflicts tab, whose subtabs are the session's resolutions of the
+// commits that conflicted; the ONE tests tab, whose subtabs are the runs of
+// the suites; and the ONE fixing-tests tab, whose subtabs are the fixing
+// attempts that followed the failed runs. AN AGENT DRAWS ONLY IN THE
+// RESOLVING-CONFLICTS AND FIXING-TESTS TABS (owner request, 2026-11-09): a
+// commit's subtab carries only its replay's narration, and a run's only its
+// suites.
 //
 // THE VIEW IS THE DAEMON'S OWN BOOKKEEPING OF WHAT IT DREW, kept apart from the
 // ledger's rounds. A round is a ledger interval (a conflict resolution is a
 // `conflicts` round, a fixing attempt a `fixes` round, and the rebase goes on
 // in a new `rebasing` round after each), and the footer and the resume read
 // those rounds unchanged. The view is what the bubble draws: one rebasing tab
-// across every round and replay, each commit's subtab across its conflict
-// resolution, one tests tab across every run. Each view is recorded in the
-// merge's progress record, so a resumed run draws on from where it stood.
+// across every round and replay, one resolving-conflicts tab across every
+// resolution, each resolution's subtab across its attempts at its commit, one
+// tests tab across every run and one fixing-tests tab across every attempt.
+// Each view is recorded in the merge's progress record, so a resumed run
+// draws on from where it stood.
 
 // The row ids of the nested tabs. A subtab's row is keyed by what it is (a
 // commit of a replay, a run), and its parent is the tab it is drawn in.
 const (
-	rowRebaseCommit   = "rebase_commit"
-	rowTestsRun       = "tests_run"
-	rowTestsRunFixing = "tests_run_fixing"
+	rowRebaseCommit       = "rebase_commit"
+	rowConflictResolution = "conflict_resolution"
+	rowTestsRun           = "tests_run"
+	rowTestsRunFixing     = "tests_run_fixing"
 )
 
 // tabKey names one tab row of the bubble's sub-feed: its row id, its secondary
@@ -54,14 +62,31 @@ func roundTabKey(kind string, round int) tabKey {
 // rebasingKey is the ONE rebasing tab's key.
 func rebasingKey() tabKey { return roundTabKey(TabRebasing, 1) }
 
+// conflictsKey is the ONE resolving-conflicts tab's key.
+func conflictsKey() tabKey { return roundTabKey(TabConflicts, 1) }
+
 // testsKey is the ONE tests tab's key.
 func testsKey() tabKey { return roundTabKey(TabTests, 1) }
+
+// fixingTestsKey is the ONE fixing-tests tab's key.
+func fixingTestsKey() tabKey { return roundTabKey(TabFixes, 1) }
 
 // commitKey is the subtab of commit i (0-based) of replay `replay`.
 func commitKey(replay, i int) tabKey {
 	parent := rebasingKey()
-	return tabKey{id: rowRebaseCommit, sub: fmt.Sprintf("%d.%d", replay, i), parent: &parent}
+	return tabKey{id: rowRebaseCommit, sub: replayCommitSub(replay, i), parent: &parent}
 }
+
+// resolutionKey is the resolving-conflicts tab's subtab of the conflict
+// resolution of commit i (0-based) of replay `replay`.
+func resolutionKey(replay, i int) tabKey {
+	parent := conflictsKey()
+	return tabKey{id: rowConflictResolution, sub: replayCommitSub(replay, i), parent: &parent}
+}
+
+// replayCommitSub is the secondary key of commit i of replay `replay`, which
+// its commit subtab and its resolution's subtab share.
+func replayCommitSub(replay, i int) string { return fmt.Sprintf("%d.%d", replay, i) }
 
 // runKey is the subtab of run n (1-based): the n-th tests round.
 func runKey(n int) tabKey {
@@ -69,9 +94,10 @@ func runKey(n int) tabKey {
 	return tabKey{id: rowTestsRun, sub: strconv.Itoa(n), parent: &parent}
 }
 
-// fixingKey is the sub-subtab of the fixing attempt that followed run n.
+// fixingKey is the fixing-tests tab's subtab of the fixing attempt that
+// followed run n.
 func fixingKey(n int) tabKey {
-	parent := runKey(n)
+	parent := fixingTestsKey()
 	return tabKey{id: rowTestsRunFixing, sub: strconv.Itoa(n), parent: &parent}
 }
 
@@ -214,15 +240,18 @@ type commitView struct {
 	Conflict *conflictView `json:"conflict,omitempty"`
 }
 
-// conflictView is a commit's conflict resolution, once the session has it.
+// conflictView is a commit's conflict resolution, once the session has it:
+// the commit's subtab of the resolving-conflicts tab.
 type conflictView struct {
 	Span  span     `json:"span"`
 	Files []string `json:"files,omitempty"`
 }
 
-// testsView is the tests tab. Its runs are the tests rounds, and each run's
-// row is drawn by the run itself.
-type testsView struct {
+// parentView is a parent tab whose subtabs draw themselves: the tests tab
+// (its runs are the tests rounds), the resolving-conflicts tab (its
+// resolutions are the commits' conflictViews) and the fixing-tests tab (its
+// attempts are the fixes rounds). The view is the tab's own badge.
+type parentView struct {
 	Span span `json:"span"`
 }
 
@@ -258,8 +287,8 @@ func (v *rebaseView) clone() *rebaseView {
 	return &out
 }
 
-// clone answers a copy of the tests view.
-func (v *testsView) clone() *testsView {
+// clone answers a copy of the parent view.
+func (v *parentView) clone() *parentView {
 	if v == nil {
 		return nil
 	}
@@ -344,27 +373,47 @@ func (v *rebaseView) commitTab(i int, waiting bool) *frontendv1.FeedMergeTab {
 			inner.State = &frontendv1.FeedMergeTabRebaseCommit_Settled{Settled: settled}
 		}
 	}
-	if c.Conflict != nil {
-		conflict := &frontendv1.FeedMergeRebaseCommitConflict{}
-		for _, path := range c.Conflict.Files {
-			conflict.Files = append(conflict.Files, &frontendv1.FeedMergeConflictFile{Path: path})
-		}
-		st := c.Conflict.Span.state(waiting)
-		if w := st.waitingOnUser(); w != nil {
-			conflict.State = &frontendv1.FeedMergeRebaseCommitConflict_WaitingOnUser{WaitingOnUser: w}
-		} else if live, settled := st.badge(); live != nil {
-			conflict.State = &frontendv1.FeedMergeRebaseCommitConflict_Live{Live: live}
-		} else {
-			conflict.State = &frontendv1.FeedMergeRebaseCommitConflict_Settled{Settled: settled}
-		}
-		inner.Conflict = conflict
+	return &frontendv1.FeedMergeTab{
+		Label: v.commitLabel(i),
+		Kind:  &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: inner},
+	}
+}
+
+// commitLabel is the label commit i of the current replay is drawn with, by
+// its commit subtab and its resolution's subtab alike: the commit, at the
+// replay's round.
+func (v *rebaseView) commitLabel(i int) *frontendv1.FeedMergeTabLabel {
+	c := v.Commits[i]
+	return &frontendv1.FeedMergeTabLabel{
+		Words: &frontendv1.FeedMergeTabLabel_Commit{Commit: &frontendv1.FeedMergeRebaseCommitIdentity{ShortSha: short(c.SHA), Subject: c.Subject}},
+		Round: uint32(v.Replay),
+	}
+}
+
+// resolutionTab builds the resolving-conflicts tab's subtab of commit i's
+// conflict resolution at WAITING: the files that conflicted, at the
+// resolution's own progress. Only a commit whose conflict was handed to the
+// session has one; drawing any other is a bug of the caller's.
+func (v *rebaseView) resolutionTab(i int, waiting bool) *frontendv1.FeedMergeTab {
+	c := v.Commits[i]
+	if c.Conflict == nil {
+		panic(fmt.Sprintf("merge: commit %d (%s) of replay %d has no conflict resolution to draw", i, c.SHA, v.Replay))
+	}
+	inner := &frontendv1.FeedMergeTabConflictResolution{}
+	for _, path := range c.Conflict.Files {
+		inner.Files = append(inner.Files, &frontendv1.FeedMergeConflictFile{Path: path})
+	}
+	st := c.Conflict.Span.state(waiting)
+	if w := st.waitingOnUser(); w != nil {
+		inner.State = &frontendv1.FeedMergeTabConflictResolution_WaitingOnUser{WaitingOnUser: w}
+	} else if live, settled := st.badge(); live != nil {
+		inner.State = &frontendv1.FeedMergeTabConflictResolution_Live{Live: live}
+	} else {
+		inner.State = &frontendv1.FeedMergeTabConflictResolution_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{
-		Label: &frontendv1.FeedMergeTabLabel{
-			Words: &frontendv1.FeedMergeTabLabel_Commit{Commit: &frontendv1.FeedMergeRebaseCommitIdentity{ShortSha: short(c.SHA), Subject: c.Subject}},
-			Round: uint32(v.Replay),
-		},
-		Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: inner},
+		Label: v.commitLabel(i),
+		Kind:  &frontendv1.FeedMergeTab_ConflictResolution{ConflictResolution: inner},
 	}
 }
 
@@ -389,7 +438,7 @@ func drawEach[T any](lines []T, asLine func(T) rebaseLine) []*frontendv1.FeedMer
 }
 
 // testsTab builds the tests tab's kind arm at WAITING.
-func (v *testsView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
+func (v *parentView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTests{}
 	st := v.Span.state(waiting)
 	if w := st.waitingOnUser(); w != nil {
@@ -402,6 +451,40 @@ func (v *testsView) testsTab(waiting bool) *frontendv1.FeedMergeTab {
 	return &frontendv1.FeedMergeTab{
 		Label: tabLabel(TabTests, 1),
 		Kind:  &frontendv1.FeedMergeTab_Tests{Tests: inner},
+	}
+}
+
+// conflictsTab builds the resolving-conflicts tab's kind arm at WAITING.
+func (v *parentView) conflictsTab(waiting bool) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabResolvingConflicts{}
+	st := v.Span.state(waiting)
+	if w := st.waitingOnUser(); w != nil {
+		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_WaitingOnUser{WaitingOnUser: w}
+	} else if live, settled := st.badge(); live != nil {
+		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_Live{Live: live}
+	} else {
+		inner.State = &frontendv1.FeedMergeTabResolvingConflicts_Settled{Settled: settled}
+	}
+	return &frontendv1.FeedMergeTab{
+		Label: tabLabel(TabConflicts, 1),
+		Kind:  &frontendv1.FeedMergeTab_ResolvingConflicts{ResolvingConflicts: inner},
+	}
+}
+
+// fixingTestsTab builds the fixing-tests tab's kind arm at WAITING.
+func (v *parentView) fixingTestsTab(waiting bool) *frontendv1.FeedMergeTab {
+	inner := &frontendv1.FeedMergeTabFixingTests{}
+	st := v.Span.state(waiting)
+	if w := st.waitingOnUser(); w != nil {
+		inner.State = &frontendv1.FeedMergeTabFixingTests_WaitingOnUser{WaitingOnUser: w}
+	} else if live, settled := st.badge(); live != nil {
+		inner.State = &frontendv1.FeedMergeTabFixingTests_Live{Live: live}
+	} else {
+		inner.State = &frontendv1.FeedMergeTabFixingTests_Settled{Settled: settled}
+	}
+	return &frontendv1.FeedMergeTab{
+		Label: tabLabel(TabFixes, 1),
+		Kind:  &frontendv1.FeedMergeTab_FixingTests{FixingTests: inner},
 	}
 }
 
@@ -425,9 +508,9 @@ func runTab(n int, st tabState, output *frontendv1.FeedMergeTestsRunOutput) *fro
 // runLabel is run n's drawn label.
 func runLabel(n int) string { return fmt.Sprintf("run %d", n) }
 
-// fixingTab builds a fixing attempt's sub-subtab, carrying the attempt and
-// the ONE bound.
-func fixingTab(st tabState, attempt int) *frontendv1.FeedMergeTab {
+// fixingTab builds the fixing-tests tab's subtab of the attempt that followed
+// run n, labelled with that run and carrying the attempt and the ONE bound.
+func fixingTab(n int, st tabState, attempt int) *frontendv1.FeedMergeTab {
 	inner := &frontendv1.FeedMergeTabTestsRunFixing{Attempt: &frontendv1.FeedMergeFixAttempt{Attempt: uint32(attempt), MaxAttempts: MaxFixAttempts}}
 	if waiting := st.waitingOnUser(); waiting != nil {
 		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_WaitingOnUser{WaitingOnUser: waiting}
@@ -437,7 +520,7 @@ func fixingTab(st tabState, attempt int) *frontendv1.FeedMergeTab {
 		inner.State = &frontendv1.FeedMergeTabTestsRunFixing_Settled{Settled: settled}
 	}
 	return &frontendv1.FeedMergeTab{
-		Label: textLabel("fixing", 1),
+		Label: textLabel(runLabel(n), 1),
 		Kind:  &frontendv1.FeedMergeTab_TestsRunFixing{TestsRunFixing: inner},
 	}
 }
@@ -480,27 +563,55 @@ func (p *replay) commitAt() int {
 	return min(p.done, len(p.commits)-1)
 }
 
+// publishConflicts publishes the resolving-conflicts tab at WAITING.
+func (r *run) publishConflicts(waiting bool) {
+	r.publish(conflictsKey(), r.conflicts.conflictsTab(waiting))
+}
+
+// publishResolution publishes the subtab of commit i's conflict resolution at
+// WAITING.
+func (r *run) publishResolution(i int, waiting bool) {
+	r.publish(resolutionKey(r.rebasing.Replay, i), r.rebasing.resolutionTab(i, waiting))
+}
+
 // settleConflictAttempt ends the commit's current resolution attempt with
 // the line the merge tries it again with: a retry after a resolution that did
-// not resolve, or a re-prompt after a restart cut it short. The commit and the
-// rebasing tab stay live; the next attempt opens a new section.
+// not resolve, or a re-prompt after a restart cut it short. The commit, the
+// rebasing tab and the resolving-conflicts tab stay live; the next attempt
+// draws the resolution's subtab live again.
 func (r *run) settleConflictAttempt(p *replay, line string) {
 	i := p.commitAt()
 	c := &r.rebasing.Commits[i]
 	c.Conflict.Span.settle(r.o.nowMS(), line)
 	c.Lines = append(c.Lines, line)
 	r.publishCommit(i, false)
+	r.publishResolution(i, false)
+}
+
+// settleConflict ends commit i's conflict resolution at nowMS, and the
+// resolving-conflicts tab with it: resolved when failure is empty, gave up
+// with failure otherwise.
+func (r *run) settleConflict(i int, nowMS int64, failure string) {
+	r.rebasing.Commits[i].Conflict.Span.settle(nowMS, failure)
+	r.conflicts.Span.settle(nowMS, failure)
+	r.publishConflicts(false)
+	r.publishResolution(i, false)
 }
 
 // drawConflict stands commit i's conflict resolution live, fresh or resumed:
-// the session's turns draw in the commit's subtab, which (with the rebasing
-// tab) an open ask draws waiting on the user.
+// the resolving-conflicts tab and the resolution's subtab are drawn live, the
+// session's turns draw in that subtab, and an open ask draws it, the
+// resolving-conflicts tab, the commit's subtab and the rebasing tab waiting
+// on the user.
 func (r *run) drawConflict(ctx context.Context, round tabRound, i int, files int) {
 	commit := r.rebasing.Commits[i]
+	r.conflicts.Span.relive(round.started.UnixMilli())
 	r.drawLive(ctx, round, footer.StepConflictResolution, conflictLine(commit.Subject, files), nil,
-		commitKey(r.rebasing.Replay, i), func(waiting bool) {
+		resolutionKey(r.rebasing.Replay, i), func(waiting bool) {
 			r.publishRebasing(waiting)
 			r.publishCommit(i, waiting)
+			r.publishConflicts(waiting)
+			r.publishResolution(i, waiting)
 		})
 }
 
@@ -554,16 +665,40 @@ func (r *run) testsRound() int {
 	return r.rounds[TabTests]
 }
 
+// publishFixingTests publishes the fixing-tests tab at WAITING.
+func (r *run) publishFixingTests(waiting bool) {
+	r.publish(fixingTestsKey(), r.fixing.fixingTestsTab(waiting))
+}
+
+// publishFixing publishes the subtab of the fixing attempt `attempt` that
+// followed run n, at ST.
+func (r *run) publishFixing(n int, st tabState, attempt int) {
+	r.publish(fixingKey(n), fixingTab(n, st, attempt))
+}
+
+// settleFixing ends the fixing attempt `attempt` that followed run n in
+// ROUND, and the fixing-tests tab with it: its fix committed when failure is
+// empty, gave up with failure otherwise.
+func (r *run) settleFixing(round tabRound, n, attempt int, failure string) {
+	now := r.o.nowMS()
+	r.fixing.Span.settle(now, failure)
+	r.publishFixingTests(false)
+	r.publishFixing(n, round.settled(now, failure), attempt)
+}
+
 // drawFixing stands fixing attempt `attempt` live, fresh or resumed, as the
-// sub-subtab of run n: the session's turns draw in it, and an open ask draws
-// it and the tests tab waiting on the user.
+// fixing-tests tab's subtab of run n: the session's turns draw in it, and an
+// open ask draws it, the fixing-tests tab and the tests tab waiting on the
+// user.
 func (r *run) drawFixing(ctx context.Context, round tabRound, n, attempt int, suites []string) {
+	r.fixing.Span.relive(round.started.UnixMilli())
 	r.drawLive(ctx, round, footer.StepFixing, fixingLine(suites), func(f *footer.MergeFacts) {
 		f.Attempt, f.MaxAttempts = attempt, MaxFixAttempts
 	}, fixingKey(n), func(waiting bool) {
 		st := round.live()
 		st.waiting = waiting
 		r.publishTesting(waiting)
-		r.publish(fixingKey(n), fixingTab(st, attempt))
+		r.publishFixingTests(waiting)
+		r.publishFixing(n, st, attempt)
 	})
 }

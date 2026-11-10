@@ -62,14 +62,30 @@ function testsWithRun(
   ];
 }
 
-/** The view a run's panel shows. */
-function runViewOf(host: HTMLElement): string | null {
-  return host.querySelector(".merge-run")?.getAttribute("data-run-view") ?? null;
+/** A failed run, and the fixing-tests tab holding the attempt FIXING that followed it, and the rows given. */
+function fixingRun(fixing: Parameters<typeof tabRow>[1], ...rows: ReturnType<typeof childRow>[]) {
+  return [
+    ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
+    tabRow("t-fixing", { kind: "fixingTests", state: fixing.state === "settled" ? "settled" : "live" }),
+    tabRow("t-fix", { ...fixing, parent: "t-fixing" }),
+    ...rows,
+  ];
 }
 
-/** The run's badge in the tests tab's strip. */
-function runBadge(host: HTMLElement): HTMLElement | null {
-  return host.querySelector<HTMLElement>('.merge-strip.is-nested > [data-merge-tab="testsRun"]');
+/** A rebasing tab whose commit conflicted, and the resolving-conflicts tab holding its resolution in STATE. */
+function conflictResolution(state: "live" | "waitingOnUser" | "settled") {
+  return [
+    tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+    tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+    tabRow("t-conflicts", { kind: "resolvingConflicts", state: state === "settled" ? "settled" : "live" }),
+    tabRow("cr1", {
+      kind: "conflictResolution",
+      state,
+      ...(state === "settled" ? { outcome: "succeeded" as const } : {}),
+      parent: "t-conflicts",
+      payload: { files: [{ path: "a.go" }] },
+    }),
+  ];
 }
 
 /** The kind of the tab the strip marks active. */
@@ -189,12 +205,9 @@ describe("which tab is active", () => {
   });
 
   it("follows the run down every strip to its live tab", () => {
-    const view = new FakeSubfeed([
-      ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
-      tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
-    ]);
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
     const { host } = mount(view);
-    expect([activeKinds(host), runViewOf(host)]).toEqual([["tests", "testsRun"], "remediation"]);
+    expect(activeKinds(host)).toEqual(["fixingTests", "testsRunFixing"]);
   });
 
   it("keeps each strip's own pick: a commit picked in the rebasing tab survives the bubble's strip moving", () => {
@@ -254,43 +267,40 @@ describe("a rebasing tab is a strip of its commits", () => {
     expect(host.querySelector(".merge-rebase-commit .merge-line")?.textContent).toBe("replayed 1/2");
   });
 
-  it("draws a conflicted commit's files over its resolution's rows", () => {
-    const view = new FakeSubfeed([
-      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
-      tabRow("c1", {
-        kind: "rebaseCommit",
-        state: "live",
-        parent: "t-rebase",
-        payload: { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [{ path: "a.go" }] } },
-      }),
-      childRow("r1", "c1"),
-    ]);
+  it("draws a conflicted commit's resolution in the resolving-conflicts tab, never in the commit's", () => {
+    const view = new FakeSubfeed([...conflictResolution("live"), childRow("r1", "cr1")]);
     const { host } = mount(view);
-    const section = host.querySelector(".merge-conflict");
-    expect([section?.querySelector(".merge-conflict-file")?.textContent, section?.querySelector("[data-nest] [data-feed-row]")?.getAttribute("data-feed-row")]).toEqual(["a.go", "r1"]);
+    const panel = host.querySelector('[data-merge-tab-body="conflictResolution"]');
+    expect([
+      topKinds(host),
+      panel?.querySelector(".merge-conflict-file")?.textContent,
+      panel?.querySelector("[data-nest] [data-feed-row]")?.getAttribute("data-feed-row"),
+    ]).toEqual([["rebasing", "resolvingConflicts"], "a.go", "r1"]);
   });
 
-  it("draws no conflict section on a commit that replayed cleanly", () => {
+  it("draws no conflict files and no agent rows in a commit's own panel", () => {
     const view = new FakeSubfeed([
       tabRow("t-rebase", { kind: "rebasing", state: "live" }),
       tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+      childRow("r1", "c1"),
     ]);
     const { host } = mount(view);
-    expect(host.querySelector(".merge-conflict")).toBeNull();
+    const panel = host.querySelector('[data-merge-tab-body="rebaseCommit"]');
+    expect([panel?.querySelector(".merge-conflict-files"), panel?.querySelector("[data-feed-row]")]).toEqual([null, null]);
   });
 
-  it("draws the conflict section once a push hands the commit to the session", () => {
-    const commit = (conflict: boolean) =>
-      tabRow("c1", {
-        kind: "rebaseCommit",
-        state: "live",
-        parent: "t-rebase",
-        payload: conflict ? { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [{ path: "a.go" }] } } : {},
-      });
-    const view = new FakeSubfeed([tabRow("t-rebase", { kind: "rebasing", state: "live" }), commit(false)]);
+  it("moves to the resolution once a push hands a commit's conflict to the session", () => {
+    const rebasing = [
+      tabRow("t-rebase", { kind: "rebasing", state: "live" }),
+      tabRow("c1", { kind: "rebaseCommit", state: "live", parent: "t-rebase" }),
+    ];
+    const view = new FakeSubfeed(rebasing);
     const { host } = mount(view);
-    view.push([tabRow("t-rebase", { kind: "rebasing", state: "live" }), commit(true), childRow("r1", "c1")]);
-    expect(host.querySelector(".merge-conflict [data-feed-row]")?.getAttribute("data-feed-row")).toBe("r1");
+    view.push([...conflictResolution("live"), childRow("r1", "cr1")]);
+    expect([activeKinds(host), host.querySelector('[data-merge-tab-body="conflictResolution"] [data-feed-row]')?.getAttribute("data-feed-row")]).toEqual([
+      ["resolvingConflicts", "conflictResolution"],
+      "r1",
+    ]);
   });
 });
 
@@ -307,91 +317,27 @@ describe("a tests tab is a strip of its runs", () => {
   });
 
   it("draws a run as one badge, never a strip of its own", () => {
-    const view = new FakeSubfeed([
-      ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
-      tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
-    ]);
+    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
     const { host } = mount(view);
     expect([stripKinds(host), host.querySelector('[data-merge-tab-body="testsRun"] .merge-strip')]).toEqual([["tests", "testsRun"], null]);
   });
 
-  it("shows a run's tests while no fixing attempt follows it", () => {
-    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
+  it("draws a failed run's suites alone, with its fixing attempt in the fixing-tests tab", () => {
+    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }, childRow("r1", "t-fix")));
     const { host } = mount(view);
-    expect([runViewOf(host), host.querySelector<HTMLElement>(".merge-run-output")?.hidden]).toEqual(["tests", false]);
-  });
-
-  it("shows a run's remediation once a fixing attempt follows it", () => {
-    const run = testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" });
-    const view = new FakeSubfeed(run);
-    const { host } = mount(view);
-    view.push([...run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }), childRow("r1", "t-fix")]);
-    expect([runViewOf(host), host.querySelector(".merge-run-remediation:not([hidden]) [data-feed-row]")?.getAttribute("data-feed-row")]).toEqual([
-      "remediation",
-      "r1",
+    host.querySelector<HTMLElement>('.merge-strip:not(.is-nested) > [data-merge-tab="tests"]')?.click();
+    const run = host.querySelector('[data-merge-tab-body="testsRun"]');
+    expect([topKinds(host), run?.querySelector(".merge-run") !== null, run?.querySelector("[data-feed-row]")]).toEqual([
+      ["tests", "fixingTests"],
+      true,
+      null,
     ]);
   });
 
-  it("opens the view dropdown when the selected run's badge is clicked again", () => {
-    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
-    const { host } = mount(view);
-    runBadge(host)?.click();
-    const items = [...host.querySelectorAll<HTMLElement>(".merge-run-views:not([hidden]) .merge-run-view-item")];
-    expect(items.map((e) => [e.textContent, e.getAttribute("aria-checked")])).toEqual([
-      ["tests", "false"],
-      ["remediation", "true"],
-    ]);
-  });
-
-  it("switches a run to the view picked in its dropdown, and closes the dropdown", () => {
-    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
-    const { host } = mount(view);
-    runBadge(host)?.click();
-    host.querySelector<HTMLElement>('.merge-run-view-item[data-run-view="tests"]')?.click();
-    expect([runViewOf(host), host.querySelector<HTMLElement>(".merge-run-views")?.hidden]).toEqual(["tests", true]);
-  });
-
-  it("keeps the reader's picked view across a push", () => {
-    const rows = fixingRun({ kind: "testsRunFixing", state: "live" });
-    const view = new FakeSubfeed(rows);
-    const { host } = mount(view);
-    runBadge(host)?.click();
-    host.querySelector<HTMLElement>('.merge-run-view-item[data-run-view="tests"]')?.click();
-    view.push([...rows, childRow("r1", "t-fix")]);
-    expect(runViewOf(host)).toBe("tests");
-  });
-
-  it("offers no dropdown on a run with no remediation", () => {
-    const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }));
-    const { host } = mount(view);
-    runBadge(host)?.click();
-    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
-  });
-
-  it("closes an open dropdown when the run's badge is clicked once more", () => {
-    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
-    const { host } = mount(view);
-    document.body.append(host);
-    runBadge(host)?.click();
-    runBadge(host)?.click();
-    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
-    host.remove();
-  });
-
-  it("closes an open dropdown on a click outside it", () => {
-    const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }));
-    const { host } = mount(view);
-    document.body.append(host);
-    runBadge(host)?.click();
-    document.body.click();
-    expect(host.querySelector<HTMLElement>(".merge-run-views")?.hidden).toBe(true);
-    host.remove();
-  });
-
-  it("draws no fixing sub-subtab for a run that passed", () => {
+  it("draws no fixing tab for a run that passed", () => {
     const view = new FakeSubfeed(testsWithRun({ suites: [] }, { state: "settled", outcome: "succeeded" }));
     const { host } = mount(view);
-    expect(host.querySelector('[data-merge-tab="testsRunFixing"]')).toBeNull();
+    expect([host.querySelector('[data-merge-tab="fixingTests"]'), host.querySelector('[data-merge-tab="testsRunFixing"]')]).toEqual([null, null]);
   });
 });
 
@@ -563,14 +509,6 @@ describe("agentic tabs draw the sub-feed rows parented to them", () => {
   });
 });
 
-/** A failed run with a fixing attempt FIXING under it, and the rows given. */
-function fixingRun(fixing: Parameters<typeof tabRow>[1], ...rows: ReturnType<typeof childRow>[]) {
-  return [
-    ...testsWithRun({ suites: [] }, { state: "settled", outcome: "failed" }),
-    tabRow("t-fix", { ...fixing, parent: "t-run" }),
-    ...rows,
-  ];
-}
 
 describe("a fixing attempt names its attempt above its rows", () => {
   it("draws the attempt as 'attempt 2/3'", () => {
@@ -584,7 +522,7 @@ describe("a fixing attempt names its attempt above its rows", () => {
   it("still draws the rows parented to it under the attempt", () => {
     const view = new FakeSubfeed(fixingRun({ kind: "testsRunFixing", state: "live" }, childRow("r1", "t-fix")));
     const { host } = mount(view);
-    expect(host.querySelector(".merge-remediation-head ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
+    expect(host.querySelector(".merge-fix-attempt ~ [data-nest] [data-feed-row]")?.getAttribute("data-feed-row")).toBe(
       "r1",
     );
   });
@@ -912,28 +850,12 @@ describe("a pick tab", () => {
   });
 });
 
-/** A rebasing tab whose one commit has its conflict section in STATE. */
-function conflictedCommit(state: "live" | "waitingOnUser" | "settled") {
-  const conflictState =
-    state === "settled"
-      ? { case: "settled", value: { startedAtMs: 1n, endedAtMs: 2n, outcome: { case: "succeeded", value: {} } } }
-      : { case: state, value: { startedAtMs: 1n } };
-  return [
-    tabRow("t-rebase", { kind: "rebasing", state: "live" }),
-    tabRow("c1", {
-      kind: "rebaseCommit",
-      state: "live",
-      parent: "t-rebase",
-      payload: { conflict: { state: conflictState, files: [{ path: "a.go" }] } },
-    }),
-  ];
-}
 
 describe("an agent stream's stop control", () => {
   it.each([
-    ["a live conflict section", () => conflictedCommit("live"), true],
-    ["a conflict section waiting on the user", () => conflictedCommit("waitingOnUser"), true],
-    ["a settled conflict section", () => conflictedCommit("settled"), false],
+    ["a live conflict resolution", () => conflictResolution("live"), true],
+    ["a conflict resolution waiting on the user", () => conflictResolution("waitingOnUser"), true],
+    ["a settled conflict resolution", () => conflictResolution("settled"), false],
     ["a live resolving tab", () => [tabRow("t1", { kind: "resolving", state: "live" })], true],
     ["a settled resolving tab", () => [tabRow("t1", { kind: "resolving", state: "settled" })], false],
     ["a live fixing attempt", () => fixingRun({ kind: "testsRunFixing", state: "live" }), true],
@@ -947,16 +869,16 @@ describe("an agent stream's stop control", () => {
     expect(host.querySelector(".merge-tab-panel .merge-tab-stop [data-interrupt]") !== null).toBe(offered);
   });
 
-  it("stops a conflict by its commit's row id, sent as a merge tab", async () => {
+  it("stops a conflict by its resolution's row id, sent as a merge tab", async () => {
     // Arrange
-    const { host, h } = mountWith(new FakeSubfeed(conflictedCommit("live")));
+    const { host, h } = mountWith(new FakeSubfeed(conflictResolution("live")));
     // Act
-    host.querySelector<HTMLElement>(".merge-conflict .merge-tab-stop [data-interrupt]")?.click();
+    host.querySelector<HTMLElement>('[data-merge-tab-body="conflictResolution"] .merge-tab-stop [data-interrupt]')?.click();
     await settle();
     // Assert
     expect(h.calls.interrupt[0]?.target).toEqual({
       case: "mergeTab",
-      value: { $typeName: "frontend.v1.FeedId", value: "c1" },
+      value: { $typeName: "frontend.v1.FeedId", value: "cr1" },
     });
   });
 

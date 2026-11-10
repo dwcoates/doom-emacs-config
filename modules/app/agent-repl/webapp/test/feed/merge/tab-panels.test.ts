@@ -1,13 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { childTabsOf, readMergeTab, type MergeTab } from "../../../src/feed/merge/tab-strip.js";
-import {
-  autoRunView,
-  drawRemediationHeading,
-  fixingOf,
-  mergeTabPanel,
-  swapHeading,
-} from "../../../src/feed/merge/tab-panels.js";
+import { childTabsOf, drawTabDuration, readMergeTab, type MergeTab } from "../../../src/feed/merge/tab-strip.js";
+import { mergeTabPanel, swapHeading } from "../../../src/feed/merge/tab-panels.js";
 import { createTicker } from "../../../src/clock.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
 import { FakeSubfeed, childRow, tabRow } from "./fixtures.js";
@@ -45,60 +39,6 @@ const SWITCH = {
     availability: { case: "available", value: { target: { id: "ws-merge", dir: "/w/merge" } } },
   },
 };
-
-describe("autoRunView", () => {
-  it("shows a run's tests while no fixing attempt follows it", () => {
-    expect(autoRunView(undefined)).toBe("tests");
-  });
-
-  it("shows a run's remediation once a fixing attempt follows it", () => {
-    expect(autoRunView(tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })))).toBe("remediation");
-  });
-});
-
-describe("fixingOf", () => {
-  const run = () => tabOf(tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" }));
-
-  it("finds the fixing attempt parented to the run", () => {
-    const view = new FakeSubfeed([tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
-    expect(fixingOf(run(), view)?.id).toBe("t-fix");
-  });
-
-  it("finds none for a run nothing followed", () => {
-    expect(fixingOf(run(), new FakeSubfeed([tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-other" })]))).toBeUndefined();
-  });
-
-  it("refuses a run followed by two fixing attempts", () => {
-    const view = new FakeSubfeed([
-      tabRow("t-fix1", { kind: "testsRunFixing", state: "settled", outcome: "failed", parent: "t-run" }),
-      tabRow("t-fix2", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
-    ]);
-    expect(() => fixingOf(run(), view)).toThrow("a run has at most one");
-  });
-});
-
-describe("drawRemediationHeading", () => {
-  it("draws the attempt, its clock and its state glyph on one line", () => {
-    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live", payload: { attempt: { attempt: 2, maxAttempts: 3 } } }));
-    const line = drawRemediationHeading(fix, createTicker(1000)).querySelector(".merge-remediation-line");
-    expect([...(line?.children ?? [])].map((e) => e.className.split(" ")[0])).toEqual([
-      "merge-fix-attempt",
-      "merge-tab-duration",
-      "merge-tab-glyph",
-    ]);
-  });
-
-  it("states a failed attempt's own account under the line", () => {
-    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "settled", outcome: "failed" }));
-    const summary = drawRemediationHeading(fix, createTicker(1000)).querySelector<HTMLElement>(".merge-tab-summary");
-    expect([summary?.hidden, summary?.querySelector(".merge-tab-failed") !== null]).toEqual([false, true]);
-  });
-
-  it("states nothing under the line of an attempt still at work", () => {
-    const fix = tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live" }));
-    expect(drawRemediationHeading(fix, createTicker(1000)).querySelector<HTMLElement>(".merge-tab-summary")?.hidden).toBe(true);
-  });
-});
 
 describe("mergeTabPanel", () => {
   it("draws a script hook's tab as its own row: the script, its tail and its exit", () => {
@@ -153,28 +93,71 @@ describe("mergeTabPanel", () => {
     expect([...(container?.children ?? [])].map((e) => e.getAttribute("data-feed-row"))).toEqual(["r1", "r2"]);
   });
 
-  it("asks for a commit to be drawn afresh when its conflict section appears", () => {
-    const view = new FakeSubfeed();
-    const panel = mergeTabPanel(tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live" })), view, rc());
-    const handed = tabRow("c1", {
-      kind: "rebaseCommit",
-      state: "live",
-      payload: { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [] } },
-    });
-    expect(panel.update(tabOf(handed))).toBe(false);
+  it("draws a commit as its narration alone, never an agent row parented to it", () => {
+    const commit = tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }] } });
+    const panel = mergeTabPanel(tabOf(commit), new FakeSubfeed([commit, childRow("r1", "c1")]), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect([[...host.querySelectorAll(".merge-line")].map((e) => e.textContent), host.querySelector("[data-feed-row]")]).toEqual([["a"], null]);
   });
 
-  it("redraws a commit's lines in place when they grew", () => {
+  it("asks for a commit to be drawn afresh when its lines grew", () => {
     const view = new FakeSubfeed();
     const panel = mergeTabPanel(
       tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }] } })),
       view,
       rc(),
     );
+    const grown = tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }, { line: { case: "text", value: "b" } }] } });
+    expect(panel.update(tabOf(grown))).toBe(false);
+  });
+
+  it("draws a conflict resolution as its conflicted files over its agent rows", () => {
+    const resolution = tabRow("cr1", {
+      kind: "conflictResolution",
+      state: "live",
+      parent: "t-conflicts",
+      payload: { files: [{ path: "b.go" }, { path: "a.go" }] },
+    });
+    const panel = mergeTabPanel(tabOf(resolution), new FakeSubfeed([resolution, childRow("r1", "cr1")]), rc());
     const host = document.createElement("div");
     host.append(...panel.nodes);
-    panel.update(tabOf(tabRow("c1", { kind: "rebaseCommit", state: "live", payload: { lines: [{ line: { case: "text", value: "a" } }, { line: { case: "text", value: "b" } }] } })));
-    expect([...host.querySelectorAll(".merge-line")].map((e) => e.textContent)).toEqual(["a", "b"]);
+    expect([
+      [...host.querySelectorAll(".merge-conflict-files > .merge-conflict-file")].map((e) => e.textContent),
+      [...host.querySelectorAll(".merge-tab-rows > [data-feed-row]")].map((e) => e.getAttribute("data-feed-row")),
+      host.querySelector(".merge-tab-stop") !== null,
+    ]).toEqual([["b.go", "a.go"], ["r1"], true]);
+  });
+
+  it("draws a fixing attempt as its attempt over its agent rows", () => {
+    const fixing = tabRow("f1", {
+      kind: "testsRunFixing",
+      state: "settled",
+      outcome: "succeeded",
+      parent: "t-fixing",
+      payload: { attempt: { attempt: 2, maxAttempts: 4 } },
+    });
+    const panel = mergeTabPanel(tabOf(fixing), new FakeSubfeed([fixing, childRow("r1", "f1")]), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect([
+      host.querySelector(".merge-fix-attempt")?.textContent,
+      [...host.querySelectorAll(".merge-tab-rows > [data-feed-row]")].map((e) => e.getAttribute("data-feed-row")),
+    ]).toEqual(["attempt 2/4", ["r1"]]);
+  });
+
+  it.each([
+    ["resolvingConflicts", "conflictResolution"],
+    ["fixingTests", "testsRunFixing"],
+  ] as const)("draws the %s tab's %s subtabs as a nested strip", (parent, child) => {
+    const rows = [
+      tabRow("t-parent", { kind: parent, state: "live" }),
+      tabRow("t-child", { kind: child, state: "live", parent: "t-parent" }),
+    ];
+    const panel = mergeTabPanel(childTabsOf(rows, undefined)[0], new FakeSubfeed(rows), rc());
+    const host = document.createElement("div");
+    host.append(...panel.nodes);
+    expect(host.querySelector(`.merge-strip.is-nested [data-merge-tab="${child}"]`)).not.toBeNull();
   });
 
   it("draws a parent tab's children as a nested strip", () => {
@@ -203,41 +186,36 @@ describe("mergeTabPanel", () => {
     ]).toEqual(["3/1/7", null]);
   });
 
-  it("draws a run as its views, with no strip of its own", () => {
+  it("draws a run as its suites alone: no strip, and no fixing attempt a stored row parents to it", () => {
     const rows = [
-      tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" }),
+      tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } }),
       tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" }),
+      childRow("r1", "t-fix"),
     ];
     const panel = mergeTabPanel(tabOf(rows[0]), new FakeSubfeed(rows), rc());
     const host = document.createElement("div");
     host.append(...panel.nodes);
-    expect([[...host.querySelectorAll(".merge-run-view")].map((e) => e.getAttribute("data-run-view")), host.querySelector(".merge-strip")]).toEqual([
-      ["tests", "remediation"],
-      null,
-    ]);
+    expect([
+      host.querySelectorAll(".merge-run .merge-suite").length,
+      host.querySelector(".merge-strip"),
+      host.querySelector(".merge-fix-attempt"),
+      host.querySelector("[data-feed-row]"),
+    ]).toEqual([2, null, null, null]);
   });
 
-  it("offers a run's views on reselect only once it has a remediation", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
-    const view = new FakeSubfeed([run]);
-    const panel = mergeTabPanel(tabOf(run), view, rc());
+  it("updates a run's suites in place", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
+    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
     const host = document.createElement("div");
     host.append(...panel.nodes);
-    const badge = document.createElement("div");
-    panel.reselect?.(badge);
-    const closed = host.querySelector<HTMLElement>(".merge-run-views")?.hidden;
-    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
-    panel.update(tabOf(run));
-    panel.reselect?.(badge);
-    expect([closed, host.querySelector<HTMLElement>(".merge-run-views")?.hidden]).toEqual([true, false]);
+    const drawn = host.querySelector(".merge-run");
+    const next = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(2) } } });
+    expect([panel.update(tabOf(next)), host.querySelector(".merge-run") === drawn]).toEqual([true, true]);
   });
 
-  it("refuses a run whose fixing attempt disappeared", () => {
+  it("offers nothing on a run's reselect: a run has one view", () => {
     const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
-    const view = new FakeSubfeed([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
-    const panel = mergeTabPanel(tabOf(run), view, rc());
-    view.push([run]);
-    expect(() => panel.update(tabOf(run))).toThrow("disappeared");
+    expect(mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc()).reselect).toBeUndefined();
   });
 
   it("draws a child tab a later push adds to a parent's strip", () => {
@@ -324,10 +302,10 @@ describe("a panel's opening shows its newest output", () => {
     Object.defineProperty(el, "clientHeight", { value: 300, configurable: true });
   }
 
-  /** The run view VIEW of a drawn run panel. */
-  const runView = (view: "tests" | "remediation"): HTMLElement => {
-    const el = document.querySelector<HTMLElement>(`.merge-run-view[data-run-view="${view}"]`);
-    if (el === null) throw new Error(`no ${view} view`);
+  /** The drawn run panel's scroll box. */
+  const runBox = (): HTMLElement => {
+    const el = document.querySelector<HTMLElement>(".merge-run");
+    if (el === null) throw new Error("no run");
     return el;
   };
 
@@ -335,53 +313,20 @@ describe("a panel's opening shows its newest output", () => {
     const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
     const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
     inBubble(panel.nodes);
-    layOut(runView("tests"), { top: 0, height: 300 }, true);
+    layOut(runBox(), { top: 0, height: 300 }, true);
     panel.opened?.();
-    expect(runView("tests").scrollTop).toBe(700);
+    expect(runBox().scrollTop).toBe(700);
   });
 
-  it("opens a run already remediating at the end of its remediation", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
-    const fix = tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" });
-    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run, fix]), rc());
-    inBubble(panel.nodes);
-    layOut(runView("remediation"), { top: 0, height: 300 }, true);
-    panel.opened?.();
-    expect(runView("remediation").scrollTop).toBe(700);
-  });
-
-  it("opens the remediation a failed run moves on to at its end", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
-    const view = new FakeSubfeed([run]);
-    const panel = mergeTabPanel(tabOf(run), view, rc());
-    inBubble(panel.nodes);
-    panel.opened?.();
-    layOut(runView("remediation"), { top: 0, height: 300 }, true);
-    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
-    panel.update(tabOf(run));
-    expect(runView("remediation").scrollTop).toBe(700);
-  });
-
-  it("leaves a run's views where they stand until the strip opens it", () => {
-    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
-    const view = new FakeSubfeed([run]);
-    const panel = mergeTabPanel(tabOf(run), view, rc());
-    inBubble(panel.nodes);
-    layOut(runView("remediation"), { top: 0, height: 300 }, true);
-    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
-    panel.update(tabOf(run));
-    expect(runView("remediation").scrollTop).toBe(0);
-  });
-
-  it("leaves the shown view where the reader scrolled it across a push", () => {
+  it("leaves a run where the reader scrolled it across a push", () => {
     const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
     const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
     inBubble(panel.nodes);
-    layOut(runView("tests"), { top: 0, height: 300 }, true);
+    layOut(runBox(), { top: 0, height: 300 }, true);
     panel.opened?.();
-    runView("tests").scrollTop = 100;
+    runBox().scrollTop = 100;
     panel.update(tabOf(tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(2) } } })));
-    expect(runView("tests").scrollTop).toBe(100);
+    expect(runBox().scrollTop).toBe(100);
   });
 
   it("opens an agent stream with its last row at the bottom of the sub-feed", () => {
@@ -396,23 +341,19 @@ describe("a panel's opening shows its newest output", () => {
     expect(subfeed.scrollTop).toBe(600);
   });
 
-  it("opens a conflicted commit with its resolution's last row at the bottom of the sub-feed", () => {
-    const commit = tabRow("c1", {
-      kind: "rebaseCommit",
-      state: "live",
-      payload: { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [] } },
-    });
-    const panel = mergeTabPanel(tabOf(commit), new FakeSubfeed([commit, childRow("r1", "c1")]), rc());
+  it("opens a conflict resolution with its last row at the bottom of the sub-feed", () => {
+    const resolution = tabRow("cr1", { kind: "conflictResolution", state: "live", payload: { files: [{ path: "a.go" }] } });
+    const panel = mergeTabPanel(tabOf(resolution), new FakeSubfeed([resolution, childRow("r1", "cr1")]), rc());
     const { subfeed } = inBubble(panel.nodes);
     layOut(subfeed, { top: 0, height: 300 }, true);
-    const rows = document.querySelector<HTMLElement>(".merge-conflict .merge-tab-rows");
+    const rows = document.querySelector<HTMLElement>(".merge-tab-rows");
     if (rows === null) throw new Error("no resolution stream");
     layOut(rows, { top: 50, height: 450 }, false);
     panel.opened?.();
     expect(subfeed.scrollTop).toBe(200);
   });
 
-  it("opens a commit with no conflict without moving anything", () => {
+  it("opens a commit without moving anything", () => {
     const commit = tabRow("c1", { kind: "rebaseCommit", state: "live" });
     const panel = mergeTabPanel(tabOf(commit), new FakeSubfeed([commit]), rc());
     const { subfeed } = inBubble(panel.nodes);
@@ -449,7 +390,8 @@ describe("swapHeading", () => {
         };
       },
     };
-    const head = drawRemediationHeading(tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live" })), ticker);
+    const head = document.createElement("div");
+    head.append(drawTabDuration(tabOf(tabRow("t-fix", { kind: "testsRunFixing", state: "live" })), ticker));
     const subscribed = live;
     document.createElement("div").append(head);
     swapHeading(head, document.createElement("p"));

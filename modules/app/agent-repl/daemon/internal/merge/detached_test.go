@@ -631,18 +631,18 @@ func TestATabOfAnAsyncMergeIsPublishedInTheRequestersFeedAsComposed(t *testing.T
 	// Arrange
 	h := newHarness(t)
 	h.registerMergeWorkspace(theWorkspace, "request-1", "feature")
-	tab := &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{
-		Conflict: &frontendv1.FeedMergeRebaseCommitConflict{}}}}
+	tab := &frontendv1.FeedMergeTab{Kind: &frontendv1.FeedMergeTab_ConflictResolution{ConflictResolution: &frontendv1.FeedMergeTabConflictResolution{
+		Files: []*frontendv1.FeedMergeConflictFile{{Path: "a.go"}}}}}
 
 	// Act
-	h.o.publishTab(theMergeWorkspace, "lease-1", commitKey(1, 0), tab)
+	h.o.publishTab(theMergeWorkspace, "lease-1", resolutionKey(1, 0), tab)
 
 	// Assert
 	if own := h.feed.tabsOn(theMergeWorkspace); len(own) != 0 {
 		t.Fatalf("the merge workspace drew %d tabs, want none", len(own))
 	}
-	if mirrored := h.feed.tabsOn(theWorkspace); len(mirrored) != 1 || mirrored[0].GetRebaseCommit().GetConflict() == nil {
-		t.Fatalf("requester tabs = %+v, want the conflicted commit's subtab", mirrored)
+	if mirrored := h.feed.tabsOn(theWorkspace); len(mirrored) != 1 || len(mirrored[0].GetConflictResolution().GetFiles()) != 1 {
+		t.Fatalf("requester tabs = %+v, want the conflict resolution's subtab", mirrored)
 	}
 }
 

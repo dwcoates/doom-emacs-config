@@ -20,6 +20,7 @@ import {
   FeedMergeRebaseLineSchema,
   FeedMergeRebaseReplayingSchema,
   FeedMergeTabCommittingSchema,
+  FeedMergeTabConflictResolutionSchema,
   FeedMergeTabRebaseCommitSchema,
   FeedMergeTabRebasingSchema,
   FeedMergeTabTestsRunFixingSchema,
@@ -341,9 +342,9 @@ describe("the replay header's paint", () => {
 
 describe("drawFeedMergeConflictFiles", () => {
   it("draws each conflicted path verbatim, in git's order", () => {
-    const u = create(FeedMergeTabRebaseCommitSchema, { conflict: { files: [{ path: "b.go" }, { path: "a.go" }] } });
+    const u = create(FeedMergeTabConflictResolutionSchema, { files: [{ path: "b.go" }, { path: "a.go" }] });
     expect(
-      [...drawFeedMergeConflictFiles(u.conflict?.files ?? []).querySelectorAll(".merge-conflict-file")].map((e) => e.textContent),
+      [...drawFeedMergeConflictFiles(u.files).querySelectorAll(".merge-conflict-file")].map((e) => e.textContent),
     ).toEqual(["b.go", "a.go"]);
   });
 });

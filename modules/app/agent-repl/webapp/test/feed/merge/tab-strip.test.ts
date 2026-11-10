@@ -11,10 +11,9 @@ import { createTicker } from "../../../src/clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   AGENTIC_KINDS,
+  NARRATED_KINDS,
   PARENT_KINDS,
   RESOLVED_KINDS,
-  SECTIONED_KINDS,
-  VIEWED_KINDS,
   autoSelectedTab,
   childTabsOf,
   drawFeedMergeTab,
@@ -94,8 +93,8 @@ describe("childTabsOf: a strip is the sub-feed's tab rows it holds, in served or
 });
 
 describe("readMergeTab: the arms are read from the contract", () => {
-  it("holds to the schema: every kind is resolved, agentic, a parent, sectioned, or viewed", () => {
-    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS, ...PARENT_KINDS, ...SECTIONED_KINDS, ...VIEWED_KINDS].sort()).toEqual(
+  it("holds to the schema: every kind is resolved, agentic, a parent, or narrated", () => {
+    expect([...RESOLVED_KINDS, ...AGENTIC_KINDS, ...PARENT_KINDS, ...NARRATED_KINDS].sort()).toEqual(
       [...oneofArms(FeedMergeTabSchema, "kind")].sort(),
     );
   });
@@ -104,7 +103,15 @@ describe("readMergeTab: the arms are read from the contract", () => {
     "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
-      const waits = ["resolving", "rebasing", "tests", "testsRunFixing"].includes(kind);
+      const waits = [
+        "resolving",
+        "rebasing",
+        "resolvingConflicts",
+        "conflictResolution",
+        "tests",
+        "fixingTests",
+        "testsRunFixing",
+      ].includes(kind);
       const want =
         kind === "rebaseCommit"
           ? ["live", "pending", "settled", "waitingOnUser"]

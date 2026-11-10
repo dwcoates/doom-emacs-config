@@ -139,12 +139,15 @@ type run struct {
 	// agenticAt is the row the agentic round drawLive last stood is drawn in,
 	// guarded by mu; nil before the first.
 	agenticAt *agenticRow
-	// rebasing and testing are the bubble's one rebasing tab and one tests tab
+	// rebasing, conflicts, testing and fixing are the bubble's one rebasing
+	// tab, one resolving-conflicts tab, one tests tab and one fixing-tests tab
 	// as last drawn (nested.go), recorded in the progress record. The run's
 	// own goroutine mutates them; an ask's redraw reads them only while the
 	// agentic round stands, under agenticMu, while the run waits on its turn.
-	rebasing rebaseView
-	testing  testsView
+	rebasing  rebaseView
+	conflicts parentView
+	testing   parentView
+	fixing    parentView
 	// startedMS is when the run was admitted: the queue tab's end, and the
 	// head's clock from then on (frontend.v1.FeedMergeRuntime), which counts
 	// only the time the merge has been worked on.
@@ -224,8 +227,8 @@ type run struct {
 }
 
 // agenticRow is the row an agentic round is drawn in, kept so a merge-tab
-// interrupt names it: the round's own tab, a commit's subtab, or a run's
-// fixing sub-subtab.
+// interrupt names it: the round's own tab, a conflict resolution's subtab, or
+// a fixing attempt's subtab.
 type agenticRow struct {
 	key   tabKey
 	round tabRound
@@ -458,8 +461,8 @@ func recordFailed(log dlog.Logger, op, failed, cut string, fields dlog.Context, 
 // queue records it on each turn the merge submits (a merge origin), so that
 // turn's rows land on the merge sub-feed, parented to that row, and NOWHERE
 // ELSE (owner ruling, 2026-10-01). A configured prompt's turn draws in its
-// tab, a conflict resolution's in its commit's subtab, and a fixing attempt's
-// in its sub-subtab. A turn the user sends while the merge runs is not the
+// tab, a conflict resolution's in its subtab of the resolving-conflicts tab,
+// and a fixing attempt's in its subtab of the fixing-tests tab. A turn the user sends while the merge runs is not the
 // merge's and draws on the main feed. The feed resolver is merge-agnostic and
 // applies the address without knowing what a merge is.
 //

@@ -91,10 +91,10 @@ func TestAsksTellTheListenerOnlyWhenTheStandingChanges(t *testing.T) {
 }
 
 // tabStates names the state arm of every push of one agentic part, in order,
-// a push that repeats the state before it collapsing into it: a commit
-// subtab's conflict section (pushes before the conflict carry none and are
-// skipped), a fixing sub-subtab, or the rebasing or tests tab that draws its
-// agent's ask too.
+// a push that repeats the state before it collapsing into it: a conflict
+// resolution's subtab, a fixing attempt's subtab, the resolving-conflicts or
+// fixing-tests tab they are drawn in, or the rebasing or tests tab that draws
+// its agent's ask too.
 func (f *fakeFeed) tabStates(kind string) []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -106,11 +106,12 @@ func (f *fakeFeed) tabStates(kind string) []string {
 		}
 		var state any
 		switch k := tab.GetKind().(type) {
-		case *frontendv1.FeedMergeTab_RebaseCommit:
-			if k.RebaseCommit.GetConflict() == nil {
-				continue
-			}
-			state = k.RebaseCommit.GetConflict().GetState()
+		case *frontendv1.FeedMergeTab_ConflictResolution:
+			state = k.ConflictResolution.GetState()
+		case *frontendv1.FeedMergeTab_ResolvingConflicts:
+			state = k.ResolvingConflicts.GetState()
+		case *frontendv1.FeedMergeTab_FixingTests:
+			state = k.FixingTests.GetState()
 		case *frontendv1.FeedMergeTab_TestsRunFixing:
 			state = k.TestsRunFixing.GetState()
 		case *frontendv1.FeedMergeTab_Rebasing:
@@ -120,10 +121,12 @@ func (f *fakeFeed) tabStates(kind string) []string {
 		}
 		name := "settled"
 		switch state.(type) {
-		case *frontendv1.FeedMergeRebaseCommitConflict_Live, *frontendv1.FeedMergeTabTestsRunFixing_Live,
+		case *frontendv1.FeedMergeTabConflictResolution_Live, *frontendv1.FeedMergeTabTestsRunFixing_Live,
+			*frontendv1.FeedMergeTabResolvingConflicts_Live, *frontendv1.FeedMergeTabFixingTests_Live,
 			*frontendv1.FeedMergeTabRebasing_Live, *frontendv1.FeedMergeTabTests_Live:
 			name = "live"
-		case *frontendv1.FeedMergeRebaseCommitConflict_WaitingOnUser, *frontendv1.FeedMergeTabTestsRunFixing_WaitingOnUser,
+		case *frontendv1.FeedMergeTabConflictResolution_WaitingOnUser, *frontendv1.FeedMergeTabTestsRunFixing_WaitingOnUser,
+			*frontendv1.FeedMergeTabResolvingConflicts_WaitingOnUser, *frontendv1.FeedMergeTabFixingTests_WaitingOnUser,
 			*frontendv1.FeedMergeTabRebasing_WaitingOnUser, *frontendv1.FeedMergeTabTests_WaitingOnUser:
 			name = "waiting"
 		}
@@ -159,10 +162,14 @@ func TestAConflictResolutionThatAsksIsDrawnWaitingOnTheUser(t *testing.T) {
 	// Act
 	admitted(t, h)
 
-	// Assert: the commit's conflict section, and the rebasing tab it is drawn
-	// in, both say the session waits on the user.
-	if got, want := h.feed.tabStates(rowRebaseCommit), []string{"live", "waiting", "settled"}; !slices.Equal(got, want) {
-		t.Fatalf("conflict section states = %v, want %v", got, want)
+	// Assert: the resolution's subtab, the resolving-conflicts tab it is
+	// drawn in, and the rebasing tab it serves all say the session waits on
+	// the user.
+	if got, want := h.feed.tabStates(rowConflictResolution), []string{"live", "waiting", "settled"}; !slices.Equal(got, want) {
+		t.Fatalf("conflict resolution states = %v, want %v", got, want)
+	}
+	if got, want := h.feed.tabStates(TabConflicts), []string{"live", "waiting", "settled"}; !slices.Equal(got, want) {
+		t.Fatalf("resolving-conflicts tab states = %v, want %v", got, want)
 	}
 	if got, want := h.feed.tabStates(TabRebasing), []string{"live", "waiting", "live", "settled"}; !slices.Equal(got, want) {
 		t.Fatalf("rebasing tab states = %v, want %v", got, want)
@@ -180,8 +187,8 @@ func TestAnAnsweredAskDrawsTheConflictsTabLiveAgain(t *testing.T) {
 	admitted(t, h)
 
 	// Assert
-	if got, want := h.feed.tabStates(rowRebaseCommit), []string{"live", "waiting", "live", "settled"}; !slices.Equal(got, want) {
-		t.Fatalf("conflict section states = %v, want %v", got, want)
+	if got, want := h.feed.tabStates(rowConflictResolution), []string{"live", "waiting", "live", "settled"}; !slices.Equal(got, want) {
+		t.Fatalf("conflict resolution states = %v, want %v", got, want)
 	}
 }
 
@@ -197,10 +204,13 @@ func TestAFixingAttemptThatAsksIsDrawnWaitingOnTheUser(t *testing.T) {
 	// Act
 	admitted(t, h)
 
-	// Assert: the fixing sub-subtab, and the tests tab it is drawn in, both
-	// say the session waits on the user.
+	// Assert: the fixing attempt's subtab, the fixing-tests tab it is drawn
+	// in, and the tests tab it serves all say the session waits on the user.
 	if got, want := h.feed.tabStates(rowTestsRunFixing), []string{"live", "waiting", "settled"}; !slices.Equal(got, want) {
 		t.Fatalf("fixing states = %v, want %v", got, want)
+	}
+	if got, want := h.feed.tabStates(TabFixes), []string{"live", "waiting", "settled"}; !slices.Equal(got, want) {
+		t.Fatalf("fixing-tests tab states = %v, want %v", got, want)
 	}
 	if got, want := h.feed.tabStates(TabTests), []string{"live", "waiting", "live", "settled"}; !slices.Equal(got, want) {
 		t.Fatalf("tests tab states = %v, want %v", got, want)
@@ -218,8 +228,8 @@ func TestAnAskAlreadyOpenDrawsTheConflictsTabWaitingAtOnce(t *testing.T) {
 	admitted(t, h)
 
 	// Assert
-	if got := h.feed.tabStates(rowRebaseCommit); len(got) == 0 || got[0] != "waiting" {
-		t.Fatalf("conflict section states = %v, want it drawn waiting first", got)
+	if got := h.feed.tabStates(rowConflictResolution); len(got) == 0 || got[0] != "waiting" {
+		t.Fatalf("conflict resolution states = %v, want it drawn waiting first", got)
 	}
 }
 
@@ -237,8 +247,8 @@ func TestAnAskChangeWithNoAgenticTabLiveDrawsNoTab(t *testing.T) {
 	admitted(t, h)
 
 	// Assert
-	if got := h.feed.tabStates(rowRebaseCommit); len(got) != 0 {
-		t.Fatalf("conflict section states = %v, want none drawn", got)
+	if got := h.feed.tabStates(rowConflictResolution); len(got) != 0 {
+		t.Fatalf("conflict resolution states = %v, want none drawn", got)
 	}
 	if got, want := h.feed.tabStates(TabTests), []string{"live", "settled"}; !slices.Equal(got, want) {
 		t.Fatalf("tests tab states = %v, want it never drawn waiting", got)

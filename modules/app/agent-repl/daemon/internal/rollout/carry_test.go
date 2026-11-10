@@ -837,6 +837,33 @@ func TestARefusedMidWorkAdoptionIsAskedAgainAtFreeness(t *testing.T) {
 	}
 }
 
+// TestARefusalWrittenBeforeTheWindowOpensIsTakenBack covers a refusal on
+// disk before the incumbent watches for one: no change is ever reported for
+// it, so the window must look once after its watch stands, rather than wait
+// out its whole length to reclaim the workspace as an expiry.
+func TestARefusalWrittenBeforeTheWindowOpensIsTakenBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.registry.onSeal = func(sealed ids.WorkspaceID) {
+		if err := h.c.writeRefusal(sealed, "the shim reported no build"); err != nil {
+			t.Errorf("writeRefusal: %v", err)
+		}
+	}
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	call := h.registry.awaitRequest(t, isFreenessTransfer)
+
+	// Assert
+	if call.WS != ws {
+		t.Fatalf("fallback request = %+v, want the refused workspace transferred at freeness", call)
+	}
+}
+
 func TestARefusedMidWorkAdoptionIsTakenBackAtOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

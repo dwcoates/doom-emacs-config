@@ -118,3 +118,42 @@ The owner answered "continue" to the proposed layout and questions
     ends the attempt's section with its line, and the next attempt opens a new
     section.
   - Master's fixing re-prompt after a restart reuses the run's fixing row.
+
+### 4. Agents draw only in their own tabs (feed.proto, daemon, webapp)
+
+- **What**: fixing tests and resolving conflicts are top-level tabs of their
+  own, and a session's turns are drawn only there (owner request,
+  2026-11-09).
+  - `FeedMergeTab.resolving_conflicts` (18) is a PARENT tab beside rebasing.
+    Its subtabs are `FeedMergeTab.conflict_resolution` (19) rows, one per
+    commit of a replay whose conflict went to the session. Each is labelled
+    with its commit and replay, carries the conflicted files, and holds the
+    resolution's agent rows across every attempt at the commit.
+  - `FeedMergeTab.fixing_tests` (20) is a PARENT tab beside tests. Its
+    subtabs are the `tests_run_fixing` rows, now parented to it instead of to
+    their run, and labelled with the run they fix ("run 2").
+  - `FeedMergeTabRebaseCommit.conflict` (7) is retired, and
+    `FeedMergeRebaseCommitConflict` is gone: its fields are
+    `FeedMergeTabConflictResolution`'s, at the same tags. A commit's subtab
+    carries only its replay's narration, and a run's subtab only its suites.
+    The webapp's run panel lost its "tests" and "remediation" views and their
+    dropdown.
+  - The daemon records both parent tabs' badges in the progress record
+    (`progressDoc.conflicts`, `progressDoc.fixing`), as it records the tests
+    tab's.
+  - The queue's front entry names the new tabs as its active tab
+    (`frontTabLabel`). The roster's stages still group a conflict resolution
+    under rebasing and a fixing attempt under tests
+    (`rosterstages.go stageGroup`): the ledger closes the rebasing round
+    failed when a conflict is handed over, so a rebasing stage of its own
+    rounds would read failed while the resolution runs.
+- **Why**: the owner asked for the run subtabs to carry only the test suite
+  run, and for agent feeds to be limited to the two new tabs.
+- **Consequences**:
+  - Layout 107 drops the retired `conflict` section from every stored commit
+    tab, which every read of its bubble would otherwise refuse. As with layout
+    79's retired kinds, a bubble recorded before the change no longer draws
+    its resolutions or its fixing attempts: their rows stay stored, parented
+    to a commit or a run that no longer draws agent rows.
+  - The rebasing and tests tabs are still drawn waiting on the user while the
+    agent serving them has an ask open, beside the agent's own tab.

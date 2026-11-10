@@ -757,9 +757,8 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		summary := fmt.Sprintf("conflict resolution gave up: %s; the rebase is left in progress in %s", why, r.subject.dir)
 		r.settleAgentic()
 		i, now := p.commitAt(), r.o.nowMS()
-		c := &r.rebasing.Commits[i]
-		c.Conflict.Span.settle(now, summary)
-		c.Span.settle(now, summary)
+		r.settleConflict(i, now, summary)
+		r.rebasing.Commits[i].Span.settle(now, summary)
 		r.rebasing.Span.settle(now, summary)
 		r.publishRebasing(false)
 		r.publishCommit(i, false)
@@ -771,8 +770,8 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 	}
 	r.settleAgentic()
 	i := p.commitAt()
+	r.settleConflict(i, r.o.nowMS(), "")
 	c := &r.rebasing.Commits[i]
-	c.Conflict.Span.settle(r.o.nowMS(), "")
 	c.Lines = append(c.Lines, "the conflict is resolved; the rebase continues")
 	r.publishRebasing(false)
 	r.publishCommit(i, false)
@@ -1014,7 +1013,7 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 	}
 	if cut := r.cutShort(close, resumed); cut != "" {
 		r.settleAgentic()
-		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), cut+" cut this fixing attempt short; it is prompted again"), attempt))
+		r.publishFixing(n, round.settled(r.o.nowMS(), cut+" cut this fixing attempt short; it is prompted again"), attempt)
 		r.closeTab(ctx, round, "restarted")
 		r.o.log(ctx, r.ws).Info(op, cut+" cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
 			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
@@ -1039,7 +1038,7 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 		return gaveUp, err
 	}
 	r.settleAgentic()
-	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), ""), attempt))
+	r.settleFixing(round, n, attempt, "")
 	r.publishTesting(false)
 	r.closeTab(ctx, round, "succeeded")
 	return nil, nil
@@ -1100,7 +1099,7 @@ func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt i
 // and the merge fails in its tests.
 func (r *run) fixGaveUp(ctx context.Context, round tabRound, n, attempt int, why string) *outcome {
 	r.settleAgentic()
-	r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), why), attempt))
+	r.settleFixing(round, n, attempt, why)
 	r.settleTesting(why)
 	r.closeTab(ctx, round, "failed")
 	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the fixing attempt gave up; the merge fails", dlog.Context{

@@ -199,72 +199,170 @@ func TestCommitTabNamesTheCommitAndItsReplay(t *testing.T) {
 	}
 }
 
-func TestCommitTabCarriesItsConflictOnlyOnceHandedToTheSession(t *testing.T) {
+func TestACommitTabCarriesOnlyItsNarration(t *testing.T) {
+	// Arrange: a commit whose conflict was handed to the session.
+	v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d", Span: span{StartedMS: 1},
+		Lines: []string{"conflicted in 2 file(s)"}, Conflict: &conflictView{Span: span{StartedMS: 1}, Files: []string{"a.go", "b.go"}}}}}
+
+	// Act
+	tab := v.commitTab(0, false)
+
+	// Assert
+	if unknown := tab.GetRebaseCommit().ProtoReflect().GetUnknown(); len(unknown) != 0 {
+		t.Fatalf("the commit tab carries unknown fields %x", unknown)
+	}
+	if lines := tab.GetRebaseCommit().GetLines(); len(lines) != 1 || lines[0].GetText() != "conflicted in 2 file(s)" {
+		t.Fatalf("lines = %+v, want the commit's one narration line", lines)
+	}
+}
+
+func TestResolutionTabCarriesItsFilesAndItsCommitsLabel(t *testing.T) {
+	// Arrange
+	v := rebaseView{Replay: 2, Commits: []commitView{{SHA: "a1b2c3d4e5", Subject: "fix the thing", Span: span{StartedMS: 1},
+		Conflict: &conflictView{Span: span{StartedMS: 2}, Files: []string{"a.go", "b.go"}}}}}
+
+	// Act
+	tab := v.resolutionTab(0, false)
+
+	// Assert
+	resolution := tab.GetConflictResolution()
+	if files := resolution.GetFiles(); len(files) != 2 || files[1].GetPath() != "b.go" || resolution.GetLive().GetStartedAtMs() != 2 {
+		t.Fatalf("resolution = %+v, want both files, live from its own start", resolution)
+	}
+	label := tab.GetLabel()
+	if label.GetCommit().GetSubject() != "fix the thing" || label.GetCommit().GetShortSha() != short("a1b2c3d4e5") || label.GetRound() != 2 {
+		t.Fatalf("label = %+v, want the commit at its replay's round", label)
+	}
+	if want := v.commitTab(0, false).GetLabel(); !proto.Equal(label, want) {
+		t.Fatalf("label = %+v, want the commit subtab's own %+v", label, want)
+	}
+}
+
+func TestResolutionTabState(t *testing.T) {
 	tests := []struct {
-		name     string
-		conflict *conflictView
-		want     bool
+		name    string
+		span    span
+		waiting bool
+		want    string
 	}{
-		{name: "a clean commit has no section", conflict: nil, want: false},
-		{name: "a handed-over conflict has one", conflict: &conflictView{Span: span{StartedMS: 1}, Files: []string{"a.go", "b.go"}}, want: true},
+		{name: "live", span: span{StartedMS: 2}, want: "live"},
+		{name: "waiting", span: span{StartedMS: 2}, waiting: true, want: "waiting"},
+		{name: "settled", span: span{StartedMS: 2, EndedMS: 3, Failure: "gave up"}, want: "settled"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d", Span: span{StartedMS: 1}, Conflict: tt.conflict}}}
+			v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d", Span: span{StartedMS: 1}, Conflict: &conflictView{Span: tt.span}}}}
 
 			// Act
-			conflict := v.commitTab(0, false).GetRebaseCommit().GetConflict()
+			resolution := v.resolutionTab(0, tt.waiting).GetConflictResolution()
 
 			// Assert
-			if (conflict != nil) != tt.want {
-				t.Fatalf("conflict = %+v, want present %v", conflict, tt.want)
+			got := ""
+			switch resolution.GetState().(type) {
+			case *frontendv1.FeedMergeTabConflictResolution_Live:
+				got = "live"
+			case *frontendv1.FeedMergeTabConflictResolution_WaitingOnUser:
+				got = "waiting"
+			case *frontendv1.FeedMergeTabConflictResolution_Settled:
+				got = "settled"
 			}
-			if tt.want && (len(conflict.GetFiles()) != 2 || conflict.GetFiles()[1].GetPath() != "b.go" || conflict.GetLive() == nil) {
-				t.Fatalf("conflict = %+v, want both files, live", conflict)
+			if got != tt.want {
+				t.Fatalf("resolution state = %T, want %s", resolution.GetState(), tt.want)
 			}
 		})
 	}
 }
 
-func TestTheConflictSectionIsDrawnWaitingWithItsCommit(t *testing.T) {
+func TestResolutionTabOfACommitWithNoConflictPanics(t *testing.T) {
+	// Arrange
+	v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d", Span: span{StartedMS: 1}}}}
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("resolutionTab drew a commit whose conflict was never handed to the session")
+		}
+	}()
+
+	// Act
+	v.resolutionTab(0, false)
+}
+
+func TestTheConflictsCommitIsDrawnWaitingWithItsResolution(t *testing.T) {
 	// Arrange
 	v := rebaseView{Replay: 1, Commits: []commitView{{SHA: "a1b2c3d", Span: span{StartedMS: 1}, Conflict: &conflictView{Span: span{StartedMS: 2}}}}}
 
 	// Act
 	commit := v.commitTab(0, true).GetRebaseCommit()
+	resolution := v.resolutionTab(0, true).GetConflictResolution()
 
 	// Assert
-	if commit.GetWaitingOnUser().GetStartedAtMs() != 1 || commit.GetConflict().GetWaitingOnUser().GetStartedAtMs() != 2 {
-		t.Fatalf("commit = %+v, want it and its section waiting, each from its own start", commit)
+	if commit.GetWaitingOnUser().GetStartedAtMs() != 1 || resolution.GetWaitingOnUser().GetStartedAtMs() != 2 {
+		t.Fatalf("commit = %+v, resolution = %+v; want both waiting, each from its own start", commit, resolution)
 	}
 }
 
 func TestTheParentTabsAreDrawnWaitingWhileLive(t *testing.T) {
 	// Arrange
 	rebasing := rebaseView{Span: span{StartedMS: 7}}
-	gate := testsView{Span: span{StartedMS: 8}}
+	conflicts, gate, fixing := parentView{Span: span{StartedMS: 8}}, parentView{Span: span{StartedMS: 9}}, parentView{Span: span{StartedMS: 10}}
 
 	// Act
 	r := rebasing.rebasingTab(true).GetRebasing()
+	c := conflicts.conflictsTab(true).GetResolvingConflicts()
 	tt := gate.testsTab(true).GetTests()
+	f := fixing.fixingTestsTab(true).GetFixingTests()
 
 	// Assert
-	if r.GetWaitingOnUser().GetStartedAtMs() != 7 || tt.GetWaitingOnUser().GetStartedAtMs() != 8 {
-		t.Fatalf("rebasing %+v, tests %+v; want both waiting from their starts", r, tt)
+	if r.GetWaitingOnUser().GetStartedAtMs() != 7 || c.GetWaitingOnUser().GetStartedAtMs() != 8 ||
+		tt.GetWaitingOnUser().GetStartedAtMs() != 9 || f.GetWaitingOnUser().GetStartedAtMs() != 10 {
+		t.Fatalf("rebasing %+v, conflicts %+v, tests %+v, fixing %+v; want all waiting from their starts", r, c, tt, f)
+	}
+}
+
+func TestTheNewParentTabsSettle(t *testing.T) {
+	tests := []struct {
+		name   string
+		span   span
+		failed bool
+	}{
+		{name: "succeeded", span: span{StartedMS: 1, EndedMS: 2}},
+		{name: "failed", span: span{StartedMS: 1, EndedMS: 2, Failure: "gave up"}, failed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			v := parentView{Span: tt.span}
+
+			// Act
+			c := v.conflictsTab(false).GetResolvingConflicts().GetSettled()
+			f := v.fixingTestsTab(false).GetFixingTests().GetSettled()
+
+			// Assert
+			if (c.GetFailed() != nil) != tt.failed || (f.GetFailed() != nil) != tt.failed || c.GetStartedAtMs() != 1 || f.GetEndedAtMs() != 2 {
+				t.Fatalf("conflicts %+v, fixing %+v; want both settled failed=%v", c, f, tt.failed)
+			}
+		})
 	}
 }
 
 func TestTheParentTabsCarryTheirOwnLabels(t *testing.T) {
 	// Arrange
-	rebasing, tests := rebaseView{Span: span{StartedMS: 1}}, testsView{Span: span{StartedMS: 1}}
+	rebasing, parent := rebaseView{Span: span{StartedMS: 1}}, parentView{Span: span{StartedMS: 1}}
 
 	// Act
-	rl, tl := rebasing.rebasingTab(false).GetLabel(), tests.testsTab(false).GetLabel()
+	labels := map[string]*frontendv1.FeedMergeTabLabel{
+		"rebasing":            rebasing.rebasingTab(false).GetLabel(),
+		"resolving conflicts": parent.conflictsTab(false).GetLabel(),
+		"tests":               parent.testsTab(false).GetLabel(),
+		"fixing tests":        parent.fixingTestsTab(false).GetLabel(),
+	}
 
 	// Assert
-	if rl.GetText() != "rebasing" || rl.GetRound() != 1 || tl.GetText() != "tests" || tl.GetRound() != 1 {
-		t.Fatalf("labels = %+v, %+v; want the one rebasing and the one tests tab", rl, tl)
+	for want, label := range labels {
+		if label.GetText() != want || label.GetRound() != 1 {
+			t.Fatalf("label = %+v, want %q at round 1", label, want)
+		}
 	}
 }
 
@@ -299,7 +397,7 @@ func TestFixingTabState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			fixing := fixingTab(tt.state, 2).GetTestsRunFixing()
+			fixing := fixingTab(3, tt.state, 2).GetTestsRunFixing()
 
 			// Assert
 			got := ""
@@ -318,6 +416,16 @@ func TestFixingTabState(t *testing.T) {
 	}
 }
 
+func TestFixingTabIsLabelledWithTheRunItFixes(t *testing.T) {
+	// Act
+	label := fixingTab(3, tabState{startedMS: 1}, 2).GetLabel()
+
+	// Assert
+	if label.GetText() != "run 3" || label.GetRound() != 1 {
+		t.Fatalf("label = %+v, want run 3", label)
+	}
+}
+
 func TestTheSubtabKeysNestUnderTheirTabs(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -326,7 +434,8 @@ func TestTheSubtabKeysNestUnderTheirTabs(t *testing.T) {
 	}{
 		{name: "a commit under the rebasing tab", key: commitKey(2, 3), parent: rebasingKey()},
 		{name: "a run under the tests tab", key: runKey(4), parent: testsKey()},
-		{name: "a fixing attempt under its run", key: fixingKey(4), parent: runKey(4)},
+		{name: "a conflict resolution under the resolving-conflicts tab", key: resolutionKey(2, 3), parent: conflictsKey()},
+		{name: "a fixing attempt under the fixing-tests tab", key: fixingKey(4), parent: fixingTestsKey()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -340,7 +449,8 @@ func TestTheSubtabKeysNestUnderTheirTabs(t *testing.T) {
 
 func TestEverySubtabKeyIsDistinct(t *testing.T) {
 	// Arrange
-	keys := []tabKey{commitKey(1, 0), commitKey(1, 1), commitKey(2, 0), runKey(1), runKey(2), fixingKey(1), rebasingKey(), testsKey()}
+	keys := []tabKey{commitKey(1, 0), commitKey(1, 1), commitKey(2, 0), resolutionKey(1, 0), resolutionKey(2, 0), runKey(1), runKey(2),
+		fixingKey(1), fixingKey(2), rebasingKey(), conflictsKey(), testsKey(), fixingTestsKey()}
 
 	// Act
 	seen := map[[2]string]bool{}
@@ -374,9 +484,9 @@ func TestFrontTabLabelNamesTheTopLevelTab(t *testing.T) {
 		want  string
 		n     uint32
 	}{
-		{round: tabRound{kind: TabConflicts, n: 2}, want: "rebasing", n: 1},
+		{round: tabRound{kind: TabConflicts, n: 2}, want: "resolving conflicts", n: 1},
 		{round: tabRound{kind: TabRebasing, n: 3}, want: "rebasing", n: 1},
-		{round: tabRound{kind: TabFixes, n: 2}, want: "tests", n: 1},
+		{round: tabRound{kind: TabFixes, n: 2}, want: "fixing tests", n: 1},
 		{round: tabRound{kind: TabTests, n: 2}, want: "tests", n: 1},
 		{round: tabRound{kind: TabCommitting, n: 2}, want: "committing", n: 2},
 	}

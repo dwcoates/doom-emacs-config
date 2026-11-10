@@ -64,7 +64,7 @@ func TestAMergeTabInterruptStopsAnAsyncMergesAgentAndRevealsItsWorkspace(t *test
 	defer release()
 
 	// Act
-	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
+	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, resolutionKey(1, 0)))
 
 	// Assert
 	if err != nil || !running {
@@ -89,7 +89,7 @@ func TestAMergeTabInterruptStopsASyncMergesOwnAgentAndRevealsNothing(t *testing.
 	defer release()
 
 	// Act
-	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
+	running, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, resolutionKey(1, 0)))
 
 	// Assert
 	if err != nil || !running {
@@ -114,7 +114,7 @@ func TestAMergeTabInterruptThatCannotStopTheTurnIsAnError(t *testing.T) {
 	defer release()
 
 	// Act
-	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, commitKey(1, 0)))
+	_, err := h.o.InterruptTab(context.Background(), theWorkspace, tabRef(theWorkspace, lease, resolutionKey(1, 0)))
 
 	// Assert
 	if err == nil {
@@ -152,10 +152,11 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 		tab  func(lease ids.LeaseID) feedid.Ref
 	}{
 		{name: "a resolved tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, rebasingKey()) }},
-		{name: "a commit whose conflict is not the live one", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, commitKey(1, 1)) }},
+		{name: "the subtab of the commit whose conflict is live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, commitKey(1, 0)) }},
+		{name: "a commit whose conflict is not the live one", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, resolutionKey(1, 1)) }},
 		{name: "a fixing row with no fixing live", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, lease, fixingKey(1)) }},
-		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theMergeWorkspace, lease, commitKey(1, 0)) }},
-		{name: "an unknown bubble", tab: func(ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, "lease-unknown", commitKey(1, 0)) }},
+		{name: "another feed's tab", tab: func(lease ids.LeaseID) feedid.Ref { return tabRef(theMergeWorkspace, lease, resolutionKey(1, 0)) }},
+		{name: "an unknown bubble", tab: func(ids.LeaseID) feedid.Ref { return tabRef(theWorkspace, "lease-unknown", resolutionKey(1, 0)) }},
 		{name: "a head", tab: func(lease ids.LeaseID) feedid.Ref { return headRef(theWorkspace, lease) }},
 	}
 	for _, tt := range tests {
@@ -192,7 +193,7 @@ func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) 
 	defer release()
 
 	// Act / Assert: the merge workspace's repair is mirrored into the
-	// requester's subtab of the conflicted commit, and no address draws it in a
+	// requester's conflict resolution subtab, and no address draws it in a
 	// bubble of its own.
 	var mirrored *wsm.MirrorAddress
 	for _, call := range h.feed.mirrorsStood() {
@@ -200,9 +201,9 @@ func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) 
 			mirrored = call.mirror
 		}
 	}
-	want := tabRef(theWorkspace, lease, commitKey(1, 0))
+	want := tabRef(theWorkspace, lease, resolutionKey(1, 0))
 	if mirrored == nil || mirrored.Workspace != theWorkspace || mirrored.Parent.WS != want.WS || mirrored.Parent.Row != want.Row {
-		t.Fatalf("mirror = %+v, want the requester's subtab of the conflicted commit", mirrored)
+		t.Fatalf("mirror = %+v, want the requester's conflict resolution subtab", mirrored)
 	}
 	for _, addr := range h.feed.installed() {
 		if addr != nil {
@@ -214,11 +215,12 @@ func TestAnAsyncMergesRepairTurnStandsAMirrorIntoTheRequestersTab(t *testing.T) 
 func TestTheAgenticTabKindsAreTheAgenticArms(t *testing.T) {
 	// Arrange: every tab kind, built by its own builder.
 	built := map[string]*frontendv1.FeedMergeTab{
-		TabPick: pickTab(tabState{}),
-		rowRebaseCommit: {Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{
-			Conflict: &frontendv1.FeedMergeRebaseCommitConflict{}}}},
+		TabPick:           pickTab(tabState{}),
+		rowRebaseCommit:   {Kind: &frontendv1.FeedMergeTab_RebaseCommit{RebaseCommit: &frontendv1.FeedMergeTabRebaseCommit{}}},
+		TabConflicts:      (&parentView{}).conflictsTab(false),
 		rowTestsRun:       runTab(1, tabState{}, &frontendv1.FeedMergeTestsRunOutput{}),
-		rowTestsRunFixing: fixingTab(tabState{}, 1),
+		TabFixes:          (&parentView{}).fixingTestsTab(false),
+		rowTestsRunFixing: fixingTab(1, tabState{}, 1),
 		TabQueue:          {Kind: &frontendv1.FeedMergeTab_Queue{Queue: &frontendv1.FeedMergeTabQueue{}}},
 		TabPreDeploy:      hookPromptTab(tabState{}),
 		TabDeploy:         hookPromptTab(tabState{}),

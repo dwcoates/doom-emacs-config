@@ -33,15 +33,19 @@ export interface TabSpec {
     | "hookPrompt"
     | "rebasing"
     | "rebaseCommit"
+    | "resolvingConflicts"
+    | "conflictResolution"
     | "tests"
     | "testsRun"
+    | "fixingTests"
     | "testsRunFixing"
     | "committing"
     | "updatingMain"
     | "hookScript";
   /**
    * `waitingOnUser` only for the kinds that carry it (resolving, rebasing, a
-   * commit, tests, a fixing attempt); `pending` only for a commit;
+   * commit, resolving conflicts, a conflict resolution, tests, fixing tests,
+   * a fixing attempt); `pending` only for a commit;
    * `waitingForTurn` only for a test run.
    */
   state: "live" | "settled" | "waitingOnUser" | "pending" | "waitingForTurn";
@@ -56,12 +60,13 @@ export interface TabSpec {
   /** For `settled`, when it settled; `TAB_ENDED_AT_MS` unless stated. */
   endedAtMs?: bigint;
   /**
-   * The badge's words; for a commit, its subject beside the fixture's short
-   * hash `FIXTURE_SHORT_SHA` ("fix the loop" unless stated).
+   * The badge's words; for a commit or a conflict resolution, its subject
+   * beside the fixture's short hash `FIXTURE_SHORT_SHA` ("fix the loop"
+   * unless stated).
    */
   label?: string;
   round?: number;
-  /** Extra kind-level fields (`queue`, `progress`, `lines`, `output`, `conflict`, …). */
+  /** Extra kind-level fields (`queue`, `progress`, `lines`, `output`, `files`, …). */
   payload?: Record<string, unknown>;
   /** The row id of the tab this one is a subtab of. */
   parent?: string;
@@ -136,7 +141,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
       value: create(FeedMergeTabSchema, {
         label: {
           words:
-            spec.kind === "rebaseCommit"
+            spec.kind === "rebaseCommit" || spec.kind === "conflictResolution"
               ? { case: "commit", value: { shortSha: FIXTURE_SHORT_SHA, subject: spec.label ?? "fix the loop" } }
               : { case: "text", value: spec.label ?? spec.kind },
           round: spec.round ?? 1,

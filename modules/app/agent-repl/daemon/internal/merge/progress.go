@@ -127,10 +127,13 @@ type progressDoc struct {
 	ConflictCommit   string `json:"conflict_commit,omitempty"`
 	ConflictAttempts int    `json:"conflict_attempts,omitempty"`
 
-	// Rebasing and Testing are the bubble's rebasing and tests tabs as last
-	// drawn (nested.go): a resumed run draws on from them.
-	Rebasing *rebaseView `json:"rebasing,omitempty"`
-	Testing  *testsView  `json:"testing,omitempty"`
+	// Rebasing, Conflicts, Testing and Fixing are the bubble's rebasing,
+	// resolving-conflicts, tests and fixing-tests tabs as last drawn
+	// (nested.go): a resumed run draws on from them.
+	Rebasing  *rebaseView `json:"rebasing,omitempty"`
+	Conflicts *parentView `json:"conflicts,omitempty"`
+	Testing   *parentView `json:"testing,omitempty"`
+	Fixing    *parentView `json:"fixing,omitempty"`
 }
 
 // testedDoc is a speculative gate's pass: the base it ran on, the head it
@@ -370,6 +373,7 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 	}
 	doc.Speculative = speculative
 	doc.Rebasing, doc.Testing = r.rebasing.clone(), r.testing.clone()
+	doc.Conflicts, doc.Fixing = r.conflicts.clone(), r.fixing.clone()
 	if mutate != nil {
 		mutate(&doc)
 	}
@@ -488,6 +492,12 @@ func (r *run) restoreFrom(doc progressDoc) {
 	}
 	if doc.Testing != nil {
 		r.testing = *doc.Testing.clone()
+	}
+	if doc.Conflicts != nil {
+		r.conflicts = *doc.Conflicts.clone()
+	}
+	if doc.Fixing != nil {
+		r.fixing = *doc.Fixing.clone()
 	}
 }
 

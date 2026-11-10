@@ -244,13 +244,15 @@ func rewriteRetiredMergeTabs(ctx context.Context, tx *sql.Tx, log dlog.Logger) e
 // rewriteRetiredMergeTab re-encodes one stored frontend.v1.FeedRow whose merge
 // tab carries a retired prompt arm, and reports whether it did.
 func rewriteRetiredMergeTab(raw []byte) ([]byte, bool, error) {
-	row := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(raw, row); err != nil {
-		return nil, false, err
-	}
+	return editFeedRow(raw, carryRetiredPromptTab)
+}
+
+// carryRetiredPromptTab carries ROW's merge tab's retired prompt arm onto a
+// prompt hook's tab, and reports whether it did.
+func carryRetiredPromptTab(row *frontendv1.FeedRow) (bool, error) {
 	tab := row.GetMergeTab()
 	if tab == nil || tab.GetKind() != nil {
-		return raw, false, nil
+		return false, nil
 	}
 	unknown := tab.ProtoReflect().GetUnknown()
 	var kept []byte
@@ -259,11 +261,11 @@ func rewriteRetiredMergeTab(raw []byte) ([]byte, bool, error) {
 	for len(unknown) > 0 {
 		num, typ, n := protowire.ConsumeTag(unknown)
 		if n < 0 {
-			return nil, false, protowire.ParseError(n)
+			return false, protowire.ParseError(n)
 		}
 		m := protowire.ConsumeFieldValue(num, typ, unknown[n:])
 		if m < 0 {
-			return nil, false, protowire.ParseError(m)
+			return false, protowire.ParseError(m)
 		}
 		field := unknown[:n+m]
 		if (num == retiredPrePromptTag || num == retiredPostPromptTag) && typ == protowire.BytesType {
@@ -275,17 +277,13 @@ func rewriteRetiredMergeTab(raw []byte) ([]byte, bool, error) {
 		unknown = unknown[n+m:]
 	}
 	if !found {
-		return raw, false, nil
+		return false, nil
 	}
 	hook := &frontendv1.FeedMergeTabHookPrompt{}
 	if err := proto.Unmarshal(prompt, hook); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	tab.ProtoReflect().SetUnknown(kept)
 	tab.Kind = &frontendv1.FeedMergeTab_HookPrompt{HookPrompt: hook}
-	out, err := proto.Marshal(row)
-	if err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+	return true, nil
 }

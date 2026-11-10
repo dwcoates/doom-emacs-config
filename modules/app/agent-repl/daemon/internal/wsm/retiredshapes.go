@@ -53,21 +53,11 @@ func rewriteRetiredShapeRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) e
 // rewriteRetiredShapes re-encodes one stored frontend.v1.FeedRow carrying any
 // retired field this step knows, and reports whether it did.
 func rewriteRetiredShapes(log dlog.Logger, raw []byte) ([]byte, bool, error) {
-	row := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(raw, row); err != nil {
-		return nil, false, err
-	}
-	changed, err := walkMessages(row.ProtoReflect(), func(m protoreflect.Message) (bool, error) {
-		return carryRetiredShape(log, m)
+	return editFeedRow(raw, func(row *frontendv1.FeedRow) (bool, error) {
+		return walkMessages(row.ProtoReflect(), func(m protoreflect.Message) (bool, error) {
+			return carryRetiredShape(log, m)
+		})
 	})
-	if err != nil || !changed {
-		return raw, false, err
-	}
-	out, err := proto.Marshal(row)
-	if err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
 }
 
 // carryRetiredShape carries or drops M's retired fields, as its message's own

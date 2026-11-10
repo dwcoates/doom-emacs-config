@@ -1630,22 +1630,22 @@ describe("merge tabs", () => {
     ]);
   });
 
-  it("draws a commit's conflicted files in its conflict section", async () => {
+  it("draws a conflict resolution's conflicted files above its agent rows", async () => {
     // Arrange / Act
-    const row = await drawRow(mergeTabRow("rebaseCommit"));
+    const row = await drawRow(mergeTabRow("conflictResolution"));
     // Assert
-    expect([...row.querySelectorAll(".merge-conflict .merge-conflict-file")].map((el) => el.textContent)).toEqual([
+    expect([...row.querySelectorAll(".merge-conflict-files .merge-conflict-file")].map((el) => el.textContent)).toEqual([
       "daemon/x.go",
       "webapp/y.ts",
     ]);
   });
 
-  it("draws a lone run as its tests view, with no strip of its own", async () => {
+  it("draws a lone run as its suites, with no strip of its own", async () => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow("testsRun"));
     // Assert
-    expect([row.querySelector(".merge-run")?.getAttribute("data-run-view"), row.querySelector(".merge-tab-panel .merge-strip")]).toEqual([
-      "tests",
+    expect([row.querySelector(".merge-run .merge-suites") !== null, row.querySelector(".merge-tab-panel .merge-strip")]).toEqual([
+      true,
       null,
     ]);
   });
