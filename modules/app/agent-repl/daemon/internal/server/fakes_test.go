@@ -370,6 +370,11 @@ type fakeVerbs struct {
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec
+	// homeQuestions records every AskHomeMain question, in order;
+	// homeMain is the recipient it answers, homeMainErr its failure.
+	homeQuestions []fakeHomeQuestion
+	homeMain      wsm.Workspace
+	homeMainErr   error
 	// createJoined, when set, makes EnterCreate answer a ticket that joined
 	// that pending create; createHeld makes RunCreate answer the create held
 	// for the network under that ref.
@@ -3000,4 +3005,18 @@ func (f *fakeMemory) Workspace(ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.workspace
+}
+
+// fakeHomeQuestion is one AskHomeMain call.
+type fakeHomeQuestion struct {
+	asker    ids.WorkspaceID
+	question string
+}
+
+func (f *fakeVerbs) AskHomeMain(_ context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error) {
+	f.homeQuestions = append(f.homeQuestions, fakeHomeQuestion{asker: asker, question: question})
+	if f.homeMainErr != nil {
+		return wsm.Workspace{}, f.homeMainErr
+	}
+	return f.homeMain, nil
 }

@@ -320,15 +320,15 @@ export function mountComposer(
             context: { row: outcome.value.row?.value ?? "unset" },
           });
           return;
-        case "questionForked":
-          // THE WORDS WERE A QUESTION ABOUT A FINAL RESPONSE: the daemon forks
-          // them into a child workspace that answers it and mints no turn
-          // here; the child's tab is the visible effect, so the box clears and
-          // this component draws nothing.
+        case "questionSent":
+          // THE WORDS WERE A QUESTION ABOUT A CARD: the daemon sent them to the
+          // home repository's main workspace as an agent-to-agent prompt and
+          // minted no turn here; that workspace's acknowledgement is the
+          // visible effect, so the box clears and this component draws nothing.
           accepted();
-          log.info("SubmitPrompt forked a question about a final response into a child workspace", {
-            operation: "composer.question-forked",
-            context: { row: outcome.value.row?.value ?? "unset", op_id: outcome.value.opId },
+          log.info("SubmitPrompt sent a question about a card to the home main workspace", {
+            operation: "composer.question-sent",
+            context: { row: outcome.value.row?.value ?? "unset", recipient: outcome.value.recipient },
           });
           return;
         default: {

@@ -11,8 +11,8 @@
  * the daemon to toggle the workspace's question about that card
  * (agentrepl.v1.AskAboutResponse):
  * while a question stands, Emacs's composer has set its draft aside and the
- * next prompt sent is that question, forked into a child workspace that
- * answers it. A second click withdraws the question, and Emacs puts the draft
+ * next prompt sent is that question, sent to the home repository's main
+ * workspace. A second click withdraws the question, and Emacs puts the draft
  * back.
  *
  * THE DAEMON IS THE ONLY HOLDER of the question. This module never presses or

@@ -2179,7 +2179,7 @@ the form is its prompt and nothing else."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptSuccess")
                        #'string<)
-                 '("askAnswered" "commandActed" "commandPanel" "commandRefused" "questionForked" "responseRevising" "turn"))))
+                 '("askAnswered" "commandActed" "commandPanel" "commandRefused" "questionSent" "responseRevising" "turn"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
   "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded
@@ -3312,25 +3312,25 @@ response's row."
     (should-error (agent-repl-wire-decode-submit-prompt-success
                    (agent-repl-test-wire-verbs--parse "{\"responseRevising\":{}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-submit-success-question-forked-arm ()
-  "SubmitPromptSuccess's `question_forked' arm decodes the asked row and the op."
+(ert-deftest agent-repl-test-wire-verbs-submit-success-question-sent-arm ()
+  "SubmitPromptSuccess's `question_sent' arm decodes the asked row and the recipient."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-submit-prompt-success
                     (agent-repl-test-wire-verbs--parse
-                     "{\"questionForked\":{\"row\":{\"value\":\"row-1\"},\"opId\":\"k1\"}}"))
-                   '(:arm :question-forked :value (:row (:value "row-1") :op-id "k1"))))))
+                     "{\"questionSent\":{\"row\":{\"value\":\"row-1\"},\"recipient\":\"main (doom)\"}}"))
+                   '(:arm :question-sent :value (:row (:value "row-1") :recipient "main (doom)"))))))
 
-(ert-deftest agent-repl-test-wire-verbs-submit-success-question-forked-needs-row ()
-  "A `question_forked' arm that names no row is a contract breach."
+(ert-deftest agent-repl-test-wire-verbs-submit-success-question-sent-needs-row ()
+  "A `question_sent' arm that names no row is a contract breach."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-submit-prompt-success
-                   (agent-repl-test-wire-verbs--parse "{\"questionForked\":{\"opId\":\"k1\"}}")))))
+                   (agent-repl-test-wire-verbs--parse "{\"questionSent\":{\"recipient\":\"main (doom)\"}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-submit-success-question-forked-needs-op ()
-  "A `question_forked' arm that names no op is a contract breach."
+(ert-deftest agent-repl-test-wire-verbs-submit-success-question-sent-needs-recipient ()
+  "A `question_sent' arm that names no recipient is a contract breach."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-submit-prompt-success
-                   (agent-repl-test-wire-verbs--parse "{\"questionForked\":{\"row\":{\"value\":\"row-1\"}}}")))))
+                   (agent-repl-test-wire-verbs--parse "{\"questionSent\":{\"row\":{\"value\":\"row-1\"}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-error-ask-not-standing-arm ()
   "SubmitPromptError's `ask_not_standing' arm decodes empty."

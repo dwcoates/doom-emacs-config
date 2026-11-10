@@ -5967,81 +5967,18 @@ the composer took the keyboard for."
       (should-error (agent-repl-input-response-question "ws-q" :sideways))
       (should (equal fatals '("elisp.input.response-question-unknown-change ws=ws-q change=:sideways"))))))
 
-(defconst agent-repl-test-input--question-forked-answer
+(defconst agent-repl-test-input--question-sent-answer
   '(:response (:arm :success
-               :value (:arm :question-forked :value (:row (:value "row-1") :op-id "k")))))
+               :value (:arm :question-sent :value (:row (:value "row-1") :recipient "main (doom)")))))
 
-(ert-deftest agent-repl-input-a-send-while-a-question-stands-registers-the-fork-progress ()
-  "The fork's create progress is registered under the send's key before it goes."
+(ert-deftest agent-repl-input-a-sent-question-is-accepted-and-said ()
+  "A `question_sent' answer clears the composer and names the recipient."
   (agent-repl-test-input--with
     ;; Arrange
-    (let (registered)
-      (with-current-buffer agent-repl-test-input--buffer
-        (setq agent-repl--input-question-standing t))
-      (setq agent-repl-test-input--answer agent-repl-test-input--question-forked-answer)
-      (agent-repl-test-input--type "why?")
-      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress)
-                 (lambda (op reason &rest _) (push (list op reason (length agent-repl-test-input--submitted)) registered))))
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (let ((key (plist-get (agent-repl-test-input--request) :idempotency-key)))
-        (should (equal registered (list (list key "forked" 0))))))))
-
-(ert-deftest agent-repl-input-a-forked-question-is-accepted-and-said ()
-  "A `question_forked' answer clears the composer and says where the answer is."
-  (agent-repl-test-input--with
-    ;; Arrange
-    (setq agent-repl-test-input--answer agent-repl-test-input--question-forked-answer)
+    (setq agent-repl-test-input--answer agent-repl-test-input--question-sent-answer)
     (agent-repl-test-input--type "why?")
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
     (should (equal (agent-repl-test-input--composer-text) ""))
-    (should (member "[agent-repl] Asking in a new workspace…" agent-repl-test-input--messages))))
-
-(ert-deftest agent-repl-input-a-send-with-no-question-registers-nothing ()
-  "An ordinary send registers no fork progress."
-  (agent-repl-test-input--with
-    ;; Arrange
-    (let (registered)
-      (agent-repl-test-input--type "hello")
-      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress)
-                 (lambda (&rest args) (push args registered))))
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (should-not registered))))
-
-(ert-deftest agent-repl-input-a-question-send-answered-otherwise-forgets-the-op ()
-  "A send that was no fork after all forgets the op it registered."
-  (agent-repl-test-input--with
-    ;; Arrange
-    (let (forgotten)
-      (with-current-buffer agent-repl-test-input--buffer
-        (setq agent-repl--input-question-standing t))
-      (agent-repl-test-input--type "hello")
-      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress) #'ignore)
-                ((symbol-function 'agent-repl-mutation-progress-forget)
-                 (lambda (op) (push op forgotten))))
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (should (equal forgotten (list (plist-get (agent-repl-test-input--request) :idempotency-key)))))))
-
-(ert-deftest agent-repl-input-a-question-send-that-fails-forgets-the-op ()
-  "A transport failure forgets the op the send registered."
-  (agent-repl-test-input--with
-    ;; Arrange
-    (let (forgotten)
-      (with-current-buffer agent-repl-test-input--buffer
-        (setq agent-repl--input-question-standing t))
-      (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "down")))
-      (agent-repl-test-input--type "why?")
-      (cl-letf (((symbol-function 'agent-repl-verbs-register-create-progress) #'ignore)
-                ((symbol-function 'agent-repl-mutation-progress-forget)
-                 (lambda (op) (push op forgotten))))
-        ;; Act
-        (agent-repl--send :user-sent))
-      ;; Assert
-      (should (equal forgotten (list (plist-get (agent-repl-test-input--request) :idempotency-key)))))))
+    (should (member "[agent-repl] Asked main (doom)…" agent-repl-test-input--messages))))

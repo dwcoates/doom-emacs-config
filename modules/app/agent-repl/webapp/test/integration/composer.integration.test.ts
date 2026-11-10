@@ -798,8 +798,8 @@ describe("a response-revising answer", () => {
   });
 });
 
-describe("a question-forked answer", () => {
-  /** Submit words the daemon forked as a question about a final response. */
+describe("a question-sent answer", () => {
+  /** Submit words the daemon sent as a question about a card to the home main workspace. */
   const submitQuestion = async (): Promise<void> => {
     harness = await startHarness({ composer: true });
     harness.fake.answer(
@@ -807,7 +807,7 @@ describe("a question-forked answer", () => {
       create(SubmitPromptResponseSchema, {
         result: {
           case: "success",
-          value: { outcome: { case: "questionForked", value: { row: { value: "row-1" }, opId: "k1" } } },
+          value: { outcome: { case: "questionSent", value: { row: { value: "row-1" }, recipient: "main (doom)" } } },
         },
       }),
     );
@@ -823,7 +823,7 @@ describe("a question-forked answer", () => {
   });
 
   it("draws no refusal and no feed row of its own", async () => {
-    // Arrange / Act: the child workspace's tab is the visible effect.
+    // Arrange / Act: the main workspace's acknowledgement is the visible effect.
     await submitQuestion();
     // Assert
     expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
