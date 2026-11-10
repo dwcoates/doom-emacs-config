@@ -74,7 +74,15 @@ func (s *server) ReportPageResidency(
 		subject.Log.Error(opMemory, "a validated page residency was refused by the memory popups", dlog.Context{"cause": err.Error()})
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: %w", rpc, err))
 	}
-	subject.Log.Debug(opMemory, "recorded the page's residency", dlog.Context{"loaded": req.Msg.GetResidency().GetLoaded() != nil})
+	// THE FACT OUTLIVES THE DAEMON: the registration Emacs makes after a
+	// bounce answers it (lastKnownPage), so Emacs loads again only the pages
+	// it held.
+	loaded := req.Msg.GetResidency().GetLoaded() != nil
+	if err := s.deps.DB.SetPageLoaded(ctx, subject.Record.ID, loaded, s.now()); err != nil {
+		subject.Log.Error(opMemory, "could not record the page's residency", dlog.Context{"loaded": loaded, "cause": err.Error()})
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("%s: record the residency: %w", rpc, err))
+	}
+	subject.Log.Debug(opMemory, "recorded the page's residency", dlog.Context{"loaded": loaded})
 	// EMACS HOLDING NO PAGE IS NO SEVERED HOP (owner ruling, 2026-10-31:
 	// severed means actually severed). Its statement is the truth about the
 	// web hop: an unload announcement that went to another daemon during a

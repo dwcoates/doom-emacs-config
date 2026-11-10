@@ -1076,15 +1076,39 @@ A PATH, not an identity: the daemon normalizes it and mints the identity."
   "Decode `RegisterWorkspaceSuccess''s `workspace' field VALUE."
   (agent-repl-wire-decode-workspace-ref value))
 
+(defun agent-repl-wire-decode-last-known-page-loaded (value)
+  "Decode VALUE as the empty message `LastKnownPageLoaded'."
+  (agent-repl-wire--decode-empty "LastKnownPageLoaded" value))
+
+(defun agent-repl-wire-decode-last-known-page-not-loaded (value)
+  "Decode VALUE as the empty message `LastKnownPageNotLoaded'."
+  (agent-repl-wire--decode-empty "LastKnownPageNotLoaded" value))
+
+(defun agent-repl-wire-decode-last-known-page (value)
+  "Decode VALUE as `LastKnownPage': `:loaded' or `:not-loaded'.
+A LastKnownPage with no state set is a contract breach."
+  (let ((object (agent-repl-wire--object "LastKnownPage" value)))
+    (agent-repl-wire--check-keys "LastKnownPage" object '(loaded notLoaded))
+    (plist-get (agent-repl-wire--decode-oneof
+                "LastKnownPage" 'state object
+                '((loaded :loaded agent-repl-wire-decode-last-known-page-loaded)
+                  (notLoaded :not-loaded agent-repl-wire-decode-last-known-page-not-loaded)))
+               :arm)))
+
 (defun agent-repl-wire-decode-register-workspace-success (value)
-  "Decode VALUE as `RegisterWorkspaceSuccess', a plist `(:workspace REF)'."
+  "Decode VALUE as `RegisterWorkspaceSuccess'.
+A plist `(:workspace REF :last-known-page PAGE)', PAGE `:loaded',
+`:not-loaded', or nil when Emacs never reported the page."
   (let ((object (agent-repl-wire--object "RegisterWorkspaceSuccess" value)))
-    (agent-repl-wire--check-keys "RegisterWorkspaceSuccess" object '(workspace))
+    (agent-repl-wire--check-keys "RegisterWorkspaceSuccess" object '(workspace lastKnownPage))
     (agent-repl-wire--decoded
      "RegisterWorkspaceSuccess"
      (list :workspace (agent-repl-wire--decode-message
                        "RegisterWorkspaceSuccess" 'workspace object
-                       #'agent-repl-wire-decode-register-workspace-success-workspace)))))
+                       #'agent-repl-wire-decode-register-workspace-success-workspace)
+           :last-known-page (agent-repl-wire--decode-optional-message
+                             "RegisterWorkspaceSuccess" 'lastKnownPage object
+                             #'agent-repl-wire-decode-last-known-page)))))
 
 (defun agent-repl-wire-decode-register-workspace-not-a-worktree (value)
   "Decode VALUE as the empty message `RegisterWorkspaceNotAWorktree'.

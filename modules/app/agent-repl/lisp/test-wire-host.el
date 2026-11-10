@@ -124,9 +124,24 @@
                           "{\"dir\":\"/w/b\",\"refused\":{\"notAWorktree\":{}}},"
                           "{\"dir\":\"/w/c\",\"failed\":{\"cause\":\"git broke\"}}]}"))
                  '(:outcomes
-                   ((:dir "/w/a" :outcome (:arm :registered :value (:workspace (:id "ws-a" :dir "/w/a"))))
+                   ((:dir "/w/a" :outcome (:arm :registered :value (:workspace (:id "ws-a" :dir "/w/a") :last-known-page nil)))
                     (:dir "/w/b" :outcome (:arm :refused :value (:cause (:arm :not-a-worktree :value nil))))
                     (:dir "/w/c" :outcome (:arm :failed :value (:cause "git broke"))))))))
+
+(ert-deftest agent-repl-test-wire-host-register-workspace-success-decodes-the-last-known-page ()
+  "A registration answers the page the daemon last knew: loaded, not loaded, or none."
+  (dolist (case '(("{\"loaded\":{}}" . :loaded) ("{\"notLoaded\":{}}" . :not-loaded)))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-register-workspace-success
+                    (format "{\"workspace\":{\"id\":\"ws-a\",\"dir\":\"/w/a\"},\"lastKnownPage\":%s}" (car case)))
+                   (list :workspace '(:id "ws-a" :dir "/w/a") :last-known-page (cdr case))))))
+
+(ert-deftest agent-repl-test-wire-host-last-known-page-with-no-state-is-a-breach ()
+  "A last-known page naming no state is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-success
+                  "{\"workspace\":{\"id\":\"ws-a\",\"dir\":\"/w/a\"},\"lastKnownPage\":{}}")
+                 '("LastKnownPage" state "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-register-workspaces-unset-outcome-is-a-breach ()
   "An outcome with no arm set is a contract breach."

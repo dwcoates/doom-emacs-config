@@ -724,6 +724,18 @@ A hand-rolled copy of either would not be recorded here."
       (should (equal (nth 2 (car agent-repl-test-host--calls))
                      (list :workspace (agent-repl-test-host--ref) :residency residency))))))
 
+(ert-deftest agent-repl-test-host-page-residency-reported-is-the-last-known-page ()
+  "A residency the daemon took is the page it last knows."
+  (dolist (residency '((:arm :not-loaded :value nil)
+                       (:arm :loaded :value (:release (:arm :held :value nil)))))
+    (agent-repl-test-host--with-harness
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-report-page-residency "ws-1" residency #'ignore)
+      ;; Assert
+      (should (eq (agent-repl-host-last-known-page "ws-1") (plist-get residency :arm))))))
+
 (ert-deftest agent-repl-test-host-page-residency-refused-is-not-reported ()
   "A refused residency report is surfaced and does not count as reported."
   (agent-repl-test-host--with-harness
@@ -736,6 +748,7 @@ A hand-rolled copy of either would not be recorded here."
       (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) (lambda () (setq reported t)))
       ;; Assert
       (should-not reported)
+      (should-not (agent-repl-host-last-known-page "ws-1"))
       (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-refused")))))
 
 ;;;; ---- Report page unloading ----
@@ -5739,10 +5752,34 @@ no walk."
   "A registered dir is recorded at INFO with its id, and its ref answered."
   (agent-repl-test-host--with-harness
     ;; Act
-    (let ((ref (agent-repl-host--record-registration nil "/w" :registered '(:id "ws-7" :dir "/w"))))
+    (let ((ref (agent-repl-host--record-registration
+                nil "/w" :registered '(:workspace (:id "ws-7" :dir "/w") :last-known-page nil))))
       ;; Assert
       (should (equal ref '(:id "ws-7" :dir "/w")))
       (should (agent-repl-test-host--logged-p :info "elisp.host.registered dir=\"/w\" id=\"ws-7\"")))))
+
+(ert-deftest agent-repl-test-host-record-registration-records-the-last-known-page ()
+  "A workspace's registration records the page the daemon last knew it to hold."
+  (dolist (page '(:loaded :not-loaded nil))
+    (agent-repl-test-host--with-harness
+      ;; Arrange
+      (agent-repl-host--put "ws-1" :last-known-page :stale)
+      ;; Act
+      (agent-repl-host--record-registration
+       "ws-1" "/w" :registered (list :workspace '(:id "ws-7" :dir "/w") :last-known-page page) "ws-1")
+      ;; Assert
+      (should (eq (agent-repl-host-last-known-page "ws-1") page))
+      (should (agent-repl-test-host--logged-p
+               :info (format "elisp.host.registered dir=\"/w\" id=\"ws-7\" last-known-page=%S" page))))))
+
+(ert-deftest agent-repl-test-host-record-registration-without-a-workspace-records-no-page ()
+  "A registration made before any workspace exists records no last-known page."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-host--record-registration
+     nil "/w" :registered '(:workspace (:id "ws-7" :dir "/w") :last-known-page :loaded))
+    ;; Assert
+    (should (= 0 (hash-table-count agent-repl-host--by-name)))))
 
 (ert-deftest agent-repl-test-host-record-registration-records-a-refusal-and-answers-nil ()
   "A refused dir is recorded at ERROR with the refusal, and answers no ref."

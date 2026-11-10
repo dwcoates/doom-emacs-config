@@ -164,7 +164,13 @@ type RegisterWorkspaceSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace's daemon-minted identity — what every later call and every
 	// view uses; the path the host sent is never the identity.
-	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// Whether Emacs last held the workspace's page, as Emacs last reported it
+	// (agentrepl.v1.ReportPageResidency). UNSET when Emacs never reported it.
+	// THE DAEMON KEEPS IT ACROSS RESTARTS, so an Emacs re-announcing its
+	// workspaces after a bounce loads only the pages it held before, rather
+	// than every page at once.
+	LastKnownPage *LastKnownPage `protobuf:"bytes,2,opt,name=last_known_page,json=lastKnownPage,proto3" json:"last_known_page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -206,6 +212,172 @@ func (x *RegisterWorkspaceSuccess) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *RegisterWorkspaceSuccess) GetLastKnownPage() *LastKnownPage {
+	if x != nil {
+		return x.LastKnownPage
+	}
+	return nil
+}
+
+// Whether the page was loaded when Emacs last reported it.
+type LastKnownPage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to State:
+	//
+	//	*LastKnownPage_Loaded
+	//	*LastKnownPage_NotLoaded
+	State         isLastKnownPage_State `protobuf_oneof:"state"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastKnownPage) Reset() {
+	*x = LastKnownPage{}
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastKnownPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastKnownPage) ProtoMessage() {}
+
+func (x *LastKnownPage) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastKnownPage.ProtoReflect.Descriptor instead.
+func (*LastKnownPage) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *LastKnownPage) GetState() isLastKnownPage_State {
+	if x != nil {
+		return x.State
+	}
+	return nil
+}
+
+func (x *LastKnownPage) GetLoaded() *LastKnownPageLoaded {
+	if x != nil {
+		if x, ok := x.State.(*LastKnownPage_Loaded); ok {
+			return x.Loaded
+		}
+	}
+	return nil
+}
+
+func (x *LastKnownPage) GetNotLoaded() *LastKnownPageNotLoaded {
+	if x != nil {
+		if x, ok := x.State.(*LastKnownPage_NotLoaded); ok {
+			return x.NotLoaded
+		}
+	}
+	return nil
+}
+
+type isLastKnownPage_State interface {
+	isLastKnownPage_State()
+}
+
+type LastKnownPage_Loaded struct {
+	// The page was loaded.
+	Loaded *LastKnownPageLoaded `protobuf:"bytes,1,opt,name=loaded,proto3,oneof"`
+}
+
+type LastKnownPage_NotLoaded struct {
+	// The page was not loaded.
+	NotLoaded *LastKnownPageNotLoaded `protobuf:"bytes,2,opt,name=not_loaded,json=notLoaded,proto3,oneof"`
+}
+
+func (*LastKnownPage_Loaded) isLastKnownPage_State() {}
+
+func (*LastKnownPage_NotLoaded) isLastKnownPage_State() {}
+
+// Loaded. Empty: presence is the fact.
+type LastKnownPageLoaded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastKnownPageLoaded) Reset() {
+	*x = LastKnownPageLoaded{}
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastKnownPageLoaded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastKnownPageLoaded) ProtoMessage() {}
+
+func (x *LastKnownPageLoaded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastKnownPageLoaded.ProtoReflect.Descriptor instead.
+func (*LastKnownPageLoaded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+// Not loaded. Empty: presence is the fact.
+type LastKnownPageNotLoaded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LastKnownPageNotLoaded) Reset() {
+	*x = LastKnownPageNotLoaded{}
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LastKnownPageNotLoaded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LastKnownPageNotLoaded) ProtoMessage() {}
+
+func (x *LastKnownPageNotLoaded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LastKnownPageNotLoaded.ProtoReflect.Descriptor instead.
+func (*LastKnownPageNotLoaded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{5}
+}
+
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type RegisterWorkspaceError struct {
@@ -222,7 +394,7 @@ type RegisterWorkspaceError struct {
 
 func (x *RegisterWorkspaceError) Reset() {
 	*x = RegisterWorkspaceError{}
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -234,7 +406,7 @@ func (x *RegisterWorkspaceError) String() string {
 func (*RegisterWorkspaceError) ProtoMessage() {}
 
 func (x *RegisterWorkspaceError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -247,7 +419,7 @@ func (x *RegisterWorkspaceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterWorkspaceError.ProtoReflect.Descriptor instead.
 func (*RegisterWorkspaceError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RegisterWorkspaceError) GetCause() isRegisterWorkspaceError_Cause {
@@ -319,7 +491,7 @@ type RegisterWorkspaceNotAWorktree struct {
 
 func (x *RegisterWorkspaceNotAWorktree) Reset() {
 	*x = RegisterWorkspaceNotAWorktree{}
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -331,7 +503,7 @@ func (x *RegisterWorkspaceNotAWorktree) String() string {
 func (*RegisterWorkspaceNotAWorktree) ProtoMessage() {}
 
 func (x *RegisterWorkspaceNotAWorktree) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -344,7 +516,7 @@ func (x *RegisterWorkspaceNotAWorktree) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterWorkspaceNotAWorktree.ProtoReflect.Descriptor instead.
 func (*RegisterWorkspaceNotAWorktree) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 // The directory lies inside a temporary directory (owner ruling,
@@ -364,7 +536,7 @@ type RegisterWorkspaceInsideTemporaryDirectory struct {
 
 func (x *RegisterWorkspaceInsideTemporaryDirectory) Reset() {
 	*x = RegisterWorkspaceInsideTemporaryDirectory{}
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -376,7 +548,7 @@ func (x *RegisterWorkspaceInsideTemporaryDirectory) String() string {
 func (*RegisterWorkspaceInsideTemporaryDirectory) ProtoMessage() {}
 
 func (x *RegisterWorkspaceInsideTemporaryDirectory) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -389,7 +561,7 @@ func (x *RegisterWorkspaceInsideTemporaryDirectory) ProtoReflect() protoreflect.
 
 // Deprecated: Use RegisterWorkspaceInsideTemporaryDirectory.ProtoReflect.Descriptor instead.
 func (*RegisterWorkspaceInsideTemporaryDirectory) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RegisterWorkspaceInsideTemporaryDirectory) GetDir() string {
@@ -416,9 +588,17 @@ const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
 	"\x19RegisterWorkspaceResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.RegisterWorkspaceSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.RegisterWorkspaceErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"T\n" +
+	"\x06result\"\x99\x01\n" +
 	"\x18RegisterWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xbf\x02\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12C\n" +
+	"\x0flast_known_page\x18\x02 \x01(\v2\x1b.agentrepl.v1.LastKnownPageR\rlastKnownPage\"\x9c\x01\n" +
+	"\rLastKnownPage\x12;\n" +
+	"\x06loaded\x18\x01 \x01(\v2!.agentrepl.v1.LastKnownPageLoadedH\x00R\x06loaded\x12E\n" +
+	"\n" +
+	"not_loaded\x18\x02 \x01(\v2$.agentrepl.v1.LastKnownPageNotLoadedH\x00R\tnotLoadedB\a\n" +
+	"\x05state\"\x15\n" +
+	"\x13LastKnownPageLoaded\"\x18\n" +
+	"\x16LastKnownPageNotLoaded\"\xbf\x02\n" +
 	"\x16RegisterWorkspaceError\x12S\n" +
 	"\x0enot_a_worktree\x18\x01 \x01(\v2+.agentrepl.v1.RegisterWorkspaceNotAWorktreeH\x00R\fnotAWorktree\x12w\n" +
 	"\x1ainside_temporary_directory\x18\x02 \x01(\v27.agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectoryH\x00R\x18insideTemporaryDirectory\x12N\n" +
@@ -441,29 +621,35 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_register_workspace_proto_goTypes = []any{
 	(*RegisterWorkspaceRequest)(nil),                  // 0: agentrepl.v1.RegisterWorkspaceRequest
 	(*RegisterWorkspaceResponse)(nil),                 // 1: agentrepl.v1.RegisterWorkspaceResponse
 	(*RegisterWorkspaceSuccess)(nil),                  // 2: agentrepl.v1.RegisterWorkspaceSuccess
-	(*RegisterWorkspaceError)(nil),                    // 3: agentrepl.v1.RegisterWorkspaceError
-	(*RegisterWorkspaceNotAWorktree)(nil),             // 4: agentrepl.v1.RegisterWorkspaceNotAWorktree
-	(*RegisterWorkspaceInsideTemporaryDirectory)(nil), // 5: agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
-	(*v1.WorkspaceRef)(nil),                           // 6: workspace.v1.WorkspaceRef
-	(*WorkspaceParentNotOpen)(nil),                    // 7: agentrepl.v1.WorkspaceParentNotOpen
+	(*LastKnownPage)(nil),                             // 3: agentrepl.v1.LastKnownPage
+	(*LastKnownPageLoaded)(nil),                       // 4: agentrepl.v1.LastKnownPageLoaded
+	(*LastKnownPageNotLoaded)(nil),                    // 5: agentrepl.v1.LastKnownPageNotLoaded
+	(*RegisterWorkspaceError)(nil),                    // 6: agentrepl.v1.RegisterWorkspaceError
+	(*RegisterWorkspaceNotAWorktree)(nil),             // 7: agentrepl.v1.RegisterWorkspaceNotAWorktree
+	(*RegisterWorkspaceInsideTemporaryDirectory)(nil), // 8: agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
+	(*v1.WorkspaceRef)(nil),                           // 9: workspace.v1.WorkspaceRef
+	(*WorkspaceParentNotOpen)(nil),                    // 10: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_register_workspace_proto_depIdxs = []int32{
-	2, // 0: agentrepl.v1.RegisterWorkspaceResponse.success:type_name -> agentrepl.v1.RegisterWorkspaceSuccess
-	3, // 1: agentrepl.v1.RegisterWorkspaceResponse.error:type_name -> agentrepl.v1.RegisterWorkspaceError
-	6, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	4, // 3: agentrepl.v1.RegisterWorkspaceError.not_a_worktree:type_name -> agentrepl.v1.RegisterWorkspaceNotAWorktree
-	5, // 4: agentrepl.v1.RegisterWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
-	7, // 5: agentrepl.v1.RegisterWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	2,  // 0: agentrepl.v1.RegisterWorkspaceResponse.success:type_name -> agentrepl.v1.RegisterWorkspaceSuccess
+	6,  // 1: agentrepl.v1.RegisterWorkspaceResponse.error:type_name -> agentrepl.v1.RegisterWorkspaceError
+	9,  // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	3,  // 3: agentrepl.v1.RegisterWorkspaceSuccess.last_known_page:type_name -> agentrepl.v1.LastKnownPage
+	4,  // 4: agentrepl.v1.LastKnownPage.loaded:type_name -> agentrepl.v1.LastKnownPageLoaded
+	5,  // 5: agentrepl.v1.LastKnownPage.not_loaded:type_name -> agentrepl.v1.LastKnownPageNotLoaded
+	7,  // 6: agentrepl.v1.RegisterWorkspaceError.not_a_worktree:type_name -> agentrepl.v1.RegisterWorkspaceNotAWorktree
+	8,  // 7: agentrepl.v1.RegisterWorkspaceError.inside_temporary_directory:type_name -> agentrepl.v1.RegisterWorkspaceInsideTemporaryDirectory
+	10, // 8: agentrepl.v1.RegisterWorkspaceError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_register_workspace_proto_init() }
@@ -477,6 +663,10 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 		(*RegisterWorkspaceResponse_Error)(nil),
 	}
 	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*LastKnownPage_Loaded)(nil),
+		(*LastKnownPage_NotLoaded)(nil),
+	}
+	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[6].OneofWrappers = []any{
 		(*RegisterWorkspaceError_NotAWorktree)(nil),
 		(*RegisterWorkspaceError_InsideTemporaryDirectory)(nil),
 		(*RegisterWorkspaceError_ParentNotOpen)(nil),
@@ -487,7 +677,7 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

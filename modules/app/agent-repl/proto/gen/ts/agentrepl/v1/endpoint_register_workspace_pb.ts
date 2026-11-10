@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_register_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_register_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiSQoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiiAIKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAEj8KD3BhcmVudF9ub3Rfb3BlbhgDIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSABCBwoFY2F1c2UiHwodUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWUiUAopUmVnaXN0ZXJXb3Jrc3BhY2VJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQifwoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoPbGFzdF9rbm93bl9wYWdlGAIgASgLMhsuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2UiiQEKDUxhc3RLbm93blBhZ2USMwoGbG9hZGVkGAEgASgLMiEuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VMb2FkZWRIABI6Cgpub3RfbG9hZGVkGAIgASgLMiQuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VOb3RMb2FkZWRIAEIHCgVzdGF0ZSIVChNMYXN0S25vd25QYWdlTG9hZGVkIhgKFkxhc3RLbm93blBhZ2VOb3RMb2FkZWQiiAIKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAEj8KD3BhcmVudF9ub3Rfb3BlbhgDIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSABCBwoFY2F1c2UiHwodUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWUiUAopUmVnaXN0ZXJXb3Jrc3BhY2VJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RegisterWorkspaceRequest
@@ -88,6 +88,17 @@ export type RegisterWorkspaceSuccess = Message<"agentrepl.v1.RegisterWorkspaceSu
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * Whether Emacs last held the workspace's page, as Emacs last reported it
+   * (agentrepl.v1.ReportPageResidency). UNSET when Emacs never reported it.
+   * THE DAEMON KEEPS IT ACROSS RESTARTS, so an Emacs re-announcing its
+   * workspaces after a bounce loads only the pages it held before, rather
+   * than every page at once.
+   *
+   * @generated from field: agentrepl.v1.LastKnownPage last_known_page = 2;
+   */
+  lastKnownPage?: LastKnownPage | undefined;
 };
 
 /**
@@ -96,6 +107,71 @@ export type RegisterWorkspaceSuccess = Message<"agentrepl.v1.RegisterWorkspaceSu
  */
 export const RegisterWorkspaceSuccessSchema: GenMessage<RegisterWorkspaceSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_register_workspace, 2);
+
+/**
+ * Whether the page was loaded when Emacs last reported it.
+ *
+ * @generated from message agentrepl.v1.LastKnownPage
+ */
+export type LastKnownPage = Message<"agentrepl.v1.LastKnownPage"> & {
+  /**
+   * @generated from oneof agentrepl.v1.LastKnownPage.state
+   */
+  state: {
+    /**
+     * The page was loaded.
+     *
+     * @generated from field: agentrepl.v1.LastKnownPageLoaded loaded = 1;
+     */
+    value: LastKnownPageLoaded;
+    case: "loaded";
+  } | {
+    /**
+     * The page was not loaded.
+     *
+     * @generated from field: agentrepl.v1.LastKnownPageNotLoaded not_loaded = 2;
+     */
+    value: LastKnownPageNotLoaded;
+    case: "notLoaded";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.LastKnownPage.
+ * Use `create(LastKnownPageSchema)` to create a new message.
+ */
+export const LastKnownPageSchema: GenMessage<LastKnownPage> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 3);
+
+/**
+ * Loaded. Empty: presence is the fact.
+ *
+ * @generated from message agentrepl.v1.LastKnownPageLoaded
+ */
+export type LastKnownPageLoaded = Message<"agentrepl.v1.LastKnownPageLoaded"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.LastKnownPageLoaded.
+ * Use `create(LastKnownPageLoadedSchema)` to create a new message.
+ */
+export const LastKnownPageLoadedSchema: GenMessage<LastKnownPageLoaded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 4);
+
+/**
+ * Not loaded. Empty: presence is the fact.
+ *
+ * @generated from message agentrepl.v1.LastKnownPageNotLoaded
+ */
+export type LastKnownPageNotLoaded = Message<"agentrepl.v1.LastKnownPageNotLoaded"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.LastKnownPageNotLoaded.
+ * Use `create(LastKnownPageNotLoadedSchema)` to create a new message.
+ */
+export const LastKnownPageNotLoadedSchema: GenMessage<LastKnownPageNotLoaded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 5);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -141,7 +217,7 @@ export type RegisterWorkspaceError = Message<"agentrepl.v1.RegisterWorkspaceErro
  * Use `create(RegisterWorkspaceErrorSchema)` to create a new message.
  */
 export const RegisterWorkspaceErrorSchema: GenMessage<RegisterWorkspaceError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 3);
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.RegisterWorkspaceNotAWorktree
@@ -154,7 +230,7 @@ export type RegisterWorkspaceNotAWorktree = Message<"agentrepl.v1.RegisterWorksp
  * Use `create(RegisterWorkspaceNotAWorktreeSchema)` to create a new message.
  */
 export const RegisterWorkspaceNotAWorktreeSchema: GenMessage<RegisterWorkspaceNotAWorktree> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 7);
 
 /**
  * The directory lies inside a temporary directory (owner ruling,
@@ -186,5 +262,5 @@ export type RegisterWorkspaceInsideTemporaryDirectory = Message<"agentrepl.v1.Re
  * Use `create(RegisterWorkspaceInsideTemporaryDirectorySchema)` to create a new message.
  */
 export const RegisterWorkspaceInsideTemporaryDirectorySchema: GenMessage<RegisterWorkspaceInsideTemporaryDirectory> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 8);
 

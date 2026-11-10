@@ -168,6 +168,15 @@ roster and handed back verbatim.  Nil means the workspace has not been
 registered on the current daemon yet."
   (plist-get (agent-repl-host--entry ws) :ref))
 
+(defun agent-repl-host-last-known-page (ws)
+  "Return whether the daemon last knew WS\='s page loaded, or nil.
+`:loaded' or `:not-loaded', as the registration answered it
+\(`RegisterWorkspaceSuccess.last_known_page') and every residency report
+since has kept it; nil when no report was ever made.  THE DAEMON KEEPS IT
+ACROSS RESTARTS, so after a bounce it says which pages Emacs held before
+\(`agent-repl-page-unload-wanted-p')."
+  (plist-get (agent-repl-host--entry ws) :last-known-page))
+
 (defun agent-repl-host--recorded-conn (ws)
   "Return the connection recorded for WS, dead or alive, or nil.
 This file\='s own bookkeeping reads it; every consumer that is about to
@@ -468,8 +477,7 @@ there to say it."
        (pcase (plist-get response :arm)
          (:success
           (funcall on-done (agent-repl-host--record-registration
-                            log-scope dir :registered
-                            (plist-get (plist-get response :value) :workspace))))
+                            log-scope dir :registered (plist-get response :value) workspace)))
          (:error
           (if on-refused
               (progn
@@ -485,18 +493,26 @@ there to say it."
      (lambda (detail)
        (funcall on-done (agent-repl-host--record-registration log-scope dir :failed detail))))))
 
-(defun agent-repl-host--record-registration (scope dir arm value)
+(defun agent-repl-host--record-registration (scope dir arm value &optional ws)
   "Record on SCOPE how DIR\='s registration ended; answer its ref, or nil.
-ARM is `:registered' (VALUE the minted ref), `:refused' (VALUE the
-daemon\='s `RegisterWorkspaceError') or `:failed' (VALUE what broke).
+ARM is `:registered' (VALUE the decoded `RegisterWorkspaceSuccess'),
+`:refused' (VALUE the daemon\='s `RegisterWorkspaceError') or `:failed'
+\(VALUE what broke).  A registration of the existing workspace WS also
+records the page the daemon last knew it to hold
+\(`agent-repl-host-last-known-page').
 THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
 \(`agent-repl-host-register') and each dir of a RegisterWorkspaces
 \(`agent-repl-host--outcome-ref') alike, so a reader asks for one
 registration\='s outcome the same way however it was sent."
   (pcase arm
     (:registered
-     (agent-repl--info scope "elisp.host.registered dir=%S id=%S" dir (plist-get value :id))
-     value)
+     (let ((ref (plist-get value :workspace))
+           (page (plist-get value :last-known-page)))
+       (when ws
+         (agent-repl-host--put ws :last-known-page page))
+       (agent-repl--info scope "elisp.host.registered dir=%S id=%S last-known-page=%S"
+                         dir (plist-get ref :id) page)
+       ref))
     (:refused
      (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)
      nil)
@@ -555,7 +571,7 @@ registration\='s own."
     (pcase (plist-get arm :arm)
       ('nil nil)
       (:registered
-       (agent-repl-host--record-registration ws dir :registered (plist-get value :workspace)))
+       (agent-repl-host--record-registration ws dir :registered value ws))
       (:refused
        (agent-repl-host--record-registration ws dir :refused value))
       (:failed
@@ -1136,9 +1152,10 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
   "Tell the daemon what Emacs holds of workspace WS\='s page: RESIDENCY.
 RESIDENCY is a `PageResidency' plist (`agent-repl-wire-encode-page-residency').
 ON-REPORTED is called with no argument once the daemon has answered
-success.  FIRE AND FORGET otherwise: the residency only feeds the rail\='s
-memory hover, so a report that does not land is recorded and the next
-change, or the next link-up, reports again.  Answers nil without calling
+success, and the daemon stores whether the page is loaded, which the
+registration after a bounce answers (`agent-repl-host-last-known-page').
+FIRE AND FORGET otherwise: a report that does not land is recorded and
+the next change, or the next link-up, reports again.  Answers nil without calling
 anything when WS has no ref or no connection yet."
   (agent-repl-host--send-subject-verb
    ws "page-residency"
@@ -1147,6 +1164,9 @@ anything when WS has no ref or no connection yet."
             (append request (list :residency residency)) args))
    (lambda ()
      (agent-repl--log ws "elisp.host.page-residency-reported ws=%s residency=%S" ws residency)
+     ;; The daemon now knows what this report said, and keeps it.
+     (agent-repl-host--put ws :last-known-page
+                           (plist-get residency :arm))
      (funcall on-reported))
    #'ignore))
 
