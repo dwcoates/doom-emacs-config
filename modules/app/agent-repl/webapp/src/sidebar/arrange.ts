@@ -97,7 +97,7 @@ export async function sendArrangement(sc: SidebarContext, control: HTMLElement, 
  * revision of the roster that carries the change (REVISION, null for a
  * response that names none).
  */
-export interface HeldVerb<Res extends VerbResponse> extends Omit<VerbCall<Res>, "sc" | "outlivesPush" | "took"> {
+export interface HeldVerb<Res extends VerbResponse> extends Omit<VerbCall<Res>, "sc" | "idempotent" | "took"> {
   revision: (response: Res) => bigint | null;
 }
 
@@ -118,7 +118,6 @@ export async function sendHeld<Res extends VerbResponse>(
   const took = await fireVerb(control, {
     ...verb,
     sc,
-    outlivesPush: true,
     took: (response: Res) => {
       revision = verb.revision(response);
     },

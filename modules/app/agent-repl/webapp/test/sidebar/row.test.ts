@@ -981,6 +981,40 @@ describe("pathedFamilies", () => {
   });
 });
 
+describe("the row click's lockout", () => {
+  // OWNER RULING: the select is idempotent, so the row line never goes busy;
+  // a row the roster keeps unchanged stays clickable.
+  it("leaves the row line clickable after it selects", async () => {
+    // Arrange
+    const selected: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectInEditor: (request) => {
+          selected.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const line = drawRosterRow(row({ id: "ws-1" }), sc, "R").querySelector("[data-select]") as HTMLElement;
+
+    // Act
+    await click(line);
+    await click(line);
+
+    // Assert
+    expect([line.classList.contains("is-busy"), selected]).toEqual([false, ["ws-1", "ws-1"]]);
+  });
+
+  it("never greys the row line while its select is in flight", async () => {
+    const sc = sidebarContext(appContext({ selectInEditor: () => SELECT_OK }));
+    const line = drawRosterRow(row({ id: "ws-1" }), sc, "R").querySelector("[data-select]") as HTMLElement;
+    const settled = click(line);
+    const busy = line.classList.contains("is-busy");
+    await settled;
+    expect(busy).toBe(false);
+  });
+});
+
 describe("the row click in the hidden section", () => {
   // OWNER REQUEST, 2026-10-13: the click shows the workspace and then
   // selects it, so the user lands on what they clicked.
