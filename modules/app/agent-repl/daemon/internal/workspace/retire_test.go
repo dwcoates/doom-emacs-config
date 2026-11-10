@@ -26,12 +26,24 @@ func landedRequester(t *testing.T, f *fixture) wsm.Workspace {
 	return ws
 }
 
+// operationRecords answers the records under OPERATION at LEVEL, leaving out
+// the roster republish's own record.
+func operationRecords(f *fixture, level, operation string) []dlog.Record {
+	var out []dlog.Record
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == operation && r.Level == level && r.Message != "republished the roster registry" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // retireRecords answers the opRetire records at LEVEL naming WS, leaving out
 // the roster republish's own record.
 func retireRecords(f *fixture, level string, ws ids.WorkspaceID) []dlog.Record {
 	var out []dlog.Record
-	for _, r := range f.log.logger.Records() {
-		if r.Operation == opRetire && r.Level == level && r.Context["workspace"] == string(ws) && r.Message != "republished the roster registry" {
+	for _, r := range operationRecords(f, level, opRetire) {
+		if r.Context["workspace"] == string(ws) {
 			out = append(out, r)
 		}
 	}

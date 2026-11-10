@@ -24,8 +24,9 @@ const opResponseQuestion = "daemon.server.response_question"
 // question-mark control toggles it (AskAboutResponse), the root feed's watch
 // draws it (frontend.v1.FeedResponseQuestion), Emacs edits its composer on
 // each transition (HostWorkspaceResponseQuestion), and the prompt the user
-// sends while it stands is taken by it: sent, quoting the card, to the home
-// repository's main workspace as an agent-to-agent prompt (submitQuestion).
+// sends while it stands is taken by it: handed, quoting the card, to an
+// ephemeral intake workspace created for it in the home repository
+// (submitQuestion).
 
 // responseQuestions is every workspace's held question: the asked card's
 // row, ABSENT for none.
@@ -200,9 +201,9 @@ func (s *server) responseQuestionTopic(ws ids.WorkspaceID) *publish.Topic[*front
 
 // submitQuestion is SubmitPrompt's body for a user prompt sent while a
 // question about ROW stood: the question has been taken, so it ends here
-// whatever happens, and the prompt, quoting the card, is sent to the home
-// repository's main workspace as an agent-to-agent prompt from this one
-// (workspace.Verbs.AskHomeMain). No turn is minted in this workspace.
+// whatever happens, and the prompt, quoting the card, is handed to an
+// ephemeral intake workspace created for it in the home repository
+// (workspace.Verbs.AskQuestionIntake). No turn is minted in this workspace.
 func (s *server) submitQuestion(
 	ctx context.Context,
 	subject resolved,
@@ -226,11 +227,11 @@ func (s *server) submitQuestion(
 		}))))
 	}
 	question := questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid()))
-	recipient, err := s.deps.Verbs.AskHomeMain(ctx, ws, question)
+	recipient, err := s.deps.Verbs.AskQuestionIntake(ctx, ws, question)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
-	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; sent it to the home main workspace", dlog.Context{
+	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; handed it to an intake workspace", dlog.Context{
 		"row": row.GetValue(), "card": card.Arm, "recipient": string(recipient.ID), "recipient_name": recipient.Name,
 	})
 	resp.Result = &agentreplv1.SubmitPromptResponse_Success{Success: &agentreplv1.SubmitPromptSuccess{
@@ -239,7 +240,7 @@ func (s *server) submitQuestion(
 	return connect.NewResponse(resp), nil
 }
 
-// questionPrompt is the question sent to the home main workspace for a question about
+// questionPrompt is the question handed to the intake workspace for a question about
 // CARD, asked in WORDS: a response's and a prompt's markdown under their own
 // preambles, and every other card's row as JSON under its kind's.
 func questionPrompt(card feed.CardText, words string) string {

@@ -501,14 +501,14 @@ type SubmitPromptSuccess_ResponseRevising struct {
 
 type SubmitPromptSuccess_QuestionSent struct {
 	// It ASKED A QUESTION ABOUT A CARD instead of minting a turn: a
-	// question stood as it was sent (AskAboutResponse), so the daemon sent
-	// the card, quoted, followed by these words, to the home repository's
-	// MAIN workspace as an agent-to-agent prompt from this workspace
-	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT), and ended the
-	// question. The main workspace answers an interrogative itself and
-	// dispatches an imperative to a one-shot child, acknowledging this
-	// workspace either way. Nothing appears in this workspace's feed until
-	// that acknowledgement arrives.
+	// question stood as it was sent (AskAboutResponse), so the daemon
+	// handed the card, quoted, followed by these words, to an ephemeral
+	// intake workspace it created for the question in the home repository,
+	// and ended the question. The intake workspace sends this workspace the
+	// answer to an interrogative, and creates a one-shot child of this
+	// workspace for an imperative, acknowledging this workspace either way
+	// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT). Nothing
+	// appears in this workspace's feed until that acknowledgement arrives.
 	QuestionSent *SubmitPromptQuestionSent `protobuf:"bytes,8,opt,name=question_sent,json=questionSent,proto3,oneof"`
 }
 
@@ -531,8 +531,8 @@ type SubmitPromptQuestionSent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The card the question was about.
 	Row *v12.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
-	// The name of the workspace the question was sent to: the home
-	// repository's main workspace.
+	// The name of the workspace the question was handed to: the ephemeral
+	// intake workspace created for it.
 	Recipient     string `protobuf:"bytes,2,opt,name=recipient,proto3" json:"recipient,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

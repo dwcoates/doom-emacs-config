@@ -10,6 +10,11 @@
 //
 // THE WORKSPACE'S OWN CODE RUNS. The run builds and runs the runner from the
 // workspace's worktree, against that worktree, at background priority.
+//
+// A MAIN WORKSPACE MAY RUN A WORKTREE IT CUT BY HAND. A repository's main
+// workspace sits on the main checkout, so the branch it works on lives in a
+// git worktree of that repository no workspace is registered at. It names
+// that worktree (`worktree`), and the run builds and runs there instead.
 syntax = "proto3";
 
 package agentrepl.v1;
@@ -42,6 +47,17 @@ message RunTestsRequest {
   // REQUIRED. Who asks: the user, or the workspace whose agent runs the
   // command line.
   WorkspaceRequester requester = 6;
+  // The worktree the tests run in, when it is not the workspace's own. Unset
+  // runs in the workspace's own worktree. Refused (`worktree_refused`) unless
+  // `workspace` is its repository's main workspace and the directory is a
+  // git worktree of that repository.
+  RunTestsWorktree worktree = 7;
+}
+
+// A worktree a main workspace runs tests in, in place of its own.
+message RunTestsWorktree {
+  // REQUIRED. The worktree's directory, absolute.
+  string dir = 1;
 }
 
 // The CPU load a run is held under.
@@ -81,7 +97,16 @@ message RunTestsError {
     RunTestsCpuLoadRefused cpu_load_refused = 4;
     // The request's options contradict each other.
     RunTestsInvalid invalid = 5;
+    // The worktree named is not one the workspace may run tests in.
+    RunTestsWorktreeRefused worktree_refused = 6;
   }
+}
+
+// The worktree named is not one the workspace may run tests in.
+message RunTestsWorktreeRefused {
+  // Why: the workspace is not its repository's main workspace, or the
+  // directory is no git worktree of that repository.
+  string detail = 1;
 }
 
 // CPU load was asked for by someone other than the user.

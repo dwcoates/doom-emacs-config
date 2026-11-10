@@ -494,3 +494,154 @@ func TestTheTestEndpointsResolveThroughTestWorktreeOf(t *testing.T) {
 		}
 	}
 }
+
+// mainTestsWorkspace registers a repository's main workspace whose main
+// checkout holds a deploy config and a `.git/worktrees` directory, and
+// answers its ref.
+func mainTestsWorkspace(t *testing.T, h *harness) *workspacev1.WorkspaceRef {
+	t.Helper()
+	ref := testsWorkspace(t, h, testsDeploy)
+	if err := os.MkdirAll(filepath.Join(ref.GetDir(), ".git", "worktrees"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-tests", Dir: ref.GetDir()})
+	return ref
+}
+
+// cutWorktree makes a linked worktree of the repository at REPODIR, as
+// git writes one, holding DEPLOY's text as its deploy config ("" for none).
+func cutWorktree(t *testing.T, repoDir, deploy string) string {
+	t.Helper()
+	dir := t.TempDir()
+	admin := filepath.Join(repoDir, ".git", "worktrees", "cut")
+	if err := os.MkdirAll(admin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+admin+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if deploy != "" {
+		if err := os.MkdirAll(filepath.Join(dir, ".agent-repl"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(lifecycleconfig.Path(dir), []byte(deploy), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestRunTestsRunsAMainWorkspacesHandCutWorktree(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ref := mainTestsWorkspace(t, h)
+	cut := cutWorktree(t, ref.GetDir(), testsDeploy)
+	h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
+
+	// Act
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+		Worktree: &agentreplv1.RunTestsWorktree{Dir: cut}})
+
+	// Assert
+	if len(frames) != 1 || frames[0].GetEvent().GetEnded().GetPassed() == nil {
+		t.Fatalf("frames = %v, want the run's passing end", frames)
+	}
+	if h.Tests.dir != cut {
+		t.Fatalf("ran in %q, want the hand-cut worktree %q", h.Tests.dir, cut)
+	}
+	if want := merge.TestCommandFor(cut, "bin/test-all.sh", filepath.Base(cut)); !slices.Equal(h.Tests.argv[:len(want)], want) {
+		t.Fatalf("argv = %q, want the test command of the hand-cut worktree %q", h.Tests.argv, want)
+	}
+}
+
+func TestRunTestsRefusesAWorktreeItsWorkspaceMayNotRunTestsIn(t *testing.T) {
+	cases := []struct {
+		name string
+		// arrange answers the requesting workspace and the worktree it names.
+		arrange func(t *testing.T, h *harness) (*workspacev1.WorkspaceRef, string)
+		want    string
+	}{
+		{name: "a workspace that is not its repository's main workspace", arrange: func(t *testing.T, h *harness) (*workspacev1.WorkspaceRef, string) {
+			return testsWorkspace(t, h, testsDeploy), t.TempDir()
+		}, want: "not its repository's main workspace"},
+		{name: "a relative directory", arrange: func(t *testing.T, h *harness) (*workspacev1.WorkspaceRef, string) {
+			return mainTestsWorkspace(t, h), "cut"
+		}, want: "not an absolute directory"},
+		{name: "a directory that is no git worktree", arrange: func(t *testing.T, h *harness) (*workspacev1.WorkspaceRef, string) {
+			return mainTestsWorkspace(t, h), t.TempDir()
+		}, want: "no linked git worktree"},
+		{name: "a worktree of another repository", arrange: func(t *testing.T, h *harness) (*workspacev1.WorkspaceRef, string) {
+			other := t.TempDir()
+			return mainTestsWorkspace(t, h), cutWorktree(t, other, testsDeploy)
+		}, want: "a worktree of another repository"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			ref, dir := tc.arrange(t, h)
+
+			// Act
+			frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+				Worktree: &agentreplv1.RunTestsWorktree{Dir: dir}})
+
+			// Assert
+			if len(frames) != 1 || !strings.Contains(frames[0].GetError().GetWorktreeRefused().GetDetail(), tc.want) {
+				t.Fatalf("frames = %v, want one worktree_refused saying %q", frames, tc.want)
+			}
+			if h.Tests.calls != 0 {
+				t.Fatalf("the test script ran %d times, want a refused run to run nothing", h.Tests.calls)
+			}
+			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRunTests, Message: "refused a test run in a worktree its workspace may not run tests in"}); !found {
+				t.Fatalf("records = %+v, want the refusal recorded", log.Records())
+			}
+		})
+	}
+}
+
+func TestRunTestsAnswersAHandCutWorktreeWithNoTestScript(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ref := mainTestsWorkspace(t, h)
+	cut := cutWorktree(t, ref.GetDir(), "")
+
+	// Act
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+		Worktree: &agentreplv1.RunTestsWorktree{Dir: cut}})
+
+	// Assert
+	if len(frames) != 1 || frames[0].GetError().GetRunnerFailed().GetExitCode() != -1 {
+		t.Fatalf("frames = %v, want one runner_failed", frames)
+	}
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRunTests}); !found {
+		t.Fatalf("records = %+v, want the missing script recorded", log.Records())
+	}
+}
+
+func TestRunTestsFailsWhenTheRepositoryRegistryCannotBeRead(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ref := mainTestsWorkspace(t, h)
+	h.DB.listRepositoriesErr = errors.New("disk I/O error")
+
+	// Act
+	stream, err := h.Client.RunTests(context.Background(), connect.NewRequest(&agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+		Worktree: &agentreplv1.RunTestsWorktree{Dir: "/nowhere"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	for stream.Receive() {
+	}
+
+	// Assert
+	if connect.CodeOf(stream.Err()) != connect.CodeInternal {
+		t.Fatalf("stream ended %v, want Internal", stream.Err())
+	}
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRunTests}); !found {
+		t.Fatalf("records = %+v, want the failed read recorded", log.Records())
+	}
+}

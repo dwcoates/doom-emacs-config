@@ -128,7 +128,7 @@ func (v *verbs) Forget(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Info(opForget, "standing the workspace's live session down before the record goes", dlog.Context{
 			"dir": record.Dir,
 		})
-		if err := v.kill(ctx, log, ws); err != nil {
+		if err := v.kill(ctx, log, ws, wsm.CloseByUser); err != nil {
 			log.Error(opForget, "the workspace's session could not be stood down", dlog.Context{
 				"cause": err.Error(),
 			})

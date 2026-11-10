@@ -462,6 +462,15 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	if err := v.recordOrigin(ctx, log, record, spec); err != nil {
 		return wsm.Workspace{}, err
 	}
+	// AN INTAKE WORKSPACE IS MARKED AND HIDDEN BEFORE ITS SESSION EXISTS, so no
+	// turn of it can end unmarked: the turn-end edge is what retires it
+	// (retireIntake).
+	if spec.Intake {
+		if err := v.deps.DB.MarkIntake(ctx, record.ID, v.now()); err != nil {
+			log.Error(opCreate, "could not record the workspace as an intake workspace", dlog.WithCause(nil, err))
+			return wsm.Workspace{}, fmt.Errorf("create %q: record it as an intake workspace: %w", branch, err)
+		}
+	}
 	// THE CREATION STAGE'S SCRIPTS RUN NOW, before any session comes up, so
 	// a failed one undoes a create that started nothing.
 	if err := v.runCreationScripts(ctx, log, record, spec, creation); err != nil {
@@ -641,6 +650,17 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		})
 		return fmt.Errorf("create: the merge workspace of %s for request %s has no landing (target %q, parent branch %q)",
 			spec.MergeOf.Requester, spec.MergeOf.Request, spec.MergeOf.TargetDir, spec.MergeOf.ParentBranch)
+	}
+	// AN INTAKE WORKSPACE IS ONLY EVER ASKED FOR BY CreateIntake, so a spec that
+	// contradicts itself is a defect in that caller: it is a named, prompted
+	// peer with a fresh context, and nothing lands from it.
+	if spec.Intake && (strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.InitialPrompt) == "" || spec.Parent != nil ||
+		spec.ForkFrom != nil || spec.MergeOf != nil || spec.OneShot) {
+		log.Error(opCreate, "an intake workspace's create spec contradicts itself", dlog.Context{
+			"name": spec.Name, "has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "parent": ids.Optional(spec.Parent),
+			"fork_from": ids.Optional(spec.ForkFrom), "merge": spec.MergeOf != nil, "one_shot": spec.OneShot,
+		})
+		return fmt.Errorf("create: an intake workspace %q is a named, prompted peer with a fresh context, never a one-shot, a fork or a merge workspace", spec.Name)
 	}
 	// ONLY A ONE-SHOT NAMES A CONTEXT WORKSPACE: the rpc carries it inside the
 	// one-shot arm, so a spec with one on any other form is a defect in its

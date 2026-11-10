@@ -634,6 +634,11 @@ type DB interface {
 	// TakeCloseWhenTurnEnds clears a workspace's self-close mark in one
 	// statement, answering whether one stood.
 	TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool, error)
+	// MarkIntake records a workspace as an ephemeral intake workspace and
+	// hides it, in one transaction (intake.go).
+	MarkIntake(ctx context.Context, id WorkspaceID, at time.Time) error
+	// IsIntake answers whether a workspace is an ephemeral intake workspace.
+	IsIntake(ctx context.Context, id WorkspaceID) (bool, error)
 	// SetAwaiting marks a workspace awaiting correspondence from another, or
 	// clears the mark with nil (standings.go).
 	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error

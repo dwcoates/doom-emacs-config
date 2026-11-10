@@ -6,11 +6,13 @@
 // its copy control; owner request, 2026-11-09, extended it from final
 // responses to every card); a click on it asks the daemon to toggle the
 // question about that card. While a question is held, the next prompt the
-// user sends is NOT a turn of this workspace: the daemon sends the card,
-// quoted, followed by the user's words, to the home repository's MAIN
-// workspace as an agent-to-agent prompt from this one, answers the submission
-// `question_sent`, and ends the question. The main workspace acknowledges this
-// workspace, then answers the question or dispatches the change it asks for.
+// user sends is NOT a turn of this workspace: the daemon hands the card,
+// quoted, followed by the user's words, to an EPHEMERAL INTAKE WORKSPACE it
+// creates for the question in the home repository (hidden, with a fresh
+// context), answers the submission `question_sent`, and ends the question.
+// The intake workspace acknowledges this workspace, then sends it the answer
+// or creates, as its child, the one-shot workspace that makes the change
+// asked for; the daemon retires the intake workspace when its turn ends.
 //
 // A CARD IS QUOTED BY ONE RULE: a bubble with text (a prompt, a landed
 // response) by its markdown, and every other card by the daemon-resolved row

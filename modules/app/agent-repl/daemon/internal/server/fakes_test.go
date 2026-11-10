@@ -370,11 +370,14 @@ type fakeVerbs struct {
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec
-	// homeQuestions records every AskHomeMain question, in order;
-	// homeMain is the recipient it answers, homeMainErr its failure.
-	homeQuestions []fakeHomeQuestion
-	homeMain      wsm.Workspace
-	homeMainErr   error
+	// intakeQuestions records every AskQuestionIntake question, in order;
+	// questionIntake is the intake workspace it answers, questionIntakeErr
+	// its failure.
+	intakeQuestions   []fakeIntakeQuestion
+	questionIntake    wsm.Workspace
+	questionIntakeErr error
+	// intakeSpecs records every CreateIntake spec, in order.
+	intakeSpecs []workspace.IntakeSpec
 	// createJoined, when set, makes EnterCreate answer a ticket that joined
 	// that pending create; createHeld makes RunCreate answer the create held
 	// for the network under that ref.
@@ -3007,16 +3010,21 @@ func (f *fakeMemory) Workspace(ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemo
 	return f.workspace
 }
 
-// fakeHomeQuestion is one AskHomeMain call.
-type fakeHomeQuestion struct {
+// fakeIntakeQuestion is one AskQuestionIntake call.
+type fakeIntakeQuestion struct {
 	asker    ids.WorkspaceID
 	question string
 }
 
-func (f *fakeVerbs) AskHomeMain(_ context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error) {
-	f.homeQuestions = append(f.homeQuestions, fakeHomeQuestion{asker: asker, question: question})
-	if f.homeMainErr != nil {
-		return wsm.Workspace{}, f.homeMainErr
+func (f *fakeVerbs) AskQuestionIntake(_ context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error) {
+	f.intakeQuestions = append(f.intakeQuestions, fakeIntakeQuestion{asker: asker, question: question})
+	if f.questionIntakeErr != nil {
+		return wsm.Workspace{}, f.questionIntakeErr
 	}
-	return f.homeMain, nil
+	return f.questionIntake, nil
+}
+
+func (f *fakeVerbs) CreateIntake(_ context.Context, spec workspace.IntakeSpec) (wsm.Workspace, error) {
+	f.intakeSpecs = append(f.intakeSpecs, spec)
+	return f.questionIntake, nil
 }

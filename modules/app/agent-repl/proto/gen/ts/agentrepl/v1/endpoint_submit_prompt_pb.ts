@@ -265,14 +265,14 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
   } | {
     /**
      * It ASKED A QUESTION ABOUT A CARD instead of minting a turn: a
-     * question stood as it was sent (AskAboutResponse), so the daemon sent
-     * the card, quoted, followed by these words, to the home repository's
-     * MAIN workspace as an agent-to-agent prompt from this workspace
-     * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT), and ended the
-     * question. The main workspace answers an interrogative itself and
-     * dispatches an imperative to a one-shot child, acknowledging this
-     * workspace either way. Nothing appears in this workspace's feed until
-     * that acknowledgement arrives.
+     * question stood as it was sent (AskAboutResponse), so the daemon
+     * handed the card, quoted, followed by these words, to an ephemeral
+     * intake workspace it created for the question in the home repository,
+     * and ended the question. The intake workspace sends this workspace the
+     * answer to an interrogative, and creates a one-shot child of this
+     * workspace for an imperative, acknowledging this workspace either way
+     * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT). Nothing
+     * appears in this workspace's feed until that acknowledgement arrives.
      *
      * @generated from field: agentrepl.v1.SubmitPromptQuestionSent question_sent = 8;
      */
@@ -302,8 +302,8 @@ export type SubmitPromptQuestionSent = Message<"agentrepl.v1.SubmitPromptQuestio
   row?: FeedId | undefined;
 
   /**
-   * The name of the workspace the question was sent to: the home
-   * repository's main workspace.
+   * The name of the workspace the question was handed to: the ephemeral
+   * intake workspace created for it.
    *
    * @generated from field: string recipient = 2;
    */

@@ -56,7 +56,7 @@ func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 	// one door a queued merge's workspace can leave through — and a merge left
 	// on the queue behind it would wait forever on a workspace that is gone.
 	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
-	return func(ctx context.Context) error { return v.kill(ctx, log, ws) }, nil
+	return func(ctx context.Context) error { return v.kill(ctx, log, ws, wsm.CloseByUser) }, nil
 }
 
 // markClosedFirst marks a workspace closed and republishes the roster BEFORE
@@ -77,8 +77,9 @@ func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string,
 	return nil
 }
 
-// kill is Kill's body, shared with Nuke, which kills before it destroys.
-func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+// kill is Kill's body, shared with Nuke, which kills before it destroys, and
+// with the retirements. BY is who the close it records is by.
+func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, by wsm.CloseCause) error {
 	if shim, live := v.deps.Shim(ws); live {
 		// THE LATCH IS ARMED BEFORE THE ASK, and therefore before the
 		// unconditional process stop the ask's failure leads to: the stop is a
@@ -137,7 +138,7 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 
 	// A killed workspace's roster row carries closed = true: Emacs derives its
 	// tab set from that flag, and a killed workspace has no editor state left.
-	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser}); err != nil {
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: by}); err != nil {
 		log.Error(opKill, "could not record the close", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("kill %q: record closed: %w", ws, err)
 	}
@@ -184,7 +185,7 @@ func (v *verbs) BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
 	ws := record.ID
 	if v.deps.Sessions.Held(ws) {
-		if err := v.kill(ctx, log, ws); err != nil {
+		if err := v.kill(ctx, log, ws, wsm.CloseByUser); err != nil {
 			return fmt.Errorf("nuke %q: %w", ws, err)
 		}
 	} else {

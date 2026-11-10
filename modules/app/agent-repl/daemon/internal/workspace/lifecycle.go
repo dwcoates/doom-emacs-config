@@ -81,9 +81,11 @@ func (v *verbs) readLifecycle(log dlog.Logger, repoDir string) (*repoconfigv1.Li
 
 // creationStageOf is the creation stage SPEC runs under CFG, its workspace
 // landing into TARGETDIR of the repository at REPODIR. A merge workspace runs
-// none: the queue makes it, and its request named every hook it runs.
+// none: the queue makes it, and its request named every hook it runs. An
+// intake workspace runs none either: it does none of the repository's work,
+// only works out what a request is and hands it on (intake.go).
 func (v *verbs) creationStageOf(cfg *repoconfigv1.LifecycleConfig, spec CreateSpec, repoDir, targetDir string) creationStage {
-	if spec.MergeOf != nil {
+	if spec.MergeOf != nil || spec.Intake {
 		return creationStage{}
 	}
 	builtins := lifecycleconfig.Builtins{CheckoutRoot: v.deps.CheckoutRoot}

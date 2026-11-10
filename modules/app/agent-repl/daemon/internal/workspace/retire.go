@@ -117,7 +117,7 @@ func (v *verbs) RetireLanded(ctx context.Context, ws ids.WorkspaceID) (string, e
 
 	// THE SESSION GOES BEFORE THE TREE, as it does for a merge's own
 	// requester: no shim is left running in a directory that is gone.
-	if err := v.kill(ctx, log, ws); err != nil {
+	if err := v.kill(ctx, log, ws, wsm.CloseByUser); err != nil {
 		return "", fmt.Errorf("retire %q: %w", ws, err)
 	}
 	if err := v.deps.Git.RemoveCleanWorktree(ctx, repoDir, record.Dir); err != nil {

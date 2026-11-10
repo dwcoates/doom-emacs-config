@@ -440,7 +440,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "warns, in the minibuffer, that a second consecutive command-mode escape clears the feed selection")
     ("input.el" agent-repl--input-on-success
      "[agent-repl] Asked %s…"
-     "tells the user their question about a card was sent to the home main workspace")
+     "tells the user their question about a card was handed to an intake workspace")
     ("input.el" agent-repl--input-on-bubble-refusal
      "agent-repl: the prompt was refused for this agent (%S)"
      "reports a prompt refusal requiring user action")

@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/wsm"
 )
 
 // runtests.go — RunTests: the daemon is the one runner of tests on the host.
@@ -91,6 +92,21 @@ func (s *server) RunTests(
 		return sendRunnerFailed(stream, 1, -1, noScript.Error())
 	case err != nil:
 		return err
+	}
+	if named := msg.GetWorktree(); named != nil {
+		// A MAIN WORKSPACE'S HAND-CUT WORKTREE runs in place of its own.
+		cut, detail, err := s.handCutWorktreeOf(ctx, w, named.GetDir())
+		if err != nil {
+			return err
+		}
+		if detail != "" {
+			w.log.Info(opRunTests, "refused a test run in a worktree its workspace may not run tests in", dlog.Context{"dir": w.dir, "worktree": named.GetDir(), "detail": detail})
+			return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_WorktreeRefused{WorktreeRefused: &agentreplv1.RunTestsWorktreeRefused{Detail: detail}}})
+		}
+		if errors.As(cut.err, &noScript) {
+			return sendRunnerFailed(stream, 1, -1, noScript.Error())
+		}
+		w = cut.worktree
 	}
 	log, dir, script := w.log, w.dir, w.script
 	selection, err := writeRequest(msg.GetRun(), "agent-repl-run-tests-*.pb")
@@ -279,6 +295,74 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 		return testWorktree{}, &noTestScriptError{cause: err}
 	}
 	return w, nil
+}
+
+// handCutWorktree is a main workspace's hand-cut worktree resolved for a test
+// run: where the run runs, or the *noTestScriptError of a worktree with no
+// test script.
+type handCutWorktree struct {
+	worktree testWorktree
+	err      error
+}
+
+// handCutWorktreeOf resolves DIR, the worktree the workspace resolved as OWN
+// asked to run tests in instead of its own. It answers a refusal's detail
+// when that workspace is not its repository's main workspace or DIR is no git
+// worktree of that repository, and an error only when the registry cannot be
+// read.
+func (s *server) handCutWorktreeOf(ctx context.Context, own testWorktree, dir string) (handCutWorktree, string, error) {
+	repositories, err := s.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		own.log.Error(opRunTests, "could not read the repository registry to judge a test run's worktree", dlog.WithCause(dlog.Context{"worktree": dir}, err))
+		return handCutWorktree{}, "", connect.NewError(connect.CodeInternal, fmt.Errorf("run tests in %s: read the repository registry: %w", dir, err))
+	}
+	main := false
+	for _, repository := range repositories {
+		main = main || wsm.IsMainWorktree(own.dir, repository.Dir)
+	}
+	if !main {
+		return handCutWorktree{}, fmt.Sprintf("the workspace at %s is not its repository's main workspace; only a main workspace runs tests in a worktree it cut by hand", own.dir), nil
+	}
+	if !filepath.IsAbs(dir) {
+		return handCutWorktree{}, fmt.Sprintf("the worktree %q is not an absolute directory", dir), nil
+	}
+	dir = filepath.Clean(dir)
+	if err := linkedWorktreeOf(dir, own.dir); err != nil {
+		return handCutWorktree{}, err.Error(), nil
+	}
+	cut := testWorktree{log: own.log.With(dlog.Context{"worktree": dir}), dir: dir, name: filepath.Base(dir)}
+	if cut.script, err = testScriptOf(dir); err != nil {
+		own.log.Error(opRunTests, "a test run's hand-cut worktree has no test script to run", dlog.WithCause(dlog.Context{"worktree": dir}, err))
+		return handCutWorktree{err: &noTestScriptError{cause: err}}, "", nil
+	}
+	return handCutWorktree{worktree: cut}, "", nil
+}
+
+// linkedWorktreeOf answers nil when DIR is a linked git worktree of the
+// repository whose main worktree is REPODIR, and why not otherwise. It reads
+// what git itself wrote: a linked worktree's `.git` is a FILE naming its
+// administrative directory, `<repository>/.git/worktrees/<name>`.
+func linkedWorktreeOf(dir, repoDir string) error {
+	data, err := os.ReadFile(filepath.Join(dir, ".git"))
+	if err != nil {
+		return fmt.Errorf("%s is no linked git worktree: %v", dir, err)
+	}
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+	if !ok {
+		return fmt.Errorf("%s is no linked git worktree: its .git file names no gitdir", dir)
+	}
+	admin, err := filepath.EvalSymlinks(filepath.Dir(gitdir))
+	if err != nil {
+		return fmt.Errorf("%s is no linked git worktree: its gitdir %s cannot be resolved: %v", dir, gitdir, err)
+	}
+	worktrees, err := filepath.EvalSymlinks(filepath.Join(repoDir, ".git", "worktrees"))
+	if err != nil {
+		return fmt.Errorf("the repository at %s holds no linked worktrees: %v", repoDir, err)
+	}
+	if admin != worktrees {
+		return fmt.Errorf("%s is a worktree of another repository (its gitdir is %s), not of %s", dir, gitdir, repoDir)
+	}
+	return nil
 }
 
 // testScriptOf is the test script the worktree's own deploy config names.

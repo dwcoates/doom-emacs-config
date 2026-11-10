@@ -291,6 +291,11 @@ type fakeDB struct {
 	listWorkspacesErrAfterRename error
 	markSelfCloseErr             error
 	takeSelfCloseErr             error
+	// intakes are the workspaces MarkIntake marked; markIntakeErr fails the
+	// mark and isIntakeErr the read.
+	intakes       map[ids.WorkspaceID]bool
+	markIntakeErr error
+	isIntakeErr   error
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -549,6 +554,7 @@ func newFakeDB() *fakeDB {
 		jobs:        map[ids.WorkspaceID]wsm.CreationJob{},
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},
+		intakes:     map[ids.WorkspaceID]bool{},
 		closures:    map[ids.WorkspaceID][]wsm.Closure{},
 		priorities:  map[ids.WorkspaceID]*wsm.Priority{},
 		attention:   map[ids.WorkspaceID]bool{},
@@ -974,6 +980,31 @@ func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at
 		d.onMarkSelfClose()
 	}
 	return nil
+}
+
+// MarkIntake records the fake's intake mark and hides the record, as the
+// store does in one transaction.
+func (d *fakeDB) MarkIntake(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.markIntakeErr != nil {
+		return d.markIntakeErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	ws.Hidden = true
+	ws.HiddenAt = &at
+	d.workspaces[id] = ws
+	d.intakes[id] = true
+	return nil
+}
+
+// IsIntake answers the fake's intake mark.
+func (d *fakeDB) IsIntake(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.isIntakeErr != nil {
+		return false, d.isIntakeErr
+	}
+	return d.intakes[id], nil
 }
 
 // TakeCloseWhenTurnEnds clears the fake's mark, answering whether one stood.
