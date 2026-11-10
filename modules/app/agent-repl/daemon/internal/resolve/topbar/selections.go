@@ -18,13 +18,16 @@ import (
 // session states its own. A pick then starts the shim (workspace.verbs), and
 // the live session's facts replace the remembered ones as they arrive.
 
-// SelectionStore keeps a workspace's last-known controls and each login's
-// catalog (wsm.DB's selections.go).
+// SelectionStore keeps a workspace's last-known controls and context reading,
+// and each login's catalog (wsm.DB's selections.go).
 type SelectionStore interface {
 	WorkspaceSelections(ctx context.Context, id ids.WorkspaceID) (wsm.Selections, bool, error)
 	PutWorkspaceModel(ctx context.Context, id ids.WorkspaceID, model string) error
 	PutWorkspacePermissionMode(ctx context.Context, id ids.WorkspaceID, mode string) error
 	PutWorkspaceEffort(ctx context.Context, id ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	WorkspaceContextUsage(ctx context.Context, id ids.WorkspaceID) (wsm.ContextUsageRecord, bool, error)
+	PutWorkspaceContextUsage(ctx context.Context, id ids.WorkspaceID, usage *conversationv1.SessionContextUsage) error
+	PutWorkspaceContextCut(ctx context.Context, id ids.WorkspaceID) error
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	PutAccountModelCatalog(ctx context.Context, configDir string, catalog *conversationv1.ModelCatalog) error
 }
@@ -37,6 +40,16 @@ func WithSelectionStore(store SelectionStore) Option {
 
 const opSelections = "daemon.topbar.selections"
 
+// selectionsError records MESSAGE at ERROR on WS's log under opSelections:
+// the ONE record every failed keep or read of the topbar's remembered facts
+// leaves.
+func (r *resolver) selectionsError(ws ids.WorkspaceID, message string, ctx dlog.Context) {
+	r.mu.Lock()
+	log := r.logOf(ws, r.stateLocked(ws))
+	r.mu.Unlock()
+	log.Error(opSelections, message, ctx)
+}
+
 // remember writes one changed control through WRITE. A write that fails is
 // recorded at ERROR: the control is still drawn from the live session, and
 // only what a later sessionless strip draws is stale.
@@ -46,10 +59,7 @@ func (r *resolver) remember(ws ids.WorkspaceID, what string, write func(context.
 		return
 	}
 	if err := write(context.Background(), store); err != nil {
-		r.mu.Lock()
-		log := r.logOf(ws, r.stateLocked(ws))
-		r.mu.Unlock()
-		log.Error(opSelections, "could not keep a topbar control for when the shim is down", dlog.Context{"control": what, "cause": err.Error()})
+		r.selectionsError(ws, "could not keep a topbar control for when the shim is down", dlog.Context{"control": what, "cause": err.Error()})
 	}
 }
 
@@ -103,10 +113,7 @@ func (r *resolver) seedSelections(ws ids.WorkspaceID, configDir string) {
 		catalog, _, err = store.AccountModelCatalog(ctx, configDir)
 	}
 	if err != nil {
-		r.mu.Lock()
-		log := r.logOf(ws, r.stateLocked(ws))
-		r.mu.Unlock()
-		log.Error(opSelections, "could not read the remembered topbar controls; they are drawn once a session states them", dlog.Context{"cause": err.Error()})
+		r.selectionsError(ws, "could not read the remembered topbar controls; they are drawn once a session states them", dlog.Context{"cause": err.Error()})
 		return
 	}
 	if !found && len(catalog.GetOptions()) == 0 {
@@ -131,5 +138,52 @@ func (r *resolver) seedSelections(ws ids.WorkspaceID, configDir string) {
 			if len(s.catalog) == 0 {
 				s.catalog = catalog.GetOptions()
 			}
+		})
+}
+
+// THE CONTEXT CHIP OUTLIVES THE DAEMON too (layout 100). Every reading and
+// every cut is kept in wsm as it lands, and installed when the workspace's
+// account is, so a workspace revived after a restart states the figure and the
+// window its last session reported, rather than a 0 it is not at, until the
+// live session's fresh reading replaces it.
+
+// rememberContextUsage keeps USAGE as WS's last context reading.
+func (r *resolver) rememberContextUsage(ws ids.WorkspaceID, usage *conversationv1.SessionContextUsage) {
+	r.remember(ws, "context_usage", func(ctx context.Context, st SelectionStore) error {
+		return st.PutWorkspaceContextUsage(ctx, ws, usage)
+	})
+}
+
+// rememberContextCut keeps that a cut discarded WS's last context reading.
+func (r *resolver) rememberContextCut(ws ids.WorkspaceID) {
+	r.remember(ws, "context_cut", func(ctx context.Context, st SelectionStore) error {
+		return st.PutWorkspaceContextCut(ctx, ws)
+	})
+}
+
+// seedContextUsage installs WS's remembered context fact, read from the store,
+// unless the live session has already stated one of its own (a reading or a
+// cut). A read that fails is recorded at ERROR and seeds nothing; the chip is
+// drawn from the session's next reading.
+func (r *resolver) seedContextUsage(ws ids.WorkspaceID) {
+	store := r.opts.selections
+	if store == nil {
+		return
+	}
+	rec, found, err := store.WorkspaceContextUsage(context.Background(), ws)
+	if err != nil {
+		r.selectionsError(ws, "could not read the remembered context reading; the chip is drawn from the next one", dlog.Context{"cause": err.Error()})
+		return
+	}
+	if !found {
+		return
+	}
+	r.mutate(ws, "daemon.topbar.seed_context_usage", "the topbar took the remembered context reading",
+		dlog.Context{"cut": rec.Cut, "total_tokens": rec.Usage.GetTotalTokens(), "max_tokens": rec.Usage.GetMaxTokens()},
+		func(s *wsState) {
+			if s.contextUsage != nil || s.contextCut {
+				return
+			}
+			s.contextUsage, s.contextCut = rec.Usage, rec.Cut
 		})
 }

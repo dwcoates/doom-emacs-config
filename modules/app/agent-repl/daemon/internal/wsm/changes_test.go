@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 // changeBound is one wait's failure bound for a commit's report.
@@ -105,7 +108,7 @@ func TestChangesStopEndsTheReports(t *testing.T) {
 	}
 }
 
-func TestCommitPathsNameTheDirectoryTheFileAndItsLog(t *testing.T) {
+func TestCommitPathsNameTheDirectoryTheFileItsLogAndTheCommitSignal(t *testing.T) {
 	// Arrange
 	path := filepath.Join("/state", "wsm.db")
 
@@ -113,8 +116,81 @@ func TestCommitPathsNameTheDirectoryTheFileAndItsLog(t *testing.T) {
 	got := CommitPaths(path)
 
 	// Assert
-	want := []string{"/state", "/state/wsm.db", "/state/wsm.db-wal"}
+	want := []string{"/state", "/state/wsm.db", "/state/wsm.db-wal", "/state/wsm.db-commits"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("CommitPaths = %v, want %v", got, want)
+	}
+}
+
+func TestACommittedWriteOfAFileDatabaseWritesTheCommitSignal(t *testing.T) {
+	// Arrange
+	s, _ := fileStore(t)
+	signal := CommitSignalPath(s.path)
+	if err := os.Remove(signal); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove the signal: %v", err)
+	}
+
+	// Act
+	err := s.SetMergedSectionFolded(context.Background(), true)
+
+	// Assert
+	info, statErr := os.Stat(signal)
+	if err != nil || statErr != nil || info.Size() != 1 {
+		t.Fatalf("write = %v, signal = %v (%v), want the commit and a one-byte signal", err, info, statErr)
+	}
+}
+
+func TestAWriteThatFailedWritesNoCommitSignal(t *testing.T) {
+	// Arrange
+	s, _ := fileStore(t)
+	signal := CommitSignalPath(s.path)
+	if err := os.Remove(signal); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove the signal: %v", err)
+	}
+
+	// Act
+	err := s.write(context.Background(), "daemon.test.write", nil, func(context.Context, *sql.Tx) error { return errors.New("refused") })
+
+	// Assert
+	if _, statErr := os.Stat(signal); err == nil || !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("write = %v, signal stat = %v; want the refusal and no signal", err, statErr)
+	}
+}
+
+func TestTheCommitSignalNeverGrows(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "wsm.db-commits")
+
+	// Act
+	err := errors.Join(writeCommitSignal(path), writeCommitSignal(path), writeCommitSignal(path))
+
+	// Assert
+	info, statErr := os.Stat(path)
+	if err != nil || statErr != nil || info.Size() != 1 {
+		t.Fatalf("writes = %v, signal = %v (%v); want one byte", err, info, statErr)
+	}
+}
+
+func TestAnUnwritableCommitSignalIsAnErrorAndTheCommitStands(t *testing.T) {
+	// Arrange: a directory where the signal file belongs cannot be written.
+	s, log := fileStore(t)
+	signal := CommitSignalPath(s.path)
+	if err := os.Remove(signal); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove the signal: %v", err)
+	}
+	if err := os.Mkdir(signal, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act
+	err := s.SetMergedSectionFolded(context.Background(), true)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("write = %v, want the commit to stand", err)
+	}
+	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSignalCommit})
+	if len(records) != 1 || records[0].Context["path"] != signal || records[0].Context["error"] == nil {
+		t.Fatalf("records = %+v, want one ERROR naming the signal and its cause", log.Records())
 	}
 }
