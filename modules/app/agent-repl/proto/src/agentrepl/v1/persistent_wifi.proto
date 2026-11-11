@@ -7,10 +7,12 @@
 // disabled outright, so closing the lid neither sleeps the machine nor drops
 // its network, its sessions or a phone hotspot it is joined to. Turning the
 // mode on also joins the configured phone hotspot; turning it off leaves it.
-// While the mode is on the display follows the lid: closing it dims the
-// built-in display to 0, opening it restores the brightness it had before
-// (lid_dim). The daemon owns both the
-// reading and the change (it is the one process that outlives every client).
+// While the mode is on, a closed lid puts the machine in the LID-CLOSED QUIET
+// STATE (quiet): the display sleeps, the configured applications are frozen,
+// and agent-repl stops drawing views nobody can see, so the battery goes to
+// agent work. Opening the lid or turning the mode off ends it. The daemon owns
+// both the reading and the change (it is the one process that outlives every
+// client).
 //
 // It is a fact about the MACHINE, never about a workspace, so it rides the
 // daemon-level stream and no per-workspace one.
@@ -60,13 +62,17 @@ message PersistentWifiState {
     PersistentWifiNoLid no_lid = 7;
     PersistentWifiLidUnwatched lid_unwatched = 8;
   }
-  // The lid-close dim in force: the display was dimmed to 0 when the lid
-  // closed with the mode on, and is restored to restore_level when the lid
-  // opens or the mode is turned off. UNSET: no lid dim is in force and the
-  // display is at the user's own brightness. It is independent of `lid`: a
-  // restore that failed leaves it set with the lid open, because the display
-  // is still dimmed. The daemon keeps it durably, so it survives a restart.
-  optional PersistentWifiLidDim lid_dim = 9;
+  // Field 9 is retired and never reused.
+  reserved 9;
+  reserved "lid_dim";
+  // The lid-closed quiet state in force: the lid is closed (heard) and the
+  // mode is on. UNSET while either is not so, and while the lid is not heard
+  // (unheard or unwatched), so a lid nobody hears never freezes anything.
+  // Readers that draw views (Emacs, the webapp pages) stop their animation,
+  // redraw and polling work while it is set, and draw current state at once
+  // when it clears; the daemon stops resolving the views those readers show
+  // for the same span. Session work is never part of it.
+  optional PersistentWifiQuiet quiet = 10;
 }
 
 // The Wi-Fi interface has an active link to a network.
@@ -108,9 +114,37 @@ message PersistentWifiLidUnwatched {
   string detail = 1;
 }
 
-// A lid-close dim in force.
-message PersistentWifiLidDim {
-  // The brightness (0.0 to 1.0) the display had the moment before the lid
-  // closed: the ONE level every restore returns it to.
-  double restore_level = 1;
+// The lid-closed quiet state, as the daemon holds it.
+message PersistentWifiQuiet {
+  // Every configured application the quiet state froze (SIGSTOP), in the
+  // configured order: each keeps its memory and windows, uses no CPU, and is
+  // thawed (SIGCONT) when the state ends. An application that was not running
+  // when the lid closed is absent: one launched while the lid is closed is
+  // never chased. Empty when nothing configured was running.
+  repeated PersistentWifiFrozenApp frozen_apps = 1;
+  // Whether the built-in display was put to sleep for the closed lid.
+  oneof display {
+    PersistentWifiQuietDisplayAsleep display_asleep = 2;
+    PersistentWifiQuietDisplayAwake display_awake = 3;
+  }
+}
+
+// One frozen application.
+message PersistentWifiFrozenApp {
+  // The application's name as configured (its bundle's name, such as
+  // "Google Chrome").
+  string name = 1;
+  // How many of its processes (the application and its helpers) are frozen.
+  uint32 processes = 2;
+}
+
+// The display was put to sleep when the quiet state began. It wakes at the
+// brightness it had when the lid opens.
+message PersistentWifiQuietDisplayAsleep {}
+
+// The display could not be put to sleep; the daemon logged why at ERROR and
+// tries again on the next lid or mode change.
+message PersistentWifiQuietDisplayAwake {
+  // Why the sleep failed, verbatim from the tool.
+  string detail = 1;
 }

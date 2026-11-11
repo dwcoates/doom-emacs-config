@@ -12,9 +12,9 @@
 //   3. the energy mode — low power (on) or high power (off) — once the
 //      machine is known to stay awake, so a lid-closed machine draws as
 //      little as it can and an open one runs at full speed again;
-//   4. the display — LAST, and only where the change moves it: dimmed when
-//      turning on with the lid closed, restored when turning off with a lid
-//      dim in force (UpdatePersistentWifiModeDisplay).
+//   4. the display — LAST, and only where the change moves it: put to sleep
+//      when turning on with the lid closed, woken when turning off with the
+//      display asleep for the quiet state (UpdatePersistentWifiModeDisplay).
 // A failed hotspot, energy mode or display step never stops the change:
 // staying awake on whatever network is present is still the outcome asked
 // for, so those three steps report how they went inside the SUCCESS, and only
@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_persistent_wifi_mode.proto.
  */
 export const file_agentrepl_v1_endpoint_update_persistent_wifi_mode: GenFile = /*@__PURE__*/
-  fileDesc("CjdhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3BlcnNpc3RlbnRfd2lmaV9tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEi3QEKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVJlcXVlc3QSNgoCb24YASABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT25IABI4CgNvZmYYAiABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAASPgoGdG9nZ2xlGAMgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVRvZ2dsZUgAQggKBmFjdGlvbiIcChpVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiIAoeVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlVG9nZ2xlIqwBCiBVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVSZXNwb25zZRJACgdzdWNjZXNzGAEgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVN1Y2Nlc3NIABI8CgVlcnJvchgCIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFcnJvckgAQggKBnJlc3VsdCKaAgofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlU3VjY2VzcxIwCgVzdGF0ZRgBIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVN0YXRlEj4KB2hvdHNwb3QYAiABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBI+CgdkaXNwbGF5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoLZW5lcmd5X21vZGUYBCABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZSLhBAofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBJFCgZqb2luZWQYASABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEpvaW5lZEgAElQKDmFscmVhZHlfam9pbmVkGAIgASgLMjouYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3RBbHJlYWR5Sm9pbmVkSAASQQoEbGVmdBgDIAEoCzIxLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90TGVmdEgAElMKDm5vdF9vbl9ob3RzcG90GAQgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3RIABJcChJuZXR3b3JrX3VucmVhZGFibGUYBSABKAsyPi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlSAASWQoRbm9fd2lmaV9pbnRlcmZhY2UYBiABKAsyPC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5vV2lmaUludGVyZmFjZUgAEkUKBmZhaWxlZBgHIAEoCzIzLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90RmFpbGVkSABCCQoHb3V0Y29tZSI9CiVVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90Sm9pbmVkEhQKDG5ldHdvcmtfbmFtZRgBIAEoCSJECixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90QWxyZWFkeUpvaW5lZBIUCgxuZXR3b3JrX25hbWUYASABKAkiOwojVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdExlZnQSFAoMbmV0d29ya19uYW1lGAEgASgJIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3QiMgowVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlIjAKLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb1dpZmlJbnRlcmZhY2UiTQolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEZhaWxlZBIUCgxuZXR3b3JrX25hbWUYASABKAkSDgoGZGV0YWlsGAIgASgJIpkCCiJVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlEk0KCWxvd19wb3dlchgBIAEoCzI4LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlTG93UG93ZXJIABJPCgpoaWdoX3Bvd2VyGAIgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXJIABJICgZmYWlsZWQYAyABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZEgAQgkKB291dGNvbWUiLAoqVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUxvd1Bvd2VyIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXIiOgooVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZBIOCgZkZXRhaWwYASABKAkipAMKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoGZGltbWVkGAEgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlEaW1tZWRIABJJCghyZXN0b3JlZBgCIAEoCzI1LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5UmVzdG9yZWRIABJQCgx0b29sX21pc3NpbmcYAyABKAsyOC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVRvb2xNaXNzaW5nSAASRQoGZmFpbGVkGAQgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlGYWlsZWRIABJLCgl1bmNoYW5nZWQYBSABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVVuY2hhbmdlZEgAQgkKB291dGNvbWUiPgolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheURpbW1lZBIVCg1yZXN0b3JlX2xldmVsGAEgASgBIjgKJ1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlSZXN0b3JlZBINCgVsZXZlbBgBIAEoASIqCihVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5VW5jaGFuZ2VkIj8KKlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlUb29sTWlzc2luZxIRCgl0b29sX3BhdGgYASABKAkiNwolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheUZhaWxlZBIOCgZkZXRhaWwYASABKAki1wEKHVVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVycm9yElwKFnBvd2VyX3NldHRpbmdzX3JlZnVzZWQYASABKAsyOi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlUG93ZXJTZXR0aW5nc1JlZnVzZWRIABJPCg9tb2RlX3VucmVhZGFibGUYAiABKAsyNC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGVIAEIHCgVjYXVzZSI+CixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVQb3dlclNldHRpbmdzUmVmdXNlZBIOCgZkZXRhaWwYASABKAkiOAomVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGUSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_persistent_wifi]);
+  fileDesc("CjdhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3BlcnNpc3RlbnRfd2lmaV9tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEi3QEKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVJlcXVlc3QSNgoCb24YASABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT25IABI4CgNvZmYYAiABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAASPgoGdG9nZ2xlGAMgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVRvZ2dsZUgAQggKBmFjdGlvbiIcChpVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiIAoeVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlVG9nZ2xlIqwBCiBVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVSZXNwb25zZRJACgdzdWNjZXNzGAEgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVN1Y2Nlc3NIABI8CgVlcnJvchgCIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFcnJvckgAQggKBnJlc3VsdCKaAgofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlU3VjY2VzcxIwCgVzdGF0ZRgBIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVN0YXRlEj4KB2hvdHNwb3QYAiABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBI+CgdkaXNwbGF5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoLZW5lcmd5X21vZGUYBCABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZSLhBAofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBJFCgZqb2luZWQYASABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEpvaW5lZEgAElQKDmFscmVhZHlfam9pbmVkGAIgASgLMjouYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3RBbHJlYWR5Sm9pbmVkSAASQQoEbGVmdBgDIAEoCzIxLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90TGVmdEgAElMKDm5vdF9vbl9ob3RzcG90GAQgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3RIABJcChJuZXR3b3JrX3VucmVhZGFibGUYBSABKAsyPi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlSAASWQoRbm9fd2lmaV9pbnRlcmZhY2UYBiABKAsyPC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5vV2lmaUludGVyZmFjZUgAEkUKBmZhaWxlZBgHIAEoCzIzLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90RmFpbGVkSABCCQoHb3V0Y29tZSI9CiVVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90Sm9pbmVkEhQKDG5ldHdvcmtfbmFtZRgBIAEoCSJECixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90QWxyZWFkeUpvaW5lZBIUCgxuZXR3b3JrX25hbWUYASABKAkiOwojVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdExlZnQSFAoMbmV0d29ya19uYW1lGAEgASgJIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3QiMgowVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlIjAKLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb1dpZmlJbnRlcmZhY2UiTQolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEZhaWxlZBIUCgxuZXR3b3JrX25hbWUYASABKAkSDgoGZGV0YWlsGAIgASgJIpkCCiJVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlEk0KCWxvd19wb3dlchgBIAEoCzI4LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlTG93UG93ZXJIABJPCgpoaWdoX3Bvd2VyGAIgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXJIABJICgZmYWlsZWQYAyABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZEgAQgkKB291dGNvbWUiLAoqVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUxvd1Bvd2VyIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXIiOgooVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZBIOCgZkZXRhaWwYASABKAki+gIKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoGZmFpbGVkGAQgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlGYWlsZWRIABJLCgl1bmNoYW5nZWQYBSABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVVuY2hhbmdlZEgAEkMKBXNsZXB0GAYgASgLMjIuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlTbGVwdEgAEkEKBHdva2UYByABKAsyMS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVdva2VIAEIJCgdvdXRjb21lSgQIARACSgQIAhADSgQIAxAEUgZkaW1tZWRSCHJlc3RvcmVkUgx0b29sX21pc3NpbmciJgokVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVNsZXB0IiUKI1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlXb2tlIioKKFVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlVbmNoYW5nZWQiNwolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheUZhaWxlZBIOCgZkZXRhaWwYASABKAki1wEKHVVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVycm9yElwKFnBvd2VyX3NldHRpbmdzX3JlZnVzZWQYASABKAsyOi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlUG93ZXJTZXR0aW5nc1JlZnVzZWRIABJPCg9tb2RlX3VucmVhZGFibGUYAiABKAsyNC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGVIAEIHCgVjYXVzZSI+CixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVQb3dlclNldHRpbmdzUmVmdXNlZBIOCgZkZXRhaWwYASABKAkiOAomVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGUSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_persistent_wifi]);
 
 /**
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeRequest
@@ -514,11 +514,12 @@ export const UpdatePersistentWifiModeEnergyModeFailedSchema: GenMessage<UpdatePe
  * failure of the request.
  *
  * THE DISPLAY FOLLOWS THE LID, NOT THE SWITCH. While the mode is on, closing
- * the lid dims the built-in display to 0 and opening it restores the level the
- * display had the moment before it closed (PersistentWifiState.lid_dim). So
- * the step acts only where the change itself moves the display: turning on
- * with the lid closed dims it, turning off with a lid dim in force restores
- * it, and every other change leaves the user's brightness alone.
+ * the lid puts the built-in display to sleep (PersistentWifiState.quiet), so
+ * nothing is composited for a screen nobody sees, and opening it wakes the
+ * display at the brightness it had: sleeping never touches the brightness.
+ * So the step acts only where the change itself moves the display: turning on
+ * with the lid closed sleeps it, turning off with it asleep wakes it, and
+ * every other change leaves it as it is.
  *
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplay
  */
@@ -528,35 +529,7 @@ export type UpdatePersistentWifiModeDisplay = Message<"agentrepl.v1.UpdatePersis
    */
   outcome: {
     /**
-     * Turning on with the lid closed: the display was dimmed to 0, and the
-     * level it had is kept to restore.
-     *
-     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayDimmed dimmed = 1;
-     */
-    value: UpdatePersistentWifiModeDisplayDimmed;
-    case: "dimmed";
-  } | {
-    /**
-     * Turning off with a lid dim in force: the display was restored to the
-     * level it had before the lid closed, and the kept level was cleared.
-     *
-     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayRestored restored = 2;
-     */
-    value: UpdatePersistentWifiModeDisplayRestored;
-    case: "restored";
-  } | {
-    /**
-     * The step had to move the display, and the brightness tool is not
-     * installed; the step was skipped.
-     *
-     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayToolMissing tool_missing = 3;
-     */
-    value: UpdatePersistentWifiModeDisplayToolMissing;
-    case: "toolMissing";
-  } | {
-    /**
-     * The brightness tool could not read the level to keep, could not set the
-     * display, or the kept level could not be stored or cleared.
+     * The display could not be put to sleep or woken; `detail` says why.
      *
      * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayFailed failed = 4;
      */
@@ -564,14 +537,29 @@ export type UpdatePersistentWifiModeDisplay = Message<"agentrepl.v1.UpdatePersis
     case: "failed";
   } | {
     /**
-     * Nothing to move: turning on with the lid open (or not watched), or
-     * turning off with no lid dim in force. The display keeps the user's
-     * brightness.
+     * Nothing to move: turning on with the lid open (or not heard), or
+     * turning off with the display awake.
      *
      * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged unchanged = 5;
      */
     value: UpdatePersistentWifiModeDisplayUnchanged;
     case: "unchanged";
+  } | {
+    /**
+     * Turning on with the lid closed: the display was put to sleep.
+     *
+     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplaySlept slept = 6;
+     */
+    value: UpdatePersistentWifiModeDisplaySlept;
+    case: "slept";
+  } | {
+    /**
+     * Turning off with the display asleep for the quiet state: it was woken.
+     *
+     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeDisplayWoke woke = 7;
+     */
+    value: UpdatePersistentWifiModeDisplayWoke;
+    case: "woke";
   } | { case: undefined; value?: undefined };
 };
 
@@ -583,51 +571,37 @@ export const UpdatePersistentWifiModeDisplaySchema: GenMessage<UpdatePersistentW
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 18);
 
 /**
- * The display was dimmed for the closed lid.
+ * The display was put to sleep for the closed lid.
  *
- * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayDimmed
+ * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplaySlept
  */
-export type UpdatePersistentWifiModeDisplayDimmed = Message<"agentrepl.v1.UpdatePersistentWifiModeDisplayDimmed"> & {
-  /**
-   * The brightness (0.0 to 1.0) the display had before the dim, which opening
-   * the lid or turning the mode off restores.
-   *
-   * @generated from field: double restore_level = 1;
-   */
-  restoreLevel: number;
+export type UpdatePersistentWifiModeDisplaySlept = Message<"agentrepl.v1.UpdatePersistentWifiModeDisplaySlept"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.UpdatePersistentWifiModeDisplayDimmed.
- * Use `create(UpdatePersistentWifiModeDisplayDimmedSchema)` to create a new message.
+ * Describes the message agentrepl.v1.UpdatePersistentWifiModeDisplaySlept.
+ * Use `create(UpdatePersistentWifiModeDisplaySleptSchema)` to create a new message.
  */
-export const UpdatePersistentWifiModeDisplayDimmedSchema: GenMessage<UpdatePersistentWifiModeDisplayDimmed> = /*@__PURE__*/
+export const UpdatePersistentWifiModeDisplaySleptSchema: GenMessage<UpdatePersistentWifiModeDisplaySlept> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 19);
 
 /**
- * The display was restored from a lid dim.
+ * The display was woken from the quiet state's sleep, at the brightness it had.
  *
- * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayRestored
+ * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayWoke
  */
-export type UpdatePersistentWifiModeDisplayRestored = Message<"agentrepl.v1.UpdatePersistentWifiModeDisplayRestored"> & {
-  /**
-   * The brightness (0.0 to 1.0) the display was restored to: the level kept
-   * when the lid closed.
-   *
-   * @generated from field: double level = 1;
-   */
-  level: number;
+export type UpdatePersistentWifiModeDisplayWoke = Message<"agentrepl.v1.UpdatePersistentWifiModeDisplayWoke"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.UpdatePersistentWifiModeDisplayRestored.
- * Use `create(UpdatePersistentWifiModeDisplayRestoredSchema)` to create a new message.
+ * Describes the message agentrepl.v1.UpdatePersistentWifiModeDisplayWoke.
+ * Use `create(UpdatePersistentWifiModeDisplayWokeSchema)` to create a new message.
  */
-export const UpdatePersistentWifiModeDisplayRestoredSchema: GenMessage<UpdatePersistentWifiModeDisplayRestored> = /*@__PURE__*/
+export const UpdatePersistentWifiModeDisplayWokeSchema: GenMessage<UpdatePersistentWifiModeDisplayWoke> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 20);
 
 /**
- * The change left the display as the user set it.
+ * The change left the display as it was.
  *
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayUnchanged
  */
@@ -642,28 +616,7 @@ export const UpdatePersistentWifiModeDisplayUnchangedSchema: GenMessage<UpdatePe
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 21);
 
 /**
- * The brightness tool is absent.
- *
- * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayToolMissing
- */
-export type UpdatePersistentWifiModeDisplayToolMissing = Message<"agentrepl.v1.UpdatePersistentWifiModeDisplayToolMissing"> & {
-  /**
-   * The path the daemon looked for it at.
-   *
-   * @generated from field: string tool_path = 1;
-   */
-  toolPath: string;
-};
-
-/**
- * Describes the message agentrepl.v1.UpdatePersistentWifiModeDisplayToolMissing.
- * Use `create(UpdatePersistentWifiModeDisplayToolMissingSchema)` to create a new message.
- */
-export const UpdatePersistentWifiModeDisplayToolMissingSchema: GenMessage<UpdatePersistentWifiModeDisplayToolMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 22);
-
-/**
- * The brightness tool failed.
+ * The display tool failed.
  *
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeDisplayFailed
  */
@@ -681,7 +634,7 @@ export type UpdatePersistentWifiModeDisplayFailed = Message<"agentrepl.v1.Update
  * Use `create(UpdatePersistentWifiModeDisplayFailedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplayFailedSchema: GenMessage<UpdatePersistentWifiModeDisplayFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 23);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 22);
 
 /**
  * The power step did not take effect, so the mode is as it was. The hotspot
@@ -720,7 +673,7 @@ export type UpdatePersistentWifiModeError = Message<"agentrepl.v1.UpdatePersiste
  * Use `create(UpdatePersistentWifiModeErrorSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeErrorSchema: GenMessage<UpdatePersistentWifiModeError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 24);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 23);
 
 /**
  * The power settings change was refused.
@@ -741,7 +694,7 @@ export type UpdatePersistentWifiModePowerSettingsRefused = Message<"agentrepl.v1
  * Use `create(UpdatePersistentWifiModePowerSettingsRefusedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModePowerSettingsRefusedSchema: GenMessage<UpdatePersistentWifiModePowerSettingsRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 25);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 24);
 
 /**
  * The current mode could not be read.
@@ -762,5 +715,5 @@ export type UpdatePersistentWifiModeModeUnreadable = Message<"agentrepl.v1.Updat
  * Use `create(UpdatePersistentWifiModeModeUnreadableSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeModeUnreadableSchema: GenMessage<UpdatePersistentWifiModeModeUnreadable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 26);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 25);
 
