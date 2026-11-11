@@ -66,6 +66,12 @@ export interface TranscriptFacts {
   /** Tokens the last request carried: cache reads + cache writes + fresh input. */
   readonly contextTokens: number;
   /**
+   * Tokens the last request left cached: its cache reads + cache writes
+   * ({@link CacheCoverage}). A compaction boundary states its whole
+   * post-compaction context here, as it states it in `contextTokens`.
+   */
+  readonly cachedTokens: number;
+  /**
    * Whether the transcript stated ANY usage at all.
    *
    * `contextTokens` is 0 both for a conversation that has never reached the
@@ -154,24 +160,77 @@ function isCliSynthesized(record: TranscriptLine): boolean {
  * without the per-tier split is the 5-minute tier, the API's only tier before
  * the split existed.
  */
-export interface CacheRequest {
+export interface CacheRequest extends CacheCoverage {
   readonly writtenTtlMs: number | undefined;
-  /**
-   * The context the request sent: `cache_read_input_tokens +
-   * cache_creation_input_tokens + input_tokens`, what a cold read of the
-   * conversation after it re-reads.
-   */
+}
+
+/**
+ * What one request left in the prompt cache, against the context it sent.
+ *
+ * - `contextTokens` is the context the request sent: `cache_read_input_tokens +
+ *   cache_creation_input_tokens + input_tokens`, what a cold read of the
+ *   conversation after it re-reads.
+ * - `cachedTokens` is the part of it the cache holds after the request:
+ *   `cache_read_input_tokens + cache_creation_input_tokens`. The rest, the
+ *   request's `input_tokens`, went uncached.
+ */
+export interface CacheCoverage {
   readonly contextTokens: number;
+  readonly cachedTokens: number;
+}
+
+/**
+ * The vendor's cache prices, as multiples of the base input price: a cache
+ * read costs a tenth of it, and a write at the one-hour tier twice it. The
+ * daemon's keep-alive run cap names the same two prices
+ * (agent-repld.internal.cachelapse.CacheReadPrice and CacheWritePrice).
+ */
+export const CACHE_READ_PRICE = 0.1;
+export const CACHE_WRITE_PRICE = 2;
+
+/**
+ * Whether a request LEFT ITS CONTEXT CACHED: whether a keep-alive after it
+ * costs what a keep-alive is meant to cost, a re-read of the cached context.
+ *
+ * WARMTH IS WHAT THE VENDOR CACHED, NEVER WHEN A REQUEST HAPPENED (2026-11-11,
+ * torch-human-cancel-hang). A vendor-error retry sent 916,455 tokens uncached
+ * and wrote nothing: the cache held only its 35,089-token prefix. The request
+ * still moved every clock, so the cache read warm, and the keep-alive 52
+ * minutes later rewrote the whole ~920k context (cache_creation_input_tokens
+ * 917,006) to answer ".": as much as twenty ordinary keep-alives. The same
+ * shape recurred in github-event-subscriptions on 2026-10-31 (728,834
+ * uncached, nothing written).
+ *
+ * THE RULE IS THE PRICES'. The next request writes the uncached part at
+ * {@link CACHE_WRITE_PRICE}, where an ordinary keep-alive re-reads the whole
+ * context at {@link CACHE_READ_PRICE}. The context counts as cached while that
+ * write costs no more than the re-read, which leaves an ordinary request's
+ * uncached tail (the few tokens after its last cache breakpoint) far inside the
+ * rule. A request that sent nothing has nothing to keep, and counts as cached.
+ */
+export function leftContextCached(coverage: CacheCoverage): boolean {
+  const uncached = coverage.contextTokens - coverage.cachedTokens;
+  return uncached * CACHE_WRITE_PRICE <= coverage.contextTokens * CACHE_READ_PRICE;
+}
+
+/** A coverage as the log states it. */
+export function coverageContext(coverage: CacheCoverage): Record<string, unknown> {
+  return {
+    context_tokens: coverage.contextTokens,
+    cached_tokens: coverage.cachedTokens,
+    uncached_tokens: coverage.contextTokens - coverage.cachedTokens,
+  };
 }
 
 export function cacheRequestOf(record: TranscriptLine): CacheRequest | undefined {
   if (isCliSynthesized(record)) return undefined;
   const usage = record.message?.usage;
   if (usage === undefined) return undefined;
+  const cachedTokens = (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
   return {
     writtenTtlMs: writtenCacheTtlMs(usage),
-    contextTokens:
-      (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.input_tokens ?? 0),
+    contextTokens: cachedTokens + (usage.input_tokens ?? 0),
+    cachedTokens,
   };
 }
 
@@ -214,6 +273,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     throw err;
   }
   let contextTokens = 0;
+  let cachedTokens = 0;
   let sawUsage = false;
   let lastRequestAtMs = 0;
   let lastModel: string | undefined;
@@ -249,6 +309,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
       if (compacted !== undefined) {
         sawUsage = true;
         contextTokens = compacted.postTokens;
+        cachedTokens = compacted.postTokens;
         lastRequestAtMs = compacted.atMs ?? lastRequestAtMs;
       }
     } else if (isClearEnvelope(record)) {
@@ -264,6 +325,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
     if (request === undefined) continue;
     sawUsage = true;
     contextTokens = request.contextTokens;
+    cachedTokens = request.cachedTokens;
     // A request that wrote nothing keeps the tier the last write bought.
     cacheTtlMs = request.writtenTtlMs ?? cacheTtlMs;
     if (typeof record.message?.model === "string") lastModel = record.message.model;
@@ -281,6 +343,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
   }
   const facts: TranscriptFacts = {
     contextTokens,
+    cachedTokens,
     sawUsage,
     lastRequestAtMs,
     cacheTtlMs,
@@ -398,7 +461,18 @@ function coldReason(
     return "model_switch";
   }
   if (facts.lastRequestAtMs === 0) return undefined;
-  return nowMs - facts.lastRequestAtMs > facts.cacheTtlMs ? "lapsed" : undefined;
+  if (nowMs - facts.lastRequestAtMs > facts.cacheTtlMs) return "lapsed";
+  // A LAST REQUEST THAT LEFT ITS CONTEXT UNCACHED is a lapsed cache whatever
+  // its age: continuing re-reads the context at full price, exactly what the
+  // gate exists to ask about ({@link leftContextCached}).
+  if (!leftContextCached(facts)) {
+    LOGGER.info(
+      { ...coverageContext(facts), last_request_at: new Date(facts.lastRequestAtMs).toISOString() },
+      "the cache is judged lapsed: the conversation's last request left its context uncached",
+    );
+    return "lapsed";
+  }
+  return undefined;
 }
 
 /** The refusal message, fully populated — every field the proto declares. */

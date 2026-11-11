@@ -30,7 +30,7 @@
 import type { shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
 import type { QueryLike } from "../sdk/types.js";
-import { readTranscriptFacts } from "./cold.js";
+import { coverageContext, leftContextCached, readTranscriptFacts } from "./cold.js";
 import { keepalivePromptText } from "./keepalive.js";
 import { profileFromProto, type SessionProfile } from "./profile.js";
 import type { PromptQueue } from "./prompt-queue.js";
@@ -90,6 +90,15 @@ export async function beatParkedConversation(
   if (facts.lastRequestAtMs === 0) {
     LOGGER.info(context, "the parked conversation never reached the model; it holds no cache to keep");
     return { kind: "lapsed", lapsedAtMs: 0 };
+  }
+  // A LAST REQUEST THAT LEFT ITS CONTEXT UNCACHED left nothing to keep: the
+  // cache is lapsed from it (engine/cold.ts, leftContextCached).
+  if (!leftContextCached(facts)) {
+    LOGGER.info(
+      { ...context, ...coverageContext(facts), lapsed_at_ms: facts.lastRequestAtMs },
+      "the parked conversation's last request left its context uncached; its cache is lapsed and no keep-alive was sent",
+    );
+    return { kind: "lapsed", lapsedAtMs: facts.lastRequestAtMs };
   }
   const lapsesAtMs = facts.lastRequestAtMs + facts.cacheTtlMs;
   if (deps.nowMs() > lapsesAtMs) {

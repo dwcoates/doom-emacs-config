@@ -183,6 +183,24 @@ describe("one parked keep-alive", () => {
     expect(built).toHaveLength(0);
   });
 
+  it("answers the lapse at its last request, and builds no query, when that request left the context uncached", async () => {
+    // Arrange
+    const uncached = assistant("a1", "p1");
+    const message = uncached.message as Record<string, unknown>;
+    uncached.message = { ...message, usage: { input_tokens: 916_455, cache_creation_input_tokens: 0, cache_read_input_tokens: 35_089 } };
+    const { deps, built } = beatDeps([user("p1", null), uncached], answering());
+    const mark = logSinkMark();
+
+    // Act
+    const outcome = await beatParkedConversation(deps, parkedRequest());
+
+    // Assert
+    expect(outcome).toEqual({ kind: "lapsed", lapsedAtMs: REQUEST_AT_MS });
+    expect(built).toHaveLength(0);
+    const record = logRecordsSince(mark).find((r) => r.message.includes("left its context uncached"));
+    expect([record?.level, record?.context.uncached_tokens, record?.context.cached_tokens]).toEqual(["info", 916_455, 35_089]);
+  });
+
   it("answers a lapse at zero for a conversation that never reached the model", async () => {
     // Arrange
     const { deps, built } = beatDeps([user("p1", null)], answering());

@@ -6996,7 +6996,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (compacted) return { anchor: undefined, reason: "the cold gate compacted the conversation" };
     if (facts.lastRequestAtMs === 0) return { anchor: undefined, reason: "the transcript states no request instant" };
     return {
-      anchor: { atMs: facts.lastRequestAtMs, ttlMs: facts.cacheTtlMs, contextTokens: facts.contextTokens },
+      anchor: {
+        atMs: facts.lastRequestAtMs,
+        ttlMs: facts.cacheTtlMs,
+        contextTokens: facts.contextTokens,
+        cachedTokens: facts.cachedTokens,
+      },
       reason: "a resumed conversation, anchored at the transcript's last request",
     };
   }
@@ -7010,7 +7015,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (message.type !== "assistant" || message.parent_tool_use_id !== null) return;
     const request = cacheRequestOf(message as TranscriptLine);
     if (request === undefined) return;
-    cadence?.noteRequest(request.writtenTtlMs, request.contextTokens);
+    cadence?.noteRequest(request);
   }
 
   /**
