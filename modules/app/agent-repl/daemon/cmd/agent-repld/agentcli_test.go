@@ -931,6 +931,86 @@ func (c *cliClient) UpdateRemoteControlMode(_ context.Context, req *connect.Requ
 		Success: &agentreplv1.UpdateRemoteControlModeSuccess{On: req.Msg.GetOn() != nil}}}), nil
 }
 
+func (c *cliClient) UpdateQueueBypassMode(_ context.Context, req *connect.Request[agentreplv1.UpdateQueueBypassModeRequest]) (*connect.Response[agentreplv1.UpdateQueueBypassModeResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&agentreplv1.UpdateQueueBypassModeResponse{Result: &agentreplv1.UpdateQueueBypassModeResponse_Success{
+		Success: &agentreplv1.UpdateQueueBypassModeSuccess{On: req.Msg.GetOn() != nil}}}), nil
+}
+
+func TestSetQueueBypassSendsTheModeAndTheNamedContext(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *agentreplv1.UpdateQueueBypassModeRequest
+	}{
+		{name: "on naming no context", args: []string{"-queue-bypass", "on"},
+			want: &agentreplv1.UpdateQueueBypassModeRequest{Action: &agentreplv1.UpdateQueueBypassModeRequest_On{On: &agentreplv1.UpdateQueueBypassModeOn{}}}},
+		{name: "off", args: []string{"-queue-bypass", "off"},
+			want: &agentreplv1.UpdateQueueBypassModeRequest{Action: &agentreplv1.UpdateQueueBypassModeRequest_Off{Off: &agentreplv1.UpdateQueueBypassModeOff{}}}},
+		{name: "on with full main context", args: []string{"-queue-bypass", "on", "-context", "full"},
+			want: bypassOnWith(&frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_FullMain{FullMain: &frontendv1.TopbarQueueBypassContextFullMain{}}})},
+		{name: "on with compacted main context", args: []string{"-queue-bypass", "on", "-context", "compacted"},
+			want: bypassOnWith(&frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_CompactedMain{CompactedMain: &frontendv1.TopbarQueueBypassContextCompactedMain{}}})},
+		{name: "on with existing bypass context", args: []string{"-queue-bypass", "on", "-context", "existing"},
+			want: bypassOnWith(&frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_Existing{Existing: &frontendv1.TopbarQueueBypassContextExisting{}}})},
+		{name: "on with existing plus compacted main context", args: []string{"-queue-bypass", "on", "-context", "existing-plus-compacted"},
+			want: bypassOnWith(&frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain{ExistingPlusCompactedMain: &frontendv1.TopbarQueueBypassContextExistingPlusCompactedMain{}}})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"set", "peer"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateQueueBypassModeRequest](t, f)
+			tt.want.Workspace = req.GetWorkspace()
+			if req.GetWorkspace().GetId() != "ws-peer" || !proto.Equal(req, tt.want) {
+				t.Errorf("request = %v, want %v for ws-peer", req, tt.want)
+			}
+		})
+	}
+}
+
+// bypassOnWith is an on request naming CONTEXT.
+func bypassOnWith(named *frontendv1.TopbarQueueBypassContext) *agentreplv1.UpdateQueueBypassModeRequest {
+	return &agentreplv1.UpdateQueueBypassModeRequest{Action: &agentreplv1.UpdateQueueBypassModeRequest_On{On: &agentreplv1.UpdateQueueBypassModeOn{Context: named}}}
+}
+
+func TestSetQueueBypassRefusesAMisusedFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "a toggle, which is the editor's", args: []string{"-queue-bypass", "toggle"}, want: "-queue-bypass is on or off"},
+		{name: "an unknown context", args: []string{"-queue-bypass", "on", "-context", "half"}, want: "-context is full, compacted, existing or existing-plus-compacted"},
+		{name: "a context with off", args: []string{"-queue-bypass", "off", "-context", "full"}, want: "-context is named only with -queue-bypass on"},
+		{name: "a context with no mode", args: []string{"-context", "full"}, want: "-context is named only with -queue-bypass on"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"set", "peer"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), tt.want) {
+				t.Fatalf("exit %d, requests %v, stderr %q; want a usage failure naming %q and nothing sent", code, f.client.requests, f.errOut.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestSetRemoteControlSendsTheModeForTheNamedWorkspace(t *testing.T) {
 	tests := []struct {
 		name   string

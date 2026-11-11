@@ -151,7 +151,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"prompt":                 {usage: "prompt [-as-user] WS TEXT", run: workspacePrompt},
 		"gather":                 {usage: "gather -workspaces A,B,C -prompt TEXT [-as-user]", run: workspaceGather},
 		"gather-status":          {usage: "gather-status GATHER", run: workspaceGatherStatus},
-		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-as-user]", run: workspaceSet},
+		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
 		"summary":                {usage: "summary WS -text SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":               {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
@@ -944,6 +944,8 @@ func workspaceSet(c *cliCall, args []string) int {
 	notAwaiting := fs.Bool("not-awaiting", false, "clear what the workspace awaits")
 	name := fs.String("name", "", "rename the workspace: its name only, never its branch or directory")
 	remoteControl := fs.String("remote-control", "", "on or off: whether the workspace's session is reachable from claude.ai")
+	queueBypass := fs.String("queue-bypass", "", "on or off: whether the workspace holds its repository's queue bypass mode")
+	bypassContext := fs.String("context", "", "with -queue-bypass on: full, compacted, existing or existing-plus-compacted, how the bypass session gets its context")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
@@ -1013,6 +1015,16 @@ func workspaceSet(c *cliCall, args []string) int {
 		}
 		calls = append(calls, func() int {
 			resp, err := c.client.UpdateRemoteControlMode(c.ctx, connect.NewRequest(req))
+			return answer(c, resp, err)
+		})
+	}
+	if *queueBypass != "" || *bypassContext != "" {
+		req, err := queueBypassRequest(ref, *queueBypass, *bypassContext)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		calls = append(calls, func() int {
+			resp, err := c.client.UpdateQueueBypassMode(c.ctx, connect.NewRequest(req))
 			return answer(c, resp, err)
 		})
 	}
@@ -1192,6 +1204,52 @@ func remoteControlRequest(ref *workspacev1.WorkspaceRef, text string) (*agentrep
 		return nil, fmt.Errorf("-remote-control is on or off, not %q", text)
 	}
 	return req, nil
+}
+
+// queueBypassRequest reads the -queue-bypass and -context flags into the
+// request that takes or releases workspace REF's queue bypass mode. An agent
+// names the mode it wants, never a toggle; a context is named only when the
+// mode is taken, and an on naming none keeps the behavior from before the
+// menu.
+func queueBypassRequest(ref *workspacev1.WorkspaceRef, mode, bypassContext string) (*agentreplv1.UpdateQueueBypassModeRequest, error) {
+	req := &agentreplv1.UpdateQueueBypassModeRequest{Workspace: ref}
+	switch mode {
+	case "on":
+		on := &agentreplv1.UpdateQueueBypassModeOn{}
+		if bypassContext != "" {
+			named, err := queueBypassContextOf(bypassContext)
+			if err != nil {
+				return nil, err
+			}
+			on.Context = named
+		}
+		req.Action = &agentreplv1.UpdateQueueBypassModeRequest_On{On: on}
+	case "off":
+		if bypassContext != "" {
+			return nil, fmt.Errorf("-context is named only with -queue-bypass on")
+		}
+		req.Action = &agentreplv1.UpdateQueueBypassModeRequest_Off{Off: &agentreplv1.UpdateQueueBypassModeOff{}}
+	case "":
+		return nil, fmt.Errorf("-context is named only with -queue-bypass on")
+	default:
+		return nil, fmt.Errorf("-queue-bypass is on or off, not %q", mode)
+	}
+	return req, nil
+}
+
+// queueBypassContextOf reads a -context flag into the context it names.
+func queueBypassContextOf(text string) (*frontendv1.TopbarQueueBypassContext, error) {
+	switch text {
+	case "full":
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_FullMain{FullMain: &frontendv1.TopbarQueueBypassContextFullMain{}}}, nil
+	case "compacted":
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_CompactedMain{CompactedMain: &frontendv1.TopbarQueueBypassContextCompactedMain{}}}, nil
+	case "existing":
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_Existing{Existing: &frontendv1.TopbarQueueBypassContextExisting{}}}, nil
+	case "existing-plus-compacted":
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain{ExistingPlusCompactedMain: &frontendv1.TopbarQueueBypassContextExistingPlusCompactedMain{}}}, nil
+	}
+	return nil, fmt.Errorf("-context is full, compacted, existing or existing-plus-compacted, not %q", text)
 }
 
 // priorityOf reads a -priority flag: a level, or none to clear it.
