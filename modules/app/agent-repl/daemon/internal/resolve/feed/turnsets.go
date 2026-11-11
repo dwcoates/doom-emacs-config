@@ -59,6 +59,9 @@ type turnAnswer struct {
 	names func(row *frontendv1.FeedRow) bool
 	// retires reports whether a row of an answered turn leaves the feed.
 	retires func(row *frontendv1.FeedRow) bool
+	// retired, when set, is told of every row the answer retired, so it can
+	// record why that row left the feed.
+	retired func(s *wsState, addr feedid.Feed, id string, row *frontendv1.FeedRow)
 	// into is the set the upsert door refuses the answered turns' rows by.
 	into map[ids.TurnID]bool
 	// record writes the answered turns durably; nil records nothing.
@@ -103,6 +106,9 @@ func (r *resolver) answerTurns(s *wsState, answer turnAnswer) error {
 	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
 		if answer.into[ids.TurnID(row.GetTurn().GetValue())] && answer.retires(row) && r.retire(s, addr, id) {
 			retired++
+			if answer.retired != nil {
+				answer.retired(s, addr, id, row)
+			}
 		}
 	})
 	fields["turns"], fields["first"], fields["retired"] = len(turns), firstTurn(turns), retired

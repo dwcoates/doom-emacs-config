@@ -5,24 +5,48 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // A VENDOR NOTICE AND THE FAULT IT REPORTS ARE ONE CARD (notice.go): a notice
 // of a turn that ended on a fault folds into the ending's marker and its own
 // row leaves the feed, in either arrival order.
 
-// notice hands the resolver one settled vendor notice of TURN, as UNIT.
+// notice hands the resolver one settled unclassified vendor notice of TURN, as UNIT.
 func (h *harness) notice(unit, text, turn string) {
+	h.t.Helper()
+	h.subjectNotice(unit, text, turn, unclassifiedSubject())
+}
+
+// subjectNotice hands the resolver one settled vendor notice of TURN, as UNIT,
+// that its producer classed as SUBJECT.
+func (h *harness) subjectNotice(unit, text, turn string, subject *conversationv1.AgentResponseSynthesizedNotice) {
 	h.t.Helper()
 	h.resolver.OnActivity(testWorkspace, mainAgent(),
 		responseFrame(unit, &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: text},
-			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
-				SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
-					Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{Unclassified: &conversationv1.AgentNoticeUnclassified{}},
-				},
-			},
+			Prose:      &conversationv1.AgentResponseProse{Markdown: text},
+			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{SynthesizedNotice: subject},
 		}, nil), &conversationv1.TurnId{Value: turn}, nil)
+}
+
+// The notice subjects, as a producer classes them.
+func unclassifiedSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{Unclassified: &conversationv1.AgentNoticeUnclassified{}}}
+}
+func accountSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_Account{Account: &conversationv1.AgentNoticeAccount{}}}
+}
+func usageLimitSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageLimit{UsageLimit: &conversationv1.AgentNoticeUsageLimit{}}}
+}
+func usageWarningSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageWarning{UsageWarning: &conversationv1.AgentNoticeUsageWarning{}}}
+}
+func usageTransitionSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageTransition{UsageTransition: &conversationv1.AgentNoticeUsageTransition{}}}
+}
+func transientSubject() *conversationv1.AgentResponseSynthesizedNotice {
+	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}}}
 }
 
 // internalFailure is a vendor 500 carrying MESSAGE.
@@ -56,6 +80,7 @@ func TestANoticeOnItsOwnIsHeadedByTheNeutralMarkerNamingItsSubject(t *testing.T)
 		{name: "a changed allowance window", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageTransition{UsageTransition: &conversationv1.AgentNoticeUsageTransition{}}}, detail: "allowance window changed"},
 		{name: "an approaching limit", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageWarning{UsageWarning: &conversationv1.AgentNoticeUsageWarning{}}}, detail: "approaching an allowance limit"},
 		{name: "trouble waiting cures", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}}}, detail: "temporary vendor trouble"},
+		{name: "the account refused", subject: accountSubject(), detail: "signed out or account refused"},
 		{name: "an unclassified notice names no detail", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{Unclassified: &conversationv1.AgentNoticeUnclassified{}}}},
 	}
 	for _, tc := range cases {
@@ -71,6 +96,52 @@ func TestANoticeOnItsOwnIsHeadedByTheNeutralMarkerNamingItsSubject(t *testing.T)
 				t.Fatalf("detail = %v, want %q", m.Detail, tc.detail)
 			}
 		})
+	}
+}
+
+func TestADrawnNoticeCarriesItsSubjectAndOffersSignInForTheAccount(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject *conversationv1.AgentResponseSynthesizedNotice
+		signIn  bool
+	}{
+		{name: "the account refused offers the sign-in action", subject: accountSubject(), signIn: true},
+		{name: "an exhausted allowance offers nothing", subject: usageLimitSubject()},
+		{name: "trouble waiting cures offers nothing", subject: transientSubject()},
+		{name: "an unclassified notice offers nothing", subject: unclassifiedSubject()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			drawn := drawnNotice(tc.subject)
+
+			// Assert
+			if !proto.Equal(drawn.GetSynthesized(), tc.subject) {
+				t.Fatalf("synthesized = %v, want the producer's %v", drawn.GetSynthesized(), tc.subject)
+			}
+			if (drawn.SignIn != nil) != tc.signIn {
+				t.Fatalf("sign_in = %v, want set = %v", drawn.SignIn, tc.signIn)
+			}
+			if !proto.Equal(drawn.GetMarker(), noticeMarker(tc.subject)) {
+				t.Fatalf("marker = %v, want the subject's head", drawn.GetMarker())
+			}
+		})
+	}
+}
+
+func TestANoticeRowCarriesItsSubjectOnTheFeed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+
+	// Act
+	h.subjectNotice("u-t1", "Login expired · Please run /login", "t1", accountSubject())
+
+	// Assert
+	row := h.rowByID(rootFeed(), root("u-t1"))
+	notice := row.GetActivity().GetResponse().GetNotice()
+	if notice.GetSynthesized().GetAccount() == nil || notice.GetSignIn() == nil {
+		t.Fatalf("notice = %v, want the account subject and the sign-in action on the row", notice)
 	}
 }
 

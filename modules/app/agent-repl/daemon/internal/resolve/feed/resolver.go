@@ -617,8 +617,11 @@ type feedState struct {
 	// the pages a reader's request loaded, and what the next one reads.
 	book bookState
 	// served is the feed's newest row that showed the vendor serving, which
-	// answers every outage card before it (vendorrecovery.go).
+	// answers every card of another turn before it (vendorrecovery.go).
 	served servedEvidence
+	// servedByModel is the feed's newest row the model produced, which
+	// answers every card before it, of its own turn too (vendorrecovery.go).
+	servedByModel servedEvidence
 }
 
 // walk is one request's page position: the order key of the OLDEST row the

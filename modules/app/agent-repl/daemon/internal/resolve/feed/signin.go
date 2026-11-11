@@ -43,6 +43,21 @@ func isFailureRow(row *frontendv1.FeedRow) bool {
 	return row.GetActivity().GetResponse().GetError() != nil || row.GetTurnEnded().GetErrored() != nil
 }
 
+// answeredBySignIn reports whether ROW is a card a completed sign-in answers,
+// by the feed's one retirement rule (vendorrecovery.go cureOf): a turn ending
+// that offers the sign-in action, or a notice that the vendor refused the
+// account. Such a row names its turn as one the sign-in answers.
+func answeredBySignIn(row *frontendv1.FeedRow) bool {
+	cure, ok := cureOf(row)
+	return ok && cure.signIn
+}
+
+// leavesOnSignIn reports whether ROW, of a turn a sign-in answered, leaves the
+// feed: one of the turn's failure rows, or a card the sign-in answers.
+func leavesOnSignIn(row *frontendv1.FeedRow) bool {
+	return isFailureRow(row) || answeredBySignIn(row)
+}
+
 // offersSignIn reports whether ROW is a turn's errored ending whose marker
 // offers the sign-in action: the ending of a turn a sign-in answers.
 func offersSignIn(row *frontendv1.FeedRow) bool {
@@ -73,11 +88,11 @@ func (r *resolver) noteSignInEnding(s *wsState, turn ids.TurnID) {
 	})
 }
 
-// signedInRow reports whether ROW is a failure row of a turn a sign-in
+// signedInRow reports whether ROW is a failure row or an answered card of a turn a sign-in
 // answered, which the upsert door refuses to draw.
 func (r *resolver) signedInRow(s *wsState, f *feedState, row *frontendv1.FeedRow) bool {
 	turn := row.GetTurn().GetValue()
-	if turn == "" || !s.signedIn[ids.TurnID(turn)] || !isFailureRow(row) {
+	if turn == "" || !s.signedIn[ids.TurnID(turn)] || !leavesOnSignIn(row) {
 		return false
 	}
 	r.logger(s.id).Debug("daemon.feed.signed_in_row_refused",
@@ -98,8 +113,9 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 	s := r.state(ws)
 	answer := turnAnswer{
 		op:       opSignedIn,
-		names:    offersSignIn,
-		retires:  isFailureRow,
+		names:    answeredBySignIn,
+		retires:  leavesOnSignIn,
+		retired:  r.logSignInAnswer,
 		into:     s.signedIn,
 		nothing:  "a sign-in completed and no drawn turn ending offered it; nothing was retired",
 		failed:   "a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again",
@@ -110,6 +126,17 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 		answer.record = r.deps.SignedIn.RecordSignedInTurns
 	}
 	return r.answerTurns(s, answer)
+}
+
+// logSignInAnswer records that a completed sign-in retired ROW (ID of feed
+// ADDR), through the one record every answered card takes
+// (vendorrecovery.go retireAnswered).
+func (r *resolver) logSignInAnswer(s *wsState, addr feedid.Feed, id string, row *frontendv1.FeedRow) {
+	cure, ok := cureOf(row)
+	if !ok {
+		cure = cardCure{subject: "sign_in_failure", signIn: true}
+	}
+	r.logAnswered(s, addr, id, row, cure, dlog.Context{"answered_by": "sign_in"})
 }
 
 // restoreSignedIn loads the workspace's answered turns when a process first
