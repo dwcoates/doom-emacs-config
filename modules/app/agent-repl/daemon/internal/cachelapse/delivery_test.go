@@ -334,8 +334,8 @@ func TestAKeeperThatCannotStartStandsStopped(t *testing.T) {
 	if err == nil {
 		t.Fatal("Run started with no workspaces to arm")
 	}
-	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive,
-		Message: "the cache keeper stopped; no keep-alive goes out for any workspace until the next daemon runs its own"})
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opLapse,
+		Message: "could not list the workspaces to re-arm their cache lapses; the cache keeper stops, and no keep-alive goes out for any workspace until the next daemon runs its own"})
 	if !ok || !strings.Contains(fmt.Sprint(record.Context["cause"]), "disk I/O error") {
 		t.Fatalf("records = %+v, want the stop at ERROR with its cause", h.log.Records())
 	}

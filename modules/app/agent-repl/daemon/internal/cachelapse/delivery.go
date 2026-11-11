@@ -96,12 +96,11 @@ func (k *Keeper) missed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID
 	return true
 }
 
-// driveStopped records the keeper's loop ending before the daemon did, with
-// CAUSE: at ERROR, and as the daemon-wide `keepalive_drive_stopped` fault.
+// driveStopped stands the keeper's loop ending before the daemon did, with
+// CAUSE, as the daemon-wide `keepalive_drive_stopped` fault. The failure that
+// stopped it was recorded at ERROR where it happened (restore).
 func (k *Keeper) driveStopped(ctx context.Context, cause error) {
 	log := k.deps.Log.Global()
-	log.Error(opDrive, "the cache keeper stopped; no keep-alive goes out for any workspace until the next daemon runs its own",
-		dlog.WithCause(dlog.Context{"armed_beats": len(k.beats)}, cause))
 	if _, err := k.deps.Faults.OpenFault(ctx, wsm.Fault{
 		Kind:     health.KindKeepaliveDriveStopped,
 		Detail:   cause.Error(),

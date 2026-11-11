@@ -477,7 +477,8 @@ func (k *Keeper) restore(ctx context.Context) error {
 		if leaving(ctx, log, opLapse, "listing the workspaces to re-arm their cache lapses", err) {
 			return nil
 		}
-		// Recorded at ERROR by driveStopped, which owns the keeper's stop.
+		log.Error(opLapse, "could not list the workspaces to re-arm their cache lapses; the cache keeper stops, and no keep-alive goes out for any workspace until the next daemon runs its own",
+			dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("cachelapse: list the workspaces to re-arm their cache lapses and keep-alives: %w", err)
 	}
 	for _, ws := range workspaces {
