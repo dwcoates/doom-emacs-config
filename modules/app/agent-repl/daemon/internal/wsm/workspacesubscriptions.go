@@ -371,5 +371,10 @@ func endWorkspaceSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws Workspace
 	if err := endGithubSubscriptionsInTx(ctx, tx, ws); err != nil {
 		return 0, err
 	}
+	// So do its Slack-thread subscriptions, their pending messages and their
+	// post nonces (slackthreads.go).
+	if err := endSlackThreadSubscriptionsInTx(ctx, tx, ws); err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }
