@@ -40,10 +40,32 @@ describe("openingErrorVerdict", () => {
     ["an execution error with no transient words", undefined, "the budget is exhausted", "shim.vendor.api_error", "rejected", "vendor"],
   ] as const)("labels %s", (_case, status, text, kind, retry, cause) => {
     // Arrange, Act.
+    const { apiFailure: _typed, ...label } = openingErrorVerdict(status, text);
+
+    // Assert.
+    expect(label).toEqual({ kind, retry, cause });
+  });
+
+  it.each([
+    ["a credential rejected by its words", undefined, "OAuth token has expired", "authenticationFailed"],
+    ["a refused resume", undefined, "No conversation found with session ID: bf5fcae1", "unmodeled"],
+  ] as const)("types the refusal of %s, which it rejects", (_case, status, text, kind) => {
+    // Arrange, Act.
     const verdict = openingErrorVerdict(status, text);
 
     // Assert.
-    expect(verdict).toEqual({ kind, retry, cause });
+    expect([verdict.apiFailure?.kind.case, verdict.apiFailure?.message]).toEqual([kind, text]);
+  });
+
+  it.each([
+    ["an overloaded API", 529, "Overloaded"],
+    ["a token refresh an outage broke", undefined, "OAuth token refresh failed: fetch failed"],
+  ] as const)("types no refusal for %s, which it retries", (_case, status, text) => {
+    // Arrange, Act.
+    const verdict = openingErrorVerdict(status, text);
+
+    // Assert.
+    expect(verdict.apiFailure).toBeUndefined();
   });
 
   it("lets a transient status win over text the classifier reads as a missing model", () => {
@@ -96,6 +118,18 @@ describe("startFailureLabel", () => {
 
     // Assert.
     expect(label).toEqual({ retry: "retryable", bound: { name: "live_signal", ms: 3_000 }, cause: "vendor" });
+  });
+
+  it("reads the API refusal a rejected start carried", () => {
+    // Arrange.
+    const verdict = openingErrorVerdict(undefined, "OAuth token has expired");
+    const err = new VendorStartError("rejected", "rejected", undefined, "vendor", verdict.apiFailure);
+
+    // Act.
+    const label = startFailureLabel(err);
+
+    // Assert.
+    expect(label.apiFailure?.kind.case).toBe("authenticationFailed");
   });
 
   it("answers an UNLABELED error as rejected, never as retryable", () => {

@@ -19,6 +19,7 @@ import { containing } from "../expect-shapes.js";
 import {
   classifyVendorApiFailure,
   convertResult,
+  openingApiFailure,
   redactVendorMessage,
   VENDOR_MESSAGE_MAX,
 } from "../../src/convert/terminals.js";
@@ -577,5 +578,33 @@ describe("redactVendorMessage", () => {
     expect(redactVendorMessage("the credential was rejected — sign in again")).toBe(
       "the credential was rejected — sign in again",
     );
+  });
+});
+
+describe("openingApiFailure", () => {
+  it.each([
+    // [case, status, text, kind]
+    ["an expired OAuth session no status names", undefined, "Failed to authenticate: OAuth session expired and could not be refreshed", "authenticationFailed"],
+    ["a credential rejected by status", 401, "invalid x-api-key", "authenticationFailed"],
+    ["a credential forbidden by status, which the status keeps", 403, "OAuth token lacks the scope", "permissionDenied"],
+    ["a missing model no status names", undefined, "model claude-nope does not exist", "notFound"],
+    ["a refusal it has no class for", undefined, "No conversation found with session ID: bf5fcae1", "unmodeled"],
+  ] as const)("types %s", (_case, status, text, kind) => {
+    // Arrange, Act.
+    const failure = openingApiFailure(status, text);
+
+    // Assert.
+    expect(failure.kind.case).toBe(kind);
+  });
+
+  it("keeps the vendor's sentence as the refusal's message", () => {
+    // Arrange.
+    const text = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+    // Act.
+    const failure = openingApiFailure(undefined, text);
+
+    // Assert.
+    expect(failure.message).toBe(text);
   });
 });

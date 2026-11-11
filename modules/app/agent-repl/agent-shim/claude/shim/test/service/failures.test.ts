@@ -60,6 +60,30 @@ describe("startSessionFailure", () => {
     },
   );
 
+  it("carries a rejection's API refusal on the rejected arm", () => {
+    // Arrange.
+    const apiFailure = create(conversationv1.ApiRequestFailedSchema, {
+      message: "Failed to authenticate",
+      kind: { case: "authenticationFailed", value: create(conversationv1.ApiAuthenticationFailedSchema, {}) },
+    });
+
+    // Act.
+    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "rejected", cause: "vendor", apiFailure }, "why");
+
+    // Assert.
+    const retry = failure.cause.case === "vendorStartFailed" ? failure.cause.value.retry : undefined;
+    expect(retry?.case === "rejected" ? retry.value.apiFailure?.kind.case : undefined).toBe("authenticationFailed");
+  });
+
+  it("leaves a rejection with no API refusal without one", () => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "rejected", cause: "vendor" }, "why");
+
+    // Assert.
+    const retry = failure.cause.case === "vendorStartFailed" ? failure.cause.value.retry : undefined;
+    expect(retry?.case === "rejected" ? retry.value.apiFailure : "not rejected").toBeUndefined();
+  });
+
   it("carries the cold evidence verbatim so the daemon can offer a remediation", () => {
     // Arrange.
     const cold = create(conversationv1.SessionColdSchema, { contextTokens: 40_000n });

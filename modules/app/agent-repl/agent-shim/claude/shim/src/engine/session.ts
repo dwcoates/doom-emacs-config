@@ -3104,6 +3104,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         verdict.retry,
         undefined,
         verdict.cause,
+        verdict.apiFailure,
       ),
     );
   }
@@ -5566,6 +5567,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           remedy.retry,
           remedy.retry === "retryable" && classifyAgentFailure({ text: remedy.detail }).network ? "network" : "vendor",
           remedy.detail,
+          remedy.apiFailure,
         );
       }
       // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
@@ -5803,7 +5805,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       identity = undefined;
       const detail = withVendorStderr(err instanceof Error ? err.message : String(err));
       LOGGER.error({ cause: detail, retry: label.retry, failure_cause: label.cause }, "the vendor query could not be started");
-      return refuseVendorStart(label.retry, label.cause, detail);
+      return refuseVendorStart(label.retry, label.cause, detail, label.apiFailure);
     }
     // THE HELD CUTS, NOW KEYABLE AND NOW SAFE TO KEY. Written AFTER the query
     // is up rather than before it: a row landed under a producer the failure
@@ -5942,9 +5944,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     retry: VendorStartRetry,
     cause: VendorStartCause,
     detail: string,
+    apiFailure?: conversationv1.ApiRequestFailed,
   ): shimv1.StartSessionResponse {
     if (retry === "retryable" && cause === "network") noteNetworkReach({ kind: "unreachable", detail });
-    return startSessionRefused({ kind: "vendorStartFailed", retry, cause }, detail);
+    return startSessionRefused({ kind: "vendorStartFailed", retry, cause, apiFailure }, detail);
   }
 
   /**
@@ -5973,7 +5976,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   type Remedy =
     | { kind: "none" }
     | { kind: "cleared"; vendorSessionId: string }
-    | { kind: "failed"; detail: string; retry: VendorStartRetry };
+    | {
+        kind: "failed";
+        detail: string;
+        retry: VendorStartRetry;
+        /** The API's refusal of the summarizer, when the failure was one. */
+        apiFailure: conversationv1.ApiRequestFailed | undefined;
+      };
 
   async function applyColdRemediation(
     remediation: conversationv1.SessionColdRemediation | undefined,
@@ -6001,7 +6010,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           remediation.remediation.value.model?.name ?? requestedModel,
           remediation.remediation.value.scope,
         );
-        return outcome.ok ? { kind: "none" } : { kind: "failed", detail: outcome.error, retry: outcome.retry };
+        return outcome.ok
+          ? { kind: "none" }
+          : { kind: "failed", detail: outcome.error, retry: outcome.retry, apiFailure: outcome.apiFailure };
       }
       default:
         return { kind: "none" };
@@ -6021,7 +6032,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
-  ): Promise<{ ok: true; summary: string } | { ok: false; error: string; retry: VendorStartRetry }> {
+  ): Promise<
+    | { ok: true; summary: string }
+    | { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined }
+  > {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
     /** Narrate one phase, to the fan-out and to the log. */
@@ -6032,16 +6046,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     ): void => narrateCompactionPhase(which, figures, said, { vendor_session_id: vendorSessionId });
     /**
      * A compaction that did not complete, said once to both surfaces, with
-     * whether asking again can help — the start it gates carries that label.
+     * whether asking again can help — the start it gates carries that label —
+     * and the API's refusal of the summarizer when the failure was one.
      */
-    const failed = (error: string, retry: VendorStartRetry): { ok: false; error: string; retry: VendorStartRetry } => {
+    const failed = (
+      error: string,
+      retry: VendorStartRetry,
+      apiFailure?: conversationv1.ApiRequestFailed,
+    ): { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined } => {
       phase(
         conversationv1.SessionCompactionPhase.FAILED,
         { tokensBefore: facts.contextTokens, error },
         "the cold gate's compaction did not complete",
       );
-      LOGGER.debug({ vendor_session_id: vendorSessionId, retry }, "labeled the failed compaction");
-      return { ok: false, error, retry };
+      LOGGER.debug(
+        { vendor_session_id: vendorSessionId, retry, api_failure: apiFailure?.kind.case ?? "" },
+        "labeled the failed compaction",
+      );
+      return { ok: false, error, retry, apiFailure };
     };
     coldCompactionFigures = undefined;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
@@ -6094,6 +6116,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             ? `the summarizing session ended with an error result: ${asked.words}`
             : `the summarizing session ended as ${asked.subtype}`,
           verdict.retry,
+          verdict.apiFailure,
         );
       }
       case "answered":
