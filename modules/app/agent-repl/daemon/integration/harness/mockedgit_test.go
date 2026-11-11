@@ -106,3 +106,16 @@ func TestNoGitHubLinkNamesTheLeafsBinaryAndNoFile(t *testing.T) {
 		t.Fatal("the unreachable gh path exists")
 	}
 }
+
+func TestNoSlackLinkNamesTheLeafsBinaryAndNoFile(t *testing.T) {
+	// Act
+	got := NoSlackLink
+
+	// Assert
+	if got != "-X agent-repld/internal/gnsclient.gnsBinary=/dev/null/no-slack-in-tests" {
+		t.Fatalf("NoSlackLink = %q", got)
+	}
+	if _, err := os.Stat("/dev/null/no-slack-in-tests"); err == nil {
+		t.Fatal("the unreachable gns path exists")
+	}
+}
