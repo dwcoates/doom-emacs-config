@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 
 	"agent-repld/internal/appfreeze"
+	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/persistentwifi"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/runtimemetrics"
 )
 
@@ -22,11 +24,13 @@ const thawGuardVerb = "thaw-guard"
 // freezeDir is the frozen set's directory under the state root.
 func freezeDir(stateDir string) string { return filepath.Join(stateDir, "persistent-wifi") }
 
-// processHolds are what the daemon keeps open for its whole life so the
-// kernel releases them only at its death: the shared hold on the frozen
-// set's owners file and the write end of its guard's pipe. Neither is ever
-// closed by the daemon.
-var processHolds []*os.File
+// The daemon keeps these for its whole life, so the kernel releases them only
+// at its death: the shared hold on the frozen set's owners file and the write
+// end of its guard's pipe. Neither is ever released by the daemon.
+var (
+	ownersHold *recordlock.Shared
+	guardPipe  *os.File
+)
 
 // buildFreezer builds the application freezer for the quiet state. A REAL
 // HOST holds the frozen set's ownership shared and starts its thaw guard
@@ -45,7 +49,7 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 		if err != nil {
 			return nil, fmt.Errorf("agent-repld: %w", err)
 		}
-		processHolds = append(processHolds, owners)
+		ownersHold = owners
 		if err := startThawGuard(selfExe, stateDir, log); err != nil {
 			return nil, err
 		}
@@ -89,7 +93,7 @@ func startThawGuard(selfExe, stateDir string, log dlog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("agent-repld: make the thaw guard's pipe: %w", err)
 	}
-	cmd := exec.Command(selfExe, thawGuardVerb, "-state-dir", stateDir)
+	cmd := childproc.Command(childproc.Stable, selfExe, thawGuardVerb, "-state-dir", stateDir)
 	cmd.ExtraFiles = []*os.File{r}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
@@ -98,11 +102,11 @@ func startThawGuard(selfExe, stateDir string, log dlog.Logger) error {
 		return fmt.Errorf("agent-repld: start the thaw guard: %w", err)
 	}
 	_ = r.Close()
-	processHolds = append(processHolds, w)
+	guardPipe = w
 	log.Info(op, "the thaw guard is watching this daemon", dlog.Context{"guard_pid": cmd.Process.Pid})
-	// inflight: unjoined: the guard outlives the daemon by design; its wait
-	// ends only if it exits first, which is recorded.
-	go func() {
+	// A STANDING WATCH: the guard outlives the daemon by design, so the wait
+	// ends only if the guard exits first, which is recorded.
+	inflight.Standing(func() {
 		err := cmd.Wait()
 		cause := "exited"
 		if err != nil {
@@ -110,7 +114,7 @@ func startThawGuard(selfExe, stateDir string, log dlog.Logger) error {
 		}
 		log.Error(op, "the thaw guard ended while its daemon lives; a frozen application would not be thawed if this daemon died without a successor",
 			dlog.Context{"guard_pid": cmd.Process.Pid, "cause": cause})
-	}()
+	})
 	return nil
 }
 
@@ -140,7 +144,7 @@ func runThawGuard(args []string, stderr io.Writer) int {
 	dir := freezeDir(*stateDir)
 	err = appfreeze.RunGuard(appfreeze.GuardDeps{
 		DaemonGone: appfreeze.PipeGone(pipe),
-		TryOwn:     appfreeze.FlockTryOwn(filepath.Join(dir, appfreeze.OwnersFile)),
+		TryOwn:     appfreeze.RecordTryOwn(filepath.Join(dir, appfreeze.OwnersFile)),
 		Store:      appfreeze.FileStore{Path: filepath.Join(dir, appfreeze.RecordFile)},
 		Signal:     appfreeze.KillSignaler,
 		Log:        surfaces.Global(),
