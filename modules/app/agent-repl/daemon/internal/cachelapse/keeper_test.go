@@ -187,6 +187,7 @@ func (f *fakeDB) SetLastKeepalive(_ context.Context, id wsm.WorkspaceID, at time
 		return wsm.ErrNotFound
 	}
 	rec.LastKeepaliveAt = &at
+	rec.KeepaliveRunBeats++
 	f.records[id] = rec
 	return nil
 }

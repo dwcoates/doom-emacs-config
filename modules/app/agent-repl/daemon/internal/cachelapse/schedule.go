@@ -103,7 +103,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 // beatPlanFor answers WS's next beat, false when it owes none. ONE PARK,
 // WHATEVER STOOD IT DOWN: a session the idle sweep parked owes none by the
 // cutoff below, and a withheld one by its withholding, so no reader here asks
-// which stand-down it was.
+// which stand-down it was. A run at its break-even owes none (runcap.go).
 //
 // THE DECISION IS RECORDED AT INFO WHEN IT CHANGES, at DEBUG while it stands
 // (owesNone): every reason it owes none is an ordinary state of a fleet, but
@@ -165,6 +165,9 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none("its session stands at the cold gate")
+	}
+	if why, capped := k.runCapped(ctx, log, ws, record, queued); capped {
+		return none(why)
 	}
 	runs, _, err := bringup.OnlyVisible(ctx, k.deps.DB, log, []wsm.Workspace{record})
 	if err != nil {
