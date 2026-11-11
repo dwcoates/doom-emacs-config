@@ -286,68 +286,80 @@ dependency chain first. Parallelism belongs to this scheduler:
 ordinary and merge-gate runs omit them. `--record` is reserved for the
 canonical post-merge timing run on master.
 
-### A run reuses an earlier pass of a suite's exact inputs (owner ruling, 2026-10-14)
+### A run reuses an earlier pass of each unit's exact inputs (owner rulings, 2026-10-14 and 2026-11-11)
 
 A system's unit and integration suites run every other system as a mock, so
-what they can observe is exactly what they read. Every run (`bin/test-all.sh`,
-the merge gate, a development run) therefore SKIPS a keyed suite whose INPUT
-KEY already has a green record, and says so:
-`<suite>: reused a green run (inputs <key>, passed <when> on <branch> <commit>)`.
-Code: `testrun/internal/reuse`; the declarations: `testrun/roster` (`Suite.Reuse`).
+what a test can observe is exactly what it reads. Every run (`bin/test-all.sh`,
+the merge gate, a development run) cuts each selected suite into UNITS and
+SKIPS every unit whose INPUT KEY already has a green record. Code:
+`testrun/internal/reuse` (`units.go` decides, skips, confines and records;
+`derive.go` cuts suites into units); the declarations: `testrun/roster`
+(`Suite.Reuse`, `Suite.NeverReused`). How a test author declares a read is
+the `/agent-repl-tests` skill, "Every suite declares its inputs; reuse is per
+unit".
 
-- **The key is content, not history.** It hashes every file the suite reads
-  (its Go build graph from `go list -deps -test`, every directory a `./...`
-  pattern walks, the programs its tests run, the runner's own code, and the
-  `Reuse.Inputs` its tests read as data), its roster entry, its toolchain
-  (go, node, npm) and its environment. The same bytes key the same in any
-  worktree, on any branch, in any queue order.
-- **The input set is ENFORCED, not trusted.** Every unit of a keyed suite runs
-  under `testrun confine`: a seatbelt profile that refuses every file read
-  under every checkout of the repository except the suite's input set, in the
-  unit's whole process tree, and an environment scrubbed to what the key
-  covers. A test that reads an undeclared file fails with "Operation not
-  permitted"; the fix is to declare the read in the suite's `Reuse.Inputs`
-  (or move the test that reads far beyond its system), never to widen the
-  profile. A run that is itself sandboxed cannot confine, so it reuses and
-  records nothing, and says so.
-- **A record is written only for a whole green suite on unmoved inputs.** The
-  suite is re-keyed after its run; if anything moved (an edit mid-run, a test
-  writing into its inputs) or a `node_modules` it read was not installed from
-  its lock, nothing is recorded and the run says why. A record from a dirty
-  checkout says "with uncommitted changes": the commit does not hold the bytes.
-- **Which suites are keyed.** `daemon`, `sidecar`, `store`, `lock`,
-  `logging`, `protohelpers`, `webapp`, `shim` and `ert`. A Go suite's set is
-  derived from its build graph; a TypeScript or Emacs suite's is its whole
-  tree plus what its `Reuse` declares, and its `node_modules` is declared
-  Generated (checked against its lock after every recorded run). The end-to-end suites ALWAYS run, and so do
-  the shell harnesses, `repo-scans` (the tests that read the whole module,
-  kept apart so no system's key covers the others' trees) and `testrun` (its
-  tests start real sandboxes, which a confined test cannot).
-- **A package is reused on its own** in a suite that declares
-  `Suite.PackageReuse` (the `daemon` suite). A keyed suite that runs still
-  skips each unit-test package whose own key has a green record, and says so:
-  `<suite>: reused package <package>'s green run (inputs <key>, passed <when>
-  on <branch> <commit>)`. A package's key hashes the build graph its test
-  binary links (`go list -deps -test`: every package's directory, testdata and
-  embedded files, the go.mod and go.sum), the runner's code, its toolchain and
-  environment, its roster entry, and the files its `PackageReuse.Inputs`
-  declares; its units run under a profile refusing every other read, so an
-  undeclared read fails the package ("Operation not permitted"). A package
-  whose reads cannot be enumerated is named in `PackageReuse.Never` and runs
-  whenever its suite runs. Only the reused packages' binaries are left out of
-  the module's one build. The integration pass is never reused per package.
-  Code: `testrun/internal/reuse/packages.go`.
+- **The unit** is what the runner records one pass for: a Go package (unit
+  or integration; a tagged pass's is `<package>[<tags>]`), a vitest test file,
+  an ERT test file, a suite-wide check (`vet`, `vet[<tag>]`, `typecheck`), or
+  a whole script or e2e suite. Each vitest and ERT file runs in its own
+  process, so a unit's profile confines only its own inputs. Module builds,
+  the ERT fake daemon's build and an integration bundle are infra: each runs
+  only while a unit that needs it runs, under the suite's envelope (every
+  unit's inputs together), and is never recorded.
+- **The key is content, not history.** A unit's key hashes every file it
+  reads: a Go package's test binary's build graph from `go list -deps -test`
+  (each package's directory, testdata and embedded files, the go.mod and
+  go.sum) and the programs its tests start; a vitest file's import graph
+  with its config's and the config's setup files' (`tsimports.go`), and the
+  package's manifests; an ERT file, the helpers and the modules `config.el`
+  loads, and what the file loads (`ertloads.go`); a script suite's script.
+  Every unit adds the runner's own code and what its suite's `Reuse`
+  declares (`Inputs` for every unit, `Units["<unit>"]` for one). Its roster
+  facts, toolchain (go, node, npm) and environment complete it. No checkout
+  path, branch, commit or workspace enters a key: the same bytes key the same
+  in any worktree, on any branch, in any queue order, so a unit one workspace
+  passed is reused by every other on the host.
+- **The input set is ENFORCED, not trusted.** Every keyed unit runs under
+  `testrun confine`: a seatbelt profile that refuses every file read under
+  every checkout of the repository except its own input set, in its whole
+  process tree, and an environment scrubbed to what the key covers. An
+  undeclared read fails with "Operation not permitted"; the fix is declaring
+  it, never widening the profile. A unit whose reads cannot be enumerated is
+  named in `Reuse.Never` and runs unconfined, never recorded. A run that is
+  itself sandboxed cannot confine, so it reuses and records nothing, and says
+  so.
+- **Every suite declares its inputs**, or a written reason it never can be
+  reused (`NeverReused`: a container's daemon reads outside any profile, a
+  scan walks the whole module, a latency measurement). `roster.Check`
+  refuses a suite with neither, at the start of every run and in
+  `TestEverySuiteDeclaresItsInputs`.
+- **Each unit's outcome is recorded on its own**, after a re-key: a passed
+  unit gets a pass record though its suite failed, and every unit that ran
+  gets a last outcome, so a later run can say it failed before. A unit whose
+  inputs moved while it ran, or that read a `node_modules` not installed from
+  its lock, records nothing and the run says why. A record from a dirty
+  checkout says "with uncommitted changes".
+- **What the run says.** Per suite: `<suite>: reuse: <n> units, <r> reused,
+  <k> run (<tally>)`, and per running unit `<suite>: unit <name> runs
+  (inputs <key>): <why>`, the why being "failed before", "inputs changed
+  since its newest green record: <one input> and <n> more", or "never
+  recorded". A suite every unit of which is reused never starts, and its
+  line is the one the merge gate reads: `<suite>: reused a green run (inputs
+  <key over its units' keys>, passed <newest> on <branch> <commit>)`. The run
+  ends with its own tally, `reuse: <n> units, <r> reused, <k> run (...)`.
 - **`--no-reuse` runs everything** and still records. `--record` and
-  `--coverage` imply it. A targeted run, narrowed below whole suites (a
+  `--coverage` imply it. A targeted run, narrowed below whole units (a
   test-name filter), neither reuses nor records.
 - **Every file is placed.** Each file of the checkout is in a keyed suite's
-  input set, in `roster.AlwaysRunRegions`, or in `roster.ReadByNoSuite`; an
+  envelope, in `roster.AlwaysRunRegions`, or in `roster.ReadByNoSuite`; an
   unplaced file fails the run (`placement: <file> is read by no suite and
-  listed nowhere`) without stopping reuse, because no keyed suite can read it.
+  listed nowhere`) without stopping reuse.
 - **`testrun plan [--json] [--suites a,b] [--no-reuse]`** prints what a run
-  would run and reuse, and why, without running anything. The records live in
-  `~/.cache/agent-repl/test-passes/<suite>/<key>.json` (`AGENT_REPL_TEST_PASSES`
-  overrides it).
+  would run and reuse, unit by unit, without running anything. The records
+  live in `~/.cache/agent-repl/test-passes/<suite>@<unit>/` (`/` spelled
+  `%`; `AGENT_REPL_TEST_PASSES` overrides it): a small pass record per key,
+  the newest pass and the last outcome with their manifests, and at most the
+  newest 32 passes per unit.
 
 OVERLAPPING RUNS SHARE ONE CORE BUDGET, IN PRIORITY ORDER, AND RATION MEMORY
 (owner ruling, 2026-10-20, replacing the 2026-10-14 hybrid that rationed only
@@ -1284,11 +1296,12 @@ like an improvement still needs that conversation. Code:
 `daemon/internal/merge/suiteselect.go`, `gate.go`, `failingtests.go`,
 `process.go`, `chain.go`, `queue.go`.
 
-- **A selected suite whose exact inputs passed before is reused, not run**
-  ("A run reuses an earlier pass of a suite's exact inputs"): its row reads
-  reused and names the run that passed it, and it draws no footer edge. Only
-  the keyed unit and integration suites are ever reused; the end-to-end suites
-  always run.
+- **A selected suite whose every unit's exact inputs passed before is reused,
+  not run** ("A run reuses an earlier pass of each unit's exact inputs"): its
+  row reads reused and names the newest run that passed one of its units, and
+  it draws no footer edge. A partly reused suite runs its other units, and
+  its counts are those units; its section opens with its reuse tally and why
+  each unit runs.
 - **Runs go to completion past failures.** The runner keeps going after a suite
   fails, every selected suite reports, and the whole run is archived under
   `<state>/merge-logs/<lease>-tests-<round>.log`, kept three days after its

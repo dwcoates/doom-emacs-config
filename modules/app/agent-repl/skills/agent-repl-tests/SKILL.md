@@ -162,33 +162,23 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   (`testrun/internal/suites/modulebuild_test.go`), which fails when a roster
   suite plans any other build unit.
 
-## A unit's reuse inputs come from the tool's dependency listing
+## Every suite declares its inputs; reuse is per unit
 
-- A reused unit's inputs are derived from the Go tool's own listing
-  (`go list -deps -test`), never from a hand-kept list of the files it builds
-  from: a package's key covers every package its test binary links, their
-  testdata and embedded files, go.mod, go.sum, the toolchain, the keyed
-  environment (the build tags among it) and the runner.
-- What a test reads beyond its build graph (a source scan, a golden, the
-  prompts, the vocabulary) is declared in the roster
-  (`Suite.Reuse.Inputs` for a suite, `Suite.PackageReuse.Inputs` for one
-  package). A package whose reads cannot be enumerated goes in
-  `PackageReuse.Never`, with why: it is never reused.
-- Enforced by the profile every keyed unit runs under, which refuses every
-  other read in the checkout, so a missing declaration fails the run rather
-  than letting a stale pass through; pinned by
-  `TestAPackagesProfileRefusesAFileItsInputsOmit` and
-  `TestEachInputMovesOnlyTheKeysOfThePackagesThatReadIt`
-  (`testrun/internal/reuse/packages_test.go`). Code and mechanics:
-  `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of a
-  suite's exact inputs".
-- A refused read does not always say "operation not permitted": a listing of
-  an undeclared directory comes back EMPTY (`filepath.Glob` drops the
-  refusal), so a scan that globs a directory fails on finding nothing. Its
-  declaration is the directory (a `/`-suffixed subtree).
-- A targeted run (`-go DIR=Test`) is never confined, so only an untargeted
-  run of the suite proves a declaration; run one after adding a package's
-  reads.
+- Every roster suite (`testrun/roster/roster.go`) declares `Reuse`, what its units read beyond what the runner derives, or `NeverReused`, a written reason it can never be reused.
+  - `roster.Check` refuses a suite with neither or with both, at the start of every run and in `TestEverySuiteDeclaresItsInputs`, so a new suite lands with its declaration.
+  - `NeverReused` is only for a suite no profile can confine (a container's daemon reads the checkout outside it, a scan walks the whole module) or whose verdict is not a function of its inputs (a latency measurement).
+- Reuse is per UNIT: a Go package (unit or integration, a tagged pass named `<package>[<tags>]`), a vitest test file, an ERT test file, a suite-wide check (`vet`, `typecheck`), or a whole script or e2e suite.
+  - A unit's inputs are derived by the tools, never kept by hand: a Go package's from `go list -deps -test` (every package its test binary links, their testdata and embedded files, go.mod, go.sum), a vitest file's from its import graph, an ERT file's from what it and the helpers load.
+  - A run skips every unit whose inputs an earlier green run on the host passed it on, from any workspace: a unit's key is its inputs' bytes, never a checkout path, branch or workspace.
+  - A unit that passed is recorded though its suite failed, so the rerun after a fix runs only the failed units and those whose inputs the fix touched.
+- Each unit runs confined to exactly the inputs its key covers. A test failing with "Operation not permitted" on a checkout file reads an undeclared input.
+  - Declare it for that unit in `Reuse.Units["<unit>"]`, or in `Reuse.Inputs` only when every unit of the suite reads it. Never widen a profile.
+  - A refused read does not always say "operation not permitted": a listing of an undeclared directory comes back EMPTY (`filepath.Glob` drops the refusal), so a scan that globs a directory fails on finding nothing. Its declaration is the directory (a `/`-suffixed subtree).
+  - A unit whose reads cannot be enumerated goes in `Reuse.Never` with why: it runs unconfined and is never recorded.
+  - A targeted run (`-go DIR=Test`, `-vitest FILE=name`) is never confined, so only an untargeted run of the unit proves a declaration; run one after adding a read.
+- Each vitest and ERT file runs in its own process, so a unit's profile confines only its own file's inputs.
+  - A new test file is a new unit and costs one process start: about 0.8s for vitest and 1.2s for ERT (the runner's per-chunk overhead history, 2026-11-11).
+- How keys, profiles and records work is `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of each unit's exact inputs".
 
 ## E2E coverage is a step of a scenario
 
@@ -380,8 +370,8 @@ coverage impact (always none).
 14. **A build unit per Go package, and a whole suite rerun for one package's change.**
     - Evidence (merge gate, `~/.claude-emacs/merge-logs/abc9582429d943eb-tests-1.log`): 514 units, 960s wall, 1,785 CPU-s; the daemon suite alone planned 340 units, 167 of them `:build` units (230s of unit wall, 281 CPU-s), each a `go test -c` that re-linked what the others had just compiled. A change to any daemon file reran all of it.
     - Fix 1: one build command per module pass ("A Go module's test binaries are built by one command"). Measured (2026-11-11, full `-suite daemon` runs under the CPU governor): the daemon suite plans 175 units; its builds are two units, `daemon:build` 82.7-92.2 CPU-s (49-56s wall at `-p=2`) and `daemon:build[integration]` 4.7 CPU-s.
-    - Fix 2: each daemon unit-test package is reused on its own green pass ("A unit's reuse inputs come from the tool's dependency listing"). Measured (2026-11-11): with a one-line change to `internal/runecap` (22 dependent test packages), 114 packages were reused and 61 units ran, 259 CPU-s against 792 CPU-s for the same suite with nothing reused; `daemon:build` built only the remaining packages, 26.4 CPU-s.
-    - Coverage impact: none; every package's tests run as their own units against the same binaries, and a reused package's pass is of exactly its inputs. No package is in `PackageReuse.Never`; the integration pass is not reused per package, and the other modules' suites are not package-reused yet.
+    - Fix 2: each daemon unit-test package is reused on its own green pass ("Every suite declares its inputs; reuse is per unit"), now every unit of every suite. Measured (2026-11-11): with a one-line change to `internal/runecap` (22 dependent test packages), 114 packages were reused and 61 units ran, 259 CPU-s against 792 CPU-s for the same suite with nothing reused; `daemon:build` built only the remaining packages, 26.4 CPU-s.
+    - Coverage impact: none; every package's tests run as their own units against the same binaries, and a reused package's pass is of exactly its inputs.
 
 ## Changes that LOOK faster and are refused
 
