@@ -6,10 +6,10 @@
 // keeps that script's behavior and step order (hotspot, power settings,
 // display; see endpoint_update_persistent_wifi_mode.proto), with an energy
 // mode step (Low Power Mode on, except High Power Mode under a closed lid on AC
-// power, which energy.go holds to; High Power Mode off) before the display. The
-// display FOLLOWS THE LID while the mode is on (display.go): a closed lid
-// dims it to 0 and opening it restores the level kept when it closed. The
-// lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
+// power, which energy.go holds to; High Power Mode off) before the display.
+// While the mode is on a closed lid puts the machine in the LID-CLOSED QUIET
+// STATE (quiet.go): the views stop, the configured applications freeze and
+// the display sleeps, all undone when the lid opens. The lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
 // polled. It also READS the
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads
