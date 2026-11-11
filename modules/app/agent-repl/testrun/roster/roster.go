@@ -310,7 +310,7 @@ var Suites = []Suite{
 		// The canonical timing history, which the runner's own test parses.
 		// Its tests find the module's root and the runner's own directories
 		// by listing them.
-		Inputs: []string{".", "testrun", "testrun/internal", "testrun/ert"},
+		Inputs: []string{".", "testrun", "testrun/internal", "testrun/ert", "testrun/vitest"},
 		Units: map[string][]string{
 			"internal/cli":   {"test_time.csv"},
 			"caselist":       {"daemon/cmd/agent-repld/testredundancycli.go"},
@@ -321,7 +321,7 @@ var Suites = []Suite{
 			"gofunc":                            {"testrun/ert"},
 			"internal/goprofile":                {"testrun/ert"},
 			"internal/gotest":                   {"testrun/ert"},
-			"internal/redundancy/gomeasure":     {"daemon/"},
+			"internal/redundancy/gomeasure":     {"daemon/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/"},
 			"internal/redundancy/vitestmeasure": {"webapp", "testrun/vitest/"},
 		},
 		Never: map[string]string{
@@ -410,7 +410,7 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
 			Units: shimUnitInputs}},
-	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp", "webapp/src/", "webapp/test/")},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp", "webapp/app-layers.ts", "webapp/src/", "webapp/test/")},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
@@ -533,6 +533,8 @@ var webappUnitInputs = func() map[string][]string {
 	for _, f := range []string{"test/vite-config.test.ts", "test/control.test.ts", "test/integration/harness.self.test.ts"} {
 		out[f] = append(out[f], "webapp/index.html")
 	}
+	// The vite config's check builds the app from the page's entry.
+	out["test/vite-config.test.ts"] = append(out["test/vite-config.test.ts"], "webapp/src/")
 	out["test/failure/sink.test.ts"] = []string{"webapp/src/"}
 	out["test/webkit-stylesheets.test.ts"] = append(out["test/webkit-stylesheets.test.ts"], "webapp/test/")
 	return out
