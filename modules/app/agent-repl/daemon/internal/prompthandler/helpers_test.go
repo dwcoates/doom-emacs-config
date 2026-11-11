@@ -3,6 +3,8 @@ package prompthandler
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -36,6 +38,13 @@ type fakeDB struct {
 	claimed map[string]*fakeClaim
 	// claimErr fails the claim when set.
 	claimErr error
+	// contextSummary is the summary the workspace's next prompt owes, "" for
+	// none; takeErr fails its take and restoreErr its restore. restored
+	// records every summary put back.
+	contextSummary string
+	takeErr        error
+	restoreErr     error
+	restored       []string
 	// acceptErr fails the acceptance stamp when set.
 	acceptErr error
 	// standing, when set, overrides the standing every claim answers.
@@ -52,6 +61,30 @@ type fakeClaim struct {
 }
 
 func newFakeDB() *fakeDB { return &fakeDB{claimed: map[string]*fakeClaim{}} }
+
+// TakeOwedContextSummary takes the owed context summary, as the store does.
+func (d *fakeDB) TakeOwedContextSummary(_ context.Context, _ ids.WorkspaceID) (string, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.takeErr != nil {
+		return "", false, d.takeErr
+	}
+	summary := d.contextSummary
+	d.contextSummary = ""
+	return summary, summary != "", nil
+}
+
+// RestoreOwedContextSummary puts a taken summary back.
+func (d *fakeDB) RestoreOwedContextSummary(_ context.Context, _ ids.WorkspaceID, summary string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.restoreErr != nil {
+		return d.restoreErr
+	}
+	d.restored = append(d.restored, summary)
+	d.contextSummary = summary
+	return nil
+}
 
 // claimOn reads back the claim standing on key, zero when there is none.
 func (d *fakeDB) claimOn(key string) fakeClaim {
@@ -323,6 +356,20 @@ func (h *harness) moved() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), h.movedOn...)
 }
 
+// contextSummaryBriefText is the test corpus's context-summary brief.
+const contextSummaryBriefText = "<!-- used by: test; placeholders: {{summary}} -->\nthe queue conversation: {{summary}}\n"
+
+// contextSummaryBriefDir is a briefs directory holding only the context
+// summary's brief.
+func contextSummaryBriefDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, BriefContextSummary+".md"), []byte(contextSummaryBriefText), 0o600); err != nil {
+		t.Fatalf("write the context summary brief: %v", err)
+	}
+	return dir
+}
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
@@ -338,11 +385,12 @@ func newHarness(t *testing.T) *harness {
 		},
 	}
 	built, err := newHandler(Deps{
-		DB:        h.db,
-		Queue:     h.queue,
-		Feed:      h.feed,
-		Asks:      h.asks,
-		Summaries: h.owed,
+		DB:         h.db,
+		Queue:      h.queue,
+		Feed:       h.feed,
+		Asks:       h.asks,
+		Summaries:  h.owed,
+		PromptsDir: contextSummaryBriefDir(t),
 		Panels: func(_ context.Context, _ ids.WorkspaceID, command conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 			h.askedMu.Lock()
 			h.asked = append(h.asked, command)

@@ -1935,7 +1935,7 @@ describe("the Merge Queue section's queues", () => {
 
   it.each([
     { name: "a running queue's repository name in the merge purple", paused: false, want: "var(--blocked)" },
-    { name: "a paused queue's repository name in the error red", paused: true, want: "var(--err)" },
+    { name: "a paused queue's repository name in the canonical orange", paused: true, want: "var(--canonical-orange)" },
   ])("draws $name", ({ paused, want }) => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), paused: paused ? {} : undefined } })]),

@@ -372,8 +372,7 @@ func (s *store) ResolveGatherTarget(ctx context.Context, id GatherID, ws Workspa
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		resolved = n == 1
+		resolved, err = touchedRow(res)
 		return err
 	})
 	return resolved, err
@@ -397,7 +396,7 @@ func (s *store) MarkGatherFirstTold(ctx context.Context, id GatherID, told Gathe
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
+		if first, err := touchedRow(res); err != nil || !first {
 			return err
 		}
 		_, err = tx.ExecContext(ctx,

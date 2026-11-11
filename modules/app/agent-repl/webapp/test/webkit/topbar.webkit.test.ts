@@ -15,10 +15,12 @@
  *
  * EVERY CHIP STANDS ONE MEASURE FROM THE NEXT, in the right group and in the
  * left group's status run alike (owner request, 2026-11-09: the status chips
- * moved left), and the wifi chip is centered between its neighbors by being
- * one of them. Measured before the change:
- * 21.2px between most chips' text, 13px from the context figure to the wifi
- * disc and 21px from the disc to the warning chip.
+ * moved left; 2026-11-10: they open the strip, the queue-bypass chip first,
+ * and the warnings ride the heading rather than a chip of the run), and the
+ * run's middle chip, remote control, is centered between its neighbors by
+ * being one of them. Measured before the 2026-11-09 change: 21.2px between
+ * most chips' text, 13px from the context figure to the wifi disc and 21px
+ * from the disc to the warning chip.
  *
  * THE RIGHT-HAND TEXT IS THE LEFT-HAND TEXT'S SIZE. Measured: every cell on
  * both sides computes to 13.6px (0.85rem), the yellow context figure
@@ -50,6 +52,12 @@ const spacings = (m: StripMeasure): number[] => [...runSpacings(m.cells), ...run
 
 /** The right group's spacing before the 2026-10-02 change, between text chips. */
 const OLD_SPACING_PX = 21.2;
+
+/** The spacing the 2026-10-02 change set, before the 2026-11-10 quarter. */
+const THIRTY_PERCENT_SPACING_PX = 14.8;
+
+/** The two chips' 1px borders inside every spacing, which no narrowing touches. */
+const BORDERS_PX = 2;
 
 /** The page and stylesheet one screen density's tests run against. */
 interface Rig {
@@ -127,28 +135,39 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(m.cells.map((c) => c.cell)).toEqual(["topbar-model", "topbar-effort", "topbar-mode", "topbar-context"]);
   });
 
-  it("draws one cell of every status kind in the left group", async () => {
+  it("draws one cell of every status kind in the left group, and no warning chip", async () => {
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
-    expect(m.status.map((c) => c.cell)).toEqual(["topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
+    expect(m.status.map((c) => c.cell)).toEqual(["topbar-queue-bypass", "topbar-remote-control", "topbar-wifi"]);
   });
 
-  it("stands the right-hand chips 30% closer than before", async () => {
+  it("stands the right-hand chips at least 30% closer than before", async () => {
     // Arrange / Act
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
 
     // Assert
-    expect(spacings(m)[0]).toBeCloseTo(OLD_SPACING_PX * 0.7, 0);
+    expect(spacings(m)[0]).toBeLessThanOrEqual(OLD_SPACING_PX * 0.7);
   });
 
-  it("centers the wifi chip between the remote-control chip and the warning chip", async () => {
+  // THE 2026-11-10 REQUEST: the chip gaps narrow by a quarter again. The 30%
+  // closer spacing was 14.8px, 12.8px of it rems and 2px the two borders;
+  // the rems narrow by a quarter and the borders stay.
+  it("stands the right-hand chips a quarter closer again in their rems", async () => {
+    // Arrange / Act
+    const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
+
+    // Assert
+    expect(spacings(m)[0]).toBeCloseTo((THIRTY_PERCENT_SPACING_PX - BORDERS_PX) * 0.75 + BORDERS_PX, 1);
+  });
+
+  it("centers the remote-control chip between the queue-bypass chip and the wifi chip", async () => {
     // Arrange
     const m = await rig.page.evaluate(() => window.topbarPage.drawStrip(true));
     const at = (name: string) => m.status.find((c) => c.cell === name);
-    const [remote, wifi, warnings] = [at("topbar-remote-control"), at("topbar-wifi"), at("topbar-warnings")];
+    const [bypass, remote, wifi] = [at("topbar-queue-bypass"), at("topbar-remote-control"), at("topbar-wifi")];
 
     // Act
-    const before = (wifi?.left ?? Number.NaN) - (remote?.right ?? Number.NaN);
-    const after = (warnings?.left ?? Number.NaN) - (wifi?.right ?? Number.NaN);
+    const before = (remote?.left ?? Number.NaN) - (bypass?.right ?? Number.NaN);
+    const after = (wifi?.left ?? Number.NaN) - (remote?.right ?? Number.NaN);
 
     // Assert
     expect(before).toBeCloseTo(after, 2);
@@ -208,16 +227,16 @@ describe.each([1, 2])("the topbar in WebKit at %ix", (dpr) => {
     expect(Math.abs((box.top + box.bottom) / 2 - (m.row.top + m.row.bottom) / 2)).toBeLessThanOrEqual(0.5);
   });
 
-  // WITH NO SUMMARY THE NAME TAKES THE SUMMARY'S PLACE on the band.
-  it("draws the name in the summary's place when there is no summary", async () => {
-    // ARRANGE
-    const summarized = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, true));
-    // ACT
+  // WITH NO SUMMARY THE NAME STANDS ALONE (owner request, 2026-11-10: the
+  // summary and the name are centered together in the strip's full height),
+  // so a lone name is centered in that height by the heading's own column.
+  it("centers the name alone in the strip's height when there is no summary", async () => {
+    // ARRANGE / ACT
     const bare = await rig.page.evaluate(() => window.topbarPage.drawStrip(true, false));
     // ASSERT
     const middle = (b: { top: number; bottom: number }): number => (b.top + b.bottom) / 2;
     expect(bare.title).toBeNull();
-    expect(Math.abs(middle(bare.name) - middle(summarized.title!))).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(middle(bare.name) - middle(bare.row))).toBeLessThanOrEqual(0.5);
   });
 
   it("italicizes the summary", async () => {

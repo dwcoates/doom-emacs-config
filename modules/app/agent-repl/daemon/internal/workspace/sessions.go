@@ -2734,6 +2734,10 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 	if err != nil {
 		return nil, err
 	}
+	carried, err := f.carryOwedStartWork(ctx, log, ws, req)
+	if err != nil {
+		return nil, err
+	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
 	// the start and never answers held this call, and the workspace's start
@@ -2867,6 +2871,10 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			refusal := refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
 				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
 				map[string]any{"detail": failure.GetDetail()})
+			// THE FAILURE WAS THE ASKED-FOR COMPACTION OR SUMMARY: the label
+			// says so, so a queue-bypass switch answers compaction_failed
+			// rather than switch_failed (compactionFailure).
+			compaction := vendor.GetCompaction() != nil
 			// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, and the daemon
 			// never re-derives it from `detail`. A frame with neither arm is
 			// malformed: it is treated as a rejection, loudly.
@@ -2877,7 +2885,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				// daemon draws it as a network fault while it retries.
 				switch retry.Retryable.GetCause().(type) {
 				case *shimv1.StartSessionVendorStartRetryable_Network:
-					return nil, labeledNetwork(refusal, failure.GetDetail())
+					return nil, markCompaction(labeledNetwork(refusal, failure.GetDetail()), compaction)
 				case *shimv1.StartSessionVendorStartRetryable_Vendor:
 				default:
 					log.Error(opBringUp, "the shim's retryable vendor start names no cause; it is read as the vendor's", dlog.Context{
@@ -2885,7 +2893,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 						"invariant_violation": "StartSessionVendorStartRetryable.cause is always set",
 					})
 				}
-				return nil, labeled(refusal, true, true, failure.GetDetail())
+				return nil, markCompaction(labeled(refusal, true, true, failure.GetDetail()), compaction)
 			case *shimv1.StartSessionVendorStartFailed_Rejected:
 				// A CREDENTIAL THE VENDOR REJECTED is cured by signing in
 				// again: the ONE predicate a turn's account failure is read
@@ -2894,13 +2902,13 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				if refused := retry.Rejected.GetApiFailure(); ladder.ApiFailureCuredBySignIn(refused) {
 					label.signIn = refused.GetMessage()
 				}
-				return nil, label
+				return nil, markCompaction(label, compaction)
 			default:
 				log.Error(opBringUp, "the shim's vendor_start_failed states neither retryable nor rejected; treated as a rejection", dlog.Context{
 					"detail":              failure.GetDetail(),
 					"invariant_violation": "StartSessionVendorStartFailed.retry is always set",
 				})
-				return nil, labeled(refusal, false, true, failure.GetDetail())
+				return nil, markCompaction(labeled(refusal, false, true, failure.GetDetail()), compaction)
 			}
 		}
 		if failure.GetAlreadyStarted() != nil {
@@ -2919,6 +2927,9 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
 		return nil, refuse(log, "OpenWorkspace", ArmStartSessionUnspecified,
 			fmt.Sprintf("the shim refused to start workspace %q's session with no cause set: %s", ws, failure.GetDetail()), false)
+	}
+	if err := f.settleOwedStartWork(ctx, log, ws, carried, response.GetSuccess()); err != nil {
+		return nil, err
 	}
 	return response.GetSuccess().GetSession(), nil
 }

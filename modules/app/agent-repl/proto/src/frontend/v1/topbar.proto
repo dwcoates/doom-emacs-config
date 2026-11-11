@@ -160,9 +160,12 @@ message TopbarView {
 // it is off, its ordinary conversation. Each keeps its own transcript and its
 // own warm cache, and the one not running is kept for the next switch.
 //
-// A STATUS AND A CONTROL: clicking the chip sends UpdateQueueBypassMode's
-// `toggle` arm, except in the held_elsewhere arm, where the chip is a status
-// only. The chip draws nothing on success; it redraws from the next push.
+// A STATUS AND A CONTROL. In the off arm a click opens the chip's menu, drawn
+// as the topbar's other menus are: one row per served option, and a pick
+// sends UpdateQueueBypassMode's `on` arm echoing the option's context. In the
+// on arm a click sends `toggle`, which releases the mode. In the
+// held_elsewhere arm the chip is a status only. The chip draws nothing on
+// success; it redraws from the next push.
 message TopbarQueueBypass {
   // The workspace's standing toward the mode. Exactly one repository workspace
   // may hold the mode at a time, so the third arm is a mode this workspace
@@ -179,8 +182,53 @@ message TopbarQueueBypass {
 // the chip is drawn lit.
 message TopbarQueueBypassOn {}
 // The mode is free and this workspace does not hold it: the chip is drawn
-// unlit, and a click takes the mode.
-message TopbarQueueBypassOff {}
+// unlit, and a click opens the menu of how the bypass session gets its
+// context.
+message TopbarQueueBypassOff {
+  // The menu's rows, in display order; the menu renders exactly this list.
+  // ALWAYS the two main-context options (full, then compacted), followed by
+  // the two existing-context options only while the workspace has a parked
+  // bypass conversation to resume. The daemon decides which are offered; the
+  // client never infers it.
+  repeated TopbarQueueBypassContextOption options = 1;
+}
+// One way the bypass session may get its context.
+message TopbarQueueBypassContextOption {
+  // The choice, the typed echo token UpdateQueueBypassModeOn.context takes
+  // back unchanged.
+  TopbarQueueBypassContext context = 1;
+  // The row's label, a few words, composed by the daemon ("Full main
+  // context").
+  string display_name = 2;
+}
+// HOW THE BYPASS SESSION GETS ITS CONTEXT when the workspace takes the mode.
+// Served on each menu row and echoed back by the pick. The set arm IS the
+// choice; exactly one is set.
+message TopbarQueueBypassContext {
+  oneof context {
+    // A full fork of the main (queue) conversation as it stands now. Replaces
+    // any parked bypass conversation, whose transcript stays on disk.
+    TopbarQueueBypassContextFullMain full_main = 1;
+    // A fork of the main conversation, compacted by the shim's summarizer
+    // before its first turn. Replaces any parked bypass conversation.
+    TopbarQueueBypassContextCompactedMain compacted_main = 2;
+    // The parked bypass conversation, resumed as it was left. Offered only
+    // while one is parked.
+    TopbarQueueBypassContextExisting existing = 3;
+    // The parked bypass conversation, resumed, with a compacted summary of
+    // the main conversation carried into its context before the user's next
+    // prompt. Offered only while one is parked.
+    TopbarQueueBypassContextExistingPlusCompactedMain existing_plus_compacted_main = 4;
+  }
+}
+// A full fork of the main conversation.
+message TopbarQueueBypassContextFullMain {}
+// A compacted fork of the main conversation.
+message TopbarQueueBypassContextCompactedMain {}
+// The parked bypass conversation as it was left.
+message TopbarQueueBypassContextExisting {}
+// The parked bypass conversation plus a compacted summary of the main one.
+message TopbarQueueBypassContextExistingPlusCompactedMain {}
 // Another workspace of the same repository holds the mode: the chip is drawn
 // muted and does not respond to a click.
 message TopbarQueueBypassHeldElsewhere {

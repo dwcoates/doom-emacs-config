@@ -1514,15 +1514,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the three ingresses ----
 
 	handler, err := prompthandler.New(prompthandler.Deps{
-		Queue:     queue,
-		Feed:      feedResolver,
-		DB:        p.DB,
-		Asks:      verbs,
-		Summaries: summaries,
-		Panels:    server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
-		MintTurn:  wsm.NewTurnID,
-		MovedOn:   mergeOrchestrator.RetireConcluded,
-		Log:       p.Surfaces,
+		Queue:      queue,
+		Feed:       feedResolver,
+		DB:         p.DB,
+		Asks:       verbs,
+		Summaries:  summaries,
+		PromptsDir: paths.PromptsDir,
+		Panels:     server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
+		MintTurn:   wsm.NewTurnID,
+		MovedOn:    mergeOrchestrator.RetireConcluded,
+		Log:        p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the prompt handler: %w", err)

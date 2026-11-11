@@ -63,11 +63,14 @@
                  "{\"dir\":\"~/w/fix\"}")))
 
 (ert-deftest agent-repl-test-wire-host-register-success-carries-the-minted-ref ()
-  "The success arm carries the daemon-minted WorkspaceRef, whole."
+  "The success arm carries the daemon-minted WorkspaceRef, whole.
+A success that states no page residency decodes it as nil: the daemon
+knows nothing of the page."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-register-workspace-response
                   "{\"success\":{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}}")
-                 '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix"))))))
+                 '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix")
+                                         :last-known-page nil)))))
 
 (ert-deftest agent-repl-test-wire-host-register-error-arm-carries-its-cause ()
   "The error arm carries the refusal the daemon named."

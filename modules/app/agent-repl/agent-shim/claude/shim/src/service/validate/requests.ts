@@ -26,6 +26,7 @@ import {
   validateHistoryPointer,
   validatePromptOrigin,
   validateSessionColdRemediation,
+  validateStartSessionCarrySummary,
   validateStartTurnSentBy,
   validateTurnId,
   validateUserSaid,
@@ -108,6 +109,9 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
         resume.rolledBackTurns.forEach((turn, index) => {
           validateTurnId(turn, `start_session.resume.rolled_back_turns[${index}]`);
         });
+        if (resume.carrySummary !== undefined) {
+          validateStartSessionCarrySummary(resume.carrySummary, "start_session.resume.carry_summary");
+        }
         return;
       }
       default:
@@ -212,6 +216,9 @@ export function validateHoldParkedBridgeRequest(request: shimv1.HoldParkedBridge
     }
     if (request.start.source.value.coldRemediation !== undefined) {
       throw invalidArgument("hold_parked_bridge.start.resume.cold_remediation is set; the gate parks a resume that named none");
+    }
+    if (request.start.source.value.carrySummary !== undefined) {
+      throw invalidArgument("hold_parked_bridge.start.resume.carry_summary is set; a bridge resumes its conversation alone");
     }
     if (!request.remoteControl.enabled) {
       throw invalidArgument("hold_parked_bridge.remote_control.enabled is false; a bridge held off is no bridge");

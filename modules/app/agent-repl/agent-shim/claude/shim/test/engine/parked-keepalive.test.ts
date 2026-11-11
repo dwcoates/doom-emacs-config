@@ -6,12 +6,12 @@
  * building on an earlier keep-alive, and without paying a cold read for a
  * cache that already lapsed.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
+import { testTempDir } from "../temp-dir.js";
+import { writeTranscript } from "../vendor-transcript.js";
 import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { beatParkedConversation, parkedResumeAnchor, type ParkedBeatQuery } from "../../src/engine/parked-keepalive.js";
 import { readTranscriptChain, type ChainRecord } from "../../src/engine/rollback.js";
@@ -55,14 +55,10 @@ const PARKED_ID = "parked-1";
 
 /** A shim's account root and working directory, with the parked transcript filed under them. */
 function filed(lines: Record<string, unknown>[] | undefined): { configDir: string; cwd: string } {
-  const root = mkdtempSync(path.join(os.tmpdir(), "shim-parked-"));
+  const root = testTempDir("shim-parked-");
   const configDir = path.join(root, "config");
   const cwd = path.join(root, "work");
-  if (lines !== undefined) {
-    const file = transcriptPath(configDir, cwd, PARKED_ID);
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
-  }
+  if (lines !== undefined) writeTranscript(configDir, cwd, PARKED_ID, lines);
   return { configDir, cwd };
 }
 

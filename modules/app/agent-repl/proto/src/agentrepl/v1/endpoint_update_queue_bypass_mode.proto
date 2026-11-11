@@ -15,6 +15,13 @@
 // the first time); releasing it does the reverse. Neither conversation's cache
 // is spent by the other, and the one not running is kept for the next switch.
 //
+// TAKING IT MAY NAME HOW THE BYPASS SESSION GETS ITS CONTEXT
+// (UpdateQueueBypassModeOn.context, owner request 2026-11-11): a full or a
+// compacted fork of the ordinary conversation, which replaces the parked
+// bypass conversation, or the parked bypass conversation, alone or with a
+// compacted summary of the ordinary one carried into it. Releasing never
+// does: it resumes the ordinary conversation as it stands.
+//
 // ONLY A PERSONAL ACCOUNT MAY HOLD IT: a work account's workspace is refused,
 // and its topbar draws no chip at all.
 //
@@ -25,6 +32,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "frontend/v1/topbar.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -46,7 +54,16 @@ message UpdateQueueBypassModeRequest {
   }
 }
 // Take the mode.
-message UpdateQueueBypassModeOn {}
+message UpdateQueueBypassModeOn {
+  // How the bypass session gets its context: the option the chip's menu
+  // served, echoed back unchanged (a typed echo token, so its four arms are
+  // declared once, in frontend.v1, and never respelled here). UNSET keeps the
+  // behavior every caller had before the menu: a full fork of the ordinary
+  // conversation while no bypass conversation is parked, and the parked one
+  // resumed while one is. A context that is set with no arm set is
+  // InvalidArgument.
+  optional frontend.v1.TopbarQueueBypassContext context = 1;
+}
 // Release the mode.
 message UpdateQueueBypassModeOff {}
 // Flip the mode.
@@ -86,6 +103,14 @@ message UpdateQueueBypassModeError {
     UpdateQueueBypassModeTurnInFlight turn_in_flight = 6;
     // The conversation switch did not complete; the detail says which step.
     UpdateQueueBypassModeSwitchFailed switch_failed = 7;
+    // The context named the parked bypass conversation (existing, or existing
+    // plus compacted main), and the workspace parks none. Nothing changed.
+    UpdateQueueBypassModeNoBypassConversation no_bypass_conversation = 8;
+    // The compaction or summary the context asked for did not complete. The
+    // switch stands as the conversation swap left it: the hold is taken, the
+    // queue is stopped, and the bypass conversation is bound; its next start
+    // asks for the compaction again.
+    UpdateQueueBypassModeCompactionFailed compaction_failed = 9;
   }
 }
 // The workspace id is not registered.
@@ -112,5 +137,12 @@ message UpdateQueueBypassModeTurnInFlight {}
 // The switch between the two conversations failed.
 message UpdateQueueBypassModeSwitchFailed {
   // What failed, verbatim from the daemon.
+  string detail = 1;
+}
+// No bypass conversation is parked to resume.
+message UpdateQueueBypassModeNoBypassConversation {}
+// The compaction or summary did not complete.
+message UpdateQueueBypassModeCompactionFailed {
+  // The shim's own account of the failure, verbatim.
   string detail = 1;
 }

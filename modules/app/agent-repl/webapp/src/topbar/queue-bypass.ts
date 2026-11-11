@@ -13,20 +13,38 @@
  * ABSENT ON A WORK ACCOUNT: the daemon sends no chip for a workspace whose
  * session spends as one, and the strip then draws nothing in its place.
  *
- * A CONTROL AS WELL AS A STATUS: clicking sends
- * `agentrepl.v1.UpdateQueueBypassMode`'s `toggle` arm for this page's
- * workspace. The daemon resolves it, switches the workspace's conversation,
- * and the chip redraws from the push the change causes.
+ * A CONTROL AS WELL AS A STATUS. Off, a click opens the menu of how the
+ * bypass session gets its context, drawn exactly as the topbar's other menus
+ * are (the reveal layer, `list-rows`, the shared row rule, the one pick path):
+ * its rows are the served `frontend.v1.TopbarQueueBypassOff.options`, in the
+ * served order, and a pick sends `agentrepl.v1.UpdateQueueBypassMode`'s `on`
+ * arm echoing the row's context verbatim. The daemon decides which options
+ * are offered; this file never infers one. On, a click sends the `toggle`
+ * arm, which releases the mode. Either way the daemon switches the
+ * workspace's conversation, and the chip redraws from the push the change
+ * causes.
  */
 import { createControl, type Control } from "../control.js";
 import { UpdateQueueBypassModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_queue_bypass_mode_pb";
-import type { TopbarQueueBypass } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import type {
+  TopbarQueueBypass,
+  TopbarQueueBypassContextOption,
+  TopbarQueueBypassOff,
+} from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { sendChipToggle } from "./chip-toggle.js";
 import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
+import { sendPick } from "./pick.js";
+import { asAnchor } from "./strip.js";
+
+/** The reveal's name, and the anchor the chip carries. */
+export const QUEUE_BYPASS_REVEAL = "queue-bypass";
+
+/** The hook naming a menu row's context: its arm's name. */
+export const QUEUE_BYPASS_CONTEXT_ATTRIBUTE = "data-queue-bypass-context";
 
 /**
  * The bypass glyph: a curved arrow stepping over a bar, stroked in the current
@@ -68,6 +86,8 @@ const UPDATE_QUEUE_BYPASS_MODE_CAUSES = {
   heldElsewhere: () => "another workspace of this repository holds queue bypass mode",
   turnInFlight: () => "a turn is running; end it or interrupt it first",
   switchFailed: (value: { detail: string }) => `the switch did not complete: ${value.detail}`,
+  noBypassConversation: () => "this workspace has no bypass conversation to resume",
+  compactionFailed: (value: { detail: string }) => `the compaction did not complete: ${value.detail}`,
 } as unknown as SentenceTable;
 
 /** The chip, painted from its mode arm, with the daemon's tooltip. */
@@ -80,12 +100,24 @@ export function drawTopbarQueueBypass(u: TopbarQueueBypass, tc: TopbarContext): 
 
   const button = createControl();
   button.className = "topbar-queue-bypass-button";
-  button.setAttribute("aria-label", "toggle queue bypass mode");
   button.append(drawDiscGlyph(BYPASS_GLYPH));
-  if (mode !== "held-elsewhere") {
+  const arm = u.mode;
+  if (arm.case === "off") {
+    // The chip is the control; see the model selector for the reasoning.
+    button.setAttribute("aria-label", "choose how queue bypass mode gets its context");
+    asAnchor(chip, QUEUE_BYPASS_REVEAL);
+    const body = (): HTMLElement => drawQueueBypassOptions(arm.value, tc, chip, button);
+    tc.reveals.register(QUEUE_BYPASS_REVEAL, QUEUE_BYPASS_REVEAL, body);
+    button.addEventListener("click", () => {
+      tc.reveals.toggle(QUEUE_BYPASS_REVEAL, QUEUE_BYPASS_REVEAL, body);
+    });
+  } else if (arm.case === "on") {
+    button.setAttribute("aria-label", "release queue bypass mode");
     button.addEventListener("click", () => {
       void toggleQueueBypassMode(tc, chip, button, mode);
     });
+  } else {
+    button.setAttribute("aria-label", "queue bypass mode is held by another workspace");
   }
   chip.append(button);
 
@@ -96,7 +128,80 @@ export function drawTopbarQueueBypass(u: TopbarQueueBypass, tc: TopbarContext): 
   return chip;
 }
 
-/** Send `UpdateQueueBypassMode{toggle}` for this page's workspace. */
+/**
+ * A row's context as a DOM hook: its arm's name. A row with no arm set is a
+ * malformed push, never a nameless row.
+ */
+export function queueBypassContextToken(option: TopbarQueueBypassContextOption): string {
+  const context = requireMessage(option.context, "TopbarQueueBypassContextOption.context");
+  return requireCase(context.context, "TopbarQueueBypassContext.context").case;
+}
+
+/** The reveal: exactly the served options, in the served order. */
+export function drawQueueBypassOptions(
+  off: TopbarQueueBypassOff,
+  tc: TopbarContext,
+  chip: HTMLElement,
+  button: Control,
+): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "topbar-queue-bypass-options list-rows";
+  for (const option of off.options) {
+    list.append(drawQueueBypassOption(option, tc, chip, button));
+  }
+  return list;
+}
+
+/** One offered context. */
+export function drawQueueBypassOption(
+  option: TopbarQueueBypassContextOption,
+  tc: TopbarContext,
+  chip: HTMLElement,
+  button: Control,
+): Control {
+  const row = createControl();
+  row.className = "topbar-queue-bypass-option";
+  row.setAttribute(QUEUE_BYPASS_CONTEXT_ATTRIBUTE, queueBypassContextToken(option));
+  row.textContent = option.displayName;
+  row.addEventListener("click", () => {
+    void pickQueueBypassContext(option, tc, chip, button, row);
+  });
+  return row;
+}
+
+/** Take the mode, echoing the picked row's context verbatim. */
+export async function pickQueueBypassContext(
+  option: TopbarQueueBypassContextOption,
+  tc: TopbarContext,
+  chip: HTMLElement,
+  button: Control,
+  row: Control,
+): Promise<void> {
+  log.info(`the reader took queue bypass mode with ${option.displayName}`, {
+    operation: "topbar.queue-bypass-picked",
+    context: { context: queueBypassContextToken(option) },
+  });
+  await sendPick(
+    {
+      rpc: "UpdateQueueBypassMode",
+      send: (client) =>
+        client.updateQueueBypassMode({
+          workspace: tc.ctx.workspace,
+          action: { case: "on", value: { context: option.context } },
+        }),
+      schema: UpdateQueueBypassModeResponseSchema,
+      causes: UPDATE_QUEUE_BYPASS_MODE_CAUSES,
+      malformedOperation: "topbar.queue-bypass-pick",
+      unreadableOperation: "topbar.queue-bypass-malformed-refusal",
+    },
+    tc,
+    chip,
+    button,
+    row,
+  );
+}
+
+/** Send `UpdateQueueBypassMode{toggle}` for this page's workspace: a release. */
 async function toggleQueueBypassMode(tc: TopbarContext, chip: HTMLElement, button: Control, drawn: string): Promise<void> {
   log.info("the reader toggled queue bypass mode", {
     operation: "topbar.queue-bypass-toggle",

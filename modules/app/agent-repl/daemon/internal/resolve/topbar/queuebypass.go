@@ -26,7 +26,7 @@ const (
 // the rest of the naming as it is.
 func (r *resolver) SetQueueBypass(ws ids.WorkspaceID, chip QueueBypass) {
 	r.mutate(ws, "daemon.topbar.set_queue_bypass", "the topbar took the workspace's queue bypass standing",
-		dlog.Context{"offered": chip.Offered, "holds": chip.Holds, "held_by": chip.HeldBy},
+		dlog.Context{"offered": chip.Offered, "holds": chip.Holds, "held_by": chip.HeldBy, "offers": len(chip.Offers)},
 		func(s *wsState) {
 			s.naming.QueueBypass = chip
 		})
@@ -52,7 +52,33 @@ func queueBypassChip(chip QueueBypass) *frontendv1.TopbarQueueBypass {
 		}
 	}
 	return &frontendv1.TopbarQueueBypass{
-		Mode:    &frontendv1.TopbarQueueBypass_Off{Off: &frontendv1.TopbarQueueBypassOff{}},
+		Mode:    &frontendv1.TopbarQueueBypass_Off{Off: &frontendv1.TopbarQueueBypassOff{Options: queueBypassOptions(chip.Offers)}},
 		Tooltip: &frontendv1.TopbarQueueBypassTooltip{Text: queueBypassOffTooltip},
 	}
+}
+
+// queueBypassOptions are the off chip's menu rows: OFFERS, in their order,
+// each labeled. The workspace verbs build every offer, so an offer naming no
+// arm this resolver labels is a bug, refused loudly.
+func queueBypassOptions(offers []*frontendv1.TopbarQueueBypassContext) []*frontendv1.TopbarQueueBypassContextOption {
+	options := make([]*frontendv1.TopbarQueueBypassContextOption, 0, len(offers))
+	for _, offer := range offers {
+		options = append(options, &frontendv1.TopbarQueueBypassContextOption{Context: offer, DisplayName: queueBypassLabel(offer)})
+	}
+	return options
+}
+
+// queueBypassLabel is the row label of OFFER, a few words.
+func queueBypassLabel(offer *frontendv1.TopbarQueueBypassContext) string {
+	switch offer.GetContext().(type) {
+	case *frontendv1.TopbarQueueBypassContext_FullMain:
+		return "Full main context"
+	case *frontendv1.TopbarQueueBypassContext_CompactedMain:
+		return "Compacted main context"
+	case *frontendv1.TopbarQueueBypassContext_Existing:
+		return "Existing bypass context"
+	case *frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain:
+		return "Existing bypass plus compacted main"
+	}
+	panic(fmt.Sprintf("topbar: a queue-bypass offer names the undeclared context arm %T", offer.GetContext()))
 }

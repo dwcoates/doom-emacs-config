@@ -232,6 +232,18 @@ export function validateSessionColdRemediation(
 
 
 /**
+ * `shim.v1.StartSessionCarrySummary` — the conversation summarized, never
+ * empty, and the summarizer whole: a model, and a scope that is a choice.
+ */
+export function validateStartSessionCarrySummary(value: shimv1.StartSessionCarrySummary, path: string): void {
+  if (value.vendorSessionId === "") throw emptyIdentity(`${path}.vendor_session_id`);
+  if (value.summarizer === undefined) throw unsetField(`${path}.summarizer`);
+  validateAgentModel(value.summarizer.model, `${path}.summarizer.model`);
+  if (value.summarizer.scope === conversationv1.SessionCompactScope.UNSPECIFIED) {
+    throw invalidArgument(`${path}.summarizer.scope is SESSION_COMPACT_SCOPE_UNSPECIFIED; a summary names what it summarizes`);
+  }
+}
+/**
  * `shim.v1.ForkPoint` — exactly one extent, and a cut names a record. The token
  * is opaque to the daemon, but an empty one is no record at all.
  */

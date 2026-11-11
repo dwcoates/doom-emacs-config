@@ -2,16 +2,20 @@
  * The topbar: one thin strip, redrawn whole on every push.
  *
  * LEFT TIGHT, RIGHT TIGHT, AND THE TITLE IN WHAT IS BETWEEN THEM — the
- * status run (the remote-control chip, then the persistent-wifi chip) at the
- * left edge, then the account cell (its connectivity glyph, then its label),
- * then the warning chip. The model selector, the effort selector, the
- * permission-mode picker and the context chip sit at the right edge.
+ * status run (the queue-bypass chip on a personal account, the remote-control
+ * chip, then the persistent-wifi chip) at the left edge, then the account cell
+ * (its connectivity glyph, then its label). The model selector, the effort
+ * selector, the permission-mode picker and the context chip sit at the right
+ * edge.
  *
  * THE STATUS CHIPS RIDE THE LEFT (owner requests, 2026-11-09 and
  * 2026-11-10): the right group was crowded and the left nearly empty, so the
- * centered heading read as off-center; the two status chips open the strip.
- * The warning chip ends the left group because it is the one chip that comes
- * and goes; at the group's end its arrival moves no other chip.
+ * centered heading read as off-center; the status chips open the strip.
+ *
+ * THE WARNINGS RIDE THE HEADING (owner request, 2026-11-10), not a chip:
+ * while anything is wrong, the heading's first line is drawn in the list's
+ * severity color and its click opens the list (`warnings.ts`). Nothing in
+ * either flank comes and goes with them, so their arrival moves no chip.
  *
  * THE RULE IS EQUAL CLEAR SPACE, NOT A SHARED MIDPOINT (owner ruling,
  * 2026-09-14, superseding the "true center" rule of 2026-09-13). The row is a
@@ -33,14 +37,14 @@
  * tooltip, the tone name, the title, the figure and every warning sentence are
  * all composed daemon-side.
  *
- * THE WARNING CHIP DOES NOT WAIT FOR A PUSH. It is where the page's own
- * client-local failures are shown (`src/failure/local.ts`), and those are
+ * THE HEADING'S WARNINGS DO NOT WAIT FOR A PUSH. They are where the page's
+ * own client-local failures are shown (`src/failure/local.ts`), and those are
  * exactly the failures that can stop a push arriving — a boot that could not
  * adopt, a link that dropped. So the strip is MOUNTED at boot, before
  * adoption and before any stream, and redraws on every change to that set:
  * over the last view drawn if there was one (stale while the link is down,
- * which is the point), or as the chip alone if there never was. `watch` opens
- * the stream once adoption has succeeded.
+ * which is the point), or as a bare heading carrying the failures alone if
+ * there never was. `watch` opens the stream once adoption has succeeded.
  *
  * WHAT SURVIVES A PUSH IS THE REVEAL, and only by name. The strip itself is
  * replaced entirely — that is the whole-view-push contract — while the reveal
@@ -86,7 +90,7 @@ export interface Handle {
 }
 
 export interface TopbarDeps {
-  /** The client-local failures the warning chip lists beside the pushed ones. */
+  /** The client-local failures the heading's warnings list beside the pushed ones. */
   readonly failures: LocalFailureView;
   /** Injected by tests, where jsdom reports every rect as zero. */
   geometry?: RevealGeometry;
@@ -122,8 +126,8 @@ export interface TopbarHandle extends Handle {
 }
 
 /**
- * Mount the topbar on HOST and keep its warning chip drawn from DEPS.failures
- * until `watch` hands it a stream.
+ * Mount the topbar on HOST and keep its heading's warnings drawn from
+ * DEPS.failures until `watch` hands it a stream.
  *
  * The stream is STANDING: it never concludes on its own, so `dispose()` is the
  * only thing that closes it.
@@ -162,7 +166,7 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
 
   // A CHANGE TO THE CLIENT-LOCAL FAILURES REDRAWS WITHOUT A PUSH: over the
   // last view if there is one, which may be stale because the link is what
-  // failed, or as the chip alone if no view was ever drawn.
+  // failed, or as the bare heading carrying them if no view was ever drawn.
   const redraw = (): void => {
     log.debug("redrawing the topbar for a client-local failure change", {
       operation: "topbar.local-failures-changed",
@@ -222,9 +226,9 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
 }
 
 /**
- * The strip before any view: the warning chip alone, in the left group's
- * status run it always occupies, or NOTHING when no client-local failure
- * stands.
+ * The strip before any view: a heading with the bare "agent-repl" name, its
+ * line carrying the client-local failures as the warnings' control, between
+ * empty flanks; or NOTHING when no client-local failure stands.
  */
 export function drawTopbarFailuresOnly(cc: WarningChipContext): HTMLElement | null {
   if (cc.localFailures().length === 0) return null;
@@ -307,9 +311,9 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   // cell is drawn on every push and in the same slot, whether or not the
   // workspace has a session. A control the daemon left ABSENT states so in
   // its own slot — each draw function answers with `no-session.ts`'s dash —
-  // and the context chip and the warning strip carry the session-less facts
-  // themselves, the chip's hover leading with the reason and the strip
-  // carrying it as a line.
+  // and the context chip and the heading's warnings carry the session-less
+  // facts themselves, the chip's hover leading with the reason and the
+  // warnings list carrying it as a line.
   const right = drawChipRun("topbar-right", [
     drawTopbarModelSelector(u.modelSelector, tc),
     drawTopbarEffortSelector(u.effortSelector, tc),

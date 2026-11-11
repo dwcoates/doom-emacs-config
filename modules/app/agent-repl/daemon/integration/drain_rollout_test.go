@@ -1142,7 +1142,7 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	// the holdout on the cadence while the turn runs.
 	d.AwaitLogRecord(incumbentLog, "the transfer asked again at freeness", func(r harness.LogRecord) bool {
 		return r.PID == d.PID() && r.Operation == "daemon.rollout.transfer" &&
-			r.Message == "asked the bounce registry to transfer the workspace again at its freeness"
+			r.Message == "asked the bounce registry to transfer the workspace again" && r.Context["gate"] == "freeness"
 	})
 	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
 		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" && strings.ToLower(r.Level) == "warn" &&

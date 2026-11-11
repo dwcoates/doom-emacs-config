@@ -1397,6 +1397,9 @@ the observable is the URL the host is asked to hold."
                          (lambda (_ws fn) (funcall fn))))
                 (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
                 (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+                ;; THE HOST HOLDS THE PAGE: a slot off screen is made with none, and a
+                ;; workspace with no page has nothing to re-point.
+                (agent-repl-webhost-ensure-page agent-repl-itest-host--ws)
                 (setq navigated nil)
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
@@ -2138,6 +2141,9 @@ the page is re-pointed in the one host web view rather than remounted."
                 (agent-repl--ws-put agent-repl-itest-host--ws :project-dir
                                     (agent-repl-itest--fixture-dir "itest-host-ws"))
                 (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+                ;; THE HOST HOLDS THE PAGE: a slot off screen is made with none, and a
+                ;; workspace with no page has nothing to re-point.
+                (agent-repl-webhost-ensure-page agent-repl-itest-host--ws)
                 (setq navigated nil)
                 ;; Act.
                 (agent-repl-host-on-link-up fresh)

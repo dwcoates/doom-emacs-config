@@ -103,7 +103,11 @@ function topbarContext(): TopbarContext {
   return { ctx: appContext(), reveals: mountRevealLayer(host()), openLogin: () => undefined, localFailures: () => [] };
 }
 
-/** The strip's view: one of every chip, warnings included. */
+/**
+ * The strip's view: one of every chip, the queue-bypass chip a personal
+ * account draws included, and warnings, which ride the heading's line rather
+ * than a chip of the status run.
+ */
 function stripView(session: boolean, summary: boolean) {
   return create(TopbarViewSchema, {
     ...(summary ? { title: { text: "ABC/fix the flaky reconnect backoff" } } : {}),
@@ -123,6 +127,7 @@ function stripView(session: boolean, summary: boolean) {
       : {}),
     context: { text: "142.3k", breakdown: { sections: [] } },
     warnings: { warnings: [{ line: { text: "something is wrong" } }] },
+    queueBypass: { mode: { case: "off", value: {} }, tooltip: { text: "queue bypass off" } },
     remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
     persistentWifi: {
       wifi: { case: "joined", value: {} },

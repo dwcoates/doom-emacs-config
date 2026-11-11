@@ -47,6 +47,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
@@ -410,13 +411,15 @@ func (s *Service) arm(ctx context.Context, g wsm.Gather) {
 	run := runOf(ctx)
 	wait := g.DeadlineAt.Sub(s.deps.Clock.Now())
 	fired := s.deps.Clock.After(wait)
-	go func() {
+	// STANDING, NOT COUNTED: the wait is a timer's, up to the whole deadline,
+	// and a drain must not wait a deadline out. It ends with Run.
+	inflight.Standing(func() {
 		select {
 		case <-fired:
 			s.loop.Report(deadlineEvent{gather: g.ID})
 		case <-run.Done():
 		}
-	}()
+	})
 }
 
 type deadlineEvent struct{ gather wsm.GatherID }

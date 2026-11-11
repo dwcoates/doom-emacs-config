@@ -450,13 +450,15 @@ describe("the chip's client-local failures", () => {
     expect(rows).toEqual(["this page cannot read the daemon's state", "served"]);
   });
 
-  it("names the standing arms on the chip, readable without opening it", () => {
+  it("names the standing arms on the heading's warnings line, readable without opening it", () => {
     const failures = createLocalFailures();
     failures.report(staleBundle("drift"));
     failures.report(daemonUnreachable(1006, "gone"));
     const { tc } = withFailures(failures);
-    const chip = drawTopbarWarningStrip(strip(), tc);
-    expect(chip?.getAttribute("data-local-arms")).toBe("staleBundle daemonUnreachable");
+    const drawn = drawTopbarWarningStrip(strip(), tc);
+    expect(drawn?.querySelector(".topbar-heading-warnings")?.getAttribute("data-local-arms")).toBe(
+      "staleBundle daemonUnreachable",
+    );
   });
 
   it("marks a failure's row as the page's own, by its arm", () => {

@@ -84,7 +84,7 @@ export async function beatParkedConversation(
   const facts = readTranscriptFacts(file);
   if (facts === undefined) {
     const detail = `no transcript at ${file}`;
-    LOGGER.error({ ...context, transcript: file }, "the parked conversation's keep-alive was not sent: its transcript is not on disk");
+    LOGGER.error({ ...context, transcript: file, detail }, "the parked conversation's keep-alive was not sent: its transcript is not on disk");
     return { kind: "failed", detail };
   }
   if (facts.lastRequestAtMs === 0) {

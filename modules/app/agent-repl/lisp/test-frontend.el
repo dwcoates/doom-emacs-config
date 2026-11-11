@@ -421,6 +421,8 @@ EFFECTS collects what the rescue did: (:page WS) for a page reload and
            (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:7777"
              (cl-letf* ((agent-repl--webhost-url "http://host.localhost:7777/?host=1")
                         ((symbol-function 'agent-repl-webhost-xwidget) (lambda () 'host-xwidget))
+                        ;; The host holds the page: only a held page is reloaded.
+                        ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) t))
                        ((symbol-function 'agent-repl--frontend-webview-uri) (lambda (_xw) ,uri))
                        ((symbol-function 'agent-repl-webhost-reload-page)
                         (lambda (ws) (push (list :page ws) ,effects) "ws-1"))

@@ -481,7 +481,7 @@ func TestAnOwnForksBringUpForksTheWholeConversationUnderNoHold(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
 	ws := ownPendingFork(f)
-	f.client.response = startedResponse("forked-own")
+	f.client.response = startedResponse("forked-1")
 
 	// Act
 	err := f.fleet.Start(context.Background(), ws.ID)
@@ -500,7 +500,7 @@ func TestAnOwnForksBringUpForksTheWholeConversationUnderNoHold(t *testing.T) {
 	if len(f.deliveries.held) != 0 {
 		t.Fatalf("held = %v, want no deliveries held for a conversation nothing drives", f.deliveries.held)
 	}
-	if got := f.client.requests[len(f.client.requests)-1].GetResume().GetVendorSessionId(); got != "forked-own" {
+	if got := f.client.requests[len(f.client.requests)-1].GetResume().GetVendorSessionId(); got != "forked-1" {
 		t.Fatalf("StartSession resumed %q, want the fork", got)
 	}
 }
@@ -509,7 +509,7 @@ func TestAnOwnForkRecordsTheWorkspaceAsItsOwnParent(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
 	ws := ownPendingFork(f)
-	f.client.response = startedResponse("forked-own")
+	f.client.response = startedResponse("forked-1")
 
 	// Act
 	err := f.fleet.Start(context.Background(), ws.ID)
@@ -522,7 +522,7 @@ func TestAnOwnForkRecordsTheWorkspaceAsItsOwnParent(t *testing.T) {
 		t.Fatalf("resolved forks = %+v, want the fork recorded once", f.db.resolvedForks)
 	}
 	got := f.db.resolvedForks[0]
-	if got.vendorSessionID != "forked-own" || got.lineage.Workspace != ws.ID || got.lineage.Parent != ws.ID || got.lineage.ThroughMs != fixedNow.UnixMilli() {
+	if got.vendorSessionID != "forked-1" || got.lineage.Workspace != ws.ID || got.lineage.Parent != ws.ID || got.lineage.ThroughMs != fixedNow.UnixMilli() {
 		t.Fatalf("resolved = %+v, want the fork of the workspace's own conversation bounded at now", got)
 	}
 	if _, owed := f.db.pendingForks[ws.ID]; owed {

@@ -10999,6 +10999,206 @@ describe("the cold gate's COMPACT remediation", () => {
   });
 });
 
+describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => {
+  /** The summary of `main-1` a resume of the bypass conversation carries. */
+  const carry = (): shimv1.StartSessionCarrySummary =>
+    create(shimv1.StartSessionCarrySummarySchema, {
+      vendorSessionId: "main-1",
+      summarizer: create(conversationv1.SessionColdCompactSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+        scope: conversationv1.SessionCompactScope.ALL,
+      }),
+    });
+
+  /** A resume of `bypass-1` carrying {@link carry}. */
+  function carryingRequest(): shimv1.StartSessionRequest {
+    const request = resumeRequest("bypass-1");
+    if (request.source.case === "resume") request.source.value.carrySummary = carry();
+    return request;
+  }
+
+  /** A harness whose first query, the summarizer, answers with `done`. */
+  function summarizing(): Harness {
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777771");
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+    writeTranscript(h.configDir, h.cwd, "main-1", [assistantLine()]);
+    return h;
+  }
+
+  it("answers the summary on the success", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    const pending = h.engine.startSession(carryingRequest());
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
+    const response = await pending;
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.carriedSummary?.text : undefined).toBe("done");
+  });
+
+  it("summarizes the named conversation on an ephemeral fork, which writes nothing", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    const pending = h.engine.startSession(carryingRequest());
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
+    await pending;
+
+    // Assert
+    expect(h.queries[0]?.spec.binding).toEqual({ kind: "ephemeral_fork", parentSessionId: "main-1" });
+  });
+
+  it("asks the summarizer on the carried model", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    const pending = h.engine.startSession(carryingRequest());
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
+    await pending;
+
+    // Assert
+    expect(h.queries[0]?.spec.model).toBe("claude-haiku-4-5");
+  });
+
+  it("leaves the resumed conversation's transcript as it was", async () => {
+    // Arrange
+    const h = summarizing();
+    const transcript = transcriptPath(h.configDir, h.cwd, "bypass-1");
+    const before = readFileSync(transcript, "utf8");
+
+    // Act
+    const pending = h.engine.startSession(carryingRequest());
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
+    await pending;
+
+    // Assert
+    expect(readFileSync(transcript, "utf8")).toBe(before);
+  });
+
+  it("answers no carried summary on a resume that asked for none", async () => {
+    // Arrange
+    const h = harness();
+    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("bypass-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "bypass-1" }));
+    const response = await pending;
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.carriedSummary : "not a success").toBeUndefined();
+  });
+
+  it("refuses vendor_start_failed marked as the compaction when the summary does not complete", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+
+    // Act
+    const response = await h.engine.startSession(carryingRequest());
+
+    // Assert
+    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
+    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction !== undefined : "not vendor_start_failed").toBe(true);
+  });
+
+  it("opens no session when the summary does not complete", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+
+    // Act
+    await h.engine.startSession(carryingRequest());
+
+    // Assert
+    expect(h.queries).toHaveLength(1);
+  });
+});
+
+describe("the compaction marker on a failed start", () => {
+  it("marks a failed cold-gate compaction as the compaction", async () => {
+    // Arrange
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const compact = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, { scope: conversationv1.SessionCompactScope.ALL }),
+      },
+    });
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", compact));
+
+    // Assert
+    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
+    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction !== undefined : "not vendor_start_failed").toBe(true);
+  });
+
+  it("leaves the marker off a vendor that would not open", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
+      },
+    });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
+    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction : "not vendor_start_failed").toBeUndefined();
+  });
+
+  it("compacts a WARM context when the resume names the compact remediation", async () => {
+    // A SET REMEDIATION IS CARRIED OUT WARM OR COLD: the compacted fork a
+    // queue-bypass switch owes is warm, and its first start compacts it.
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777772");
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const compact = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, { scope: conversationv1.SessionCompactScope.ALL }),
+      },
+    });
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("resume-1", compact));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert
+    expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
+  });
+});
+
 describe("reconciliation when the record cannot describe the work", () => {
   it("leaves a live run live when the book cannot be read: nothing states it ran in the CLI process", async () => {
     // Arrange.
@@ -18663,6 +18863,28 @@ describe("HoldParkedBridge", () => {
       response.result.case === "success" ? response.result.value.session?.vendorSessionId : undefined,
       h.queries.length,
     ]).toEqual(["success", "resume-1", 1]);
+  });
+
+  it("refuses a pay answer carrying a summary already_started, so a new shim writes the summary", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+    const request = resumeRequest("resume-1", pay());
+    if (request.source.case === "resume") {
+      request.source.value.carrySummary = create(shimv1.StartSessionCarrySummarySchema, {
+        vendorSessionId: "main-1",
+        summarizer: create(conversationv1.SessionColdCompactSchema, {
+          model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+          scope: conversationv1.SessionCompactScope.ALL,
+        }),
+      });
+    }
+
+    // Act
+    const response = await h.engine.startSession(request);
+
+    // Assert
+    expect(failureCause(response)).toBe("alreadyStarted");
   });
 
   it("ends its watch once the pay answer takes the session", async () => {

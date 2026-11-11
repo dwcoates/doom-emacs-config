@@ -3,7 +3,8 @@
 // sendChipToggle, the one click path of a topbar chip that turns a mode over.
 // Driven directly over UpdateRemoteControlMode (any toggle rpc serves), so
 // each case pins what the helper guarantees every chip, and a source scan
-// pins that both chips go through it.
+// pins that every toggle chip (queue bypass, remote control, persistent wifi)
+// goes through it.
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,8 +181,8 @@ describe("the toggle chips' one click path", () => {
     expect(sources.filter((s) => s.text.includes('"data-settling"')).map((s) => s.file)).toEqual([]);
   });
 
-  it("is what both toggle chips send through", () => {
+  it("is what every toggle chip sends through", () => {
     const callers = sources.filter((s) => s.text.includes("sendChipToggle(")).map((s) => s.file).sort();
-    expect(callers).toEqual(["persistent-wifi.ts", "remote-control.ts"]);
+    expect(callers).toEqual(["persistent-wifi.ts", "queue-bypass.ts", "remote-control.ts"]);
   });
 });

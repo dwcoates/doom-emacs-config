@@ -544,6 +544,12 @@ type fakeVerbs struct {
 	remoteWorkspaces []ids.WorkspaceID
 	remoteOn         bool
 	remoteErr        error
+	// bypassChanges and bypassContexts are every UpdateQueueBypassMode's
+	// change and context, answered with bypassOn and bypassErr.
+	bypassChanges  []workspace.QueueBypassChange
+	bypassContexts []workspace.QueueBypassContext
+	bypassOn       bool
+	bypassErr      error
 
 	// retries counts every RetryVendorError, answered with retryResponse and
 	// retryErr.
@@ -701,6 +707,12 @@ func (f *fakeVerbs) UpdateRemoteControlMode(_ context.Context, ws ids.WorkspaceI
 	f.remoteChanges = append(f.remoteChanges, change)
 	f.remoteWorkspaces = append(f.remoteWorkspaces, ws)
 	return f.remoteOn, f.remoteErr
+}
+
+func (f *fakeVerbs) UpdateQueueBypassMode(_ context.Context, _ ids.WorkspaceID, change workspace.QueueBypassChange, bypassContext workspace.QueueBypassContext) (bool, error) {
+	f.bypassChanges = append(f.bypassChanges, change)
+	f.bypassContexts = append(f.bypassContexts, bypassContext)
+	return f.bypassOn, f.bypassErr
 }
 
 func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {

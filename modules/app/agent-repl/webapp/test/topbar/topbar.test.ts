@@ -137,19 +137,28 @@ describe("drawTopbarView", () => {
     expect(openPanel(host)?.textContent).toBe("session abc");
   });
 
-  // THE STATUS CHIPS RIDE THE LEFT (owner request, 2026-11-09): after the
-  // account cell, the remote-control chip, the persistent-wifi chip, then the
-  // warning chip, which ends the run so its arrival moves no other chip.
-  it("draws the left group as the account cell and then the status run", () => {
+  // THE STATUS CHIPS OPEN THE STRIP, LEFT OF THE LOGIN (owner requests,
+  // 2026-11-09 and 2026-11-10): the status run, then the account cell. The
+  // queue-bypass chip opens the run on a personal account (owner request,
+  // 2026-11-10), and the warnings are no chip of it: they ride the heading.
+  it("draws the left group as the status run and then the account cell", () => {
     const { tc } = topbarContext();
     const left = drawTopbarView(view(), tc).querySelector(".topbar-left");
-    expect([...(left?.children ?? [])].map(firstClass)).toEqual(["topbar-account-cell", "topbar-status"]);
+    expect([...(left?.children ?? [])].map(firstClass)).toEqual(["topbar-status", "topbar-account-cell"]);
   });
 
-  it("orders the status run remote control, persistent wifi, warnings", () => {
+  it("orders the status run queue bypass, remote control, persistent wifi, with no warnings in it", () => {
     const { tc } = topbarContext();
-    const row = drawTopbarView(view({ warnings: sessionlessView("parked").warnings }), tc);
-    expect(childClasses(row, ".topbar-status")).toEqual(["topbar-remote-control", "topbar-wifi", "topbar-warnings"]);
+    const row = drawTopbarView(
+      view({
+        warnings: sessionlessView("parked").warnings,
+        queueBypass: create(TopbarViewSchema, {
+          queueBypass: { mode: { case: "off", value: {} }, tooltip: { text: "queue bypass off" } },
+        }).queueBypass,
+      }),
+      tc,
+    );
+    expect(childClasses(row, ".topbar-status")).toEqual(["topbar-queue-bypass", "topbar-remote-control", "topbar-wifi"]);
   });
 
   it("orders the right group model, effort, permission mode, context", () => {
@@ -233,7 +242,7 @@ describe("drawTopbarView", () => {
   it("draws the state as a warning line rather than losing it", () => {
     const { host, tc } = topbarContext();
     host.append(drawTopbarView(sessionlessView("cold context, awaiting your answer"), tc));
-    host.querySelector(".topbar-warnings")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    host.querySelector(".topbar-heading-warnings")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(openPanel(host)?.textContent).toBe("cold context, awaiting your answer");
   });
 
@@ -596,17 +605,17 @@ describe("mountTopbar: the chip's client-local failures", () => {
     handle.dispose();
   });
 
-  it("draws no chip at all while nothing stands", () => {
+  it("draws no warnings at all while nothing stands", () => {
     const { host, handle } = mountUnwatched(createLocalFailures());
-    expect(host.querySelector(".topbar-warnings")).toBeNull();
+    expect(host.querySelector(".topbar-heading-warnings")).toBeNull();
     handle.dispose();
   });
 
-  it("draws the chip in the left group's status run before any push", () => {
+  it("draws the warnings on the heading's line before any push", () => {
     const failures = createLocalFailures();
     const { host, handle } = mountUnwatched(failures);
     failures.report(staleBundle("drift"));
-    expect(host.querySelector(".topbar-row > .topbar-left > .topbar-status > .topbar-warnings")).not.toBeNull();
+    expect(host.querySelector(".topbar-row > .topbar-heading > .topbar-heading-warnings")).not.toBeNull();
     handle.dispose();
   });
 
@@ -754,9 +763,12 @@ describe("the strip's layout", () => {
     expect(spacing).toBeLessThanOrEqual(21.2 * 0.7);
   });
 
-  it("spaces the right-hand chips no closer than 30%", () => {
-    const spacing = (token("--topbar-chips-gap") + 2 * token("--topbar-chips-inset")) * 16 + 2;
-    expect(spacing).toBeGreaterThan(21.2 * 0.69);
+  // THE 2026-11-10 REQUEST: the chip gaps "narrow by a quarter" again, every
+  // rem going to the title's flanks. The rems of the 30%-closer spacing,
+  // 0.2rem + 2 x 0.3rem, narrow by exactly a quarter; the 1px borders stay.
+  it("narrows the chips' rem spacing by a quarter from the 30%-closer measure", () => {
+    const rems = token("--topbar-chips-gap") + 2 * token("--topbar-chips-inset");
+    expect(rems).toBeCloseTo((0.2 + 2 * 0.3) * 0.75, 6);
   });
 
   // ONE RULE FOR EVERY CHIP, keyed on its run: a button inside a control's
@@ -865,8 +877,14 @@ describe("the account cell", () => {
     ]);
   });
 
-  it("stands the glyph closer to its label than two chips of the strip stand apart", () => {
-    expect(declaration(".topbar-account-cell", "gap")).toBe("calc(var(--topbar-chip-gap) / 2)");
+  // THE LOGIN GLYPH HUGS THE LOGIN NAME (owner request, 2026-11-10): no gap
+  // inside the cell, and only the label's shrunken left inset between them.
+  it("stands the glyph against its label with no gap inside the cell", () => {
+    expect(declaration(".topbar-account-cell", "gap")).toBe("0");
+  });
+
+  it("insets the label from the glyph by 0.15rem alone", () => {
+    expect(declaration(".topbar-account-cell > .topbar-account", "padding-left")).toBe("0.15rem");
   });
 
   // ONE ELEMENT MEANS ONE ANCHOR: the options hang under the pair.
@@ -998,7 +1016,7 @@ describe("the no-session cells", () => {
       declaration(".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]", "padding-block"),
     ).toBe(
       declaration(
-        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-heading-warnings",
+        ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-wifi-button",
         "padding-block",
       ),
     );
@@ -1008,7 +1026,7 @@ describe("the no-session cells", () => {
   // `padding` shorthand would quietly win over it for that one cell.
   it.each([
     ".topbar-model[data-no-session],\n.topbar-effort[data-no-session],\n.topbar-effort[data-effort-unsupported],\n.topbar-mode[data-no-session]",
-    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-heading-warnings",
+    ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-queue-bypass-button,\n.topbar-remote-control-button,\n.topbar-wifi-button",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
   });

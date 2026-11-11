@@ -280,7 +280,7 @@ func TestBindSessionForgetsTheForkTheWorkspaceWas(t *testing.T) {
 			instant := time.Unix(1_700_000_000, 0)
 
 			// Act
-			err := s.BindSession(context.Background(), Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "chosen", StartedAt: instant, LastEngagementAt: instant})
+			err := s.BindSession(context.Background(), Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "chosen", StartedAt: instant, LastEngagementAt: instant}, nil)
 
 			// Assert
 			if err != nil {
@@ -304,7 +304,7 @@ func TestBindSessionRefusesASessionWithNoIdentityAndWritesNothing(t *testing.T) 
 	_, child := forkedPair(t, s)
 
 	// Act
-	err := s.BindSession(context.Background(), Session{Workspace: child.ID, VendorSessionID: "chosen"})
+	err := s.BindSession(context.Background(), Session{Workspace: child.ID, VendorSessionID: "chosen"}, nil)
 
 	// Assert
 	if err == nil {
@@ -338,7 +338,7 @@ func TestBindSessionToOwnForkBindsNoConversationAndOwesTheFork(t *testing.T) {
 	sess.VendorSessionID = ""
 
 	// Act
-	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue")
+	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue", nil)
 
 	// Assert
 	if err != nil {
@@ -366,7 +366,7 @@ func TestBindSessionToOwnForkForgetsTheForkTheWorkspaceWas(t *testing.T) {
 	sess.VendorSessionID = ""
 
 	// Act
-	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue")
+	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue", nil)
 
 	// Assert
 	if err != nil {
@@ -395,7 +395,7 @@ func TestBindSessionToOwnForkRefusesAndWritesNothing(t *testing.T) {
 			sess.VendorSessionID = tc.vendor
 
 			// Act
-			err := s.BindSessionToOwnFork(ctx, sess, tc.parent)
+			err := s.BindSessionToOwnFork(ctx, sess, tc.parent, nil)
 
 			// Assert
 			if err == nil {
@@ -420,7 +420,7 @@ func TestLineageEndsAtAnOwnFork(t *testing.T) {
 	ctx := context.Background()
 	sess, _, _ := s.Session(ctx, ws.ID)
 	sess.VendorSessionID = ""
-	if err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue"); err != nil {
+	if err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue", nil); err != nil {
 		t.Fatalf("BindSessionToOwnFork: %v", err)
 	}
 	if err := s.ResolveFork(ctx, "vendor-bypass", ForkLineage{Workspace: ws.ID, Parent: ws.ID, ParentBook: "book-queue", ThroughMs: 5}); err != nil {

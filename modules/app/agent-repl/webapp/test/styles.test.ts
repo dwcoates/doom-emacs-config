@@ -4483,15 +4483,21 @@ describe("the persistent-wifi chip's paints (owner request, 2026-10-02)", () => 
 });
 
 /**
- * The rule that names BOTH chips' hooks, one wifi hook and its remote-control
- * twin, alone: the two chips share one look and feel (owner ruling,
- * 2026-10-31), so each of the wifi chip's paint rules is the remote-control
- * chip's too.
+ * The rule that names one wifi hook and each of its TWINS' (the same hook on
+ * the twin chip), alone: the remote-control chip shares the wifi chip's look
+ * and feel (owner ruling, 2026-10-31), and so does the queue-bypass chip
+ * (owner request, 2026-11-10), so each of the wifi chip's paint rules is
+ * theirs too. The mode-on disc is the one paint the queue-bypass chip does not
+ * share (it lights in the canonical orange), so that rule names the
+ * remote-control twin alone.
  */
-function sharedChipRule(wifi: string): string | undefined {
-  const twin = wifi.replaceAll("topbar-wifi", "topbar-remote-control");
+function sharedChipRule(
+  wifi: string,
+  twins: readonly string[] = ["topbar-remote-control", "topbar-queue-bypass"],
+): string | undefined {
+  const hooks = [wifi, ...twins.map((twin) => wifi.replaceAll("topbar-wifi", twin))];
   return rulesOf(stylesheet).find(
-    (rule) => rule.selectors.length === 2 && rule.selectors.includes(wifi) && rule.selectors.includes(twin),
+    (rule) => rule.selectors.length === hooks.length && hooks.every((hook) => rule.selectors.includes(hook)),
   )?.declarations;
 }
 
@@ -4505,7 +4511,7 @@ describe("the remote-control chip's paints (owner ruling, 2026-10-31)", () => {
   });
 
   it("fills the disc green when the mode is on, as the wifi chip's", () => {
-    expect(sharedChipRule('.topbar-wifi[data-mode="on"] .topbar-wifi-disc') ?? "").toMatch(
+    expect(sharedChipRule('.topbar-wifi[data-mode="on"] .topbar-wifi-disc', ["topbar-remote-control"]) ?? "").toMatch(
       /fill:\s*var\(--wifi-mode-on-disc\)/,
     );
   });

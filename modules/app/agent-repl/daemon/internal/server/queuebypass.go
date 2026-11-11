@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -28,7 +29,7 @@ func (s *server) UpdateQueueBypassMode(
 	if done {
 		return answer(resp, cerr)
 	}
-	on, err := s.deps.Verbs.UpdateQueueBypassMode(ctx, subject.Record.ID, queueBypassChange(req.Msg))
+	on, err := s.deps.Verbs.UpdateQueueBypassMode(ctx, subject.Record.ID, queueBypassChange(req.Msg), queueBypassContext(req.Msg))
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
@@ -56,6 +57,17 @@ func queueBypassChange(req *agentreplv1.UpdateQueueBypassModeRequest) workspace.
 	panic(fmt.Sprintf("server: undeclared UpdateQueueBypassModeRequest.action arm %T", req.GetAction()))
 }
 
+// queueBypassContext is the context a validated request's on arm names, the
+// default for an on naming none and for every other arm.
+func queueBypassContext(req *agentreplv1.UpdateQueueBypassModeRequest) workspace.QueueBypassContext {
+	named, err := workspace.QueueBypassContextFrom(req.GetOn().GetContext())
+	if err != nil {
+		// validateUpdateQueueBypassModeRequest refused every such context.
+		panic(fmt.Sprintf("server: an unvalidated queue-bypass context reached the verb: %v", err))
+	}
+	return named
+}
+
 // validateUpdateQueueBypassModeRequest is UpdateQueueBypassModeRequest's
 // validation: a workspace and one action arm.
 func validateUpdateQueueBypassModeRequest(req *agentreplv1.UpdateQueueBypassModeRequest) *connect.Error {
@@ -63,14 +75,24 @@ func validateUpdateQueueBypassModeRequest(req *agentreplv1.UpdateQueueBypassMode
 		return err
 	}
 	switch req.GetAction().(type) {
-	case *agentreplv1.UpdateQueueBypassModeRequest_On,
-		*agentreplv1.UpdateQueueBypassModeRequest_Off,
+	case *agentreplv1.UpdateQueueBypassModeRequest_On:
+		return validateQueueBypassContext(req.GetOn().GetContext())
+	case *agentreplv1.UpdateQueueBypassModeRequest_Off,
 		*agentreplv1.UpdateQueueBypassModeRequest_Toggle:
 		return nil
 	case nil:
 		return invalid("action", "a queue-bypass action arm is required")
 	}
 	return invalid("action", "the queue-bypass action is not one this contract defines")
+}
+
+// validateQueueBypassContext refuses a context that is set with no arm, or
+// with one this contract does not define. Unset is the default.
+func validateQueueBypassContext(named *frontendv1.TopbarQueueBypassContext) *connect.Error {
+	if _, err := workspace.QueueBypassContextFrom(named); err != nil {
+		return invalid("on.context", err.Error())
+	}
+	return nil
 }
 
 func (s *requestLoggingServer) UpdateQueueBypassMode(

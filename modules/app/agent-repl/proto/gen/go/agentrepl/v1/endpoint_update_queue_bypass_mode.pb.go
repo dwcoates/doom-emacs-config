@@ -15,6 +15,13 @@
 // the first time); releasing it does the reverse. Neither conversation's cache
 // is spent by the other, and the one not running is kept for the next switch.
 //
+// TAKING IT MAY NAME HOW THE BYPASS SESSION GETS ITS CONTEXT
+// (UpdateQueueBypassModeOn.context, owner request 2026-11-11): a full or a
+// compacted fork of the ordinary conversation, which replaces the parked
+// bypass conversation, or the parked bypass conversation, alone or with a
+// compacted summary of the ordinary one carried into it. Releasing never
+// does: it resumes the ordinary conversation as it stands.
+//
 // ONLY A PERSONAL ACCOUNT MAY HOLD IT: a work account's workspace is refused,
 // and its topbar draws no chip at all.
 //
@@ -30,6 +37,7 @@
 package agentreplv1
 
 import (
+	v11 "agentrepl/proto/frontend/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -162,7 +170,15 @@ func (*UpdateQueueBypassModeRequest_Toggle) isUpdateQueueBypassModeRequest_Actio
 
 // Take the mode.
 type UpdateQueueBypassModeOn struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How the bypass session gets its context: the option the chip's menu
+	// served, echoed back unchanged (a typed echo token, so its four arms are
+	// declared once, in frontend.v1, and never respelled here). UNSET keeps the
+	// behavior every caller had before the menu: a full fork of the ordinary
+	// conversation while no bypass conversation is parked, and the parked one
+	// resumed while one is. A context that is set with no arm set is
+	// InvalidArgument.
+	Context       *v11.TopbarQueueBypassContext `protobuf:"bytes,1,opt,name=context,proto3,oneof" json:"context,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -195,6 +211,13 @@ func (x *UpdateQueueBypassModeOn) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UpdateQueueBypassModeOn.ProtoReflect.Descriptor instead.
 func (*UpdateQueueBypassModeOn) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *UpdateQueueBypassModeOn) GetContext() *v11.TopbarQueueBypassContext {
+	if x != nil {
+		return x.Context
+	}
+	return nil
 }
 
 // Release the mode.
@@ -414,6 +437,8 @@ type UpdateQueueBypassModeError struct {
 	//	*UpdateQueueBypassModeError_HeldElsewhere
 	//	*UpdateQueueBypassModeError_TurnInFlight
 	//	*UpdateQueueBypassModeError_SwitchFailed
+	//	*UpdateQueueBypassModeError_NoBypassConversation
+	//	*UpdateQueueBypassModeError_CompactionFailed
 	Cause         isUpdateQueueBypassModeError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -519,6 +544,24 @@ func (x *UpdateQueueBypassModeError) GetSwitchFailed() *UpdateQueueBypassModeSwi
 	return nil
 }
 
+func (x *UpdateQueueBypassModeError) GetNoBypassConversation() *UpdateQueueBypassModeNoBypassConversation {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateQueueBypassModeError_NoBypassConversation); ok {
+			return x.NoBypassConversation
+		}
+	}
+	return nil
+}
+
+func (x *UpdateQueueBypassModeError) GetCompactionFailed() *UpdateQueueBypassModeCompactionFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateQueueBypassModeError_CompactionFailed); ok {
+			return x.CompactionFailed
+		}
+	}
+	return nil
+}
+
 type isUpdateQueueBypassModeError_Cause interface {
 	isUpdateQueueBypassModeError_Cause()
 }
@@ -559,6 +602,20 @@ type UpdateQueueBypassModeError_SwitchFailed struct {
 	SwitchFailed *UpdateQueueBypassModeSwitchFailed `protobuf:"bytes,7,opt,name=switch_failed,json=switchFailed,proto3,oneof"`
 }
 
+type UpdateQueueBypassModeError_NoBypassConversation struct {
+	// The context named the parked bypass conversation (existing, or existing
+	// plus compacted main), and the workspace parks none. Nothing changed.
+	NoBypassConversation *UpdateQueueBypassModeNoBypassConversation `protobuf:"bytes,8,opt,name=no_bypass_conversation,json=noBypassConversation,proto3,oneof"`
+}
+
+type UpdateQueueBypassModeError_CompactionFailed struct {
+	// The compaction or summary the context asked for did not complete. The
+	// switch stands as the conversation swap left it: the hold is taken, the
+	// queue is stopped, and the bypass conversation is bound; its next start
+	// asks for the compaction again.
+	CompactionFailed *UpdateQueueBypassModeCompactionFailed `protobuf:"bytes,9,opt,name=compaction_failed,json=compactionFailed,proto3,oneof"`
+}
+
 func (*UpdateQueueBypassModeError_UnknownWorkspace) isUpdateQueueBypassModeError_Cause() {}
 
 func (*UpdateQueueBypassModeError_WorkspaceRefMismatch) isUpdateQueueBypassModeError_Cause() {}
@@ -572,6 +629,10 @@ func (*UpdateQueueBypassModeError_HeldElsewhere) isUpdateQueueBypassModeError_Ca
 func (*UpdateQueueBypassModeError_TurnInFlight) isUpdateQueueBypassModeError_Cause() {}
 
 func (*UpdateQueueBypassModeError_SwitchFailed) isUpdateQueueBypassModeError_Cause() {}
+
+func (*UpdateQueueBypassModeError_NoBypassConversation) isUpdateQueueBypassModeError_Cause() {}
+
+func (*UpdateQueueBypassModeError_CompactionFailed) isUpdateQueueBypassModeError_Cause() {}
 
 // The workspace id is not registered.
 type UpdateQueueBypassModeUnknownWorkspace struct {
@@ -868,18 +929,104 @@ func (x *UpdateQueueBypassModeSwitchFailed) GetDetail() string {
 	return ""
 }
 
+// No bypass conversation is parked to resume.
+type UpdateQueueBypassModeNoBypassConversation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateQueueBypassModeNoBypassConversation) Reset() {
+	*x = UpdateQueueBypassModeNoBypassConversation{}
+	mi := &file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateQueueBypassModeNoBypassConversation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateQueueBypassModeNoBypassConversation) ProtoMessage() {}
+
+func (x *UpdateQueueBypassModeNoBypassConversation) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateQueueBypassModeNoBypassConversation.ProtoReflect.Descriptor instead.
+func (*UpdateQueueBypassModeNoBypassConversation) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDescGZIP(), []int{14}
+}
+
+// The compaction or summary did not complete.
+type UpdateQueueBypassModeCompactionFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The shim's own account of the failure, verbatim.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateQueueBypassModeCompactionFailed) Reset() {
+	*x = UpdateQueueBypassModeCompactionFailed{}
+	mi := &file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateQueueBypassModeCompactionFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateQueueBypassModeCompactionFailed) ProtoMessage() {}
+
+func (x *UpdateQueueBypassModeCompactionFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateQueueBypassModeCompactionFailed.ProtoReflect.Descriptor instead.
+func (*UpdateQueueBypassModeCompactionFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UpdateQueueBypassModeCompactionFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_update_queue_bypass_mode_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc = "" +
 	"\n" +
-	"4agentrepl/v1/endpoint_update_queue_bypass_mode.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x9c\x02\n" +
+	"4agentrepl/v1/endpoint_update_queue_bypass_mode.proto\x12\fagentrepl.v1\x1a\x18frontend/v1/topbar.proto\x1a\x1cworkspace/v1/workspace.proto\"\x9c\x02\n" +
 	"\x1cUpdateQueueBypassModeRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x127\n" +
 	"\x02on\x18\x02 \x01(\v2%.agentrepl.v1.UpdateQueueBypassModeOnH\x00R\x02on\x12:\n" +
 	"\x03off\x18\x03 \x01(\v2&.agentrepl.v1.UpdateQueueBypassModeOffH\x00R\x03off\x12C\n" +
 	"\x06toggle\x18\x04 \x01(\v2).agentrepl.v1.UpdateQueueBypassModeToggleH\x00R\x06toggleB\b\n" +
-	"\x06action\"\x19\n" +
-	"\x17UpdateQueueBypassModeOn\"\x1a\n" +
+	"\x06action\"k\n" +
+	"\x17UpdateQueueBypassModeOn\x12D\n" +
+	"\acontext\x18\x01 \x01(\v2%.frontend.v1.TopbarQueueBypassContextH\x00R\acontext\x88\x01\x01B\n" +
+	"\n" +
+	"\b_context\"\x1a\n" +
 	"\x18UpdateQueueBypassModeOff\"\x1d\n" +
 	"\x1bUpdateQueueBypassModeToggle\"\xb3\x01\n" +
 	"\x1dUpdateQueueBypassModeResponse\x12F\n" +
@@ -887,7 +1034,7 @@ const file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2(.agentrepl.v1.UpdateQueueBypassModeErrorH\x00R\x05errorB\b\n" +
 	"\x06result\".\n" +
 	"\x1cUpdateQueueBypassModeSuccess\x12\x0e\n" +
-	"\x02on\x18\x01 \x01(\bR\x02on\"\xbf\x05\n" +
+	"\x02on\x18\x01 \x01(\bR\x02on\"\x94\a\n" +
 	"\x1aUpdateQueueBypassModeError\x12b\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v23.agentrepl.v1.UpdateQueueBypassModeUnknownWorkspaceH\x00R\x10unknownWorkspace\x12o\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v27.agentrepl.v1.UpdateQueueBypassModeWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12b\n" +
@@ -895,7 +1042,9 @@ const file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc = "" +
 	"\fwork_account\x18\x04 \x01(\v2..agentrepl.v1.UpdateQueueBypassModeWorkAccountH\x00R\vworkAccount\x12Y\n" +
 	"\x0eheld_elsewhere\x18\x05 \x01(\v20.agentrepl.v1.UpdateQueueBypassModeHeldElsewhereH\x00R\rheldElsewhere\x12W\n" +
 	"\x0eturn_in_flight\x18\x06 \x01(\v2/.agentrepl.v1.UpdateQueueBypassModeTurnInFlightH\x00R\fturnInFlight\x12V\n" +
-	"\rswitch_failed\x18\a \x01(\v2/.agentrepl.v1.UpdateQueueBypassModeSwitchFailedH\x00R\fswitchFailedB\a\n" +
+	"\rswitch_failed\x18\a \x01(\v2/.agentrepl.v1.UpdateQueueBypassModeSwitchFailedH\x00R\fswitchFailed\x12o\n" +
+	"\x16no_bypass_conversation\x18\b \x01(\v27.agentrepl.v1.UpdateQueueBypassModeNoBypassConversationH\x00R\x14noBypassConversation\x12b\n" +
+	"\x11compaction_failed\x18\t \x01(\v23.agentrepl.v1.UpdateQueueBypassModeCompactionFailedH\x00R\x10compactionFailedB\a\n" +
 	"\x05cause\"'\n" +
 	"%UpdateQueueBypassModeUnknownWorkspace\"N\n" +
 	")UpdateQueueBypassModeWorkspaceRefMismatch\x12!\n" +
@@ -907,6 +1056,9 @@ const file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc = "" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"#\n" +
 	"!UpdateQueueBypassModeTurnInFlight\";\n" +
 	"!UpdateQueueBypassModeSwitchFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"+\n" +
+	")UpdateQueueBypassModeNoBypassConversation\"?\n" +
+	"%UpdateQueueBypassModeCompactionFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -921,7 +1073,7 @@ func file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDescGZIP() []b
 	return file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_goTypes = []any{
 	(*UpdateQueueBypassModeRequest)(nil),              // 0: agentrepl.v1.UpdateQueueBypassModeRequest
 	(*UpdateQueueBypassModeOn)(nil),                   // 1: agentrepl.v1.UpdateQueueBypassModeOn
@@ -937,28 +1089,34 @@ var file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_goTypes = []any{
 	(*UpdateQueueBypassModeHeldElsewhere)(nil),        // 11: agentrepl.v1.UpdateQueueBypassModeHeldElsewhere
 	(*UpdateQueueBypassModeTurnInFlight)(nil),         // 12: agentrepl.v1.UpdateQueueBypassModeTurnInFlight
 	(*UpdateQueueBypassModeSwitchFailed)(nil),         // 13: agentrepl.v1.UpdateQueueBypassModeSwitchFailed
-	(*v1.WorkspaceRef)(nil),                           // 14: workspace.v1.WorkspaceRef
+	(*UpdateQueueBypassModeNoBypassConversation)(nil), // 14: agentrepl.v1.UpdateQueueBypassModeNoBypassConversation
+	(*UpdateQueueBypassModeCompactionFailed)(nil),     // 15: agentrepl.v1.UpdateQueueBypassModeCompactionFailed
+	(*v1.WorkspaceRef)(nil),                           // 16: workspace.v1.WorkspaceRef
+	(*v11.TopbarQueueBypassContext)(nil),              // 17: frontend.v1.TopbarQueueBypassContext
 }
 var file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.UpdateQueueBypassModeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 0: agentrepl.v1.UpdateQueueBypassModeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.UpdateQueueBypassModeRequest.on:type_name -> agentrepl.v1.UpdateQueueBypassModeOn
 	2,  // 2: agentrepl.v1.UpdateQueueBypassModeRequest.off:type_name -> agentrepl.v1.UpdateQueueBypassModeOff
 	3,  // 3: agentrepl.v1.UpdateQueueBypassModeRequest.toggle:type_name -> agentrepl.v1.UpdateQueueBypassModeToggle
-	5,  // 4: agentrepl.v1.UpdateQueueBypassModeResponse.success:type_name -> agentrepl.v1.UpdateQueueBypassModeSuccess
-	6,  // 5: agentrepl.v1.UpdateQueueBypassModeResponse.error:type_name -> agentrepl.v1.UpdateQueueBypassModeError
-	7,  // 6: agentrepl.v1.UpdateQueueBypassModeError.unknown_workspace:type_name -> agentrepl.v1.UpdateQueueBypassModeUnknownWorkspace
-	8,  // 7: agentrepl.v1.UpdateQueueBypassModeError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateQueueBypassModeWorkspaceRefMismatch
-	9,  // 8: agentrepl.v1.UpdateQueueBypassModeError.transferring_away:type_name -> agentrepl.v1.UpdateQueueBypassModeTransferringAway
-	10, // 9: agentrepl.v1.UpdateQueueBypassModeError.work_account:type_name -> agentrepl.v1.UpdateQueueBypassModeWorkAccount
-	11, // 10: agentrepl.v1.UpdateQueueBypassModeError.held_elsewhere:type_name -> agentrepl.v1.UpdateQueueBypassModeHeldElsewhere
-	12, // 11: agentrepl.v1.UpdateQueueBypassModeError.turn_in_flight:type_name -> agentrepl.v1.UpdateQueueBypassModeTurnInFlight
-	13, // 12: agentrepl.v1.UpdateQueueBypassModeError.switch_failed:type_name -> agentrepl.v1.UpdateQueueBypassModeSwitchFailed
-	14, // 13: agentrepl.v1.UpdateQueueBypassModeHeldElsewhere.workspace:type_name -> workspace.v1.WorkspaceRef
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	17, // 4: agentrepl.v1.UpdateQueueBypassModeOn.context:type_name -> frontend.v1.TopbarQueueBypassContext
+	5,  // 5: agentrepl.v1.UpdateQueueBypassModeResponse.success:type_name -> agentrepl.v1.UpdateQueueBypassModeSuccess
+	6,  // 6: agentrepl.v1.UpdateQueueBypassModeResponse.error:type_name -> agentrepl.v1.UpdateQueueBypassModeError
+	7,  // 7: agentrepl.v1.UpdateQueueBypassModeError.unknown_workspace:type_name -> agentrepl.v1.UpdateQueueBypassModeUnknownWorkspace
+	8,  // 8: agentrepl.v1.UpdateQueueBypassModeError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateQueueBypassModeWorkspaceRefMismatch
+	9,  // 9: agentrepl.v1.UpdateQueueBypassModeError.transferring_away:type_name -> agentrepl.v1.UpdateQueueBypassModeTransferringAway
+	10, // 10: agentrepl.v1.UpdateQueueBypassModeError.work_account:type_name -> agentrepl.v1.UpdateQueueBypassModeWorkAccount
+	11, // 11: agentrepl.v1.UpdateQueueBypassModeError.held_elsewhere:type_name -> agentrepl.v1.UpdateQueueBypassModeHeldElsewhere
+	12, // 12: agentrepl.v1.UpdateQueueBypassModeError.turn_in_flight:type_name -> agentrepl.v1.UpdateQueueBypassModeTurnInFlight
+	13, // 13: agentrepl.v1.UpdateQueueBypassModeError.switch_failed:type_name -> agentrepl.v1.UpdateQueueBypassModeSwitchFailed
+	14, // 14: agentrepl.v1.UpdateQueueBypassModeError.no_bypass_conversation:type_name -> agentrepl.v1.UpdateQueueBypassModeNoBypassConversation
+	15, // 15: agentrepl.v1.UpdateQueueBypassModeError.compaction_failed:type_name -> agentrepl.v1.UpdateQueueBypassModeCompactionFailed
+	16, // 16: agentrepl.v1.UpdateQueueBypassModeHeldElsewhere.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_init() }
@@ -971,6 +1129,7 @@ func file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_init() {
 		(*UpdateQueueBypassModeRequest_Off)(nil),
 		(*UpdateQueueBypassModeRequest_Toggle)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[1].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_msgTypes[4].OneofWrappers = []any{
 		(*UpdateQueueBypassModeResponse_Success)(nil),
 		(*UpdateQueueBypassModeResponse_Error)(nil),
@@ -983,6 +1142,8 @@ func file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_init() {
 		(*UpdateQueueBypassModeError_HeldElsewhere)(nil),
 		(*UpdateQueueBypassModeError_TurnInFlight)(nil),
 		(*UpdateQueueBypassModeError_SwitchFailed)(nil),
+		(*UpdateQueueBypassModeError_NoBypassConversation)(nil),
+		(*UpdateQueueBypassModeError_CompactionFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -990,7 +1151,7 @@ func file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_queue_bypass_mode_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -126,12 +126,15 @@ ALTER TABLE workspaces ADD COLUMN conversation_bound_at INTEGER;
 // takes the clock and cold mark the parked row held for the conversation now
 // bound, stamped bound at AT. A conversation bound with no clock of its own
 // (the bypass conversation's first binding, a fork whose new system prompt
-// reads no cache) is timed from its first turn. A blank STEPPEDOUT is a bug
-// in the caller, refused loudly: a switch always parks the conversation it
-// stepped out of.
-func (s *store) SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time) error {
+// reads no cache) is timed from its first turn. RESUMESPARKED says whether
+// the conversation bound is the parked one: false for a fork that REPLACES a
+// parked bypass conversation, whose clock then goes with the binding it
+// discards rather than to the fork. A blank STEPPEDOUT is a bug in the
+// caller, refused loudly: a switch always parks the conversation it stepped
+// out of.
+func (s *store) SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time, resumesParked bool) error {
 	const op = "daemon.wsm.swap_parked_conversation"
-	fields := dlog.Context{"workspace": string(id), "vendor_session_id": steppedOut, "at": at}
+	fields := dlog.Context{"workspace": string(id), "vendor_session_id": steppedOut, "at": at, "resumes_parked": resumesParked}
 	if strings.TrimSpace(steppedOut) == "" {
 		err := fmt.Errorf("wsm: a parked conversation names its conversation (workspace %s)", id)
 		s.log.Error(op, "refused a blank parked conversation", withError(fields, err))
@@ -170,6 +173,7 @@ func (s *store) SwapParkedConversation(ctx context.Context, id WorkspaceID, step
 		// until a turn of its own closes.
 		var inClock, inColdTurn any
 		switch {
+		case !resumesParked:
 		case parkedCold.Valid && parkedCold.Bool:
 			if ended.Valid {
 				inColdTurn = ended.Int64

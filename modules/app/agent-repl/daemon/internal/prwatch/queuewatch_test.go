@@ -207,8 +207,8 @@ func TestADepartureThatCannotBeReadHoldsTheNoticeBack(t *testing.T) {
 		t.Fatalf("subscription = %+v; want it unadvanced and failing", sub)
 	}
 	owed, _ := r.db.OwedGithubMergeQueueNotices(context.Background())
-	if len(owed) != 1 || len(owed[0].Pending) != 1 || !strings.Contains(owed[0].Pending[0], "are failing") {
-		t.Fatalf("owed = %+v, want only the failure", owed)
+	if len(owed) != 0 {
+		t.Fatalf("owed = %+v, want nothing: a read the daemon could not make is told to no workspace", owed)
 	}
 }
 

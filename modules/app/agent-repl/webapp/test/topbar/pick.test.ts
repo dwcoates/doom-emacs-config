@@ -98,7 +98,7 @@ describe("sendPick", () => {
 });
 
 describe("the selectors share the one pick path", () => {
-  it.each(["src/topbar/model.ts", "src/topbar/effort.ts", "src/topbar/permission-mode.ts"])(
+  it.each(["src/topbar/model.ts", "src/topbar/effort.ts", "src/topbar/permission-mode.ts", "src/topbar/queue-bypass.ts"])(
     "%s sends through sendPick and never calls an rpc itself",
     (file) => {
       // Arrange

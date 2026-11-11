@@ -1,6 +1,6 @@
 /**
  * What every topbar element is handed: the app context, the shared reveal
- * layer, the client-local failures the warning chip lists, and the door to the
+ * layer, the client-local failures the heading's warnings list, and the door to the
  * login overlay.
  *
  * The reveal layer is here rather than passed element by element because a
@@ -12,7 +12,7 @@ import type { AppContext } from "../rpc/context.js";
 import type { RevealLayer } from "./reveal.js";
 
 /**
- * What the warning chip needs to draw the client-local failures on its own —
+ * What the heading's warnings need to draw the client-local failures on its own —
  * before the first topbar push, or with no app context at all, because the
  * failure that stopped the page may be exactly what kept both from arriving.
  */
