@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"agentrepl/testrun/internal/events"
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
 	"agentrepl/testrun/internal/run"
@@ -403,38 +404,58 @@ func (c *tick) Now() time.Time {
 	return c.t
 }
 
-// fakeReuser reuses the suites named in reused, reports unplaced as the
-// placement check's finding, and remembers what it was asked to record.
+// fakeReuser cuts each suite into one unit per split group and atomic unit
+// (a module build is infra), reuses every unit of the suites named in reused
+// and the units named in units, reports unplaced as the placement check's
+// finding, and remembers what it was asked to record.
 type fakeReuser struct {
 	reused   map[string]bool
+	units    map[string]bool
 	unplaced []string
 	mode     *reuse.Mode
-	recorded *[]string
+	// decideErr fails every decision.
+	decideErr error
+	// recordedUnits are the unit IDs Record was handed.
+	recordedUnits *[]string
 }
 
-func (f fakeReuser) Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error) {
+func (f fakeReuser) Probe() error { return nil }
+
+func (f fakeReuser) Decide(s roster.Suite, u suites.Units, mode reuse.Mode, _ error) (reuse.SuiteVerdict, error) {
 	*f.mode = mode
-	var out []reuse.Verdict
-	for _, s := range selected {
-		v := reuse.Verdict{Suite: s, Why: "always runs"}
-		if f.reused[s.Name] {
-			v.Keyed = true
-			v.Reused = &reuse.Record{Suite: s.Name, Branch: "master", Commit: "0123456789abcdef"}
-		}
-		out = append(out, v)
+	if f.decideErr != nil {
+		return reuse.SuiteVerdict{}, f.decideErr
 	}
-	return out, nil
+	v := reuse.SuiteVerdict{SuiteUnits: reuse.SuiteUnits{Suite: s}}
+	add := func(id string) {
+		unit := reuse.Unit{Suite: s.Name, Name: id, Specs: []string{id}}
+		uv := reuse.UnitVerdict{Unit: unit, Keyed: true, Key: reuse.Key{Digest: "abcdef0123456789"}, Why: reuse.Why{Kind: reuse.WhyNeverRecorded}}
+		if f.reused[s.Name] || f.units[id] {
+			uv.Reused = &reuse.Record{Suite: s.Name, Branch: "master", Commit: "0123456789abcdef", PassedAt: time.Date(2026, 11, 10, 9, 30, 0, 0, time.Local)}
+		}
+		v.SuiteUnits.Units = append(v.SuiteUnits.Units, unit)
+		v.Units = append(v.Units, uv)
+	}
+	for _, a := range u.Atomic {
+		if strings.HasSuffix(a.ID, ":build") {
+			v.Infra = append(v.Infra, a.ID)
+			continue
+		}
+		add(a.ID)
+	}
+	for _, sp := range u.Splits {
+		add(sp.Group)
+	}
+	return v, nil
 }
 
-func (f fakeReuser) Unplaced([]reuse.Verdict) ([]string, error) { return f.unplaced, nil }
+func (f fakeReuser) Unplaced([]reuse.SuiteVerdict) ([]string, error) { return f.unplaced, nil }
 
-func (f fakeReuser) Confine(_ []reuse.Verdict, _ string, u suites.Units) suites.Units { return u }
+func (f fakeReuser) Confine(_ reuse.SuiteVerdict, u suites.Units) suites.Units { return u }
 
-func (f fakeReuser) Record(mode reuse.Mode, _ []reuse.Verdict, results []run.SuiteResult, _ map[string]int) error {
-	for _, r := range results {
-		if r.Outcome == run.Passed {
-			*f.recorded = append(*f.recorded, r.Name)
-		}
+func (f fakeReuser) Record(_ reuse.Mode, _ []reuse.SuiteVerdict, units []run.Result) error {
+	for _, u := range units {
+		*f.recordedUnits = append(*f.recordedUnits, u.Spec.ID)
 	}
 	return nil
 }
@@ -502,7 +523,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		*prepared = append(*prepared, webappDistCall{module: m, unitsBefore: len(e.ran)})
 		return nil
 	}
-	fr := &fakeReuser{mode: new(reuse.Mode), recorded: &[]string{}}
+	fr := &fakeReuser{mode: new(reuse.Mode), recordedUnits: &[]string{}}
 	d.Reuse = fr
 	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls, prepared: prepared}
 }
@@ -1535,5 +1556,103 @@ func TestAFullRunWithoutCoverageSkipsTheSuitesItDoesNotRun(t *testing.T) {
 	if !strings.Contains(h.out.String(), "webapp-coverage-honesty: runs only in a coverage run, skipping") ||
 		!strings.Contains(h.out.String(), "e2e-perf: runs only when named, skipping") {
 		t.Fatalf("stdout lacks the skips:\n%s", h.out.String())
+	}
+}
+
+// packageBuild is a Build turning daemon into two packages' splits after one
+// module build, and every other suite into one unit named after it.
+func packageBuild(_ suites.Layout, s roster.Suite) (suites.Units, error) {
+	if s.Name != "daemon" {
+		sp := run.Spec{Argv: []string{s.Name}}
+		sp.ID, sp.Suite = s.Name, s.Name
+		return suites.Units{Atomic: []run.Spec{sp}}, nil
+	}
+	split := func(rel string) suites.Split {
+		return suites.Split{Group: "daemon:" + rel, Suite: "daemon", Items: []string{"TestA"}, Deps: []string{"daemon:build"}, Package: rel,
+			Chunk: func(id string, items []string) run.Spec {
+				sp := run.Spec{Argv: []string{id}}
+				sp.ID, sp.Suite = id, "daemon"
+				return sp
+			}}
+	}
+	b := suites.GoBuild{ID: "daemon:build", Suite: "daemon", Options: gobuild.Options{Module: "/d", BinDir: "/b", Self: "/testrun"},
+		Needs: map[string]string{"daemon:a": "a", "daemon:b": "b"}}
+	return suites.Units{Splits: []suites.Split{split("a"), split("b")}, GoBuilds: []suites.GoBuild{b}}.Finish(), nil
+}
+
+func TestRunSkipsAReusedUnitAndSaysWhyTheOtherRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Build = packageBuild
+	h.reuser.units = map[string]bool{"daemon:a": true}
+
+	// Act
+	code := h.run(t, "--suites", "daemon")
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	ran := strings.Join(h.exec.ran, " ")
+	if strings.Contains(ran, "daemon:a#") || !strings.Contains(ran, "daemon:b#") {
+		t.Fatalf("ran %v, want daemon:b's chunk and not the reused daemon:a's", h.exec.ran)
+	}
+	for _, want := range []string{
+		"daemon: reuse: 2 units, 1 reused, 1 run (1 never recorded)",
+		"daemon: unit daemon:b runs (inputs abcdef012345): never recorded",
+		"reuse: 2 units, 1 reused, 1 run (1 never recorded)",
+	} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, h.out)
+		}
+	}
+	if !slices.Contains(*h.reuser.recordedUnits, "daemon:build") {
+		t.Fatalf("Record was handed units %v, want the run's unit results", *h.reuser.recordedUnits)
+	}
+}
+
+func TestRunWhoseUnitsAreAllReusedNeverStartsTheSuite(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Build = packageBuild
+	h.reuser.reused = map[string]bool{"daemon": true}
+
+	// Act
+	code := h.run(t, "--suites", "daemon")
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 0 || strings.Contains(h.out.String(), "daemon: starting") {
+		t.Fatalf("ran %v, want a wholly reused suite never started:\n%s", h.exec.ran, h.out)
+	}
+	for _, want := range []string{
+		"daemon: reused a green run (inputs ",
+		"daemon: reuse: all 2 units reused",
+		"reused an earlier green run of every unit, NOT run: daemon (--no-reuse runs them)",
+	} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, h.out)
+		}
+	}
+}
+
+func TestRunWhoseReuseDecisionFailsRunsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	h.deps.Build = packageBuild
+	h.reuser.decideErr = errors.New("go list exited 1")
+
+	// Act
+	code := h.run(t, "--suites", "daemon")
+
+	// Assert
+	want := "ERROR: deciding which units an earlier run's pass covers failed: go list exited 1"
+	if code != 1 || !strings.Contains(h.errOut.String(), want) {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 0 {
+		t.Fatalf("units ran after the failed decision: %v", h.exec.ran)
 	}
 }

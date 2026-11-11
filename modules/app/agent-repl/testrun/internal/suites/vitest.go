@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/cover"
@@ -89,15 +90,17 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(ifiles) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s's %s", s.Name, dir, s.IntegrationConfig)
 	}
-	split, err := vitestIntegrationSplit(l, s, dir, ifiles)
+	splits, err := vitestIntegrationSplits(l, s, dir, ifiles)
 	if err != nil {
 		return Units{}, err
 	}
 	if build, ok := vitestIntegrationBuild(s, dir); ok {
 		u.Atomic = append(u.Atomic, build)
-		split.Deps = append(split.Deps, build.ID)
+		for i := range splits {
+			splits[i].Deps = append(splits[i].Deps, build.ID)
+		}
 	}
-	u.Splits = append(u.Splits, split)
+	u.Splits = append(u.Splits, splits...)
 	return u, nil
 }
 
@@ -116,15 +119,14 @@ func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
 // coverage run has each chunk write istanbul JSON of the files it loaded
 // (cover.VitestIntegrationCoverage), which the baseline merges into the suite's
 // unit coverage.
-func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string) (Split, error) {
-	group := s.Name + "[integration]"
+func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, files []string) ([]Split, error) {
 	work := filepath.Join(l.Work, "vitest", s.Name+"-integration")
 	if err := os.MkdirAll(filepath.Join(work, "items"), 0o755); err != nil {
-		return Split{}, fmt.Errorf("suites: create %s: %w", work, err)
+		return nil, fmt.Errorf("suites: create %s: %w", work, err)
 	}
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
 	named := func(id string, items []string, names []string) run.Spec {
-		tag := filepath.Base(id)
+		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
@@ -139,7 +141,7 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 				// (webapp/vitest.config.ts's coverage note).
 				"--isolate",
 				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
-				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), filepath.Base(id)),
+				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), tag),
 			)
 		}
 		if len(names) > 0 {
@@ -152,7 +154,7 @@ func vitestIntegrationSplit(l Layout, s roster.Suite, dir string, files []string
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	return Split{Group: group, Suite: s.Name, Items: files, Chunk: chunk, Named: named}, nil
+	return fileSplits(VitestIntegrationGroup(s.Name), s.Name, files, chunk, named), nil
 }
 
 func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (Units, error) {
@@ -173,8 +175,9 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.
 	typecheck.Slots = TypecheckSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
+	allChunk := sched.ChunkID(VitestFileGroup(s.Name, files[0]), 0)
 	named := func(id string, items []string, names []string) run.Spec {
-		tag := filepath.Base(id)
+		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run",
@@ -190,7 +193,7 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 			)
 			// ONE chunk carries the config's `all: true` pass. The merge sums
 			// the counts, so every other chunk writes only its loaded files.
-			if id != sched.ChunkID(s.Name, 0) {
+			if id != allChunk {
 				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
 			}
 		}
@@ -204,20 +207,61 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
+	splits := fileSplits(s.Name, s.Name, files, chunk, named)
 	atomic := []run.Spec{typecheck}
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
 			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",
 			"--coverage.reportsDirectory=" + filepath.Dir(cover.VitestCoverage(l.Work, s.Name)),
 		})
-		merge.Deps = []string{s.Name}
+		for _, sp := range splits {
+			merge.Deps = append(merge.Deps, sp.Group)
+		}
 		atomic = append(atomic, merge)
 	}
-	return Units{
-		Atomic: atomic,
-		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Chunk: chunk, Named: named}},
-	}, nil
+	return Units{Atomic: atomic, Splits: splits}, nil
 }
+
+// ONE PROCESS PER TEST FILE. Each vitest and ERT test file is its own split,
+// so its own process: the file is the unit its reuse records
+// (agentrepl/testrun/internal/reuse), and a unit's profile confines exactly
+// its own inputs only when no other file shares its process.
+
+// fileSplits is one split per file under prefix ("<prefix>/<file>"), every
+// one built by chunk and named.
+func fileSplits(prefix, suite string, files []string, chunk func(id string, items []string) run.Spec, named func(id string, items, names []string) run.Spec) []Split {
+	out := make([]Split, 0, len(files))
+	for _, f := range files {
+		out = append(out, Split{Group: prefix + "/" + f, Suite: suite, Items: []string{f}, Chunk: chunk, Named: named})
+	}
+	return out
+}
+
+// unitTag is a unit ID as one file name: its slashes spelled "%", so two
+// files of one name in different directories never share a tag.
+func unitTag(id string) string { return strings.ReplaceAll(id, "/", "%") }
+
+// VitestFileGroup is the split group of a vitest suite's unit-config file.
+func VitestFileGroup(suite, file string) string { return suite + "/" + file }
+
+// VitestIntegrationGroup is the group prefix of a vitest suite's integration
+// files: "<suite>[integration]/<file>".
+func VitestIntegrationGroup(suite string) string { return suite + "[integration]" }
+
+// VitestFileOfGroup is the file a vitest suite's split group runs, and the
+// config it runs under (relative to the package).
+func VitestFileOfGroup(s roster.Suite, group string) (file, config string, err error) {
+	if f, ok := strings.CutPrefix(group, VitestIntegrationGroup(s.Name)+"/"); ok && f != "" && s.IntegrationConfig != "" {
+		return f, s.IntegrationConfig, nil
+	}
+	if f, ok := strings.CutPrefix(group, s.Name+"/"); ok && f != "" {
+		return f, VitestConfig, nil
+	}
+	return "", "", fmt.Errorf("suites: %q is no file group of %s", group, s.Name)
+}
+
+// VitestConfig is the config `vitest run` reads when given none.
+const VitestConfig = "vitest.config.ts"
 
 // VitestNamePattern is the `-t` value that runs exactly the tests whose full
 // names (describe titles and the test's own, joined by single spaces) start

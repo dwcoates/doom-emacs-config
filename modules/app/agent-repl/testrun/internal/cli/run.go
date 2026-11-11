@@ -54,9 +54,9 @@ type Deps struct {
 	Work string
 	// Pid names the run in the CSV.
 	Pid int
-	// Reuse decides which selected suites an earlier run's pass covers,
-	// confines the keyed ones, and records their passes
-	// (agentrepl/testrun/internal/reuse).
+	// Reuse cuts each selected suite into its units, decides which an
+	// earlier run's pass covers, confines the rest, and records their
+	// outcomes (agentrepl/testrun/internal/reuse).
 	Reuse Reuser
 	// RunLog is the run's own log file; a coverage run writes its merged
 	// baseline beside it. "" when testrun was started directly.
@@ -75,10 +75,14 @@ type Deps struct {
 
 // Reuser is the run's pass-record seam (reuse.Runner).
 type Reuser interface {
-	Decide(selected []roster.Suite, mode reuse.Mode) ([]reuse.Verdict, error)
-	Unplaced(verdicts []reuse.Verdict) ([]string, error)
-	Confine(verdicts []reuse.Verdict, name string, u suites.Units) suites.Units
-	Record(mode reuse.Mode, verdicts []reuse.Verdict, results []run.SuiteResult, units map[string]int) error
+	// Probe answers whether the host can confine a unit, once per run.
+	Probe() error
+	// Decide cuts suite s, built as u, into its units and decides which
+	// this run reuses.
+	Decide(s roster.Suite, u suites.Units, mode reuse.Mode, sandboxErr error) (reuse.SuiteVerdict, error)
+	Unplaced(verdicts []reuse.SuiteVerdict) ([]string, error)
+	Confine(v reuse.SuiteVerdict, u suites.Units) suites.Units
+	Record(mode reuse.Mode, verdicts []reuse.SuiteVerdict, results []run.Result) error
 }
 
 // RunConditions names what a run's units measure under, for the timing
@@ -95,6 +99,12 @@ func RunConditions(unitPrefix []string) string {
 // Run executes `testrun run` and returns the process exit status.
 func Run(ctx context.Context, d Deps, a Args) int {
 	log := d.Log
+	// EVERY SUITE DECLARES ITS INPUTS, or why it never can: a roster that
+	// does not is refused before anything runs (roster.Check).
+	if err := roster.Check(roster.Suites); err != nil {
+		log.Errorf("the roster is refused: %v", err)
+		return 1
+	}
 	moduleRoot, err := filepath.Abs(a.Module)
 	if err != nil {
 		log.Errorf("resolve the module root %s: %v", a.Module, err)
@@ -172,25 +182,19 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 	}
 	mode := a.ReuseMode()
-	verdicts, err := d.Reuse.Decide(selected, mode)
-	if err != nil {
-		log.Errorf("deciding which suites an earlier run's pass covers failed: %v", err)
-		return 1
+	sandboxErr := d.Reuse.Probe()
+	if sandboxErr != nil {
+		log.Infof("reuse is off for this run, every unit runs and none is recorded: %v", sandboxErr)
 	}
-	reuse.Report(log, verdicts)
-	unplaced, err := d.Reuse.Unplaced(verdicts)
-	if err != nil {
-		log.Errorf("the placement check could not run: %v", err)
-		return 1
-	}
-	placed := reuse.ReportPlacement(log, unplaced)
-	selected = reuse.Remaining(verdicts)
 
 	// Building units can mean `go list`, `vitest list` and npm dependency
-	// checks, so every suite builds at once.
+	// checks, and deciding them hashes their inputs, so every suite builds
+	// and decides at once.
 	built := make([]suites.Units, len(selected))
 	buildErrs := make([]error, len(selected))
 	narrowErrs := make([]error, len(selected))
+	decided := make([]reuse.SuiteVerdict, len(selected))
+	decideErrs := make([]error, len(selected))
 	var wg sync.WaitGroup
 	for i, s := range selected {
 		wg.Add(1)
@@ -202,9 +206,16 @@ func Run(ctx context.Context, d Deps, a Args) int {
 			if buildErrs[i] == nil && a.Selection != "" {
 				built[i], narrowErrs[i] = resolved.Narrow(s, built[i])
 			}
-			if buildErrs[i] == nil && narrowErrs[i] == nil {
-				built[i] = d.Reuse.Confine(verdicts, s.Name, built[i])
+			if buildErrs[i] != nil || narrowErrs[i] != nil {
+				return
 			}
+			// Reuse after the narrowing (a targeted run reuses nothing) and
+			// before confinement, which wraps each unit in its own profile.
+			decided[i], decideErrs[i] = d.Reuse.Decide(s, built[i], mode, sandboxErr)
+			if decideErrs[i] != nil || decided[i].AllReused() {
+				return
+			}
+			built[i] = d.Reuse.Confine(decided[i], reuse.SkipReused(decided[i], built[i]))
 		}()
 	}
 	wg.Wait()
@@ -213,6 +224,35 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		ev.Refused(err.Error())
 		return 1
 	}
+	if err := errors.Join(decideErrs...); err != nil {
+		log.Errorf("deciding which units an earlier run's pass covers failed: %v", err)
+		return 1
+	}
+	// A suite every unit of which is reused does not run at all; one that
+	// could not be built has no verdict, and fails below.
+	var verdicts []reuse.SuiteVerdict
+	var running []roster.Suite
+	var runningBuilt []suites.Units
+	var runningErrs []error
+	for i, s := range selected {
+		if buildErrs[i] == nil {
+			reuse.Report(log, decided[i])
+			verdicts = append(verdicts, decided[i])
+			if decided[i].AllReused() {
+				continue
+			}
+		}
+		running = append(running, s)
+		runningBuilt = append(runningBuilt, built[i])
+		runningErrs = append(runningErrs, buildErrs[i])
+	}
+	selected, built, buildErrs = running, runningBuilt, runningErrs
+	unplaced, err := d.Reuse.Unplaced(verdicts)
+	if err != nil {
+		log.Errorf("the placement check could not run: %v", err)
+		return 1
+	}
+	placed := reuse.ReportPlacement(log, unplaced)
 	var planned []suites.Units
 	var unbuilt []run.SuiteResult
 	for i, s := range selected {
@@ -290,14 +330,11 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("recording this run's test times in the metrics store failed: %v", err)
 		return 1
 	}
-	unitsPerSuite := map[string]int{}
-	for _, r := range results {
-		unitsPerSuite[r.Spec.Suite]++
-	}
-	if err := d.Reuse.Record(mode, verdicts, suiteResults, unitsPerSuite); err != nil {
+	if err := d.Reuse.Record(mode, verdicts, results); err != nil {
 		log.Errorf("recording this run's passes failed: %v", err)
 		return 1
 	}
+	reuse.Summarize(log, verdicts)
 
 	printUnitSummary(log, results, d.Slots, start, end, p.Makespan)
 	passed, failed := partition(suiteResults)
@@ -330,9 +367,6 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Infof("timings were not recorded, pass --record only for a canonical history run")
 	}
 	printClosing(log, a)
-	if names := reuse.ReusedNames(verdicts); len(names) > 0 {
-		log.Infof("reused an earlier green run of their exact inputs, NOT run: %s (--no-reuse runs them)", strings.Join(names, " "))
-	}
 	return 0
 }
 

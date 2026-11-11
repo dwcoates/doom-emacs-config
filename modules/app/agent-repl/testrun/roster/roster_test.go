@@ -276,8 +276,15 @@ func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
 			s, ok := Lookup(name)
 
 			// Assert
-			if !ok || s.Reuse == nil || !slices.Contains(s.Reuse.Inputs, "testdata/scenario-goldens/") {
-				t.Fatalf("%s's inputs = %+v, want testdata/scenario-goldens/ among them", name, s.Reuse)
+			if !ok || s.Reuse == nil {
+				t.Fatalf("%s declares no Reuse", name)
+			}
+			declared := slices.Contains(s.Reuse.Inputs, "testdata/scenario-goldens/")
+			for _, paths := range s.Reuse.Units {
+				declared = declared || slices.Contains(paths, "testdata/scenario-goldens/")
+			}
+			if !declared {
+				t.Fatalf("%s's inputs = %+v, want testdata/scenario-goldens/ among them, for the suite or one of its units", name, s.Reuse)
 			}
 		})
 	}
@@ -331,5 +338,51 @@ func TestNoUnitIsWiderThanTheGovernorsFirstUnit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCheck(t *testing.T) {
+	tests := []struct {
+		name  string
+		suite Suite
+		want  string
+	}{
+		{"a suite declaring its inputs", Suite{Name: "s", Reuse: &Reuse{}}, ""},
+		{"a suite never reused with a reason", Suite{Name: "s", NeverReused: "it measures"}, ""},
+		{"a suite declaring nothing", Suite{Name: "s"}, "s declares no Reuse and no NeverReused reason"},
+		{"a blank reason", Suite{Name: "s", NeverReused: "  "}, "s declares no Reuse and no NeverReused reason"},
+		{"both", Suite{Name: "s", Reuse: &Reuse{}, NeverReused: "x"}, "s declares both Reuse and NeverReused"},
+		{"a never-reused unit without a reason", Suite{Name: "s", Reuse: &Reuse{Never: map[string]string{"u": ""}}}, `never reused without a reason`},
+		{"a unit both declared and never reused", Suite{Name: "s", Reuse: &Reuse{Units: map[string][]string{"u": {"x/"}}, Never: map[string]string{"u": "why"}}},
+			`both declares its unit "u"'s inputs and names it never reused`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := Check([]Suite{tt.suite})
+
+			// Assert
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestEverySuiteDeclaresItsInputs is the roster's own standing check: the
+// runner refuses a roster Check refuses, so this fails first.
+func TestEverySuiteDeclaresItsInputs(t *testing.T) {
+	// Act
+	err := Check(Suites)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
 	}
 }

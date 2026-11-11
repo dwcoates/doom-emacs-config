@@ -546,7 +546,7 @@ func (c *controller) runCarried(ctx context.Context, ws ids.WorkspaceID, carried
 				c.log.Error(opCarry, "could not push the webapp reload after the carried restart", dlog.WithCause(rFields, err))
 			}
 		}
-		if _, err := c.BounceShim(ctx, ws, reason, r.Force, done); err != nil {
+		if _, err := c.BounceShim(ctx, ws, reason, r.Force, nil, done); err != nil {
 			// BounceShim recorded the refusal at ERROR; the adoption stands.
 			continue
 		}

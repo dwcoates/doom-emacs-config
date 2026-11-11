@@ -23,10 +23,16 @@ import (
 	"agentrepl/testrun/testenv"
 )
 
-// EVERY GO PACKAGE IS SPLIT THE SAME WAY: one unit compiles its test binary,
-// and its top-level tests run from that binary in as many chunks as the
-// planner chooses. A package of two quick tests stays one chunk; a package
-// whose tests run for minutes is spread across cores like any other suite.
+// EVERY GO PACKAGE IS SPLIT THE SAME WAY: its top-level tests run from its
+// test binary in as many chunks as the planner chooses. A package of two
+// quick tests stays one chunk; a package whose tests run for minutes is
+// spread across cores like any other suite.
+//
+// THE BINARIES ARE BUILT BY ONE UNIT PER MODULE PASS (GoBuild,
+// internal/gobuild), never one per package: every chunk depends on its
+// module's build, and runs its package's binary through `testrun exec-test`,
+// which fails the chunk with the package's compiler output when that one
+// package did not compile.
 //
 // `go test` would also vet the package. A compiled binary is not vetted, so
 // each module gets one vet unit running exactly the analyzers `go test` runs
@@ -67,14 +73,16 @@ type goPkg struct {
 	Suite string
 	// Module is the module directory; Rel the package's path under it.
 	Module, Rel string
-	// Bin is where the build unit writes the test binary.
+	// Bin is where the module build writes the test binary (gobuild.BinPath).
 	Bin string
+	// Self is the testrun binary every chunk runs the binary through.
+	Self string
+	// After is the unit that must end before the binary runs: the module's
+	// build, or the package's prebuild after it.
+	After string
 	// CovDir is where every chunk writes its coverage counters; "" runs
 	// without coverage.
 	CovDir string
-	// Build replaces the default build command (`go test -c`) when the
-	// package needs more than its binary built first.
-	Build []string
 	// ChunkEnv is added to every chunk's environment.
 	ChunkEnv []string
 	// Timeout is each chunk's -test.timeout.
@@ -92,26 +100,41 @@ type goPkg struct {
 	// ProgramsDir is the run's programs directory (Layout.ProgramsDir).
 	ProgramsDir string
 	// SpawnedCovDir, under coverage, is where the systems this package's
-	// tests spawn write their counters (testenv.Coverage): the build and every
-	// chunk carry it, with the programs marked instrumented, so the reach of
-	// an integration or e2e tier counts. "" spawns uninstrumented systems.
+	// tests spawn write their counters (testenv.Coverage): every chunk
+	// carries it, with the programs marked instrumented, so the reach of an
+	// integration or e2e tier counts. "" spawns uninstrumented systems.
 	SpawnedCovDir string
 }
 
-// sharePrebuilt makes this package's build process compile its test binary,
-// run TestMain once to fill a shared directory, and point every chunk there.
-func (p *goPkg) sharePrebuilt(dir string, before ...string) {
-	lines := append([]string{"set -euo pipefail"}, before...)
-	tags := ""
-	if p.Tags != "" {
-		tags = "-tags " + strconv.Quote(p.Tags) + " "
+// spawnedEnv is the environment a process carries whose spawned systems
+// write coverage counters (SpawnedCovDir), or nil.
+//
+// GOCOVERDIR too, so a system spawned by a harness that only inherits its
+// environment (the sidecar's, the store's, the shim's lock helper) has a
+// directory for its counters: an instrumented binary started without one
+// warns on its stderr, which the tests read. A cover-built test binary writes
+// its own counters by its -test.gocoverdir flag, which takes precedence.
+func (p goPkg) spawnedEnv() []string {
+	if p.SpawnedCovDir == "" {
+		return nil
 	}
-	lines = append(lines,
-		"go test -c "+tags+"-o "+strconv.Quote(p.Bin)+" "+strconv.Quote(goPackageArg(p.Rel)),
-		testenv.Prebuild+"="+strconv.Quote(dir)+" "+strconv.Quote(p.Bin)+" -test.run '^$'",
-	)
-	p.Build = []string{"bash", "-c", strings.Join(lines, "\n")}
+	return []string{testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + p.SpawnedCovDir, "GOCOVERDIR=" + p.SpawnedCovDir}
+}
+
+// prebuild is the unit that runs the package's TestMain once, after the
+// module build, to fill the shared directory dir every chunk then reads
+// (testenv.Prebuild), running the shell lines before first. Every chunk of
+// the package waits for it.
+func (p *goPkg) prebuild(dir string, before ...string) run.Spec {
+	lines := append([]string{"set -euo pipefail"}, before...)
+	lines = append(lines, testenv.Prebuild+"="+strconv.Quote(dir)+" "+strconv.Quote(p.Self)+" exec-test "+strconv.Quote(p.Bin)+" -test.run '^$'")
+	// A shared prebuild builds the systems its chunks spawn, so under
+	// coverage it builds them instrumented too.
+	sp := spec(p.group()+":prebuild", p.Suite, p.Module, []string{"bash", "-c", strings.Join(lines, "\n")}, p.spawnedEnv()...)
+	sp.Deps = []string{p.After}
+	p.After = sp.ID
 	p.ChunkEnv = append(p.ChunkEnv, testenv.Prebuilt+"="+dir)
+	return sp
 }
 
 // group is the package's chunk group, which is also its unit ID prefix.
@@ -124,48 +147,33 @@ func (p goPkg) group() string {
 	return p.Suite + ":" + p.Rel
 }
 
-// units is the package's build unit and, when it has tests, its split.
-func (p goPkg) units() (run.Spec, *Split, error) {
+// CompiledUnitID is the unit of a package whose test files hold no test:
+// whether they compiled is its whole check (gobuild.Check).
+func CompiledUnitID(group string) string { return group + ":compiled" }
+
+// units is the package's split, or, when it has no tests, the unit checking
+// that its test files compiled.
+func (p goPkg) units() (*run.Spec, *Split, error) {
 	dir := filepath.Join(p.Module, p.Rel)
 	tests, err := GoTopLevelTestsTagged(dir, p.Tags)
 	if err != nil {
-		return run.Spec{}, nil, err
+		return nil, nil, err
 	}
-	argv := p.Build
-	if argv == nil {
-		argv = []string{"go", "test", "-c", "-o", p.Bin}
-		if p.Tags != "" {
-			argv = append(argv, "-tags", p.Tags)
-		}
-		if p.CovDir != "" {
-			argv = append(argv, "-cover", "-coverpkg=./...")
-		}
-		argv = append(argv, goPackageArg(p.Rel))
-	}
-	var spawnedEnv []string
-	if p.SpawnedCovDir != "" {
-		if err := os.MkdirAll(p.SpawnedCovDir, 0o755); err != nil {
-			return run.Spec{}, nil, fmt.Errorf("suites: create %s: %w", p.SpawnedCovDir, err)
-		}
-		// GOCOVERDIR too, so a system spawned by a harness that only
-		// inherits its environment (the sidecar's, the store's, the shim's
-		// lock helper) has a directory for its counters: an instrumented
-		// binary started without one warns on its stderr, which the tests
-		// read. A cover-built test binary writes its own counters by its
-		// -test.gocoverdir flag, which takes precedence.
-		spawnedEnv = []string{testenv.ProgramsInstrumented + "=1", testenv.Coverage + "=" + p.SpawnedCovDir, "GOCOVERDIR=" + p.SpawnedCovDir}
-		p.ChunkEnv = append(p.ChunkEnv, spawnedEnv...)
-	}
-	// A shared prebuild builds the systems its chunks spawn, so under
-	// coverage it builds them instrumented too.
-	buildUnit := spec(p.group()+":build", p.Suite, p.Module, argv, spawnedEnv...)
 	if len(tests) == 0 {
 		// Nothing to run: compiling the test files is the whole check.
-		return buildUnit, nil, nil
+		check := spec(CompiledUnitID(p.group()), p.Suite, dir, []string{p.Self, "check-test", p.Bin})
+		check.Deps = []string{p.After}
+		return &check, nil, nil
+	}
+	if p.SpawnedCovDir != "" {
+		if err := os.MkdirAll(p.SpawnedCovDir, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("suites: create %s: %w", p.SpawnedCovDir, err)
+		}
+		p.ChunkEnv = append(p.ChunkEnv, p.spawnedEnv()...)
 	}
 	if p.CovDir != "" {
 		if err := os.MkdirAll(p.CovDir, 0o755); err != nil {
-			return run.Spec{}, nil, fmt.Errorf("suites: create %s: %w", p.CovDir, err)
+			return nil, nil, fmt.Errorf("suites: create %s: %w", p.CovDir, err)
 		}
 	}
 	timeout := p.Timeout
@@ -187,7 +195,7 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		default:
 			panic(fmt.Sprintf("suites: a Go chunk runs one named test path, got %d: %v", len(names), names))
 		}
-		argv := []string{p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel.Tests, 1)),
+		argv := []string{p.Self, "exec-test", p.Bin, "-test.count=1", "-test.v", "-test.parallel=" + strconv.Itoa(max(p.Parallel.Tests, 1)),
 			"-test.timeout=" + timeout, "-test.run=" + pattern}
 		if p.CovDir != "" {
 			argv = append(argv, "-test.gocoverdir="+p.CovDir)
@@ -200,12 +208,12 @@ func (p goPkg) units() (run.Spec, *Split, error) {
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	deps := []string{buildUnit.ID}
+	deps := []string{p.After}
 	for _, name := range p.Programs {
 		deps = append(deps, ProgramUnitID(name))
 	}
-	return buildUnit, &Split{
-		Group: p.group(), Suite: p.Suite, Items: tests, Deps: deps,
+	return nil, &Split{
+		Group: p.group(), Suite: p.Suite, Items: tests, Deps: deps, Package: p.Rel, Tags: p.Tags,
 		// Test binaries and every expensive integration binary are already
 		// compiled by the dependency unit. Go's -v timings omit time that
 		// parallel subtests spend paused, so wall-minus-items can otherwise

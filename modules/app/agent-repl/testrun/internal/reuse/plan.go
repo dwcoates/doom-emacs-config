@@ -34,12 +34,20 @@ type PlanSuite struct {
 	Suite string `json:"suite"`
 	// Kind is "unit+integration" for a keyed system suite, "e2e" for the
 	// cross-system suites, "harness" for the script suites.
-	Kind     string `json:"kind"`
+	Kind string `json:"kind"`
+	// InputKey is a wholly reused suite's key over its units' (CombinedKey).
 	InputKey string `json:"input_key,omitempty"`
-	Reused   bool   `json:"reused"`
-	// Why is why a suite runs: "always runs", "no record", "changed since its
-	// newest green record: <inputs>", "--no-reuse", ... Empty when reused.
+	// Reused is a suite every unit of which is reused: it does not run.
+	Reused bool `json:"reused"`
+	// Units and ReusedUnits are how many units the suite is cut into, and how
+	// many of them a run reuses.
+	Units       int `json:"units"`
+	ReusedUnits int `json:"reused_units"`
+	// Why is why a suite runs: its running units' reasons, tallied ("2
+	// failed before, 1 inputs changed"). Empty when reused.
 	Why string `json:"why,omitempty"`
+	// Running are the units that run and why each does.
+	Running []PlanUnit `json:"running,omitempty"`
 	// PassedAt, Branch, Sha and Dirty name the run a reused suite's record
 	// came from. Dirty means Sha does not hold the passed bytes.
 	PassedAt *time.Time `json:"passed_at,omitempty"`
@@ -56,6 +64,13 @@ type PlanSuite struct {
 	Cases []PlanCases `json:"cases,omitempty"`
 }
 
+// PlanUnit is one running unit of a suite.
+type PlanUnit struct {
+	// Unit is the unit's name in its suite, "" for a whole-suite unit.
+	Unit string `json:"unit"`
+	Why  string `json:"why"`
+}
+
 // PlanCases is one targeted invocation and the tests it runs.
 type PlanCases struct {
 	Command string   `json:"command"`
@@ -65,8 +80,6 @@ type PlanCases struct {
 // SuiteKind names a roster entry's kind for the plan.
 func SuiteKind(s roster.Suite) string {
 	switch {
-	case s.Reuse != nil:
-		return "unit+integration"
 	case s.Kind == roster.E2E || s.Name == "e2e-emacs":
 		return "e2e"
 	case s.Kind == roster.Script || s.Kind == roster.SplitScript:
@@ -76,23 +89,27 @@ func SuiteKind(s roster.Suite) string {
 }
 
 // BuildPlan is the plan document for verdicts and the placement result.
-func BuildPlan(verdicts []Verdict, unplaced []string, reuseAvailable bool) PlanDoc {
+func BuildPlan(verdicts []SuiteVerdict, unplaced []string, reuseAvailable bool) PlanDoc {
 	doc := PlanDoc{Version: PlanVersion, NoReuseFlag: "--no-reuse", ReuseAvailable: reuseAvailable, Unplaced: unplaced}
 	if doc.Unplaced == nil {
 		doc.Unplaced = []string{}
 	}
 	for _, v := range verdicts {
-		ps := PlanSuite{Suite: v.Suite.Name, Kind: SuiteKind(v.Suite), Width: max(v.Suite.Slots, 1)}
-		if v.Keyed {
-			ps.InputKey = v.Key.Digest
-		}
-		if r := v.Reused; r != nil {
-			ps.Reused = true
+		ps := PlanSuite{Suite: v.Suite.Name, Kind: SuiteKind(v.Suite), Width: max(v.Suite.Slots, 1),
+			Units: len(v.Units), ReusedUnits: v.Reused()}
+		if v.AllReused() {
+			r := v.newestReused()
+			ps.Reused, ps.InputKey = true, v.CombinedKey().Digest
 			at := r.PassedAt
 			ps.PassedAt, ps.Branch, ps.Sha, ps.Dirty = &at, r.Branch, r.Commit, r.Dirty
 		} else {
-			ps.Why = v.Why
+			ps.Why = whyTallyOf([]SuiteVerdict{v})
 			ps.Command = "bin/test-all.sh --suites " + v.Suite.Name
+			for _, u := range v.Units {
+				if u.Reused == nil {
+					ps.Running = append(ps.Running, PlanUnit{Unit: u.Name, Why: u.Why.String()})
+				}
+			}
 		}
 		doc.Suites = append(doc.Suites, ps)
 	}
@@ -124,7 +141,7 @@ func WritePlanText(w io.Writer, doc PlanDoc) error {
 			}
 			fmt.Fprintf(&b, "%-28s reuse   inputs %s passed %s on %s\n", s.Suite, short(s.InputKey), s.PassedAt.Local().Format("2006-01-02 15:04"), src)
 		default:
-			fmt.Fprintf(&b, "%-28s run     %s: %s\n", s.Suite, s.Command, s.Why)
+			fmt.Fprintf(&b, "%-28s run     %s: %d of %d units reused, %d run (%s)\n", s.Suite, s.Command, s.ReusedUnits, s.Units, s.Units-s.ReusedUnits, s.Why)
 		}
 	}
 	for _, f := range doc.Unplaced {

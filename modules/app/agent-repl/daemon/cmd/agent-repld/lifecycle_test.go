@@ -525,7 +525,7 @@ type bounceAsk struct {
 	done   func(error)
 }
 
-func (f *fakeShimBouncer) BounceShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+func (f *fakeShimBouncer) BounceShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error) {
 	f.asked = append(f.asked, bounceAsk{ws: ws, reason: reason, force: force, done: done})
 	return bounce.Decision{Now: true}, f.err
 }

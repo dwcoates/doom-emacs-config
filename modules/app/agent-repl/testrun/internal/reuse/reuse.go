@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"agentrepl/testrun/internal/run"
@@ -64,112 +63,9 @@ type Deps struct {
 	Head func() (branch, commit string, dirty bool, err error)
 	Now  func() time.Time
 	Log  Logger
-}
-
-// Verdict is one selected suite's reuse decision.
-type Verdict struct {
-	Suite roster.Suite
-	// Keyed is a suite with a Reuse declaration that this run confines and
-	// may record. A keyed suite whose sandbox is unavailable is not keyed for
-	// the run.
-	Keyed bool
-	Key   Key
-	// Set is the suite's input set (keyed suites only).
-	Set *InputSet
-	// Profile is the suite's profile file (keyed suites only).
-	Profile string
-	// Reused is the record this run reuses instead of running the suite.
-	Reused *Record
-	// Why says why a suite that runs is not reused.
-	Why string
-}
-
-// Decide keys every selected suite and decides which a run reuses. A keyed
-// suite whose inputs cannot be derived is an error, never an unkeyed run: the
-// roster has drifted from the tree, and a key computed around that would be
-// a guess.
-func Decide(d Deps, selected []roster.Suite, mode Mode) ([]Verdict, error) {
-	verdicts := make([]Verdict, len(selected))
-	sandboxErr := d.Probe()
-	if sandboxErr != nil {
-		d.Log.Infof("reuse is off for this run, every suite runs and none is recorded: %v", sandboxErr)
-	}
-	errs := make([]error, len(selected))
-	var wg sync.WaitGroup
-	for i, s := range selected {
-		verdicts[i] = Verdict{Suite: s}
-		switch {
-		case s.Reuse == nil:
-			verdicts[i].Why = "always runs"
-			continue
-		case sandboxErr != nil:
-			verdicts[i].Why = "reuse unavailable: no sandbox"
-			continue
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs[i] = decideOne(d, &verdicts[i], mode)
-		}()
-	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return nil, err
-		}
-	}
-	return verdicts, nil
-}
-
-func decideOne(d Deps, v *Verdict, mode Mode) error {
-	s := v.Suite
-	set, err := SuiteInputs(d, s)
-	if err != nil {
-		return fmt.Errorf("reuse: derive %s's inputs: %w", s.Name, err)
-	}
-	facts, err := suiteFacts(d, s)
-	if err != nil {
-		return err
-	}
-	key, err := ComputeKey(d.Repo, set, facts)
-	if err != nil {
-		return fmt.Errorf("reuse: key %s: %w", s.Name, err)
-	}
-	profile, err := Profile(d.Repo, d.DenyRoots, set)
-	if err != nil {
-		return fmt.Errorf("reuse: %s's profile: %w", s.Name, err)
-	}
-	path := filepath.Join(d.ProfileDir, s.Name+".sb")
-	if err := os.WriteFile(path, []byte(profile), 0o644); err != nil {
-		return fmt.Errorf("reuse: write %s's profile: %w", s.Name, err)
-	}
-	v.Keyed, v.Key, v.Set, v.Profile = true, key, set, path
-	switch mode {
-	case NoReuse:
-		v.Why = "--no-reuse"
-		return nil
-	case Targeted:
-		v.Why = "a targeted run neither reuses nor records"
-		return nil
-	}
-	rec, ok, err := d.Store.Lookup(s.Name, key.Digest)
-	if err != nil {
-		return err
-	}
-	if ok {
-		v.Reused = &rec
-		return nil
-	}
-	newest, ok, err := d.Store.Newest(s.Name)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		v.Why = "no record"
-		return nil
-	}
-	v.Why = "changed since its newest green record: " + nameEntries(key.Manifest.Changed(newest.Manifest))
-	return nil
+	// Hashes caches the decision's file digests across its units (nil reads
+	// every file each time).
+	Hashes *HashCache
 }
 
 // maxWhyEntries bounds how many changed inputs a reason names.
@@ -182,36 +78,38 @@ func nameEntries(names []string) string {
 	return fmt.Sprintf("%s and %d more", strings.Join(names[:maxWhyEntries], ", "), len(names)-maxWhyEntries)
 }
 
-// suiteFacts are a keyed suite's non-file inputs.
-func suiteFacts(d Deps, s roster.Suite) (Facts, error) {
-	tools, err := d.Toolchain(s.Kind)
-	if err != nil {
-		return Facts{}, fmt.Errorf("reuse: %s's toolchain: %w", s.Name, err)
-	}
-	return Facts{Suite: Describe(s), Toolchain: tools, Env: KeyedEnv(d.Environ)}, nil
-}
-
 // Describe spells a roster entry for the key: every field that decides how
 // the suite is built and run, its reuse declaration's contents included
-// (never the pointer's address).
+// (never a pointer's address).
 func Describe(s roster.Suite) string {
 	r := s.Reuse
 	s.Reuse = nil
-	if r == nil {
-		return fmt.Sprintf("%#v", s)
+	out := fmt.Sprintf("%#v", s)
+	if r != nil {
+		out += fmt.Sprintf(" reuse=%#v", *r)
 	}
-	return fmt.Sprintf("%#v reuse=%#v", s, *r)
+	return out
 }
 
-// SuiteInputs is a keyed suite's input set: its build graph, the programs its
-// tests run, the runner that runs it, and its declared inputs.
+// SuiteInputs is a keyed suite's ENVELOPE: everything any of its units, and
+// the infra units serving them, read -- its build graph, the programs its
+// tests run, the runner that runs it, and every input its Reuse declares,
+// each unit's included. The infra units run under its profile, a whole-suite
+// unit (a script or e2e suite) is keyed on it, and the placement check places
+// it.
 func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	if s.Reuse == nil {
 		return nil, fmt.Errorf("reuse: %s declares no reuse", s.Name)
 	}
 	set := NewInputSet()
 	switch s.Kind {
-	case roster.GoModule:
+	case roster.Script, roster.SplitScript:
+		// A script suite's call graph is no tool's to derive: it reads its
+		// script and what its Reuse declares.
+		if err := placeRosterPath(d, set, s.Path, false); err != nil {
+			return nil, err
+		}
+	case roster.GoModule, roster.E2E:
 		dir := roster.Resolve(d.Repo, d.Module, s.Path)
 		tagSets := []string{""}
 		if s.IntegrationTags != "" {
@@ -282,7 +180,22 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	if err := addDeclared(d, set, s.Reuse); err != nil {
 		return nil, fmt.Errorf("reuse: %s: %w", s.Name, err)
 	}
+	for _, unit := range sortedKeys(s.Reuse.Units) {
+		if err := addInputs(d, set, s.Reuse.Units[unit]); err != nil {
+			return nil, fmt.Errorf("reuse: %s's unit %s: %w", s.Name, unit, err)
+		}
+	}
 	return set, nil
+}
+
+// sortedKeys is m's keys, sorted.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // addSuiteTree places a suite's own directory (a roster path) as a hashed
@@ -351,13 +264,11 @@ func RepoPath(d Deps, p string) (string, bool, error) {
 	return c, tree, nil
 }
 
+// addDeclared places what r declares every unit reads: its Inputs, hashed,
+// and its Generated subtrees, readable.
 func addDeclared(d Deps, set *InputSet, r *roster.Reuse) error {
-	for _, p := range r.Inputs {
-		// A module resolver (esbuild, node) lists a file's directory to find
-		// it, so a declared file's directory listing is read too, and hashed.
-		if err := placeRosterPath(d, set, p, true); err != nil {
-			return err
-		}
+	if err := addInputs(d, set, r.Inputs); err != nil {
+		return err
 	}
 	for _, p := range r.Generated {
 		rel, tree, err := RepoPath(d, p)
@@ -374,6 +285,18 @@ func addDeclared(d Deps, set *InputSet, r *roster.Reuse) error {
 	return nil
 }
 
+// addInputs places declared input paths. A module resolver (esbuild, node)
+// lists a file's directory to find it, so a declared file's directory
+// listing is read too, and hashed.
+func addInputs(d Deps, set *InputSet, paths []string) error {
+	for _, p := range paths {
+		if err := placeRosterPath(d, set, p, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // placeRosterPath places one roster path in set: a subtree when it ends in
 // "/", else one file, and with listDir also the file's directory listing.
 func placeRosterPath(d Deps, set *InputSet, p string, listDir bool) error {
@@ -384,24 +307,15 @@ func placeRosterPath(d Deps, set *InputSet, p string, listDir bool) error {
 	if tree {
 		return set.AddTree(rel)
 	}
+	// A directory named without the "/" of a subtree is its listing alone:
+	// a scan that lists it, or looks up what is in it, reads nothing more.
+	if info, err := os.Stat(filepath.Join(d.Repo, filepath.FromSlash(rel))); err == nil && info.IsDir() {
+		return set.AddDir(rel)
+	}
 	if listDir {
 		return errors.Join(set.AddFile(rel), set.AddDir(path.Dir(rel)))
 	}
 	return set.AddFile(rel)
-}
-
-// Report prints each verdict's line: a reused suite's in the shape the merge
-// gate reads, a running keyed suite's reason at INFO.
-func Report(log Logger, verdicts []Verdict) {
-	for _, v := range verdicts {
-		switch {
-		case v.Reused != nil:
-			log.Infof("%s: reused a green run (inputs %s, passed %s on %s)", v.Suite.Name, v.Key.Short(),
-				v.Reused.PassedAt.Local().Format("2006-01-02 15:04"), Source(*v.Reused))
-		case v.Keyed:
-			log.Infof("%s: runs (inputs %s): %s", v.Suite.Name, v.Key.Short(), v.Why)
-		}
-	}
 }
 
 // Source names the checkout state a record passed on, never claiming a commit
@@ -417,107 +331,6 @@ func Source(r Record) string {
 	return fmt.Sprintf("%s %s", r.Branch, commit)
 }
 
-// Remaining is the selected suites a run still runs: every one not reused.
-func Remaining(verdicts []Verdict) []roster.Suite {
-	var out []roster.Suite
-	for _, v := range verdicts {
-		if v.Reused == nil {
-			out = append(out, v.Suite)
-		}
-	}
-	return out
-}
-
-// Confine starts every unit of each keyed suite under its profile and the
-// scrubbed environment (`testrun confine`). Units of other suites are left as
-// they are.
-func Confine(self string, verdicts []Verdict, name string, u suites.Units) suites.Units {
-	var v *Verdict
-	for i := range verdicts {
-		if verdicts[i].Suite.Name == name {
-			v = &verdicts[i]
-		}
-	}
-	if v == nil || !v.Keyed || v.Reused != nil {
-		return u
-	}
-	wrap := func(sp run.Spec) run.Spec {
-		sp.Argv = ConfineCommand(self, v.Profile, sp.Env, sp.Argv)
-		return sp
-	}
-	out := suites.Units{Programs: u.Programs}
-	for _, sp := range u.Atomic {
-		out.Atomic = append(out.Atomic, wrap(sp))
-	}
-	for _, sp := range u.Splits {
-		chunk := sp.Chunk
-		sp.Chunk = func(id string, items []string) run.Spec { return wrap(chunk(id, items)) }
-		out.Splits = append(out.Splits, sp)
-	}
-	return out
-}
-
-// RecordPasses stores a pass for every keyed suite of the run that passed whole,
-// after re-keying it: a suite whose inputs changed while it ran (an edit in
-// the checkout, a test writing into its own inputs) passed on bytes no key
-// names, so it records nothing and the run says which inputs moved.
-func RecordPasses(d Deps, mode Mode, verdicts []Verdict, results []run.SuiteResult, units map[string]int) error {
-	if mode == Targeted {
-		return nil
-	}
-	passed := map[string]bool{}
-	for _, r := range results {
-		if r.Outcome == run.Passed {
-			passed[r.Name] = true
-		}
-	}
-	for _, v := range verdicts {
-		if v.Keyed && v.Reused == nil && !passed[v.Suite.Name] {
-			d.Log.Infof("%s ran confined to its inputs: a failure reading a checkout file with \"operation not permitted\" is a read its Reuse does not declare (testrun/roster; AGENTS.md, \"A run reuses an earlier pass of a suite's exact inputs\")", v.Suite.Name)
-		}
-	}
-	var branch, commit string
-	var dirty, headRead bool
-	for _, v := range verdicts {
-		if !v.Keyed || v.Reused != nil || !passed[v.Suite.Name] {
-			continue
-		}
-		facts, err := suiteFacts(d, v.Suite)
-		if err != nil {
-			return err
-		}
-		after, err := ComputeKey(d.Repo, v.Set, facts)
-		if err != nil {
-			return fmt.Errorf("reuse: re-key %s after its run: %w", v.Suite.Name, err)
-		}
-		if after.Digest != v.Key.Digest {
-			d.Log.Errorf("%s: not recorded, its inputs changed while it ran: %s", v.Suite.Name, nameEntries(after.Manifest.Changed(v.Key.Manifest)))
-			continue
-		}
-		stale, err := staleInstall(d.Repo, v.Set)
-		if err != nil {
-			return fmt.Errorf("reuse: check %s's installed packages: %w", v.Suite.Name, err)
-		}
-		if stale != "" {
-			d.Log.Errorf("%s: not recorded, it ran on packages its key does not name: %s", v.Suite.Name, stale)
-			continue
-		}
-		if !headRead {
-			if branch, commit, dirty, err = d.Head(); err != nil {
-				return fmt.Errorf("reuse: read the checkout's HEAD: %w", err)
-			}
-			headRead = true
-		}
-		rec := Record{Suite: v.Suite.Name, Key: v.Key.Digest, PassedAt: d.Now(), Checkout: d.Repo,
-			Branch: branch, Commit: commit, Dirty: dirty, Units: units[v.Suite.Name], Manifest: v.Key.Manifest}
-		if err := d.Store.Put(rec); err != nil {
-			return err
-		}
-		d.Log.Infof("%s: recorded a green run (inputs %s)", v.Suite.Name, v.Key.Short())
-	}
-	return nil
-}
-
 // Runner is the run's reuse seam over the real host: Deps, and the checkout's
 // file list for the placement check.
 type Runner struct {
@@ -525,19 +338,29 @@ type Runner struct {
 	Files func() ([]string, error)
 }
 
-// Decide is Decide over r's Deps.
-func (r Runner) Decide(selected []roster.Suite, mode Mode) ([]Verdict, error) {
-	return Decide(r.Deps, selected, mode)
+// Probe is whether this host can confine a unit (Deps.Probe), asked once
+// per run: nil when it can.
+func (r Runner) Probe() error { return r.Deps.Probe() }
+
+// Decide cuts suite s, whose units the run built as u, into its reuse units
+// (Derive) and decides which this run reuses (Decide). sandboxErr is the
+// run's Probe answer.
+func (r Runner) Decide(s roster.Suite, u suites.Units, mode Mode, sandboxErr error) (SuiteVerdict, error) {
+	su, err := Derive(r.Deps, s, u, mode != Targeted)
+	if err != nil {
+		return SuiteVerdict{}, err
+	}
+	return Decide(r.Deps, su, mode, sandboxErr)
 }
 
-// Unplaced is every file of the checkout that no region places. It derives
-// the input set of every keyed suite of the roster, selected or not, reusing
-// the sets verdicts already hold.
-func (r Runner) Unplaced(verdicts []Verdict) ([]string, error) {
+// Unplaced is every file of the checkout that no region places. It places
+// the envelope of every keyed suite of the roster, selected or not, reusing
+// the envelopes verdicts already hold.
+func (r Runner) Unplaced(verdicts []SuiteVerdict) ([]string, error) {
 	sets := map[string]*InputSet{}
 	for _, v := range verdicts {
-		if v.Set != nil {
-			sets[v.Suite.Name] = v.Set
+		if v.Envelope != nil {
+			sets[v.Suite.Name] = v.Envelope
 		}
 	}
 	for _, s := range roster.Suites {
@@ -562,13 +385,13 @@ func (r Runner) Unplaced(verdicts []Verdict) ([]string, error) {
 }
 
 // Confine is Confine with r's runner binary.
-func (r Runner) Confine(verdicts []Verdict, name string, u suites.Units) suites.Units {
-	return Confine(r.Deps.Self, verdicts, name, u)
+func (r Runner) Confine(v SuiteVerdict, u suites.Units) suites.Units {
+	return Confine(r.Deps.Self, v, u)
 }
 
-// Record is RecordPasses over r's Deps.
-func (r Runner) Record(mode Mode, verdicts []Verdict, results []run.SuiteResult, units map[string]int) error {
-	return RecordPasses(r.Deps, mode, verdicts, results, units)
+// Record is RecordOutcomes over r's Deps.
+func (r Runner) Record(mode Mode, verdicts []SuiteVerdict, results []run.Result) error {
+	return RecordOutcomes(r.Deps, mode, verdicts, results)
 }
 
 // staleInstall names the first generated node_modules tree of set that was
@@ -587,15 +410,4 @@ func staleInstall(repo string, set *InputSet) (string, error) {
 		}
 	}
 	return "", nil
-}
-
-// ReusedNames is the reused suites' names, in verdict order.
-func ReusedNames(verdicts []Verdict) []string {
-	var out []string
-	for _, v := range verdicts {
-		if v.Reused != nil {
-			out = append(out, v.Suite.Name)
-		}
-	}
-	return out
 }

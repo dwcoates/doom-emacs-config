@@ -28,7 +28,7 @@ func TestARunSkipsAReusedSuiteAndSaysSo(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[agent-repl-tests] daemon: reused a green run (inputs ",
-		"reused an earlier green run of their exact inputs, NOT run: daemon (--no-reuse runs them)",
+		"reused an earlier green run of every unit, NOT run: daemon (--no-reuse runs them)",
 	} {
 		if !strings.Contains(h.out.String(), want) {
 			t.Errorf("stdout lacks %q:\n%s", want, h.out)
@@ -36,7 +36,9 @@ func TestARunSkipsAReusedSuiteAndSaysSo(t *testing.T) {
 	}
 }
 
-func TestARunRecordsTheSuitesThatPassed(t *testing.T) {
+// A unit that passed is recorded whatever its suite did, so the run hands
+// Record every unit's result, the failed suite's included.
+func TestARunHandsRecordEveryUnitsResultFailedSuitesIncluded(t *testing.T) {
 	// Arrange
 	h := newHarness(t, map[string]int{"store": 1}, nil)
 
@@ -44,8 +46,9 @@ func TestARunRecordsTheSuitesThatPassed(t *testing.T) {
 	h.run(t, "--suites", "daemon,store")
 
 	// Assert
-	if got := *h.reuser.recorded; !slices.Equal(got, []string{"daemon"}) {
-		t.Fatalf("recorded %v, want only the passing daemon", got)
+	got := *h.reuser.recordedUnits
+	if !slices.Contains(got, "daemon") || !slices.Contains(got, "store") {
+		t.Fatalf("Record was handed %v, want the passing daemon's and the failing store's units", got)
 	}
 }
 

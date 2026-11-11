@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 )
 
 // KeyVersion is part of every key. Changing what a key covers, or how it is
 // spelled, bumps it, so no record made under the old meaning is ever reused.
-const KeyVersion = "reuse-key-v1"
+const KeyVersion = "reuse-key-v2"
 
 // Facts are the non-file inputs of a suite: everything besides the checkout
 // that decides what its tests observe.
@@ -31,8 +33,9 @@ type Facts struct {
 	Env map[string]string
 }
 
-// Manifest is a key's itemized content: one digest per hashed entry, so two
-// keys can be compared entry by entry to say WHAT changed.
+// Manifest is a key's itemized content: one digest per hashed entry
+// (compacted, see compact), so two keys can be compared entry by entry to say
+// WHAT changed.
 type Manifest map[string]string
 
 // Key is a suite's input key and the manifest it was computed from.
@@ -53,6 +56,13 @@ func (k Key) Short() string {
 // that does not exist is an error: a declared input that is not there is a
 // roster that has drifted from the tree, never something to hash around.
 func ComputeKey(repo string, set *InputSet, facts Facts) (Key, error) {
+	return ComputeKeyCached(repo, set, facts, nil)
+}
+
+// ComputeKeyCached is ComputeKey reading each file's digest through cache
+// (nil reads every file): the units of one run share most of their inputs,
+// and hashing each shared file once per unit cost a run seconds.
+func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache) (Key, error) {
 	if err := set.Overlap(); err != nil {
 		return Key{}, err
 	}
@@ -64,7 +74,7 @@ func ComputeKey(repo string, set *InputSet, facts Facts) (Key, error) {
 	for name, v := range facts.Env {
 		m["@env "+name] = v
 	}
-	h := hasher{repo: repo, generated: set.Generated(), m: m}
+	h := hasher{repo: repo, generated: set.Generated(), m: m, cache: cache}
 	for _, p := range set.Files() {
 		if err := h.file(p); err != nil {
 			return Key{}, err
@@ -85,7 +95,24 @@ func ComputeKey(repo string, set *InputSet, facts Facts) (Key, error) {
 			return Key{}, err
 		}
 	}
-	return Key{Digest: m.digest(), Manifest: m}, nil
+	return Key{Digest: m.digest(), Manifest: m.compact()}, nil
+}
+
+// compactValueLen is how many hex digits of an entry's value a stored
+// manifest keeps.
+const compactValueLen = 16
+
+// compact is m with each value replaced by the first compactValueLen hex
+// digits of its SHA-256: enough to tell an entry changed, a fraction of a
+// directory listing's or a file line's length. The key's digest is over the
+// full values; a manifest is only ever compared with another compacted one.
+func (m Manifest) compact() Manifest {
+	out := make(Manifest, len(m))
+	for name, v := range m {
+		sum := sha256.Sum256([]byte(v))
+		out[name] = hex.EncodeToString(sum[:])[:compactValueLen]
+	}
+	return out
 }
 
 // digest is the key: a hash over the manifest's sorted lines.
@@ -126,6 +153,59 @@ type hasher struct {
 	repo      string
 	generated []string
 	m         Manifest
+	cache     *HashCache
+}
+
+// HashCache holds the digests of the files one phase of a run has read,
+// each under the file's identity when it was read (its size, modification
+// time, mode and inode), so a file that changed is read again. One cache
+// lives for one phase: the decision's keys, or the re-keys after the run,
+// never both, so a re-key reads every input afresh.
+type HashCache struct {
+	mu sync.Mutex
+	m  map[string]cachedDigest
+}
+
+type cachedDigest struct {
+	id     string
+	digest string
+}
+
+// NewHashCache is an empty cache.
+func NewHashCache() *HashCache { return &HashCache{m: map[string]cachedDigest{}} }
+
+// fileIdentity is what a cached digest is held under.
+func fileIdentity(info fs.FileInfo) string {
+	id := fmt.Sprintf("%d %d %o", info.Size(), info.ModTime().UnixNano(), info.Mode())
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		id += fmt.Sprintf(" %d %d", st.Dev, st.Ino)
+	}
+	return id
+}
+
+// digest is the file p's content digest, through the cache when there is one.
+func (h hasher) digest(p string, info fs.FileInfo) (string, error) {
+	id := fileIdentity(info)
+	if h.cache != nil {
+		h.cache.mu.Lock()
+		c, ok := h.cache.m[p]
+		h.cache.mu.Unlock()
+		if ok && c.id == id {
+			return c.digest, nil
+		}
+	}
+	data, err := os.ReadFile(h.abs(p))
+	if err != nil {
+		return "", fmt.Errorf("reuse: read %s: %w", p, err)
+	}
+	sum := sha256.Sum256(data)
+	d := hex.EncodeToString(sum[:])
+	if h.cache != nil {
+		h.cache.mu.Lock()
+		h.cache.m[p] = cachedDigest{id: id, digest: d}
+		h.cache.mu.Unlock()
+	}
+	return d, nil
 }
 
 func (h hasher) abs(p string) string { return filepath.Join(h.repo, filepath.FromSlash(p)) }
@@ -148,13 +228,12 @@ func (h hasher) entry(p string, info fs.FileInfo) error {
 		}
 		h.m[p] = "link " + target
 	case info.Mode().IsRegular():
-		data, err := os.ReadFile(h.abs(p))
+		d, err := h.digest(p, info)
 		if err != nil {
-			return fmt.Errorf("reuse: read %s: %w", p, err)
+			return err
 		}
-		sum := sha256.Sum256(data)
 		// The executable bit is part of what a test can observe.
-		h.m[p] = fmt.Sprintf("file %s %o", hex.EncodeToString(sum[:]), info.Mode().Perm()&0o111)
+		h.m[p] = fmt.Sprintf("file %s %o", d, info.Mode().Perm()&0o111)
 	default:
 		return fmt.Errorf("reuse: input %s is neither a regular file nor a link (%s)", p, info.Mode())
 	}
@@ -166,7 +245,8 @@ func (h hasher) entry(p string, info fs.FileInfo) error {
 // A GENERATED ENTRY IS NOT LISTED: the run itself creates and deletes those
 // trees (an install, a build, a tool's cache), so whether one exists says
 // nothing about the suite's inputs, and listing it would move the key the
-// moment a run first creates it.
+// moment a run first creates it. Nor is vite's transient bundle of a config
+// (isConfigBundle), for the same reason.
 func (h hasher) listing(p string) error {
 	entries, err := os.ReadDir(h.abs(p))
 	if err != nil {
@@ -174,7 +254,7 @@ func (h hasher) listing(p string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if h.isGenerated(path.Join(p, e.Name())) {
+		if h.isGenerated(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
 			continue
 		}
 		kind := "f"

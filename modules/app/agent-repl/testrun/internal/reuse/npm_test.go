@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
@@ -62,15 +63,15 @@ func TestARunOnAStaleInstallRecordsNothing(t *testing.T) {
 	f := newFixture(t)
 	write(t, f.d.Repo, fixtureModule+"/web/package-lock.json", lockJSON)
 	write(t, f.d.Repo, fixtureModule+"/web/node_modules/.package-lock.json", `{"packages": {}}`)
-	s := lockSuite
+	s := harnessSuite
 	s.Reuse = &roster.Reuse{Generated: []string{"web/node_modules/"}}
-	v := f.decide(t, Reusing, s)
+	v := f.decide(t, Reusing, s, harnessUnits())
 
 	// Act
-	f.pass(t, Reusing, v)
+	f.record(t, Reusing, run.Passed, v)
 
 	// Assert
-	if _, ok, _ := f.d.Store.Lookup("lock", v[0].Key.Digest); ok {
+	if _, ok, _ := f.d.Store.Lookup("harness", v.Units[0].Key.Digest); ok {
 		t.Fatal("a run on packages its key does not name was recorded")
 	}
 	if len(f.log.errs) != 1 || !strings.Contains(f.log.errs[0], "it ran on packages its key does not name") {

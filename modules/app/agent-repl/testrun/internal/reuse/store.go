@@ -14,13 +14,19 @@ import (
 	"agentrepl/testrun/internal/atomicfile"
 )
 
-// Record says one suite passed whole on one set of inputs.
+// Record says one unit passed on one set of inputs, or, as a unit's last
+// outcome (Store.Last), that it failed on them.
 type Record struct {
-	Version int    `json:"version"`
-	Suite   string `json:"suite"`
-	Key     string `json:"key"`
-	// PassedAt is when the run that passed it ended.
+	Version int `json:"version"`
+	// Suite is the unit's record name (UnitRecordName).
+	Suite string `json:"suite"`
+	Key   string `json:"key"`
+	// PassedAt is when the run that passed it ended; for a failure, when the
+	// run that failed it ended.
 	PassedAt time.Time `json:"passed_at"`
+	// Failed marks a last outcome that was a failure. A pass record never
+	// carries it.
+	Failed bool `json:"failed,omitempty"`
 	// Checkout is the worktree the run tested.
 	Checkout string `json:"checkout"`
 	// Branch and Commit are the checkout's HEAD when the run started.
@@ -30,11 +36,13 @@ type Record struct {
 	// bytes are the key's, and Commit does NOT hold them, so a report never
 	// claims it does.
 	Dirty bool `json:"dirty"`
-	// Units is how many units of the suite passed.
+	// Units is how many of the runner's units (a package's chunks, a file's
+	// one) passed.
 	Units int `json:"units"`
 	// Manifest is the key's itemized content, so a later run can say which
-	// input differs from this record.
-	Manifest Manifest `json:"manifest"`
+	// input differs from this record. Only a unit's newest pass and its last
+	// outcome carry one (Store); a pass record under its key does not.
+	Manifest Manifest `json:"manifest,omitempty"`
 }
 
 // recordVersion is the record file's format.
@@ -65,7 +73,25 @@ func DefaultStoreDir() (string, error) {
 }
 
 var hexKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
-var suiteName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// suiteName is a whole suite's record name, or one unit's (UnitRecordName).
+var suiteName = regexp.MustCompile(`^[A-Za-z0-9_-]+(@[A-Za-z0-9_.%\[\]-]+)?$`)
+
+// lastFile is the name of a unit's last-outcome record in its directory, and
+// newestFile its newest pass with that pass's manifest: no .json extension,
+// so neither is ever read as a pass under a key.
+const (
+	lastFile   = "last.outcome"
+	newestFile = "newest.pass"
+)
+
+// maxPasses is how many pass records a unit keeps: the newest, by when they
+// passed. A unit's records are a cache of facts, and every run of a changed
+// unit adds one, so without a bound the host's store grows with every run
+// (2026-11-11: 835 MB of suite records, none ever deleted, on a disk with
+// 670 MB left). Enough to keep each workspace's recent variants of a unit
+// reusable across the host.
+const maxPasses = 32
 
 func (s Store) path(suite, key string) (string, error) {
 	if !suiteName.MatchString(suite) {
@@ -96,44 +122,128 @@ func (s Store) Lookup(suite, key string) (Record, bool, error) {
 	return r, true, nil
 }
 
-// Newest answers the suite's most recently passed record, whatever its key,
-// and whether there is one: what a run that cannot reuse compares against to
-// say which input changed.
+// Newest answers the unit's most recently passed record, whatever its key,
+// with its manifest, and whether there is one: what a run that cannot reuse
+// compares against to say which input changed.
 func (s Store) Newest(suite string) (Record, bool, error) {
-	if !suiteName.MatchString(suite) {
-		return Record{}, false, fmt.Errorf("reuse: %q is not a suite name", suite)
-	}
-	entries, err := os.ReadDir(filepath.Join(s.Dir, suite))
+	return s.readNamed(suite, newestFile)
+}
+
+// passes is every pass record of the unit under its key, newest first.
+func (s Store) passes(suite string) ([]Record, []string, error) {
+	dir := filepath.Join(s.Dir, suite)
+	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Record{}, false, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return Record{}, false, fmt.Errorf("reuse: list %s's records: %w", suite, err)
+		return nil, nil, fmt.Errorf("reuse: list %s's records: %w", suite, err)
 	}
 	var records []Record
+	var paths []string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
 			continue
 		}
-		r, err := readRecord(filepath.Join(s.Dir, suite, e.Name()))
+		p := filepath.Join(dir, e.Name())
+		r, err := readRecord(p)
 		if err != nil {
-			return Record{}, false, err
+			return nil, nil, err
 		}
 		records = append(records, r)
+		paths = append(paths, p)
 	}
-	if len(records) == 0 {
-		return Record{}, false, nil
+	idx := make([]int, len(records))
+	for i := range idx {
+		idx[i] = i
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].PassedAt.After(records[j].PassedAt) })
-	return records[0], true, nil
+	sort.SliceStable(idx, func(a, b int) bool { return records[idx[a]].PassedAt.After(records[idx[b]].PassedAt) })
+	outR, outP := make([]Record, len(idx)), make([]string, len(idx))
+	for i, j := range idx {
+		outR[i], outP[i] = records[j], paths[j]
+	}
+	return outR, outP, nil
 }
 
-// Put writes r.
+// Put writes the pass r.
 func (s Store) Put(r Record) error {
+	if r.Failed {
+		return fmt.Errorf("reuse: %s's record is a failure, which is a last outcome (PutLast), never a pass", r.Suite)
+	}
 	p, err := s.path(r.Suite, r.Key)
 	if err != nil {
 		return err
 	}
+	withManifest := r
+	r.Manifest = nil
+	if err := s.write(p, r); err != nil {
+		return err
+	}
+	newest, ok, err := s.Newest(r.Suite)
+	if err != nil {
+		return err
+	}
+	if !ok || !newest.PassedAt.After(r.PassedAt) {
+		if err := s.write(filepath.Join(s.Dir, r.Suite, newestFile), withManifest); err != nil {
+			return err
+		}
+	}
+	return s.prune(r.Suite)
+}
+
+// prune deletes the unit's pass records beyond its newest maxPasses.
+func (s Store) prune(suite string) error {
+	_, paths, err := s.passes(suite)
+	if err != nil {
+		return err
+	}
+	if len(paths) <= maxPasses {
+		return nil
+	}
+	for _, p := range paths[maxPasses:] {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("reuse: prune %s's old pass %s: %w", suite, p, err)
+		}
+	}
+	return nil
+}
+
+// Last answers the unit's last outcome, pass or failure, and whether it has
+// one: what says a unit that runs failed before.
+func (s Store) Last(suite string) (Record, bool, error) {
+	return s.readNamed(suite, lastFile)
+}
+
+// readNamed reads the unit's record file name (lastFile, newestFile).
+func (s Store) readNamed(suite, name string) (Record, bool, error) {
+	if !suiteName.MatchString(suite) {
+		return Record{}, false, fmt.Errorf("reuse: %q is not a suite name", suite)
+	}
+	r, err := readRecord(filepath.Join(s.Dir, suite, name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Record{}, false, nil
+	}
+	if err != nil {
+		return Record{}, false, err
+	}
+	if r.Suite != suite {
+		return Record{}, false, fmt.Errorf("reuse: %s's %s records %s", suite, name, r.Suite)
+	}
+	return r, true, nil
+}
+
+// PutLast writes r as its unit's last outcome, replacing the one before.
+func (s Store) PutLast(r Record) error {
+	if !suiteName.MatchString(r.Suite) {
+		return fmt.Errorf("reuse: %q is not a suite name", r.Suite)
+	}
+	if !hexKey.MatchString(r.Key) {
+		return fmt.Errorf("reuse: %q is not an input key", r.Key)
+	}
+	return s.write(filepath.Join(s.Dir, r.Suite, lastFile), r)
+}
+
+func (s Store) write(p string, r Record) error {
 	r.Version = recordVersion
 	data, err := json.Marshal(r)
 	if err != nil {

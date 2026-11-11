@@ -20,7 +20,7 @@ type shimLogWorkspaceStore interface {
 }
 
 type shimLogRelauncher interface {
-	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error)
+	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error)
 }
 
 // runShimLogRolls consumes hard-ceiling requests for the serving lifetime.
@@ -97,7 +97,7 @@ func forceShimLogRoll(
 			req.Log.Info(shimLogRollOperation, "rolled the shim whose log reached its hard ceiling", ended)
 		}
 	}
-	decision, err := relauncher.BounceShim(ctx, workspace.ID, rollout.ReasonShimLogCeiling, false, done)
+	decision, err := relauncher.BounceShim(ctx, workspace.ID, rollout.ReasonShimLogCeiling, false, nil, done)
 	if err != nil {
 		fields["cause"] = err.Error()
 		req.Log.Error(shimLogRollOperation, "the bounce registry refused the shim-log roll", fields)

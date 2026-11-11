@@ -87,7 +87,7 @@ func (v *verbs) SelectAccount(ctx context.Context, ws ids.WorkspaceID, configDir
 	// THE ACCOUNT SWITCH BOUNCES AT FREENESS, never over work: the user asked
 	// to spend as another account, not to end what runs now, exactly as a
 	// restart once idle (RestartWhenIdle) bounces.
-	if _, err := v.bounceShim(ctx, log, ws, false, nil); err != nil {
+	if _, err := v.bounceShim(ctx, log, ws, false, nil, nil); err != nil {
 		return false, err
 	}
 	return chosen.LoggedIn, nil

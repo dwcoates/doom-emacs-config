@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func runRelaunch(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchRe
 	t.Helper()
 	old := h.fleet.live[ws]
 	done := make(chan error, 1)
-	if _, err := h.c.BounceShim(context.Background(), ws, reason, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, reason, false, nil, func(err error) { done <- err }); err != nil {
 		return err
 	}
 	if old != nil {
@@ -41,7 +42,7 @@ func runRelaunch(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchRe
 func bounceAndWait(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchReason, force bool) error {
 	t.Helper()
 	done := make(chan error, 1)
-	if _, err := h.c.BounceShim(context.Background(), ws, reason, force, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, reason, force, nil, func(err error) { done <- err }); err != nil {
 		return err
 	}
 	return awaitBounce(t, h, done)
@@ -196,7 +197,7 @@ func TestTheReapIsTheGateBeforeTheNewShimIsInstalled(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	// The old process is NOT reaped yet: the engine must be sitting on the gate,
@@ -222,7 +223,7 @@ func TestAnExpiredStandDownWindowForceKillsAndStillPassesTheGate(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.clock.awaitArmed(t, standDownWindow)
@@ -252,7 +253,7 @@ func TestAnExpiredStandDownWindowIsLoggedLoudly(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.clock.awaitArmed(t, standDownWindow)
@@ -571,7 +572,7 @@ func TestARefusedStandDownWaitsOutTheWindowRatherThanGivingUp(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.clock.awaitArmed(t, standDownWindow)
@@ -1005,7 +1006,7 @@ func TestAForcedBounceStandsTheShimDownForced(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	decision, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, true, func(err error) { done <- err })
+	decision, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, true, nil, func(err error) { done <- err })
 	if err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
@@ -1030,7 +1031,7 @@ func TestABusyWorkspacesBounceIsRegisteredNotRun(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	decision, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil)
+	decision, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, nil)
 
 	// Assert
 	if err != nil {
@@ -1051,7 +1052,7 @@ func TestARegistryRefusalIsReturnedAndLogged(t *testing.T) {
 	h.registry.err = errFake
 
 	// Act
-	_, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil)
+	_, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, false, nil, nil)
 
 	// Assert
 	if err == nil {
@@ -1114,7 +1115,7 @@ func TestAShimBounceAsksToReplaceTheShim(t *testing.T) {
 	h.freeness.SetFree(ws, false)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, nil); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 
@@ -1151,7 +1152,7 @@ func TestAShimBounceEndedUnrunIsAnOutcomeNotAFailure(t *testing.T) {
 			ws, _ := h.workspace(t)
 			h.freeness.SetFree(ws, false)
 			done := make(chan error, 1)
-			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, func(err error) { done <- err }); err != nil {
 				t.Fatalf("BounceShim: %v", err)
 			}
 
@@ -1245,7 +1246,7 @@ func deferredBounce(t *testing.T, h *harness, ws ids.WorkspaceID, reason Relaunc
 	old = h.fleet.live[ws]
 	old.killAnswer = liveRefusal()
 	done = make(chan error, 2)
-	if _, err := h.c.BounceShim(context.Background(), ws, reason, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, reason, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.registry.wait()
@@ -1358,7 +1359,7 @@ func TestALiveRefusalRecordsTheWorkItNames(t *testing.T) {
 	}
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, nil); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.registry.wait()
@@ -1442,7 +1443,7 @@ func TestAnUnansweredUnforcedStandDownDefersTheBounce(t *testing.T) {
 			old.killErr = errFake
 
 			// Act
-			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, nil); err != nil {
 				t.Fatalf("BounceShim: %v", err)
 			}
 			h.clock.awaitArmed(t, standDownWindow)
@@ -1466,7 +1467,7 @@ func TestAnUnansweredUnforcedStandDownWhoseShimLeavesInsideTheWindowPassesTheGat
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.clock.awaitArmed(t, standDownWindow)
@@ -1492,7 +1493,7 @@ func TestAForcedStandDownTheShimRefusesIsStillForceKilledAtTheWindow(t *testing.
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	h.clock.awaitArmed(t, standDownWindow)
@@ -1556,7 +1557,7 @@ func TestADeferralToldToTheShimBouncesCompletionIsRecordedAsAContractBreach(t *t
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, nil); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 
@@ -1585,7 +1586,7 @@ func TestASessionlessOldShimIsStoppedAtOnceWithoutTheWindow(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	waitForForceKill(t, old)
@@ -1624,7 +1625,7 @@ func TestAResumeEndedByARestartRelaunchesOverTheInstalledShim(t *testing.T) {
 	first.Reap()
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 
@@ -1652,7 +1653,7 @@ func TestAForcedStandDownThatHangsIsKilledAtItsBound(t *testing.T) {
 	done := make(chan error, 1)
 
 	// Act
-	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, func(err error) { done <- err }); err != nil {
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, nil, func(err error) { done <- err }); err != nil {
 		t.Fatalf("BounceShim: %v", err)
 	}
 	waitForForceKill(t, old)
@@ -1666,5 +1667,62 @@ func TestAForcedStandDownThatHangsIsKilledAtItsBound(t *testing.T) {
 		if armed == standDownWindow {
 			t.Fatalf("the stand-down window was waited out for a hung forced stand-down")
 		}
+	}
+}
+
+// TestABouncesWorkIsEndedInsideItBeforeTheOldShimGoes pins where BounceShim's
+// endWork runs: inside the bounce's Run, which the registry runs drained, and
+// before anything replaces the old shim, so nothing the cut
+// work's end releases is dispatched to the shim being stood down.
+func TestABouncesWorkIsEndedInsideItBeforeTheOldShimGoes(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	old := h.fleet.live[ws]
+	done := make(chan error, 1)
+	endWork := func(context.Context) { h.order.record("end_work") }
+
+	// Act
+	if _, err := h.c.BounceShim(context.Background(), ws, ReasonRestartVerb, true, endWork, func(err error) { done <- err }); err != nil {
+		t.Fatalf("BounceShim: %v", err)
+	}
+	old.Reap()
+	if err := awaitBounce(t, h, done); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	end := indexOf(taken, "end_work")
+	if count := len(slices.DeleteFunc(slices.Clone(taken), func(s string) bool { return s != "end_work" })); count != 1 {
+		t.Fatalf("steps = %v, want end_work run exactly once", taken)
+	}
+	for _, later := range []string{"hold_starts", "prelaunch", "kill_session", "install"} {
+		if i := indexOf(taken, later); i >= 0 && i < end {
+			t.Fatalf("steps = %v, want the work ended before %s", taken, later)
+		}
+	}
+}
+
+// TestABounceDeferredBehindAMergeEndsNoWork pins that a bounce that gives
+// itself back unperformed ends nothing: the work it would cut runs on.
+func TestABounceDeferredBehindAMergeEndsNoWork(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyHold); err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	ended := false
+
+	// Act
+	err := h.c.shimBounce(ReasonBuildStale, false, func(context.Context) { ended = true })(context.Background(), ws)
+
+	// Assert
+	if !errors.Is(err, bounce.ErrDeferredBehindLease) {
+		t.Fatalf("bounce = %v, want it deferred behind the merge's lease", err)
+	}
+	if ended {
+		t.Fatal("endWork ran for a bounce that was given back unperformed")
 	}
 }

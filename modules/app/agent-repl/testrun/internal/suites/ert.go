@@ -70,10 +70,11 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	return Units{
-		Atomic: []run.Spec{build},
-		Splits: []Split{{Group: s.Name, Suite: s.Name, Items: files, Deps: []string{build.ID}, Chunk: chunk, Named: named}},
-	}, nil
+	splits := fileSplits(s.Name, s.Name, files, chunk, named)
+	for i := range splits {
+		splits[i].Deps = []string{build.ID}
+	}
+	return Units{Atomic: []run.Spec{build}, Splits: splits}, nil
 }
 
 // lispSymbols is a quoted list of symbols, each name interned exactly.

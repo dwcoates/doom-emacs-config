@@ -143,6 +143,43 @@ before the unit starts; a harness bound that spans a whole run must allow
 for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 `cpu_wait_ended`).
 
+## A Go module's test binaries are built by one command
+
+- Every unit-test binary of a Go module pass (its ordinary pass, and its
+  tagged integration pass) is built by ONE build unit, `<suite>:build` or
+  `<suite>:build[<tags>]`: `testrun build-tests` runs one `go test -exec`
+  over every package (`testrun/internal/gobuild`), held to its width
+  (`suites.BuildSlots`, pinned by `-p` and `GOMAXPROCS`).
+- Never a build unit per package, and never a hand-written `go test -c` in a
+  unit. Each package's tests still run as their own units against its binary,
+  so per-package verdicts, bounds, failure output and reruns by path are
+  unchanged; a package that does not compile fails only its own units, with
+  its compiler output.
+- A step that drops units from a suite (a selection's narrowing, per-package
+  reuse) ends with `suites.Units.Finish`, so the build names only the packages
+  whose units remain.
+- Enforced by `TestEveryRosterGoSuitePlansOneBuildPerPass`
+  (`testrun/internal/suites/modulebuild_test.go`), which fails when a roster
+  suite plans any other build unit.
+
+## Every suite declares its inputs; reuse is per unit
+
+- Every roster suite (`testrun/roster/roster.go`) declares `Reuse`, what its units read beyond what the runner derives, or `NeverReused`, a written reason it can never be reused.
+  - `roster.Check` refuses a suite with neither or with both, at the start of every run and in `TestEverySuiteDeclaresItsInputs`, so a new suite lands with its declaration.
+  - `NeverReused` is only for a suite no profile can confine (a container's daemon reads the checkout outside it, a scan walks the whole module) or whose verdict is not a function of its inputs (a latency measurement).
+- Reuse is per UNIT: a Go package (unit or integration, a tagged pass named `<package>[<tags>]`), a vitest test file, an ERT test file, a suite-wide check (`vet`, `typecheck`), or a whole script or e2e suite.
+  - A unit's inputs are derived by the tools, never kept by hand: a Go package's from `go list -deps -test` (every package its test binary links, their testdata and embedded files, go.mod, go.sum), a vitest file's from its import graph, an ERT file's from what it and the helpers load.
+  - A run skips every unit whose inputs an earlier green run on the host passed it on, from any workspace: a unit's key is its inputs' bytes, never a checkout path, branch or workspace.
+  - A unit that passed is recorded though its suite failed, so the rerun after a fix runs only the failed units and those whose inputs the fix touched.
+- Each unit runs confined to exactly the inputs its key covers. A test failing with "Operation not permitted" on a checkout file reads an undeclared input.
+  - Declare it for that unit in `Reuse.Units["<unit>"]`, or in `Reuse.Inputs` only when every unit of the suite reads it. Never widen a profile.
+  - A refused read does not always say "operation not permitted": a listing of an undeclared directory comes back EMPTY (`filepath.Glob` drops the refusal), so a scan that globs a directory fails on finding nothing. Its declaration is the directory (a `/`-suffixed subtree).
+  - A unit whose reads cannot be enumerated goes in `Reuse.Never` with why: it runs unconfined and is never recorded.
+  - A targeted run (`-go DIR=Test`, `-vitest FILE=name`) is never confined, so only an untargeted run of the unit proves a declaration; run one after adding a read.
+- Each vitest and ERT file runs in its own process, so a unit's profile confines only its own file's inputs.
+  - A new test file is a new unit and costs one process start: about 0.8s for vitest and 1.2s for ERT (the runner's per-chunk overhead history, 2026-11-11).
+- How keys, profiles and records work is `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of each unit's exact inputs".
+
 ## E2E coverage is a step of a scenario
 
 - A new top-level e2e test is only for an entirely new, large feature, and it is itself a scenario (`scenario(t, steps...)` in `e2e/scenarios_test.go`).
@@ -329,6 +366,12 @@ coverage impact (always none).
     - Evidence: every flake in the merge gates from 2026-10-30 to 2026-11-02 was a wait running out its bound while its dependency had already failed: a page that hung on a Vite chunk cycle and never drew (`TestEmacsKillCloseLeavesTheTabOrderAlone`, 5 branches; `TestEmacsTabsRehydrateFromTheRosterOnConnect`, 4), a registration refused in silence (`TestDoom/*`, 4 steps at 5s each), a successor that closed the gap a test meant to read (`TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous`, 2). Each read as "slow under load" (docs/investigations/2026-11-02-flaky-tests.md).
     - Fix: the fault latch (see "Synchronization: events, never time"); the dependency's failure ends the wait with its own record.
     - Coverage impact: none; a wait that fails sooner asserts the same thing.
+
+14. **A build unit per Go package, and a whole suite rerun for one package's change.**
+    - Evidence (merge gate, `~/.claude-emacs/merge-logs/abc9582429d943eb-tests-1.log`): 514 units, 960s wall, 1,785 CPU-s; the daemon suite alone planned 340 units, 167 of them `:build` units (230s of unit wall, 281 CPU-s), each a `go test -c` that re-linked what the others had just compiled. A change to any daemon file reran all of it.
+    - Fix 1: one build command per module pass ("A Go module's test binaries are built by one command"). Measured (2026-11-11, full `-suite daemon` runs under the CPU governor): the daemon suite plans 175 units; its builds are two units, `daemon:build` 82.7-92.2 CPU-s (49-56s wall at `-p=2`) and `daemon:build[integration]` 4.7 CPU-s.
+    - Fix 2: each daemon unit-test package is reused on its own green pass ("Every suite declares its inputs; reuse is per unit"), now every unit of every suite. Measured (2026-11-11): with a one-line change to `internal/runecap` (22 dependent test packages), 114 packages were reused and 61 units ran, 259 CPU-s against 792 CPU-s for the same suite with nothing reused; `daemon:build` built only the remaining packages, 26.4 CPU-s.
+    - Coverage impact: none; every package's tests run as their own units against the same binaries, and a reused package's pass is of exactly its inputs.
 
 ## Changes that LOOK faster and are refused
 

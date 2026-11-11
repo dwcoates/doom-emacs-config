@@ -52,6 +52,14 @@ var suiteSkipped = regexp.MustCompile(`(?m)^.*?([A-Za-z0-9_-]+): not selected by
 // suiteStarting matches the script's line as a suite starts.
 var suiteStarting = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): starting\s*$`)
 
+// suiteReuseLine matches the runner's reuse lines for one suite, printed
+// before any unit starts (testrun/internal/reuse, Report and RecordOutcomes):
+// its tally ("<suite>: reuse: 12 units, 9 reused, 3 run (...)"), and each
+// running unit's reason ("<suite>: unit internal/merge runs (inputs ...):
+// failed before ...", "<suite>: the whole suite runs ..."). Each belongs to
+// the suite it names, never to whichever suite settles next.
+var suiteReuseLine = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): (?:reuse: |(?:unit \S+|the whole suite) runs\b)`)
+
 // suitePlanned matches the runner's line naming how many units a suite runs,
 // printed as the suite starts: the total its unit verdicts are counted against.
 var suitePlanned = regexp.MustCompile(`^.*?([A-Za-z0-9_-]+): ([0-9]+) units planned\s*$`)
@@ -197,7 +205,8 @@ func reusedSuite(line string) (string, string, bool) {
 // [SUITE] output:") and by the unit's own verdict line ("unit ID [SUITE]
 // ok|FAILED ..."). So a line inside a bracket belongs to that
 // bracket's suite, and a line that names a suite -- its starting and verdict
-// lines, a unit cancelled before it ran -- belongs to the suite it names.
+// lines, its reuse tally and each of its units' reasons for running, a unit
+// cancelled before it ran -- belongs to the suite it names.
 //
 // Any other line belongs to the suite whose verdict comes NEXT, which is the
 // whole rule for a run that prints no brackets (one suite at a time). What
@@ -233,6 +242,10 @@ func splitSuiteOutput(output string, selected []string) map[string]string {
 			continue
 		}
 		if m := suitePlanned.FindStringSubmatch(line); m != nil {
+			lines[m[1]] = append(lines[m[1]], line)
+			continue
+		}
+		if m := suiteReuseLine.FindStringSubmatch(line); m != nil {
 			lines[m[1]] = append(lines[m[1]], line)
 			continue
 		}

@@ -266,3 +266,108 @@ func TestIsGeneratedNamesEveryPathInAGeneratedSubtree(t *testing.T) {
 		})
 	}
 }
+
+func TestTheHashCacheReadsAFileOnceUntilItChanges(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"a.txt": "one"})
+	set := NewInputSet()
+	if err := set.AddFile("a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewHashCache()
+	first, err := ComputeKeyCached(root, set, Facts{}, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "a.txt", "two, longer")
+
+	// Act
+	second, err := ComputeKeyCached(root, set, Facts{}, cache)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	uncached, err := ComputeKey(root, set, Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Digest == second.Digest || second.Digest != uncached.Digest {
+		t.Fatalf("keys = %s %s %s, want the changed file read again", first.Short(), second.Short(), uncached.Short())
+	}
+	if len(cache.m) != 1 {
+		t.Fatalf("cache holds %d digests, want 1", len(cache.m))
+	}
+}
+
+func TestACachedDigestIsTheFilesOwn(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"a.txt": "one"})
+	set := NewInputSet()
+	if err := set.AddFile("a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewHashCache()
+
+	// Act
+	cached, err := ComputeKeyCached(root, set, Facts{}, cache)
+	again, err2 := ComputeKeyCached(root, set, Facts{}, cache)
+
+	// Assert
+	plain, err3 := ComputeKey(root, set, Facts{})
+	if err != nil || err2 != nil || err3 != nil || cached.Digest != plain.Digest || again.Digest != plain.Digest {
+		t.Fatalf("keys = %s %s %s (%v %v %v), want one key", cached.Short(), again.Short(), plain.Short(), err, err2, err3)
+	}
+}
+
+func TestAKeysManifestIsCompactAndStillSaysWhatChanged(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"d/a.txt": "one", "d/b.txt": "two"})
+	set := NewInputSet()
+	if err := set.AddFlatDir("d"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ComputeKey(root, set, Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "d/b.txt", "three")
+
+	// Act
+	after, err := ComputeKey(root, set, Facts{})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range after.Manifest {
+		if len(v) != compactValueLen {
+			t.Fatalf("%s's value %q is %d long, want %d", name, v, len(v), compactValueLen)
+		}
+	}
+	if got := after.Manifest.Changed(before.Manifest); len(got) != 1 || got[0] != "d/b.txt" {
+		t.Fatalf("Changed = %v, want d/b.txt", got)
+	}
+}
+
+func TestAListingDoesNotHashAConfigsTransientBundle(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"p/vitest.config.ts": "export default {}"})
+	set := NewInputSet()
+	if err := set.AddDir("p"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ComputeKey(root, set, Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "p/vitest.config.ts.timestamp-1794416560305-e10a16afab32.mjs", "bundled")
+
+	// Act
+	after, err := ComputeKey(root, set, Facts{})
+
+	// Assert
+	if err != nil || after.Digest != before.Digest {
+		t.Fatalf("keys %s %s (%v), want a bundle appearing to move nothing", before.Short(), after.Short(), err)
+	}
+}

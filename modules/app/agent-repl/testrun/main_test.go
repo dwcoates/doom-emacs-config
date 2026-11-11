@@ -2,6 +2,7 @@ package main
 
 import (
 	testrunv1 "agentrepl/proto/testrun/v1"
+	"bytes"
 	"google.golang.org/protobuf/proto"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/internal/gobuild"
+	"agentrepl/testrun/internal/run"
 )
 
 func TestForwardEvents(t *testing.T) {
@@ -103,5 +107,64 @@ func TestRedundancyRequestArgvRefuses(t *testing.T) {
 				t.Fatalf("redundancyRequestArgv = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// logBuffers is a run.Log whose lines a test reads back.
+func logBuffers() (*run.Log, *bytes.Buffer, *bytes.Buffer) {
+	var out, errs bytes.Buffer
+	return &run.Log{Out: &out, Err: &errs}, &out, &errs
+}
+
+func TestTheModuleBuildCommandsLogTheirFailures(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "_.test")
+	if err := os.WriteFile(gobuild.FailurePath(bin), []byte("a.go:1: bad\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		cmd      func(*run.Log, []string) int
+		argv     []string
+		wantCode int
+		wantLog  string
+	}{
+		{"build-tests without its directories", buildTestsCmd, []string{"--", "a"}, 2, "build-tests: gobuild: build-tests needs -module and -bindir"},
+		{"stash-test without its binary", stashTestCmd, []string{"-module", "/m", "-bindir", "/b"}, 2, "stash-test: usage: stash-test -module DIR -bindir DIR BINARY"},
+		{"stash-test outside the module", stashTestCmd, []string{"-module", t.TempDir(), "-bindir", t.TempDir(), bin}, 1, "is not in the module"},
+		{"exec-test without a binary", execTestCmd, nil, 2, "exec-test: usage"},
+		{"exec-test of a package that did not compile", execTestCmd, []string{bin, "-test.v"}, 1, "exec-test " + bin + ": the package's tests did not compile: " + gobuild.FailurePath(bin)},
+		{"check-test of a package that did not compile", checkTestCmd, []string{bin}, 1, "check-test " + bin + ": the package's tests did not compile"},
+		{"check-test without its binary", checkTestCmd, nil, 2, "check-test: usage: check-test BINARY"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log, _, errs := logBuffers()
+
+			// Act
+			code := tt.cmd(log, tt.argv)
+
+			// Assert
+			if code != tt.wantCode || !strings.Contains(errs.String(), "ERROR: ") || !strings.Contains(errs.String(), tt.wantLog) {
+				t.Fatalf("exit %d logging %q, want exit %d logging %q", code, errs.String(), tt.wantCode, tt.wantLog)
+			}
+		})
+	}
+}
+
+func TestCheckTestCmdPassesABuiltBinary(t *testing.T) {
+	// Arrange
+	bin := filepath.Join(t.TempDir(), "_.test")
+	if err := os.WriteFile(bin, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log, _, errs := logBuffers()
+
+	// Act
+	code := checkTestCmd(log, []string{bin})
+
+	// Assert
+	if code != 0 || errs.Len() != 0 {
+		t.Fatalf("exit %d logging %q, want a quiet pass", code, errs.String())
 	}
 }

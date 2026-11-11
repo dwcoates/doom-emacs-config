@@ -682,27 +682,23 @@ func TestGoPkgUnits(t *testing.T) {
 		name      string
 		covDir    bool
 		parallel  roster.Parallel
-		wantBuild []string
 		wantChunk []string
 		wantSlots int
 	}{
 		{
-			name:      "a covered package compiles instrumented and writes counters",
+			name:      "a covered package's chunk writes counters",
 			covDir:    true,
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "-cover", "-coverpkg=./...", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$", "-test.gocoverdir=COV"},
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$", "-test.gocoverdir=COV"},
 		},
 		{
-			name:      "an uncovered package compiles plain",
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
+			name:      "an uncovered package's chunk runs its binary plain",
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=1", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
 		{
 			name:      "a wait-bound package overlaps its tests in a chunk at its width",
 			parallel:  roster.Parallel{Tests: 4, Slots: 2},
 			wantSlots: 2,
-			wantBuild: []string{"go", "test", "-c", "-o", "BIN", "./p"},
-			wantChunk: []string{"BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
+			wantChunk: []string{"/testrun", "exec-test", "BIN", "-test.count=1", "-test.v", "-test.parallel=4", "-test.timeout=10m", "-test.run=^(TestA)$"},
 		},
 	}
 	for _, tt := range tests {
@@ -714,10 +710,10 @@ func TestGoPkgUnits(t *testing.T) {
 			if tt.covDir {
 				cov = filepath.Join(t.TempDir(), "cov")
 			}
-			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, CovDir: cov, Parallel: tt.parallel}
+			p := goPkg{Suite: "m", Module: module, Rel: "p", Bin: bin, Self: "/testrun", After: "m:build", CovDir: cov, Parallel: tt.parallel}
 
 			// Act
-			build, split, err := p.units()
+			check, split, err := p.units()
 
 			// Assert
 			if err != nil {
@@ -734,10 +730,10 @@ func TestGoPkgUnits(t *testing.T) {
 				}
 				return out
 			}
-			if build.ID != "m:p:build" || !reflect.DeepEqual(subst(build.Argv), tt.wantBuild) {
-				t.Fatalf("build = %s %v, want m:p:build %v", build.ID, subst(build.Argv), tt.wantBuild)
+			if check != nil {
+				t.Fatalf("a package with tests got a compiled-check unit %s", check.ID)
 			}
-			if split == nil || split.Group != "m:p" || !reflect.DeepEqual(split.Items, []string{"TestA", "TestB"}) || !reflect.DeepEqual(split.Deps, []string{"m:p:build"}) {
+			if split == nil || split.Group != "m:p" || split.Package != "p" || !reflect.DeepEqual(split.Items, []string{"TestA", "TestB"}) || !reflect.DeepEqual(split.Deps, []string{"m:build"}) {
 				t.Fatalf("split = %+v", split)
 			}
 			chunk := split.Chunk("m:p#00", []string{"TestA"})
@@ -756,33 +752,33 @@ func TestGoPkgUnits(t *testing.T) {
 	}
 }
 
-func TestGoPkgUnitsOfAPackageWithoutTestsIsItsBuildAlone(t *testing.T) {
+func TestGoPkgUnitsOfAPackageWithoutTestsIsItsCompiledCheck(t *testing.T) {
 	// Arrange: test files with helpers only.
 	module := goPackageFixture(t, "func helper(t *testing.T) {}\n")
 
 	// Act
-	build, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b"}.units()
+	check, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "m:build"}.units()
 
 	// Assert
-	if err != nil || split != nil || build.ID != "m:p:build" {
-		t.Fatalf("units = %s, %+v, %v; want the build alone", build.ID, split, err)
+	if err != nil || split != nil || check == nil {
+		t.Fatalf("units = %+v, %+v, %v; want the compiled check alone", check, split, err)
+	}
+	if check.ID != "m:p:compiled" || !reflect.DeepEqual(check.Argv, []string{"/testrun", "check-test", "/b"}) || !reflect.DeepEqual(check.Deps, []string{"m:build"}) {
+		t.Fatalf("check = %s %v after %v", check.ID, check.Argv, check.Deps)
 	}
 }
 
-func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
+func TestGoPkgChunkCarriesItsTimeoutAndEnv(t *testing.T) {
 	// Arrange
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
-	p := goPkg{Suite: "e2e", Module: module, Rel: "p", Bin: "/b", Build: []string{"bash", "-c", "make it"}, ChunkEnv: []string{"K=V"}, Timeout: "45m"}
+	p := goPkg{Suite: "e2e", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "e2e:build", ChunkEnv: []string{"K=V"}, Timeout: "45m"}
 
 	// Act
-	build, split, err := p.units()
+	_, split, err := p.units()
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(build.Argv, []string{"bash", "-c", "make it"}) {
-		t.Fatalf("build argv = %v", build.Argv)
 	}
 	chunk := split.Chunk("e2e:p#00", []string{"TestA"})
 	if !strings.Contains(strings.Join(chunk.Argv, " "), "-test.timeout=45m") || chunk.Env[len(chunk.Env)-1] != "K=V" {
@@ -790,21 +786,21 @@ func TestGoPkgUnitsUsesACustomBuild(t *testing.T) {
 	}
 }
 
-func TestGoPkgSharedPrebuild(t *testing.T) {
+func TestGoPkgPrebuildRunsTestMainOnceAfterTheBuild(t *testing.T) {
 	// Arrange
-	p := goPkg{Module: "/module with space", Rel: "integration", Bin: "/work/pkg.test"}
+	p := goPkg{Suite: "e2e", Module: "/module with space", Rel: ".", Bin: "/work/pkg.test", Self: "/testrun", After: "e2e:build"}
 
 	// Act
-	p.sharePrebuilt("/work/shared", "prepare deps")
+	pre := p.prebuild("/work/shared", "prepare deps")
 
 	// Assert
-	wantScript := "set -euo pipefail\nprepare deps\ngo test -c -o \"/work/pkg.test\" \"./integration\"\n" +
-		"AGENT_REPL_TEST_PREBUILD=\"/work/shared\" \"/work/pkg.test\" -test.run '^$'"
-	if !reflect.DeepEqual(p.Build, []string{"bash", "-c", wantScript}) {
-		t.Fatalf("build = %q, want %q", p.Build, wantScript)
+	wantScript := "set -euo pipefail\nprepare deps\n" +
+		"AGENT_REPL_TEST_PREBUILD=\"/work/shared\" \"/testrun\" exec-test \"/work/pkg.test\" -test.run '^$'"
+	if pre.ID != "e2e:.:prebuild" || !reflect.DeepEqual(pre.Argv, []string{"bash", "-c", wantScript}) || !reflect.DeepEqual(pre.Deps, []string{"e2e:build"}) {
+		t.Fatalf("prebuild = %s %q after %v, want %q after e2e:build", pre.ID, pre.Argv, pre.Deps, wantScript)
 	}
-	if !reflect.DeepEqual(p.ChunkEnv, []string{"AGENT_REPL_TEST_PREBUILT=/work/shared"}) {
-		t.Fatalf("chunk env = %v", p.ChunkEnv)
+	if p.After != "e2e:.:prebuild" || !reflect.DeepEqual(p.ChunkEnv, []string{"AGENT_REPL_TEST_PREBUILT=/work/shared"}) {
+		t.Fatalf("after the prebuild the package's chunks wait on %s with env %v", p.After, p.ChunkEnv)
 	}
 }
 
@@ -825,7 +821,7 @@ func TestGoModuleCoverageModes(t *testing.T) {
 			}
 			var build, report bool
 			for _, unit := range u.Atomic {
-				build = build || unit.ID == "m:p:build" && strings.Contains(strings.Join(unit.Argv, " "), "-cover")
+				build = build || unit.ID == "m:build" && slices.Contains(unit.Argv, "-cover")
 				report = report || unit.ID == "m:coverage"
 			}
 			if build != coverage || report != coverage {
@@ -1310,15 +1306,17 @@ func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
 	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
 
 	// Act
-	split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+	splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+	split := splits[0]
+	chunk := split.Chunk(split.Group+"#00", []string{"test/integration/a.integration.test.ts"})
 	argv := strings.Join(chunk.Argv, " ")
-	if split.Group != "webapp[integration]" || !strings.Contains(argv, "--config vitest.integration.config.ts") || !strings.Contains(argv, "--maxWorkers=1") {
+	if len(splits) != 1 || split.Group != "webapp[integration]/test/integration/a.integration.test.ts" ||
+		!strings.Contains(argv, "--config vitest.integration.config.ts") || !strings.Contains(argv, "--maxWorkers=1") {
 		t.Fatalf("group %q argv %q, want the integration group under its config, one worker", split.Group, argv)
 	}
 }
@@ -1331,7 +1329,7 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 	}{
 		{name: "a coverage run", coverage: true, want: []string{
 			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
-			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]#00",
+			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]%test%integration%a.integration.test.ts#00",
 		}},
 		{name: "an ordinary run", coverage: false},
 	}
@@ -1341,13 +1339,13 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 			dir, work := t.TempDir(), t.TempDir()
 			l := Layout{Module: dir, Work: work, Coverage: tt.coverage}
 			s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
-			split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+			splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Act
-			chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+			chunk := splits[0].Chunk(splits[0].Group+"#00", []string{"test/integration/a.integration.test.ts"})
 
 			// Assert
 			argv := strings.ReplaceAll(strings.Join(chunk.Argv, " "), work, "WORK")
@@ -1579,5 +1577,108 @@ func TestVitestNamedChunkPassesItsNames(t *testing.T) {
 	i := slices.Index(argv, "-t")
 	if i < 0 || argv[i+1] != VitestNamePattern([]string{"a suite"}) || argv[len(argv)-1] != "src/a.test.ts" {
 		t.Fatalf("argv = %v, want -t with the names' pattern and the file", argv)
+	}
+}
+
+func TestEveryVitestFileIsItsOwnSplit(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir(), Coverage: true}
+	files := []string{"test/a.test.ts", "test/sub/a.test.ts"}
+
+	// Act
+	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, dir, files)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []string
+	for _, sp := range u.Splits {
+		groups = append(groups, sp.Group)
+		if len(sp.Items) != 1 {
+			t.Errorf("%s holds %v, want its one file", sp.Group, sp.Items)
+		}
+	}
+	if want := []string{"webapp/test/a.test.ts", "webapp/test/sub/a.test.ts"}; !slices.Equal(groups, want) {
+		t.Fatalf("groups = %v, want %v", groups, want)
+	}
+	for _, a := range u.Atomic {
+		if a.ID == "webapp:coverage" && !slices.Equal(a.Deps, groups) {
+			t.Fatalf("the coverage merge waits on %v, want every file", a.Deps)
+		}
+	}
+	first := strings.Join(u.Splits[0].Chunk("webapp/test/a.test.ts#00", files[:1]).Argv, " ")
+	second := strings.Join(u.Splits[1].Chunk("webapp/test/sub/a.test.ts#00", files[1:]).Argv, " ")
+	if strings.Contains(first, "--coverage.all=false") || !strings.Contains(second, "--coverage.all=false") {
+		t.Fatalf("first %q second %q, want only the first file's chunk to carry the all-files pass", first, second)
+	}
+	if !strings.Contains(first, "webapp%test%a.test.ts#00") || !strings.Contains(second, "webapp%test%sub%a.test.ts#00") {
+		t.Fatalf("first %q second %q, want each chunk's outputs under its own tag", first, second)
+	}
+}
+
+func TestEveryERTFileIsItsOwnSplitAfterTheFakeDaemon(t *testing.T) {
+	// Arrange
+	module := t.TempDir()
+	lisp := filepath.Join(module, "lisp")
+	if err := os.MkdirAll(lisp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aggregator := "(load (expand-file-name \"test-helpers.el\" dir))\n(load (expand-file-name \"test-a.el\" dir))\n"
+	if err := os.WriteFile(filepath.Join(lisp, "test-agent-repl.el"), []byte(aggregator), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	u, err := ertUnits(Layout{Repo: module, Module: module, Work: t.TempDir()}, roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []string
+	for _, sp := range u.Splits {
+		groups = append(groups, sp.Group)
+		if !slices.Equal(sp.Deps, []string{"ert:fakedaemon"}) {
+			t.Errorf("%s waits on %v, want the fake daemon's build", sp.Group, sp.Deps)
+		}
+	}
+	if want := []string{"ert/test-helpers.el", "ert/test-a.el"}; !slices.Equal(groups, want) {
+		t.Fatalf("groups = %v, want %v", groups, want)
+	}
+}
+
+func TestVitestFileOfGroup(t *testing.T) {
+	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
+	tests := []struct {
+		group, file, config string
+		wantErr             bool
+	}{
+		{group: "webapp/test/a.test.ts", file: "test/a.test.ts", config: VitestConfig},
+		{group: "webapp[integration]/test/i.test.ts", file: "test/i.test.ts", config: "vitest.integration.config.ts"},
+		{group: "webapp", wantErr: true},
+		{group: "shim/test/a.test.ts", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.group, func(t *testing.T) {
+			// Act
+			file, config, err := VitestFileOfGroup(s, tt.group)
+
+			// Assert
+			if (err != nil) != tt.wantErr || file != tt.file || config != tt.config {
+				t.Fatalf("VitestFileOfGroup = %q %q %v, want %q %q error %v", file, config, err, tt.file, tt.config, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUnitTagSpellsSlashesSoTwoDirectoriesNeverShareOne(t *testing.T) {
+	// Act
+	a, b := unitTag("webapp/test/x/a.test.ts#00"), unitTag("webapp/test/y/a.test.ts#00")
+
+	// Assert
+	if a == b || strings.Contains(a, "/") {
+		t.Fatalf("tags = %q %q, want distinct names with no slash", a, b)
 	}
 }

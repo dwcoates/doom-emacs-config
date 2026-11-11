@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
@@ -26,29 +27,25 @@ func e2eUnits(l Layout, s roster.Suite) (Units, error) {
 func e2eUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
 	work := filepath.Join(l.Work, "e2e")
 	u := Units{Atomic: goVets(s, dir)}
+	b := moduleBuild(l, s.Name, dir, "", false)
 	for i, rel := range pkgs {
-		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel], Bin: filepath.Join(work, fmt.Sprintf("%03d.test", i)),
-			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir()}
-		u.Programs = append(u.Programs, p.Programs...)
+		p := b.pkgOf(l, s, rel)
 		if l.Coverage {
 			p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
 		}
+		var extra []run.Spec
 		if rel == "." {
-			prebuilt := filepath.Join(work, "prebuilt")
-			p.sharePrebuilt(prebuilt, strconv.Quote(filepath.Join(l.Module, "bin", "ensure-e2e-deps.sh")))
+			pre := p.prebuild(filepath.Join(work, "prebuilt"), strconv.Quote(filepath.Join(l.Module, "bin", "ensure-e2e-deps.sh")))
+			extra = append(extra, pre)
 			p.Timeout = "45m"
 		}
-		build, split, err := p.units()
-		if err != nil {
+		if err := u.addPackage(&b, p, extra...); err != nil {
 			return Units{}, err
-		}
-		u.Atomic = append(u.Atomic, build)
-		if split != nil {
-			u.Splits = append(u.Splits, *split)
 		}
 	}
 	if len(u.Splits) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has no tests under %s", s.Name, dir)
 	}
-	return u, nil
+	u.GoBuilds = append(u.GoBuilds, b)
+	return u.Finish(), nil
 }

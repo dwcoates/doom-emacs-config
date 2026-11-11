@@ -33,12 +33,12 @@ const FaultRelaunchFailed = health.KindResumeFailed
 // queue owns dispatch, so it decides "free" and "bounce now" as one step and
 // drains the workspace while the engine below runs. What this package owns is
 // the engine itself (shimBounce).
-func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error) {
 	fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 	decision, err := c.deps.Bounces.RequestBounce(ctx, ws, c.timeShimBounce(ws, reason, bounce.Request{
 		Reason:       string(reason),
 		Force:        force,
-		Run:          c.shimBounce(reason, force),
+		Run:          c.shimBounce(reason, force, endWork),
 		ReplacesShim: true,
 		Done: func(err error) {
 			switch bounce.OutcomeOf(err) {
@@ -116,7 +116,7 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 // It deliberately does NOT use Hibernate: hibernation is the IDLE SWEEP's
 // directive and compacts the transcript, which is exactly wrong for a bounce
 // that means to resume the same context moments later.
-func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
+func (c *controller) shimBounce(reason RelaunchReason, force bool, endWork func(context.Context)) bounce.Func {
 	return func(ctx context.Context, ws ids.WorkspaceID) error {
 		fields := dlog.Context{"workspace": string(ws), "reason": string(reason), "force": force}
 
@@ -137,6 +137,17 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 				c.log.Info(opRelaunch, "a merge holds the workspace; the unforced bounce waits for the merge to release it", dlog.Merge(fields, dlog.Context{"lease": string(held.ID)}))
 				return fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
 			}
+		}
+		// THE CUT WORK ENDS INSIDE THE DRAIN (BounceShim's endWork). The
+		// registry dispatches nothing while this runs, so a prompt deferred
+		// behind the cut turn, released by that turn's end, waits for the
+		// fresh shim instead of being started on this one in the instant
+		// before its stand-down (integration
+		// TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn,
+		// 2026-11-11: the deferred prompt's StartTurn reached the old shim
+		// 13ms after its KillTurn, and was lost with it).
+		if endWork != nil {
+			endWork(ctx)
 		}
 		var lease *wsm.Lease
 		// mergeHeld records that the workspace's MERGE lease already holds its
@@ -718,7 +729,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	// waiting would race the Add (the WaitGroup contract; -race reported it on
 	// three tests).
 	c.staleChecks.Add(1)
-	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, func(err error) {
+	decision, err := c.BounceShim(ctx, ws, ReasonBuildStale, force, nil, func(err error) {
 		defer c.staleChecks.Done()
 		c.settleStaleBounce(ws, err)
 	})

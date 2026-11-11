@@ -81,6 +81,10 @@ type Split struct {
 	Named func(id string, items []string, names []string) run.Spec
 	// Slots is every chunk's width; zero is one slot.
 	Slots int
+	// Package and Tags are a Go package split's package, relative to its
+	// module, and the build tags it runs under; Package is "" for every other
+	// split.
+	Package, Tags string
 }
 
 // Units is everything one suite contributes.
@@ -98,6 +102,9 @@ type Units struct {
 	// otherwise.
 	Tests []string
 	Only  func(names []string) []run.Spec
+	// GoBuilds are a Go suite's module builds, already placed in Atomic over
+	// the packages Atomic and Splits run (Finish).
+	GoBuilds []GoBuild
 }
 
 // Build turns one suite into units.
@@ -134,9 +141,22 @@ func PinnedEnv() []string {
 // A unit that needs flags of its own passes them here rather than setting
 // GOFLAGS itself, which would drop the pins.
 func GoFlagsEnv(extra ...string) string {
+	return goFlagsEnv(1, extra...)
+}
+
+func goFlagsEnv(packages int, extra ...string) string {
 	parts := append([]string{os.Getenv("GOFLAGS")}, extra...)
-	parts = append(parts, "-p=1", "-trimpath")
+	parts = append(parts, fmt.Sprintf("-p=%d", packages), "-trimpath")
 	return "GOFLAGS=" + strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}
+
+// WidePinnedEnv is PinnedEnv for a go command holding slots slots: it builds
+// slots packages at a time, each of its processes held to the GOMAXPROCS
+// every unit's are. MEASURED 2026-11-10 on the daemon's 166 packages: -p=2
+// averaged 1.5 cores (74 CPU-seconds in 48s), within two slots; -p=4 with
+// GOMAXPROCS=4 averaged 2.6 under a full run, past them.
+func WidePinnedEnv(slots int) []string {
+	return []string{goFlagsEnv(slots), "GOMAXPROCS=2"}
 }
 
 func spec(id, suite, dir string, argv []string, env ...string) run.Spec {

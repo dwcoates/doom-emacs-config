@@ -468,3 +468,39 @@ func TestAReusedSuiteIsNoFailure(t *testing.T) {
 		t.Fatalf("failing suites = %v, want none for a reused suite", found.suites)
 	}
 }
+
+// TestReuseLinesAreAttributedToTheSuiteTheyName covers the per-unit reuse
+// lines the runner prints for every suite before any unit starts: each
+// belongs to the suite it names, whichever suite settles first, and the
+// run's own tally to none.
+func TestReuseLinesAreAttributedToTheSuiteTheyName(t *testing.T) {
+	// Arrange
+	output := strings.Join([]string{
+		"[agent-repl-tests] webapp: reuse: 3 units, 1 reused, 2 run (1 failed before, 1 inputs changed)",
+		"[agent-repl-tests] webapp: unit test/a.test.ts runs (inputs abcdef012345): failed before, inputs unchanged",
+		"[agent-repl-tests] e2e: the whole suite runs: never reused: its sandbox staging walks the whole module",
+		"[agent-repl-tests] daemon: passed in 3s",
+		"[agent-repl-tests] reuse: 4 units, 1 reused, 3 run (1 failed before, 1 inputs changed, 1 never reused)",
+		"[agent-repl-tests] webapp: passed in 4s",
+		"[agent-repl-tests] e2e: passed in 5s",
+	}, "\n")
+
+	// Act
+	sections := splitSuiteOutput(output, []string{"daemon", "webapp", "e2e"})
+
+	// Assert
+	if strings.Contains(sections["daemon"], "unit test/a.test.ts") || strings.Contains(sections["daemon"], "the whole suite runs") {
+		t.Fatalf("the daemon section is %q, want none of the other suites' reuse lines", sections["daemon"])
+	}
+	for _, want := range []string{"webapp: reuse: 3 units", "webapp: unit test/a.test.ts runs"} {
+		if !strings.Contains(sections["webapp"], want) {
+			t.Errorf("the webapp section is %q, want %q", sections["webapp"], want)
+		}
+	}
+	if !strings.Contains(sections["e2e"], "e2e: the whole suite runs") {
+		t.Errorf("the e2e section is %q, want its reason", sections["e2e"])
+	}
+	if strings.Contains(sections["daemon"], "reuse: 4 units") {
+		t.Errorf("the run's own tally belongs to the suite settling next, as any unbracketed line: %q", sections["daemon"])
+	}
+}
