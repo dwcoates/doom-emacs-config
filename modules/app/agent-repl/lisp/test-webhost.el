@@ -1164,6 +1164,37 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
   (let ((last-input-event (list 'xwidget-event 'host-xwidget 'load-changed status)))
     (agent-repl--webhost-on-load 'load-changed)))
 
+
+(ert-deftest agent-repl-test-wh-the-quiet-state-reaches-the-host-and-the-sidebar ()
+  "Entering and leaving the quiet state are each one setQuiet call."
+  (agent-repl-test-wh--with-host
+    (let ((sidebar nil))
+      (cl-letf (((symbol-function 'agent-repl-sidebar-view-set-quiet) (lambda (q) (push q sidebar))))
+        ;; Act
+        (agent-repl-webhost-set-quiet t)
+        (agent-repl-webhost-set-quiet nil)
+        ;; Assert
+        (should (equal (mapcar (lambda (call) (and (string-search "h.setQuiet(true)" call) t))
+                               (agent-repl-test-wh--sent "setQuiet"))
+                       '(t nil)))
+        (should (equal (reverse sidebar) '(t nil)))))))
+
+(ert-deftest agent-repl-test-wh-the-quiet-state-with-no-host-tells-only-the-sidebar ()
+  "With no host the quiet state reaches the sidebar alone."
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl-test-wh--host nil) (attempted nil) (sidebar nil))
+      (cl-letf (((symbol-function 'agent-repl--webhost-call) (lambda (&rest args) (push args attempted)))
+                ((symbol-function 'agent-repl-sidebar-view-set-quiet) (lambda (q) (push q sidebar))))
+        ;; Act
+        (agent-repl-webhost-set-quiet t)
+        ;; Assert
+        (should-not attempted)
+        (should (equal sidebar '(t)))))))
+
+(ert-deftest agent-repl-test-wh-the-quiet-state-is-followed ()
+  "The host follows the persistent-wifi quiet hook."
+  (should (memq #'agent-repl-webhost-set-quiet (default-value 'agent-repl-persistent-wifi-quiet-functions))))
+
 (ert-deftest agent-repl-test-wh-a-load-replays-every-page ()
   "A loaded host starts empty, so every page is handed to it again, in time."
   ;; Arrange

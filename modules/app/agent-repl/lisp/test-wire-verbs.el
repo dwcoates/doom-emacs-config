@@ -6046,7 +6046,7 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{\"networkName\":\"Home\"},\"on\":{}}")
                  '(:wifi (:arm :joined :value (:network-name "Home"))
-                   :mode (:arm :on :value nil) :lid nil :lid-dim nil))))
+                   :mode (:arm :on :value nil) :lid nil :quiet nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-withheld-name-is-nil ()
   "A joined network whose name macOS withholds decodes with no name."
@@ -6054,13 +6054,13 @@ instead diverges from it unseen."
                   #'agent-repl-wire-decode-persistent-wifi-state
                   "{\"joined\":{},\"off\":{}}")
                  '(:wifi (:arm :joined :value (:network-name nil))
-                   :mode (:arm :off :value nil) :lid nil :lid-dim nil))))
+                   :mode (:arm :off :value nil) :lid nil :quiet nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-unread-facts-are-nil ()
   "Facts the daemon could not read are unassigned oneofs, never a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-persistent-wifi-state "{}")
-                 '(:wifi nil :mode nil :lid nil :lid-dim nil))))
+                 '(:wifi nil :mode nil :lid nil :quiet nil))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-each-lid-arm ()
   "Each lid arm decodes arm for arm, the unwatched one with its detail."
@@ -6074,14 +6074,30 @@ instead diverges from it unseen."
                               :lid)
                    (cdr case)))))
 
-(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-the-lid-dim ()
-  "A lid-close dim in force decodes its restore level; zero is the omitted default."
-  (dolist (case '(("{\"lidClosed\":{},\"lidDim\":{\"restoreLevel\":0.81}}" . (:restore-level 0.81))
-                  ("{\"lidDim\":{}}" . (:restore-level 0.0))))
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-decodes-the-quiet-state ()
+  "The lid-closed quiet state decodes its frozen applications and its display."
+  (dolist (case '(("{\"lidClosed\":{},\"quiet\":{\"frozenApps\":[{\"name\":\"Slack\",\"processes\":4}],\"displayAsleep\":{}}}"
+                   . (:frozen-apps ((:name "Slack" :processes 4))
+                      :display (:arm :display-asleep :value nil)))
+                  ("{\"quiet\":{\"displayAwake\":{\"detail\":\"refused\"}}}"
+                   . (:frozen-apps nil :display (:arm :display-awake :value (:detail "refused"))))))
     (should (equal (plist-get (agent-repl-test-wire-verbs--decode-quietly
                                #'agent-repl-wire-decode-persistent-wifi-state (car case))
-                              :lid-dim)
+                              :quiet)
                    (cdr case)))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-quiet-without-a-display-refused ()
+  "A quiet state that names no display arm is a breach."
+  (should (equal (car (agent-repl-test-wire-verbs--decode-breach
+                       #'agent-repl-wire-decode-persistent-wifi-state "{\"quiet\":{}}"))
+                 "PersistentWifiQuiet")))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-quiet-arms-pinned ()
+  "PersistentWifiQuiet's display oneof has exactly the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/persistent_wifi.pb.go" "PersistentWifiQuiet")
+                       #'string<)
+                 '("displayAsleep" "displayAwake"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-state-arms-pinned ()
   "PersistentWifiState's oneofs have exactly the arms decoded here."
@@ -6121,13 +6137,13 @@ instead diverges from it unseen."
                   (concat "{\"success\":{\"state\":{\"joined\":{},\"on\":{}},"
                           "\"hotspot\":{\"failed\":{\"networkName\":\"Phone\",\"detail\":\"not visible\"}},"
                           "\"energyMode\":{\"failed\":{\"detail\":\"refused\"}},"
-                          "\"display\":{\"toolMissing\":{\"toolPath\":\"/b/mac-brightness\"}}}}"))
+                          "\"display\":{\"slept\":{}}}}"))
                  '(:arm :success
                    :value (:state (:wifi (:arm :joined :value (:network-name nil))
-                                   :mode (:arm :on :value nil) :lid nil :lid-dim nil)
+                                   :mode (:arm :on :value nil) :lid nil :quiet nil)
                            :hotspot (:arm :failed :value (:network-name "Phone" :detail "not visible"))
                            :energy-mode (:arm :failed :value (:detail "refused"))
-                           :display (:arm :tool-missing :value (:tool-path "/b/mac-brightness")))))))
+                           :display (:arm :slept :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-with-an-unread-state ()
   "A success whose standing could not be re-read carries the empty state."
@@ -6136,15 +6152,16 @@ instead diverges from it unseen."
                                         (concat "{\"success\":{\"state\":{},"
                                                 "\"hotspot\":{\"notOnHotspot\":{}},"
                                                 "\"energyMode\":{\"highPower\":{}},"
-                                                "\"display\":{\"restored\":{}}}}"))
+                                                "\"display\":{\"woke\":{}}}}"))
                                        :value)
                             :state)
-                 '(:wifi nil :mode nil :lid nil :lid-dim nil))))
+                 '(:wifi nil :mode nil :lid nil :quiet nil))))
 
-(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-display-decodes-its-levels ()
-  "The dimmed and restored arms carry their brightness levels as floats."
-  (dolist (case '(("{\"dimmed\":{\"restoreLevel\":0.81}}" . (:arm :dimmed :value (:restore-level 0.81)))
-                  ("{\"restored\":{\"level\":0.5}}" . (:arm :restored :value (:level 0.5)))
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-display-decodes-each-arm ()
+  "Each display outcome arm decodes arm for arm, the failed one with its detail."
+  (dolist (case '(("{\"slept\":{}}" . (:arm :slept :value nil))
+                  ("{\"woke\":{}}" . (:arm :woke :value nil))
+                  ("{\"failed\":{\"detail\":\"x\"}}" . (:arm :failed :value (:detail "x")))
                   ("{\"unchanged\":{}}" . (:arm :unchanged :value nil))))
     (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
                                           #'agent-repl-wire-decode-update-persistent-wifi-mode-response
@@ -6160,14 +6177,14 @@ instead diverges from it unseen."
   "A success missing its required hotspot outcome is a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
-                  "{\"success\":{\"state\":{},\"display\":{\"dimmed\":{}}}}")
+                  "{\"success\":{\"state\":{},\"display\":{\"slept\":{}}}}")
                  '("UpdatePersistentWifiModeSuccess" hotspot "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-success-without-energy-mode-refused ()
   "A success missing its required energy mode outcome is a breach."
   (should (equal (agent-repl-test-wire-verbs--decode-breach
                   #'agent-repl-wire-decode-update-persistent-wifi-mode-response
-                  "{\"success\":{\"state\":{},\"hotspot\":{\"notOnHotspot\":{}},\"display\":{\"dimmed\":{}}}}")
+                  "{\"success\":{\"state\":{},\"hotspot\":{\"notOnHotspot\":{}},\"display\":{\"slept\":{}}}}")
                  '("UpdatePersistentWifiModeSuccess" energyMode "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-error-decodes-its-cause ()

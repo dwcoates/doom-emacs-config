@@ -146,6 +146,23 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
 
 ;;;; ---- Answers ----
 
+
+(ert-deftest agent-repl-test-sv-the-quiet-state-reaches-the-page ()
+  "The quiet state is handed to the sidebar page as a boolean."
+  (agent-repl-test-sv--with-sidebar
+    (agent-repl-sidebar-view-set-quiet t)
+    (agent-repl-sidebar-view-set-quiet nil)
+    (should (equal (mapcar (lambda (call) (and (string-search "h.setQuiet(true)" call) t))
+                           (agent-repl-test-sv--sent "setQuiet"))
+                   '(t nil)))))
+
+(ert-deftest agent-repl-test-sv-the-quiet-state-without-a-sidebar-sends-nothing ()
+  "With no sidebar there is no page to quiet."
+  (agent-repl-test-sv--with-sidebar
+    (setq agent-repl-test-sv--xw nil)
+    (agent-repl-sidebar-view-set-quiet t)
+    (should-not agent-repl-test-sv--calls)))
+
 (ert-deftest agent-repl-test-sv-an-answer-is-recorded ()
   "Every answer is recorded with its call and outcome."
   (agent-repl-test-sv--with-sidebar
