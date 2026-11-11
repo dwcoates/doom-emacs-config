@@ -79,7 +79,7 @@ daemon/
     headless/      the ONE exec site for the daemon's own `claude -p` calls:
                    the classifier's routing question and the workspace naming
                    call. Guard, binary resolution, stdin discipline, deadline
-    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate and its per-repo test turn, briefs, ledger,
+    merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate at the head, the two repair slots, briefs, ledger,
                    queue-change reports and subscription records)
     mergenotice/   merge queue subscription notices: buffers every reported queue change, and one loop tells each
                    subscriber's agent once of a merge put in line, a merge leaving or a deploy's end, in one short
