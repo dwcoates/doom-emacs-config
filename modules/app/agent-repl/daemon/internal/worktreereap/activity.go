@@ -72,28 +72,9 @@ func lastActivity(ctx context.Context, git Git, repoDir, admin string, wt gitcli
 	}
 	consider(committed, "head_committed")
 	if record != nil {
-		for _, stamp := range workspaceStamps(*record) {
+		for _, stamp := range record.Stamps() {
 			consider(stamp.At, stamp.Signal)
 		}
 	}
 	return newest, nil
-}
-
-// workspaceStamps is every instant a workspace record says somebody was there:
-// its creation, and its last activity, last selection and merge where set.
-func workspaceStamps(ws wsm.Workspace) []activity {
-	stamps := []activity{{At: ws.CreatedAt, Signal: "workspace_created"}}
-	for _, stamp := range []struct {
-		at     *time.Time
-		signal string
-	}{
-		{ws.LastActivityAt, "workspace_activity"},
-		{ws.LastSelectedAt, "workspace_selected"},
-		{ws.MergedAt, "workspace_merged"},
-	} {
-		if stamp.at != nil {
-			stamps = append(stamps, activity{At: *stamp.at, Signal: stamp.signal})
-		}
-	}
-	return stamps
 }
