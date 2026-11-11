@@ -537,7 +537,10 @@ type StartTurnKind =
   | { readonly kind: "vendorRefused" }
   | { readonly kind: "queryDead" }
   // A `join_running_turn` start while an ask blocks the vendor.
-  | { readonly kind: "askOpen" };
+  | { readonly kind: "askOpen" }
+  // The vendor's transcript already holds the turn's prompt, so it is never
+  // pushed again (shim.v1.StartTurnFailure.prompt_recorded).
+  | { readonly kind: "promptRecorded" };
 
 /** The base constructor for `shim.v1.StartTurnFailure`. */
 export function startTurnFailure(cause: StartTurnKind, detail: string): shimv1.StartTurnFailure {
@@ -555,7 +558,9 @@ export function startTurnFailure(cause: StartTurnKind, detail: string): shimv1.S
             ? { case: "vendorRefused", value: create(shimv1.StartTurnVendorRefusedSchema, {}) }
             : cause.kind === "askOpen"
               ? { case: "askOpen", value: create(shimv1.StartTurnAskOpenSchema, {}) }
-              : { case: "queryDead", value: create(shimv1.StartTurnQueryDeadSchema, {}) },
+              : cause.kind === "promptRecorded"
+                ? { case: "promptRecorded", value: create(shimv1.StartTurnPromptRecordedSchema, {}) }
+                : { case: "queryDead", value: create(shimv1.StartTurnQueryDeadSchema, {}) },
   });
 }
 

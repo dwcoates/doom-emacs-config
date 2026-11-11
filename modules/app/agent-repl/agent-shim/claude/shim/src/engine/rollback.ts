@@ -176,7 +176,19 @@ export interface TranscriptIndex {
   read(head?: string): ChainRead;
   /** Take in what the file gained since the last read, without walking a chain. */
   refresh(): void;
+  /**
+   * Whether the file records a record under `uuid`, its unterminated tail
+   * included: `recorded`, `absent` (no such record, or no file yet), or the
+   * read's failure, which is never answered as either.
+   */
+  holds(uuid: string): TranscriptHolds;
 }
+
+/** What {@link TranscriptIndex.holds} found. */
+export type TranscriptHolds =
+  | { readonly kind: "recorded" }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable"; readonly detail: string };
 
 /** What the index has taken in from its file. */
 interface Ingested {
@@ -311,6 +323,19 @@ export function createTranscriptIndex(
       if (result.kind === "failed") {
         LOGGER.error({ file, cause: result.detail }, "the vendor transcript could not be read to refresh its index");
       }
+    },
+    holds(uuid) {
+      const result = takeIn();
+      if (result.kind === "absent") return { kind: "absent" };
+      if (result.kind === "failed") {
+        LOGGER.error({ file, uuid, cause: result.detail }, "the vendor transcript could not be read to look a record up");
+        return { kind: "unreadable", detail: result.detail };
+      }
+      if (taken.byUuid.has(uuid)) return { kind: "recorded" };
+      if (result.tail.trim() === "") return { kind: "absent" };
+      const tail: Ingested = { byUuid: new Map(), last: undefined };
+      ingest(result.tail, tail, project);
+      return tail.byUuid.has(uuid) ? { kind: "recorded" } : { kind: "absent" };
     },
   };
 }

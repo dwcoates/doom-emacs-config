@@ -77,6 +77,7 @@ import type { LiveWorkEntry, LiveWorkTable } from "./detached.js";
 import type { ForegroundUnitTable } from "./foreground.js";
 import type { SessionIdentity } from "./identity.js";
 import type { QueryLike } from "../sdk/types.js";
+import type { TranscriptHolds } from "./rollback.js";
 
 const LOGGER = bindLog({ component: "shim-engine-turn", operation: "shim.engine.turn" });
 
@@ -177,6 +178,12 @@ export interface SessionContext {
    * sent to join the running turn is then refused (StartTurnFailure.ask_open).
    */
   askOpen(): boolean;
+  /**
+   * Whether the vendor's transcript already records `turnId`'s prompt, under
+   * the vendor uuid the turn id derives: a StartTurn for it is then refused
+   * (StartTurnFailure.prompt_recorded), since the vendor drops a repeated uuid.
+   */
+  promptRecorded(turnId: string): TranscriptHolds;
   /**
    * Deliver a prompt to the vendor as the send of `turn`, under a client uuid
    * the vendor echoes on its reply (engine/sends.ts).
@@ -590,6 +597,34 @@ export class TurnEngine {
     const identity = this.session.identity();
     if (identity === undefined) {
       return startTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
+    }
+    // A PROMPT THE VENDOR ALREADY RECORDED IS NEVER PUSHED AGAIN, as a start or
+    // a join. It goes under the vendor uuid its turn id derives
+    // (convert/ids.ts promptVendorUuid), and the vendor silently drops a
+    // message whose uuid its transcript holds: pushed, it opens a turn the
+    // vendor never runs and no reply ever ends. A repeat of a turn THIS shim
+    // took was answered above (repeatedStart), so a recorded prompt here was
+    // delivered by an earlier process, and its turn already ran.
+    const recorded = this.session.promptRecorded(requested);
+    if (recorded.kind === "unreadable") {
+      return startTurnRefused(
+        { kind: "vendorRefused" },
+        `the vendor transcript could not be read to tell whether turn ${requested}'s prompt is already recorded: ${recorded.detail}`,
+      );
+    }
+    if (recorded.kind === "recorded") {
+      LOGGER.error(
+        {
+          turn_id: requested,
+          join_running_turn: request.joinRunningTurn,
+          detail: "a prompt is delivered once; the daemon retires an entry it delivered, so a recorded prompt asked for again means its delivery was lost from the daemon's records",
+        },
+        "refused a StartTurn whose prompt the vendor already recorded; nothing was pushed",
+      );
+      return startTurnRefused(
+        { kind: "promptRecorded" },
+        `the vendor transcript already records turn ${requested}'s prompt; pushed again, the vendor would drop it and the turn would never end`,
+      );
     }
     const open = this.session.openTurn();
     if (open !== undefined && request.joinRunningTurn && !open.keepalive && open.adopted !== true) {
