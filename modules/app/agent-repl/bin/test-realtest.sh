@@ -366,6 +366,16 @@ scratch_bin() {
 cat "${STUB_READINESS_JSON:?the case must state a readiness document}"
 STUB
 
+    # THE VOLUME'S FREE SPACE IS THE TEST'S ANSWER, never the host's: the
+    # script declines under its backup floor, and the scratch home sits on
+    # whatever volume the run was given (2026-11-11: a run's RAM disk stood at
+    # 1.9GiB free and 46 cases declined). Ample unless the case says otherwise.
+    cat > "$dir/df" <<'STUB'
+#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'stub 0 0 %s 0%% /\n' "${STUB_FREE_KIB:-104857600}"
+STUB
+
     # THE LOW-PRIORITY STUB IS THE RUN LOG. It appends the test name of every `go test`
     # invocation the script makes, which is how a sequencing case sees WHICH
     # realtests ran and in what order rather than only that one did.
@@ -581,7 +591,7 @@ done
 exit 0
 STUB
 
-    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill" "$dir/go" "$dir/open"
+    chmod +x "$dir"/*.sh "$dir/emacsclient" "$dir/pgrep" "$dir/ps" "$dir/cp" "$dir/kill" "$dir/go" "$dir/open" "$dir/df"
     printf '%s' "$dir"
 }
 
@@ -786,6 +796,44 @@ test_runs_when_nothing_stands_in_the_way() {
     fi
     if ! grep_in "$out" -q "which editor the owner is left with is settled at the end"; then
         fail "$name" "the run does not say the editor it leaves behind is settled at the end: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_declines_when_the_volume_is_under_the_backup_floor() {
+    local name="the script DECLINES when the volume backing HOME is under the backup floor"
+    local dir out status=0
+    dir="$(scratch_bin backup-floor)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(STUB_FREE_KIB=$((2 * 1024 * 1024 - 1)) run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! grep_in "$out" -q 'less than 2GiB free'; then
+        fail "$name" "the refusal does not name the floor: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/run-reached" ]; then
+        fail "$name" "the run was reached despite the full volume"
+        return
+    fi
+    pass "$name"
+}
+
+test_runs_when_the_volume_is_at_the_backup_floor() {
+    local name="the script runs when the volume backing HOME stands exactly at the backup floor"
+    local dir out status=0
+    dir="$(scratch_bin backup-floor-met)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(STUB_FREE_KIB=$((2 * 1024 * 1024)) run_script "$dir")" || status=$?
+    if grep_in "$out" -q 'less than 2GiB free'; then
+        fail "$name" "the run declined at the floor itself: $out"
         return
     fi
     pass "$name"
@@ -2265,6 +2313,8 @@ test_declines_when_a_system_is_not_deployed
 test_declining_names_the_daemon_deploy_remedy
 test_declines_when_emacs_is_running_without_a_takeover
 test_backs_up_before_refusing_the_takeover
+test_declines_when_the_volume_is_under_the_backup_floor
+test_runs_when_the_volume_is_at_the_backup_floor
 test_declines_when_the_backup_copy_totally_fails
 test_runs_when_nothing_stands_in_the_way
 test_records_the_deployed_revisions
