@@ -521,6 +521,7 @@ async function send(
 /** The causes only UpdateQuestionDraft can answer with; the four are shared. */
 const OWN_CAUSES = {
   askNotStanding: () => "this question is no longer standing",
+  askSessionEnded: () => "the question's session ended before it was answered; nothing was sent",
   unservedValue: (value: { text: string }) => `the question never served "${value.text}"`,
   noSession: () => "the workspace has no session to answer",
 } as unknown as SentenceTable;

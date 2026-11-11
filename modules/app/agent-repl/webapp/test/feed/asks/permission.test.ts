@@ -320,6 +320,11 @@ describe("a refused answer", () => {
       text: "this ask is no longer standing",
     },
     {
+      arm: "askSessionEnded",
+      cause: { case: "askSessionEnded", value: {} },
+      text: "the ask's session ended before it was answered; nothing was sent",
+    },
+    {
       arm: "noStandingOffer",
       cause: { case: "noStandingOffer", value: {} },
       text: "no standing allow was offered for this call",

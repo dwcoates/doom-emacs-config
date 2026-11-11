@@ -3057,6 +3057,16 @@ so nothing was submitted."
   "Decode SubmitPromptError's `ask_not_standing' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-ask-not-standing json))
 
+(defun agent-repl-wire-decode-submit-prompt-ask-session-ended (json)
+  "Decode SubmitPromptAskSessionEnded from JSON.  Empty: the send was a
+typed answer to a standing ask whose session no longer holds it, so the
+ask was settled abandoned and nothing was submitted."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptAskSessionEnded" json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-ask-session-ended (json)
+  "Decode SubmitPromptError's `ask_session_ended' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-ask-session-ended json))
+
 (defun agent-repl-wire-decode-submit-prompt-thread-awaiting-first-answer (json)
   "Decode SubmitPromptThreadAwaitingFirstAnswer from JSON.  Empty: a chat
 thread's first question is still being answered, so there is no node yet
@@ -3119,7 +3129,7 @@ arm this codec does not know is refused as an unknown field.
 not decoded: they refuse only an agent\='s prompt, and every prompt the
 editor sends is the user\='s."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding threadAwaitingFirstAnswer))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding askSessionEnded threadAwaitingFirstAnswer))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -3137,6 +3147,7 @@ editor sends is the user\='s."
          (list 'modelNotInCatalog :model-not-in-catalog #'agent-repl-wire-decode-submit-prompt-error-model-not-in-catalog)
          (list 'modelRefused :model-refused #'agent-repl-wire-decode-submit-prompt-error-model-refused)
          (list 'askNotStanding :ask-not-standing #'agent-repl-wire-decode-submit-prompt-error-ask-not-standing)
+         (list 'askSessionEnded :ask-session-ended #'agent-repl-wire-decode-submit-prompt-error-ask-session-ended)
          (list 'threadAwaitingFirstAnswer :thread-awaiting-first-answer
                #'agent-repl-wire-decode-submit-prompt-error-thread-awaiting-first-answer))))))
 
@@ -6112,13 +6123,15 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
   (let ((message "UpdateQuestionDraftError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
-                    askNotStanding unservedValue noSession))
+                    askNotStanding askSessionEnded unservedValue noSession))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (append (agent-repl-wire-verbs--handover-arms "UpdateQuestionDraft")
                    (list (list 'askNotStanding :ask-not-standing
                                (agent-repl-wire-verbs--empty-arm "UpdateQuestionDraftAskNotStanding"))
+                         (list 'askSessionEnded :ask-session-ended
+                               (agent-repl-wire-verbs--empty-arm "UpdateQuestionDraftAskSessionEnded"))
                          (list 'unservedValue :unserved-value
                                #'agent-repl-wire-decode-update-question-draft-unserved-value)
                          (list 'noSession :no-session
@@ -6165,13 +6178,15 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
   (let ((message "AnswerPermissionError"))
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
-                    askNotStanding noStandingOffer noSession))
+                    askNotStanding askSessionEnded noStandingOffer noSession))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
            (append (agent-repl-wire-verbs--handover-arms "AnswerPermission")
                    (list (list 'askNotStanding :ask-not-standing
                                (agent-repl-wire-verbs--empty-arm "AnswerPermissionAskNotStanding"))
+                         (list 'askSessionEnded :ask-session-ended
+                               (agent-repl-wire-verbs--empty-arm "AnswerPermissionAskSessionEnded"))
                          (list 'noStandingOffer :no-standing-offer
                                (agent-repl-wire-verbs--empty-arm "AnswerPermissionNoStandingOffer"))
                          (list 'noSession :no-session

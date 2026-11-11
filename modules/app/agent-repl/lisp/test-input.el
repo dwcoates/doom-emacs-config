@@ -2455,6 +2455,41 @@ unknown arm."
                    agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
 
 
+(defconst agent-repl-test-input--ask-session-ended-answer
+  '(:response (:arm :error :value (:reason (:arm :ask-session-ended :value nil))))
+  "A scripted `ask_session_ended' refusal: the ask's session is gone.")
+
+(ert-deftest agent-repl-input-ask-session-ended-keeps-the-text ()
+  "The typed answer reached nobody, so the composer keeps the text."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-session-ended-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) "use OAuth"))))
+
+(ert-deftest agent-repl-input-ask-session-ended-is-not-queued ()
+  "The card was settled abandoned, so nothing is held for a re-drive."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-session-ended-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-ask-session-ended-says-the-session-ended ()
+  "The refusal says the ask's session ended, never that it was already
+answered, and is recorded at INFO, not as an unknown arm."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--ask-session-ended-answer)
+    (agent-repl-test-input--type "use OAuth")
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      (should (equal (agent-repl-test-input--notice)
+                     "the question's session ended before it was answered; nothing was sent"))
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.refused-ask-session-ended"))
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error "elisp.input.unknown-error-arm")))))
+
 (defconst agent-repl-test-input--thread-awaiting-answer
   '(:response (:arm :error :value (:reason (:arm :thread-awaiting-first-answer :value nil))))
   "A scripted `thread_awaiting_first_answer' refusal: the thread's first
@@ -5619,8 +5654,10 @@ was called for, :said the echo-area messages, :text the composer after."
 (ert-deftest agent-repl-test-input-answer-refusal-texts ()
   "Each refusal a numbered answer can meet has its own sentence."
   (should (equal (mapcar (lambda (arm) (agent-repl--input-answer-refusal-text (list :arm arm :value nil)))
-                         '(:ask-not-standing :unserved-value :no-standing-offer :no-session :other))
-                 '("the card was already answered" "the card no longer offers that choice"
+                         '(:ask-not-standing :ask-session-ended :unserved-value :no-standing-offer :no-session :other))
+                 '("the card was already answered"
+                   "the question's session ended before it was answered; nothing was sent"
+                   "the card no longer offers that choice"
                    "the card offers no always allow" "the workspace has no session"
                    "answer refused"))))
 

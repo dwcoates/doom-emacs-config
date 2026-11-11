@@ -380,6 +380,7 @@ async function answer(
  */
 const OWN_CAUSES = {
   askNotStanding: () => "this ask is no longer standing",
+  askSessionEnded: () => "the ask's session ended before it was answered; nothing was sent",
   noStandingOffer: () => "no standing allow was offered for this call",
   noSession: () => "the workspace has no session to answer",
 } as unknown as SentenceTable;
