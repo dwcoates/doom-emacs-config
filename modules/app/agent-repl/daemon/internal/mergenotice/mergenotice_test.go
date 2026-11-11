@@ -332,7 +332,7 @@ func TestDeliverSubmitsOneDeferredHiddenNoticePerSubscriber(t *testing.T) {
 	if got[0].key == got[1].key {
 		t.Fatalf("keys = %q and %q, want one per notice", got[0].key, got[1].key)
 	}
-	if want := "merge queue of doom|`fix` landed.| Queue empty.| Subscription ended."; got[0].text != want {
+	if want := "merge queue of doom|queue depleted: `fix` landed and none is left in line.| Queue empty.| Subscription ended."; got[0].text != want {
 		t.Fatalf("text = %q, want %q", got[0].text, want)
 	}
 }
@@ -472,7 +472,7 @@ func TestRunDeliversEveryToldChangeInOrder(t *testing.T) {
 	go func() { f.s.Run(ctx, f.prompts); close(done) }()
 
 	// Act: the start between the two is never told.
-	f.s.QueueChanged(change(merge.QueueChangeEnqueued, repoDoom, fix, fix))
+	f.s.QueueChanged(pausedDoom)
 	f.s.QueueChanged(change(merge.QueueChangeStarted, repoDoom, fix, fix))
 	f.s.QueueChanged(landedLast)
 	var changes []string
@@ -484,7 +484,7 @@ func TestRunDeliversEveryToldChangeInOrder(t *testing.T) {
 	<-done
 
 	// Assert.
-	want := []string{"`fix` put in line.", "`fix` landed."}
+	want := []string{"queue paused.", "queue depleted: `fix` landed and none is left in line."}
 	if !reflect.DeepEqual(changes, want) {
 		t.Fatalf("changes = %q, want %q", changes, want)
 	}
@@ -745,7 +745,7 @@ func TestTheSupersedingNoticeSaysEveryChangeOldestFirstThenTheQueueAsItNowStands
 	// Assert.
 	got := f.prompts.submissions()
 	fields := fieldsOf(t, got[len(got)-1].text)
-	want := []string{"merge queue of doom", "2 changes: `fix` put in line; `fix` landed.", " Queue empty."}
+	want := []string{"merge queue of doom", "2 changes: queue paused; queue depleted: `fix` landed and none is left in line.", " Queue empty."}
 	if !reflect.DeepEqual(fields[:3], want) {
 		t.Fatalf("notice = %q, want %q", fields[:3], want)
 	}
@@ -1000,11 +1000,14 @@ func TestADepletionRecordsEachSubscriptionItEnds(t *testing.T) {
 
 func TestAQueueLeftNonEmptyKeepsItsSubscriptions(t *testing.T) {
 	tests := []struct {
-		name   string
-		change merge.QueueChange
+		name      string
+		change    merge.QueueChange
+		wantTold  int
+		wantEnded bool
 	}{
-		{name: "a merge left with another in line", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", false, ""))},
-		{name: "a pause", change: pausedDoom},
+		{name: "a merge left with another in line, which is told to nobody", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", false, ""))},
+		{name: "a pause, which is told and ends nothing", change: pausedDoom, wantTold: 1},
+		{name: "a resume, which is told and ends nothing", change: resumedDoom, wantTold: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1019,8 +1022,11 @@ func TestAQueueLeftNonEmptyKeepsItsSubscriptions(t *testing.T) {
 				t.Fatalf("ended = %+v, want none", f.subs.ended)
 			}
 			got := f.prompts.submissions()
-			if len(got) != 1 || fieldsOf(t, got[0].text)[3] != Lifetime(false) {
-				t.Fatalf("submissions = %+v, want one notice saying nothing of an end", got)
+			if len(got) != tt.wantTold {
+				t.Fatalf("submissions = %+v, want %d told", got, tt.wantTold)
+			}
+			if tt.wantTold == 1 && fieldsOf(t, got[0].text)[3] != Lifetime(false) {
+				t.Fatalf("notice %q, want one saying nothing of an end", got[0].text)
 			}
 		})
 	}
