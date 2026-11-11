@@ -1560,7 +1560,18 @@ func (*StartSessionVendorStartVendor) Descriptor() ([]byte, []int) {
 // blocked the opening. The caller does not retry; the user must change
 // something and restart.
 type StartSessionVendorStartRejected struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE VENDOR API'S OWN REFUSAL, when the rejection was one: the opening, or
+	// the cold gate's compaction that gates it, ended on an API error result.
+	// Its kind is what tells the caller what the user must change -- an
+	// `authentication_failed` or `oauth_org_not_allowed` is cured by signing in
+	// again, so the caller offers the sign-in and retries the start once a
+	// sign-in for the session's account root completes; any other kind is not.
+	// UNSET when the rejection was not an API answer (a missing binary, a
+	// refused resume, a blocking hook, a query that could not be built), which
+	// no sign-in cures. The kind is the producer's reading of the API's status
+	// and words: an answer that stated no status is classed by its sentence.
+	ApiFailure    *v1.ApiRequestFailed `protobuf:"bytes,1,opt,name=api_failure,json=apiFailure,proto3,oneof" json:"api_failure,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1593,6 +1604,13 @@ func (x *StartSessionVendorStartRejected) ProtoReflect() protoreflect.Message {
 // Deprecated: Use StartSessionVendorStartRejected.ProtoReflect.Descriptor instead.
 func (*StartSessionVendorStartRejected) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *StartSessionVendorStartRejected) GetApiFailure() *v1.ApiRequestFailed {
+	if x != nil {
+		return x.ApiFailure
+	}
+	return nil
 }
 
 type StartSessionUnknownSession struct {
@@ -1822,8 +1840,11 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x06vendor\x18\x02 \x01(\v2&.shim.v1.StartSessionVendorStartVendorH\x00R\x06vendorB\a\n" +
 	"\x05cause\" \n" +
 	"\x1eStartSessionVendorStartNetwork\"\x1f\n" +
-	"\x1dStartSessionVendorStartVendor\"!\n" +
-	"\x1fStartSessionVendorStartRejected\"\x1c\n" +
+	"\x1dStartSessionVendorStartVendor\"z\n" +
+	"\x1fStartSessionVendorStartRejected\x12G\n" +
+	"\vapi_failure\x18\x01 \x01(\v2!.conversation.v1.ApiRequestFailedH\x00R\n" +
+	"apiFailure\x88\x01\x01B\x0e\n" +
+	"\f_api_failure\"\x1c\n" +
 	"\x1aStartSessionUnknownSession\"\x1c\n" +
 	"\x1aStartSessionAlreadyStarted\"\x1f\n" +
 	"\x1dStartSessionConversationOwned\"\x7f\n" +
@@ -1877,7 +1898,8 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*v1.AgentId)(nil),                               // 30: conversation.v1.AgentId
 	(*v1.SessionStarted)(nil),                        // 31: conversation.v1.SessionStarted
 	(*v1.SessionCold)(nil),                           // 32: conversation.v1.SessionCold
-	(*v1.LockHolderFailure)(nil),                     // 33: conversation.v1.LockHolderFailure
+	(*v1.ApiRequestFailed)(nil),                      // 33: conversation.v1.ApiRequestFailed
+	(*v1.LockHolderFailure)(nil),                     // 34: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	11, // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
@@ -1912,12 +1934,13 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	21, // 29: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
 	19, // 30: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
 	20, // 31: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
-	33, // 32: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	33, // 32: shim.v1.StartSessionVendorStartRejected.api_failure:type_name -> conversation.v1.ApiRequestFailed
+	34, // 33: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }
@@ -1963,6 +1986,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*StartSessionVendorStartRetryable_Network)(nil),
 		(*StartSessionVendorStartRetryable_Vendor)(nil),
 	}
+	file_shim_v1_endpoint_start_session_proto_msgTypes[21].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
