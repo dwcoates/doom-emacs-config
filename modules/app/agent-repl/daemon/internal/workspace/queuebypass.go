@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -90,6 +91,46 @@ func (c QueueBypassContext) String() string {
 		return "existing_plus_compacted_main"
 	}
 	return fmt.Sprintf("QueueBypassContext(%d)", int(c))
+}
+
+// Proto is the context as the wire's echo token
+// (frontend.v1.TopbarQueueBypassContext): the ONE place its four arms are
+// built, so the topbar's menu, the CLI and the server speak one vocabulary.
+// The default names no arm, so asking for its token is a bug in the caller.
+func (c QueueBypassContext) Proto() *frontendv1.TopbarQueueBypassContext {
+	switch c {
+	case QueueBypassContextFullMain:
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_FullMain{FullMain: &frontendv1.TopbarQueueBypassContextFullMain{}}}
+	case QueueBypassContextCompactedMain:
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_CompactedMain{CompactedMain: &frontendv1.TopbarQueueBypassContextCompactedMain{}}}
+	case QueueBypassContextExisting:
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_Existing{Existing: &frontendv1.TopbarQueueBypassContextExisting{}}}
+	case QueueBypassContextExistingPlusCompactedMain:
+		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain{ExistingPlusCompactedMain: &frontendv1.TopbarQueueBypassContextExistingPlusCompactedMain{}}}
+	}
+	panic(fmt.Sprintf("workspace: the queue-bypass context %s has no echo token", c))
+}
+
+// QueueBypassContextFrom reads an echo token back into the context it names:
+// unset is the default, and a token with no arm, or one this build does not
+// define, is refused.
+func QueueBypassContextFrom(token *frontendv1.TopbarQueueBypassContext) (QueueBypassContext, error) {
+	if token == nil {
+		return QueueBypassContextDefault, nil
+	}
+	switch token.GetContext().(type) {
+	case *frontendv1.TopbarQueueBypassContext_FullMain:
+		return QueueBypassContextFullMain, nil
+	case *frontendv1.TopbarQueueBypassContext_CompactedMain:
+		return QueueBypassContextCompactedMain, nil
+	case *frontendv1.TopbarQueueBypassContext_Existing:
+		return QueueBypassContextExisting, nil
+	case *frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain:
+		return QueueBypassContextExistingPlusCompactedMain, nil
+	case nil:
+		return QueueBypassContextDefault, errors.New("a set queue-bypass context names one of its arms")
+	}
+	return QueueBypassContextDefault, fmt.Errorf("the queue-bypass context %T is not one this contract defines", token.GetContext())
 }
 
 // resumesExisting reports whether the context resumes the parked bypass
@@ -361,9 +402,15 @@ func (v *verbs) queueBypassChip(ctx context.Context, record wsm.Workspace) (topb
 	if err != nil {
 		return topbar.QueueBypass{}, fmt.Errorf("read the queue bypass standing of %q: %w", record.ID, err)
 	}
-	// WHILE THE MODE IS NOT HELD, THE PARKED CONVERSATION IS THE BYPASS ONE:
-	// the queue conversation is the one bound.
-	chip := topbar.QueueBypass{Offered: true, Holds: standing.Holds, BypassParked: !standing.Holds && standing.ParkedVendorSessionID != ""}
+	chip := topbar.QueueBypass{Offered: true, Holds: standing.Holds}
+	if !standing.Holds {
+		chip.Offers = []*frontendv1.TopbarQueueBypassContext{QueueBypassContextFullMain.Proto(), QueueBypassContextCompactedMain.Proto()}
+		// WHILE THE MODE IS NOT HELD, THE PARKED CONVERSATION IS THE BYPASS
+		// ONE: the queue conversation is the one bound.
+		if standing.ParkedVendorSessionID != "" {
+			chip.Offers = append(chip.Offers, QueueBypassContextExisting.Proto(), QueueBypassContextExistingPlusCompactedMain.Proto())
+		}
+	}
 	if standing.HeldBy != "" {
 		holder, err := v.deps.DB.Workspace(ctx, standing.HeldBy)
 		if err != nil {

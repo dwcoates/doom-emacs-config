@@ -60,22 +60,12 @@ func queueBypassChange(req *agentreplv1.UpdateQueueBypassModeRequest) workspace.
 // queueBypassContext is the context a validated request's on arm names, the
 // default for an on naming none and for every other arm.
 func queueBypassContext(req *agentreplv1.UpdateQueueBypassModeRequest) workspace.QueueBypassContext {
-	named := req.GetOn().GetContext()
-	if named == nil {
-		return workspace.QueueBypassContextDefault
+	named, err := workspace.QueueBypassContextFrom(req.GetOn().GetContext())
+	if err != nil {
+		// validateUpdateQueueBypassModeRequest refused every such context.
+		panic(fmt.Sprintf("server: an unvalidated queue-bypass context reached the verb: %v", err))
 	}
-	switch named.GetContext().(type) {
-	case *frontendv1.TopbarQueueBypassContext_FullMain:
-		return workspace.QueueBypassContextFullMain
-	case *frontendv1.TopbarQueueBypassContext_CompactedMain:
-		return workspace.QueueBypassContextCompactedMain
-	case *frontendv1.TopbarQueueBypassContext_Existing:
-		return workspace.QueueBypassContextExisting
-	case *frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain:
-		return workspace.QueueBypassContextExistingPlusCompactedMain
-	}
-	// validateUpdateQueueBypassModeRequest refused every other arm.
-	panic(fmt.Sprintf("server: undeclared TopbarQueueBypassContext.context arm %T", named.GetContext()))
+	return named
 }
 
 // validateUpdateQueueBypassModeRequest is UpdateQueueBypassModeRequest's
@@ -99,19 +89,10 @@ func validateUpdateQueueBypassModeRequest(req *agentreplv1.UpdateQueueBypassMode
 // validateQueueBypassContext refuses a context that is set with no arm, or
 // with one this contract does not define. Unset is the default.
 func validateQueueBypassContext(named *frontendv1.TopbarQueueBypassContext) *connect.Error {
-	if named == nil {
-		return nil
+	if _, err := workspace.QueueBypassContextFrom(named); err != nil {
+		return invalid("on.context", err.Error())
 	}
-	switch named.GetContext().(type) {
-	case *frontendv1.TopbarQueueBypassContext_FullMain,
-		*frontendv1.TopbarQueueBypassContext_CompactedMain,
-		*frontendv1.TopbarQueueBypassContext_Existing,
-		*frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain:
-		return nil
-	case nil:
-		return invalid("on.context", "a set queue-bypass context names one of its arms")
-	}
-	return invalid("on.context", "the queue-bypass context is not one this contract defines")
+	return nil
 }
 
 func (s *requestLoggingServer) UpdateQueueBypassMode(

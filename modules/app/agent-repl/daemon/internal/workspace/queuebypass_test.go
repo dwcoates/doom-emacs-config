@@ -3,8 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -306,15 +312,17 @@ func TestQueueBypassContextString(t *testing.T) {
 	}
 }
 
-func TestQueueBypassChipSaysWhetherABypassConversationIsParked(t *testing.T) {
+func TestQueueBypassChipOffersTheContextsTheStandingAllows(t *testing.T) {
 	cases := []struct {
 		name   string
 		bypass wsm.QueueBypass
-		want   bool
+		want   []QueueBypassContext
 	}{
-		{name: "nothing parked", bypass: wsm.QueueBypass{}, want: false},
-		{name: "the bypass conversation parked while the mode is free", bypass: wsm.QueueBypass{ParkedVendorSessionID: "vendor-bypass"}, want: true},
-		{name: "the queue conversation parked while the mode is held", bypass: wsm.QueueBypass{Holds: true, ParkedVendorSessionID: "vendor-queue"}, want: false},
+		{name: "nothing parked offers the two main-context options", bypass: wsm.QueueBypass{},
+			want: []QueueBypassContext{QueueBypassContextFullMain, QueueBypassContextCompactedMain}},
+		{name: "the bypass conversation parked while the mode is free offers all four", bypass: wsm.QueueBypass{ParkedVendorSessionID: "vendor-bypass"},
+			want: []QueueBypassContext{QueueBypassContextFullMain, QueueBypassContextCompactedMain, QueueBypassContextExisting, QueueBypassContextExistingPlusCompactedMain}},
+		{name: "the mode held offers nothing", bypass: wsm.QueueBypass{Holds: true, ParkedVendorSessionID: "vendor-queue"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -330,9 +338,100 @@ func TestQueueBypassChipSaysWhetherABypassConversationIsParked(t *testing.T) {
 			if err != nil {
 				t.Fatalf("queueBypassChip: %v", err)
 			}
-			if !chip.Offered || chip.BypassParked != tc.want {
-				t.Fatalf("chip = %+v, want offered with bypass parked %v", chip, tc.want)
+			var got []QueueBypassContext
+			for _, offer := range chip.Offers {
+				named, err := QueueBypassContextFrom(offer)
+				if err != nil {
+					t.Fatalf("offer %v: %v", offer, err)
+				}
+				got = append(got, named)
+			}
+			if !chip.Offered || !slices.Equal(got, tc.want) {
+				t.Fatalf("chip offers %v (offered %v), want %v", got, chip.Offered, tc.want)
 			}
 		})
+	}
+}
+
+func TestQueueBypassContextProtoRoundTrips(t *testing.T) {
+	for _, named := range []QueueBypassContext{QueueBypassContextFullMain, QueueBypassContextCompactedMain, QueueBypassContextExisting, QueueBypassContextExistingPlusCompactedMain} {
+		t.Run(named.String(), func(t *testing.T) {
+			// Act
+			got, err := QueueBypassContextFrom(named.Proto())
+
+			// Assert
+			if err != nil || got != named {
+				t.Fatalf("QueueBypassContextFrom(%s.Proto()) = (%s, %v), want %s", named, got, err, named)
+			}
+		})
+	}
+}
+
+func TestQueueBypassContextFrom(t *testing.T) {
+	cases := []struct {
+		name    string
+		token   *frontendv1.TopbarQueueBypassContext
+		want    QueueBypassContext
+		wantErr bool
+	}{
+		{name: "unset is the default", token: nil, want: QueueBypassContextDefault},
+		{name: "a token naming no arm is refused", token: &frontendv1.TopbarQueueBypassContext{}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := QueueBypassContextFrom(tc.token)
+
+			// Assert
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("QueueBypassContextFrom = (%s, %v), want (%s, error %v)", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestTheDefaultContextHasNoEchoToken(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("QueueBypassContextDefault.Proto() did not refuse")
+		}
+	}()
+
+	// Act
+	QueueBypassContextDefault.Proto()
+}
+
+// TestTheContextArmsAreBuiltOnlyByProto fails on a hand-rolled echo token
+// anywhere in the daemon's production code: every one comes from
+// QueueBypassContext.Proto.
+func TestTheContextArmsAreBuiltOnlyByProto(t *testing.T) {
+	// Arrange
+	const spelling = "TopbarQueueBypassContext_FullMain{FullMain:"
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(filepath.Join("..", ".."), func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+			path == filepath.Join("..", "..", "internal", "workspace", "queuebypass.go") {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), spelling) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the daemon: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("files building the context's echo token by hand = %v, want every one through QueueBypassContext.Proto", offenders)
 	}
 }

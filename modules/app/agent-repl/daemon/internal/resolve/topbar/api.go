@@ -103,10 +103,11 @@ type QueueBypass struct {
 	Holds bool
 	// HeldBy names the sibling holding the mode, empty when none does.
 	HeldBy string
-	// BypassParked reports that the workspace, not holding the mode, has a
-	// parked bypass conversation to resume: the chip's menu then offers the
-	// two existing-context options too.
-	BypassParked bool
+	// Offers are the contexts the off chip's menu offers, in display order,
+	// as the workspace verbs decide them (workspace.QueueBypassContext.Proto):
+	// the two main-context ones always, and the two existing ones while a
+	// bypass conversation is parked. Empty while the mode is held.
+	Offers []*frontendv1.TopbarQueueBypassContext
 }
 
 // DetachedUnmodeled is one live item of UNMODELED work running detached. It

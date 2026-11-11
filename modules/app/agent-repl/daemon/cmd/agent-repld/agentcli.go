@@ -1241,13 +1241,13 @@ func queueBypassRequest(ref *workspacev1.WorkspaceRef, mode, bypassContext strin
 func queueBypassContextOf(text string) (*frontendv1.TopbarQueueBypassContext, error) {
 	switch text {
 	case "full":
-		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_FullMain{FullMain: &frontendv1.TopbarQueueBypassContextFullMain{}}}, nil
+		return workspace.QueueBypassContextFullMain.Proto(), nil
 	case "compacted":
-		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_CompactedMain{CompactedMain: &frontendv1.TopbarQueueBypassContextCompactedMain{}}}, nil
+		return workspace.QueueBypassContextCompactedMain.Proto(), nil
 	case "existing":
-		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_Existing{Existing: &frontendv1.TopbarQueueBypassContextExisting{}}}, nil
+		return workspace.QueueBypassContextExisting.Proto(), nil
 	case "existing-plus-compacted":
-		return &frontendv1.TopbarQueueBypassContext{Context: &frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain{ExistingPlusCompactedMain: &frontendv1.TopbarQueueBypassContextExistingPlusCompactedMain{}}}, nil
+		return workspace.QueueBypassContextExistingPlusCompactedMain.Proto(), nil
 	}
 	return nil, fmt.Errorf("-context is full, compacted, existing or existing-plus-compacted, not %q", text)
 }
