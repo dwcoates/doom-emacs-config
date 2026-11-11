@@ -114,7 +114,7 @@
  */
 import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
-import { coverageContext, leftContextCached, type CacheCoverage, type CacheRequest } from "./cold.js";
+import { coverageContext, leftContextCached, type CacheCoverage, type CacheRequest, type TranscriptFacts } from "./cold.js";
 import type { SendVerdict } from "./sends.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
@@ -846,6 +846,22 @@ export interface CacheAnchor extends CacheCoverage {
   /** When that request happened, on the cadence's clock, in epoch milliseconds. */
   readonly atMs: number;
   readonly ttlMs: number | undefined;
+}
+
+/**
+ * The anchor a transcript's last request states: when it happened, the tier
+ * the cache was bought at, and what it left cached. THE ONE READING of a
+ * transcript as an anchor, for a resumed session's cadence and a parked
+ * conversation's beat alike. The caller answers a transcript that states no
+ * request instant itself.
+ */
+export function transcriptCacheAnchor(facts: TranscriptFacts): CacheAnchor {
+  return {
+    atMs: facts.lastRequestAtMs,
+    ttlMs: facts.cacheTtlMs,
+    contextTokens: facts.contextTokens,
+    cachedTokens: facts.cachedTokens,
+  };
 }
 
 /**

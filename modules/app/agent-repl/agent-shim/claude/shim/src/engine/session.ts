@@ -200,6 +200,7 @@ import {
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
+  transcriptCacheAnchor,
   type AskedBeatRefusal,
   type CacheAnchor,
   type KeepaliveAttribution,
@@ -6996,12 +6997,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (compacted) return { anchor: undefined, reason: "the cold gate compacted the conversation" };
     if (facts.lastRequestAtMs === 0) return { anchor: undefined, reason: "the transcript states no request instant" };
     return {
-      anchor: {
-        atMs: facts.lastRequestAtMs,
-        ttlMs: facts.cacheTtlMs,
-        contextTokens: facts.contextTokens,
-        cachedTokens: facts.cachedTokens,
-      },
+      anchor: transcriptCacheAnchor(facts),
       reason: "a resumed conversation, anchored at the transcript's last request",
     };
   }

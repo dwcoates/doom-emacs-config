@@ -6,7 +6,8 @@
  * context whose last several exchanges are keep-alives — the model reads them,
  * the user paid for them, and nothing on any surface says they are there.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import {
@@ -18,6 +19,7 @@ import {
   KeepaliveCadence,
   KeepaliveRewind,
   anchorLapsesAtMs,
+  transcriptCacheAnchor,
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
@@ -2338,5 +2340,25 @@ describe("conversationRecordUuid", () => {
     expect(noteSendSites).toHaveLength(1);
     expect(source).toMatch(/function noteConversationRecord\([^)]*\): void \{\n\s+rewind\.noteRecord\(/);
     expect(source).toMatch(/function noteSendRecord\([^)]*\): void \{\n\s+rewind\.noteSend\(/);
+  });
+});
+
+describe("the anchor a transcript's last request states", () => {
+  const FACTS = { contextTokens: 951_544, cachedTokens: 35_089, sawUsage: true, lastRequestAtMs: TURN_AT, cacheTtlMs: CACHE_TTL_1H_MS, prompts: 3 };
+
+  it("anchors at the last request, with its tier and its coverage", () => {
+    expect(transcriptCacheAnchor(FACTS)).toEqual({ atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 951_544, cachedTokens: 35_089 });
+  });
+
+  it("is the one reading of a transcript as an anchor: no other engine source builds one from the facts", () => {
+    // Arrange: every engine source but the helper's own.
+    const dir = path.join(path.dirname(new URL(import.meta.url).pathname), "../../src/engine");
+    const sources = readdirSync(dir).filter((name) => name.endsWith(".ts") && name !== "keepalive.ts");
+
+    // Act: the sources that read the facts' tier into an anchor by hand.
+    const handRolled = sources.filter((name) => /ttlMs:\s*facts\.cacheTtlMs|facts\.lastRequestAtMs\s*\+\s*facts\.cacheTtlMs/.test(readFileSync(path.join(dir, name), "utf8")));
+
+    // Assert
+    expect(handRolled).toEqual([]);
   });
 });

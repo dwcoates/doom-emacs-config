@@ -31,7 +31,7 @@ import type { shimv1 } from "../proto.js";
 import { bindLog } from "../log.js";
 import type { QueryLike } from "../sdk/types.js";
 import { coverageContext, leftContextCached, readTranscriptFacts } from "./cold.js";
-import { keepalivePromptText } from "./keepalive.js";
+import { anchorLapsesAtMs, keepalivePromptText, transcriptCacheAnchor } from "./keepalive.js";
 import { profileFromProto, type SessionProfile } from "./profile.js";
 import type { PromptQueue } from "./prompt-queue.js";
 import { isKeepaliveRecord, isPromptRecord, readTranscriptChain, type ChainRecord } from "./rollback.js";
@@ -91,16 +91,17 @@ export async function beatParkedConversation(
     LOGGER.info(context, "the parked conversation never reached the model; it holds no cache to keep");
     return { kind: "lapsed", lapsedAtMs: 0 };
   }
+  const anchor = transcriptCacheAnchor(facts);
+  const lapsesAtMs = anchorLapsesAtMs(anchor);
   // A LAST REQUEST THAT LEFT ITS CONTEXT UNCACHED left nothing to keep: the
   // cache is lapsed from it (engine/cold.ts, leftContextCached).
-  if (!leftContextCached(facts)) {
+  if (!leftContextCached(anchor)) {
     LOGGER.info(
-      { ...context, ...coverageContext(facts), lapsed_at_ms: facts.lastRequestAtMs },
+      { ...context, ...coverageContext(anchor), lapsed_at_ms: lapsesAtMs },
       "the parked conversation's last request left its context uncached; its cache is lapsed and no keep-alive was sent",
     );
-    return { kind: "lapsed", lapsedAtMs: facts.lastRequestAtMs };
+    return { kind: "lapsed", lapsedAtMs: lapsesAtMs };
   }
-  const lapsesAtMs = facts.lastRequestAtMs + facts.cacheTtlMs;
   if (deps.nowMs() > lapsesAtMs) {
     LOGGER.info({ ...context, lapsed_at_ms: lapsesAtMs }, "the parked conversation's cache had already lapsed; no keep-alive was sent");
     return { kind: "lapsed", lapsedAtMs: lapsesAtMs };
