@@ -77,7 +77,7 @@ import type {
   FeedResponseRevision,
   FeedResponseSuccess,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { drawSignInAction } from "../../login/request.js";
+import { drawSignInActions } from "../../login/request.js";
 import { log } from "../../log.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
@@ -581,10 +581,7 @@ function renderedText(slot: HTMLElement): string {
 function cutShortFooter(u: FeedResponseError): HTMLElement[] {
   const footer = [cutShortMarker()];
   if (u.signIn !== undefined) {
-    const actions = document.createElement("div");
-    actions.className = RESPONSE_CUT_SHORT_ACTIONS_CLASS;
-    actions.append(drawSignInAction("response-sign-in", "feed.response-sign-in"));
-    footer.push(actions);
+    footer.push(drawSignInActions(RESPONSE_CUT_SHORT_ACTIONS_CLASS, "response-sign-in", "feed.response-sign-in"));
   }
   return footer;
 }

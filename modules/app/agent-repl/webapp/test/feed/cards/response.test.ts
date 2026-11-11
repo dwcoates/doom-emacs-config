@@ -40,6 +40,7 @@ import {
   SIGN_IN_ACTION,
   SIGN_IN_ACTION_ATTRIBUTE,
   answerLoginRequests,
+  drawSignInActions,
 } from "../../../src/login/request.js";
 import { visibleWidth, columnMeasure } from "../../../src/metaprompt-tree.js";
 import { installTreeLayout, stagedCols, stagedMeasure, useTreeLayout } from "../../tree-layout.js";
@@ -342,6 +343,15 @@ describe("the broken state", () => {
     );
     const action = el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS} [${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`);
     expect([action?.localName, action?.textContent]).toEqual(["ar-button", "sign in"]);
+  });
+
+  it("draws the bubble's sign-in as the shared sign-in row", () => {
+    const el = drawFeedResponse(
+      response({ result: { case: "error", value: { prose: { prose: plainProse("Failed to authenticate.") }, signIn: {} } } }),
+      rowContext(),
+    );
+    const row = el.querySelector(`.${RESPONSE_CUT_SHORT_ACTIONS_CLASS}`);
+    expect(row?.innerHTML).toBe(drawSignInActions(RESPONSE_CUT_SHORT_ACTIONS_CLASS, "response-sign-in", "x").innerHTML);
   });
 
   it("offers no sign-in action when the daemon did not set it", () => {

@@ -5,6 +5,7 @@ import {
   SIGN_IN_ACTION_ATTRIBUTE,
   answerLoginRequests,
   drawSignInAction,
+  drawSignInActions,
   requestLogin,
 } from "../../src/login/request.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -79,5 +80,34 @@ describe("drawSignInAction", () => {
     // Assert
     const record = await forwardedRecord(capture, "test.sign-in");
     expect(record.level.case).toBe("info");
+  });
+});
+
+describe("drawSignInActions", () => {
+  it("is a row in the surface's class holding the shared sign-in action alone", () => {
+    // Act
+    const row = drawSignInActions("some-surface-actions", "some-surface-action", "test.sign-in");
+    // Assert
+    const shared = drawSignInAction("some-surface-action", "test.sign-in");
+    const only = row.firstElementChild as HTMLElement;
+    expect([row.localName, row.className, row.childElementCount, only.outerHTML]).toEqual([
+      "div",
+      "some-surface-actions",
+      1,
+      shared.outerHTML,
+    ]);
+  });
+
+  it("opens the page's login overlay from the row's action", () => {
+    // Arrange
+    const opened: HTMLElement[] = [];
+    const stop = answerLoginRequests((control) => opened.push(control));
+    const row = drawSignInActions("some-surface-actions", "some-surface-action", "test.sign-in");
+    const action = row.firstElementChild as HTMLElement;
+    // Act
+    action.click();
+    stop();
+    // Assert
+    expect(opened).toEqual([action]);
   });
 });
