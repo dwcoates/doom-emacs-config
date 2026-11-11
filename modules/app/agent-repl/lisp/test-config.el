@@ -542,6 +542,62 @@ Every doctor log record lands in `agent-repl-config-test--doctor-records'."
     (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
     (should (search-forward "agent-repl--doctor-requirements-issues\n" nil t))))
 
+;;;; ---- Spotlight and the agent worktrees ----
+
+(defconst agent-repl-config-test--workspace-list
+  (concat "{\"workspace\":{\"dir\":\"/Users/u/.config/doom-worktrees/a\"},\"repository\":{\"dir\":\"/Users/u/.config/doom\"}}\n"
+          "{\"workspace\":{\"dir\":\"/Users/u/.config/doom\"},\"repository\":{\"dir\":\"/Users/u/.config/doom\"}}\n"
+          "{\"workspace\":{\"dir\":\"/Users/u/work/ee-worktrees/b\"},\"repository\":{\"dir\":\"/Users/u/work/ee\"}}\n"
+          "{\"workspace\":{\"dir\":\"/Users/u/work/ee-worktrees/c\"},\"repository\":{\"dir\":\"/Users/u/work/ee\"}}\n"
+          "{\"workspace\":{\"dir\":\"/Users/u/work/gns.noindex/d\"},\"repository\":{\"dir\":\"/Users/u/work/gns\"}}\n")
+  "A workspace list: one root under a dot folder, one indexed, one `.noindex'.")
+
+(defmacro agent-repl-config-test--with-workspace-list (exit output &rest body)
+  "Run BODY with the Spotlight check's workspace list answering EXIT and OUTPUT."
+  (declare (indent 2))
+  `(agent-repl-config-test--with-doctor
+     (cl-letf (((symbol-function 'agent-repl--doctor-run-workspace-list) (lambda () (cons ,exit ,output)))
+               ((symbol-function 'agent-repl--doctor-log) #'ignore))
+       ,@body)))
+
+(ert-deftest agent-repl-config-test-doctor-spotlight-reads-each-worktree-root-once ()
+  "Each root is a non-checkout workspace's parent, named once."
+  (agent-repl-config-test--with-doctor
+    (should (equal (agent-repl--doctor-worktree-roots agent-repl-config-test--workspace-list)
+                   '("/Users/u/.config/doom-worktrees" "/Users/u/work/ee-worktrees" "/Users/u/work/gns.noindex")))))
+
+(ert-deftest agent-repl-config-test-doctor-spotlight-skips-dot-and-noindex-paths ()
+  "Spotlight never indexes a path with a dot folder or a `.noindex' folder."
+  (agent-repl-config-test--with-doctor
+    (should (equal (mapcar #'agent-repl--doctor-spotlight-skips-p
+                           '("/Users/u/.config/doom-worktrees" "/Users/u/work/gns.noindex" "/Users/u/work/ee-worktrees"))
+                   '(t t nil)))))
+
+(ert-deftest agent-repl-config-test-doctor-spotlight-warns-of-an-indexed-root ()
+  "An indexed root is a warning naming the one step."
+  (agent-repl-config-test--with-workspace-list 0 agent-repl-config-test--workspace-list
+    (let ((agent-repl-spotlight-excluded-roots nil))
+      (should (equal (agent-repl--doctor-spotlight-issues)
+                     '((warn . "agent-repl: Spotlight indexes the agent worktrees in /Users/u/work/ee-worktrees. Add that folder in System Settings > Spotlight > Search Privacy, then add it to `agent-repl-spotlight-excluded-roots'.")))))))
+
+(ert-deftest agent-repl-config-test-doctor-spotlight-trusts-a-named-exclusion ()
+  "A root named in `agent-repl-spotlight-excluded-roots' is no finding."
+  (agent-repl-config-test--with-workspace-list 0 agent-repl-config-test--workspace-list
+    (let ((agent-repl-spotlight-excluded-roots '("/Users/u/work/ee-worktrees/")))
+      (should-not (agent-repl--doctor-spotlight-issues)))))
+
+(ert-deftest agent-repl-config-test-doctor-spotlight-reports-an-unlistable-registry ()
+  "A workspace list that fails is a warning carrying its output."
+  (agent-repl-config-test--with-workspace-list 1 "no daemon\n"
+    (should (equal (agent-repl--doctor-spotlight-issues)
+                   '((warn . "agent-repl: the Spotlight check could not list the workspaces (exit 1): no daemon"))))))
+
+(ert-deftest agent-repl-config-test-doctor-aggregates-the-spotlight-provider ()
+  "The aggregation names the Spotlight provider, so doom doctor runs it."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "doctor.el" agent-repl-config-test--module-root))
+    (should (search-forward "agent-repl--doctor-spotlight-issues\n" nil t))))
+
 (ert-deftest agent-repl-config-test-doctor-loaded-as-a-library-runs-no-check ()
   "Loading doctor.el with the checks inhibited starts no process."
   (let ((processes 0))
