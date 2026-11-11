@@ -2,8 +2,10 @@ package reuse
 
 import (
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -391,6 +393,10 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		}
 	}
 	graph := NewImportGraph(d.Repo)
+	listings, err := packageListings(d.Repo, pkgRel, env)
+	if err != nil {
+		return nil, nil, err
+	}
 	all := NewInputSet()
 	for _, name := range b.order {
 		unit := b.units[name]
@@ -407,6 +413,15 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		}
 		for _, m := range vitestManifests {
 			if err := graph.addIfFile(set, path.Join(pkgRel, m)); err != nil {
+				return nil, nil, err
+			}
+		}
+		// Vitest walks the whole package to match its include globs, even
+		// to run one file: every listing it reads is hashed, so a test file
+		// added anywhere reruns the suite's file units, and an edited one
+		// only the units whose graph holds it.
+		for _, l := range listings {
+			if err := set.AddDir(l); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -444,6 +459,34 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		b.units[typecheck].Desc = unitDesc(s, typecheck)
 	}
 	return b.list(), b.infra, nil
+}
+
+// packageListings is every directory of the package at pkgRel that vitest's
+// file discovery walks: all of them but the suite's generated subtrees (its
+// node_modules, its build output) and dot directories, which its globs skip.
+func packageListings(repo, pkgRel string, env *InputSet) ([]string, error) {
+	generated := env.Generated()
+	var out []string
+	root := filepath.Join(repo, filepath.FromSlash(pkgRel))
+	err := filepath.WalkDir(root, func(abs string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("reuse: walk %s: %w", abs, err)
+		}
+		if !e.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(repo, abs)
+		if err != nil {
+			return fmt.Errorf("reuse: place %s under %s: %w", abs, repo, err)
+		}
+		rel = filepath.ToSlash(rel)
+		if abs != root && (strings.HasPrefix(e.Name(), ".") || slices.ContainsFunc(generated, func(g string) bool { return under(rel, g) })) {
+			return filepath.SkipDir
+		}
+		out = append(out, rel)
+		return nil
+	})
+	return out, err
 }
 
 // ERT. Each test file is its own unit, run in its own Emacs, named by its

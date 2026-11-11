@@ -237,7 +237,8 @@ func webFixture(t *testing.T, f fixture) roster.Suite {
 	t.Helper()
 	for p, body := range map[string]string{
 		"/web/package.json":                     "{}",
-		"/web/vitest.config.ts":                 `import { a } from "./alias.ts"; export default { test: { setupFiles: ["./test/setup.ts"] } }`,
+		"/web/vitest.config.ts":                 `import { a } from "./alias.ts"; export default { test: { setupFiles: ["./test/setup.ts"], globalSetup: "./test/global.ts" } }`,
+		"/web/test/global.ts":                   "export default () => {}",
 		"/web/vitest.integration.config.ts":     `import base from "./vitest.config"; export default base`,
 		"/web/alias.ts":                         "export const a = 1",
 		"/web/test/setup.ts":                    `import "../src/dom";`,
@@ -282,7 +283,7 @@ func TestDeriveVitestKeysEachFileOnItsOwnImportGraph(t *testing.T) {
 	}
 	byName := unitsByName(su)
 	a := byName["test/a.test.ts"].Set
-	for _, p := range []string{"test/a.test.ts", "src/a.ts", "vitest.config.ts", "alias.ts", "test/setup.ts", "src/dom.ts", "package.json"} {
+	for _, p := range []string{"test/a.test.ts", "src/a.ts", "vitest.config.ts", "alias.ts", "test/setup.ts", "test/global.ts", "src/dom.ts", "package.json"} {
 		if !a.Contains(fixtureModule + "/web/" + p) {
 			t.Errorf("a.test.ts's set does not place %s", p)
 		}
@@ -292,6 +293,14 @@ func TestDeriveVitestKeysEachFileOnItsOwnImportGraph(t *testing.T) {
 	}
 	if a.Contains(fixtureModule+"/web/src/b.ts") || a.Contains(fixtureModule+"/web/test/b.test.ts") {
 		t.Error("a.test.ts's set places another file's graph")
+	}
+	for _, d := range []string{"web", "web/src", "web/test", "web/test/integration"} {
+		if !slices.Contains(a.Dirs(), fixtureModule+"/"+d) {
+			t.Errorf("a.test.ts's set does not list %s, which vitest's discovery walks", d)
+		}
+	}
+	if slices.Contains(a.Dirs(), fixtureModule+"/web/node_modules") {
+		t.Error("a.test.ts's set lists the generated node_modules")
 	}
 	i := byName["test/integration/i.test.ts"].Set
 	for _, p := range []string{"vitest.integration.config.ts", "vitest.config.ts", "test/setup.ts", "test/integration/fixture.json"} {

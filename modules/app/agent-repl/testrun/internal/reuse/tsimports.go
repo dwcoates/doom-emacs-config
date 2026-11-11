@@ -237,14 +237,15 @@ func (g *ImportGraph) addIfFile(set *InputSet, p string) error {
 	return set.AddFile(p)
 }
 
-// setupFilesPattern finds a vitest config's setupFiles list.
-var setupFilesPattern = regexp.MustCompile(`\bsetupFiles\s*:\s*\[([^\]]*)\]`)
+// setupFilesPattern finds a vitest config's setupFiles and globalSetup
+// entries: a list, or one string.
+var setupFilesPattern = regexp.MustCompile(`\b(?:setupFiles|globalSetup)\s*:\s*(\[[^\]]*\]|["'][^"'\n]+["'])`)
 
 // stringLiteral finds a quoted string.
 var stringLiteral = regexp.MustCompile(`["']([^"'\n]+)["']`)
 
-// SetupFiles is every setup file the vitest config at config (repository
-// relative) and the configs it imports name, resolved against the config's
+// SetupFiles is every setup and global setup file the vitest config at
+// config (repository relative) and the configs it imports name, resolved against the config's
 // package directory. A setup file named but missing is an error: vitest
 // would refuse it too.
 func (g *ImportGraph) SetupFiles(config string) ([]string, error) {
