@@ -1002,3 +1002,54 @@ func TestADecodedHeldImageRefusesAMalformedEntry(t *testing.T) {
 		})
 	}
 }
+
+// TestProtoHexesRoundTrips pins the held row's one encoding of proto messages:
+// each message's deterministic wire bytes in hex, read back equal, in order.
+func TestProtoHexesRoundTrips(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []*conversationv1.ImageBlock
+	}{
+		{name: "none", images: nil},
+		{name: "two", images: []*conversationv1.ImageBlock{pastedImage("/a.png"), pastedImage("/b.png")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			decoded, err := decodeProtoHexes("image", protoHexes("an image", tt.images),
+				func() *conversationv1.ImageBlock { return &conversationv1.ImageBlock{} })
+
+			// Assert
+			if err != nil || len(decoded) != len(tt.images) {
+				t.Fatalf("decoded %v (%v), want %v", decoded, err, tt.images)
+			}
+			for i := range tt.images {
+				if !proto.Equal(decoded[i], tt.images[i]) {
+					t.Fatalf("decoded[%d] = %v, want %v", i, decoded[i], tt.images[i])
+				}
+			}
+		})
+	}
+}
+
+// TestHeldDeployHooksShareTheProtoHexEncoding pins that a held create's deploy
+// hooks are encoded and decoded by the one proto-hex encoding its images use.
+func TestHeldDeployHooksShareTheProtoHexEncoding(t *testing.T) {
+	// Arrange
+	hooks := []*repoconfigv1.Hook{{}, {}}
+
+	// Act
+	encoded := hookBytes(hooks)
+	decoded, err := decodeHooks(encoded)
+
+	// Assert
+	if !slices.Equal(encoded, protoHexes("a deploy hook", hooks)) {
+		t.Fatalf("hookBytes = %v, want the proto-hex encoding", encoded)
+	}
+	if err != nil || len(decoded) != len(hooks) {
+		t.Fatalf("decodeHooks = %v (%v), want %d hooks", decoded, err, len(hooks))
+	}
+	if _, err := decodeHooks([]string{"zz"}); err == nil || !strings.Contains(err.Error(), "decode a held create's deploy hook") {
+		t.Fatalf("decodeHooks(malformed) = %v, want the deploy hook named", err)
+	}
+}

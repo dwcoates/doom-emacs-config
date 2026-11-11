@@ -737,15 +737,7 @@ func createKey(spec CreateSpec) string {
 
 // hookBytes is each hook's deterministic wire encoding, hex.
 func hookBytes(hooks []*repoconfigv1.Hook) []string {
-	out := make([]string, 0, len(hooks))
-	for _, h := range hooks {
-		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(h)
-		if err != nil {
-			panic(fmt.Sprintf("workspace: a deploy hook will not encode: %v", err))
-		}
-		out = append(out, hex.EncodeToString(b))
-	}
-	return out
+	return protoHexes("a deploy hook", hooks)
 }
 
 // protoHexes is each message's deterministic wire encoding, hex; WHAT names
@@ -969,19 +961,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 }
 
 func decodeHooks(encoded []string) ([]*repoconfigv1.Hook, error) {
-	var out []*repoconfigv1.Hook
-	for _, e := range encoded {
-		raw, err := hex.DecodeString(e)
-		if err != nil {
-			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
-		}
-		hook := &repoconfigv1.Hook{}
-		if err := proto.Unmarshal(raw, hook); err != nil {
-			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
-		}
-		out = append(out, hook)
-	}
-	return out, nil
+	return decodeProtoHexes("deploy hook", encoded, func() *repoconfigv1.Hook { return &repoconfigv1.Hook{} })
 }
 
 func optionalID(s string) *ids.WorkspaceID {
