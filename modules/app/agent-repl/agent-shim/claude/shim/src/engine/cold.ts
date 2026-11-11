@@ -183,7 +183,7 @@ export interface CacheCoverage {
  * The vendor's cache prices, as multiples of the base input price: a cache
  * read costs a tenth of it, and a write at the one-hour tier twice it. The
  * daemon's keep-alive run cap names the same two prices
- * (agent-repld.internal.cachelapse.CacheReadPrice and CacheWritePrice).
+ * (agent-repld.internal.cachelapse.CacheReadPriceTenths and CacheWritePriceTenths).
  */
 export const CACHE_READ_PRICE = 0.1;
 export const CACHE_WRITE_PRICE = 2;
