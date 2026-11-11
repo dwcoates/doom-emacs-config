@@ -448,6 +448,11 @@ Copy an image, then paste it into the input window the way you paste words.
   - Click it to open it large over the feed (see below).
   - It is one character: one `DEL` removes it, and killing and yanking moves it.
   - A terminal frame shows `[Copied Image]` in its place.
+- **A new workspace's prompt takes pasted images too**, in the minibuffer: the one-shot's commission (`SPC TAB o` and its variants), `SPC TAB n`'s initial prompt, and a fork's.
+  - The same paste keys and `C-c C-i` paste the image, shown as `[pasted image]` instead of a thumbnail.
+  - The images reach the new workspace's first message after its words.
+  - A prompt of images alone is refused: an image rides the prompt's words.
+  - Recalling a one-shot draft with `M-p` recalls its images with it.
 - **In the feed, a prompt's images show once its bubble is expanded.**
   - A collapsed prompt bubble, like a collapsed held card, shows your words alone, as it does for a reply's quote.
   - A held card draws its images the same way the prompt's bubble will.

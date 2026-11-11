@@ -454,6 +454,108 @@ prefix argument asks for an older kill."
   (agent-repl--image-evil-paste #'evil-paste-before nil (agent-repl--ws-current-name)
                                 (agent-repl--image-composer-attach)))
 
+;;;; ---- Pasting into a creation prompt -------------------------------------
+;;
+;; A CREATION PROMPT READ IN THE MINIBUFFER (`SPC TAB o', `SPC TAB n', a
+;; fork's prompt) TAKES PASTED IMAGES TOO, by the same paste keys and the
+;; same decisions.  The image is the same one marker character the composer
+;; uses, carrying the same `agent-repl--input-image-marker-property', so
+;; `agent-repl--input-string-parts' reads the prompt's text as words and
+;; images exactly as it reads the composer's.  It is DRAWN as
+;; `agent-repl--image-prompt-display' rather than as a thumbnail: a
+;; one-line minibuffer has no room for a picture.  The workspace the prompt
+;; creates does not exist yet, so the image is kept in the process-wide
+;; `agent-repl--image-prompt-subdir'.
+
+(defconst agent-repl--image-prompt-display "[pasted image]"
+  "What an image pasted into a creation prompt\='s minibuffer is drawn as.")
+
+(defconst agent-repl--image-prompt-subdir "prompt-images/"
+  "Where images pasted into a creation prompt are kept, under the global state dir.
+Process-wide, because the prompt is read before the workspace it creates
+exists, and from any workspace or none.")
+
+(defconst agent-repl--image-prompt-log-scope
+  '(:agent-repl-central "a creation prompt's pasted image belongs to no workspace yet")
+  "The log scope an image pasted into a creation prompt records under.")
+
+(declare-function agent-repl--global-state-file "agent-repl-core" (relative))
+
+(defun agent-repl--image-prompt-marker (path media-type)
+  "Return the one-character prompt string that stands for the image at PATH.
+The composer\='s marker (`agent-repl--image-marker'), drawn as
+`agent-repl--image-prompt-display': the `display' rides the character,
+because a minibuffer runs no decoration of its own."
+  (let ((marker (agent-repl--image-marker path media-type)))
+    (put-text-property 0 1 'display agent-repl--image-prompt-display marker)
+    marker))
+
+(defun agent-repl--image-prompt-text (parts)
+  "Return creation-prompt text that reads back as PARTS.
+PARTS are words and image plists (`agent-repl--input-string-parts');
+each image becomes its prompt marker.  The prompt\='s persisted history
+keeps this form, so a recalled draft carries its images and nothing
+else of the minibuffer\='s properties."
+  (mapconcat (lambda (part)
+               (if (stringp part)
+                   part
+                 (agent-repl--image-prompt-marker (plist-get part :path)
+                                                  (plist-get part :media-type))))
+             parts ""))
+
+(defun agent-repl--image-prompt-attach (entry)
+  "Keep the clipboard\='s ENTRY image for a creation prompt and insert it at point.
+Return the image\='s path."
+  (let ((scope agent-repl--image-prompt-log-scope))
+    (pcase-let ((`(,path . ,media-type)
+                 (agent-repl--image-capture-into
+                  scope
+                  (lambda ()
+                    (agent-repl--image-ensure-dir
+                     scope (agent-repl--global-state-file agent-repl--image-prompt-subdir)))
+                  entry)))
+      (insert (agent-repl--image-prompt-marker path media-type))
+      (agent-repl--info scope "clipboard-image: pasted into a creation prompt path=%s media-type=%s"
+                        path media-type)
+      path)))
+
+(defun agent-repl-prompt-attach-clipboard-image ()
+  "Attach the clipboard\='s image to a creation prompt, even beside text."
+  (interactive "*")
+  (agent-repl--image-attach-forced agent-repl--image-prompt-log-scope
+                                   #'agent-repl--image-prompt-attach))
+
+(defun agent-repl-prompt-yank ()
+  "Paste the clipboard\='s image into a creation prompt, or `yank' as usual."
+  (interactive "*")
+  (agent-repl--image-yank agent-repl--image-prompt-log-scope #'agent-repl--image-prompt-attach))
+
+(defun agent-repl-prompt-evil-paste-after ()
+  "Evil\='s `p' in a creation prompt: the clipboard\='s image, or `evil-paste-after'."
+  (interactive "*")
+  (agent-repl--image-evil-paste #'evil-paste-after t agent-repl--image-prompt-log-scope
+                                #'agent-repl--image-prompt-attach))
+
+(defun agent-repl-prompt-evil-paste-before ()
+  "Evil\='s `P' in a creation prompt: the clipboard\='s image, or `evil-paste-before'."
+  (interactive "*")
+  (agent-repl--image-evil-paste #'evil-paste-before nil agent-repl--image-prompt-log-scope
+                                #'agent-repl--image-prompt-attach))
+
+(defvar agent-repl-image-prompt-map (make-sparse-keymap)
+  "Keys a creation prompt\='s minibuffer adds so its paste keys paste images.
+The remaps mirror the composer\='s, and `C-c C-i' attaches the
+clipboard\='s image even beside text, as it does in the composer.")
+
+(agent-repl-refill-keymap
+ agent-repl-image-prompt-map
+ (lambda (map)
+   (define-key map [remap yank] #'agent-repl-prompt-yank)
+   (define-key map [remap clipboard-yank] #'agent-repl-prompt-yank)
+   (define-key map [remap evil-paste-after] #'agent-repl-prompt-evil-paste-after)
+   (define-key map [remap evil-paste-before] #'agent-repl-prompt-evil-paste-before)
+   (define-key map (kbd "C-c C-i") #'agent-repl-prompt-attach-clipboard-image)))
+
 ;;;; ---- Keybinding -----------------------------------------------------------
 
 ;; Bound into the input mode map (defined in input.el, loaded first).  The
