@@ -53,25 +53,7 @@ func linkPulls(parsed *frontendv1.ParsedProse, target *pullrefs.Target, arriving
 	if target == nil {
 		return
 	}
-	blocks := parsed.GetBlocks()
-	for i, block := range blocks {
-		growing := arriving && i == len(blocks)-1
-		switch b := block.GetBlock().(type) {
-		case *frontendv1.ProseBlock_Plain:
-			b.Plain.Markdown = pullrefs.Linkify(b.Plain.GetMarkdown(), *target, growing)
-		case *frontendv1.ProseBlock_Tree:
-			nodes := b.Tree.GetNodes()
-			for j, node := range nodes {
-				if text := node.GetText(); text != nil {
-					text.Markdown = pullrefs.Linkify(text.GetMarkdown(), *target, growing && j == len(nodes)-1)
-				}
-			}
-		case *frontendv1.ProseBlock_Entries:
-			for _, node := range b.Entries.GetNodes() {
-				if text := node.GetAnswer().GetText(); text != nil {
-					text.Markdown = pullrefs.Linkify(text.GetMarkdown(), *target, false)
-				}
-			}
-		}
-	}
+	eachDrawnMarkdown(parsed, true, func(markdown string, ends bool) string {
+		return pullrefs.Linkify(markdown, *target, arriving && ends)
+	})
 }

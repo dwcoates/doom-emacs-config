@@ -45,16 +45,7 @@ func markCodeSpans(parsed *frontendv1.ParsedProse, spans []string) {
 	if len(spans) == 0 {
 		return
 	}
-	for _, block := range parsed.GetBlocks() {
-		switch b := block.GetBlock().(type) {
-		case *frontendv1.ProseBlock_Plain:
-			b.Plain.Markdown = codespans.Markup(b.Plain.GetMarkdown(), spans)
-		case *frontendv1.ProseBlock_Entries:
-			for _, node := range b.Entries.GetNodes() {
-				if text := node.GetAnswer().GetText(); text != nil {
-					text.Markdown = codespans.Markup(text.GetMarkdown(), spans)
-				}
-			}
-		}
-	}
+	eachDrawnMarkdown(parsed, false, func(markdown string, _ bool) string {
+		return codespans.Markup(markdown, spans)
+	})
 }
