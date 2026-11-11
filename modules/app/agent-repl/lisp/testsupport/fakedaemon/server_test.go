@@ -157,6 +157,42 @@ func TestDefaultUpdateQueueBypassModeIsSuccess(t *testing.T) {
 	}
 }
 
+func TestDefaultGatherWorkspacesIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.GatherWorkspaces(context.Background(),
+		connect.NewRequest(&agentreplv1.GatherWorkspacesRequest{Caller: &workspaceRef}))
+	if err != nil {
+		t.Fatalf("GatherWorkspaces: %v", err)
+	}
+
+	// Assert.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GatherWorkspaces default is %v, want the success arm", resp.Msg)
+	}
+}
+
+func TestDefaultGetGatherStatusIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.GetGatherStatus(context.Background(),
+		connect.NewRequest(&agentreplv1.GetGatherStatusRequest{}))
+	if err != nil {
+		t.Fatalf("GetGatherStatus: %v", err)
+	}
+
+	// Assert.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GetGatherStatus default is %v, want the success arm", resp.Msg)
+	}
+}
+
 func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
