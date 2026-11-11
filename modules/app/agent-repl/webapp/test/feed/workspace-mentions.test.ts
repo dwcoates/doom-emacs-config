@@ -2,9 +2,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
   WatchWorkspaceMentionsResponseSchema,
   type WatchWorkspaceMentionsRequest,
@@ -243,14 +243,14 @@ describe("readMentionTargets", () => {
 });
 
 describe("installWorkspaceMentionClicks", () => {
-  /** A page whose SelectWorkspace records its requests, with ROOT's clicks installed. */
+  /** A page whose SelectInEditor records its requests, with ROOT's clicks installed. */
   function page(root: HTMLElement) {
-    const calls: SelectWorkspaceRequest[] = [];
+    const calls: SelectInEditorRequest[] = [];
     const ctx = scriptedAppContext(
       {
-        selectWorkspace: (req) => {
+        selectInEditor: (req) => {
           calls.push(req);
-          return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
         },
       },
       { workspace: WORKSPACE, failures: new RecordingSink() },
@@ -310,9 +310,9 @@ describe("installWorkspaceMentionClicks", () => {
     // ARRANGE
     const capture = captureLogRecords();
     const root = tree(`<a class="${WORKSPACE_MENTION_CLASS}" ${WORKSPACE_MENTION_ATTRIBUTE}="ws-gone">gone</a>`);
-    const calls: SelectWorkspaceRequest[] = [];
+    const calls: SelectInEditorRequest[] = [];
     const ctx = scriptedAppContext(
-      { selectWorkspace: (req) => (calls.push(req), create(SelectWorkspaceResponseSchema, {})) },
+      { selectInEditor: (req) => (calls.push(req), create(SelectInEditorResponseSchema, {})) },
       { workspace: WORKSPACE, failures: new RecordingSink() },
     );
     const uninstall = installWorkspaceMentionClicks(ctx, root);

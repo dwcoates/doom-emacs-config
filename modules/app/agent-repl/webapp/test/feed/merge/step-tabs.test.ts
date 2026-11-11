@@ -10,9 +10,9 @@ import {
   type OpenWorkspaceRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { scriptedAppContext } from "../../rpc/app-context.js";
 import { RecordingSink, WORKSPACE, harness, mergeRow, rowContext } from "../harness.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
@@ -194,16 +194,16 @@ describe("drawFeedMergeTabRebaseCommit", () => {
 describe("drawFeedMergeRebaseReplaying", () => {
   /** The rebasing tab drawn over one replay header, in a page that answers both clicks. */
   function header(replaying: typeof REPLAYING = REPLAYING) {
-    const calls = { openWorkspace: [] as OpenWorkspaceRequest[], selectWorkspace: [] as SelectWorkspaceRequest[], openInEditor: [] as OpenInEditorRequest[] };
+    const calls = { openWorkspace: [] as OpenWorkspaceRequest[], selectInEditor: [] as SelectInEditorRequest[], openInEditor: [] as OpenInEditorRequest[] };
     const ctx = scriptedAppContext(
       {
         openWorkspace: (req) => {
           calls.openWorkspace.push(req);
           return create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } });
         },
-        selectWorkspace: (req) => {
-          calls.selectWorkspace.push(req);
-          return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+        selectInEditor: (req) => {
+          calls.selectInEditor.push(req);
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
         },
         openInEditor: (req) => {
           calls.openInEditor.push(req);
@@ -250,8 +250,8 @@ describe("drawFeedMergeRebaseReplaying", () => {
   it("opens the target's workspace and then switches to it when the target is clicked", async () => {
     const { line, calls } = header();
     line.querySelector<HTMLElement>("[data-merge-target]")!.click();
-    await vi.waitFor(() => expect(calls.selectWorkspace).toHaveLength(1));
-    expect([calls.openWorkspace.map((r) => r.workspace?.id), calls.selectWorkspace.map((r) => r.workspace?.id)]).toEqual([
+    await vi.waitFor(() => expect(calls.selectInEditor).toHaveLength(1));
+    expect([calls.openWorkspace.map((r) => r.workspace?.id), calls.selectInEditor.map((r) => r.workspace?.id)]).toEqual([
       ["ws-main"],
       ["ws-main"],
     ]);

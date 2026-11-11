@@ -2,9 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { FeedMergeWorkspaceSwitchSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -22,14 +22,14 @@ afterEach(() => {
 /** The merge workspace every switch below names. */
 const TARGET = create(WorkspaceRefSchema, { id: "ws-merge", dir: "/w/merge" });
 
-/** A row context whose SelectWorkspace succeeds, with the calls it received. */
+/** A row context whose SelectInEditor succeeds, with the calls it received. */
 function selecting() {
-  const calls: SelectWorkspaceRequest[] = [];
+  const calls: SelectInEditorRequest[] = [];
   const ctx = scriptedAppContext(
     {
-      selectWorkspace: (req) => {
+      selectInEditor: (req) => {
         calls.push(req);
-        return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+        return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
       },
     },
     { workspace: WORKSPACE, failures: new RecordingSink() },

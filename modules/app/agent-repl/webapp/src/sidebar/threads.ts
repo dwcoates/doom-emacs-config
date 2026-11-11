@@ -18,7 +18,7 @@
  * the thread's names for them (`verbs.ts`): archive or restore, and delete.
  */
 import { RequestNewThreadResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_new_thread_pb.js";
-import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb.js";
+import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb.js";
 import { ShowChatNodeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb.js";
 import { ShowSidebarAppResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_sidebar_app_pb.js";
 import type {
@@ -42,7 +42,7 @@ import type { RailContext, SidebarContext } from "./context.js";
 import { openScope, type DrawScope } from "./scope.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { drawMenuControl } from "./row.js";
-import { drawThreadMenu, type VerbTarget } from "./verbs.js";
+import { buildSelectInEditorRequest, drawThreadMenu, type VerbTarget } from "./verbs.js";
 
 /** The switcher drawn in the rail's head. */
 export interface AppSwitcher {
@@ -250,7 +250,15 @@ function drawThreadRow(row: RosterThreadRow, sc: SidebarContext, path: string, a
   ws.append(drawThreadMenu(target, archived));
   line.addEventListener("click", () => {
     log.info("selecting a thread from the rail", { operation: "sidebar.thread.select", context: { thread: thread.id } });
-    void sendGesture(ctx, "SelectWorkspace", GESTURE_REFUSED, (client) => client.selectWorkspace({ workspace: thread }), SelectWorkspaceResponseSchema);
+    // THE SAME SELECT AS A ROW'S CLICK (`buildSelectInEditorRequest`), so the
+    // editor makes the switch rather than following the roster later.
+    void sendGesture(
+      ctx,
+      "SelectInEditor",
+      GESTURE_REFUSED,
+      (client) => client.selectInEditor(buildSelectInEditorRequest(thread)),
+      SelectInEditorResponseSchema,
+    );
   });
   return ws;
 }

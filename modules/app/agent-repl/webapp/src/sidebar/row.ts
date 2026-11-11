@@ -67,6 +67,7 @@ import {
   type SelectInEditorResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { SetWorkspaceHiddenResponseSchema, type SetWorkspaceHiddenError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
+import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatTickedAge } from "../duration.js";
 import { sameLocalDate } from "../clock.js";
@@ -1137,7 +1138,9 @@ export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
 }
 
 /**
- * The row click: SelectInEditor, echoed, idempotent, and nothing else.
+ * The rail's select: SelectInEditor, echoed, idempotent, and nothing else. A
+ * row's click and a merge queue entry's both run it, the entry's naming the
+ * merge's bubble to REVEAL when it has one.
  *
  * THE EDITOR MAKES THE SWITCH, as it makes a key's (owner request,
  * 2026-10-23): the daemon relays the click to Emacs, which moves its frame on
@@ -1151,17 +1154,18 @@ export async function selectWorkspace(
   line: HTMLElement,
   sc: SidebarContext,
   workspace: WorkspaceRef,
+  reveal?: FeedId,
 ): Promise<void> {
   log.info("selecting a workspace from the rail", {
     operation: "sidebar.row.select",
-    context: { workspace: workspace.id },
+    context: { workspace: workspace.id, reveal: reveal?.value ?? "none" },
   });
   // The row LINE is the control: a refusal lands as its next sibling, inside
   // the row's own box, exactly where a menu item's refusal lands.
   await runSelectVerb(line, {
     sc,
     rpc: "SelectInEditor",
-    call: (client) => client.selectInEditor(buildSelectInEditorRequest(workspace)),
+    call: (client) => client.selectInEditor(buildSelectInEditorRequest(workspace, reveal)),
     schema: SelectInEditorResponseSchema,
     took: (response) => noteSelectRoute(response, workspace),
   });

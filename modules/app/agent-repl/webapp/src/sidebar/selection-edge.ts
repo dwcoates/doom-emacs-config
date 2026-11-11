@@ -2,8 +2,9 @@
  * selection-edge — THE MOMENT THIS PAGE'S WORKSPACE BECOMES THE SELECTED ONE.
  *
  * Every way of switching workspaces — Emacs's tab chords and pickers, a
- * sidebar row click in any webview, a merge-queue entry — is the one
- * `SelectWorkspace` verb, and the daemon states its result as
+ * sidebar row click in any webview, a merge-queue entry — ends in the one
+ * `SelectWorkspace` verb (a page's click reaches it through the editor,
+ * `SelectInEditor`), and the daemon states its result as
  * `WorkspaceRoster.current` (`frontend.v1.RosterCurrentWorkspace`). A switch
  * TO this page's workspace is therefore exactly one edge of that field: from
  * naming another workspace, or none, to naming this one. No switch path can

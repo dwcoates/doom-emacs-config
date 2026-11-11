@@ -954,12 +954,19 @@ describe("a click on a merge in the queue", () => {
     return { asked, sc };
   }
 
-  it("selects the credited workspace and opens the merge's bubble", async () => {
+  // A PARTIAL SELECTION (2026-11-11): the daemon's own select left Emacs to
+  // follow the roster, which waits on an active minibuffer, so the rail drew
+  // the workspace selected while the frame showed another. The click is the
+  // editor's own switch, as a row's is.
+  it.each([
+    ["a merge with a bubble", "bubble-1"],
+    ["a merge without one", undefined],
+  ])("selects the credited workspace through the editor, for %s", async (_name, reveal) => {
     const { asked, sc } = selecting();
-    drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { reveal: "bubble-1" }) }), undefined, glyph(), sc, "head").click();
+    drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", reveal === undefined ? {} : { reveal }) }), undefined, glyph(), sc, "head").click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id, "reveal" in r ? r.reveal?.value : undefined])).toEqual([
-      ["agentrepl.v1.SelectWorkspaceRequest", "w1", "bubble-1"],
+      ["agentrepl.v1.SelectInEditorRequest", "w1", reveal],
     ]);
   });
 

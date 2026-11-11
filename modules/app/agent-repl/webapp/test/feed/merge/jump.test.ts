@@ -6,15 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-  type SelectWorkspaceResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+  type SelectInEditorResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
   OpenWorkspaceResponseSchema,
   type OpenWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { FeedIdSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { MalformedView } from "../../../src/rpc/malformed.js";
 import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "../../../src/feed/merge/jump.js";
 import { scriptedAppContext } from "../../rpc/app-context.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
@@ -33,12 +35,12 @@ const SITE: JumpSite = { describe: "a test switch", operation: "merge.test-jump"
 /** The workspace every jump selects. */
 const TARGET = create(WorkspaceRefSchema, { id: "ws-merge", dir: "/w/merge" });
 
-/** A context whose SelectWorkspace answers ANSWER, or throws THROWN. */
-function scripted(answer: SelectWorkspaceResponse | Error) {
-  const calls: SelectWorkspaceRequest[] = [];
+/** A context whose SelectInEditor answers ANSWER, or throws THROWN. */
+function scripted(answer: SelectInEditorResponse | Error) {
+  const calls: SelectInEditorRequest[] = [];
   const ctx = scriptedAppContext(
     {
-      selectWorkspace: (req) => {
+      selectInEditor: (req) => {
         calls.push(req);
         if (answer instanceof Error) throw answer;
         return answer;
@@ -50,7 +52,7 @@ function scripted(answer: SelectWorkspaceResponse | Error) {
 }
 
 /** Run one jump from a fresh host to its end. */
-async function jump(answer: SelectWorkspaceResponse | Error) {
+async function jump(answer: SelectInEditorResponse | Error) {
   const s = scripted(answer);
   const host = document.createElement("div");
   const call = jumpToWorkspace(host, s.rc.ctx, TARGET, SITE);
@@ -59,7 +61,7 @@ async function jump(answer: SelectWorkspaceResponse | Error) {
   return { host, calls: s.calls };
 }
 
-const SELECTED = create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+const SELECTED = create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
 
 describe("jumpToWorkspace", () => {
   it("selects the workspace verbatim and draws nothing on success", async () => {
@@ -68,9 +70,36 @@ describe("jumpToWorkspace", () => {
     expect(host.children).toHaveLength(0);
   });
 
+  it("asks no reveal when none is given", async () => {
+    const { calls } = await jump(SELECTED);
+    expect(calls.map((c) => c.reveal)).toEqual([undefined]);
+  });
+
+  it("carries the row to reveal on the select", async () => {
+    const s = scripted(SELECTED);
+    const call = jumpToWorkspace(document.createElement("div"), s.rc.ctx, TARGET, SITE, create(FeedIdSchema, { value: "bubble-1" }));
+    await vi.advanceTimersByTimeAsync(0);
+    await call;
+    expect(s.calls.map((c) => c.reveal?.value)).toEqual(["bubble-1"]);
+  });
+
+  it.each(["relayed", "selected"] as const)("draws nothing when the %s route made the switch", async (route) => {
+    const { host } = await jump(
+      create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: route, value: {} } } } }),
+    );
+    expect(host.children).toHaveLength(0);
+  });
+
+  it("refuses a success that names no route as a malformed view", async () => {
+    const s = scripted(create(SelectInEditorResponseSchema, { result: { case: "success", value: {} } }));
+    const refused = expect(jumpToWorkspace(document.createElement("div"), s.rc.ctx, TARGET, SITE)).rejects.toThrow(MalformedView);
+    await vi.advanceTimersByTimeAsync(0);
+    await refused;
+  });
+
   it("draws a refusal in the site's class at the host", async () => {
     const { host } = await jump(
-      create(SelectWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+      create(SelectInEditorResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
     );
     expect(host.querySelector(".merge-test-refusal")?.getAttribute("data-arm")).toBe("unknownWorkspace");
   });
@@ -78,7 +107,7 @@ describe("jumpToWorkspace", () => {
   it("records a refusal under the site's operation", async () => {
     const capture = captureLogRecords();
     await jump(
-      create(SelectWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+      create(SelectInEditorResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
     );
     const record = await forwardedRecord(capture, "merge.test-jump-refused");
     expect(record.level.case).toBe("warn");
@@ -87,7 +116,7 @@ describe("jumpToWorkspace", () => {
   it("records an expected answer under the site's operation and draws nothing", async () => {
     const capture = captureLogRecords();
     const { host } = await jump(
-      create(SelectWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "standingDown", value: {} } } } }),
+      create(SelectInEditorResponseSchema, { result: { case: "error", value: { cause: { case: "standingDown", value: {} } } } }),
     );
     expect(host.children).toHaveLength(0);
     const record = await forwardedRecord(capture, "merge.test-jump-expected-answer");
@@ -117,15 +146,15 @@ describe("jumpToWorkspace", () => {
     expect(record.level.case).toBe("error");
   });
 
-  it("is the one SelectWorkspace call site in the merge bubble", () => {
+  it("is the one SelectInEditor call site in the merge bubble", () => {
     for (const file of ["queue.ts", "merge.ts", "merge-body.ts", "workspace-switch.ts", "step-tabs.ts"]) {
       const source = codeOf(readFileSync(join(process.cwd(), "src/feed/merge", file), "utf8"));
-      expect(source.includes("selectWorkspace("), file).toBe(false);
+      expect(source.includes("selectInEditor("), file).toBe(false);
     }
   });
 });
 
-/** A context whose OpenWorkspace answers OPENED and whose SelectWorkspace answers SELECTED. */
+/** A context whose OpenWorkspace answers OPENED and whose SelectInEditor answers SELECTED. */
 function scriptedOpen(opened: OpenWorkspaceResponse | Error) {
   const calls: string[] = [];
   const ctx = scriptedAppContext(
@@ -135,7 +164,7 @@ function scriptedOpen(opened: OpenWorkspaceResponse | Error) {
         if (opened instanceof Error) throw opened;
         return opened;
       },
-      selectWorkspace: (req) => {
+      selectInEditor: (req) => {
         calls.push(`select ${req.workspace?.id}`);
         return SELECTED;
       },
