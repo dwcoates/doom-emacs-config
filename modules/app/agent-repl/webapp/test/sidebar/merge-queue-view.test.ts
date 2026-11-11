@@ -17,11 +17,9 @@ import {
   RosterMergeQueueGithubEntrySchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
-  RosterMergeQueueRemediatingReasonSchema,
-  RosterMergeQueueRemediatingSchema,
+  RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueStageSchema,
   RosterMergeQueueSubjectSchema,
-  RosterMergeQueueWaitingPlacementSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { RepositoryRefSchema as WorkspaceRepositorySchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -37,9 +35,6 @@ import {
   drawQueuedGroupHead,
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
-  MERGE_QUEUE_LABEL_CLASS,
-  placementLabel,
-  MERGE_QUEUE_POSITION_CLASS,
   MERGE_QUEUE_CARD_LINE_CLASS,
   githubPlaceText,
   MERGE_QUEUE_CLASS,
@@ -50,6 +45,7 @@ import {
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
+  MERGE_QUEUE_POSITION_CLASS,
   pausedText,
   queueDrag,
   queueHoverText,
@@ -60,16 +56,17 @@ import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
   appContext,
-  conflictsReason,
   fakeTicker,
   mergeQueueBand,
   mergingHead,
   NOW,
   queueGroup,
   queueSubject,
-  remediatingMerge,
+  fixingTestsMerge,
+  resolvingConflictsMerge,
+  awaitingFixingTestsMerge,
+  awaitingResolvingConflictsMerge,
   sidebarContext,
-  testsReason,
   waitingMerge,
 } from "./harness.js";
 
@@ -131,13 +128,16 @@ describe("pausedText", () => {
 });
 
 describe("queueLine", () => {
-  it("lists the head, then each merge remediating, then each waiting, by workspace", () => {
+  it("lists the head, then each repair slot and the merges awaiting each, then each waiting, by workspace", () => {
     const queue = create(RosterRepoMergeQueueSchema, {
       head: mergingHead("w1"),
-      remediating: [remediatingMerge("w2", NOW)],
-      waiting: [waitingMerge("w3"), waitingMerge("w4")],
+      fixingTests: fixingTestsMerge("w2", NOW),
+      resolvingConflicts: resolvingConflictsMerge("w3", NOW),
+      awaitingFixingTests: [awaitingFixingTestsMerge("w4", NOW)],
+      awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w5", NOW)],
+      waiting: [waitingMerge("w6"), waitingMerge("w7")],
     });
-    expect(queueLine(queue)).toBe("w1 w2 w3 w4");
+    expect(queueLine(queue)).toBe("w1 w2 w3 w4 w5 w6 w7");
   });
 
   it("states an empty line for a queue drawing no merge", () => {
@@ -159,13 +159,14 @@ describe("queueLine and queueCount with GitHub standings", () => {
 });
 
 describe("queueCount", () => {
-  it("counts the head, those remediating and those waiting", () => {
+  it("counts the head, those at or awaiting a repair slot and those waiting", () => {
     const queue = create(RosterRepoMergeQueueSchema, {
       head: mergingHead("w1"),
-      remediating: [remediatingMerge("w2", NOW)],
+      fixingTests: fixingTestsMerge("w2", NOW),
+      awaitingFixingTests: [awaitingFixingTestsMerge("w5", NOW)],
       waiting: [waitingMerge("w3"), waitingMerge("w4")],
     });
-    expect(queueCount(queue)).toBe(4);
+    expect(queueCount(queue)).toBe(5);
   });
 
   it("counts an empty queue as none", () => {
@@ -289,7 +290,7 @@ describe("drawRosterMergeQueue", () => {
         ...drawRosterMergeQueue(
           create(RosterRepoMergeQueueSchema, {
             head: mergingHead("w0"),
-            remediating: [remediatingMerge("wr", NOW)],
+            fixingTests: fixingTestsMerge("wr", NOW),
             waiting: order.map((id) => waitingMerge(id)),
           }),
           sc,
@@ -315,29 +316,36 @@ describe("drawRosterMergeQueue", () => {
     expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), sc, "queue")).toThrow(MalformedView);
   });
 
-  it("draws a merge remediating out of line between the head and the waiting merges", () => {
+  it("draws the merges out of line between the head and the waiting merges: each slot's holder, then those awaiting each", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
         head: mergingHead("w1"),
-        remediating: [remediatingMerge("w2", NOW)],
-        waiting: [waitingMerge("w3")],
+        fixingTests: fixingTestsMerge("w2", NOW),
+        resolvingConflicts: resolvingConflictsMerge("w3", NOW),
+        awaitingFixingTests: [awaitingFixingTestsMerge("w4", NOW)],
+        awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w5", NOW)],
+        waiting: [waitingMerge("w6")],
       }),
       sc,
       "queue",
     );
-    expect([...body.children].map((el) => el.className)).toEqual([
-      MERGE_QUEUE_HEAD_CLASS,
-      `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`,
-      MERGE_QUEUE_WAITING_CLASS,
+    const out = `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`;
+    expect([...body.children].map((el) => [el.className, el.querySelector(".sb-mq-name")?.textContent])).toEqual([
+      [MERGE_QUEUE_HEAD_CLASS, "w1"],
+      [out, "w2"],
+      [out, "w3"],
+      [out, "w4"],
+      [out, "w5"],
+      [MERGE_QUEUE_WAITING_CLASS, "w6"],
     ]);
   });
 
-  it("draws a queue whose line is empty while a merge remediates, with no head", () => {
+  it("draws a queue whose line is empty while a merge stands out of line, with no head", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
-        remediating: [remediatingMerge("w2", NOW)],
+        resolvingConflicts: resolvingConflictsMerge("w2", NOW),
       }),
       sc,
       "queue",
@@ -385,13 +393,13 @@ describe("drawRosterMergeQueue", () => {
     expect(queueDrag(sc, body, body.querySelector(`.${MERGE_QUEUE_GITHUB_CLASS}`), new Map())).toBeNull();
   });
 
-  it("draws a remediating merge on one line: its name, what it repairs, then its clock from when it stepped aside", () => {
+  it("draws a merge out of line on one line: its name, its repair, then its clock from when it took or began awaiting its slot", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
         head: mergingHead("w1"),
-        remediating: [remediatingMerge("w2", NOW - 4_000)],
+        fixingTests: fixingTestsMerge("w2", NOW - 4_000),
       }),
       sc,
       "queue",
@@ -405,26 +413,24 @@ describe("drawRosterMergeQueue", () => {
   });
 
   it.each([
-    ["its failing tests", testsReason(), "fixing tests"],
-    ["its rebase's conflicts", conflictsReason(), "resolving conflicts"],
-    ["a reason this build does not name", create(RosterMergeQueueRemediatingReasonSchema, {}), undefined],
-  ])("says what a remediating merge repairs after its name: %s", (_name, reason, want) => {
+    ["the fixing-tests slot's holder", { fixingTests: fixingTestsMerge("w2", NOW) }, "fixing tests"],
+    ["the resolving-conflicts slot's holder", { resolvingConflicts: resolvingConflictsMerge("w2", NOW) }, "resolving conflicts"],
+    ["a merge awaiting the fixing-tests slot", { awaitingFixingTests: [awaitingFixingTestsMerge("w2", NOW)] }, "waiting to fix tests"],
+    ["a merge awaiting the resolving-conflicts slot", { awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w2", NOW)] }, "waiting to resolve conflicts"],
+  ])("says the repair after the name of %s", (_name, slots, want) => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(
-      create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [remediatingMerge("w2", NOW, reason)] }),
-      sc,
-      "queue",
-    );
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), ...slots }), sc, "queue");
     expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .${MERGE_QUEUE_REASON_CLASS}`)?.textContent).toBe(want);
   });
 
-  it("refuses a remediating merge that carries no reason as malformed", () => {
+  it("refuses a repair slot's holder that carries no subject as malformed", () => {
     const { sc } = daemon();
-    const unreasoned = create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) });
+    const subjectless = create(RosterMergeQueueFixingTestsSchema, { sinceMs: BigInt(NOW) });
     expect(() =>
-      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [unreasoned] }), sc, "queue"),
+      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), fixingTests: subjectless }), sc, "queue"),
     ).toThrow(MalformedView);
   });
+
 });
 
 describe("dragging a waiting merge", () => {
@@ -651,38 +657,10 @@ describe("drawRosterMergeQueueWaiting", () => {
     ]);
   });
 
-  it("ticks a racing merge's clock from when it took its racing slot, not when it was put in line", () => {
+  it("draws no front mark on a waiting merge", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(
-      waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_600_000), racingSinceMs: BigInt(NOW - 4_000) }),
-      1,
-      sc,
-      "w",
-    );
-    expect(line.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(4_000));
-  });
-
-  it.each([
-    { name: "marks a merge the user put at the front front", init: { front: true }, want: "front" },
-    { name: "marks a merge back from a repair returned", init: { returned: true }, want: "returned" },
-    { name: "marks a merge put in line at the back with no label", init: {}, want: null },
-  ])("$name", ({ init, want }) => {
-    const { sc } = daemon();
-    const labels = [...drawRosterMergeQueueWaiting(waitingMerge("w1", init), 1, sc, "w").querySelectorAll(`.${MERGE_QUEUE_LABEL_CLASS}`)];
-    expect(labels.map((label) => label.textContent)).toEqual(want === null ? [] : [want]);
-  });
-
-  it("draws no label for a placement this build does not name", () => {
-    expect(placementLabel(create(RosterMergeQueueWaitingPlacementSchema, {}))).toBeNull();
-  });
-
-  it("draws the returned label as a peer of the front label, in the queue label's class", () => {
-    const { sc } = daemon();
-    const front = drawRosterMergeQueueWaiting(waitingMerge("w1", { front: true }), 1, sc, "w").querySelector(".sb-mq-front");
-    const returned = drawRosterMergeQueueWaiting(waitingMerge("w1", { returned: true }), 1, sc, "w").querySelector(".sb-mq-returned");
-    expect(front?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
-    expect(returned?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
-    expect(returned?.classList.contains("sb-mq-front")).toBe(false);
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w");
+    expect([...line.children].map((el) => el.className)).toEqual(["sb-mq-position", "sb-mq-name", "sb-mq-clock"]);
   });
 });
 
@@ -719,9 +697,9 @@ describe("a click on a merge in the queue", () => {
   it.each([
     ["the head card", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueHead(mergingHead("w1"), undefined, sc, "head")],
     [
-      "a remediating card",
+      "a repair slot's card",
       (sc: ReturnType<typeof selecting>["sc"]) =>
-        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { remediating: [remediatingMerge("w2", NOW)] }), sc, "queue").querySelector(
+        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { fixingTests: fixingTestsMerge("w2", NOW) }), sc, "queue").querySelector(
           `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
         ) as HTMLElement,
     ],

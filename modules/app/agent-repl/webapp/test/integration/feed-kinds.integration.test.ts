@@ -59,9 +59,7 @@ import {
   HOOK_OUTCOMES,
   MERGE_TAB_KINDS,
   MERGE_TAB_STATES,
-  MERGE_TAB_HELD_KINDS,
   MERGE_TAB_PENDING_KINDS,
-  MERGE_TAB_TURN_KINDS,
   MERGE_TAB_WAITING_KINDS,
   MERGE_LANDED_ON,
   MERGE_TEST_LOG,
@@ -293,14 +291,10 @@ describe("arm coverage", () => {
     if (field?.message === undefined) throw new Error(`no message under the ${kind} tab`);
     const waits = (MERGE_TAB_WAITING_KINDS as readonly string[]).includes(kind);
     const pends = (MERGE_TAB_PENDING_KINDS as readonly string[]).includes(kind);
-    const turns = (MERGE_TAB_TURN_KINDS as readonly string[]).includes(kind);
-    const holds = (MERGE_TAB_HELD_KINDS as readonly string[]).includes(kind);
     assertCoversOneof(field.message, "state", [
       ...MERGE_TAB_STATES,
       ...(waits ? ["waitingOnUser"] : []),
       ...(pends ? ["pending"] : []),
-      ...(turns ? ["waitingForTurn"] : []),
-      ...(holds ? ["held"] : []),
     ]);
   });
 
@@ -1575,33 +1569,11 @@ describe("merge tabs", () => {
     expect(row.querySelector(`[data-merge-tab="${kind}"]`)?.getAttribute("data-tab-state")).toBe("pending");
   });
 
-  it.each(MERGE_TAB_TURN_KINDS)("draws the %s tab waiting for its test turn with a hollow dot", async (kind) => {
-    // Arrange / Act
-    const row = await drawRow(mergeTabRow(kind, "waitingForTurn"));
-    // Assert
-    const tab = row.querySelector(`[data-merge-tab="${kind}"]`);
-    expect([tab?.getAttribute("data-tab-state"), tab?.querySelector(".merge-tab-glyph")?.textContent]).toEqual([
-      "waitingForTurn",
-      "○",
-    ]);
-  });
-
   it.each(MERGE_TAB_WAITING_KINDS)("draws the %s tab waiting on the user with a ❓", async (kind) => {
     // Arrange / Act
     const row = await drawRow(mergeTabRow(kind, "waitingOnUser"));
     // Assert
     expect(row.querySelector(`[data-merge-tab="${kind}"] .merge-tab-glyph`)?.textContent).toBe("❓");
-  });
-
-  it.each(MERGE_TAB_HELD_KINDS)("draws the %s tab held with a pause mark", async (kind) => {
-    // Arrange / Act
-    const row = await drawRow(mergeTabRow(kind, "held"));
-    // Assert
-    const tab = row.querySelector(`[data-merge-tab="${kind}"]`);
-    expect([tab?.getAttribute("data-tab-state"), tab?.querySelector(".merge-tab-glyph")?.textContent]).toEqual([
-      "held",
-      "‖",
-    ]);
   });
 
   it("draws the label with its round", async () => {

@@ -1130,12 +1130,13 @@ body {
   color: var(--muted);
 }
 #ws-sidebar .sb-mq-stage { display: inline-flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
-/* THE SECOND SPOT (owner ruling, 2026-10-31): a merge remediating out of
-   line stands above the merges waiting and is drawn as one of them (owner
-   request, 2026-11-10); only its label says what it repairs. */
-/* A QUEUE LABEL after a merge's name (owner request, 2026-11-10): `front`,
-   `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
-   alike in the queue's purple. */
+/* THE REPAIR SLOTS (owner rulings, 2026-10-31 and 2026-11-11): a merge out
+   of line, at a repair slot or awaiting one, stands above the merges waiting
+   and is drawn as one of them (owner request, 2026-11-10); only its label
+   says the repair it makes or awaits. */
+/* A QUEUE LABEL after a merge's name (owner request, 2026-11-10): `fixing
+   tests`, `resolving conflicts`, a wait for either, and a GitHub place are
+   peers, drawn alike in the queue's purple. */
 #ws-sidebar .sb-mq-label { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; white-space: nowrap; }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
@@ -1587,7 +1588,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    test/webkit/queue-group-gap.webkit.test.ts), whatever its queue ends with.
    Each line a queue can end with states how far its card reaches below its
    baseline (--mq-below-text, measured in WebKit): a stage strip, at 0.7rem;
-   a name line (a head's alone, or a remediating card's one line); a waiting
+   a name line (a head's alone, or a merge out of line's one line); a waiting
    merge's line. The queue's last card then stands off the next group by
    what is left of the 6.25px a line must reach below its baseline for the
    next name to hang by that gap. */
@@ -8882,11 +8883,9 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 }
 .merge-tab-glyph.is-live,
 #ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
-/* A TAB'S DOT, live or in line for its turn, at 70% of the badge's size
-   (owner request, 2026-10-17); the check, the cross and the question mark
-   keep the badge's size. */
+/* A LIVE TAB'S DOT at 70% of the badge's size (owner request, 2026-10-17);
+   the check, the cross and the question mark keep the badge's size. */
 .merge-tab-glyph.is-live,
-.merge-tab-glyph.is-waiting-for-turn,
 #ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { font-size: 0.7em; }
 /* A replayed commit's badge (tab-strip.ts): its short hash at the duration's
    size, in a darker grey than the duration, beside a subject in the badge's
@@ -8905,17 +8904,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .merge-tab-summary .merge-tab-failed {
   padding: 0.25rem 0;
   color: var(--err);
-}
-/* A RUN IN LINE FOR ITS TEST TURN is under way but runs nothing yet: its dot
-   is hollow and still, and the line under the strip names whose tests run. */
-.merge-tab-glyph.is-waiting-for-turn { color: var(--muted); }
-/* A TAB HELD WHILE ITS MERGE WAITS IN LINE AGAIN after a repair out of line
-   runs nothing: its pause mark is still and muted, like a run in line for its
-   turn. */
-.merge-tab-glyph.is-held { color: var(--muted); }
-.merge-tab-summary .merge-tab-waiting-for-turn {
-  padding: 0.25rem 0;
-  color: var(--muted);
 }
 .merge-tab-panel { padding-top: 0.3rem; }
 /* A running agent stream's stop sits on its own line above its rows. */
