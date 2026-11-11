@@ -350,6 +350,60 @@ func TestWorktreeRemoveTakesTheTreeOffDiskAndOutOfTheRegistry(t *testing.T) {
 	}
 }
 
+func TestWorktreeMoveRenamesTheTreeAndItsRegistration(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	aside := filepath.Join(filepath.Dir(dir), ".wt.removing")
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", target, "main"})
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "move", target, aside})
+
+	// Assert.
+	_, oldErr := os.Stat(target)
+	_, newErr := os.Stat(aside)
+	if got.Exit != 0 || !os.IsNotExist(oldErr) || newErr != nil || repo.Worktree(aside) == nil || repo.Worktree(target) != nil {
+		t.Fatalf("worktree move = %+v (old %v, new %v, registrations %v), want the tree and its registration at the new path",
+			got, oldErr, newErr, repo.Worktrees)
+	}
+}
+
+func TestWorktreeMoveRefusesALockedTreeUnlessForcedTwice(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", target, "main"})
+	repo.Worktree(target).Locked = true
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "move", target, filepath.Join(filepath.Dir(dir), "elsewhere")})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "cannot move a locked working tree") {
+		t.Fatalf("worktree move of a locked tree = %+v, want git's refusal", got)
+	}
+}
+
+func TestWorktreeMoveRefusesAnExistingDestination(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	target := filepath.Join(filepath.Dir(dir), "wt")
+	taken := filepath.Join(filepath.Dir(dir), "taken")
+	Run(s, "/", []string{"-C", dir, "worktree", "add", "-b", "feature", target, "main"})
+	if err := os.Mkdir(taken, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "worktree", "move", target, taken})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "already exists") {
+		t.Fatalf("worktree move onto an existing path = %+v, want git's refusal", got)
+	}
+}
+
 func TestWorktreePruneDropsARegistrationWhoseTreeIsGone(t *testing.T) {
 	// Arrange.
 	s, repo, dir := world(t)

@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -3162,6 +3163,9 @@ func TestCreateThatFailsAfterMaterializingLeavesNothingBehind(t *testing.T) {
 		{name: "the registration fails", arrange: func(f *fixture) { f.db.registerErr = errFake }, registered: false},
 		{name: "the session does not come up", arrange: func(f *fixture) { f.fleet.startErr = errors.New("the fork could not be made") }, registered: true},
 		{name: "the queue refuses the initial prompt", arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue is closed") }, registered: true},
+		{name: "the initial prompt meets the session's cold gate", arrange: func(f *fixture) {
+			f.queue.submitErr = fmt.Errorf("%w: the conversation is cold at 212,455 context tokens", promptqueue.ErrColdGate)
+		}, registered: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

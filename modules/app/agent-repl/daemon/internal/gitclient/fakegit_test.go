@@ -96,6 +96,14 @@ type gitFixture struct {
 	// the one case a pure script cannot: a git that took the worktree away and
 	// then reported a failure anyway.
 	RemovePath string `json:"remove_path"`
+	// MoveFrom and MoveTo, when set, rename MoveFrom to MoveTo before the
+	// fixture answers: a `worktree move` that moved the tree.
+	MoveFrom string `json:"move_from"`
+	MoveTo   string `json:"move_to"`
+	// Absent, when set, is a path that must not exist when the fixture runs:
+	// the fake fails loudly (exit 120) if it does. It is how a test asserts
+	// what stands on disk at the instant git is asked to act.
+	Absent string `json:"absent"`
 	// BlockOnFifo, when set, is a named pipe the fake opens for reading and
 	// then reads from, which never returns. It models a git STILL RUNNING when
 	// the daemon's context ends — the case the cancellation classification is
@@ -119,6 +127,12 @@ type gitFixture struct {
 // ok is a fixture that succeeds with that stdout.
 func ok(stdout string, match ...string) gitFixture {
 	return gitFixture{Match: match, Stdout: stdout}
+}
+
+// movedAside is the `worktree move` a forced removal makes first, moving DIR
+// to its asideDir.
+func movedAside(dir string) gitFixture {
+	return gitFixture{Match: []string{"worktree", "move"}, MoveFrom: dir, MoveTo: asideDir(dir)}
 }
 
 // fails is a fixture that exits nonzero with that stderr.
@@ -443,6 +457,18 @@ func fakeGitMain() {
 			// than pretending the fixture answered.
 			fmt.Fprintf(os.Stderr, "fake git: survived signal %d\n", fixture.KillSelfWith)
 			os.Exit(120)
+		}
+		if fixture.Absent != "" {
+			if _, err := os.Lstat(fixture.Absent); err == nil {
+				fmt.Fprintf(os.Stderr, "fake git: %s exists, and the fixture requires it absent\n", fixture.Absent)
+				os.Exit(120)
+			}
+		}
+		if fixture.MoveFrom != "" {
+			if err := os.Rename(fixture.MoveFrom, fixture.MoveTo); err != nil {
+				fmt.Fprintf(os.Stderr, "fake git: moving %s: %v\n", fixture.MoveFrom, err)
+				os.Exit(120)
+			}
 		}
 		if fixture.RemovePath != "" {
 			if err := os.RemoveAll(fixture.RemovePath); err != nil {
