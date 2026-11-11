@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestACappedRunRecordsItsBreakEvenWithTheRunAndThePrices(t *testing.T) {
 		Message: "the workspace's keep-alive run reached its break-even; its cache is left to lapse and marked cold"})
 	got := []any{record.Context["workspace"], record.Context["run_beats"], record.Context["run_cap"], record.Context["read_price_tenths"], record.Context["write_price_tenths"]}
 	want := []any{string(theWorkspace), KeepaliveRunCap, KeepaliveRunCap, CacheReadPriceTenths, CacheWritePriceTenths}
-	if !ok || !equalAll(got, want) {
+	if !ok || !slices.Equal(got, want) {
 		t.Fatalf("record = %+v (found %v), want %v", record.Context, ok, want)
 	}
 }
@@ -158,16 +159,4 @@ func TestTheBeatThatReachesTheBreakEvenIsTheRunsLast(t *testing.T) {
 	if h.shim.beats != 1 || h.db.coldMarks != 1 {
 		t.Fatalf("beats = %d, cold marks = %d; want the run's last beat sent and no more, its cache marked cold", h.shim.beats, h.db.coldMarks)
 	}
-}
-
-func equalAll(got, want []any) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }
