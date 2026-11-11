@@ -182,6 +182,13 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   (`testrun/internal/reuse/packages_test.go`). Code and mechanics:
   `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of a
   suite's exact inputs".
+- A refused read does not always say "operation not permitted": a listing of
+  an undeclared directory comes back EMPTY (`filepath.Glob` drops the
+  refusal), so a scan that globs a directory fails on finding nothing. Its
+  declaration is the directory (a `/`-suffixed subtree).
+- A targeted run (`-go DIR=Test`) is never confined, so only an untargeted
+  run of the suite proves a declaration; run one after adding a package's
+  reads.
 
 ## E2E coverage is a step of a scenario
 
@@ -369,6 +376,12 @@ coverage impact (always none).
     - Evidence: every flake in the merge gates from 2026-10-30 to 2026-11-02 was a wait running out its bound while its dependency had already failed: a page that hung on a Vite chunk cycle and never drew (`TestEmacsKillCloseLeavesTheTabOrderAlone`, 5 branches; `TestEmacsTabsRehydrateFromTheRosterOnConnect`, 4), a registration refused in silence (`TestDoom/*`, 4 steps at 5s each), a successor that closed the gap a test meant to read (`TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous`, 2). Each read as "slow under load" (docs/investigations/2026-11-02-flaky-tests.md).
     - Fix: the fault latch (see "Synchronization: events, never time"); the dependency's failure ends the wait with its own record.
     - Coverage impact: none; a wait that fails sooner asserts the same thing.
+
+14. **A build unit per Go package, and a whole suite rerun for one package's change.**
+    - Evidence (merge gate, `~/.claude-emacs/merge-logs/abc9582429d943eb-tests-1.log`): 514 units, 960s wall, 1,785 CPU-s; the daemon suite alone planned 340 units, 167 of them `:build` units (230s of unit wall, 281 CPU-s), each a `go test -c` that re-linked what the others had just compiled. A change to any daemon file reran all of it.
+    - Fix 1: one build command per module pass ("A Go module's test binaries are built by one command"). Measured (2026-11-11, full `-suite daemon` runs under the CPU governor): the daemon suite plans 175 units; its builds are two units, `daemon:build` 82.7-92.2 CPU-s (49-56s wall at `-p=2`) and `daemon:build[integration]` 4.7 CPU-s.
+    - Fix 2: each daemon unit-test package is reused on its own green pass ("A unit's reuse inputs come from the tool's dependency listing"). Measured (2026-11-11): with a one-line change to `internal/runecap` (22 dependent test packages), 114 packages were reused and 61 units ran, 259 CPU-s against 792 CPU-s for the same suite with nothing reused; `daemon:build` built only the remaining packages, 26.4 CPU-s.
+    - Coverage impact: none; every package's tests run as their own units against the same binaries, and a reused package's pass is of exactly its inputs. No package is in `PackageReuse.Never`; the integration pass is not reused per package, and the other modules' suites are not package-reused yet.
 
 ## Changes that LOOK faster and are refused
 
