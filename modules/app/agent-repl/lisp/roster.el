@@ -1267,10 +1267,11 @@ the decisions.  The FIRST judgment of an id is INFO, its repeats DEBUG.")
 (defun agent-repl-roster-apply-current ()
   "Move the frame to the workspace the roster's `current' names, if needed.
 THE ROSTER IS THE ONE SOURCE OF THE SELECTION.  Every switch -- a key, a
-picker, a notification, a sidebar row, a merge-queue entry -- is a
+picker, a notification, a sidebar row, a merge-queue entry -- ends in a
 SelectWorkspace, and the frame follows here when the last accepted roster
 \(`agent-repl-roster-view') names a workspace other than the one shown.  A
-switch Emacs requested moves the frame at once as well
+switch Emacs requested, which every page's click is (SelectInEditor),
+moves the frame at once as well
 \(`agent-repl-host-request-switch'); the roster stays the authority, since
 every push while that request is pending is deferred, and the answer
 re-applies the roster, which moves the frame back if the daemon refused.

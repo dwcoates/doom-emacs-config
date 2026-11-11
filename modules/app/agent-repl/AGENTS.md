@@ -2125,6 +2125,25 @@ display mode on every surface. (Forward reference: a sibling section covers
 the viewed/partial display modes and demotion this restores from; read the two
 together.)
 
+## Selecting a workspace is one act
+
+Owner ruling, standing (2026-11-11). Selecting a workspace means one thing:
+Emacs's frame shows it, the webapp shows its page, the sidebar draws it
+current and the daemon's roster names it `current`. Every selection, from any
+origin, moves all four together. There is no partial selection, such as a
+sidebar that draws a workspace selected while the frame shows another.
+
+- A selection made in Emacs (a key, a picker, a banner) is
+  `agent-repl-host-request-switch`, which moves the frame on the request.
+- A selection made in a page (a rail row, a merge queue entry, a thread, a
+  feed's jump) is `agentrepl.v1.SelectInEditor`, built by
+  `webapp.src.sidebar.verbs.buildSelectInEditorRequest()`, which the daemon
+  relays to Emacs as that same switch. A page never sends
+  `agentrepl.v1.SelectWorkspace`. The roster's follow of a daemon-made select
+  waits on an active minibuffer, so a page's `SelectWorkspace` left the
+  frame behind (a merge queue entry's click, 2026-11-11).
+  `webapp/test/sidebar/verbs.test.ts` ("a page's selection") pins it.
+
 ## The webapp holds NO business logic; the daemon is the source of truth
 
 Owner ruling, standing (2026-09-21). The webapp is a RENDERER of what the
