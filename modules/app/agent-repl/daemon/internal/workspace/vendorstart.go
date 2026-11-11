@@ -89,7 +89,10 @@ type startLabel struct {
 	// the shim's typed refusal is one a sign-in cures
 	// (ladder.ApiFailureCuredBySignIn). Set only on a rejection.
 	signIn string
-	err    error
+	// compaction is true when what failed was the compaction or summary the
+	// start was asked for (shim.v1.StartSessionVendorStartFailed.compaction).
+	compaction bool
+	err        error
 }
 
 func (l *startLabel) Error() string { return l.err.Error() }
@@ -98,6 +101,13 @@ func (l *startLabel) Unwrap() error { return l.err }
 // labeled wraps a refusal with its verdict.
 func labeled(err error, retryable, vendor bool, cause string) error {
 	return &startLabel{retryable: retryable, vendor: vendor, cause: cause, err: err}
+}
+
+// markCompaction marks LABELED, a startLabel, as a failure of the asked-for
+// compaction or summary when COMPACTION.
+func markCompaction(labeled error, compaction bool) error {
+	labeled.(*startLabel).compaction = compaction
+	return labeled
 }
 
 // labeledNetwork wraps a RETRYABLE refusal the shim blamed on the network.
