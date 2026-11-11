@@ -142,15 +142,7 @@ func (s *store) RequeueColdGatedMerge(ctx context.Context, repo RepoKey, id Work
 		if lease == "" {
 			return nil
 		}
-		res, err = tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))
-		if err != nil {
-			return err
-		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: merge lease %s of workspace %s", lease, id)); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease)
-		return err
+		return dropMergeLease(ctx, tx, id, lease)
 	})
 	if err != nil {
 		return err

@@ -1058,10 +1058,11 @@ func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id Workspa
 }
 
 // dropMergeLease deletes LEASE, workspace ID's merge lease, and that lease's
-// progress record in TX: the half of an admitted merge's end that keeps "a
-// merge lease stands with exactly one queue entry". A lease that is not ID's
-// merge lease is refused and deletes nothing. The caller disowns the lease
-// once TX commits.
+// progress record in TX: the half of a merge's end that keeps "a merge lease
+// stands with exactly one queue entry" when its entry leaves or goes back in
+// line (DropAdmittedMerge, RequeueColdGatedMerge). A lease that is not ID's
+// merge lease is refused and deletes nothing. The caller
+// disowns the lease once TX commits.
 func dropMergeLease(ctx context.Context, tx *sql.Tx, id WorkspaceID, lease LeaseID) error {
 	res, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))
 	if err != nil {

@@ -2,10 +2,13 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // entryOfQueue answers WS's entry in REPO's queue, failing the test when it
@@ -379,5 +382,64 @@ func TestRequeueColdGatedMergeRefusesAMissingLedgerAndLogsIt(t *testing.T) {
 	}
 	if !loggedOperation(log, "daemon.wsm.requeue_cold_gated_merge", "error") {
 		t.Fatalf("the refusal was not recorded at ERROR: %v", log.Records())
+	}
+}
+
+func TestDropMergeLeaseDeletesTheLeaseAndItsProgress(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	lease := admittedWithLease(t, s, repo, ws.ID)
+
+	// Act
+	err := s.write(ctx, "test.drop_merge_lease", nil, func(ctx context.Context, tx *sql.Tx) error {
+		return dropMergeLease(ctx, tx, ws.ID, lease.ID)
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("dropMergeLease: %v", err)
+	}
+	_, held, _ := s.Lease(ctx, ws.ID)
+	_, progress, _ := s.MergeProgressOf(ctx, ws.ID)
+	if held || progress {
+		t.Fatalf("lease held %v, progress %v; want both gone", held, progress)
+	}
+}
+
+func TestDropMergeLeaseRefusesALeaseThatIsNotTheWorkspacesMergeLease(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	lease := admittedWithLease(t, s, repo, ws.ID)
+
+	// Act
+	err := s.write(ctx, "test.drop_merge_lease", nil, func(ctx context.Context, tx *sql.Tx) error {
+		return dropMergeLease(ctx, tx, ws.ID, NewLeaseID())
+	})
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("dropMergeLease = %v, want ErrNotFound", err)
+	}
+	if got, held, _ := s.Lease(ctx, ws.ID); !held || got.ID != lease.ID {
+		t.Fatalf("lease = %v held %v, want the merge's own lease kept", got.ID, held)
+	}
+	if _, progress, _ := s.MergeProgressOf(ctx, ws.ID); !progress {
+		t.Fatal("the refused drop deleted the progress record")
+	}
+}
+
+func TestOnlyDropMergeLeaseDeletesAMergeLease(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?")
+
+	// Assert
+	if !slices.Equal(sites, []string{"mergequeue.go"}) {
+		t.Fatalf("a merge lease is deleted at %v, want only dropMergeLease in mergequeue.go", sites)
 	}
 }
