@@ -154,6 +154,26 @@ one repository, except the move below):
   channel, the person or the thread it came from), with no prefix or suffix of
   your own.
 - Give `-priority` or `-model` only when the user named one.
+- `-hidden` creates the workspace BORN HIDDEN: its row is inserted hidden, so
+  no sidebar draws it even for an instant. Use it for a workspace nobody is
+  meant to open, such as an intake that works out a request and hands it on.
+  `workspace set -hidden` after the create leaves a window in which the
+  workspace is drawn, so a create that wants none uses `-hidden`.
+- AN INTAKE FILES THE WORKSPACE IT CREATES. A workspace that creates another
+  decides where it belongs and says so in the create, so the new workspace is
+  born in its subsection and is never asked to file itself.
+  - `-subsection NAME` files it into an existing subsection of its
+    repository.
+  - `-new-subsection NAME -gather WS,WS,...` files it into a new subsection
+    that also gathers the named open, unsectioned, top-level workspaces of the
+    repository (never a main workspace). `-gather` is optional.
+  - A placement is refused for a child, for a create asked for by the user
+    (`-as-user`) and beside an async merge, and for a subsection or a gathered
+    workspace the repository does not have. Nothing is created then, and the
+    refusal names the arm (`placement_on_child`, `unknown_placement_subsection`,
+    `gather_unknown_workspace`, `gather_not_gatherable`, and the others).
+  - A create with a placement does not add the filing note to the first
+    message.
 - `-pre-deploy-prompt TEXT`, `-pre-deploy-script PATH:SECONDS`,
   `-post-deploy-prompt TEXT` and `-post-deploy-script PATH:SECONDS` (each
   repeatable, kept in order) REPLACE the repository's hooks of that stage for

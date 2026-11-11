@@ -131,6 +131,51 @@ message CreateWorkspaceRequest {
   // or anything else: a creator that passes a Slack thread still says who it
   // is.
   WorkspaceOriginator originator = 14;
+
+  // BORN HIDDEN. Present and true = the workspace's row is inserted hidden, in
+  // the insert's own transaction, so no roster the daemon publishes ever
+  // draws it visible (a hidden workspace is the user's to reveal). UNSET =
+  // born visible. An intake workspace (a card's `?` question, a Slack emoji
+  // ack) is made this way: hiding it after it exists flashes it in the
+  // sidebar for as long as the second write takes. Refused as invalid beside
+  // `async_merge`, whose merge workspace is born hidden by the queue.
+  optional bool hidden = 15;
+
+  // WHERE THE WORKSPACE IS FILED, decided by the creator and written in the
+  // insert's own transaction, so the workspace is born in its subsection and
+  // never files itself as a first task. UNSET = born unsectioned, and a
+  // repository that has subsections asks the new workspace to file itself.
+  // PRESENT = the creator did the filing, so the daemon adds no filing note
+  // to the workspace's first message. Placing is an agent's act: the
+  // requester must be a workspace (`placement_requires_workspace`), and a
+  // placement on a child (`placement_on_child`) or beside `async_merge`
+  // (`placement_on_merge_workspace`) is refused, because a child sits
+  // wherever its owner does and a merge workspace is drawn nowhere.
+  optional CreateWorkspacePlacement placement = 16;
+}
+
+// Where a created workspace is filed (CreateWorkspaceRequest.placement).
+message CreateWorkspacePlacement {
+  // REQUIRED.
+  oneof target {
+    // An EXISTING subsection of the workspace's repository, by name. A name
+    // no subsection of the repository carries is `unknown_placement_subsection`.
+    string subsection = 1;
+    // A NEW subsection created with the workspace in it.
+    CreateWorkspaceNewSubsection new_subsection = 2;
+  }
+}
+
+// A subsection made by the create that files the workspace into it.
+message CreateWorkspaceNewSubsection {
+  // The subsection's name. Blank is `blank_placement_subsection_name`.
+  string name = 1;
+  // Workspaces gathered into the new subsection beside the created one, by
+  // name. Each must be an OPEN, UNSECTIONED, TOP-LEVEL workspace of the
+  // create's repository and never a main workspace, else the create is
+  // refused with `gather_unknown_workspace` or `gather_not_gatherable` and
+  // nothing is created. Empty = the subsection holds only the new workspace.
+  repeated string gather = 2;
 }
 
 // Who created a workspace. THE ARM IS THE ORIGINATOR.
@@ -696,6 +741,25 @@ message CreateWorkspaceError {
     // 2026-11-10). Nothing was created. The requester does the work itself,
     // or creates a child that is no one-shot and lands its branch directly.
     CreateWorkspaceRequesterBypassingQueue requester_bypassing_queue = 54;
+    // The placement names a workspace with a parent: a child sits wherever
+    // its owner does. Nothing was created.
+    CreateWorkspacePlacementOnChild placement_on_child = 55;
+    // The placement came beside `async_merge`: a merge workspace is drawn
+    // nowhere until revealed. Nothing was created.
+    CreateWorkspacePlacementOnMergeWorkspace placement_on_merge_workspace = 56;
+    // The placement's requester is the user, not a workspace. Nothing was
+    // created.
+    CreateWorkspacePlacementRequiresWorkspace placement_requires_workspace = 57;
+    // The placement names a subsection the repository does not have.
+    CreateWorkspaceUnknownPlacementSubsection unknown_placement_subsection = 58;
+    // The placement's new subsection has a blank name.
+    CreateWorkspaceBlankPlacementSubsectionName blank_placement_subsection_name = 59;
+    // A workspace the placement gathers is not one the repository holds.
+    CreateWorkspaceGatherUnknownWorkspace gather_unknown_workspace = 60;
+    // A workspace the placement gathers is known but cannot be gathered: it
+    // is closed, a child, a main workspace, a merge workspace, already in a
+    // subsection, of another repository, or named twice.
+    CreateWorkspaceGatherNotGatherable gather_not_gatherable = 61;
   }
 }
 // The requester holds the queue bypass mode, so it dispatches no one-shot and
@@ -703,6 +767,40 @@ message CreateWorkspaceError {
 message CreateWorkspaceRequesterBypassingQueue {
   // What the requester is reminded to do instead, composed by the daemon.
   string detail = 1;
+}
+// A placement on a child workspace.
+message CreateWorkspacePlacementOnChild {
+  // The sentence naming the child's owner as the one whose place it takes.
+  string detail = 1;
+}
+// A placement beside an async merge.
+message CreateWorkspacePlacementOnMergeWorkspace {
+  string detail = 1;
+}
+// A placement asked by the user, who has no agent to file for.
+message CreateWorkspacePlacementRequiresWorkspace {
+  string detail = 1;
+}
+// A subsection name the repository does not carry.
+message CreateWorkspaceUnknownPlacementSubsection {
+  // The name as requested.
+  string name = 1;
+}
+// A new subsection's blank name.
+message CreateWorkspaceBlankPlacementSubsectionName {
+  string detail = 1;
+}
+// A gathered workspace name the repository does not hold.
+message CreateWorkspaceGatherUnknownWorkspace {
+  // The name as requested.
+  string name = 1;
+}
+// A gathered workspace that cannot be gathered.
+message CreateWorkspaceGatherNotGatherable {
+  // The gathered workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Why it cannot be gathered, as a sentence.
+  string detail = 2;
 }
 // A requested model the creating login does not offer.
 message CreateWorkspaceModelNotInCatalog {

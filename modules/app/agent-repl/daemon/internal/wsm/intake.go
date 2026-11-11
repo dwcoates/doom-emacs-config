@@ -13,8 +13,9 @@ import (
 // per EPHEMERAL INTAKE WORKSPACE, a hidden workspace the daemon creates to
 // work out what a request is and hand it on (a card's `?` question, a Slack
 // emoji ack), which the daemon closes when a turn of it ends. The row is
-// written in the transaction that hides the workspace (MarkIntake), so an
-// intake workspace is never one without the other.
+// written in the transaction that inserts the workspace hidden
+// (RegisterFacts.Intake), so an intake workspace is never one without the
+// other, and never drawn visible.
 //
 // IT IS ADDITIVE: one new table the previous build never names.
 const intakeWorkspacesDDL = `
@@ -24,20 +25,11 @@ CREATE TABLE intake_workspaces (
 );
 `
 
-// MarkIntake records workspace ID as an ephemeral intake workspace as of AT
-// and hides it, in one transaction. A workspace is marked once, at its
-// creation, so a second mark is a caller's defect and is refused.
-func (s *store) MarkIntake(ctx context.Context, id WorkspaceID, at time.Time) error {
-	const op = "daemon.wsm.mark_intake"
-	return s.write(ctx, op, dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO intake_workspaces (workspace_id, marked_at) VALUES (?, ?)`, id, nanos(at)); err != nil {
-			return err
-		}
-		return updateWorkspaceColumns(ctx, tx, id, hideColumns(true, at)...)
-	})
+// insertIntakeRow records workspace ID as an ephemeral intake workspace as of
+// AT, inside the transaction that inserts it (RegisterFacts.Intake).
+func insertIntakeRow(ctx context.Context, tx *sql.Tx, id WorkspaceID, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO intake_workspaces (workspace_id, marked_at) VALUES (?, ?)`, id, nanos(at))
+	return err
 }
 
 // IsIntake answers whether workspace ID is an ephemeral intake workspace.

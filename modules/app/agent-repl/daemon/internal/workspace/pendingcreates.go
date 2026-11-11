@@ -706,7 +706,10 @@ func createKey(spec CreateSpec) string {
 		Name, Model, Priority, PermissionMode, Consent, Prompt string
 		SlackThread, Originator                                string
 		PreDeploy, PostDeploy                                  []string
+		Hidden                                                 bool
+		Placement                                              *heldPlacement
 	}{
+		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
 		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.Originator)),
@@ -773,6 +776,42 @@ type heldSpec struct {
 	// default; a held row written before landing targets existed has none,
 	// which is what its create meant.
 	Landing *heldLanding `json:"landing,omitempty"`
+	// Hidden is the born-hidden request, and Placement the creator's filing
+	// of the workspace; a row written before either existed has neither.
+	Hidden    bool           `json:"hidden,omitempty"`
+	Placement *heldPlacement `json:"placement,omitempty"`
+}
+
+// heldPlacement is a held create's CreatePlacement.
+type heldPlacement struct {
+	Subsection    string   `json:"subsection,omitempty"`
+	NewSubsection string   `json:"new_subsection,omitempty"`
+	HasNew        bool     `json:"has_new,omitempty"`
+	Gather        []string `json:"gather,omitempty"`
+}
+
+// heldPlacementOf is PLACEMENT as a held row stores it, nil for none.
+func heldPlacementOf(p *CreatePlacement) *heldPlacement {
+	if p == nil {
+		return nil
+	}
+	held := &heldPlacement{Subsection: p.Subsection}
+	if p.NewSubsection != nil {
+		held.HasNew, held.NewSubsection, held.Gather = true, p.NewSubsection.Name, p.NewSubsection.Gather
+	}
+	return held
+}
+
+// createPlacementOf reads a held row's placement back, nil for none.
+func createPlacementOf(held *heldPlacement) *CreatePlacement {
+	if held == nil {
+		return nil
+	}
+	out := &CreatePlacement{Subsection: held.Subsection}
+	if held.HasNew {
+		out.NewSubsection = &wsm.NewSubsectionPlacement{Name: held.NewSubsection, Gather: held.Gather}
+	}
+	return out
 }
 
 // heldSelection is a held create's context selection (ContextSelection).
@@ -828,6 +867,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
 		SlackThread: spec.SlackThread, Originator: spec.Originator.String(),
+		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 	}
 	if spec.Priority != nil {
 		p := int(*spec.Priority)
@@ -865,6 +905,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 		ConsentedUngatedMode: held.ConsentedUngatedMode, DeployHooks: wsm.DeployHooks{PreDeploy: pre, PostDeploy: post},
 		Name: held.Name, Model: held.Model, PermissionMode: held.PermissionMode, SlackThread: held.SlackThread,
 		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
+		Hidden:     held.Hidden, Placement: createPlacementOf(held.Placement),
 	}
 	if held.Originator != "" {
 		if spec.Originator, err = lifecycleconfig.ParseOriginator(held.Originator); err != nil {

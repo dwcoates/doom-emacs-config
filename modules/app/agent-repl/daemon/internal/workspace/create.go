@@ -165,6 +165,13 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		return wsm.Workspace{}, err
 	}
 
+	// THE PLACEMENT IS CHECKED BEFORE ANYTHING IS SPENT TOO: a subsection or a
+	// gathered workspace the registry refuses is answered before git is
+	// touched (createplacement.go).
+	if err := v.checkPlacement(ctx, global, spec, repoDir); err != nil {
+		return wsm.Workspace{}, err
+	}
+
 	// THE MODEL IS CHECKED BEFORE ANYTHING IS SPENT TOO: a model the creating
 	// login does not know is refused before the naming call and before git
 	// is touched (creationmodels.go).
@@ -441,8 +448,16 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// republish cut a create between its registration and a separate
 		// re-keying write, and the workspace could never be landed).
 		CreationJob: workspaceID,
+		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED: the insert's own
+		// transaction writes all three, so no roster publication between the
+		// registration and this create's return ever draws the row visible,
+		// unmarked or unsectioned.
+		Hidden: spec.Hidden || spec.Intake, Intake: spec.Intake, Placement: spec.registerPlacement(),
 	})
 	if err != nil {
+		if refusal, ok := placementRefusal(global, err); ok {
+			return wsm.Workspace{}, refusal
+		}
 		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
 	}
 	made = &record
@@ -461,15 +476,6 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// hook runs: every later stage's hooks read them (lifecycle.go).
 	if err := v.recordOrigin(ctx, log, record, spec); err != nil {
 		return wsm.Workspace{}, err
-	}
-	// AN INTAKE WORKSPACE IS MARKED AND HIDDEN BEFORE ITS SESSION EXISTS, so no
-	// turn of it can end unmarked: the turn-end edge is what retires it
-	// (retireIntake).
-	if spec.Intake {
-		if err := v.deps.DB.MarkIntake(ctx, record.ID, v.now()); err != nil {
-			log.Error(opCreate, "could not record the workspace as an intake workspace", dlog.WithCause(nil, err))
-			return wsm.Workspace{}, fmt.Errorf("create %q: record it as an intake workspace: %w", branch, err)
-		}
 	}
 	// THE CREATION STAGE'S SCRIPTS RUN NOW, before any session comes up, so
 	// a failed one undoes a create that started nothing.
@@ -678,6 +684,9 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 			"kind": string(spec.ContextSelection.Kind), "row": spec.ContextSelection.Row,
 		})
 		return fmt.Errorf("create: a context selection belongs to a context workspace, and this create names none (row %s)", spec.ContextSelection.Row)
+	}
+	if err := validatePlacement(log, spec); err != nil {
+		return err
 	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
@@ -1062,7 +1071,7 @@ func (s CreateSpec) forkedElsewhere() bool {
 // its root does, and placing it would move its whole family; a merge
 // workspace's own brief says what it is.
 func (s CreateSpec) filesItself() bool {
-	return filesItself(s.Parent, s.MergeOf != nil)
+	return s.Placement == nil && filesItself(s.Parent, s.MergeOf != nil)
 }
 
 // filesItself is the one rule of which workspace is asked to file itself

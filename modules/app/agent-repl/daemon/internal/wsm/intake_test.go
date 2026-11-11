@@ -2,31 +2,41 @@ package wsm
 
 import (
 	"context"
-	"errors"
+	"path/filepath"
 	"testing"
-
-	"agent-repld/internal/dlog"
 )
 
-func TestMarkIntakeRecordsTheWorkspaceAndHidesIt(t *testing.T) {
+// registerBornIntake registers a linked workspace born an intake workspace.
+func registerBornIntake(t *testing.T, s *store, repoDir, name string) Workspace {
+	t.Helper()
+	registerMain(t, s, repoDir)
+	ws, _, err := s.RegisterWorkspace(context.Background(), filepath.Join(t.TempDir(), name), RegisterFacts{
+		Name: name, Branch: name, ParentBranch: "master", RepoDir: repoDir, Intake: true,
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(%s): %v", name, err)
+	}
+	return ws
+}
+
+func TestAnIntakeWorkspaceIsBornMarkedAndHidden(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
 
 	// Act
-	err := s.MarkIntake(context.Background(), ws.ID, instant)
+	ws := registerBornIntake(t, s, arrangeRepo(t, "repo"), "intake")
 
 	// Assert
-	if err != nil {
-		t.Fatalf("MarkIntake: %v", err)
-	}
 	intake, err := s.IsIntake(context.Background(), ws.ID)
 	if err != nil || !intake {
-		t.Fatalf("IsIntake = %v, %v; want the marked workspace", intake, err)
+		t.Fatalf("IsIntake = %v, %v; want the intake workspace", intake, err)
+	}
+	if !ws.Hidden || ws.HiddenAt == nil {
+		t.Fatalf("the record Register answered = hidden %v at %v, want an intake workspace born hidden", ws.Hidden, ws.HiddenAt)
 	}
 	got, err := s.Workspace(context.Background(), ws.ID)
 	if err != nil || !got.Hidden {
-		t.Fatalf("Workspace hidden = %v, %v; want the marked workspace hidden", got.Hidden, err)
+		t.Fatalf("Workspace hidden = %v, %v; want the intake workspace hidden", got.Hidden, err)
 	}
 }
 
@@ -44,51 +54,10 @@ func TestAWorkspaceNeverMarkedIsNoIntakeWorkspace(t *testing.T) {
 	}
 }
 
-func TestMarkIntakeFails(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(t *testing.T, s *store) WorkspaceID
-		wantErr error
-		// wantLogged is whether the store records the failure as an ERROR:
-		// an unknown workspace is an answer, which its caller records.
-		wantLogged bool
-	}{
-		{name: "an unregistered workspace", arrange: func(*testing.T, *store) WorkspaceID { return "ws-nobody" }, wantErr: ErrNotFound},
-		{name: "a workspace marked before", wantLogged: true, arrange: func(t *testing.T, s *store) WorkspaceID {
-			ws := testWorkspace(t, s)
-			if err := s.MarkIntake(context.Background(), ws.ID, instant); err != nil {
-				t.Fatalf("MarkIntake: %v", err)
-			}
-			return ws.ID
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, logs := testStore(t)
-			id := tt.arrange(t, s)
-
-			// Act
-			err := s.MarkIntake(context.Background(), id, instant)
-
-			// Assert
-			if err == nil || (tt.wantErr != nil && !errors.Is(err, tt.wantErr)) {
-				t.Fatalf("MarkIntake = %v, want a failure of %v", err, tt.wantErr)
-			}
-			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.mark_intake"}); ok != tt.wantLogged {
-				t.Fatalf("ERROR daemon.wsm.mark_intake record found = %v, want %v; records %+v", ok, tt.wantLogged, logs.Records())
-			}
-		})
-	}
-}
-
 func TestForgettingAnIntakeWorkspaceForgetsItsMark(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-	if err := s.MarkIntake(context.Background(), ws.ID, instant); err != nil {
-		t.Fatalf("MarkIntake: %v", err)
-	}
+	ws := registerBornIntake(t, s, arrangeRepo(t, "repo"), "intake")
 	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: instant, By: CloseByDaemon}); err != nil {
 		t.Fatalf("MarkClosed: %v", err)
 	}

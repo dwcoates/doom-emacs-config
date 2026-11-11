@@ -346,6 +346,15 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 				forkHead = out.MergeOf.ForkHead
 			}
 		}
+		// THE PLACEMENT IS JUDGED BEFORE ANY ROW IS WRITTEN.
+		var placed *resolvedPlacement
+		if facts.Placement != nil {
+			resolved, err := checkPlacement(ctx, tx, repo, *facts.Placement, facts.Parent, facts.MergeOf != nil)
+			if err != nil {
+				return err
+			}
+			placed = &resolved
+		}
 		out.Place, err = landingPlace(ctx, tx, out.Priority, out.ID)
 		if err != nil {
 			return err
@@ -380,6 +389,25 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 				return err
 			}
 			if err := requireOneRow(res, fmt.Sprintf("wsm: register %s: the creation job of %s", normalized, out.ID)); err != nil {
+				return err
+			}
+		}
+		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED: written in this very
+		// transaction, so no read of the roster ever finds the row visible,
+		// unmarked or unsectioned (the flash an after-the-fact write left).
+		if facts.Hidden || facts.Intake {
+			if err := updateWorkspaceColumns(ctx, tx, out.ID, hideColumns(true, out.CreatedAt)...); err != nil {
+				return err
+			}
+			out.Hidden, out.HiddenAt = true, &out.CreatedAt
+		}
+		if facts.Intake {
+			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt); err != nil {
+				return err
+			}
+		}
+		if placed != nil {
+			if err := applyPlacement(ctx, tx, out.ID, *placed); err != nil {
 				return err
 			}
 		}

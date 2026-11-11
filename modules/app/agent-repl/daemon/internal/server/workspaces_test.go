@@ -3484,3 +3484,60 @@ func TestCreateWorkspaceAnswersTheLifecycleRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateWorkspaceMapsHiddenAndPlacementToTheSpec(t *testing.T) {
+	tests := []struct {
+		name          string
+		hidden        *bool
+		placement     *agentreplv1.CreateWorkspacePlacement
+		wantHidden    bool
+		wantPlacement *workspace.CreatePlacement
+	}{
+		{name: "neither", wantHidden: false},
+		{name: "born hidden", hidden: boolPtr(true), wantHidden: true},
+		{name: "an existing subsection", placement: &agentreplv1.CreateWorkspacePlacement{
+			Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}},
+			wantPlacement: &workspace.CreatePlacement{Subsection: "auth"}},
+		{name: "a new subsection with a gather", placement: &agentreplv1.CreateWorkspacePlacement{
+			Target: &agentreplv1.CreateWorkspacePlacement_NewSubsection{NewSubsection: &agentreplv1.CreateWorkspaceNewSubsection{Name: "auth", Gather: []string{"a", "b"}}}},
+			wantPlacement: &workspace.CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a", "b"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := oneShotCreate(registeredRepoRef(h), nil)
+			req.Hidden, req.Placement = tt.hidden, tt.placement
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+			}
+			spec := h.Verbs.createSpecs[0]
+			if spec.Hidden != tt.wantHidden || !reflect.DeepEqual(spec.Placement, tt.wantPlacement) {
+				t.Fatalf("spec hidden %v placement %+v, want %v and %+v", spec.Hidden, spec.Placement, tt.wantHidden, tt.wantPlacement)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceRefusesAPlacementOnAnAsyncMergeOnItsArm(t *testing.T) {
+	// Arrange
+	h, req := asyncHarness(t)
+	req.Placement = &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}}
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetPlacementOnMergeWorkspace() == nil {
+		t.Fatalf("CreateWorkspace = (%v, %v), want the placement_on_merge_workspace arm", resp, err)
+	}
+	if len(h.Merge.requests) != 0 {
+		t.Fatalf("merge requests = %+v, want none enqueued", h.Merge.requests)
+	}
+}
