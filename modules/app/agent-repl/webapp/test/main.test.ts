@@ -924,12 +924,12 @@ describe("a boot that fails", { timeout: BOOT_TIMEOUT_MS }, () => {
     );
   });
 
-  test("draws no warning chip for an address failure, having no topbar yet", async () => {
+  test("draws no heading warnings for an address failure, having no topbar yet", async () => {
     addressPage("?dir=/tmp/ws-1");
 
     await bootMain();
 
-    expect(document.querySelector("#topbar .topbar-warnings")).toBeNull();
+    expect(document.querySelector("#topbar .topbar-heading-warnings")).toBeNull();
   });
 });
 
