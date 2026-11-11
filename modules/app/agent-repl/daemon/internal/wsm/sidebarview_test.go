@@ -375,3 +375,19 @@ func TestSetSectionHeightsRefusesAnUnknownSection(t *testing.T) {
 	// Act
 	_ = s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: "open_lines", Height: SizedHeight(1)}})
 }
+
+func TestSectionHeightFieldsNamesEachSectionsHeight(t *testing.T) {
+	// Arrange
+	changes := []SectionHeightChange{
+		{Section: BandMergeQueue, Height: SizedHeight(3)},
+		{Section: BandHidden, Height: FittedHeight()},
+	}
+
+	// Act
+	got := SectionHeightFields(changes)
+
+	// Assert
+	if len(got) != 2 || got["merge_queue_lines"] != uint32(3) || got["hidden_lines"] != "fitted" {
+		t.Fatalf("fields = %v, want the queue's 3 lines and hidden fitted", got)
+	}
+}

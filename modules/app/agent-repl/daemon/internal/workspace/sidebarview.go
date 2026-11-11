@@ -49,15 +49,7 @@ func (v *verbs) FoldOpenSection(ctx context.Context, folded bool) error {
 // one write, then republishes the roster to every page. There is nothing to
 // refuse: the roster carries exactly one of each band section.
 func (v *verbs) SizeSections(ctx context.Context, changes []wsm.SectionHeightChange) error {
-	fields := dlog.Context{}
-	for _, c := range changes {
-		if lines, sized := c.Height.Lines(); sized {
-			fields[string(c.Section)] = lines
-		} else {
-			fields[string(c.Section)] = "fitted"
-		}
-	}
-	return v.recordView(ctx, opSizeSections, "the band sections' heights", fields,
+	return v.recordView(ctx, opSizeSections, "the band sections' heights", wsm.SectionHeightFields(changes),
 		func(ctx context.Context) error { return v.deps.DB.SetSectionHeights(ctx, changes) })
 }
 

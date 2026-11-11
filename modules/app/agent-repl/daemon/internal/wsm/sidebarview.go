@@ -266,16 +266,7 @@ func (s *store) SetSectionHeights(ctx context.Context, changes []SectionHeightCh
 	if len(changes) == 0 {
 		panic("wsm: SetSectionHeights handed no change")
 	}
-	fields := dlog.Context{}
-	for _, c := range changes {
-		lines, sized := c.Height.Lines()
-		if sized {
-			fields[c.Section.column()] = lines
-		} else {
-			fields[c.Section.column()] = "fitted"
-		}
-	}
-	return s.write(ctx, "daemon.wsm.set_section_heights", fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, "daemon.wsm.set_section_heights", SectionHeightFields(changes), func(ctx context.Context, tx *sql.Tx) error {
 		if err := mintSidebarView(ctx, tx); err != nil {
 			return err
 		}
@@ -286,6 +277,20 @@ func (s *store) SetSectionHeights(ctx context.Context, changes []SectionHeightCh
 		}
 		return nil
 	})
+}
+
+// SectionHeightFields is the record context every height write carries: each
+// section's column naming its lines, or "fitted".
+func SectionHeightFields(changes []SectionHeightChange) dlog.Context {
+	fields := dlog.Context{}
+	for _, c := range changes {
+		if lines, sized := c.Height.Lines(); sized {
+			fields[c.Section.column()] = lines
+		} else {
+			fields[c.Section.column()] = "fitted"
+		}
+	}
+	return fields
 }
 
 // mintSidebarView inserts the singleton at DefaultSidebarView when nobody has
