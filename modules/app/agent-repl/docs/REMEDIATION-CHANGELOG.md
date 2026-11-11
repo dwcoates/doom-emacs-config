@@ -1399,3 +1399,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-11 signin-start-rejection (landed in queue bypass mode): a start the vendor rejected for the credential offers sign-in (footer and cold gate), and a completed sign-in retries it
 - 2026-11-11 signin-auto-login (landed in queue bypass mode): a needed sign-in opens the login by itself; the footer and cold-gate sign-in buttons are removed
 - 2026-11-11 merge-queue-stall-triage (landed in queue bypass mode): wsm: the daemon writes layout 122, so the workspace-gather tables exist
+- 2026-11-11 merge-queue-stall-triage (landed in queue bypass mode): shim: a cold gate's compaction draws one divider, not two with the held prompt between them
