@@ -29,7 +29,7 @@ func decideKeyed(d Deps, name string, set *InputSet, facts Facts, mode Mode) (ke
 	if err != nil {
 		return keyedDecision{}, fmt.Errorf("reuse: key %s: %w", name, err)
 	}
-	profile, err := writeProfile(d, name+".sb", set)
+	profile, err := writeProfile(d, name, set)
 	if err != nil {
 		return keyedDecision{}, err
 	}

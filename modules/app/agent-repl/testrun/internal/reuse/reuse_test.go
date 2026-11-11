@@ -153,7 +153,7 @@ func TestDecide(t *testing.T) {
 		{name: "a failed unit that was edited says what changed", before: ptr(run.Failed), edit: true, mode: Reusing, suite: harnessSuite, keyed: true,
 			want: WhyFailedBefore, changed: fixtureModule + "/bin/lib-x.sh"},
 		{name: "--no-reuse runs a recorded unit", before: ptr(run.Passed), mode: NoReuse, suite: harnessSuite, keyed: true, want: WhyNoReuse},
-		{name: "a targeted run runs a recorded unit", before: ptr(run.Passed), mode: Targeted, suite: harnessSuite, keyed: true, want: WhyTargeted},
+		{name: "a targeted run runs a recorded unit, unconfined", before: ptr(run.Passed), mode: Targeted, suite: harnessSuite, want: WhyTargeted},
 		{name: "a never-reused suite runs unkeyed", mode: Reusing, suite: roster.Suite{Name: "harness", Kind: roster.Script, Path: "bin/test-x.sh", NeverReused: "it measures"},
 			want: WhyNever},
 		{name: "no sandbox means no reuse", before: ptr(run.Passed), mode: Reusing, suite: harnessSuite, probe: errors.New("nested"), want: WhyNoSandbox},
@@ -585,7 +585,7 @@ func TestRecordOutcomes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, ok, err := f.d.Store.Lookup("harness", v.Units[0].Key.Digest)
+			_, ok, err := f.d.Store.Newest("harness")
 			if err != nil || ok != tt.wantPass {
 				t.Fatalf("pass recorded = %v (%v), want %v", ok, err, tt.wantPass)
 			}
@@ -918,5 +918,18 @@ func TestACancelledUnitRecordsNoOutcome(t *testing.T) {
 				t.Fatal("a unit with a cancelled spec was recorded a pass")
 			}
 		})
+	}
+}
+
+func TestTheEnvelopesProfileIsNotAWholeSuiteUnitsProfile(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	v := f.decide(t, Reusing, harnessSuite, harnessUnits())
+
+	// Assert
+	if v.EnvelopeProfile == v.Units[0].Profile || filepath.Base(v.EnvelopeProfile) != "harness.envelope.sb" {
+		t.Fatalf("envelope %s, unit %s, want two files", v.EnvelopeProfile, v.Units[0].Profile)
 	}
 }

@@ -221,7 +221,7 @@ func Decide(d Deps, su SuiteUnits, mode Mode, sandboxErr error) (SuiteVerdict, e
 		}
 		return v, nil
 	}
-	profile, err := writeProfile(d, s.Name+".sb", su.Envelope)
+	profile, err := writeProfile(d, s.Name+".envelope", su.Envelope)
 	if err != nil {
 		return SuiteVerdict{}, err
 	}
@@ -266,14 +266,14 @@ func decideUnit(d Deps, v *UnitVerdict, mode Mode, tools map[string]string) erro
 	return nil
 }
 
-// writeProfile writes set's profile into the run's profile directory, under
-// file name.
+// writeProfile writes set's profile into the run's profile directory, as
+// "<name>.sb".
 func writeProfile(d Deps, name string, set *InputSet) (string, error) {
 	profile, err := Profile(d.Repo, d.DenyRoots, set)
 	if err != nil {
 		return "", fmt.Errorf("reuse: %s's profile: %w", name, err)
 	}
-	p := filepath.Join(d.ProfileDir, name)
+	p := filepath.Join(d.ProfileDir, name+".sb")
 	if err := os.WriteFile(p, []byte(profile), 0o644); err != nil {
 		return "", fmt.Errorf("reuse: write %s's profile: %w", name, err)
 	}
