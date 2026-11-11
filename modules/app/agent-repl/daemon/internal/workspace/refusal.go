@@ -216,6 +216,11 @@ const (
 	// DISTINCT arm from ArmUnservedAnswer, which is a value the standing batch
 	// never served (AnswerQuestionError spells the two apart).
 	ArmAskNotStanding = "ask_not_standing"
+	// ArmAskSessionEnded is an answer to a card that WAS standing, refused by
+	// the shim `no_open_ask`: the session that posed the ask no longer holds
+	// it, so the card is settled abandoned and nothing was sent. Every answer
+	// endpoint carries it by this name (AnswerQuestionError.ask_session_ended).
+	ArmAskSessionEnded = "ask_session_ended"
 	// ArmMultiPickOnSingleSelect is more than one choice on a single-select
 	// question.
 	ArmMultiPickOnSingleSelect = "multi_pick_on_single_select"

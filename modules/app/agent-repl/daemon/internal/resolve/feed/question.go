@@ -72,6 +72,15 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 		card.Clock = runningClock(served.startedAtMs)
 	case *conversationv1.AgentQuestion_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestion_Success"})
+		// AN ABANDONED SETTLE NEVER OVERRIDES ONE ALREADY DRAWN: it says only
+		// that the session holding the ask is gone, and an ask that already
+		// settled was not left waiting on it.
+		if _, abandoned := frame.Success.GetOutcome().(*conversationv1.AgentQuestionSuccess_Abandoned); abandoned && served.settled {
+			log.Debug("daemon.feed.question_abandoned_after_settled",
+				"an abandoned settle arrived for an ask already settled; the settled card stands",
+				dlog.Context{"ask": askID, "row": served.row.GetValue()})
+			return
+		}
 		card.Questions = questionItems(frame.Success.GetBatch())
 		served.open = false
 		served.settled = true
@@ -88,6 +97,12 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			// NOBODY ANSWERING IS AN ANSWER to a legitimate ask: the agent
 			// proceeded without a choice, so the card is expired rather than
 			// pending forever.
+			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
+			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
+		case *conversationv1.AgentQuestionSuccess_Abandoned:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_Abandoned"})
+			// THE SESSION THAT ASKED IS GONE: nothing can be answered, so the
+			// card is expired rather than standing forever.
 			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		default:

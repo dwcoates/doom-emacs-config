@@ -102,6 +102,18 @@ func (f *Fleet) sessionWatcher(ws ids.WorkspaceID) (sessionwatcher.Watcher, bool
 	return session.watcher, true
 }
 
+// AbandonRefusedAsk hands a refused answer's ask to the workspace's watcher,
+// which settles it abandoned when the views still stand it
+// (sessionwatcher.Watcher.AbandonRefusedAsk). With no watcher up there is no
+// stream the views stand it from, and false is the answer.
+func (f *Fleet) AbandonRefusedAsk(ws ids.WorkspaceID, kind sessionwatcher.AskKind, id string) bool {
+	watcher, ok := f.sessionWatcher(ws)
+	if !ok {
+		return false
+	}
+	return watcher.AbandonRefusedAsk(kind, id)
+}
+
 // sender narrows a shim client to the queue's delivery surface.
 type sender struct {
 	client shimclientSender

@@ -553,6 +553,68 @@ func TestAnswerPermissionPropagatesAStaleCard(t *testing.T) {
 	asRefusal(t, err, ArmShimNoOpenAsk)
 }
 
+func TestAnAnswerTheShimRefusesForAStandingCardSettlesItAbandoned(t *testing.T) {
+	tests := []struct {
+		name   string
+		rpc    string
+		key    string
+		answer func(f *fixture) error
+	}{
+		{
+			name: "a consent ask", rpc: "AnswerPermission", key: "permission:ask-1",
+			answer: func(f *fixture) error {
+				f.cards.permissions["ask-1"] = ServedPermission{Agent: &conversationv1.AgentId{Value: "agent-9"}}
+				return f.verbs.AnswerPermission(context.Background(), "w1", permissionAnswer("ask-1", allowedOnce()))
+			},
+		},
+		{
+			name: "a question batch", rpc: "AnswerQuestion", key: "question:q-1",
+			answer: func(f *fixture) error {
+				f.cards.questions["q-1"] = ServedQuestion{Agent: &conversationv1.AgentId{Value: "agent-2"}, Batch: servedBatch()}
+				return f.verbs.AnswerQuestion(context.Background(), "w1", questionAnswer("q-1", selection("pick one", "a")))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the views still stand the card the shim no longer holds.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.cards.stillStanding = map[string]bool{tt.key: true}
+			f.shim.answerErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNoOpenAsk, Detail: "no ask is open"}
+
+			// Act.
+			err := tt.answer(f)
+
+			// Assert: the card is settled, and the caller told the session ended.
+			refusal := asRefusal(t, err, ArmAskSessionEnded)
+			if refusal.Rpc != tt.rpc {
+				t.Fatalf("refusal rpc = %q, want %s", refusal.Rpc, tt.rpc)
+			}
+			if len(f.cards.abandoned) != 1 || f.cards.abandoned[0] != tt.key {
+				t.Fatalf("abandoned = %v, want [%s]", f.cards.abandoned, tt.key)
+			}
+		})
+	}
+}
+
+func TestAnAnswerTheShimRefusesForACardNoLongerStandingKeepsTheShimsArm(t *testing.T) {
+	// Arrange: the card's own settle won the race; nothing is retired.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.questions["q-1"] = ServedQuestion{Agent: &conversationv1.AgentId{Value: "agent-2"}, Batch: servedBatch()}
+	f.shim.answerErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNoOpenAsk}
+
+	// Act.
+	err := f.verbs.AnswerQuestion(context.Background(), "w1", questionAnswer("q-1", selection("pick one", "a")))
+
+	// Assert.
+	asRefusal(t, err, ArmShimNoOpenAsk)
+	if len(f.cards.abandoned) != 0 {
+		t.Fatalf("abandoned = %v, want none", f.cards.abandoned)
+	}
+}
+
 func TestAnswerQuestionPropagatesTheShimArm(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

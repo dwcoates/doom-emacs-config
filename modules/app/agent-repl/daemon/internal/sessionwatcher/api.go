@@ -191,6 +191,12 @@ type FeedSink interface {
 	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace)
 	// OnQuestion is the agent blocking on a choice.
 	OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace)
+	// AsksStanding answers every ask whose card stands open, oldest first,
+	// each as the start its card was drawn from under the agent that asked.
+	// THE FEED IS THE REGISTRY OF STANDING ASKS: every ask any view stands
+	// was drawn on it, live or from a page. The watcher reads it to settle
+	// every ask the session's facts no longer name open (askreconcile.go).
+	AsksStanding(ws ids.WorkspaceID) []*conversationv1.SessionOpenAsk
 	// OnPermission is the agent blocking on consent.
 	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace)
 	// OnContextCut is the AgentUpdate.context_cut page line — /clear, a
@@ -662,6 +668,11 @@ const (
 
 // Watcher is one live workspace's watch fleet.
 type Watcher interface {
+	// AbandonRefusedAsk settles, as abandoned, the ask of KIND under ID when
+	// the feed still stands it, because the shim refused an answer to it
+	// `no_open_ask`: no gate holds it. It reports whether a standing ask was
+	// settled (askreconcile.go).
+	AbandonRefusedAsk(kind AskKind, id string) bool
 	// Departed reports whether the shim this watcher watched is gone, and
 	// how. A departed watcher's recorded turn and live work are HISTORY, not
 	// work in flight: they ended with the shim.

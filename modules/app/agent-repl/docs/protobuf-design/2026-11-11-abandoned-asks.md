@@ -53,11 +53,12 @@ was routed to that dead ask, so the workspace could never be prompted again.
 - WHY `SessionOpenAsk` IS IMPORTED, not respelled: it is already the
   "this agent's ask, as its start recorded it" message.
 - CONSEQUENCES:
-  - The store gains an `open_ask` table, kept by the same lifecycle
+  - The store gains an `ask_line` index table: one row per page line that
+    records an ask, with whether the ask is open. It is kept in the same
     transaction as the entry row.
   - The table is backfilled once from the stored entries, so asks already
     orphaned before this change are answered too.
-  - The shim settles every answered ask as abandoned before it states its
+  - The shim settles every ask the store answers as abandoned before it states its
     session's facts.
 
 ### `ask_session_ended` on `agentrepl.v1.AnswerPermissionError`, `agentrepl.v1.AnswerQuestionError`, `agentrepl.v1.UpdateQuestionDraftError` and `agentrepl.v1.SubmitPromptError`

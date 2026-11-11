@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -755,7 +756,46 @@ func find(events []event, name string) (event, bool) {
 	return event{}, false
 }
 
-type feedSink struct{ rec *recorder }
+type feedSink struct {
+	rec *recorder
+
+	// mu guards standing and settles.
+	mu sync.Mutex
+	// standing is what AsksStanding answers: the asks the feed stands, less
+	// every one a settle routed here since.
+	standing []*conversationv1.SessionOpenAsk
+	// settles is every settle routed here, as "kind:id:arm".
+	settles []string
+}
+
+// AsksStanding answers the standing asks no settle has retired.
+func (s *feedSink) AsksStanding(ids.WorkspaceID) []*conversationv1.SessionOpenAsk {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.standing)
+}
+
+// settled records a settle of the ask KEY and retires it from standing.
+func (s *feedSink) settled(key, arm string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settles = append(s.settles, key+":"+arm)
+	s.standing = slices.DeleteFunc(s.standing, func(a *conversationv1.SessionOpenAsk) bool { return openAskKey(a) == key })
+}
+
+// settledAsks answers every settle routed here, in order.
+func (s *feedSink) settledAsks() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.settles)
+}
+
+// stand adds an ask to the feed's standing set.
+func (s *feedSink) stand(ask *conversationv1.SessionOpenAsk) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.standing = append(s.standing, ask)
+}
 
 func (s *feedSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
 	s.rec.emit(event{sink: "feed", method: "OnTurnOpened", detail: string(turn)})
@@ -786,10 +826,24 @@ func (s *feedSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, 
 }
 
 func (s *feedSink) OnQuestion(_ ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
+	if success := q.GetSuccess(); success != nil {
+		arm := "answered"
+		if success.GetAbandoned() != nil {
+			arm = "abandoned"
+		}
+		s.settled(askKey(string(AskKindQuestion), q.GetId().GetValue()), arm)
+	}
 	s.rec.emit(event{sink: "feed", method: "OnQuestion", agent: agent.GetValue(), detail: q.GetId().GetValue(), place: place})
 }
 
 func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
+	if success := p.GetSuccess(); success != nil {
+		arm := "decided"
+		if success.GetAbandoned() != nil {
+			arm = "abandoned"
+		}
+		s.settled(askKey(string(AskKindPermission), p.GetId().GetValue()), arm)
+	}
 	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue(), place: place})
 }
 
@@ -1155,6 +1209,8 @@ func itoa(n int) string {
 
 // harness is one started watcher plus everything a test drives it with.
 type harness struct {
+	// feed is the feed fake, whose standing asks and settles a test reads.
+	feed *feedSink
 	// measurements receives every shim measurements frame the watcher folds.
 	measurements *measurementsSink
 	t            *testing.T
@@ -1253,6 +1309,13 @@ func newHarnessWithMerge(t *testing.T, session Session) *harness {
 // the merge sink, which records into the harness's recorder.
 func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink) *harness {
 	t.Helper()
+	return startHarnessFeed(t, session, prep, stalls, merge, nil)
+}
+
+// startHarnessFeed is startHarnessSinks with the feed fake FEED, whose
+// standing asks the watcher reads at its start; nil is an empty feed.
+func startHarnessFeed(t *testing.T, session Session, prep func(*fakeClient), stalls lockwatch.Registry, merge *mergeSink, feed *feedSink) *harness {
+	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger(), clock: newManualClock(), measurements: &measurementsSink{folded: make(chan foldedMeasurements, 8)}}
 	h.lifecycle = &lifecycleSink{rec: h.rec}
 	if prep != nil {
@@ -1264,8 +1327,13 @@ func startHarnessSinks(t *testing.T, session Session, prep func(*fakeClient), st
 		session.Opening = WorkspaceOpened()
 	}
 
+	if feed == nil {
+		feed = &feedSink{}
+	}
+	feed.rec = h.rec
+	h.feed = feed
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
-		Feed:         &feedSink{rec: h.rec},
+		Feed:         feed,
 		Footer:       &footerSink{rec: h.rec},
 		Topbar:       &topbarSink{rec: h.rec},
 		Sidebar:      &sidebarSink{rec: h.rec},

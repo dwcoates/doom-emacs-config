@@ -1137,6 +1137,10 @@ type Cards interface {
 	ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string)
 	// StandingAsk answers the oldest ask standing on the addressed feed.
 	StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (feed.StandingAsk, bool)
+	// AbandonRefusedAsk settles, as abandoned, a card the shim refused an
+	// answer to `no_open_ask`, when the views still stand it: the session
+	// that posed it is gone. It reports whether a standing card was settled.
+	AbandonRefusedAsk(ws ids.WorkspaceID, kind sessionwatcher.AskKind, id string) bool
 	// ColdGate answers the standing cold gate's served menu, false when no
 	// gate stands.
 	ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool)
