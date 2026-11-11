@@ -84,7 +84,7 @@ func (s *store) BindSession(ctx context.Context, sess Session, owed *OwedStartWo
 	if sess.HostSessionID == "" {
 		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
 	}
-	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir, "owed": owedField(owed)}
+	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir, "owed": OwedField(owed)}
 	if err := validOwed(owed); err != nil {
 		s.log.Error(op, "refused a binding owing malformed start work", withError(fields, err))
 		return err
@@ -113,8 +113,9 @@ func insertOwed(ctx context.Context, tx *sql.Tx, ws WorkspaceID, owed *OwedStart
 	return insertOwedStartWork(ctx, tx, ws, *owed)
 }
 
-// owedField is OWED as a log field.
-func owedField(owed *OwedStartWork) string {
+// OwedField is OWED as a record field: "none", "compact" or
+// "summary_of:<id>". It is the one spelling every package's records use.
+func OwedField(owed *OwedStartWork) string {
 	switch {
 	case owed == nil:
 		return "none"
@@ -135,7 +136,7 @@ func owedField(owed *OwedStartWork) string {
 // same transaction.
 func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string, owed *OwedStartWork) error {
 	const op = "daemon.wsm.bind_session_to_own_fork"
-	fields := dlog.Context{"workspace": string(sess.Workspace), "parent_vendor_session_id": parentVendorSessionID, "config_dir": sess.ConfigDir, "owed": owedField(owed)}
+	fields := dlog.Context{"workspace": string(sess.Workspace), "parent_vendor_session_id": parentVendorSessionID, "config_dir": sess.ConfigDir, "owed": OwedField(owed)}
 	if err := validOwed(owed); err != nil {
 		s.log.Error(op, "refused an own fork owing malformed start work", withError(fields, err))
 		return err

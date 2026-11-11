@@ -3,6 +3,9 @@ package wsm
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -789,5 +792,60 @@ func TestSessionAndSessionsDecodeTheSameRow(t *testing.T) {
 	}
 	if !reflect.DeepEqual(one, all[0]) {
 		t.Fatalf("Session = %+v, Sessions[0] = %+v, want the same decoded row", one, all[0])
+	}
+}
+
+func TestOwedField(t *testing.T) {
+	cases := []struct {
+		name string
+		owed *OwedStartWork
+		want string
+	}{
+		{name: "nothing owed", want: "none"},
+		{name: "a compaction", owed: &OwedStartWork{Compact: true}, want: "compact"},
+		{name: "a summary names its conversation", owed: &OwedStartWork{SummaryOf: "vendor-queue"}, want: "summary_of:vendor-queue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := OwedField(tc.owed)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("OwedField(%+v) = %q, want %q", tc.owed, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOwedWorkIsSpelledOnlyByOwedField fails on a hand-rolled spelling of
+// owed start work in a record field anywhere in the daemon: every package
+// names it through OwedField.
+func TestOwedWorkIsSpelledOnlyByOwedField(t *testing.T) {
+	// Arrange
+	const spelling = `"summary_of:" +`
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == filepath.Join("..", "wsm", "sessions.go") {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), spelling) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the daemon's packages: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("files spelling owed work by hand = %v, want every one through wsm.OwedField", offenders)
 	}
 }
