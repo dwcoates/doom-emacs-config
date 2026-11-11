@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
@@ -896,6 +897,46 @@ func TestStandDownsFuncForwardsTheWorkspace(t *testing.T) {
 	// Assert
 	if got != "ws-1" {
 		t.Fatalf("stood down %q, want ws-1", got)
+	}
+}
+
+// fakeParked answers one parked keep-alive and records the workspace asked.
+type fakeParked struct{ asked []ids.WorkspaceID }
+
+func (f *fakeParked) ParkedKeepalive(_ context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
+	f.asked = append(f.asked, ws)
+	return &shimv1.SendKeepaliveParked{}, nil
+}
+
+func TestLateParkedKeepaliveRefusesBeforeTheFleetIsBuilt(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	parked := lateParkedKeepalive(log, func() (parkedKeepaliver, bool) { return nil, false })
+
+	// Act
+	got, err := parked(context.Background(), "ws-1")
+
+	// Assert
+	if got != nil || !errors.Is(err, errFleetNotBuilt) {
+		t.Fatalf("parked = %v, %v; want the not-built refusal", got, err)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "a parked keep-alive was read before the session fleet was built"}); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+}
+
+func TestLateParkedKeepaliveReachesTheFleetBuiltAfterIt(t *testing.T) {
+	// Arrange: the adapter is made while the fleet is still nil, as the graph makes it.
+	var fleet *fakeParked
+	parked := lateParkedKeepalive(dlog.NewTestLogger(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil })
+	fleet = &fakeParked{}
+
+	// Act
+	got, err := parked(context.Background(), "ws-1")
+
+	// Assert
+	if err != nil || got == nil || len(fleet.asked) != 1 || fleet.asked[0] != "ws-1" {
+		t.Fatalf("parked = %v, %v, asked %v; want the late-built fleet asked for ws-1", got, err, fleet.asked)
 	}
 }
 

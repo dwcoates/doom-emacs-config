@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
@@ -61,6 +63,32 @@ type standDownsFunc func(ws ids.WorkspaceID)
 
 // StandDownWithheld implements cachelapse.StandDowns.
 func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
+
+// parkedKeepaliver is the slice of the session fleet the cache keeper reads a
+// parked conversation's keep-alive through.
+type parkedKeepaliver interface {
+	ParkedKeepalive(ctx context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error)
+}
+
+// errFleetNotBuilt is lateParkedKeepalive's refusal before the fleet exists.
+var errFleetNotBuilt = errors.New("the session fleet is not built yet")
+
+// lateParkedKeepalive reads the parked keep-alive through the fleet FLEET
+// answers at each call, so the keeper can be built before the fleet. A call
+// before the fleet exists is refused, recorded at ERROR here, where the
+// keeper's contract says a failed read is recorded.
+func lateParkedKeepalive(log dlog.Logger, fleet func() (parkedKeepaliver, bool)) func(context.Context, ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
+	return func(ctx context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
+		f, ok := fleet()
+		if !ok {
+			log.Error("daemon.cachelapse.drive", "a parked keep-alive was read before the session fleet was built", dlog.Context{
+				"workspace": string(ws), "invariant_violation": "the cache keeper's loop runs only once the graph is built",
+			})
+			return nil, fmt.Errorf("parked keep-alive for %q: %w", ws, errFleetNotBuilt)
+		}
+		return f.ParkedKeepalive(ctx, ws)
+	}
+}
 
 // withheldRetrier is the slice of the drain controller the sink retries a
 // deferred stand-down through.
