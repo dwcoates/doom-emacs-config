@@ -1,0 +1,3 @@
+<!-- used by: daemon/internal/slackwatch (reactions.go, the directive a fork created subscribed to its thread carries); placeholders: {{link}}, {{mode}} -->
+
+This workspace was created subscribed to the originating thread ({{link}}) in {{mode}} mode: agent-repl tells you the thread's new messages as Slack thread notices, each stating what the mode lets you do, and you post into the thread with `agent-repld workspace slack-post here -thread {{link}} -text ":<emoji>: <message>"`. If you move to another workspace, subscribe that workspace with `agent-repld workspace slack-subscribe here -thread {{link}} -mode {{mode}}`.
