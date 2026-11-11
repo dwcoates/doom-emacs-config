@@ -381,7 +381,8 @@ var Suites = []Suite{
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
-		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
+			Units: shimUnitInputs}},
 	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/")},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
@@ -429,6 +430,44 @@ const (
 	onlyInCoverage  = "it runs only in a coverage run, which reuses nothing"
 	perfMeasurement = "its verdict is a latency measurement of this run, not a function of its inputs"
 )
+
+// shimUnitInputs is what each shim test file reads beyond its import graph,
+// found by running every file confined to its graph (2026-11-11) and
+// declaring each read it was refused.
+var shimUnitInputs = func() map[string][]string {
+	const shim = "agent-shim/claude/shim/"
+	src, captures, tests := shim+"src/", shim+"testdata/captures/", shim+"test/"
+	standIn := shim + "test/integration-support/shim-lock-stand-in.sh"
+	out := map[string][]string{
+		"scripts/capture/capture.test.mjs":             {shim + "scripts/capture/prompts.json"},
+		"test/build-options.test.ts":                   {shim + "build.mjs", shim + "test/fakes/build-store-server.mjs"},
+		"test/convert/place.test.ts":                   {src + "convert/attachments.ts"},
+		"test/integration-support/detach-gate.test.ts": {shim + "test/integration/detached.test.ts"},
+		"test/store/stub-client.test.ts":               {shim + "test/store/"},
+	}
+	// The source scans, each over the shim's own sources.
+	for _, f := range []string{"test/convert/detached.test.ts", "test/convert/effort.test.ts", "test/engine/vendor-paths.test.ts",
+		"test/log-classification.test.ts", "test/store/update-entry.test.ts", "test/vendor-guard.test.ts",
+		"test/engine/serial-probe.test.ts", "test/engine/side-query.test.ts", "test/engine/vendor-probe.test.ts"} {
+		out[f] = []string{src}
+	}
+	// The scans over the shim's own tests.
+	for _, f := range []string{"test/log-records.test.ts", "test/vendor-transcript.test.ts", "test/temp-dir.test.ts"} {
+		out[f] = []string{tests}
+	}
+	// The recorded vendor streams, read as data.
+	for _, f := range []string{"test/convert/fold.test.ts", "test/convert/goldens/fixtures.test.ts", "test/convert/goldens/invariants.test.ts",
+		"test/convert/goldens/record-plane.test.ts", "test/convert/goldens/scenarios.test.ts", "test/fake/golden-conformance.test.ts"} {
+		out[f] = []string{captures}
+	}
+	// The integration files that start the lock helper's stand-in.
+	for _, f := range []string{"test/integration/detached.test.ts", "test/integration/process.test.ts", "test/integration/record.test.ts",
+		"test/integration/session.test.ts", "test/integration/transport.test.ts", "test/integration/turn.test.ts",
+		"test/integration/gate.test.ts", "test/integration/task-board.test.ts"} {
+		out[f] = []string{standIn}
+	}
+	return out
+}()
 
 // daemonUnitInputs is what each daemon package reads beyond its build graph,
 // found by running every package confined to its build graph alone
