@@ -66,6 +66,10 @@ const (
 	// running turn while an ask blocks the vendor. The queue keeps it held for
 	// the running turn's end (promptqueue.ErrAskOpen).
 	ArmShimAskOpen = "ask_open"
+	// ArmShimPromptRecorded is StartTurnFailure.prompt_recorded: the vendor's
+	// transcript already records the turn's prompt, so the shim never pushes it
+	// again (promptqueue.ErrPromptRecorded).
+	ArmShimPromptRecorded = "prompt_recorded"
 	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
 	// illegal on the wire and is surfaced rather than guessed at.
 	ArmShimUnspecified = "unspecified"
@@ -105,7 +109,9 @@ func refusedNoSession(err error) bool {
 // because it holds no session: the queue holds that prompt under the
 // reconnect hold rather than retiring it. It matches promptqueue.ErrAskOpen
 // for a join the shim refused because an ask blocks the vendor: the queue
-// keeps that prompt held for the running turn's end.
+// keeps that prompt held for the running turn's end. It matches
+// promptqueue.ErrPromptRecorded for a start or a join whose prompt the vendor
+// already recorded: the queue retires that entry as delivered.
 func (r *ShimRefusal) Is(target error) bool {
 	if r.Verb != "StartTurn" {
 		return false
@@ -115,6 +121,8 @@ func (r *ShimRefusal) Is(target error) bool {
 		return r.Arm == ArmShimNoSession
 	case promptqueue.ErrAskOpen:
 		return r.Arm == ArmShimAskOpen
+	case promptqueue.ErrPromptRecorded:
+		return r.Arm == ArmShimPromptRecorded
 	default:
 		return false
 	}

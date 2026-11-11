@@ -848,3 +848,23 @@ func TestAWithdrawnPromptThatHadStoodAsItsOwnTurnIsDeliveredAgain(t *testing.T) 
 		}
 	}
 }
+
+// A prompt sent to join whose prompt the vendor already records joins nothing:
+// its hold retires as delivered and its turn row closes as withdrawn.
+func TestARecordedPromptSentToJoinJoinsNothingAndRetiresAsDelivered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.recorded = map[ids.TurnID]bool{"t1": true}
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	how, closed := h.db.closedTurn("t1")
+	retired := h.db.retired("t1")
+	_, joining := h.q.joining(theWorkspace)
+	if !closed || how != wsm.CloseWithdrawn || retired == nil || retired.Kind != tombstoneDelivered || joining {
+		t.Fatalf("t1 close = (%v, %v), tombstone = %+v, joining = %v; want withdrawn, retired as delivered, and nothing joining",
+			how, closed, retired, joining)
+	}
+}

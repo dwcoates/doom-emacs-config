@@ -204,6 +204,27 @@ func TestSenderJoinRunningTurnCarriesTheAskOpenRefusalForTheQueue(t *testing.T) 
 	}
 }
 
+// A start refused because the vendor already recorded its prompt carries the
+// prompt_recorded arm, so the queue retires the entry as delivered.
+func TestSenderStartTurnCarriesThePromptRecordedRefusalForTheQueue(t *testing.T) {
+	// Arrange
+	s := newTestSender(&fakeSenderClient{startTurn: &shimv1.StartTurnResponse{
+		Result: &shimv1.StartTurnResponse_Failure{Failure: &shimv1.StartTurnFailure{
+			Detail: "the vendor transcript already records the prompt",
+			Kind:   &shimv1.StartTurnFailure_PromptRecorded{PromptRecorded: &shimv1.StartTurnPromptRecorded{}},
+		}},
+	}})
+
+	// Act
+	_, err := s.StartTurn(context.Background(), "turn-1", nil, conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil)
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != ArmShimPromptRecorded || !errors.Is(err, promptqueue.ErrPromptRecorded) {
+		t.Fatalf("StartTurn = %v, want the typed prompt_recorded refusal the queue matches", err)
+	}
+}
+
 func TestSenderStartTurnMarksAShimThatDiedUnderTheCallForTheQueue(t *testing.T) {
 	// Arrange
 	died := fmt.Errorf("%w: unavailable: dial unix /s.sock: connect: connection refused", shimclient.ErrShimDied)

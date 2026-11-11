@@ -686,6 +686,9 @@ type fakeSender struct {
 	notes []string
 	// joinErr, when set, refuses every JoinRunningTurn.
 	joinErr error
+	// recorded are the turns whose prompt the vendor already records: their
+	// StartTurn and JoinRunningTurn are refused prompt_recorded.
+	recorded map[ids.TurnID]bool
 	// sentBys is the sender every StartTurn, StartInterjection and
 	// JoinRunningTurn was handed, nil for none, in call order.
 	sentBys []*SentBy
@@ -747,6 +750,9 @@ func (s *fakeSender) JoinRunningTurn(_ context.Context, turn ids.TurnID, said *c
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sentBys = append(s.sentBys, sentBy)
+	if s.recorded[turn] {
+		return nil, fmt.Errorf("shim StartTurn refused: prompt_recorded: %w", ErrPromptRecorded)
+	}
 	if s.joinErr != nil {
 		return nil, s.joinErr
 	}
@@ -772,6 +778,9 @@ func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *convers
 	}
 	if s.startErr != nil {
 		return nil, s.startErr
+	}
+	if s.recorded[turn] {
+		return nil, fmt.Errorf("shim StartTurn refused: prompt_recorded: %w", ErrPromptRecorded)
 	}
 	s.turns = append(s.turns, turn)
 	s.said = append(s.said, said)

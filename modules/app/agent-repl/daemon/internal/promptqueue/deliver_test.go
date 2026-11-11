@@ -1252,3 +1252,63 @@ func TestEveryMirroredRowRetractionGoesThroughRetractAccepted(t *testing.T) {
 		t.Fatalf("mirrored rows retracted outside retractAccepted: %v", sites)
 	}
 }
+
+// --- a prompt the vendor already recorded -----------------------------------
+
+// recordedBehindRunning stands RUNNING with t1 and t2 held behind it, t1's
+// prompt one the vendor already records, and ends RUNNING.
+func recordedBehindRunning(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.sender.recorded = map[ids.TurnID]bool{"t1": true}
+	running(t, h, "running-turn", "the running work")
+	for _, turn := range []ids.TurnID{"t1", "t2"} {
+		if _, err := h.q.Submit(context.Background(), submission(turn, "hello "+string(turn))); err != nil {
+			t.Fatalf("Submit %s: %v", turn, err)
+		}
+	}
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	return h
+}
+
+func TestARecordedPromptIsNeverStartedAndTheEntryBehindItIsDelivered(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t2" {
+		t.Fatalf("started turns = %v, want only t2: the recorded t1 runs nothing and t2 goes in its place", got)
+	}
+}
+
+func TestARecordedPromptsHoldIsRetiredAsDelivered(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if retired := h.db.retired("t1"); retired == nil || retired.Kind != tombstoneDelivered {
+		t.Fatalf("t1's tombstone = %+v, want it retired as delivered", retired)
+	}
+}
+
+func TestARecordedPromptsTurnRowClosesAsWithdrawn(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseWithdrawn {
+		t.Fatalf("t1's close = (%v, %v), want withdrawn: it never ran", how, ok)
+	}
+}
+
+func TestARecordedPromptIsRecordedAtErrorNamingItsTurn(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opDeliver})
+	if !ok || record.Context["turn"] != "t1" {
+		t.Fatalf("records = %+v, want the lost delivery recorded at ERROR naming t1", h.log.Records())
+	}
+}

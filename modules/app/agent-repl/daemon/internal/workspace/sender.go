@@ -376,6 +376,8 @@ func startTurnArm(failure *shimv1.StartTurnFailure) string {
 		return "query_dead"
 	case failure.GetAskOpen() != nil:
 		return ArmShimAskOpen
+	case failure.GetPromptRecorded() != nil:
+		return ArmShimPromptRecorded
 	default:
 		return ArmShimUnspecified
 	}
