@@ -591,6 +591,11 @@ type feedState struct {
 	retention int
 	// subs are the tails following this feed.
 	subs map[*tailSub]struct{}
+	// quietHeld are the publications the quiet gate held back from subs, the
+	// latest per row only (holdQuiet); quietSlot is each held row's index in
+	// it. Both are empty while the gate is open.
+	quietHeld []*Publication
+	quietSlot map[string]int
 	// pending are the publications a history replay is holding back from subs
 	// until its page is wholly placed (resolver.holdPushes). Empty outside a
 	// replay.
@@ -670,6 +675,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		deliveries:  map[string]*peerDelivery{},
 		pullTargets: map[ids.WorkspaceID]pullrefs.Target{},
 	}
+	deps.Quiet.Follow(QuietViewName, r.followQuiet)
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.
 	if deps.Stalls != nil {
@@ -1260,8 +1266,85 @@ func (r *resolver) push(s *wsState, f *feedState, pub Publication) {
 	if r.withheldPublication(s, f, pub) {
 		return
 	}
+	r.enqueue(f, pub)
+}
+
+// enqueue hands one publication to every tail following the feed, or, while
+// the quiet gate stands, holds it for the tails instead (holdQuiet). It is
+// the one place a publication reaches a tail live.
+func (r *resolver) enqueue(f *feedState, pub Publication) {
+	if r.deps.Quiet.Quiet() {
+		holdQuiet(f, pub)
+		r.deps.Quiet.Skipped(QuietViewName)
+		return
+	}
 	for sub := range f.subs {
 		sub.Enqueue(pub)
+	}
+}
+
+// QuietViewName names the feed tails in the quiet gate's records and
+// counters.
+const QuietViewName = "feed"
+
+// holdQuiet keeps one publication for the tails while the quiet gate stands.
+// A ROW IS HELD ONCE, AT ITS LATEST: an upsert or removal of a row already
+// held replaces it and moves to the end, so the release hands each row its
+// current state once, after every held-section change it followed. A held
+// section's change is kept in order, every one, because each carries the
+// rows that moved with it.
+func holdQuiet(f *feedState, pub Publication) {
+	if f.quietSlot == nil {
+		f.quietSlot = map[string]int{}
+	}
+	held := pub
+	if row := pub.Row; row != nil {
+		id := row.GetId().GetValue()
+		if slot, ok := f.quietSlot[id]; ok {
+			f.quietHeld[slot] = nil
+		}
+		f.quietSlot[id] = len(f.quietHeld)
+	}
+	f.quietHeld = append(f.quietHeld, &held)
+}
+
+// followQuiet is the quiet gate's follower: leaving the quiet state hands
+// every tail each feed's held publications, judged against the feed as it now
+// stands exactly as a history replay's release is (holdPushes), so a row the
+// feed no longer delivers never reaches a tail. Entering needs nothing.
+func (r *resolver) followQuiet(quiet bool) {
+	if quiet {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for ws, s := range r.workspaces {
+		released := 0
+		for _, f := range s.feeds {
+			held := f.quietHeld
+			f.quietHeld, f.quietSlot = nil, nil
+			for _, pub := range held {
+				if pub == nil {
+					continue
+				}
+				if row := pub.Row; row != nil {
+					if _, stands := f.rows[row.GetId().GetValue()]; row.GetRemoved() == nil && !stands {
+						continue
+					}
+				}
+				if r.withheldPublication(s, f, *pub) {
+					continue
+				}
+				for sub := range f.subs {
+					sub.Enqueue(*pub)
+				}
+				released++
+			}
+		}
+		if released > 0 {
+			r.logger(ws).Debug("daemon.feed.quiet_resync", "the lid opened; the feed's tails were handed each held row at its current state",
+				dlog.Context{"released": released})
+		}
 	}
 }
 

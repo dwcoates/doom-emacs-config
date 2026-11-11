@@ -386,6 +386,9 @@ type startFailedState struct {
 // wsState is one workspace's whole footer accumulation. It is in-memory only:
 // a resolver aggregates, it never stores.
 type wsState struct {
+	// quietStale records that a fact moved while the quiet gate stood, so
+	// leaving it publishes this workspace's view once (followQuiet).
+	quietStale bool
 	// id is the workspace this accumulation belongs to, stated once at its
 	// creation. It is what a resolver-wide fact keyed by workspace (a
 	// deploy's per-workspace notes) is read against.

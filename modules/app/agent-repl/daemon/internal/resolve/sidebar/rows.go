@@ -67,6 +67,12 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 		r.logArmChange(rec.ID, armName, previousArm, rc.cause)
 		r.noteStatusChange(rec.ID, s)
 	}
+	if r.factsOnly {
+		// A FACTS-ONLY RENDER (renderFacts) stops here: everything above is
+		// what an agent or the durable record depends on, everything below
+		// draws the row for a page nobody can see.
+		return &frontendv1.RosterRow{}
+	}
 	viewed := s.viewedOn(armName)
 	current := rc.selected != nil && *rc.selected == rec.ID
 	closed := recedes(rec, session)

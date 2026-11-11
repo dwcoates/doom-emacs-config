@@ -133,6 +133,9 @@ type windowRecord struct {
 // wsState is one workspace's whole topbar accumulation. In-memory only: a
 // resolver aggregates, it never stores.
 type wsState struct {
+	// quietStale records that a fact moved while the quiet gate stood, so
+	// leaving it publishes this strip once (followQuiet).
+	quietStale bool
 	// dir is the workspace directory, bound before any frame arrives.
 	dir string
 	// log is the workspace-bound logger, nil until the directory is bound.

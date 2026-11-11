@@ -25,6 +25,7 @@ import (
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
@@ -369,6 +370,18 @@ type Option func(*resolver)
 // WithResultSink installs the sink the resolver tells its result changes.
 func WithResultSink(sink ResultSink) Option {
 	return func(r *resolver) { r.results = sink }
+}
+
+// WithQuiet installs the lid-closed quiet state's view gate: while it stands
+// the roster is neither resolved nor published, its rows' facts still are, and
+// leaving it publishes the current roster once (viewquiet). Row, Thread and
+// Revision answer the last published roster meanwhile, which only the editor
+// reads, and the editor is idle while the lid is closed.
+func WithQuiet(g *viewquiet.Gate) Option {
+	return func(r *resolver) {
+		r.quiet = g
+		g.Follow(QuietViewName, r.followQuiet)
+	}
 }
 
 // WithStatusChangeSink installs the sink the resolver tells its status changes.

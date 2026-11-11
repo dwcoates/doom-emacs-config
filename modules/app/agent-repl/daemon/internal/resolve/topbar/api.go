@@ -37,6 +37,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 )
 
@@ -326,7 +327,16 @@ type options struct {
 	// selections keeps the controls for when the shim is down; nil keeps
 	// nothing (WithSelectionStore).
 	selections SelectionStore
+	// quiet is the lid-closed quiet state's view gate; nil is a gate that is
+	// never quiet (WithQuiet).
+	quiet *viewquiet.Gate
 }
+
+// WithQuiet installs the lid-closed quiet state's view gate: while it stands
+// no strip is resolved or published (every fact is still taken), and leaving
+// it publishes each strip a fact moved, once, at its current state
+// (viewquiet).
+func WithQuiet(g *viewquiet.Gate) Option { return func(o *options) { o.quiet = g } }
 
 // WithClock injects the clock every warning's ordering instant is taken from.
 func WithClock(c Clock) Option { return func(o *options) { o.clock = c } }
