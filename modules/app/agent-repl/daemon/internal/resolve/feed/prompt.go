@@ -384,14 +384,26 @@ func (r *resolver) republishRows(s *wsState, match func(*frontendv1.FeedRow) boo
 
 // SaidText composes the one canonical prompt form from plain text.
 func SaidText(text string) *conversationv1.UserSaid {
-	return &conversationv1.UserSaid{
-		Content: &conversationv1.UserContent{
-			Blocks: []*conversationv1.UserContentBlock{{
-				Block: &conversationv1.UserContentBlock_Text{
-					Text: &conversationv1.TextBlock{Text: text},
-				},
-			}},
+	return SaidTextWithImages(text, nil)
+}
+
+// SaidTextWithImages composes the canonical prompt form from plain text
+// followed by IMAGES, in order: one text block, then one image block per
+// image. A prompt the daemon decorates (a creation prompt) is one text block
+// whose words it has wrapped, so the images the person attached follow them.
+func SaidTextWithImages(text string, images []*conversationv1.ImageBlock) *conversationv1.UserSaid {
+	blocks := []*conversationv1.UserContentBlock{{
+		Block: &conversationv1.UserContentBlock_Text{
+			Text: &conversationv1.TextBlock{Text: text},
 		},
+	}}
+	for _, image := range images {
+		blocks = append(blocks, &conversationv1.UserContentBlock{
+			Block: &conversationv1.UserContentBlock_Image{Image: image},
+		})
+	}
+	return &conversationv1.UserSaid{
+		Content: &conversationv1.UserContent{Blocks: blocks},
 	}
 }
 

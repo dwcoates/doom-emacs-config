@@ -116,6 +116,33 @@ func validateUserSaid(field string, said *conversationv1.UserSaid) *connect.Erro
 	return nil
 }
 
+// validateCreationPrompt is a creation prompt's validation: a UserSaid whose
+// blocks are words and images only, because those are all a creation spec
+// carries (workspace.CreateSpec.InitialPrompt and InitialImages), and whose
+// images ride words, because the daemon names the workspace from them and
+// wraps them in its notes.
+func validateCreationPrompt(field string, said *conversationv1.UserSaid) *connect.Error {
+	if err := validateUserSaid(field, said); err != nil {
+		return err
+	}
+	words, images := false, false
+	for i, block := range said.GetContent().GetBlocks() {
+		switch {
+		case block.GetText() != nil:
+			words = words || strings.TrimSpace(block.GetText().GetText()) != ""
+		case block.GetImage() != nil:
+			images = true
+		default:
+			return invalid(fmt.Sprintf("%s.content.blocks[%d]", field, i),
+				"a creation prompt carries words and images only")
+		}
+	}
+	if images && !words {
+		return invalid(field+".content.blocks", "a creation prompt's images ride its words, and it has none")
+	}
+	return nil
+}
+
 // validateUserContentBlock is UserContentBlock's base function: the oneof is
 // required, because a block that says nothing is not a block.
 func validateUserContentBlock(field string, block *conversationv1.UserContentBlock) *connect.Error {
@@ -490,7 +517,7 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 	}
 	if standard := req.GetStandard(); standard != nil {
 		if standard.InitialPrompt != nil {
-			if err := validateUserSaid("standard.initial_prompt", standard.GetInitialPrompt()); err != nil {
+			if err := validateCreationPrompt("standard.initial_prompt", standard.GetInitialPrompt()); err != nil {
 				return err
 			}
 		}
@@ -507,7 +534,7 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		}
 	}
 	if oneShot := req.GetOneShot(); oneShot != nil {
-		if err := validateUserSaid("one_shot.prompt", oneShot.GetPrompt()); err != nil {
+		if err := validateCreationPrompt("one_shot.prompt", oneShot.GetPrompt()); err != nil {
 			return err
 		}
 		if err := validateWorkspaceRelationship("one_shot.relationship", oneShot.GetRelationship()); err != nil {

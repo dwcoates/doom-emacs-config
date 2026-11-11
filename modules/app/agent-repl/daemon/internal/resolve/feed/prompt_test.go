@@ -1494,3 +1494,37 @@ func TestAFinishHookPromptIsNamedForTheHook(t *testing.T) {
 		t.Fatalf("AuthorLabel = %q, want the finish hook named, never the user", got)
 	}
 }
+
+// TestSaidTextWithImages pins the composed form: one text block of the words,
+// then one image block per image in the order given, each the image itself.
+func TestSaidTextWithImages(t *testing.T) {
+	first := &conversationv1.ImageBlock{MediaType: "image/png", Location: &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: "/a.png"}}}
+	second := &conversationv1.ImageBlock{MediaType: "image/jpeg", Location: &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: "/b.jpg"}}}
+	tests := []struct {
+		name   string
+		images []*conversationv1.ImageBlock
+		want   *conversationv1.UserSaid
+	}{
+		{name: "no images is the plain text form", images: nil, want: SaidText("look")},
+		{
+			name:   "images follow the words in order",
+			images: []*conversationv1.ImageBlock{first, second},
+			want: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+				{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "look"}}},
+				{Block: &conversationv1.UserContentBlock_Image{Image: first}},
+				{Block: &conversationv1.UserContentBlock_Image{Image: second}},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := SaidTextWithImages("look", tt.images)
+
+			// Assert
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("SaidTextWithImages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

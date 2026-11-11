@@ -20,6 +20,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
@@ -32,12 +33,24 @@ import (
 // refuses a workspace this daemon does not serve, and DELEGATES; the policy
 // (what quiet means for a close, what a nuke destroys) lives in the verbs.
 
-// saidText flattens a composed prompt into the text the creation spec takes.
-//
-// SEAM MISMATCH (recorded in the report): workspace.CreateSpec.InitialPrompt is
-// a STRING while the contract carries conversation.v1.UserSaid, so an image
-// block attached to a creation prompt has nowhere to go. The text blocks are
-// joined verbatim and the loss is logged rather than hidden.
+// saidParts splits a composed creation prompt into the words the creation
+// spec takes and the images that ride them. The text blocks are joined
+// verbatim by a newline (holdfold.SaidText); every image block is kept in
+// composed order. Validation (validateCreationPrompt) has already refused any
+// other block kind and a prompt of images without words, so nothing is lost.
+func saidParts(said *conversationv1.UserSaid) (string, []*conversationv1.ImageBlock) {
+	var images []*conversationv1.ImageBlock
+	for _, block := range said.GetContent().GetBlocks() {
+		if image := block.GetImage(); image != nil {
+			images = append(images, image)
+		}
+	}
+	return holdfold.SaidText(said), images
+}
+
+// saidText flattens a composed prompt into plain text, for a reader that takes
+// words alone (a question's answer). The text blocks are joined verbatim and
+// any other block's loss is logged rather than hidden.
 func (s *server) saidText(log dlog.Logger, field string, said *conversationv1.UserSaid) string {
 	if said == nil {
 		return ""
@@ -52,8 +65,8 @@ func (s *server) saidText(log dlog.Logger, field string, said *conversationv1.Us
 		dropped++
 	}
 	if dropped > 0 {
-		log.Warn("daemon.server.create_workspace",
-			"a creation prompt carried non-text blocks the creation spec cannot hold",
+		log.Warn("daemon.server.said_text",
+			"a prompt carried non-text blocks its reader cannot hold",
 			dlog.Context{"field": field, "dropped": dropped})
 	}
 	return strings.Join(parts, "\n")
@@ -136,7 +149,7 @@ func (s *server) CreateWorkspace(
 	spec.Hidden = req.Msg.GetHidden()
 	spec.Placement = createPlacementOf(req.Msg.GetPlacement())
 	if standard := req.Msg.GetStandard(); standard != nil {
-		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
+		spec.InitialPrompt, spec.InitialImages = saidParts(standard.GetInitialPrompt())
 		spec.Name = standard.GetName()
 		spec.DeployHooks = deployHooksOf(standard.GetDeployHooks())
 		spec.Parent = relationshipParent(standard.GetRelationship())
@@ -144,7 +157,7 @@ func (s *server) CreateWorkspace(
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
-		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
+		spec.InitialPrompt, spec.InitialImages = saidParts(oneShot.GetPrompt())
 		spec.Name = oneShot.GetName()
 		spec.Parent = relationshipParent(oneShot.GetRelationship())
 		spec.Landing, spec.FromOrigin = landingChoice(oneShot.LandingTarget)

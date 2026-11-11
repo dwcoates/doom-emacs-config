@@ -1203,3 +1203,52 @@ func TestEveryModelPickIsValidatedThroughValidateModelPick(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// saidBlocks is a composed prompt of exactly BLOCKS.
+func saidBlocks(blocks ...*conversationv1.UserContentBlock) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
+}
+
+func textBlock(text string) *conversationv1.UserContentBlock {
+	return &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}}
+}
+
+func imageBlock(path string) *conversationv1.UserContentBlock {
+	return &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Image{Image: &conversationv1.ImageBlock{
+		MediaType: "image/png", Location: &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: path}},
+	}}}
+}
+
+func TestValidateCreationPrompt(t *testing.T) {
+	quote := &conversationv1.UserContentBlock{Block: &conversationv1.UserContentBlock_Quote{Quote: &conversationv1.UserQuoteBlock{}}}
+	tests := []struct {
+		name      string
+		said      *conversationv1.UserSaid
+		wantField string
+	}{
+		{name: "words alone pass", said: saidBlocks(textBlock("fix it"))},
+		{name: "words and images pass", said: saidBlocks(textBlock("fix it"), imageBlock("/a.png"), imageBlock("/b.png"))},
+		{name: "an image before the words passes", said: saidBlocks(imageBlock("/a.png"), textBlock("fix it"))},
+		{name: "a prompt with no blocks is refused", said: saidBlocks(), wantField: "p.content.blocks"},
+		{name: "images without words are refused", said: saidBlocks(imageBlock("/a.png")), wantField: "p.content.blocks"},
+		{name: "images beside blank words are refused", said: saidBlocks(textBlock(" \n"), imageBlock("/a.png")), wantField: "p.content.blocks"},
+		{name: "a quote block is refused", said: saidBlocks(textBlock("fix it"), quote), wantField: "p.content.blocks[1]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := validateCreationPrompt("p", tt.said)
+
+			// Assert
+			if tt.wantField == "" {
+				if err != nil {
+					t.Fatalf("validateCreationPrompt = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Code() != connect.CodeInvalidArgument || !strings.HasPrefix(err.Message(), tt.wantField+":") {
+				t.Fatalf("validateCreationPrompt = %v, want invalid argument on %s", err, tt.wantField)
+			}
+		})
+	}
+}

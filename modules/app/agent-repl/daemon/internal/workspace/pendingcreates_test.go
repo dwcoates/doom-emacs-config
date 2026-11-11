@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
@@ -377,6 +379,9 @@ func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
 		{name: "a context workspace does not", change: func(s *CreateSpec) { s.ContextWorkspace = ptr(ids.WorkspaceID("ctx")) }},
 		{name: "a context selection does not", change: func(s *CreateSpec) {
 			s.ContextSelection = &ContextSelection{Kind: ContextSelectionResponse, Row: "r", Markdown: "m"}
+		}},
+		{name: "an image does not", change: func(s *CreateSpec) {
+			s.InitialImages = []*conversationv1.ImageBlock{pastedImage("/a.png")}
 		}},
 		{name: "one-shot does not", change: func(s *CreateSpec) { s.OneShot = true }},
 		{name: "cut from origin does not", change: func(s *CreateSpec) { s.FromOrigin, s.Landing = true, &wsm.LandingChoice{} }},
@@ -929,5 +934,71 @@ func TestCreateKeyDistinguishesHiddenAndEveryPlacement(t *testing.T) {
 			t.Fatalf("%q and %q share the key %s: two different creates would be one", name, other, key)
 		}
 		seen[key] = name
+	}
+}
+
+// TestAHeldRequestKeepsItsImages pins that a held create's prompt images
+// survive the durable row, in order, and that a create of words alone keys as
+// it did before prompts carried images.
+func TestAHeldRequestKeepsItsImages(t *testing.T) {
+	tests := []struct {
+		name   string
+		images []*conversationv1.ImageBlock
+	}{
+		{name: "words alone", images: nil},
+		{name: "two images", images: []*conversationv1.ImageBlock{pastedImage("/a.png"), pastedImage("/b.png")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+			spec.RepoDir, spec.InitialPrompt, spec.InitialImages = "/r", "fix it", tt.images
+
+			// Act
+			encoded, err := encodeHeldSpec(spec)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			decoded, err := decodeHeldSpec(encoded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(decoded.InitialImages) != len(tt.images) || createKey(decoded) != createKey(spec) {
+				t.Fatalf("decoded images %v, want %v under the same key", decoded.InitialImages, tt.images)
+			}
+			for i := range tt.images {
+				if !proto.Equal(decoded.InitialImages[i], tt.images[i]) {
+					t.Fatalf("decoded image %d = %v, want %v", i, decoded.InitialImages[i], tt.images[i])
+				}
+			}
+			if tt.images == nil && strings.Contains(encoded, "initial_images") {
+				t.Fatalf("encoded %s, want no initial_images for words alone", encoded)
+			}
+		})
+	}
+}
+
+// TestADecodedHeldImageRefusesAMalformedEntry pins that a held row whose image
+// is not hex, or not an ImageBlock, answers an error naming it.
+func TestADecodedHeldImageRefusesAMalformedEntry(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded string
+	}{
+		{name: "not hex", encoded: `{"repo_dir":"/r","initial_images":["zz"]}`},
+		{name: "not a message", encoded: `{"repo_dir":"/r","initial_images":["ff"]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := decodeHeldSpec(tt.encoded)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "initial image") {
+				t.Fatalf("decodeHeldSpec = %v, want an error naming the initial image", err)
+			}
+		})
 	}
 }
