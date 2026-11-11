@@ -6355,6 +6355,24 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.75rem;
 }
 
+/* THE INTERRUPTED NOTICE'S BAR STARTS WHERE THE BOTTOM-LEFT CORNER OF THE
+   BUBBLE OR TOOL CARD ABOVE IT STOPS CURVING (owner request, 2026-11-11): those
+   corners are rounded 8px (`--bubble-radius`, `.tool-card`), so the straight
+   bottom edge begins 8px in from the rail, and the bar is drawn there rather
+   than on the rail itself. */
+.turn-ended-interrupted > .outcome-marker {
+  margin-left: 8px;
+  max-width: calc(100% - 8px);
+}
+
+/* THE INTERRUPTED NOTICE GOES WHEN THE NEXT PROMPT IS RECEIVED (owner request,
+   2026-11-11): it reports what happened to the turn that just stopped, so once
+   a later row holds a prompt that was actually sent (a held prompt has not
+   been) it is stale and takes no slot. */
+.feed-item:has(> .turn-ended-interrupted):has(~ .feed-item .bubble[data-role="prompt"]:not([data-variant="held"])) {
+  display: none;
+}
+
 /* ---- the outcome marker (src/feed/marker.ts; owner ruling, 2026-10-06) ----
 
    A NEUTRAL marker (an interrupt, a denial, a broken plan) is an inline pill
