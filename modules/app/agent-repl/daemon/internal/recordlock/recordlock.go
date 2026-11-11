@@ -47,6 +47,9 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
+
+	"agent-repld/internal/inflight"
 )
 
 // gates is this process's arbitration of its own holders, one per lock file,
@@ -343,4 +346,110 @@ func HolderOf(path string) (Holder, error) {
 	}
 	defer f.Close()
 	return HolderOn(f)
+}
+
+// Shared is one shared record lock this process holds for the length of its
+// life or some work: any number of processes hold it together, and an
+// exclusive holder excludes them all (the persistent-wifi frozen set's
+// owners, appfreeze).
+type Shared struct {
+	f    *os.File
+	gate *sync.RWMutex
+	path string
+}
+
+// ErrSharedWaitBound reports a shared hold whose wait for an exclusive holder
+// ran past its bound.
+var ErrSharedWaitBound = errors.New("the lock stayed held exclusive past the wait's bound")
+
+// HoldShared takes the shared lock on the file at PATH, creating the file but
+// never its directory, waiting in the kernel for an exclusive holder in
+// another process for at most BOUND. A holder of the exclusive lock in THIS
+// process refuses it at once with ErrWouldBlock. A wait past BOUND answers
+// ErrSharedWaitBound; the abandoned kernel wait then releases what it was
+// granted the moment it is granted, so nothing is held behind a failed hold.
+func HoldShared(path string, bound time.Duration) (*Shared, error) {
+	gate, err := gateFor(path)
+	if err != nil {
+		return nil, err
+	}
+	if !gate.TryRLock() {
+		return nil, ErrWouldBlock
+	}
+	f, err := OpenFile(path)
+	if err != nil {
+		gate.RUnlock()
+		return nil, err
+	}
+	// THE WAIT AND ITS ABANDONMENT ARE DECIDED UNDER ONE LOCK: either the
+	// caller takes the kernel's answer, or the wait, once answered, releases
+	// it itself. A descriptor blocked in the kernel's wait is never closed
+	// under it.
+	var (
+		mu        sync.Mutex
+		answered  bool
+		abandoned bool
+	)
+	done := make(chan error, 1)
+	inflight.Go(func() {
+		werr := waitShared(f)
+		mu.Lock()
+		defer mu.Unlock()
+		if abandoned {
+			f.Close()
+			gate.RUnlock()
+			return
+		}
+		answered = true
+		done <- werr
+	})
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case werr := <-done:
+		return sharedOrClose(f, gate, path, werr)
+	case <-timer.C:
+		mu.Lock()
+		if answered {
+			mu.Unlock()
+			return sharedOrClose(f, gate, path, <-done)
+		}
+		abandoned = true
+		mu.Unlock()
+		return nil, fmt.Errorf("holding %s shared: %w (%s)", path, ErrSharedWaitBound, bound)
+	}
+}
+
+// waitShared waits in the kernel for the shared record lock on F: the one
+// seam a test replaces to hold the wait open, since only another process can.
+var waitShared = func(f *os.File) error {
+	return syscall.FcntlFlock(f.Fd(), syscall.F_SETLKW, wholeFile(syscall.F_RDLCK))
+}
+
+// sharedOrClose answers the shared hold the kernel granted, or closes F and
+// lets the gate go when it refused.
+func sharedOrClose(f *os.File, gate *sync.RWMutex, path string, err error) (*Shared, error) {
+	if err != nil {
+		f.Close()
+		gate.RUnlock()
+		return nil, fmt.Errorf("holding %s shared: %w", path, err)
+	}
+	return &Shared{f: f, gate: gate, path: path}, nil
+}
+
+// Release releases the shared lock and closes its descriptor. Releasing
+// twice, or a nil hold, is safe.
+func (s *Shared) Release() error {
+	if s == nil || s.f == nil {
+		return nil
+	}
+	f := s.f
+	s.f = nil
+	uerr := syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, wholeFile(syscall.F_UNLCK))
+	cerr := f.Close()
+	s.gate.RUnlock()
+	if uerr != nil {
+		return fmt.Errorf("unlocking %s: %w", s.path, uerr)
+	}
+	return cerr
 }

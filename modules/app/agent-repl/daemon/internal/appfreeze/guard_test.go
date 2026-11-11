@@ -7,9 +7,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/recordlock"
 )
 
 func TestRunGuard(t *testing.T) {
@@ -117,8 +117,8 @@ func TestPipeGone(t *testing.T) {
 }
 
 func TestOwnershipExcludesTheGuardWhileADaemonHoldsIt(t *testing.T) {
-	// Arrange: flock on a temp file is kernel arbitration within this
-	// process's own descriptors, no child process involved.
+	// Arrange: a record lock on a temp file, arbitrated in this process, no
+	// child process involved.
 	path := filepath.Join(t.TempDir(), OwnersFile)
 	held, err := HoldOwnership(path, GuardThawBound)
 	if err != nil {
@@ -126,9 +126,9 @@ func TestOwnershipExcludesTheGuardWhileADaemonHoldsIt(t *testing.T) {
 	}
 
 	// Act
-	_, ownedWhileHeld, errWhileHeld := FlockTryOwn(path)()
-	_ = held.Close()
-	release, ownedAfter, errAfter := FlockTryOwn(path)()
+	_, ownedWhileHeld, errWhileHeld := RecordTryOwn(path)()
+	_ = held.Release()
+	release, ownedAfter, errAfter := RecordTryOwn(path)()
 
 	// Assert
 	if ownedWhileHeld || errWhileHeld != nil {
@@ -140,20 +140,20 @@ func TestOwnershipExcludesTheGuardWhileADaemonHoldsIt(t *testing.T) {
 	release()
 }
 
-func TestHoldOwnershipWaitsNoLongerThanItsBound(t *testing.T) {
-	// Arrange: a guard holds the file exclusive and never lets go.
+func TestHoldOwnershipRefusesWhileAGuardOwnsTheSet(t *testing.T) {
+	// Arrange: a guard holds the file exclusive.
 	path := filepath.Join(t.TempDir(), OwnersFile)
-	release, owned, err := FlockTryOwn(path)()
+	release, owned, err := RecordTryOwn(path)()
 	if !owned || err != nil {
-		t.Fatalf("FlockTryOwn() = %v, %v", owned, err)
+		t.Fatalf("RecordTryOwn() = %v, %v", owned, err)
 	}
 	defer release()
 
 	// Act
-	_, err = HoldOwnership(path, time.Millisecond)
+	_, err = HoldOwnership(path, GuardThawBound)
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "stuck") {
-		t.Fatalf("HoldOwnership() = %v, want the bound to fire", err)
+	if !errors.Is(err, recordlock.ErrWouldBlock) {
+		t.Fatalf("HoldOwnership() = %v, want the exclusive holder's refusal", err)
 	}
 }

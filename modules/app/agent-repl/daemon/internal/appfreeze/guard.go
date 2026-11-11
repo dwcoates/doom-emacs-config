@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/recordlock"
 )
 
 // THE THAW GUARD: NO FROZEN PROCESS OUTLIVES EVERY DAEMON.
@@ -20,7 +18,7 @@ import (
 // restarts) would leave its frozen applications stopped until the next
 // daemon happened to boot. The guard closes that, structurally:
 //
-//   - EVERY DAEMON HOLDS THE OWNERS FILE SHARED (flock) for its whole life,
+//   - EVERY DAEMON HOLDS THE OWNERS FILE SHARED (a record lock) for its whole life,
 //     taken at boot before it reads the record. The kernel releases it when
 //     the daemon dies, however it dies.
 //   - EVERY DAEMON STARTS ONE GUARD, in a session of its own so it outlives
@@ -36,39 +34,20 @@ import (
 // (HoldOwnership), so it reads the record only once the guard has cleared it.
 
 // HoldOwnership takes the owners file at path SHARED for the life of the
-// process, and answers the open file, which the caller keeps open (closing it
-// releases the hold). A guard mid-thaw holds it exclusive for as long as one
-// thaw takes (guardThawBound), so the wait is bounded by that; a wait past
-// the bound is a guard that is stuck, refused loudly.
-func HoldOwnership(path string, bound time.Duration) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+// process, and answers the hold, which the caller keeps (releasing it ends
+// the ownership). A guard mid-thaw holds it exclusive for as long as one thaw
+// takes, so the wait is bounded by that (GuardThawBound); a wait past the
+// bound is a guard that is stuck, refused loudly. The hold is a record lock
+// (recordlock), so no child the daemon forks ever holds it.
+func HoldOwnership(path string, bound time.Duration) (*recordlock.Shared, error) {
+	held, err := recordlock.HoldShared(path, bound)
+	if errors.Is(err, recordlock.ErrSharedWaitBound) {
+		return nil, fmt.Errorf("the frozen set's owners file was held exclusive past %s (a thaw takes about %s): a thaw guard is stuck: %w", bound, guardThawExpected, err)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("open the frozen set's owners file: %w", err)
+		return nil, fmt.Errorf("hold the frozen set's owners file shared: %w", err)
 	}
-	done := make(chan error, 1)
-	// inflight: bounded below: the flock call has no timeout of its own, so
-	// the wait is bounded from outside.
-	go func() { done <- unix.Flock(int(f.Fd()), unix.LOCK_SH) }()
-	timer := time.NewTimer(bound)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		if err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("hold the frozen set's owners file shared: %w", err)
-		}
-		return f, nil
-	case <-timer.C:
-		// A descriptor blocked in flock cannot be closed under it (the close
-		// waits too), so an abandoned wait closes its file once flock
-		// answers.
-		// inflight: unjoined: it ends when the stuck flock answers.
-		go func() {
-			<-done
-			_ = f.Close()
-		}()
-		return nil, fmt.Errorf("the frozen set's owners file was held exclusive past %s (a thaw takes about %s): a thaw guard is stuck", bound, guardThawExpected)
-	}
+	return held, nil
 }
 
 // Expected time and bound of a booting daemon's wait for the shared hold
@@ -172,22 +151,17 @@ func PipeGone(pipe io.Reader) func() error {
 	}
 }
 
-// FlockTryOwn is the production TryOwn: LOCK_EX|LOCK_NB on the owners file.
-func FlockTryOwn(path string) func() (func(), bool, error) {
+// RecordTryOwn is the production TryOwn: the owners file's exclusive record
+// lock, taken without waiting (recordlock.TryExclusive).
+func RecordTryOwn(path string) func() (func(), bool, error) {
 	return func() (func(), bool, error) {
-		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-		if err != nil {
-			return nil, false, fmt.Errorf("open the frozen set's owners file: %w", err)
-		}
-		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if errors.Is(err, unix.EWOULDBLOCK) {
-			_ = f.Close()
+		held, _, err := recordlock.TryExclusive(path)
+		if errors.Is(err, recordlock.ErrWouldBlock) {
 			return nil, false, nil
 		}
 		if err != nil {
-			_ = f.Close()
 			return nil, false, fmt.Errorf("ask for the frozen set's owners file exclusive: %w", err)
 		}
-		return func() { _ = f.Close() }, true, nil
+		return func() { _ = held.Release() }, true, nil
 	}
 }
