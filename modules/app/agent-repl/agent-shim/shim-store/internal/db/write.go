@@ -564,6 +564,10 @@ func (d *DB) landRow(ctx context.Context, tx *sql.Tx, fields logging.Fields, r r
 		if err := d.writePeerDelivery(ctx, tx, position, r.book.String, r); err != nil {
 			return d.refuse(fields, err)
 		}
+		// THE ASK INDEX TOO, so GetLiveWork never misses an ask left open.
+		if err := d.writeAskLine(ctx, tx, position, r.book.String, r); err != nil {
+			return d.refuse(fields, err)
+		}
 	}
 	if applied {
 		if err := d.recordApplied(ctx, tx, r, cursor, seq, now); err != nil {

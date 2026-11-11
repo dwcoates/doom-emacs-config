@@ -763,6 +763,7 @@ var liveWorkStatements = []struct {
 	{name: "the live agents listing", statement: liveAgentsSQL, args: []any{"agent-main", "agent-main"}},
 	{name: "the live detached listing", statement: liveDetachedSQL, args: []any{"agent-main", detachedKindWorkflow}},
 	{name: "the unreachable-obligation scan", statement: liveWorkGapsSQL, args: []any{detachedKindWorkflow}},
+	{name: "the live asks listing", statement: liveAsksSQL, args: []any{"agent-main", kindPageLine}},
 }
 
 func TestEveryLiveWorkStatementBuildsNoAutomaticIndex(t *testing.T) {
