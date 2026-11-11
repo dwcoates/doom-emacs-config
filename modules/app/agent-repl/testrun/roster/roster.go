@@ -356,7 +356,7 @@ var Suites = []Suite{
 			// What the shim imports from outside its package, the lock helper
 			// its integration build compiles, the metaprompt its suite reads
 			// back, and the scripts its npm hooks run.
-			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/", "agent-shim/shim-lock/", "metaprompt.md", "testdata/",
+			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/", "agent-shim/shim-lock/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
@@ -420,7 +420,7 @@ var AlwaysRunRegions = []string{
 	// The Doom module files the Emacs layer loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
-	"config.el", "doctor.el", "packages.el", "metaprompt.md", "logging-contract.md",
+	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
 	// bin/ each have their harness; the sandbox image reads .agents-sandbox.
