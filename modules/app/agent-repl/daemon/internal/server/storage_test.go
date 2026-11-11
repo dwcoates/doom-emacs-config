@@ -89,10 +89,14 @@ func TestPruneStorageAnswersEachRefusal(t *testing.T) {
 func TestEverySweepReasonHasAWireValue(t *testing.T) {
 	// A reason the contract does not draw panics; every one the sweep can
 	// give is drawn, each as its own value.
-	reasons := []storagesweep.Reason{storagesweep.ReasonNoWorkspace, storagesweep.ReasonLanded, storagesweep.ReasonClosedBackups, storagesweep.ReasonAged, storagesweep.ReasonOverBound}
+	reasons := []storagesweep.Reason{
+		storagesweep.ReasonNoWorkspace, storagesweep.ReasonLanded, storagesweep.ReasonClosedBackups, storagesweep.ReasonAged,
+		storagesweep.ReasonUntouchedLogs, storagesweep.ReasonOverBound,
+	}
 	keeps := []storagesweep.KeepReason{
 		storagesweep.KeepOpenWorkspace, storagesweep.KeepRecentlyClosed, storagesweep.KeepNotADirectory,
 		storagesweep.KeepNoBackups, storagesweep.KeepYoung, storagesweep.KeepKeptByDirectory,
+		storagesweep.KeepRecentlyTouched, storagesweep.KeepHeldLogs,
 	}
 	seen := map[int32]bool{}
 	for _, r := range reasons {

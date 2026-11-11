@@ -37,12 +37,15 @@ type world struct {
 	aged  []AgedDir
 	// bounded are the caches the sweep keeps under a size.
 	bounded []BoundedDir
+	logs    *fakeLogs
 }
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
-	return &world{t: t, root: t.TempDir(), reg: &registry{}, clock: clocktest.New(now), log: dlog.NewTestLogger()}
+	return &world{t: t, root: t.TempDir(), reg: &registry{}, clock: clocktest.New(now), log: dlog.NewTestLogger(), logs: &fakeLogs{}}
 }
+
+func (w *world) logsDir() string { return filepath.Join(w.root, "logs") }
 
 func (w *world) shimDir() string { return filepath.Join(w.root, "shim") }
 
@@ -50,8 +53,8 @@ func (w *world) sweeper() *Sweeper {
 	w.t.Helper()
 	s, err := New(Deps{
 		Registry: w.reg, Clock: w.clock, LockPath: filepath.Join(w.root, "run", "sweep.lock"),
-		ShimDir: w.shimDir(), Aged: w.aged, Bounded: w.bounded,
-		LandedAfter: DefaultLandedAfter, ClosedAfter: DefaultClosedAfter,
+		ShimDir: w.shimDir(), Aged: w.aged, Bounded: w.bounded, LogsDir: w.logsDir(), Logs: w.logs,
+		LandedAfter: DefaultLandedAfter, ClosedAfter: DefaultClosedAfter, LogsAfter: DefaultLogsAfter,
 		StartDelay: DefaultStartDelay, Every: DefaultEvery, Log: w.log,
 	})
 	if err != nil {
@@ -146,10 +149,10 @@ func TestTheShimRule(t *testing.T) {
 		{"an open workspace keeps everything, however old", false, nil, now.Add(-400 * day), true, true, ""},
 		{"a landed workspace within its window keeps everything", true, closedBy(wsm.CloseByMerge, 2*day), now.Add(-2 * day), true, true, ""},
 		{"a landed workspace past its window loses its whole directory", true, closedBy(wsm.CloseByMerge, 4*day), now.Add(-4 * day), false, false, ReasonLanded},
-		{"a closed workspace within its window keeps everything", true, closedBy(wsm.CloseByUser, 29*day), now.Add(-29 * day), true, true, ""},
+		{"a closed workspace within its window keeps everything", true, closedBy(wsm.CloseByUser, 4*day), now.Add(-4 * day), true, true, ""},
 		{"a closed workspace past its window loses only its backups", true, closedBy(wsm.CloseByUser, 31*day), now.Add(-31 * day), true, false, ReasonClosedBackups},
 		{"an agent's close is a close, not a landing", true, closedBy(wsm.CloseByAgent, 4*day), now.Add(-4 * day), true, true, ""},
-		{"an undated close counts from the last write, kept while recent", true, nil, now.Add(-29 * day), true, true, ""},
+		{"an undated close counts from the last write, kept while recent", true, nil, now.Add(-4 * day), true, true, ""},
 		{"an undated close counts from the last write, swept once old", true, nil, now.Add(-31 * day), true, false, ReasonClosedBackups},
 	}
 	for _, tt := range tests {
@@ -324,7 +327,7 @@ func TestTheAgedRule(t *testing.T) {
 	active := filepath.Join(dir, "20260801T000000Z")
 	w.write(filepath.Join(old, "cpu.pprof"), "12345", now.Add(-40*day))
 	w.touch(old, now.Add(-40*day))
-	w.write(filepath.Join(young, "cpu.pprof"), "1", now.Add(-5*day))
+	w.write(filepath.Join(young, "cpu.pprof"), "1", now.Add(-4*day))
 	w.write(filepath.Join(active, "cpu.pprof"), "1", now.Add(-90*day))
 	w.touch(active, now.Add(-90*day))
 	w.aged = []AgedDir{{Name: "profiles", Dir: dir, After: DefaultAgedAfter, Keep: func() (map[string]bool, error) {
@@ -463,8 +466,11 @@ func TestNewRefusesAZeroValue(t *testing.T) {
 		{"no clock", func(d *Deps) { d.Clock = nil }},
 		{"no lock", func(d *Deps) { d.LockPath = "" }},
 		{"no shim directory", func(d *Deps) { d.ShimDir = "" }},
+		{"no logs directory", func(d *Deps) { d.LogsDir = "" }},
+		{"no log surfaces", func(d *Deps) { d.Logs = nil }},
 		{"no log", func(d *Deps) { d.Log = nil }},
 		{"a zero window", func(d *Deps) { d.ClosedAfter = 0 }},
+		{"a zero logs window", func(d *Deps) { d.LogsAfter = 0 }},
 		{"an unnamed aged directory", func(d *Deps) { d.Aged = []AgedDir{{Dir: "/d", After: day}} }},
 		{"an aged directory with no age", func(d *Deps) { d.Aged = []AgedDir{{Name: "n", Dir: "/d"}} }},
 		{"an unnamed bounded cache", func(d *Deps) { d.Bounded = []BoundedDir{{Dir: "/d", Bound: 1}} }},
@@ -476,7 +482,8 @@ func TestNewRefusesAZeroValue(t *testing.T) {
 			// Arrange.
 			deps := Deps{
 				Registry: &registry{}, Clock: clocktest.New(now), LockPath: "/l", ShimDir: "/s",
-				LandedAfter: day, ClosedAfter: day, StartDelay: day, Every: day, Log: dlog.NewTestLogger(),
+				LogsDir: "/logs", Logs: &fakeLogs{},
+				LandedAfter: day, ClosedAfter: day, LogsAfter: day, StartDelay: day, Every: day, Log: dlog.NewTestLogger(),
 			}
 			tt.edit(&deps)
 

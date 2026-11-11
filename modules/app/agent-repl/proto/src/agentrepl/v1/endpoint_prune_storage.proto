@@ -3,9 +3,10 @@
 //
 // The sweep deletes agent-repl's own stored data once nothing will read it
 // again (daemon/internal/storagesweep): each workspace's shim state directory
-// (<state root>/shim/<key>), judged by the workspace's close record, and the
+// (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age. It
+// (profiling sessions, the test runner's reuse records), judged by age, and
+// the daemon-written logs of each workspace nobody touched for five days. It
 // also runs on its own once a day; this asks for one now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
@@ -79,16 +80,19 @@ enum PruneStorageReason {
   // A shim state directory whose every workspace closed by its own merge
   // more than three days ago: the whole directory.
   PRUNE_STORAGE_REASON_LANDED = 2;
-  // A shim state directory whose every workspace closed more than thirty
+  // A shim state directory whose every workspace closed more than five
   // days ago, one by something other than its merge: only its transcript
   // backups, so a reopened workspace keeps its identity.
   PRUNE_STORAGE_REASON_CLOSED_BACKUPS = 3;
-  // A cache directory's entry older than thirty days.
+  // A cache directory's entry older than five days.
   PRUNE_STORAGE_REASON_AGED = 4;
   // A size-bounded cache's least recently used entries, deleted until it is
   // back under its bound: one removal for the whole cache, naming its
   // directory and what was freed.
   PRUNE_STORAGE_REASON_OVER_BOUND = 5;
+  // A daemon-written log file of a workspace nobody touched for five days,
+  // that no writer holds.
+  PRUNE_STORAGE_REASON_UNTOUCHED_LOGS = 6;
 }
 
 // How many entries were left alone for one reason.
@@ -114,6 +118,10 @@ enum PruneStorageKeepReason {
   // A cache entry its directory keeps whatever its age (the open profiling
   // session).
   PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY = 6;
+  // A workspace with log files that somebody touched inside five days.
+  PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED = 7;
+  // A log file of an untouched workspace that a writer still holds.
+  PRUNE_STORAGE_KEEP_REASON_HELD_LOGS = 8;
 }
 
 message PruneStorageError {

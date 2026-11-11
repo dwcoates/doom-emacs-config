@@ -33,8 +33,9 @@ const (
 )
 
 // buildStorageSweep builds the storage sweep over the state root's shim
-// directories and the host's aged cache directories.
-func buildStorageSweep(registry storagesweep.Registry, layout stateroot.Layout, runDir string, getenv func(string) string, log dlog.Logger) (*storagesweep.Sweeper, error) {
+// directories, the host's aged cache directories, and the logs the surfaces
+// write under the state root.
+func buildStorageSweep(registry storagesweep.Registry, logs storagesweep.Logs, layout stateroot.Layout, runDir string, getenv func(string) string, log dlog.Logger) (*storagesweep.Sweeper, error) {
 	aged, err := storageAgedDirs(getenv)
 	if err != nil {
 		log.Error(graphOperation, "the storage sweep's cache directories could not be resolved", dlog.Context{"cause": err.Error()})
@@ -52,8 +53,11 @@ func buildStorageSweep(registry storagesweep.Registry, layout stateroot.Layout, 
 		ShimDir:     layout.ShimDir(),
 		Aged:        aged,
 		Bounded:     bounded,
+		LogsDir:     layout.LogsDir(),
+		Logs:        logs,
 		LandedAfter: storagesweep.DefaultLandedAfter,
 		ClosedAfter: storagesweep.DefaultClosedAfter,
+		LogsAfter:   storagesweep.DefaultLogsAfter,
 		StartDelay:  storagesweep.DefaultStartDelay,
 		Every:       storagesweep.DefaultEvery,
 		Log:         log,

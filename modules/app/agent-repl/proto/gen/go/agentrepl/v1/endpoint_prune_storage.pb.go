@@ -3,9 +3,10 @@
 //
 // The sweep deletes agent-repl's own stored data once nothing will read it
 // again (daemon/internal/storagesweep): each workspace's shim state directory
-// (<state root>/shim/<key>), judged by the workspace's close record, and the
+// (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age. It
+// (profiling sessions, the test runner's reuse records), judged by age, and
+// the daemon-written logs of each workspace nobody touched for five days. It
 // also runs on its own once a day; this asks for one now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
@@ -45,16 +46,19 @@ const (
 	// A shim state directory whose every workspace closed by its own merge
 	// more than three days ago: the whole directory.
 	PruneStorageReason_PRUNE_STORAGE_REASON_LANDED PruneStorageReason = 2
-	// A shim state directory whose every workspace closed more than thirty
+	// A shim state directory whose every workspace closed more than five
 	// days ago, one by something other than its merge: only its transcript
 	// backups, so a reopened workspace keeps its identity.
 	PruneStorageReason_PRUNE_STORAGE_REASON_CLOSED_BACKUPS PruneStorageReason = 3
-	// A cache directory's entry older than thirty days.
+	// A cache directory's entry older than five days.
 	PruneStorageReason_PRUNE_STORAGE_REASON_AGED PruneStorageReason = 4
 	// A size-bounded cache's least recently used entries, deleted until it is
 	// back under its bound: one removal for the whole cache, naming its
 	// directory and what was freed.
 	PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND PruneStorageReason = 5
+	// A daemon-written log file of a workspace nobody touched for five days,
+	// that no writer holds.
+	PruneStorageReason_PRUNE_STORAGE_REASON_UNTOUCHED_LOGS PruneStorageReason = 6
 )
 
 // Enum value maps for PruneStorageReason.
@@ -66,6 +70,7 @@ var (
 		3: "PRUNE_STORAGE_REASON_CLOSED_BACKUPS",
 		4: "PRUNE_STORAGE_REASON_AGED",
 		5: "PRUNE_STORAGE_REASON_OVER_BOUND",
+		6: "PRUNE_STORAGE_REASON_UNTOUCHED_LOGS",
 	}
 	PruneStorageReason_value = map[string]int32{
 		"PRUNE_STORAGE_REASON_UNSPECIFIED":    0,
@@ -74,6 +79,7 @@ var (
 		"PRUNE_STORAGE_REASON_CLOSED_BACKUPS": 3,
 		"PRUNE_STORAGE_REASON_AGED":           4,
 		"PRUNE_STORAGE_REASON_OVER_BOUND":     5,
+		"PRUNE_STORAGE_REASON_UNTOUCHED_LOGS": 6,
 	}
 )
 
@@ -122,6 +128,10 @@ const (
 	// A cache entry its directory keeps whatever its age (the open profiling
 	// session).
 	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY PruneStorageKeepReason = 6
+	// A workspace with log files that somebody touched inside five days.
+	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED PruneStorageKeepReason = 7
+	// A log file of an untouched workspace that a writer still holds.
+	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_HELD_LOGS PruneStorageKeepReason = 8
 )
 
 // Enum value maps for PruneStorageKeepReason.
@@ -134,6 +144,8 @@ var (
 		4: "PRUNE_STORAGE_KEEP_REASON_NO_BACKUPS",
 		5: "PRUNE_STORAGE_KEEP_REASON_YOUNG",
 		6: "PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY",
+		7: "PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED",
+		8: "PRUNE_STORAGE_KEEP_REASON_HELD_LOGS",
 	}
 	PruneStorageKeepReason_value = map[string]int32{
 		"PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED":       0,
@@ -143,6 +155,8 @@ var (
 		"PRUNE_STORAGE_KEEP_REASON_NO_BACKUPS":        4,
 		"PRUNE_STORAGE_KEEP_REASON_YOUNG":             5,
 		"PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY": 6,
+		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED":  7,
+		"PRUNE_STORAGE_KEEP_REASON_HELD_LOGS":         8,
 	}
 )
 
@@ -843,14 +857,15 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x1aPruneStorageAlreadyRunning\"\x1b\n" +
 	"\x19PruneStorageHeldElsewhere\",\n" +
 	"\x12PruneStorageFailed\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail*\xef\x01\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail*\x98\x02\n" +
 	"\x12PruneStorageReason\x12$\n" +
 	" PRUNE_STORAGE_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!PRUNE_STORAGE_REASON_NO_WORKSPACE\x10\x01\x12\x1f\n" +
 	"\x1bPRUNE_STORAGE_REASON_LANDED\x10\x02\x12'\n" +
 	"#PRUNE_STORAGE_REASON_CLOSED_BACKUPS\x10\x03\x12\x1d\n" +
 	"\x19PRUNE_STORAGE_REASON_AGED\x10\x04\x12#\n" +
-	"\x1fPRUNE_STORAGE_REASON_OVER_BOUND\x10\x05*\xcf\x02\n" +
+	"\x1fPRUNE_STORAGE_REASON_OVER_BOUND\x10\x05\x12'\n" +
+	"#PRUNE_STORAGE_REASON_UNTOUCHED_LOGS\x10\x06*\xa8\x03\n" +
 	"\x16PruneStorageKeepReason\x12)\n" +
 	"%PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED\x10\x00\x12,\n" +
 	"(PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE\x10\x01\x12-\n" +
@@ -858,7 +873,9 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	")PRUNE_STORAGE_KEEP_REASON_NOT_A_DIRECTORY\x10\x03\x12(\n" +
 	"$PRUNE_STORAGE_KEEP_REASON_NO_BACKUPS\x10\x04\x12#\n" +
 	"\x1fPRUNE_STORAGE_KEEP_REASON_YOUNG\x10\x05\x12/\n" +
-	"+PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY\x10\x06B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"+PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY\x10\x06\x12.\n" +
+	"*PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED\x10\a\x12'\n" +
+	"#PRUNE_STORAGE_KEEP_REASON_HELD_LOGS\x10\bB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_prune_storage_proto_rawDescOnce sync.Once

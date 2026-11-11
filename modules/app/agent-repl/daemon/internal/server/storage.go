@@ -77,6 +77,8 @@ func pruneStorageReason(r storagesweep.Reason) agentreplv1.PruneStorageReason {
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_AGED
 	case storagesweep.ReasonOverBound:
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND
+	case storagesweep.ReasonUntouchedLogs:
+		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_UNTOUCHED_LOGS
 	}
 	panic("server: a storage sweep deleted for a reason the contract does not draw: " + string(r))
 }
@@ -96,6 +98,10 @@ func pruneStorageKeepReason(r storagesweep.KeepReason) agentreplv1.PruneStorageK
 		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_YOUNG
 	case storagesweep.KeepKeptByDirectory:
 		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY
+	case storagesweep.KeepRecentlyTouched:
+		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED
+	case storagesweep.KeepHeldLogs:
+		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_HELD_LOGS
 	}
 	panic("server: a storage sweep kept an entry for a reason the contract does not draw: " + string(r))
 }

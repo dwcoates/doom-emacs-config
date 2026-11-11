@@ -3,9 +3,10 @@
 //
 // The sweep deletes agent-repl's own stored data once nothing will read it
 // again (daemon/internal/storagesweep): each workspace's shim state directory
-// (<state root>/shim/<key>), judged by the workspace's close record, and the
+// (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age. It
+// (profiling sessions, the test runner's reuse records), judged by age, and
+// the daemon-written logs of each workspace nobody touched for five days. It
 // also runs on its own once a day; this asks for one now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
@@ -23,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_prune_storage.proto.
  */
 export const file_agentrepl_v1_endpoint_prune_storage: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQi3wEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNEjQKCG1lYXN1cmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZU1lYXN1cmVkIk8KFFBydW5lU3RvcmFnZU1lYXN1cmVkEgwKBG5hbWUYASABKAkSCwoDZGlyGAIgASgJEg0KBWJ5dGVzGAMgASgEEg0KBWJvdW5kGAQgASgEImQKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEIlcKEFBydW5lU3RvcmFnZUtlcHQSNAoGcmVhc29uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUtlZXBSZWFzb24SDQoFY291bnQYAiABKA0i2AEKEVBydW5lU3RvcmFnZUVycm9yEkMKD2FscmVhZHlfcnVubmluZxgBIAEoCzIoLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZ0gAEkEKDmhlbGRfZWxzZXdoZXJlGAIgASgLMicuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUhlbGRFbHNld2hlcmVIABIyCgZmYWlsZWQYAyABKAsyIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRmFpbGVkSABCBwoFY2F1c2UiHAoaUHJ1bmVTdG9yYWdlQWxyZWFkeVJ1bm5pbmciGwoZUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZSIkChJQcnVuZVN0b3JhZ2VGYWlsZWQSDgoGZGV0YWlsGAEgASgJKu8BChJQcnVuZVN0b3JhZ2VSZWFzb24SJAogUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQUlVORV9TVE9SQUdFX1JFQVNPTl9OT19XT1JLU1BBQ0UQARIfChtQUlVORV9TVE9SQUdFX1JFQVNPTl9MQU5ERUQQAhInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9DTE9TRURfQkFDS1VQUxADEh0KGVBSVU5FX1NUT1JBR0VfUkVBU09OX0FHRUQQBBIjCh9QUlVORV9TVE9SQUdFX1JFQVNPTl9PVkVSX0JPVU5EEAUqzwIKFlBydW5lU3RvcmFnZUtlZXBSZWFzb24SKQolUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9VTlNQRUNJRklFRBAAEiwKKFBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fT1BFTl9XT1JLU1BBQ0UQARItCilQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1JFQ0VOVExZX0NMT1NFRBACEi0KKVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fTk9UX0FfRElSRUNUT1JZEAMSKAokUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9OT19CQUNLVVBTEAQSIwofUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9ZT1VORxAFEi8KK1BSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fS0VQVF9CWV9ESVJFQ1RPUlkQBkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQi3wEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNEjQKCG1lYXN1cmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZU1lYXN1cmVkIk8KFFBydW5lU3RvcmFnZU1lYXN1cmVkEgwKBG5hbWUYASABKAkSCwoDZGlyGAIgASgJEg0KBWJ5dGVzGAMgASgEEg0KBWJvdW5kGAQgASgEImQKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEIlcKEFBydW5lU3RvcmFnZUtlcHQSNAoGcmVhc29uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUtlZXBSZWFzb24SDQoFY291bnQYAiABKA0i2AEKEVBydW5lU3RvcmFnZUVycm9yEkMKD2FscmVhZHlfcnVubmluZxgBIAEoCzIoLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZ0gAEkEKDmhlbGRfZWxzZXdoZXJlGAIgASgLMicuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUhlbGRFbHNld2hlcmVIABIyCgZmYWlsZWQYAyABKAsyIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRmFpbGVkSABCBwoFY2F1c2UiHAoaUHJ1bmVTdG9yYWdlQWxyZWFkeVJ1bm5pbmciGwoZUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZSIkChJQcnVuZVN0b3JhZ2VGYWlsZWQSDgoGZGV0YWlsGAEgASgJKpgCChJQcnVuZVN0b3JhZ2VSZWFzb24SJAogUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQUlVORV9TVE9SQUdFX1JFQVNPTl9OT19XT1JLU1BBQ0UQARIfChtQUlVORV9TVE9SQUdFX1JFQVNPTl9MQU5ERUQQAhInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9DTE9TRURfQkFDS1VQUxADEh0KGVBSVU5FX1NUT1JBR0VfUkVBU09OX0FHRUQQBBIjCh9QUlVORV9TVE9SQUdFX1JFQVNPTl9PVkVSX0JPVU5EEAUSJwojUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5UT1VDSEVEX0xPR1MQBiqoAwoWUHJ1bmVTdG9yYWdlS2VlcFJlYXNvbhIpCiVQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1VOU1BFQ0lGSUVEEAASLAooUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9PUEVOX1dPUktTUEFDRRABEi0KKVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fUkVDRU5UTFlfQ0xPU0VEEAISLQopUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9OT1RfQV9ESVJFQ1RPUlkQAxIoCiRQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX05PX0JBQ0tVUFMQBBIjCh9QUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1lPVU5HEAUSLworUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9LRVBUX0JZX0RJUkVDVE9SWRAGEi4KKlBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fUkVDRU5UTFlfVE9VQ0hFRBAHEicKI1BSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fSEVMRF9MT0dTEAhCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
 
 /**
  * @generated from message agentrepl.v1.PruneStorageRequest
@@ -354,7 +355,7 @@ export enum PruneStorageReason {
   LANDED = 2,
 
   /**
-   * A shim state directory whose every workspace closed more than thirty
+   * A shim state directory whose every workspace closed more than five
    * days ago, one by something other than its merge: only its transcript
    * backups, so a reopened workspace keeps its identity.
    *
@@ -363,7 +364,7 @@ export enum PruneStorageReason {
   CLOSED_BACKUPS = 3,
 
   /**
-   * A cache directory's entry older than thirty days.
+   * A cache directory's entry older than five days.
    *
    * @generated from enum value: PRUNE_STORAGE_REASON_AGED = 4;
    */
@@ -377,6 +378,14 @@ export enum PruneStorageReason {
    * @generated from enum value: PRUNE_STORAGE_REASON_OVER_BOUND = 5;
    */
   OVER_BOUND = 5,
+
+  /**
+   * A daemon-written log file of a workspace nobody touched for five days,
+   * that no writer holds.
+   *
+   * @generated from enum value: PRUNE_STORAGE_REASON_UNTOUCHED_LOGS = 6;
+   */
+  UNTOUCHED_LOGS = 6,
 }
 
 /**
@@ -438,6 +447,20 @@ export enum PruneStorageKeepReason {
    * @generated from enum value: PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY = 6;
    */
   KEPT_BY_DIRECTORY = 6,
+
+  /**
+   * A workspace with log files that somebody touched inside five days.
+   *
+   * @generated from enum value: PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED = 7;
+   */
+  RECENTLY_TOUCHED = 7,
+
+  /**
+   * A log file of an untouched workspace that a writer still holds.
+   *
+   * @generated from enum value: PRUNE_STORAGE_KEEP_REASON_HELD_LOGS = 8;
+   */
+  HELD_LOGS = 8,
 }
 
 /**

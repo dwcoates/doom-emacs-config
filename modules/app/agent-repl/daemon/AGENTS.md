@@ -2892,7 +2892,7 @@ deadline any row allows and no more than the least any allows:
 
 - closed by its own merge (`Closure.By == merge`): the whole directory, 3
   days after the close (`landed`);
-- closed any other way: only `backups/`, 30 days after the close, so a
+- closed any other way: only `backups/`, 5 days after the close, so a
   reopened workspace resumes as itself (`closed_backups`);
 - closed with no close record: as the line above, counted from the
   directory's newest write.
@@ -2903,11 +2903,34 @@ no shim state that sweep (ERROR).
 **Aged caches.** `~/.cache/agent-repl/profiles` (`AGENT_REPL_PROFILE_ROOT`,
 keeping `active`, `armed` and the session `active` names) and
 `~/.cache/agent-repl/test-passes` (`AGENT_REPL_TEST_PASSES`): an entry whose
-own modification time is over 30 days old is deleted (`aged`).
+own modification time is over 5 days old is deleted (`aged`).
 
-Worktrees are the reaper's (below) and logs their writers' own retention's;
-the sweep touches neither. Every deletion is INFO with its path, reason and
-bytes; every failure is ERROR and the sweep goes on.
+**Logs of untouched workspaces** (`logs.go`). The writers' retention removes
+a log file 3 days after its LAST WRITE, and the daemon keeps writing a few
+records an hour into the log of a workspace nobody uses, so that rule never
+reaches such a file. The sweep reads the workspace's own record instead: a
+workspace whose newest stamp (`wsm.Workspace.LastTouched`: created, last
+activity, last selection, merge, close) is over 5 days old loses every
+daemon-written log file it has under `<state root>/logs`
+(`agent-repl-<id>-(daemon|shim|webapp|sidecar)-*.log` and their generations),
+open or closed (`untouched_logs`). The removal is `dlog.Surfaces.DiscardWorkspace`:
+under the mutex every sink open holds it releases the daemon's own
+descriptors, removes each family nobody else holds
+(`logging.RemoveFamilies`, the exclusive-flock proof `PruneDirectory` uses;
+a family a shim still holds is kept, `held_logs`), and removes each canonical
+link `<workspace>/.claude/emacs/<runtime>.log` that named a removed file, so
+the log reader sees a runtime that never wrote, never a lost log
+(`bin/logs-reader.go` `linkAgedOut`). The workspace's next record opens a
+fresh target and link. Emacs's own per-workspace files
+(`agent-repl-<id>-emacs-*.log`) are NOT touched: Emacs opens them per write
+and holds no lock, so nothing can prove them unheld, and Emacs ages them
+itself. A log of a workspace the registry does not know is left to the
+writers' retention.
+
+Worktrees are the reaper's (below), and every other log is its writer's own
+retention's; the sweep touches neither. Every deletion is INFO with its path
+(or, for logs, its workspace, file count and links), reason and bytes; every
+failure is ERROR and the sweep goes on.
 
 ## The landed-worktree reaper (`internal/worktreereap`)
 
