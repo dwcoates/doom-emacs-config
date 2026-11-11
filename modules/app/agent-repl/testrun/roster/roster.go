@@ -496,17 +496,17 @@ var daemonPackageReuse = &PackageReuse{Inputs: map[string][]string{
 	"internal/runtimemetrics":  {"proto/vocab/"},
 	"internal/sessionwatcher":  {"proto/vocab/"},
 	"internal/vocab":           {"daemon/", "proto/vocab/"},
-	// The agent CLI's tests check every command a skill names, and that each
-	// API skill links the front door.
-	"cmd/agent-repld": {"skills/", "bin/agent-repld"},
+	// The agent CLI's tests check every command a skill or a daemon brief
+	// names, and that each API skill links the front door.
+	"cmd/agent-repld": {"skills/", "prompts/", "bin/agent-repld"},
 	// gitclient pins the markers the merge queue's hook spells.
 	"internal/gitclient": {"/.githooks/reference-transaction"},
 	// lifecycleconfig pins the repository's own lifecycle config to the
 	// pipeline its queue runs, and to the scripts it names.
 	"internal/lifecycleconfig": {"daemon/", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},
 	// The harness's deploy configuration reads the briefs and the landing
-	// script.
-	"integration/harness": {"prompts/", "bin/deploy-landing.sh"},
+	// script, and its scans read the integration suite's own sources.
+	"integration/harness": {"prompts/", "bin/deploy-landing.sh", "daemon/integration/"},
 	// prose holds the daemon's parse to the old webapp parser's golden
 	// answers, and to the webapp's parsed-prose fixture.
 	"internal/prose": {"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/"},
