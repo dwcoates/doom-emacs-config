@@ -2,40 +2,52 @@ package wsm
 
 import (
 	"context"
-	"slices"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestMergeSlotsOf(t *testing.T) {
+	type row struct {
+		state MergeQueueState
+		aside MergeAside
+	}
+	queued, admitted, requested := row{state: MergeQueued}, row{state: MergeAdmitted}, row{state: MergeRequested}
+	tests := row{state: MergeRemediating, aside: MergeAsideTests}
+	conflicts := row{state: MergeRemediating, aside: MergeAsideConflicts}
+	waitingConflicts := row{state: MergeRemediating, aside: MergeAsideWaitingConflicts}
 	cases := []struct {
-		name   string
-		states []MergeQueueState
-		// returned names the rows marked returned (MergeQueueEntry.Returned).
-		returned []int
-		want     []MergeSlot
+		name string
+		rows []row
+		want []MergeSlot
 	}{
-		{name: "an empty queue holds no slot", states: nil, want: []MergeSlot{}},
-		{name: "the first merge in line heads it while it waits", states: []MergeQueueState{MergeQueued, MergeQueued}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting}},
-		{name: "an admitted front heads its line", states: []MergeQueueState{MergeAdmitted}, want: []MergeSlot{MergeSlotHead}},
-		{name: "an admitted merge behind the head races", states: []MergeQueueState{MergeAdmitted, MergeAdmitted, MergeQueued}, want: []MergeSlot{MergeSlotHead, MergeSlotRacing, MergeSlotWaiting}},
-		{name: "a requested merge holds no slot and never heads", states: []MergeQueueState{MergeRequested, MergeQueued}, want: []MergeSlot{MergeSlotNone, MergeSlotHead}},
-		{name: "an admitted merge back from a repair waits behind the head", states: []MergeQueueState{MergeAdmitted, MergeAdmitted, MergeQueued}, returned: []int{1}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting, MergeSlotWaiting}},
-		{name: "an admitted merge back from a repair heads a line it stands first in", states: []MergeQueueState{MergeAdmitted, MergeQueued}, returned: []int{0}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting}},
-		{name: "a remediating merge remediates and never heads", states: []MergeQueueState{MergeRemediating, MergeAdmitted}, want: []MergeSlot{MergeSlotRemediating, MergeSlotHead}},
+		{name: "an empty queue holds no slot", rows: nil, want: []MergeSlot{}},
+		{name: "the first merge in line heads it while it waits", rows: []row{queued, queued}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting}},
+		{name: "an admitted front heads its line", rows: []row{admitted}, want: []MergeSlot{MergeSlotHead}},
+		{name: "an admitted merge behind the head waits", rows: []row{admitted, admitted, queued}, want: []MergeSlot{MergeSlotHead, MergeSlotWaiting, MergeSlotWaiting}},
+		{name: "a requested merge holds no slot and never heads", rows: []row{requested, queued}, want: []MergeSlot{MergeSlotNone, MergeSlotHead}},
+		{name: "a merge fixing its tests holds the fixing slot and never heads", rows: []row{tests, admitted}, want: []MergeSlot{MergeSlotFixingTests, MergeSlotHead}},
+		{name: "a merge resolving conflicts holds the resolving slot", rows: []row{admitted, conflicts}, want: []MergeSlot{MergeSlotHead, MergeSlotResolvingConflicts}},
+		{name: "a waiting merge's conflict holds the resolving slot", rows: []row{admitted, waitingConflicts}, want: []MergeSlot{MergeSlotHead, MergeSlotResolvingConflicts}},
+		{name: "a second merge fixing tests awaits the slot the first holds", rows: []row{admitted, tests, tests}, want: []MergeSlot{MergeSlotHead, MergeSlotFixingTests, MergeSlotAwaitingFixingTests}},
+		{name: "a conflict of either origin awaits the resolving slot another holds", rows: []row{conflicts, waitingConflicts, conflicts}, want: []MergeSlot{MergeSlotResolvingConflicts, MergeSlotAwaitingResolvingConflicts, MergeSlotAwaitingResolvingConflicts}},
+		{name: "the two repair slots are held at once", rows: []row{queued, tests, conflicts, queued}, want: []MergeSlot{MergeSlotHead, MergeSlotFixingTests, MergeSlotResolvingConflicts, MergeSlotWaiting}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			rows := make([]slotRow, len(tc.states))
-			for i, state := range tc.states {
-				rows[i] = slotRow{state: state, returned: slices.Contains(tc.returned, i)}
+			rows := make([]slotRow, len(tc.rows))
+			for i, r := range tc.rows {
+				rows[i] = slotRow{state: r.state, aside: r.aside}
 			}
 
 			// Act
-			got := mergeSlotsOf(rows)
+			got, err := mergeSlotsOf(rows)
 
 			// Assert
+			if err != nil {
+				t.Fatalf("mergeSlotsOf: %v", err)
+			}
 			if len(got) != len(tc.want) {
 				t.Fatalf("mergeSlotsOf = %v, want %v", got, tc.want)
 			}
@@ -45,6 +57,19 @@ func TestMergeSlotsOf(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMergeSlotsOfRefusesARemediatingEntryWithNoRepair(t *testing.T) {
+	// Arrange
+	rows := []slotRow{{workspace: "w1", state: MergeRemediating, aside: MergeAsideNone}}
+
+	// Act
+	_, err := mergeSlotsOf(rows)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "names no repair slot") || !strings.Contains(err.Error(), "w1") {
+		t.Fatalf("mergeSlotsOf = %v, want the remediating entry with no repair refused by name", err)
 	}
 }
 
@@ -125,7 +150,10 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 	admit := func(ws func(*slotQueue) WorkspaceID) func(*slotQueue, context.Context) error {
 		return func(q *slotQueue, ctx context.Context) error { return q.s.AdmitMerge(ctx, q.repo, ws(q)) }
 	}
-	stepAside := func(q *slotQueue, ctx context.Context) error { return q.s.StepAsideMerge(ctx, q.repo, q.a) }
+	stepAside := func(q *slotQueue, ctx context.Context) error {
+		_, err := q.s.StepAsideMerge(ctx, q.repo, q.a, MergeAsideTests)
+		return err
+	}
 	cases := []struct {
 		name  string
 		steps []step
@@ -142,14 +170,14 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			want:  check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return instant.Add(time.Minute) }},
 		},
 		{
-			name:  "a merge admitted behind the head takes a racing slot as it is admitted",
+			name:  "a merge admitted behind the head keeps waiting",
 			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)}},
-			want:  check{ws: b, slot: MergeSlotRacing, at: func(m map[string]time.Time) time.Time { return m["admit b"] }},
+			want:  check{ws: b, slot: MergeSlotWaiting, at: func(m map[string]time.Time) time.Time { return instant.Add(2 * time.Minute) }},
 		},
 		{
-			name:  "a head stepping aside takes the remediating slot as it steps aside",
+			name:  "a head stepping aside takes the fixing slot as it steps aside",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}},
-			want:  check{ws: a, slot: MergeSlotRemediating, at: func(m map[string]time.Time) time.Time { return m["step aside"] }},
+			want:  check{ws: a, slot: MergeSlotFixingTests, at: func(m map[string]time.Time) time.Time { return m["step aside"] }},
 		},
 		{
 			name:  "the merge behind a head stepping aside takes the head as it steps aside",
@@ -157,19 +185,10 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			want:  check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["step aside"] }},
 		},
 		{
-			// A RETURNED MERGE IS NOT WORKED ON until it is taken up: it waits
-			// behind the head, admitted, with nothing of it running.
 			name: "a remediated merge returning behind the worked-on head waits from its return",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
 				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
 			want: check{ws: a, slot: MergeSlotWaiting, at: func(m map[string]time.Time) time.Time { return m["return"] }},
-		},
-		{
-			name: "a returned merge taken up behind the head races from its take-up",
-			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
-				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }},
-				{"take up", func(q *slotQueue, ctx context.Context) error { return q.s.TakeUpReturnedMerge(ctx, q.repo, q.a) }}},
-			want: check{ws: a, slot: MergeSlotRacing, at: func(m map[string]time.Time) time.Time { return m["take up"] }},
 		},
 		{
 			name: "a returned merge takes the head again as the head ahead of it lands",
@@ -201,24 +220,12 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
 		},
 		{
-			name: "a racing successor takes the head as the head lands",
+			name: "an admitted successor takes the head as the head lands",
 			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)},
 				{"a lands", func(q *slotQueue, ctx context.Context) error {
 					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil)
 				}}},
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
-		},
-		{
-			name: "a race's winner takes the head as it overtakes",
-			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)},
-				{"yield", func(q *slotQueue, ctx context.Context) error { return q.s.YieldMergeHead(ctx, q.repo, q.a, q.b) }}},
-			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["yield"] }},
-		},
-		{
-			name: "a race's loser races from the moment it is overtaken",
-			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)},
-				{"yield", func(q *slotQueue, ctx context.Context) error { return q.s.YieldMergeHead(ctx, q.repo, q.a, q.b) }}},
-			want: check{ws: a, slot: MergeSlotRacing, at: func(m map[string]time.Time) time.Time { return m["yield"] }},
 		},
 		{
 			name: "a head a restart returns to its place keeps its head moment",
@@ -279,11 +286,15 @@ func TestForgettingTheHeadsWorkspaceHandsTheHeadOnAsItIsForgotten(t *testing.T) 
 }
 
 func TestAHandoverReadsTheSlotMomentUnchanged(t *testing.T) {
-	// Arrange: a queue on a file, its head admitted and a merge racing.
+	// Arrange: a queue on a file, its head admitted and stepped aside, so the
+	// merge behind it heads the line.
 	s, _ := fileStore(t)
 	q := newSlotQueue(t, s)
 	q.step(t, "admit a", func(ctx context.Context) error { return s.AdmitMerge(ctx, q.repo, q.a) })
-	raced := q.step(t, "admit b", func(ctx context.Context) error { return s.AdmitMerge(ctx, q.repo, q.b) })
+	raced := q.step(t, "step aside", func(ctx context.Context) error {
+		_, err := s.StepAsideMerge(ctx, q.repo, q.a, MergeAsideTests)
+		return err
+	})
 
 	// Act: a new daemon opens the same file.
 	reopened, err := Open(context.Background(), s.path, WithUnsyncedWrites())
@@ -297,31 +308,81 @@ func TestAHandoverReadsTheSlotMomentUnchanged(t *testing.T) {
 	}
 
 	// Assert
-	if len(entries) != 3 || !entries[0].SlotSince.Equal(instant.Add(time.Minute)) || !entries[1].SlotSince.Equal(raced) {
-		t.Fatalf("entries = %+v, want the head since %v and the racing merge since %v", entries, instant.Add(time.Minute), raced)
+	if len(entries) != 3 || entries[0].Workspace != q.b || !entries[0].SlotSince.Equal(raced) || entries[2].Workspace != q.a || !entries[2].SlotSince.Equal(raced) {
+		t.Fatalf("entries = %+v, want the new head and the merge fixing its tests both since %v", entries, raced)
 	}
 }
 
-func TestTheSlotBackfillGivesEveryRowItsSlotAtTheMomentItRuns(t *testing.T) {
-	// Arrange: a queue whose rows carry no slot, as an earlier build left them.
-	s, _ := testStore(t)
-	q := newSlotQueue(t, s)
-	q.step(t, "admit a", func(ctx context.Context) error { return s.AdmitMerge(ctx, q.repo, q.a) })
-	q.step(t, "admit b", func(ctx context.Context) error { return s.AdmitMerge(ctx, q.repo, q.b) })
-	corrupt(t, s, `UPDATE merge_queue SET slot = 0, slot_since = 0`)
-	before := time.Now().Add(-time.Second)
+func TestTheThreeSlotMigrationRestampsEveryQueue(t *testing.T) {
+	// Arrange -- a layout-122 file as the racing build left it: a head, a
+	// merge racing behind it (slot 3), one waiting, and three remediating
+	// merges, two fixing tests and one resolving conflicts, each with the
+	// progress record that names its repair; the racing switch disabled.
+	path := fixtureAt(t, 122)
+	execRaw(t, path, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, slot) VALUES
+	 ('/repo', 'head', 1, 1, 1, 0, 2), ('/repo', 'racer', 2, 1, 1, 0, 3), ('/repo', 'waits', 3, 0, 1, 0, 1),
+	 ('/repo', 'fix-1', 4, 3, 1, 0, 4), ('/repo', 'fix-2', 5, 3, 1, 0, 4), ('/repo', 'resolve', 6, 3, 1, 0, 4)`)
+	execRaw(t, path, `INSERT INTO merge_progress (workspace_id, lease_id, updated_at, document) VALUES
+	 ('fix-1', 'l1', 1, '{"step":"fixes"}'), ('fix-2', 'l2', 1, '{"step":"fixes"}'), ('resolve', 'l3', 1, '{"step":"conflicts"}')`)
+	execRaw(t, path, `INSERT INTO merge_racing_disabled (id, disabled_at) VALUES (1, 5)`)
 
 	// Act
-	corrupt(t, s, mergeQueueSlotBackfillDDL)
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-122 database: %v", err)
+	}
+	defer handle.Close()
+	s := handle.(*store)
 
 	// Assert
-	after := time.Now().Add(time.Second)
-	want := map[WorkspaceID]MergeSlot{q.a: MergeSlotHead, q.b: MergeSlotRacing, q.c: MergeSlotWaiting}
-	for ws, slot := range want {
-		got := q.entry(t, ws)
-		if got.Slot != slot || got.SlotSince.Before(before) || got.SlotSince.After(after) {
-			t.Fatalf("%s = %s since %v, want %s since the backfill's moment (%v..%v)", ws, got.Slot, got.SlotSince, slot, before, after)
+	want := []struct {
+		ws    string
+		slot  MergeSlot
+		aside MergeAside
+	}{
+		{"head", MergeSlotHead, MergeAsideNone},
+		{"racer", MergeSlotWaiting, MergeAsideNone},
+		{"waits", MergeSlotWaiting, MergeAsideNone},
+		{"fix-1", MergeSlotFixingTests, MergeAsideTests},
+		{"fix-2", MergeSlotAwaitingFixingTests, MergeAsideTests},
+		{"resolve", MergeSlotResolvingConflicts, MergeAsideConflicts},
+	}
+	for _, w := range want {
+		slot := scalar[int](t, s, `SELECT slot FROM merge_queue WHERE workspace_id = ?`, w.ws)
+		aside := scalar[int](t, s, `SELECT aside FROM merge_queue WHERE workspace_id = ?`, w.ws)
+		if MergeSlot(slot) != w.slot || MergeAside(aside) != w.aside {
+			t.Errorf("%s = slot %s aside %s, want slot %s aside %s", w.ws, MergeSlot(slot), MergeAside(aside), w.slot, w.aside)
 		}
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE name = 'merge_racing_disabled'`); n != 0 {
+		t.Fatalf("merge_racing_disabled survived the migration (%d), want it dropped", n)
+	}
+}
+
+func TestTheStoreRefusesASecondHolderOfAnActiveSlot(t *testing.T) {
+	cases := []struct {
+		name string
+		slot MergeSlot
+	}{
+		{name: "a second head", slot: MergeSlotHead},
+		{name: "a second merge fixing tests", slot: MergeSlotFixingTests},
+		{name: "a second merge resolving conflicts", slot: MergeSlotResolvingConflicts},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			q := newSlotQueue(t, s)
+			corrupt(t, s, `UPDATE merge_queue SET slot = ? WHERE workspace_id = ?`, int(tc.slot), q.a)
+
+			// Act
+			_, err := s.db().ExecContext(context.Background(), `UPDATE merge_queue SET slot = ? WHERE workspace_id = ?`, int(tc.slot), q.b)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "UNIQUE") {
+				t.Fatalf("recording a second %s holder = %v, want the one-holder index's refusal", tc.slot, err)
+			}
+		})
 	}
 }
 
@@ -337,5 +398,30 @@ func TestAnUndeclaredSlotRefusesTheQueuesRead(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("MergeQueue over an undeclared slot = nil, want a decode refusal")
+	}
+}
+
+func TestSlotsOfDerivesWhatTheStoreStamps(t *testing.T) {
+	// Arrange: a queue the store stamped, its head stepped aside for tests
+	// and a second for conflicts, read back.
+	q, _ := newAsideQueue(t, 3)
+	q.asideFromHead(t, q.ws[0], MergeAsideTests)
+	q.asideFromHead(t, q.ws[1], MergeAsideConflicts)
+	entries, err := q.s.MergeQueue(context.Background(), q.repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+
+	// Act
+	got, err := SlotsOf(entries)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SlotsOf: %v", err)
+	}
+	for i, entry := range entries {
+		if got[i] != entry.Slot {
+			t.Fatalf("SlotsOf = %v, want the stamped slot %s for %s", got, entry.Slot, entry.Workspace)
+		}
 	}
 }

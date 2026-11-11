@@ -8,52 +8,64 @@ import (
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
-// This file is the STEP ASIDE (owner rulings, 2026-10-31 and 2026-11-03): a
-// merge at the head of its queue whose next step waits on an agent turn of
-// its own -- fixing the failures its WHOLE test suite finished with, or
-// resolving the conflicts its rebase met -- gives up the head at once and
-// repairs OUT OF LINE, so the next merge in line takes the head and runs
-// while it does. Both reasons (AsideReason) take the ONE path below; nothing
-// else steps a merge aside.
+// This file is the STEP ASIDE and the queue's two REPAIR SLOTS (owner
+// rulings, 2026-10-31, 2026-11-03 and 2026-11-11): a merge at the head of its
+// queue whose next step waits on an agent turn of its own -- fixing the
+// failures its WHOLE test suite finished with, or resolving the conflicts its
+// rebase met -- gives up the head at once and repairs OUT OF LINE, so the next
+// merge in line takes the head and runs while it does. At most ONE merge of a
+// queue fixes tests out of line and at most ONE resolves conflicts out of
+// line; with the head, a queue has at most three active merges.
 //
 //   - THE TRIGGERS are the end of the whole suite with a failure (the gate's
 //     verdict, read once every unit ran, never its first failing unit), and a
 //     replayed commit that conflicts. A merge with nobody in line behind it
-//     has nobody to yield to, and repairs in place (stepsAside).
-//   - WHO STEPS ASIDE: the head, for either reason; and, for a conflict, a
-//     member racing behind the head (chain.go), so the next merge in line
-//     takes its place in the race while its conflicts are resolved.
-//   - STEPPING ASIDE: the repairing prompt is delivered first (the queue's
-//     hand-off is whole, so the turn lives on in the session), then the
-//     entry leaves the line (wsm.StepAsideMerge, MergeRemediating) BEFORE the
-//     run leaves its chain (leaveLine), and the run is cut, on its own
-//     goroutine, before it waits for the repairing turn (stepAside), keeping
-//     its lease and its progress record, and taken back (AdoptWorkspace) as a
-//     merge remediating once it let go.
-//   - RETURNING: once the repairing turn ends, the merge goes back in line at
-//     the FIRST WAITING PLACE -- ahead of every merge waiting, behind every
-//     merge being worked on, which it never evicts (wsm.ReturnRemediatedMerge)
-//     -- admitted, so it resumes from its record once it heads the queue: it
-//     reads the turn's end, rebases onto the target's tip and runs its whole
-//     suite again. After a test step aside that suite run is the one fixing
-//     attempt; a conflict step aside spends no fixing attempt (the conflict
-//     came from what landed ahead of it), and a rebase onto the new tip that
-//     conflicts again steps aside again, since every step aside lets another
-//     merge land.
-//   - THE REASON IS THE RECORD'S: the progress record names the step whose
-//     turn the merge waits on (asideReasonOf), so what the status and the
-//     sidebar say a merge repairs survives a restart with nothing else stored.
-//   - A RESTART KEEPS ALL OF IT: the entry's state is durable, and the boot's
-//     take-back of a remediating entry re-arms the wait on its repairing turn
-//     (recoverEntry).
+//     has nobody to yield to, and repairs in place, holding the head
+//     (stepsAside).
+//   - THE SLOTS ARE THE STORE'S (wsm.MergeSlot): the step aside's one write
+//     (wsm.StepAsideMerge) takes the repair's slot when nobody holds it, or
+//     a place awaiting it behind every merge that stepped aside for that
+//     repair before, and answers which. A release -- a return to the line, a
+//     drop -- grants the slot to the next merge awaiting it IN THE SAME
+//     WRITE, and the grant is acted on here (armRepairs) by reading the
+//     queue that write left: never a retry or a timer. The store refuses a
+//     second holder outright (its one-holder index), and the arming refuses
+//     one it would start, loudly (armRepairs).
+//   - STEPPING ASIDE: the repairing brief and its turn are RECORDED, never
+//     submitted by the run (handOff); the entry leaves the line BEFORE the
+//     run leaves its chain (leaveLine), and the run is cut and taken back
+//     (AdoptWorkspace) as a merge remediating once it let go, keeping its
+//     lease and its progress record. The holder of a repair slot has its
+//     brief delivered by the slot's wait (waitThenReturn, through
+//     reattachTurn: a turn already delivered is followed, one never delivered
+//     is submitted under its recorded id); a merge awaiting the slot has
+//     nothing delivered until it is granted.
+//   - A WAITING MERGE'S BACKGROUND REBASE RUNS GIT ONLY (rebasewaiting.go): a
+//     conflict it meets aborts the rebase and steps the merge aside for the
+//     resolving-conflicts slot (wsm.MergeAsideWaitingConflicts), with no
+//     lease and no record, and the slot's holder runs its resolving rebase
+//     (startResolving).
+//   - RETURNING: once the repair ends, the merge goes back in line at the
+//     FIRST WAITING PLACE -- ahead of every merge waiting, behind every merge
+//     being worked on, which it never evicts (wsm.ReturnRemediatedMerge) --
+//     and its bubble's repairing tab is settled at once (drawBackInLine), so
+//     no strip reads "fixing tests" or "resolving conflicts" for a merge
+//     back in line. A merge that stepped aside from the head returns
+//     admitted and resumes from its record once it heads the queue: it reads
+//     the turn's end, rebases onto the target's tip and runs its whole suite
+//     again. After a test step aside that suite run is the one fixing
+//     attempt; a conflict step aside spends no fixing attempt.
+//   - A RESTART KEEPS ALL OF IT: the entry's state, aside and slot are
+//     durable, and the boot's take-back of a remediating entry re-arms its
+//     slot's wait when it holds the slot (recoverRemediating).
 
 // AsideReason is why a merge stepped aside out of line: the step whose agent
 // turn it repairs in.
@@ -90,10 +102,51 @@ func (why AsideReason) suspension() suspension {
 	panic(fmt.Sprintf("merge: AsideReason(%d) names no reason", int(why)))
 }
 
-// racing reports whether a member racing behind the head steps aside for WHY
-// too: a conflict does (owner ruling, 2026-11-03), failing tests behind the
-// head are fixed where they stand.
-func (why AsideReason) racing() bool { return why == AsideForConflicts }
+// aside is the reason as the store records it on the entry.
+func (why AsideReason) aside() wsm.MergeAside {
+	switch why {
+	case AsideForTests:
+		return wsm.MergeAsideTests
+	case AsideForConflicts:
+		return wsm.MergeAsideConflicts
+	}
+	panic(fmt.Sprintf("merge: AsideReason(%d) names no reason", int(why)))
+}
+
+// origin is the origin of the repairing prompt the reason hands the session.
+func (why AsideReason) origin() conversationv1.PromptOrigin {
+	switch why {
+	case AsideForTests:
+		return fixOrigin
+	case AsideForConflicts:
+		return conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR
+	}
+	panic(fmt.Sprintf("merge: AsideReason(%d) names no reason", int(why)))
+}
+
+// step is the step whose record the repair waits at.
+func (why AsideReason) step() string {
+	switch why {
+	case AsideForTests:
+		return TabFixes
+	case AsideForConflicts:
+		return TabConflicts
+	}
+	panic(fmt.Sprintf("merge: AsideReason(%d) names no reason", int(why)))
+}
+
+// asideReasonFromStore answers the reason a remediating entry that stepped
+// aside from the head records in the store, and an error for any other
+// aside: a waiting merge's conflict has no record to resume from.
+func asideReasonFromStore(aside wsm.MergeAside) (AsideReason, error) {
+	switch aside {
+	case wsm.MergeAsideTests:
+		return AsideForTests, nil
+	case wsm.MergeAsideConflicts:
+		return AsideForConflicts, nil
+	}
+	return 0, fmt.Errorf("merge: the aside %s is no step aside from the head", aside)
+}
 
 // asideReasonOf answers why the remediating merge DOC records stepped aside:
 // the step whose turn its record waits on. A record at any other step is no
@@ -106,38 +159,6 @@ func asideReasonOf(doc progressDoc) (AsideReason, error) {
 		return AsideForConflicts, nil
 	}
 	return 0, fmt.Errorf("merge: a remediating merge's record stands at the %q step, which waits on no repairing turn", doc.Step)
-}
-
-// asideReasonFor answers why WS's merge, remediating out of line, stepped
-// aside, read off its durable progress record (asideReasonOf) through DB. A
-// remediating merge with no record, or one that will not decode, is a defect
-// and is answered as an error for the caller to record.
-func asideReasonFor(ctx context.Context, db wsm.DB, ws ids.WorkspaceID) (AsideReason, error) {
-	stored, found, err := db.MergeProgressOf(ctx, ws)
-	if err != nil {
-		return 0, fmt.Errorf("merge: reading the progress record of the remediating merge of %q: %w", ws, err)
-	}
-	if !found {
-		return 0, fmt.Errorf("merge: the remediating merge of %q has no progress record", ws)
-	}
-	doc, err := decodeProgress(stored)
-	if err != nil {
-		return 0, fmt.Errorf("merge: decoding the progress record of the remediating merge of %q: %w", ws, err)
-	}
-	return asideReasonOf(doc)
-}
-
-// roster is the reason as the sidebar's remediating card draws it.
-func (why AsideReason) roster() *frontendv1.RosterMergeQueueRemediatingReason {
-	switch why {
-	case AsideForTests:
-		return &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Tests{
-			Tests: &frontendv1.RosterMergeQueueRemediatingTests{}}}
-	case AsideForConflicts:
-		return &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Conflicts{
-			Conflicts: &frontendv1.RosterMergeQueueRemediatingConflicts{}}}
-	}
-	panic(fmt.Sprintf("merge: AsideReason(%d) names no reason", int(why)))
 }
 
 // errAsideForTests and errAsideForConflicts are the causes a merge that
@@ -164,34 +185,65 @@ var (
 // opRemediate is the step aside's record operation.
 const opRemediate = "daemon.merge.remediate"
 
-// remediation is one merge remediating out of line: its queue, and the cancel
-// of the wait on its repairing turn.
+// remediation is one merge remediating out of line in this daemon: its queue,
+// its record (none for a waiting merge's conflict), and, once its slot's wait
+// is armed, that wait's cancel. ARMED is set under o.mu by the one arming
+// (armRepairs), so no slot's wait is ever armed twice.
 type remediation struct {
-	repo   wsm.RepoKey
-	cancel context.CancelFunc
+	repo wsm.RepoKey
+	// doc is the record a merge that stepped aside from the head waits at;
+	// waiting marks a waiting merge's conflict, which has none.
+	doc     progressDoc
+	waiting bool
+	armed   bool
+	cancel  context.CancelFunc
 }
 
-// asideOn answers what the prompt of R's step that waits on an agent turn for
-// WHY calls once it is handed off: R's step aside, when R steps aside
-// (stepsAside), and nil when it repairs where it stands. It is the ONE way a
-// step reaches stepAside.
-func (r *run) asideOn(ctx context.Context, why AsideReason) func() {
-	if !r.o.stepsAside(ctx, r, why) {
-		return nil
+// handOff hands the repairing brief TEXT for WHY to R's session as TURN, and
+// answers how that turn ended. RECORD writes the step's own facts into the
+// record before anything is handed on, so a restart reattaches to TURN.
+//
+// A MERGE THAT STEPS ASIDE HANDS NOTHING ON (stepsAside): the brief is
+// recorded with its turn, the merge steps aside for its repair slot
+// (stepAside), and the slot's wait delivers the brief once the merge holds
+// the slot. The run answers the step aside's cut, and is taken back as a
+// merge remediating. A step aside that could not be made is recorded at
+// ERROR, and the merge repairs where it stands.
+func (r *run) handOff(ctx context.Context, why AsideReason, turn ids.TurnID, text string, record func(*progressDoc)) (wsm.TurnClose, error) {
+	if r.o.stepsAside(ctx, r, why) {
+		if err := r.checkpoint(ctx, why.step(), func(d *progressDoc) {
+			record(d)
+			d.Brief = text
+		}); err != nil {
+			return wsm.CloseFailed, err
+		}
+		if stepped, cause := r.o.stepAside(ctx, r, why); stepped {
+			return wsm.CloseFailed, cause
+		}
 	}
-	return func() { r.o.stepAside(r, why) }
+	return r.handOffInPlace(ctx, why, turn, text, record)
 }
 
-// stepsAside reports whether R steps aside for WHY: it heads its queue, or --
-// for a reason a racing member steps aside for -- races behind the head, and
+// handOffInPlace is handOff for a merge that repairs where it stands: the
+// record is written, and the brief submitted to its session at once.
+func (r *run) handOffInPlace(ctx context.Context, why AsideReason, turn ids.TurnID, text string, record func(*progressDoc)) (wsm.TurnClose, error) {
+	if err := r.checkpoint(ctx, why.step(), record); err != nil {
+		return wsm.CloseFailed, err
+	}
+	if err := r.ensureSession(ctx); err != nil {
+		return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the %s repair: %w", why, err)
+	}
+	return r.o.submit(ctx, r.ws, turn, text, why.origin())
+}
+
+// stepsAside reports whether R steps aside for WHY: it heads its queue and
 // another merge stands in line behind it. A read that fails is recorded at
 // ERROR and answers false, so the merge repairs where it stands.
 func (o *orchestrator) stepsAside(ctx context.Context, r *run, why AsideReason) bool {
 	o.mu.Lock()
 	head := o.running[r.repo] == r
-	racing := !head && why.racing() && r.speculative && o.inChainLocked(r.repo, r.ws)
 	o.mu.Unlock()
-	if !head && !racing {
+	if !head {
 		return false
 	}
 	entries, err := o.deps.DB.MergeQueue(ctx, r.repo)
@@ -210,29 +262,31 @@ func (o *orchestrator) stepsAside(ctx context.Context, r *run, why AsideReason) 
 	return false
 }
 
-// stepAside takes R out of its place once its repairing prompt for WHY was
-// handed off. It runs ON THE RUN'S OWN GOROUTINE, as the hand-off's
-// SUBMITTED, before the run waits for the repairing turn's end: the entry
-// leaves the line, and the run is marked suspending and cut right here, so
-// the wait it goes on to begins already cut and the run can never go on past
-// the hand-off -- to read the turn's end, test again and land at the head it
-// gave up (2026-10-31: a step aside on its own goroutine lost that race to a
-// fixing turn that ended at once, and the merge landed under its remediating
-// entry). The take-back waits for the run to let go, so it alone runs on its
-// own goroutine (takeBackSteppedAside). A step that fails is recorded at
-// ERROR; the merge then repairs where it stands as before.
-func (o *orchestrator) stepAside(r *run, why AsideReason) {
-	ctx := context.Background()
-	log := o.log(ctx, r.ws)
+// stepAside takes R out of its place for WHY's repair, its brief recorded: the
+// entry leaves the line for the repair's slot or a place awaiting it
+// (wsm.StepAsideMerge), and the run is marked suspending and cut right here,
+// on its own goroutine, so it can never go on past the step aside. It answers
+// true and the cause the run unwinds with once it stepped aside; false when
+// the store write failed (recorded at ERROR), and the merge repairs where it
+// stands. The take-back waits for the run to let go, so it alone runs on its
+// own goroutine (takeBackSteppedAside).
+func (o *orchestrator) stepAside(ctx context.Context, r *run, why AsideReason) (bool, error) {
+	settle := context.WithoutCancel(ctx)
+	log := o.log(settle, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "reason": why.String()}
+	var slot wsm.MergeSlot
 	// THE ENTRY LEAVES THE LINE BEFORE THE RUN LEAVES ITS CHAIN (leaveLine),
-	// under the line lock: a chain decision that read the line with the merge
-	// still in it never meets a chain the merge already left (2026-10-31,
-	// TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
-	if err := o.leaveLine(r, func() error { return o.deps.DB.StepAsideMerge(ctx, r.repo, r.ws) }); err != nil {
+	// under the line lock: a decision that read the line with the merge still
+	// in it never meets a chain the merge already left.
+	if err := o.leaveLine(r, func() error {
+		var err error
+		slot, err = o.deps.DB.StepAsideMerge(settle, r.repo, r.ws, why.aside())
+		return err
+	}); err != nil {
 		log.Error(opRemediate, "could not take the merge out of line to step aside; it repairs where it stands", withField(fields, "error", err.Error()))
-		return
+		return false, nil
 	}
+	fields["slot"] = slot.String()
 	o.mu.Lock()
 	// A RUN ANOTHER END TOOK FIRST -- a dequeue's abandonment, or a pause, a
 	// transfer or the daemon's exit suspending it -- is that end's: its entry
@@ -241,19 +295,25 @@ func (o *orchestrator) stepAside(r *run, why AsideReason) {
 	if r.suspending || r.abandonedBy != "" {
 		o.mu.Unlock()
 		log.Info(opRemediate, "the merge stepped aside as another end took its run; that end settles the merge remediating", fields)
-		return
+		return true, errMergeStopping
 	}
 	aside := why.suspension()
 	o.takenAway[r.ws] = aside
 	r.suspendLocked(aside)
 	o.mu.Unlock()
 	fields["lease"] = string(r.lease.ID)
+	if slot.Awaiting() {
+		log.Info(opRemediate, "the merge stepped aside; another merge holds its repair slot, so it waits out of line for it, in order", fields)
+	} else {
+		log.Info(opRemediate, "the merge stepped aside and holds its repair slot; its brief is delivered now", fields)
+	}
 	o.cutSuspended(o.deps.Log.Global(), r, aside, fields)
 	o.live.Add(1)
 	inflight.Go(func() {
 		defer o.live.Done()
 		o.takeBackSteppedAside(r, aside, fields)
 	})
+	return true, aside.cause
 }
 
 // takeBackSteppedAside waits for R, cut by its step aside ASIDE, to let go,
@@ -277,57 +337,137 @@ func (o *orchestrator) takeBackSteppedAside(r *run, aside suspension, fields dlo
 	o.kick(r.repo)
 }
 
-// awaitRemediation arms the wait on WS's repairing TURN, after which the merge
-// returns to REPO's line (waitThenReturn). A wait already armed for WS is
-// replaced.
-func (o *orchestrator) awaitRemediation(ws ids.WorkspaceID, repo wsm.RepoKey, turn ids.TurnID) {
-	ctx, cancel := context.WithCancel(context.Background())
+// registerRemediation records WS as remediating out of line in REPO, its
+// slot's wait not yet armed (armRepairs arms it once the store says it holds
+// the slot). A registration already standing is replaced, its wait withdrawn.
+func (o *orchestrator) registerRemediation(ws ids.WorkspaceID, rem *remediation) {
 	o.mu.Lock()
-	if standing, ok := o.remediating[ws]; ok {
-		standing.cancel()
-	}
-	o.remediating[ws] = &remediation{repo: repo, cancel: cancel}
-	o.mu.Unlock()
-	if !o.async {
-		return
-	}
-	o.live.Add(1)
-	inflight.Standing(func() {
-		defer o.live.Done()
-		o.waitThenReturn(ctx, ws, repo, turn)
-	})
+	defer o.mu.Unlock()
+	o.forgetRemediationLocked(ws)
+	o.remediating[ws] = rem
 }
 
-// waitThenReturn waits for WS's repairing TURN to end, then returns the merge to
-// REPO's line. A wait it cannot keep (the workspace has no session to follow
-// the turn in) returns the merge at once, recorded at INFO: its run reads the
-// turn's end, or delivers it again, when it heads the queue (reattachTurn).
-func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, turn ids.TurnID) {
-	log := o.log(ctx, ws)
-	fields := dlog.Context{"workspace": string(ws), "turn": string(turn)}
-	closes, err := o.deps.DB.TurnCloses(ctx, ws, []ids.TurnID{turn})
-	if err != nil {
-		log.Error(opRemediate, "could not read whether the repairing turn ended; the merge stays out of line until the next boot", withField(fields, "error", err.Error()))
+// armRepairs acts on REPO's repair slots as the store last stamped them: each
+// merge remediating here that holds a slot and has no wait armed has its
+// slot's work started -- the wait that delivers its brief and returns it to
+// the line (waitThenReturn), or, for a waiting merge's conflict, its
+// resolving rebase (startResolving). It is called after every write that can
+// grant a slot, so a release is acted on as it is made.
+//
+// A SECOND HOLDER IS A DEFECT, never a second wait: the store refuses one
+// (wsm's one-holder index), and an arming that finds a wait already armed
+// for another merge of the same slot records it at ERROR and fails hard.
+func (o *orchestrator) armRepairs(ctx context.Context, repo wsm.RepoKey) {
+	const op = opRemediate
+	// THE DAEMON'S EXIT STARTS NO REPAIR: the boot's take-back arms the slot
+	// again (recoverRemediating), and the store is not read once it closes.
+	if !o.enterAdmission() {
 		return
 	}
-	if _, ended := closes[turn]; !ended {
-		log.Info(opRemediate, "the merge remediates out of line; it returns to the line once its repairing turn ends", fields)
-		if _, err := o.deps.AwaitTurnEnd(ctx, ws, turn); err != nil {
-			if ctx.Err() != nil {
-				log.Info(opRemediate, "the wait on the repairing turn was withdrawn", fields)
+	defer o.leaveAdmission()
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the queue to act on its repair slots; a slot released now is acted on at the queue's next write",
+			dlog.Context{"repo": string(repo), "error": err.Error()})
+		return
+	}
+	type start struct {
+		ws  ids.WorkspaceID
+		rem *remediation
+		ctx context.Context
+	}
+	var starts []start
+	o.mu.Lock()
+	for _, entry := range entries {
+		if entry.Slot != wsm.MergeSlotFixingTests && entry.Slot != wsm.MergeSlotResolvingConflicts {
+			continue
+		}
+		rem, ok := o.remediating[entry.Workspace]
+		if !ok || rem.repo != repo || rem.armed {
+			continue
+		}
+		for other, standing := range o.remediating {
+			if other == entry.Workspace || standing.repo != repo || !standing.armed {
+				continue
+			}
+			if slot, found := slotOf(entries, other); !found || slot == entry.Slot {
+				o.mu.Unlock()
+				o.deps.Log.Global().Error(op, "a repair slot would have a second merge at work: the merge still armed for it no longer holds it", dlog.Context{
+					"repo": string(repo), "slot": entry.Slot.String(), "holder": string(entry.Workspace), "armed": string(other)})
+				panic(fmt.Sprintf("merge: the %s slot of %s would hold %s while %s still works in it", entry.Slot, repo, entry.Workspace, other))
+			}
+		}
+		rctx, cancel := context.WithCancel(context.Background())
+		rem.armed, rem.cancel = true, cancel
+		starts = append(starts, start{ws: entry.Workspace, rem: rem, ctx: rctx})
+	}
+	o.mu.Unlock()
+	for _, st := range starts {
+		o.deps.Log.Global().Info(op, "the merge holds its repair slot; its repair starts", dlog.Context{
+			"repo": string(repo), "workspace": string(st.ws), "waiting_conflict": st.rem.waiting})
+		if !o.async {
+			continue
+		}
+		o.live.Add(1)
+		st := st
+		inflight.Standing(func() {
+			defer o.live.Done()
+			if st.rem.waiting {
+				o.resolveWaiting(st.ctx, repo, st.ws)
 				return
 			}
-			log.Info(opRemediate, "could not follow the repairing turn; the merge returns to the line now and reads the turn's end when it heads the queue",
-				withField(fields, "cause", err.Error()))
+			o.waitThenReturn(st.ctx, st.ws, repo, st.rem.doc)
+		})
+	}
+}
+
+// slotOf answers the slot WS's entry holds among ENTRIES.
+func slotOf(entries []wsm.MergeQueueEntry, ws ids.WorkspaceID) (wsm.MergeSlot, bool) {
+	for _, entry := range entries {
+		if entry.Workspace == ws {
+			return entry.Slot, true
 		}
 	}
-	if err := o.returnRemediated(ctx, ws, repo); err != nil {
-		log.Error(opRemediate, "could not return the remediated merge to the line; it stays out of line until the next boot", withField(fields, "error", err.Error()))
+	return wsm.MergeSlotNone, false
+}
+
+// waitThenReturn delivers the brief DOC records to WS's session when it never
+// reached it, follows its repairing turn to its end (reattachTurn), and
+// returns the merge to REPO's line. A wait it cannot keep -- the turn cannot be
+// read, delivered or followed -- is recorded at ERROR and the merge returns to
+// the line at once, giving its slot to the next merge awaiting it: its run
+// reads the turn's end, or delivers its brief again, when it heads the queue
+// (resumeFix, resumeConflict).
+func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, doc progressDoc) {
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "turn": doc.Turn, "step": doc.Step}
+	why, err := asideReasonOf(doc)
+	if err != nil {
+		log.Error(opRemediate, "a merge holding a repair slot has a record that waits on no repairing turn; it returns to the line", withField(fields, "error", err.Error()))
+	} else {
+		log.Info(opRemediate, "the merge remediates out of line; it returns to the line once its repairing turn ends", fields)
+		closed, err := o.reattachTurn(ctx, ws, fields, ids.TurnID(doc.Turn), doc.Brief, why.origin())
+		switch {
+		case err != nil && ctx.Err() != nil:
+			log.Info(opRemediate, "the wait on the repairing turn was withdrawn", fields)
+			return
+		case err != nil:
+			log.Error(opRemediate, "could not deliver or follow the repairing turn; the merge returns to the line and takes its turn up again when it heads the queue",
+				withField(fields, "error", err.Error()))
+		default:
+			fields["close"] = closed.String()
+		}
+	}
+	if err := o.returnRemediated(context.WithoutCancel(ctx), ws, repo); err != nil {
+		log.Error(opRemediate, "could not return the remediated merge to the line; it stays out of line, holding its slot, until the next boot", withField(fields, "error", err.Error()))
 	}
 }
 
 // returnRemediated puts the remediating merge WS back in REPO's line, next
-// after the merge being worked on.
+// after the merge being worked on, releasing its repair slot to the next
+// merge awaiting it, whose repair starts at once (armRepairs). A merge that
+// stepped aside from the head has its bubble drawn back in line
+// (drawBackInLine).
 //
 // THE RETURN IS ORDERED WITH EVERY TAKING-UP OF A MERGE (lineLock). Read
 // between the pump's look at its front and that front's admission, the return
@@ -335,37 +475,91 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // chain then stood behind an entry it held no run for (2026-10-31,
 // TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
-	// THE TAKE-BACK LEFT ITS RECORD AND ITS BUBBLE IDENTITY HERE
-	// (recoverResumable): the held tabs are drawn from them. A remediating
-	// merge with neither is a defect, refused before anything is written.
-	o.mu.Lock()
-	doc, resuming := o.resumes[ws]
-	lease, ledgered := o.ledgerOf[ws]
-	o.mu.Unlock()
-	if !resuming || !ledgered {
-		err := fmt.Errorf("merge: the remediating merge of %s returns with no record (%v) or bubble identity (%v) taken back", ws, resuming, ledgered)
-		o.log(ctx, ws).Error(opRemediate, "a remediating merge returns with nothing taken back to resume or draw it from; it stays out of line",
-			dlog.Context{"workspace": string(ws), "repo": string(repo), "recorded": resuming, "ledgered": ledgered})
-		return err
-	}
 	if err := o.lineWrite(repo, func() error {
 		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
 	}); err != nil {
 		return err
 	}
 	o.mu.Lock()
+	rem := o.remediating[ws]
 	delete(o.remediating, ws)
 	o.mu.Unlock()
-	o.log(ctx, ws).Info(opRemediate, "the merge's repairing turn ended; it is back in line, next after the merge being worked on",
+	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, next after the merge being worked on, and its repair slot passes on",
 		dlog.Context{"workspace": string(ws), "repo": string(repo)})
-	// ITS REPAIR'S TABS ARE HELD while it waits: nothing of them runs, and
-	// only its resume reads whether the repair worked.
-	o.holdRepairTabs(ws, lease, doc)
+	if rem != nil && !rem.waiting {
+		o.drawBackInLine(ctx, ws, repo, rem.doc)
+	}
+	o.armRepairs(ctx, repo)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
 	o.kick(repo)
 	return nil
+}
+
+// drawBackInLine settles the repairing tab of WS's bubble -- "fixing tests" or
+// "resolving conflicts" -- now that its repair ended and the merge is back in
+// line, and records the merge as back in line on its record (Brief cleared,
+// BackInLine set), so a restart or a handover draws it waiting too
+// (recoverResumable) and nothing draws the repair live again until the merge
+// heads the queue and its run takes the repair's end up (2026-11-11: a merge
+// back in line kept a live "fixing tests" tab ticking, because nothing but its
+// absent run drew its bubble). A record that cannot be written is recorded at
+// ERROR; the tab is settled either way.
+func (o *orchestrator) drawBackInLine(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, doc progressDoc) {
+	log := o.log(ctx, ws)
+	o.mu.Lock()
+	ledger, known := o.ledgerOf[ws]
+	o.mu.Unlock()
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "step": doc.Step}
+	why, err := asideReasonOf(doc)
+	if err != nil || !known {
+		if err == nil {
+			err = errors.New("the merge has no bubble identity in this daemon")
+		}
+		log.Error(opRemediate, "could not draw the merge back in line: its record or its bubble cannot be read", withField(fields, "error", err.Error()))
+		return
+	}
+	v := o.buildRun(context.Background(), func(error) {}, repo, ws, doc.QueuedMS)
+	v.lease = wsm.Lease{ID: ledger, Workspace: ws}
+	v.startedMS = doc.StartedMS
+	v.restoreFrom(doc)
+	now := o.nowMS()
+	round := v.activeRound()
+	switch why {
+	case AsideForTests:
+		v.fixing.Span.settle(now, "")
+		v.publishTesting(false)
+		v.publishFixingTests(false)
+		v.publishFixing(v.testsRound(), round.settled(now, ""), doc.FixAttempt)
+	case AsideForConflicts:
+		if len(v.rebasing.Commits) > 0 {
+			i := min(doc.Replayed, len(v.rebasing.Commits)-1)
+			if c := v.rebasing.Commits[i].Conflict; c != nil {
+				c.Span.settle(now, "")
+			}
+			v.conflicts.Span.settle(now, "")
+			v.publishConflicts(false)
+			v.publishResolution(i, false)
+		}
+	}
+	fields["tab"], fields["round"] = round.kind, round.n
+	if err := v.checkpoint(ctx, doc.Step, func(d *progressDoc) {
+		d.BackInLine = true
+		d.Facts.Step = string(footer.StepEnqueued)
+	}); err != nil {
+		log.Error(opRemediate, "could not record the merge as back in line; a restart before it heads the queue draws its repair live again", withField(fields, "error", err.Error()))
+	}
+	o.mu.Lock()
+	if standing, resuming := o.resumes[ws]; resuming {
+		standing.BackInLine = true
+		standing.Brief = ""
+		standing.Facts.Step = string(footer.StepEnqueued)
+		standing.Fixing, standing.Conflicts, standing.Rebasing = v.fixing.clone(), v.conflicts.clone(), v.rebasing.clone()
+		o.resumes[ws] = standing
+	}
+	o.mu.Unlock()
+	log.Info(opRemediate, "the merge is back in line: its repairing tab is settled and its strip reads waiting until it heads the queue", fields)
 }
 
 // lineLock answers REPO's line lock (orchestrator.lines).

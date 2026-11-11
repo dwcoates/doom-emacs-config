@@ -1204,11 +1204,11 @@ const (
 	// turn's end does not lose the request, and it is in nobody's line and on
 	// no client until it is queued.
 	MergeRequested
-	// MergeRemediating is a merge that headed its queue, finished its test
-	// suite with failures, and STEPPED ASIDE to fix them (owner ruling,
-	// 2026-10-31): out of line while its fixing turn runs, holding its lease
-	// and its progress record, and put back in line -- at the first waiting
-	// place, never ahead of a merge being worked on -- once that turn ends.
+	// MergeRemediating is a merge that STEPPED ASIDE out of line (owner
+	// rulings, 2026-10-31 and 2026-11-11) for the repair its Aside names:
+	// holding that repair's slot or awaiting it, and put back in line -- at
+	// the first waiting place, never ahead of a merge being worked on -- once
+	// its repair ends.
 	MergeRemediating
 )
 
@@ -1469,23 +1469,8 @@ type MergeQueueEntry struct {
 	// every active slot ticks from SlotSince.
 	Slot      MergeSlot
 	SlotSince time.Time
-	// Returned reports that the merge came back in line from repairing out of
-	// line (ReturnRemediatedMerge) and nothing has taken it up again yet
-	// (TakeUpReturnedMerge). It is kept apart from the user's front placement
-	// (MergeSource.Front), which the return never writes. Only an admitted
-	// entry carries it: every write that moves an entry out of admitted
-	// clears it.
-	Returned bool
-}
-
-// WorkedOn reports whether the entry's merge is being worked on: admitted,
-// and not a merge returned from a repair out of line that waits to be taken
-// up again. It is the ONE answer to "is this merge running", so the status,
-// the roster, the bubble and the slots never disagree about a returned merge.
-func (e MergeQueueEntry) WorkedOn() bool { return workedOn(e.State, e.Returned) }
-
-// workedOn is WorkedOn over a row's two columns, for the reads that scan no
-// whole entry (mergeSlotsOf).
-func workedOn(state MergeQueueState, returned bool) bool {
-	return state == MergeAdmitted && !returned
+	// Aside is the repair a remediating entry is out of line for, and so
+	// the repair slot it holds or awaits; MergeAsideNone for every other
+	// entry.
+	Aside MergeAside
 }

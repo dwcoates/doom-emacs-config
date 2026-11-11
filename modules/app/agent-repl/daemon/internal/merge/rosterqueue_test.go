@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -404,14 +405,6 @@ func TestEveryWriteThatChangesTheLineRepublishesTheRosterQueue(t *testing.T) {
 			want: []ids.WorkspaceID{"ws-b", "ws-a"},
 		},
 		{
-			name:  "the head yielded to the race's winner",
-			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeAdmitted, Source: own}, {Workspace: "ws-b", State: wsm.MergeAdmitted, Source: own}},
-			write: func(h *harness, db wsm.DB) error {
-				return db.YieldMergeHead(context.Background(), h.repoKey(), "ws-a", "ws-b")
-			},
-			want: []ids.WorkspaceID{"ws-b", "ws-a"},
-		},
-		{
 			name:  "an admitted merge dropped",
 			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeAdmitted, Source: own}, {Workspace: "ws-b", State: wsm.MergeQueued, Source: own}},
 			lease: true,
@@ -588,11 +581,11 @@ func TestTheRosterLineCarriesEachMergesPlaceInLine(t *testing.T) {
 	if len(line) != 2 {
 		t.Fatalf("roster line = %v, want two merges", line)
 	}
-	if !line[0].Admitted || line[0].PlacedAtFront || !line[0].QueuedAt.Equal(queuedA) {
-		t.Fatalf("front = %+v, want admitted, not placed at the front, queued at %v", line[0], queuedA)
+	if !line[0].Admitted || !line[0].QueuedAt.Equal(queuedA) || line[0].Repair != sidebar.RepairNone {
+		t.Fatalf("front = %+v, want admitted, queued at %v, in line", line[0], queuedA)
 	}
-	if line[1].Admitted || !line[1].PlacedAtFront || !line[1].QueuedAt.Equal(queuedB) {
-		t.Fatalf("waiting = %+v, want waiting, placed at the front, queued at %v", line[1], queuedB)
+	if line[1].Admitted || !line[1].QueuedAt.Equal(queuedB) || line[1].Repair != sidebar.RepairNone {
+		t.Fatalf("waiting = %+v, want waiting, queued at %v, in line", line[1], queuedB)
 	}
 }
 

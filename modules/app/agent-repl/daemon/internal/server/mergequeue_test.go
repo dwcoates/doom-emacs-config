@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -67,23 +68,31 @@ func TestGetMergeQueueStatusRendersEachQueue(t *testing.T) {
 	}
 }
 
-func TestGetMergeQueueStatusListsAMergeRemediatingAfterTheLine(t *testing.T) {
+func TestGetMergeQueueStatusListsEachRepairSlotAfterTheLine(t *testing.T) {
 	cases := []struct {
-		name  string
-		aside merge.AsideReason
-		want  func(*agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool
+		name   string
+		repair sidebar.QueueRepair
+		want   func(*agentreplv1.MergeQueueStatusEntryStage) bool
 	}{
-		{name: "a merge fixing its failing tests", aside: merge.AsideForTests,
-			want: func(r *agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool { return r.GetTests() != nil }},
-		{name: "a merge resolving its rebase's conflicts", aside: merge.AsideForConflicts,
-			want: func(r *agentreplv1.MergeQueueStatusEntryStageRemediatingReason) bool { return r.GetConflicts() != nil }},
+		{name: "the merge holding the fixing-tests slot", repair: sidebar.RepairFixingTests,
+			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool { return s.GetFixingTests() != nil }},
+		{name: "the merge holding the resolving-conflicts slot", repair: sidebar.RepairResolvingConflicts,
+			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool { return s.GetResolvingConflicts() != nil }},
+		{name: "a merge awaiting the fixing-tests slot", repair: sidebar.RepairAwaitingFixingTests,
+			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool {
+				return s.GetAwaitingRepair().GetSlot().GetFixingTests() != nil && s.GetAwaitingRepair().GetPlace() == 1
+			}},
+		{name: "a merge awaiting the resolving-conflicts slot", repair: sidebar.RepairAwaitingResolvingConflicts,
+			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool {
+				return s.GetAwaitingRepair().GetSlot().GetResolvingConflicts() != nil && s.GetAwaitingRepair().GetPlace() == 1
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
 			queue := aQueue()
-			queue.Queue.Remediating = []merge.QueueMember{{Workspace: "ws-fixing", Name: "fixing", Branch: "agent/fixing", Started: true, AsideFor: tc.aside}}
+			queue.Queue.Remediating = []merge.QueueMember{{Workspace: "ws-fixing", Name: "fixing", Branch: "agent/fixing", Started: true, Repair: tc.repair}}
 			h.Merge.statuses = []merge.QueueStatus{queue}
 
 			// Act
@@ -94,13 +103,38 @@ func TestGetMergeQueueStatusListsAMergeRemediatingAfterTheLine(t *testing.T) {
 				t.Fatalf("GetMergeQueueStatus: %v", err)
 			}
 			entries := resp.Msg.GetSuccess().GetQueues()[0].GetEntries()
-			if len(entries) != 3 || entries[2].GetName() != "fixing" || entries[2].GetStage().GetRemediating() == nil {
-				t.Fatalf("entries = %v, want the remediating merge last, at the remediating stage", entries)
-			}
-			if reason := entries[2].GetStage().GetRemediating().GetReason(); !tc.want(reason) {
-				t.Fatalf("reason = %v, want the arm of %v", reason, tc.aside)
+			if len(entries) != 3 || entries[2].GetName() != "fixing" || !tc.want(entries[2].GetStage()) {
+				t.Fatalf("entries = %v, want the merge out of line last, at its slot's stage", entries)
 			}
 		})
+	}
+}
+
+func TestGetMergeQueueStatusListsTheHoldersBeforeTheMergesAwaitingInOrder(t *testing.T) {
+	// Arrange: out of line in the order they stepped aside -- two awaiting
+	// the fixing slot around its holder.
+	h := newHarness(t)
+	queue := aQueue()
+	queue.Queue.Remediating = []merge.QueueMember{
+		{Workspace: "ws-1", Name: "first-awaiting", Repair: sidebar.RepairAwaitingFixingTests},
+		{Workspace: "ws-2", Name: "holder", Repair: sidebar.RepairFixingTests},
+		{Workspace: "ws-3", Name: "second-awaiting", Repair: sidebar.RepairAwaitingFixingTests},
+	}
+	h.Merge.statuses = []merge.QueueStatus{queue}
+
+	// Act
+	resp, err := h.Client.GetMergeQueueStatus(context.Background(), connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GetMergeQueueStatus: %v", err)
+	}
+	entries := resp.Msg.GetSuccess().GetQueues()[0].GetEntries()[2:]
+	if len(entries) != 3 || entries[0].GetName() != "holder" || entries[1].GetName() != "first-awaiting" || entries[2].GetName() != "second-awaiting" {
+		t.Fatalf("out-of-line entries = %v, want the holder, then the awaiting in order", entries)
+	}
+	if entries[1].GetStage().GetAwaitingRepair().GetPlace() != 1 || entries[2].GetStage().GetAwaitingRepair().GetPlace() != 2 {
+		t.Fatalf("awaiting places = %v, want 1 then 2", entries[1:])
 	}
 }
 

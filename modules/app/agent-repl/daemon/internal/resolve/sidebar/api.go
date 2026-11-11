@@ -13,6 +13,7 @@
 package sidebar
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -254,9 +255,11 @@ type MergeQueue struct {
 	// showing its merge queue draws the first as its head and the rest as
 	// its waiting merges (frontend.v1.RosterRepoMergeQueue).
 	Line []QueueEntry
-	// Remediating are the merges remediating their failing tests OUT OF LINE
-	// (owner ruling, 2026-10-31), oldest first: drawn as the queue's second
-	// spot (frontend.v1.RosterRepoMergeQueue.remediating).
+	// Remediating are the merges OUT OF LINE (owner rulings, 2026-10-31 and
+	// 2026-11-11), in the order they stepped aside, each carrying the repair
+	// slot it holds or awaits (QueueEntry.Repair): drawn as the queue's two
+	// repair slots and the merges awaiting each
+	// (frontend.v1.RosterRepoMergeQueue.fixing_tests and its siblings).
 	Remediating []QueueEntry
 	// AsyncRequesters are the workspaces whose own branch has an async merge
 	// on the queue, from the moment the async request is recorded until its
@@ -310,14 +313,8 @@ type QueueEntry struct {
 	Reveal *frontendv1.FeedId
 	// QueuedAt is when the merge was put in line.
 	QueuedAt time.Time
-	// PlacedAtFront reports that the user put it in line at the front.
-	PlacedAtFront bool
-	// Returned reports that it is back in line from a repair out of line and
-	// nothing has taken it up again (wsm.MergeQueueEntry.Returned).
-	Returned bool
-	// Admitted reports that the merge is being worked on rather than waiting
-	// (wsm.MergeQueueEntry.WorkedOn): a merge back from a repair is admitted
-	// in the store yet waits, and is not Admitted here.
+	// Admitted reports that the merge's run was admitted: it is being worked
+	// on rather than waiting.
 	Admitted bool
 	// Stages are the merge's stages so far, read from its ledger
 	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line
@@ -326,13 +323,46 @@ type QueueEntry struct {
 	// SlotSince is when the merge took the slot it holds, durable on its
 	// queue entry (wsm.MergeQueueEntry.SlotSince): the clock of every active
 	// slot ticks from it (frontend.v1.RosterMergeQueueHead.head_since_ms,
-	// frontend.v1.RosterMergeQueueWaitingRacing.since_ms,
-	// frontend.v1.RosterMergeQueueRemediating.since_ms).
+	// frontend.v1.RosterMergeQueueFixingTests.since_ms and its siblings).
 	SlotSince time.Time
-	// RemediatingFor is what a merge remediating out of line repairs
-	// (frontend.v1.RosterMergeQueueRemediating.reason). Only a remediating
-	// merge carries it, and it always does.
-	RemediatingFor *frontendv1.RosterMergeQueueRemediatingReason
+	// Repair is the repair slot a merge out of line holds or awaits. Every
+	// merge out of line carries one; a merge in line carries RepairNone.
+	Repair QueueRepair
+}
+
+// QueueRepair is the repair slot a merge out of line holds or awaits: the
+// store's stamped slot (wsm.MergeSlot) as the roster draws it.
+type QueueRepair int
+
+// The repair slots.
+const (
+	// RepairNone is a merge in line.
+	RepairNone QueueRepair = iota
+	// RepairFixingTests holds the fixing-tests slot.
+	RepairFixingTests
+	// RepairResolvingConflicts holds the resolving-conflicts slot.
+	RepairResolvingConflicts
+	// RepairAwaitingFixingTests awaits the fixing-tests slot.
+	RepairAwaitingFixingTests
+	// RepairAwaitingResolvingConflicts awaits the resolving-conflicts slot.
+	RepairAwaitingResolvingConflicts
+)
+
+// String names the repair in log records.
+func (r QueueRepair) String() string {
+	switch r {
+	case RepairNone:
+		return "none"
+	case RepairFixingTests:
+		return "fixing_tests"
+	case RepairResolvingConflicts:
+		return "resolving_conflicts"
+	case RepairAwaitingFixingTests:
+		return "awaiting_fixing_tests"
+	case RepairAwaitingResolvingConflicts:
+		return "awaiting_resolving_conflicts"
+	}
+	return fmt.Sprintf("repair(%d)", int(r))
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip

@@ -1157,126 +1157,6 @@ func TestAdmitMergeMarksTheRunningEntry(t *testing.T) {
 	}
 }
 
-func TestYieldMergeHeadPutsTheWinnerFirstAndKeepsTheLoserAdmitted(t *testing.T) {
-	// Arrange: the head and the merge behind it are admitted; a third waits.
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	loser, winner, waiting := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
-	queued(t, s, repo, loser.ID, instant)
-	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
-	queued(t, s, repo, waiting.ID, instant.Add(2*time.Minute))
-	for _, id := range []WorkspaceID{loser.ID, winner.ID} {
-		if err := s.AdmitMerge(ctx, repo, id); err != nil {
-			t.Fatalf("AdmitMerge: %v", err)
-		}
-	}
-
-	// Act
-	if err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID); err != nil {
-		t.Fatalf("YieldMergeHead: %v", err)
-	}
-
-	// Assert
-	got, err := s.MergeQueue(ctx, repo)
-	if err != nil {
-		t.Fatalf("MergeQueue: %v", err)
-	}
-	if len(got) != 3 || got[0].Workspace != winner.ID || got[1].Workspace != loser.ID || got[2].Workspace != waiting.ID {
-		t.Fatalf("queue = %+v, want winner, loser, waiting", got)
-	}
-	if got[0].State != MergeAdmitted || got[1].State != MergeAdmitted || got[2].State != MergeQueued {
-		t.Fatalf("states = %v %v %v, want the winner and the suspended loser admitted, the third queued", got[0].State, got[1].State, got[2].State)
-	}
-}
-
-func TestYieldMergeHeadRefusesAWinnerNotAdmitted(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
-	queued(t, s, repo, loser.ID, instant)
-	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
-	if err := s.AdmitMerge(ctx, repo, loser.ID); err != nil {
-		t.Fatalf("AdmitMerge: %v", err)
-	}
-
-	// Act
-	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
-
-	// Assert
-	if err == nil {
-		t.Fatal("YieldMergeHead let a merge that was never admitted overtake the head")
-	}
-	got, readErr := s.MergeQueue(ctx, repo)
-	if readErr != nil {
-		t.Fatalf("MergeQueue: %v", readErr)
-	}
-	if got[0].Workspace != loser.ID || got[1].Workspace != winner.ID {
-		t.Fatalf("queue = %+v, want it unchanged by the refused yield", got)
-	}
-}
-
-func TestYieldMergeHeadAnswersAHeadThatLeftTheQueue(t *testing.T) {
-	// Arrange: the head left its queue (it failed, landed or was abandoned)
-	// before the merge behind it could record the race it won.
-	s, log := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
-	queued(t, s, repo, loser.ID, instant)
-	queued(t, s, repo, winner.ID, instant.Add(time.Minute))
-	for _, id := range []WorkspaceID{loser.ID, winner.ID} {
-		if err := s.AdmitMerge(ctx, repo, id); err != nil {
-			t.Fatalf("AdmitMerge: %v", err)
-		}
-	}
-	if err := s.RemoveMergeQueueEntry(ctx, repo, loser.ID, "failed", nil); err != nil {
-		t.Fatalf("RemoveMergeQueueEntry: %v", err)
-	}
-
-	// Act
-	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
-
-	// Assert
-	if !errors.Is(err, ErrMergeHeadLeft) {
-		t.Fatalf("YieldMergeHead = %v, want ErrMergeHeadLeft", err)
-	}
-	for _, rec := range log.Records() {
-		if rec.Level == "error" {
-			t.Fatalf("a head that left its queue was recorded at ERROR: %v", rec)
-		}
-	}
-	got, readErr := s.MergeQueue(ctx, repo)
-	if readErr != nil {
-		t.Fatalf("MergeQueue: %v", readErr)
-	}
-	if len(got) != 1 || got[0].Workspace != winner.ID || got[0].State != MergeAdmitted {
-		t.Fatalf("queue = %+v, want the winner alone, admitted", got)
-	}
-}
-
-func TestYieldMergeHeadRefusesAWinnerNotInLineAsNoHeadThatLeft(t *testing.T) {
-	// Arrange: the head is in line; the merge claiming to overtake it is not.
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	loser, winner := testWorkspace(t, s), testWorkspace(t, s)
-	queued(t, s, repo, loser.ID, instant)
-	if err := s.AdmitMerge(ctx, repo, loser.ID); err != nil {
-		t.Fatalf("AdmitMerge: %v", err)
-	}
-
-	// Act
-	err := s.YieldMergeHead(ctx, repo, loser.ID, winner.ID)
-
-	// Assert
-	if err == nil || errors.Is(err, ErrMergeHeadLeft) {
-		t.Fatalf("YieldMergeHead = %v, want a refusal that is not ErrMergeHeadLeft", err)
-	}
-}
-
 func TestRemoveMergeQueueEntryRenumbersTheRest(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -1870,11 +1750,10 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
 
 	// Assert: the helper's own query, and one call per reordering (move,
-	// move to a place, prioritize, the yield's read of both racers, a failed
-	// head stepping aside and a remediated merge returning), plus a returned
-	// merge's take-up, which reads its entry's state the same way.
-	if reads != 1 || calls != 7 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 7", reads, calls)
+	// move to a place, prioritize, a merge stepping aside and a remediated
+	// merge returning).
+	if reads != 1 || calls != 5 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 5", reads, calls)
 	}
 }
 
@@ -2198,7 +2077,7 @@ func stepAsideFixture(t *testing.T) (*store, RepoKey, WorkspaceID, WorkspaceID, 
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
-	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
 	if err := s.AdmitMerge(ctx, repo, next.ID); err != nil {
@@ -2229,7 +2108,7 @@ func TestStepAsideMergeRefusesAMergeNotAdmitted(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	err := s.StepAsideMerge(context.Background(), repo, ws.ID)
+	_, err := s.StepAsideMerge(context.Background(), repo, ws.ID, MergeAsideTests)
 
 	// Assert
 	if err == nil {
@@ -2270,7 +2149,7 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
-	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
 	if err := s.AdmitMerge(ctx, repo, next.ID); err != nil {
@@ -2305,7 +2184,7 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
-	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
 
@@ -2322,163 +2201,6 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	if len(got) != 3 || got[0].Workspace != next.ID || got[1].Workspace != failed.ID || got[2].Workspace != last.ID {
 		t.Fatalf("queue = %+v, want the merge being worked on, the returned merge, then the one waiting", got)
 	}
-}
-
-func TestReturnRemediatedMergeMarksItReturnedAndNotFront(t *testing.T) {
-	// Arrange
-	s, repo, failed, _, _ := stepAsideFixture(t)
-
-	// Act
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil); err != nil {
-		t.Fatalf("ReturnRemediatedMerge: %v", err)
-	}
-
-	// Assert
-	got := entryNamed(t, s, repo, failed)
-	if !got.Returned || got.Source.Front {
-		t.Fatalf("returned entry: returned %v, front %v; want returned and not front", got.Returned, got.Source.Front)
-	}
-	if got.WorkedOn() {
-		t.Fatal("the returned merge reads as worked on, want waiting until it is taken up")
-	}
-}
-
-func TestReturnRemediatedMergeKeepsTheUsersFrontPlacement(t *testing.T) {
-	// Arrange: a merge the user put at the front heads, steps aside behind
-	// one other merge, and returns.
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	front, next := testWorkspace(t, s), testWorkspace(t, s)
-	frontQueued(t, s, repo, front.ID, instant)
-	queued(t, s, repo, next.ID, instant.Add(time.Minute))
-	if err := s.AdmitMerge(ctx, repo, front.ID); err != nil {
-		t.Fatalf("AdmitMerge: %v", err)
-	}
-	if err := s.StepAsideMerge(ctx, repo, front.ID); err != nil {
-		t.Fatalf("StepAsideMerge: %v", err)
-	}
-
-	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, front.ID, nil); err != nil {
-		t.Fatalf("ReturnRemediatedMerge: %v", err)
-	}
-
-	// Assert
-	got := entryNamed(t, s, repo, front.ID)
-	if !got.Returned || !got.Source.Front {
-		t.Fatalf("returned front entry: returned %v, front %v; want both", got.Returned, got.Source.Front)
-	}
-}
-
-func TestTakeUpReturnedMergeClearsTheMarkSoItIsWorkedOn(t *testing.T) {
-	// Arrange
-	s, repo, failed, _, _ := stepAsideFixture(t)
-	ctx := context.Background()
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed, nil); err != nil {
-		t.Fatalf("ReturnRemediatedMerge: %v", err)
-	}
-
-	// Act
-	if err := s.TakeUpReturnedMerge(ctx, repo, failed); err != nil {
-		t.Fatalf("TakeUpReturnedMerge: %v", err)
-	}
-
-	// Assert
-	got := entryNamed(t, s, repo, failed)
-	if got.Returned || got.State != MergeAdmitted || !got.WorkedOn() {
-		t.Fatalf("taken-up entry: returned %v, state %s, worked on %v; want unmarked, admitted, worked on", got.Returned, got.State, got.WorkedOn())
-	}
-}
-
-func TestTakeUpReturnedMergeRefusesAMergeNotReturnedAndChangesNothing(t *testing.T) {
-	// Arrange: the head is admitted and never stepped aside.
-	s, log := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	ws := testWorkspace(t, s)
-	queued(t, s, repo, ws.ID, instant)
-	if err := s.AdmitMerge(ctx, repo, ws.ID); err != nil {
-		t.Fatalf("AdmitMerge: %v", err)
-	}
-
-	// Act
-	err := s.TakeUpReturnedMerge(ctx, repo, ws.ID)
-
-	// Assert
-	if err == nil {
-		t.Fatal("TakeUpReturnedMerge of a merge never returned = nil, want a refusal")
-	}
-	if !loggedOperation(log, "daemon.wsm.take_up_returned_merge", "error") {
-		t.Fatalf("the refusal was not logged at error: %v", log.Records())
-	}
-	if got := entryNamed(t, s, repo, ws.ID); got.State != MergeAdmitted || got.Returned {
-		t.Fatalf("entry after the refusal: state %s, returned %v; want it untouched", got.State, got.Returned)
-	}
-}
-
-func TestMergeQueueEntryWorkedOn(t *testing.T) {
-	cases := []struct {
-		name     string
-		state    MergeQueueState
-		returned bool
-		want     bool
-	}{
-		{"an admitted merge is worked on", MergeAdmitted, false, true},
-		{"an admitted merge back from a repair is not", MergeAdmitted, true, false},
-		{"a waiting merge is not", MergeQueued, false, false},
-		{"a remediating merge is not", MergeRemediating, false, false},
-		{"a requested merge is not", MergeRequested, false, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			entry := MergeQueueEntry{State: tc.state, Returned: tc.returned}
-
-			// Act
-			got := entry.WorkedOn()
-
-			// Assert
-			if got != tc.want {
-				t.Fatalf("WorkedOn() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestReturnAdmittedMergeDropsTheReturnedMark(t *testing.T) {
-	// Arrange: a returned merge never taken up goes back to waiting.
-	s, repo, failed, _, _ := stepAsideFixture(t)
-	ctx := context.Background()
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed, nil); err != nil {
-		t.Fatalf("ReturnRemediatedMerge: %v", err)
-	}
-
-	// Act
-	if err := s.ReturnAdmittedMerge(ctx, repo, failed, NewLeaseID()); err != nil {
-		t.Fatalf("ReturnAdmittedMerge: %v", err)
-	}
-
-	// Assert
-	if got := entryNamed(t, s, repo, failed); got.State != MergeQueued || got.Returned {
-		t.Fatalf("entry: state %s, returned %v; want waiting and unmarked", got.State, got.Returned)
-	}
-}
-
-// entryNamed reads ID's entry off REPO's queue.
-func entryNamed(t *testing.T, s *store, repo RepoKey, id WorkspaceID) MergeQueueEntry {
-	t.Helper()
-	entries, err := s.MergeQueue(context.Background(), repo)
-	if err != nil {
-		t.Fatalf("MergeQueue: %v", err)
-	}
-	for _, entry := range entries {
-		if entry.Workspace == id {
-			return entry
-		}
-	}
-	t.Fatalf("no entry for %s in %+v", id, entries)
-	return MergeQueueEntry{}
 }
 
 func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
@@ -2666,5 +2388,184 @@ func TestAQueueExitClosesExactlyAsMarkClosedDoes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(exitServing, markServing) {
 		t.Fatalf("the exit left serving ownership %v, MarkClosed left %v", exitServing, markServing)
+	}
+}
+
+// asideQueue is a queue of a head and four merges behind it, each admitted in
+// turn so it can step aside from the head as its predecessor did.
+type asideQueue struct {
+	s    *store
+	repo RepoKey
+	ws   []WorkspaceID
+}
+
+func newAsideQueue(t *testing.T, n int) (*asideQueue, *dlog.TestLogger) {
+	t.Helper()
+	s, log := testStore(t)
+	q := &asideQueue{s: s, repo: RepoKey(t.TempDir())}
+	for i := 0; i < n; i++ {
+		ws := testWorkspace(t, s).ID
+		queued(t, s, q.repo, ws, instant.Add(time.Duration(i)*time.Minute))
+		q.ws = append(q.ws, ws)
+	}
+	return q, log
+}
+
+// asideFromHead admits WS at the head and steps it aside for ASIDE,
+// answering the slot it took.
+func (q *asideQueue) asideFromHead(t *testing.T, ws WorkspaceID, aside MergeAside) MergeSlot {
+	t.Helper()
+	ctx := context.Background()
+	if err := q.s.AdmitMerge(ctx, q.repo, ws); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	slot, err := q.s.StepAsideMerge(ctx, q.repo, ws, aside)
+	if err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	return slot
+}
+
+// slotOf reads WS's stamped slot.
+func (q *asideQueue) slotOf(t *testing.T, ws WorkspaceID) MergeSlot {
+	t.Helper()
+	entries, err := q.s.MergeQueue(context.Background(), q.repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, e := range entries {
+		if e.Workspace == ws {
+			return e.Slot
+		}
+	}
+	t.Fatalf("workspace %s has no entry", ws)
+	return 0
+}
+
+func TestStepAsideMergeAnswersTheSlotItTook(t *testing.T) {
+	cases := []struct {
+		name   string
+		before []MergeAside
+		aside  MergeAside
+		want   MergeSlot
+	}{
+		{name: "a merge fixing tests takes the free fixing slot", aside: MergeAsideTests, want: MergeSlotFixingTests},
+		{name: "a merge resolving conflicts takes the free resolving slot", aside: MergeAsideConflicts, want: MergeSlotResolvingConflicts},
+		{name: "a merge fixing tests awaits the fixing slot another holds", before: []MergeAside{MergeAsideTests}, aside: MergeAsideTests, want: MergeSlotAwaitingFixingTests},
+		{name: "a merge resolving conflicts awaits the resolving slot another holds", before: []MergeAside{MergeAsideConflicts}, aside: MergeAsideConflicts, want: MergeSlotAwaitingResolvingConflicts},
+		{name: "a merge fixing tests takes its slot while another resolves conflicts", before: []MergeAside{MergeAsideConflicts}, aside: MergeAsideTests, want: MergeSlotFixingTests},
+		{name: "a merge resolving conflicts takes its slot while another fixes tests", before: []MergeAside{MergeAsideTests}, aside: MergeAsideConflicts, want: MergeSlotResolvingConflicts},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			q, _ := newAsideQueue(t, len(tc.before)+2)
+			for i, aside := range tc.before {
+				q.asideFromHead(t, q.ws[i], aside)
+			}
+
+			// Act
+			got := q.asideFromHead(t, q.ws[len(tc.before)], tc.aside)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("StepAsideMerge = %s, want %s", got, tc.want)
+			}
+			if stamped := q.slotOf(t, q.ws[len(tc.before)]); stamped != tc.want {
+				t.Fatalf("the stamped slot = %s, want %s", stamped, tc.want)
+			}
+		})
+	}
+}
+
+func TestReturnRemediatedMergeGrantsTheReleasedSlotToTheFirstAwaitingIt(t *testing.T) {
+	// Arrange: three merges stepped aside for tests in turn, so the first
+	// holds the fixing slot and the other two await it, in order.
+	q, _ := newAsideQueue(t, 4)
+	for _, ws := range q.ws[:3] {
+		q.asideFromHead(t, ws, MergeAsideTests)
+	}
+
+	// Act
+	if err := q.s.ReturnRemediatedMerge(context.Background(), q.repo, q.ws[0], nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	if got := q.slotOf(t, q.ws[1]); got != MergeSlotFixingTests {
+		t.Fatalf("the first merge awaiting the slot = %s, want it granted the fixing slot", got)
+	}
+	if got := q.slotOf(t, q.ws[2]); got != MergeSlotAwaitingFixingTests {
+		t.Fatalf("the second merge awaiting the slot = %s, want it still awaiting", got)
+	}
+}
+
+func TestAWaitingMergeStepsAsideForItsBackgroundConflictAndReturnsWaiting(t *testing.T) {
+	// Arrange: a head and a merge waiting behind it.
+	q, _ := newAsideQueue(t, 3)
+	ctx := context.Background()
+	if err := q.s.AdmitMerge(ctx, q.repo, q.ws[0]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	slot, err := q.s.StepAsideMerge(ctx, q.repo, q.ws[2], MergeAsideWaitingConflicts)
+	if err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	if err := q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], []WorkspaceID{q.ws[0]}); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	if slot != MergeSlotResolvingConflicts {
+		t.Fatalf("StepAsideMerge = %s, want the resolving slot", slot)
+	}
+	got, err := q.s.MergeQueue(ctx, q.repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[1].Workspace != q.ws[2] || got[1].State != MergeQueued || got[1].Aside != MergeAsideNone {
+		t.Fatalf("queue = %+v, want the returned merge waiting first behind the head, with no aside", got)
+	}
+}
+
+func TestStepAsideMergeRefusesAnAsideThatNamesNoRepair(t *testing.T) {
+	// Arrange
+	q, log := newAsideQueue(t, 1)
+	ctx := context.Background()
+	if err := q.s.AdmitMerge(ctx, q.repo, q.ws[0]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	_, err := q.s.StepAsideMerge(ctx, q.repo, q.ws[0], MergeAsideNone)
+
+	// Assert
+	if err == nil {
+		t.Fatal("StepAsideMerge for no repair = nil, want a refusal")
+	}
+	rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.wsm.step_aside_merge"})
+	if !found || rec.Context["aside"] != "none" || rec.Context["workspace"] != string(q.ws[0]) {
+		t.Fatalf("the refusal's record = %+v (found %v), want it at error naming the workspace and the aside", rec, found)
+	}
+	if got := q.slotOf(t, q.ws[0]); got != MergeSlotHead {
+		t.Fatalf("the refused merge = %s, want it still heading its line", got)
+	}
+}
+
+func TestAWaitingMergeCannotStepAsideForTheHeadsRepairs(t *testing.T) {
+	// Arrange
+	q, _ := newAsideQueue(t, 2)
+
+	// Act
+	_, err := q.s.StepAsideMerge(context.Background(), q.repo, q.ws[1], MergeAsideConflicts)
+
+	// Assert
+	if err == nil {
+		t.Fatal("StepAsideMerge of a waiting merge for the head's conflicts = nil, want a refusal")
+	}
+	if got := q.slotOf(t, q.ws[1]); got != MergeSlotWaiting {
+		t.Fatalf("the refused merge = %s, want it still waiting", got)
 	}
 }

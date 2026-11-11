@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -152,9 +153,10 @@ type QueueMember struct {
 	// Step is a started merge's step, empty while it waits and before its
 	// first step is published.
 	Step footer.MergeStep
-	// AsideFor is why a merge remediating out of line stepped aside, zero for
-	// every merge in line.
-	AsideFor AsideReason
+	// Repair is the repair slot a merge out of line holds or awaits, the
+	// store's stamped slot as every surface draws it; RepairNone for every
+	// merge in line.
+	Repair sidebar.QueueRepair
 }
 
 // QueueSnapshot is one repository's queue as it stands.
@@ -166,8 +168,9 @@ type QueueSnapshot struct {
 	// Members are the merges in line, front first. A merge only requested
 	// (its asking turn still running) is not in line.
 	Members []QueueMember
-	// Remediating are the merges remediating out of line (remediate.go),
-	// oldest first. They are in no place in line.
+	// Remediating are the merges out of line (remediate.go), in the order
+	// they stepped aside, each with the repair slot it holds or awaits. They
+	// are in no place in line.
 	Remediating []QueueMember
 }
 
@@ -318,14 +321,6 @@ func (d queueEventsDB) AdmitMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 	})
 }
 
-// TakeUpReturnedMerge takes a merge back from a repair up again and reports
-// it started: it was waiting, and runs from here.
-func (d queueEventsDB) TakeUpReturnedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) error {
-	return d.reported(ctx, repo, false, func() (queueWrite, error) {
-		return queueWrite{report: true, kind: QueueChangeStarted, subject: id}, d.DB.TakeUpReturnedMerge(ctx, repo, id)
-	})
-}
-
 // RemoveMergeQueueEntry drops an entry and reports the merge leaving.
 func (d queueEventsDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
 	return d.reported(ctx, repo, true, func() (queueWrite, error) {
@@ -373,14 +368,6 @@ func (d queueEventsDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id
 		return queueWrite{report: moved, kind: QueueChangeReordered, subject: id}, err
 	})
 	return moved, err
-}
-
-// YieldMergeHead gives the head's place to the race's winner and reports the
-// reorder.
-func (d queueEventsDB) YieldMergeHead(ctx context.Context, repo wsm.RepoKey, loser, winner wsm.WorkspaceID) error {
-	return d.reported(ctx, repo, false, func() (queueWrite, error) {
-		return queueWrite{report: true, kind: QueueChangeReordered, subject: winner}, d.DB.YieldMergeHead(ctx, repo, loser, winner)
-	})
 }
 
 // SetMergeQueuePaused pauses or resumes a queue and reports it. The
@@ -519,9 +506,7 @@ func (o *orchestrator) readQueue(ctx context.Context, db wsm.DB, repo wsm.RepoKe
 			return QueueSnapshot{}, err
 		}
 		for i := range remediating {
-			if remediating[i].AsideFor, err = asideReasonFor(ctx, db, remediating[i].Workspace); err != nil {
-				return QueueSnapshot{}, err
-			}
+			remediating[i].Repair = rosterRepair(aside[i].Slot)
 		}
 	}
 	return QueueSnapshot{Repo: repo, Paused: paused, Members: members, Remediating: remediating}, nil
@@ -552,7 +537,7 @@ func memberOf(entry wsm.MergeQueueEntry, record wsm.Workspace) QueueMember {
 		Name:      record.Name,
 		Branch:    branch,
 		Mode:      modeOf(entry.Source, record),
-		Started:   entry.WorkedOn(),
+		Started:   entry.State != wsm.MergeQueued,
 		Front:     entry.Source.Front,
 	}
 	switch {

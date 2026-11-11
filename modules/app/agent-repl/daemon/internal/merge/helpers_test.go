@@ -22,7 +22,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/bounce"
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -58,10 +57,6 @@ type fakeDB struct {
 	progressHistory []wsm.MergeProgress
 
 	wsm.DB
-
-	// takenUp is every workspace TakeUpReturnedMerge was called for, in
-	// order.
-	takenUp []ids.WorkspaceID
 
 	// workspaceErr, when set, is what every Workspace read answers.
 	workspaceErr error
@@ -127,11 +122,10 @@ type fakeDB struct {
 	// answers, so a test sees a second read.
 	deployHoldLater *wsm.DeployHold
 	deployHoldReads int
-	// racing is the racing switch; racingErr fails its read.
-	racing    wsm.RacingSwitch
-	racingErr error
-	repos     []wsm.Repository
-	seq       int
+	// stepAsideErr, when set, fails every StepAsideMerge.
+	stepAsideErr error
+	repos        []wsm.Repository
+	seq          int
 	// onPausedRead, when set, runs at the start of every MergeQueuePaused
 	// read, outside the fake's lock, so a test can hold an admission step in
 	// flight; pausedReads counts those reads.
@@ -880,60 +874,61 @@ func (f *fakeDB) renumber(repo wsm.RepoKey) {
 	}
 }
 
-func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winner ids.WorkspaceID) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	queue := f.queues[repo]
-	li, wi := -1, -1
-	for i, entry := range queue {
-		switch entry.Workspace {
-		case loser:
-			li = i
-		case winner:
-			wi = i
-		}
-	}
-	if li < 0 {
-		return fmt.Errorf("yield %s to %s: %w", loser, winner, wsm.ErrMergeHeadLeft)
-	}
-	if li < 0 || wi < 0 || li >= wi || queue[li].State != wsm.MergeAdmitted || queue[wi].State != wsm.MergeAdmitted {
-		return fmt.Errorf("yield %s to %s: not two admitted entries in that order", loser, winner)
-	}
-	moving := queue[wi]
-	copy(queue[li+1:wi+1], queue[li:wi])
-	queue[li] = moving
-	f.renumber(repo)
-	return nil
-}
-
-// StepAsideMerge takes the admitted entry out of line to the back, as
-// remediating, as the durable queue does.
-func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+// StepAsideMerge takes the entry out of line to the back, as remediating
+// for ASIDE, and answers the slot it took, as the durable queue does.
+func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, aside wsm.MergeAside) (wsm.MergeSlot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.beforeStepAside != nil {
 		f.beforeStepAside(id)
+	}
+	if f.stepAsideErr != nil {
+		return wsm.MergeSlotNone, f.stepAsideErr
+	}
+	from := wsm.MergeAdmitted
+	if aside == wsm.MergeAsideWaitingConflicts {
+		from = wsm.MergeQueued
 	}
 	queue := f.queues[repo]
 	for i, entry := range queue {
 		if entry.Workspace != id {
 			continue
 		}
-		if entry.State != wsm.MergeAdmitted {
-			return fmt.Errorf("step aside %s while %s, not admitted", id, entry.State)
+		if entry.State != from {
+			return wsm.MergeSlotNone, fmt.Errorf("step aside %s for %s while %s, not %s", id, aside, entry.State, from)
 		}
-		// THE SLOT MOMENT IS WRITTEN WITH THE STEP ASIDE, as the durable
-		// queue writes it (wsm.MergeQueueEntry.SlotSince).
-		entry.State, entry.Slot, entry.SlotSince, entry.Returned = wsm.MergeRemediating, wsm.MergeSlotRemediating, time.Now(), false
+		entry.State, entry.Aside = wsm.MergeRemediating, aside
 		f.queues[repo] = append(append(queue[:i:i], queue[i+1:]...), entry)
 		f.renumber(repo)
-		return nil
+		if err := f.restampRepairsLocked(repo); err != nil {
+			return wsm.MergeSlotNone, err
+		}
+		q := f.queues[repo]
+		return q[len(q)-1].Slot, nil
 	}
-	return fmt.Errorf("step aside %s: %w", id, wsm.ErrNotFound)
+	return wsm.MergeSlotNone, fmt.Errorf("step aside %s: %w", id, wsm.ErrNotFound)
 }
 
-// ReturnRemediatedMerge puts the remediating entry back, admitted and marked
-// returned, at the first waiting place, as the durable queue does.
+// restampRepairsLocked stands every remediating entry of REPO on the repair
+// slot the store's one derivation gives it (wsm.SlotsOf), stamping the
+// moment of each change, as the durable queue does in the write that moved
+// it. Entries in line keep the slots their test seeded. Called with f.mu held.
+func (f *fakeDB) restampRepairsLocked(repo wsm.RepoKey) error {
+	queue := f.queues[repo]
+	slots, err := wsm.SlotsOf(queue)
+	if err != nil {
+		return err
+	}
+	for i := range queue {
+		if queue[i].State == wsm.MergeRemediating && queue[i].Slot != slots[i] {
+			queue[i].Slot, queue[i].SlotSince = slots[i], time.Now()
+		}
+	}
+	return nil
+}
+
+// ReturnRemediatedMerge puts the remediating entry back, admitted, at the
+// first waiting place, as the durable queue does.
 func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -951,7 +946,11 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 		return fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
 	}
 	entry := queue[at]
-	entry.State, entry.Returned = wsm.MergeAdmitted, true
+	entry.State, entry.Source.Front = wsm.MergeAdmitted, true
+	if entry.Aside == wsm.MergeAsideWaitingConflicts {
+		entry.State = wsm.MergeQueued
+	}
+	entry.Aside, entry.Slot, entry.SlotSince = wsm.MergeAsideNone, wsm.MergeSlotWaiting, time.Now()
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)
 	for i, e := range rest {
@@ -962,26 +961,7 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 	}
 	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{entry}, rest[place:]...)...)
 	f.renumber(repo)
-	return nil
-}
-
-// TakeUpReturnedMerge clears a returned entry's mark, as the durable queue
-// does, refusing an entry not admitted and marked returned.
-func (f *fakeDB) TakeUpReturnedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.takenUp = append(f.takenUp, id)
-	for i, entry := range f.queues[repo] {
-		if entry.Workspace != id {
-			continue
-		}
-		if entry.State != wsm.MergeAdmitted || !entry.Returned {
-			return fmt.Errorf("take up %s while %s and returned %v", id, entry.State, entry.Returned)
-		}
-		f.queues[repo][i].Returned = false
-		return nil
-	}
-	return fmt.Errorf("take up %s: %w", id, wsm.ErrNotFound)
+	return f.restampRepairsLocked(repo)
 }
 
 func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
@@ -1067,7 +1047,7 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			f.renumber(repo)
 			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
 			f.closeOnExitLocked(id, closes)
-			return nil
+			return f.restampRepairsLocked(repo)
 		}
 	}
 	return fmt.Errorf("no queue entry for %s", id)
@@ -1101,7 +1081,7 @@ func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids
 	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
-			f.queues[repo][i].State, f.queues[repo][i].Ledger, f.queues[repo][i].Returned = wsm.MergeQueued, ledger, false
+			f.queues[repo][i].State, f.queues[repo][i].Ledger = wsm.MergeQueued, ledger
 			return nil
 		}
 	}
@@ -1127,6 +1107,9 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 	}
 	f.queues[repo] = append(f.queues[repo][:at], f.queues[repo][at+1:]...)
 	f.renumber(repo)
+	if err := f.restampRepairsLocked(repo); err != nil {
+		return err
+	}
 	delete(f.leases, id)
 	f.releasedLeases = append(f.releasedLeases, lease)
 	for ws, p := range f.progress {
@@ -1221,25 +1204,6 @@ func (f *fakeDB) RecordDeploySkip(context.Context, wsm.RepoKey) error {
 	}
 	f.deployHold.Skipped++
 	return nil
-}
-
-func (f *fakeDB) SetMergeRacingDisabled(_ context.Context, disabled bool, at time.Time) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if !disabled {
-		f.racing = wsm.RacingSwitch{}
-		return nil
-	}
-	if !f.racing.Disabled {
-		f.racing = wsm.RacingSwitch{Disabled: true, Since: at}
-	}
-	return nil
-}
-
-func (f *fakeDB) MergeRacing(context.Context) (wsm.RacingSwitch, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.racing, f.racingErr
 }
 
 func (f *fakeDB) DeployHoldOf(context.Context, wsm.RepoKey) (wsm.DeployHold, error) {
@@ -2607,20 +2571,6 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 	return run.Output, run.Code, run.Err
 }
 
-// fakePower is the host's power source, which the governor never reads
-// itself here: the harness installs every reading directly (harness.power).
-type fakePower struct{}
-
-func (fakePower) Power() (cpugov.Power, error) {
-	return cpugov.PowerUnknown, errors.New("the harness installs the power source; nothing reads it")
-}
-
-// power stands the host on a power source, which the governor tells the
-// orchestrator.
-func (h *harness) power(p cpugov.Power) {
-	h.governor.ObservePower(p)
-}
-
 // harness is one orchestrator with every fake it was built from.
 type harness struct {
 	// timings keeps every merge stage the orchestrator timed.
@@ -2716,9 +2666,6 @@ type harness struct {
 	gateTrees []string
 	// gateWorkspaces records the workspace name each gate command named.
 	gateWorkspaces []string
-	// governor is the gate governor, sampling an idle host unless a test says
-	// otherwise (h.load).
-	governor *cpugov.Governor
 	// seq is the shared monotonic sequence both the feed and the git fakes
 	// stamp their calls with, so an ordering between two subsystems is asserted
 	// on the real order.
@@ -3047,14 +2994,6 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 
-	governor, err := cpugov.New(cpugov.DefaultConfig(), fakePower{}, false, h.logs.Global())
-	if err != nil {
-		t.Fatalf("building the gate governor: %v", err)
-	}
-	h.governor = governor
-	// THE HARNESS'S HOST IS ON AC POWER, so its queues race their top two;
-	// a test of the battery window says so (harness.power).
-	h.governor.ObservePower(cpugov.PowerAC)
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
 	if err := os.WriteFile(h.script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
@@ -3067,8 +3006,6 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("building the orchestrator: %v", err)
 	}
 	h.o = o
-	// ONE MERGE AT A TIME unless a test builds a chain (chain_test.go).
-	o.window = 1
 	// NOTHING THE ORCHESTRATOR STARTED OUTLIVES ITS TEST; this waits, bounded,
 	// for every goroutine it counted to be gone.
 	t.Cleanup(func() {
@@ -3108,7 +3045,6 @@ func (h *harness) deps() Deps {
 			return []string{"bash", h.script}
 		},
 		TestRunner: h.runner,
-		Governor:   h.governor,
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
 			h.mu.Lock()

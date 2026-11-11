@@ -27,7 +27,6 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/coldbacklog"
 	"agent-repld/internal/commandcatalog"
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/desktopnotify"
@@ -1314,34 +1313,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// ---- the merge orchestrator ----
 
 	ownership = workspace.NewOwnership(rolloutController)
-	// THE GATE GOVERNOR counts the merge queue's test gates and reads the
-	// host's power source, which decides how many merges each queue works on;
-	// its reading loop is a background loop below. A harness pins the power
-	// source it reads (cpugov.FixedPowerEnv).
-	fixedPower := os.Getenv(cpugov.FixedPowerEnv)
-	powerSource, err := cpugov.HostPowerSource(fixedPower)
-	if err != nil {
-		p.Surfaces.Global().Error("daemon.boot.gate_governor", "refused the fixed power source the environment names", dlog.Context{
-			"env": cpugov.FixedPowerEnv, "value": fixedPower, "error": err.Error()})
-		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
-	}
-	if fixedPower != "" {
-		p.Surfaces.Global().Info("daemon.boot.gate_governor", "the gate governor reads a fixed power source, not the host's own", dlog.Context{
-			"env": cpugov.FixedPowerEnv, "value": fixedPower})
-	}
-	// THE GOVERNOR IS BORN WITH THE OPERATOR'S RACING SWITCH, read from the
-	// state database before any merge can be admitted, so no merge ever races
-	// under a switch that disabled racing (merge's racing.go flips it live).
-	racing, err := p.DB.MergeRacing(ctx)
-	if err != nil {
-		p.Surfaces.Global().Error("daemon.boot.gate_governor", "could not read the merge queue's racing switch", dlog.Context{
-			"error": err.Error()})
-		return nil, fmt.Errorf("agent-repld: read the merge queue's racing switch: %w", err)
-	}
-	gateGovernor, err := cpugov.New(cpugov.DefaultConfig(), powerSource, racing.Disabled, p.Surfaces.Global())
-	if err != nil {
-		return nil, fmt.Errorf("agent-repld: build the gate governor: %w", err)
-	}
 	// THE MERGE QUEUE'S SUBSCRIPTION NOTICES are told every queue change the
 	// orchestrator makes; they only buffer until their loop runs, which is
 	// handed the prompt handler built below.
@@ -1380,7 +1351,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		HookRunner:      scripts,
 		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),
-		Governor:        gateGovernor,
 		Painter:         painter,
 		StartSession:    fleet.Start,
 		StopSession:     fleet.KillSession,
@@ -1747,10 +1717,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
 		{Name: "deployed_version", Run: deployedVersion.Run},
-		{Name: "gate_governor", Run: func(ctx context.Context) error {
-			gateGovernor.Run(ctx)
-			return nil
-		}},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)

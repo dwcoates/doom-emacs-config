@@ -67,6 +67,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
@@ -413,13 +414,32 @@ func QueueState(queue merge.QueueSnapshot) string {
 		}
 		line = fmt.Sprintf("%d in line; `%s` %s", len(queue.Members), front.Name, standing)
 	}
-	if n := len(queue.Remediating); n > 0 {
-		line += fmt.Sprintf("; %d fixing out of line", n)
+	for _, member := range queue.Remediating {
+		switch member.Repair {
+		case sidebar.RepairFixingTests:
+			line += fmt.Sprintf("; `%s` fixing tests", member.Name)
+		case sidebar.RepairResolvingConflicts:
+			line += fmt.Sprintf("; `%s` resolving conflicts", member.Name)
+		}
+	}
+	if n := awaitingRepair(queue.Remediating); n > 0 {
+		line += fmt.Sprintf("; %d awaiting a repair slot", n)
 	}
 	if queue.Paused {
 		line += "; paused"
 	}
 	return line + "."
+}
+
+// awaitingRepair counts the merges out of line awaiting a repair slot.
+func awaitingRepair(outOfLine []merge.QueueMember) int {
+	n := 0
+	for _, member := range outOfLine {
+		if member.Repair == sidebar.RepairAwaitingFixingTests || member.Repair == sidebar.RepairAwaitingResolvingConflicts {
+			n++
+		}
+	}
+	return n
 }
 
 // repositoryDir is the repository's main checkout a queue key names: the key

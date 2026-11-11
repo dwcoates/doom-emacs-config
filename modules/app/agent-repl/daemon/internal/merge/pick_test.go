@@ -454,7 +454,7 @@ func TestAPickAtTheHeadHoldsTheSlotUntilItSucceedsAndThenTheMergeIsAdmitted(t *t
 	}
 }
 
-func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsARace(t *testing.T) {
+func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsAChain(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry wsm.MergeQueueEntry
@@ -467,11 +467,11 @@ func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsARace(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := racable(tt.entry)
+			got := chainable(tt.entry)
 
 			// Assert
 			if got != tt.want {
-				t.Fatalf("racable = %v, want %v", got, tt.want)
+				t.Fatalf("chainable = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"connectrpc.com/connect"
 
@@ -11,6 +12,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/workspace"
 )
 
@@ -132,32 +134,34 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 		Repository: &workspacev1.RepositoryRef{Id: string(status.Repository.ID), Dir: status.Repository.Dir},
 		Advance:    advance,
 	}
-	type listed struct {
-		member      merge.QueueMember
-		remediating bool
-	}
-	var entries []listed
-	for _, member := range status.Queue.Members {
-		entries = append(entries, listed{member: member})
-	}
-	for _, member := range status.Queue.Remediating {
-		entries = append(entries, listed{member: member, remediating: true})
-	}
-	for _, e := range entries {
-		member := e.member
+	// EVERY MERGE OUT OF LINE IS LISTED AFTER THE LINE: each repair slot's
+	// holder, then the merges awaiting each slot in the order each will be
+	// granted it (agentrepl.v1.MergeQueueStatus.entries).
+	outOfLine := slices.Clone(status.Queue.Remediating)
+	slices.SortStableFunc(outOfLine, func(a, b merge.QueueMember) int { return int(a.Repair) - int(b.Repair) })
+	members := append(slices.Clone(status.Queue.Members), outOfLine...)
+	awaiting := map[sidebar.QueueRepair]uint32{}
+	for _, member := range members {
 		kind := &agentreplv1.MergeQueueStatusEntryKind{Kind: &agentreplv1.MergeQueueStatusEntryKind_OwnBranch{OwnBranch: &agentreplv1.MergeQueueStatusEntryKindOwnBranch{}}}
 		if member.Requester != "" {
 			kind.Kind = &agentreplv1.MergeQueueStatusEntryKind_AsyncMerge{AsyncMerge: &agentreplv1.MergeQueueStatusEntryKindAsyncMerge{
 				Requester: &workspacev1.WorkspaceRef{Id: string(member.Requester)}}}
 		}
 		stage := &agentreplv1.MergeQueueStatusEntryStage{Stage: &agentreplv1.MergeQueueStatusEntryStage_Waiting{Waiting: &agentreplv1.MergeQueueStatusEntryStageWaiting{}}}
-		switch {
-		case e.remediating:
-			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Remediating{Remediating: &agentreplv1.MergeQueueStatusEntryStageRemediating{
-				Reason: remediatingReasonOf(member.AsideFor)}}
-		case member.Started:
-			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Running{Running: &agentreplv1.MergeQueueStatusEntryStageRunning{
-				StepDescription: member.Step.Words()}}
+		switch member.Repair {
+		case sidebar.RepairNone:
+			if member.Started {
+				stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Running{Running: &agentreplv1.MergeQueueStatusEntryStageRunning{
+					StepDescription: member.Step.Words()}}
+			}
+		case sidebar.RepairFixingTests:
+			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_FixingTests{FixingTests: &agentreplv1.MergeQueueStatusEntryStageFixingTests{}}
+		case sidebar.RepairResolvingConflicts:
+			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_ResolvingConflicts{ResolvingConflicts: &agentreplv1.MergeQueueStatusEntryStageResolvingConflicts{}}
+		default:
+			awaiting[member.Repair]++
+			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_AwaitingRepair{AwaitingRepair: &agentreplv1.MergeQueueStatusEntryStageAwaitingRepair{
+				Slot: awaitedSlotOf(member.Repair), Place: awaiting[member.Repair]}}
 		}
 		out.Entries = append(out.Entries, &agentreplv1.MergeQueueStatusEntry{
 			Workspace:     &workspacev1.WorkspaceRef{Id: string(member.Workspace)},
@@ -171,17 +175,17 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 	return out
 }
 
-// remediatingReasonOf renders why a merge remediating out of line stepped
-// aside. Every remediating member carries its reason (merge.QueueSnapshot),
-// so a zero or unknown one is a defect in the snapshot, and panics.
-func remediatingReasonOf(why merge.AsideReason) *agentreplv1.MergeQueueStatusEntryStageRemediatingReason {
-	switch why {
-	case merge.AsideForTests:
-		return &agentreplv1.MergeQueueStatusEntryStageRemediatingReason{Reason: &agentreplv1.MergeQueueStatusEntryStageRemediatingReason_Tests{
-			Tests: &agentreplv1.MergeQueueStatusEntryStageRemediatingTests{}}}
-	case merge.AsideForConflicts:
-		return &agentreplv1.MergeQueueStatusEntryStageRemediatingReason{Reason: &agentreplv1.MergeQueueStatusEntryStageRemediatingReason_Conflicts{
-			Conflicts: &agentreplv1.MergeQueueStatusEntryStageRemediatingConflicts{}}}
+// awaitedSlotOf renders the slot a merge awaiting a repair slot waits for.
+// Only an awaiting repair reaches it, so any other is a defect in the
+// snapshot, and panics.
+func awaitedSlotOf(repair sidebar.QueueRepair) *agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot {
+	switch repair {
+	case sidebar.RepairAwaitingFixingTests:
+		return &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot{Slot: &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests{
+			FixingTests: &agentreplv1.MergeQueueStatusEntryStageFixingTests{}}}
+	case sidebar.RepairAwaitingResolvingConflicts:
+		return &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot{Slot: &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts{
+			ResolvingConflicts: &agentreplv1.MergeQueueStatusEntryStageResolvingConflicts{}}}
 	}
-	panic(fmt.Sprintf("server: a remediating merge's snapshot carries no reason it stepped aside for (merge.AsideReason(%d))", int(why)))
+	panic(fmt.Sprintf("server: a merge out of line awaits no repair slot (%s)", repair))
 }

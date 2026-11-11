@@ -104,24 +104,3 @@ func TestStatusFailsHardWhenAQueueCannotBeRead(t *testing.T) {
 		t.Errorf("no error record: %+v", h.logs.Records())
 	}
 }
-
-func TestStatusShowsAMergeBackFromARepairWaitingWithNoStep(t *testing.T) {
-	// Arrange: the admitted merge is back from a repair out of line, and the
-	// step it stood on before it stepped aside is still recorded.
-	h := statusHarness(t)
-	h.db.mu.Lock()
-	h.db.queues[h.repoKey()][0].Returned = true
-	h.db.mu.Unlock()
-
-	// Act
-	got, err := h.o.Status(context.Background(), nil)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	member, found := memberNamed(got[0].Queue.Members, theWorkspace)
-	if !found || member.Started || member.Step != "" {
-		t.Fatalf("member = %+v (found %v), want it waiting with no step", member, found)
-	}
-}

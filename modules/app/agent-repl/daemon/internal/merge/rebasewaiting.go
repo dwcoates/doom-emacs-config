@@ -2,26 +2,34 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
-// This file is the WAITING MEMBERS' REBASE (owner ruling, 2026-10-12): every
-// landing rebases each merge still waiting in line -- beyond the working
-// window, whose two merges race to land (race.go) -- onto the target's new
-// tip, with the same rebasing and conflict-resolution step the front takes:
-// its conflicts are resolved by its own session through the usual prompts
-// and recorded resolutions. A waiting member never runs tests; it is only
-// kept close to the target, so that its turn at the front finds little left
-// to replay.
+// This file is the WAITING MEMBERS' REBASE (owner rulings, 2026-10-12 and
+// 2026-11-11): every landing rebases each merge still waiting in line behind
+// the head onto the target's new tip. A waiting member never runs tests; it is
+// only kept close to the target, so that its turn at the head finds little
+// left to replay.
 //
-// ONE AT A TIME, IN QUEUE ORDER. A landing never fans out a rebase and a
-// conflict turn per member at once: one background rebase runs across the
-// whole repository's queue, member by member. A landing during the pass asks
-// for one more pass once this one ends; nothing is restarted mid-rebase.
+// THE REBASE RUNS GIT ONLY. A replayed commit that conflicts is no prompt: the
+// rebase is aborted, the branch keeps its base, and the member steps aside out
+// of line for the RESOLVING-CONFLICTS SLOT (wsm.MergeAsideWaitingConflicts),
+// holding it when nobody does or waiting for it in order (remediate.go). The
+// slot's holder runs its RESOLVING REBASE (resolveWaiting): the same rebase,
+// its conflicts resolved by its own session through the usual prompts and
+// recorded resolutions, after which it returns to the line at the first
+// waiting place and the slot passes on.
+//
+// ONE AT A TIME, IN QUEUE ORDER. A landing never fans out a rebase per member
+// at once: one background rebase runs across the whole repository's queue,
+// member by member. A landing during the pass asks for one more pass once
+// this one ends; nothing is restarted mid-rebase.
 //
 // A MEMBER THAT IS BUSY IS SKIPPED, never waited for (owner ruling): a turn in
 // flight, live detached work, a worktree with uncommitted changes or another
@@ -31,10 +39,10 @@ import (
 // THE REBASE HOLDS THE MERGE LEASE ONLY WHILE IT RUNS. A waiting sync merge's
 // requester stays usable (no hold from enqueue); during its rebase the lease
 // holds its prompts, because the rebase rewrites the worktree its session
-// works in and its conflict turn runs in that session. The lease is released
-// the moment the rebase settles, and the entry stays exactly where it stood
-// in line. A background rebase records no progress: a restart in the middle
-// simply leaves the member to catch up at the next landing.
+// works in. The lease is released the moment the rebase settles. A background
+// rebase records no progress: a restart in the middle simply leaves the
+// member to catch up at the next landing, and a resolving rebase the restart
+// cut runs again from its start once the boot takes its slot back.
 
 // rebaseWaiting asks for a pass over repo's waiting members, once a merge
 // landed: it starts one, or asks the pass running now for one more.
@@ -92,11 +100,10 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		return
 	}
 	line := inLine(stored)
-	window := o.queueWindow()
-	if len(line) <= window {
+	if len(line) <= 1 {
 		return
 	}
-	for _, entry := range line[window:] {
+	for _, entry := range line[1:] {
 		if o.isDraining() {
 			return
 		}
@@ -110,8 +117,8 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 // rebaseWaitingMember runs one waiting member's background rebase to its end.
 //
 // THE RUN IS REGISTERED BY ITS WORKSPACE ONLY, never as its repository's
-// running merge nor in its chain: it is no head, and the race to land and the
-// admission never see it. The registration by workspace is what an eviction
+// running merge nor in its chain: it is no head, and the admission never sees
+// it. The registration by workspace is what an eviction
 // and the shutdown drain find it by, and what keeps the admission from
 // starting the member while its rebase runs.
 func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) {
@@ -196,19 +203,40 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	if contained {
 		return backgroundEnd{}
 	}
-	log.Info(op, "a landing moved the target; the waiting merge rebases onto its new tip", withField(fields, "onto", tip))
+	if r.resolving {
+		log.Info(op, "the merge holds the resolving-conflicts slot; it rebases onto the target's tip, its session resolving the conflicts", withField(fields, "onto", tip))
+	} else {
+		log.Info(op, "a landing moved the target; the waiting merge rebases onto its new tip", withField(fields, "onto", tip))
+	}
 	gaveUp, err := r.rebase(ctx, tip, targetBranch)
+	var conflicted *waitingConflict
+	if errors.As(err, &conflicted) {
+		return backgroundEnd{conflict: conflicted}
+	}
 	if err == nil && gaveUp == nil {
-		log.Info(op, "the waiting merge stands on the target's new tip; it keeps its place in line", fields)
+		log.Info(op, "the waiting merge stands on the target's new tip", fields)
 	}
 	return backgroundEnd{gaveUp: gaveUp, err: err}
 }
 
+// waitingConflict is the end of a git-only background rebase that met a
+// conflict: the commit it conflicted on and the files.
+type waitingConflict struct {
+	commit string
+	files  []string
+}
+
+func (c *waitingConflict) Error() string {
+	return fmt.Sprintf("merge: the waiting merge's rebase conflicted on %s in %d file(s)", short(c.commit), len(c.files))
+}
+
 // backgroundEnd is how a waiting member's rebase ended: an error, an outcome
-// its conflict resolution gave up on, or neither when it settled.
+// its conflict resolution gave up on, a conflict a git-only rebase met, or
+// none of them when it settled.
 type backgroundEnd struct {
-	gaveUp *outcome
-	err    error
+	gaveUp   *outcome
+	err      error
+	conflict *waitingConflict
 }
 
 // settleBackground lands a waiting member's rebase on its one end.
@@ -223,13 +251,119 @@ func (r *run) settleBackground(ctx context.Context, end backgroundEnd) {
 	switch {
 	case r.exiting():
 		r.standDownBackground(settle)
+	case end.conflict != nil:
+		r.stepAsideWaiting(settle, end.conflict)
 	case end.err != nil:
 		r.end(ctx, end.err)
 	case end.gaveUp != nil:
 		_ = r.finish(settle, *end.gaveUp)
+	case r.resolving:
+		r.giveBack(settle)
+		if err := r.o.returnRemediated(settle, r.ws, r.repo); err != nil {
+			r.o.log(settle, r.ws).Error(opRemediate, "could not return the merge whose resolving rebase settled to the line; it stays out of line, holding its slot, until the next boot",
+				dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+		}
 	default:
 		r.keepInLine(settle)
 	}
+}
+
+// stepAsideWaiting ends a git-only background rebase that met CONFLICT: the
+// rebase is aborted so the branch keeps its base, the merge gives back what
+// the rebase held, and it steps aside out of line for the resolving-conflicts
+// slot, holding it or waiting for it (wsm.StepAsideMerge,
+// MergeAsideWaitingConflicts). A step that fails is recorded at ERROR, and
+// the merge keeps its base and its place, meeting the conflict at the head.
+func (r *run) stepAsideWaiting(ctx context.Context, conflict *waitingConflict) {
+	const op = "daemon.merge.rebase_waiting"
+	o, log := r.o, r.o.log(ctx, r.ws)
+	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "commit": conflict.commit, "files": len(conflict.files)}
+	if err := r.git.AbortRebase(ctx, r.subject.dir); err != nil {
+		log.Error(op, "could not abort the waiting merge's conflicted rebase; it is left as git left it", withField(fields, "error", err.Error()))
+		r.giveBack(ctx)
+		return
+	}
+	r.giveBack(ctx)
+	var slot wsm.MergeSlot
+	if err := o.lineWrite(r.repo, func() error {
+		var err error
+		slot, err = o.deps.DB.StepAsideMerge(ctx, r.repo, r.ws, wsm.MergeAsideWaitingConflicts)
+		return err
+	}); err != nil {
+		log.Error(op, "could not step the conflicted waiting merge aside; it keeps its base and its place, and meets the conflict at the head", withField(fields, "error", err.Error()))
+		return
+	}
+	fields["slot"] = slot.String()
+	o.registerRemediation(r.ws, &remediation{repo: r.repo, waiting: true})
+	if slot.Awaiting() {
+		log.Info(op, "the waiting merge's rebase conflicted; it was aborted, and the merge waits out of line for the resolving-conflicts slot, in order", fields)
+	} else {
+		log.Info(op, "the waiting merge's rebase conflicted; it was aborted, and the merge holds the resolving-conflicts slot", fields)
+	}
+	if err := o.republishQueue(ctx, r.repo); err != nil {
+		log.Error(op, "could not republish the queue", withField(fields, "error", err.Error()))
+	}
+	o.armRepairs(ctx, r.repo)
+	o.kick(r.repo)
+}
+
+// resolveWaiting is the resolving-conflicts slot's work for WS, a waiting
+// merge whose background rebase conflicted: its RESOLVING REBASE, a background
+// rebase whose session resolves its conflicts in place, after which the merge
+// returns to the line (settleBackground). A workspace that is busy or held by
+// another lease cannot be rebased now: the merge returns to the line at once,
+// recorded at INFO, giving the slot on, and meets the conflict at the head.
+func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) {
+	const op = "daemon.merge.rebase_waiting"
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
+	settle := context.WithoutCancel(ctx)
+	giveUp := func(message string) {
+		log.Info(op, message, fields)
+		if err := o.returnRemediated(settle, ws, repo); err != nil {
+			log.Error(op, "could not return the merge to the line; it stays out of line, holding its slot, until the next boot", withField(fields, "error", err.Error()))
+		}
+	}
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err != nil {
+		log.Error(op, "could not read the entry of the merge holding the resolving-conflicts slot; it stays out of line until the next boot", withField(fields, "error", err.Error()))
+		return
+	}
+	if !o.deps.Freeness.Free(ws) {
+		fields["blockers"] = o.deps.Freeness.Blockers(ws)
+		giveUp("the merge holding the resolving-conflicts slot has a busy workspace; it returns to the line and meets the conflict at the head")
+		return
+	}
+	queuedMS, err := enqueuedMS(entry)
+	if err != nil {
+		log.Error(op, "could not read when the merge holding the resolving-conflicts slot was queued; it stays out of line until the next boot", withField(fields, "error", err.Error()))
+		return
+	}
+	runCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	r := o.newBackgroundRun(runCtx, cancel, repo, ws, queuedMS)
+	r.resolving = true
+	r.source = entry.Source
+	if !o.registerBackground(r) {
+		giveUp("the merge holding the resolving-conflicts slot has another run in this daemon; it returns to the line")
+		return
+	}
+	defer close(r.finished)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
+	if other, held := heldByAnother(err); held {
+		fields["holder"], fields["lease"] = other.Holder.String(), string(other.Lease)
+		o.unregisterBackground(r)
+		giveUp("the merge holding the resolving-conflicts slot has its workspace held by another lease; it returns to the line and meets the conflict at the head")
+		return
+	}
+	if err != nil {
+		o.unregisterBackground(r)
+		log.Error(op, "could not take the merge lease for the resolving rebase; the merge stays out of line until the next boot", withField(fields, "error", err.Error()))
+		return
+	}
+	r.lease = lease
+	o.deps.Queue.OnLeaseChanged(ws)
+	r.settleBackground(runCtx, r.rebaseInBackground(runCtx, fields))
 }
 
 // standDownBackground gives back what a waiting member's rebase holds when

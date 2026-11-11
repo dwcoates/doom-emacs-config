@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"agent-repld/internal/boot"
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/hostpower"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
@@ -1082,19 +1082,10 @@ func bootModeFor(opts options) daemonaddr.BootMode {
 	return daemonaddr.BootOrdinary
 }
 
-// hostOnBattery answers whether the host runs on battery, through the same
-// power source the merge queue's governor reads (cpugov.HostPowerSource), so
-// a harness's fixed source reads the same in both.
+// hostOnBattery answers whether the host runs on battery, read the
+// platform's own way (hostpower).
 func hostOnBattery() (bool, error) {
-	source, err := cpugov.HostPowerSource(os.Getenv(cpugov.FixedPowerEnv))
-	if err != nil {
-		return false, err
-	}
-	power, err := source.Power()
-	if err != nil {
-		return false, err
-	}
-	return power == cpugov.PowerBattery, nil
+	return hostpower.OnBattery(&hostpower.Host{})
 }
 
 // publishOwnership publishes the two advertisements of a daemon that owns

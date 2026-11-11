@@ -3,12 +3,10 @@ package merge
 import (
 	"context"
 	"errors"
-	"math"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/wsm"
 )
 
 // This file is a deploy's CONCURRENT STAGES (repoconfig.v1.LifecycleConfig
@@ -31,15 +29,8 @@ import (
 // change, so a promotion is never missed and nothing polls.
 //
 // A LOCAL MERGE IS NEVER CONCURRENT (lifecycleconfig refuses the combination):
-// it lands on the target, which only the head moves. A config with a local
-// merge runs as it always has: its chain races (racesIn), within the window.
-
-// chainsIn reports whether the queue chains deploys behind HEAD at all: a
-// head whose deploy races (racesIn), or one whose config runs leading stages
-// concurrently.
-func (o *orchestrator) chainsIn(repo wsm.RepoKey, head *run) bool {
-	return head.concurrentStages() || o.racesIn(repo, head)
-}
+// it lands on the target, which only the head moves, so a queue whose config
+// has a local merge works its head alone.
 
 // concurrentStages reports whether the run's deploy config runs any stage
 // concurrently. A run that has not read its config yet runs none.
@@ -47,17 +38,6 @@ func (r *run) concurrentStages() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.target.cfg != nil && lifecycleconfig.AnyConcurrent(r.target.cfg)
-}
-
-// windowFor is how many runs the chain behind HEAD may hold: every deploy in
-// line when the head's config has concurrent stages, else the window in force
-// (queueWindow), which the power source and the racing switch decide for a
-// chain that tests ahead of its turn.
-func (o *orchestrator) windowFor(head *run) int {
-	if head != nil && head.concurrentStages() {
-		return math.MaxInt
-	}
-	return o.queueWindow()
 }
 
 // awaitTurnFor is the boundary before STAGE: a run whose config runs STAGE one

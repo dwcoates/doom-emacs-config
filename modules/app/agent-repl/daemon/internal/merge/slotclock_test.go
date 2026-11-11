@@ -11,7 +11,7 @@ import (
 )
 
 func TestTheRosterClockOfEveryMergeIsItsEntrysSlotMoment(t *testing.T) {
-	head, racing, waiting, aside := time.UnixMilli(1_700_000_100_000), time.UnixMilli(1_700_000_200_000),
+	head, behind, waiting, aside := time.UnixMilli(1_700_000_100_000), time.UnixMilli(1_700_000_200_000),
 		time.UnixMilli(1_700_000_300_000), time.UnixMilli(1_700_000_400_000)
 	tests := []struct {
 		name string
@@ -19,29 +19,26 @@ func TestTheRosterClockOfEveryMergeIsItsEntrysSlotMoment(t *testing.T) {
 		want time.Time
 	}{
 		{name: "the head", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Line[0] }, want: head},
-		{name: "a merge racing behind the head", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Line[1] }, want: racing},
+		{name: "a deploy admitted behind the head", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Line[1] }, want: behind},
 		{name: "a merge waiting", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Line[2] }, want: waiting},
-		{name: "a merge remediating out of line", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Remediating[0] }, want: aside},
+		{name: "a merge fixing tests out of line", pick: func(q sidebar.MergeQueue) sidebar.QueueEntry { return q.Remediating[0] }, want: aside},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: four merges, each in a different slot since its own moment.
 			h := newHarness(t)
-			names := []ids.WorkspaceID{"ws-head", "ws-racing", "ws-waiting", "ws-aside"}
+			names := []ids.WorkspaceID{"ws-head", "ws-behind", "ws-waiting", "ws-aside"}
 			for _, ws := range names {
 				h.register(ws, string(ws))
 			}
 			h.db.mu.Lock()
 			h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{
 				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[0], State: wsm.MergeAdmitted, Slot: wsm.MergeSlotHead, SlotSince: head},
-				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[1], State: wsm.MergeAdmitted, Slot: wsm.MergeSlotRacing, SlotSince: racing},
+				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[1], State: wsm.MergeAdmitted, Slot: wsm.MergeSlotWaiting, SlotSince: behind},
 				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[2], State: wsm.MergeQueued, Slot: wsm.MergeSlotWaiting, SlotSince: waiting},
-				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[3], State: wsm.MergeRemediating, Slot: wsm.MergeSlotRemediating, SlotSince: aside},
+				{Repo: h.repoKey(), EnqueuedAt: head, Workspace: names[3], State: wsm.MergeRemediating, Aside: wsm.MergeAsideTests, Slot: wsm.MergeSlotFixingTests, SlotSince: aside},
 			}
 			h.db.mu.Unlock()
-			// A MERGE REMEDIATING OUT OF LINE HAS ITS PROGRESS RECORD, which
-			// names the turn it repairs in (asideReasonFor).
-			putProgressAt(t, h, names[3], TabFixes)
 
 			// Act
 			if err := h.o.republishQueue(context.Background(), h.repoKey()); err != nil {

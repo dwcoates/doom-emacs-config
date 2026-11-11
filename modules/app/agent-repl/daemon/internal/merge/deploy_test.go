@@ -251,33 +251,6 @@ func TestAHeldRepositorySkipsTheDeployHookAndCountsTheSkip(t *testing.T) {
 	}
 }
 
-func TestOnlyALocalMergeRaces(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  *repoconfigv1.LifecycleConfig
-		want bool
-	}{
-		{name: "a local merge", cfg: localMergeConfig(), want: true},
-		{name: "hooks alone", cfg: &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}}},
-		{name: "a head that has not read its config yet"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			head := &run{ws: theWorkspace, target: deployTarget{cfg: tt.cfg}}
-
-			// Act
-			got := h.o.racesIn(h.repoKey(), head)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("racesIn = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAHeadExtendsItsChainOnlyOnceItKnowsItsDeploy(t *testing.T) {
 	// Arrange: the admission's own chain extension is the one that follows
 	// the head's session; a sourcescan finds it after takeSession.

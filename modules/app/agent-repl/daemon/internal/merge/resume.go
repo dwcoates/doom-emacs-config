@@ -97,16 +97,6 @@ func (r *run) resumeRun(ctx context.Context) error {
 		return err
 	}
 	r.source = entry.Source
-	// A MERGE BACK FROM A REPAIR OUT OF LINE IS TAKEN UP HERE, as the head or
-	// racing behind it: from this write on it is worked on
-	// (wsm.MergeQueueEntry.WorkedOn), so the queue redrawn below shows it
-	// running its recorded step again.
-	if entry.Returned {
-		if err := o.deps.DB.TakeUpReturnedMerge(ctx, r.repo, ws); err != nil {
-			r.end(ctx, fmt.Errorf("could not take up the merge back from its repair: %w", err))
-			return err
-		}
-	}
 	job, _, err := o.deps.DB.CreationJob(ctx, ws)
 	if err != nil {
 		r.end(ctx, fmt.Errorf("could not read the requester's creation job: %w", err))
@@ -202,6 +192,12 @@ func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fie
 			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
 		}
 		return o.deps.AwaitTurnEnd(ctx, ws, turn)
+	}
+	// A TURN NEVER DELIVERED IS SUBMITTED WITH THE TEXT ITS RECORD CARRIES; a
+	// record with none (an earlier build's step aside, whose run delivered
+	// its brief itself) has nothing to submit, and says so.
+	if text == "" {
+		return wsm.CloseFailed, fmt.Errorf("merge: the merge's turn %s never reached the session and its record carries no text to submit", turn)
 	}
 	o.log(ctx, ws).Info(op, "the merge's turn never reached the session before the restart; it is submitted now", fields)
 	if err := o.ensureSession(ctx, ws); err != nil {

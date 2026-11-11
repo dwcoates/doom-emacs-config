@@ -98,9 +98,9 @@ type repoQueue struct {
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
-// merge, or a merge remediates out of line (owner request, 2026-10-27: a
+// merge, or a merge stands out of line (owner request, 2026-10-27: a
 // repository leaves the section as soon as its line empties and nothing
-// remediates). A paused queue holding nothing is not listed either.
+// stands out of line). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
 	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0
 }
@@ -111,8 +111,9 @@ func (q repoQueue) listed() bool {
 // (QueueEntry.Credited), so a hidden merge workspace is never selected here,
 // and an async merge is named by its own name (queueSubject).
 // Q is listed (repoQueue.listed), so its line holds a merge or a merge
-// remediates: the head is drawn only while the line holds one. The merges
-// remediating out of line are the second spot, under the head.
+// stands out of line: the head is drawn only while the line holds one. The
+// merges out of line are drawn as the queue's two repair slots and the
+// merges awaiting each, under the head.
 func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
 	const op = "daemon.sidebar.merge_queue"
 	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause)}
@@ -138,8 +139,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		if !ok {
 			continue
 		}
-		out.Remediating = append(out.Remediating, &frontendv1.RosterMergeQueueRemediating{
-			Subject: sub, SinceMs: entry.SlotSince.UnixMilli(), Reason: entry.RemediatingFor})
+		drawRepair(out, entry, sub, log)
 	}
 	for _, entry := range q.github {
 		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Workspace})
@@ -174,16 +174,45 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		if !ok {
 			continue
 		}
-		waiting := &frontendv1.RosterMergeQueueWaiting{
-			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), Placement: waitingPlacement(entry)}
-		// A MERGE ADMITTED BEHIND THE HEAD RACES IT: an active slot, whose
-		// clock ticks from the moment it took that slot.
-		if entry.Admitted {
-			waiting.Racing = &frontendv1.RosterMergeQueueWaitingRacing{SinceMs: entry.SlotSince.UnixMilli()}
-		}
-		out.Waiting = append(out.Waiting, waiting)
+		out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli()})
 	}
 	return out
+}
+
+// drawRepair draws ENTRY, a merge out of line drawn as SUB, at the repair
+// slot it holds or awaits. A repair slot holds one merge (wsm's one-holder
+// index): a second holder is a defect, recorded at ERROR and not drawn, and
+// so is a merge out of line naming no repair slot.
+func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *frontendv1.RosterMergeQueueSubject, log dlog.Logger) {
+	const op = "daemon.sidebar.merge_queue"
+	since := entry.SlotSince.UnixMilli()
+	second := func(holder *frontendv1.RosterMergeQueueSubject) {
+		log.Error(op, "a second merge holds a repair slot of the queue, so it is not drawn", dlog.Context{
+			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(), "holder": holder.GetName(),
+			"invariant_violation": "a queue's repair slot has at most one holder"})
+	}
+	switch entry.Repair {
+	case RepairFixingTests:
+		if out.FixingTests != nil {
+			second(out.FixingTests.Subject)
+			return
+		}
+		out.FixingTests = &frontendv1.RosterMergeQueueFixingTests{Subject: sub, SinceMs: since}
+	case RepairResolvingConflicts:
+		if out.ResolvingConflicts != nil {
+			second(out.ResolvingConflicts.Subject)
+			return
+		}
+		out.ResolvingConflicts = &frontendv1.RosterMergeQueueResolvingConflicts{Subject: sub, SinceMs: since}
+	case RepairAwaitingFixingTests:
+		out.AwaitingFixingTests = append(out.AwaitingFixingTests, &frontendv1.RosterMergeQueueAwaitingFixingTests{Subject: sub, SinceMs: since})
+	case RepairAwaitingResolvingConflicts:
+		out.AwaitingResolvingConflicts = append(out.AwaitingResolvingConflicts, &frontendv1.RosterMergeQueueAwaitingResolvingConflicts{Subject: sub, SinceMs: since})
+	default:
+		log.Error(op, "a merge out of line names no repair slot, so it is not drawn", dlog.Context{
+			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(),
+			"invariant_violation": "a merge out of line holds or awaits a repair slot"})
+	}
 }
 
 // headSuspended reports whether NOTHING of the head's merge in WS runs: Q is
@@ -687,21 +716,4 @@ func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 		Label: &frontendv1.RosterLabel{Text: label},
 		Count: &frontendv1.RosterSectionCount{Workspaces: uint32(count)},
 	}
-}
-
-// waitingPlacement is the label a waiting merge draws after its name
-// (frontend.v1.RosterMergeQueueWaiting.placement): returned for a merge back
-// from a repair out of line, front for one the user put at the front, and
-// none for one put in line at the back. A front merge that stepped aside and
-// came back is drawn returned, the fact that placed it where it stands.
-func waitingPlacement(entry QueueEntry) *frontendv1.RosterMergeQueueWaitingPlacement {
-	switch {
-	case entry.Returned:
-		return &frontendv1.RosterMergeQueueWaitingPlacement{Placement: &frontendv1.RosterMergeQueueWaitingPlacement_Returned{
-			Returned: &frontendv1.RosterMergeQueueWaitingReturned{}}}
-	case entry.PlacedAtFront:
-		return &frontendv1.RosterMergeQueueWaitingPlacement{Placement: &frontendv1.RosterMergeQueueWaitingPlacement_Front{
-			Front: &frontendv1.RosterMergeQueueWaitingFront{}}}
-	}
-	return nil
 }

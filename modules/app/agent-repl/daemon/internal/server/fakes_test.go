@@ -1221,10 +1221,6 @@ type fakeMerge struct {
 	rollOuts          []ids.LeaseID
 	rollOutRegistered bool
 	rollOutErr        error
-	disableRacingErr  error
-	enableRacingErr   error
-	// disables and enables count the racing-switch verbs.
-	disables, enables int
 	moveErr           error
 	// evicted records every workspace Evict was asked to take off the queue.
 	evicted []ids.WorkspaceID
@@ -1387,16 +1383,6 @@ func (f *fakeMerge) ReleaseDeploys(_ context.Context, scope merge.RepositoryScop
 func (f *fakeMerge) RollOutLanding(_ context.Context, ledger ids.LeaseID) (bool, error) {
 	f.rollOuts = append(f.rollOuts, ledger)
 	return f.rollOutRegistered, f.rollOutErr
-}
-
-func (f *fakeMerge) DisableRacing(context.Context) error {
-	f.disables++
-	return f.disableRacingErr
-}
-
-func (f *fakeMerge) EnableRacing(context.Context) error {
-	f.enables++
-	return f.enableRacingErr
 }
 
 func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope, by merge.Pauser) error {

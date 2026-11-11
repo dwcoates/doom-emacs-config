@@ -353,9 +353,12 @@ func TestAGateWhosePathsReadIsCutByTheRunsEndRunsNothing(t *testing.T) {
 	cancel(errors.New("abandoned"))
 	h.git.changedErr = fmt.Errorf("git diff was cancelled: %w", context.Canceled)
 	round := r.openTab(context.Background(), TabTests)
+	h.o.mu.Lock()
+	h.o.running[h.repoKey()] = r
+	h.o.mu.Unlock()
 
 	// Act.
-	_, err := r.gate(ctx, round, "tip", "head", nil)
+	_, err := r.gate(ctx, round, "tip", "head")
 
 	// Assert.
 	if !errors.Is(err, context.Canceled) {
@@ -369,39 +372,6 @@ func TestAGateWhosePathsReadIsCutByTheRunsEndRunsNothing(t *testing.T) {
 	}
 	if rec, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.tests"); ok {
 		t.Fatalf("the cut was recorded as a warning: %+v", rec)
-	}
-}
-
-func TestAGateWhosePathsReadIsCutByTheMergeAheadMovingRunsNothingAndRestarts(t *testing.T) {
-	// Arrange: the run goes on, but its speculative gate is cut because the
-	// merge ahead moved, and its git diff answers the cut.
-	h := newHarness(t)
-	r := failingTestsRun(t, h)
-	r.ctx, r.cancel = context.WithCancelCause(context.Background())
-	t.Cleanup(func() { r.cancel(nil) })
-	ctx, cancel := context.WithCancelCause(r.ctx)
-	cancel(errBaseMoved)
-	h.git.changedErr = fmt.Errorf("git diff was cancelled: %w", context.Canceled)
-	round := r.openTab(context.Background(), TabTests)
-
-	// Act.
-	_, err := r.gate(ctx, round, "tip", "head", nil)
-
-	// Assert.
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("gate err = %v, want the cut answered", err)
-	}
-	h.runner.mu.Lock()
-	started := len(h.runner.argv)
-	h.runner.mu.Unlock()
-	if started != 0 {
-		t.Fatalf("the runner was started %d times for a cut gate, want none", started)
-	}
-	if rec, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.tests"); ok {
-		t.Fatalf("the cut was recorded as a warning: %+v", rec)
-	}
-	if got := gateRecord(t, h, "cut before its verdict by the merge ahead moved"); got["round"] != round.n {
-		t.Fatalf("cut record = %v, want round %d", got, round.n)
 	}
 }
 
@@ -445,8 +415,8 @@ func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
 
 	// Assert.
 	got := gateRecord(t, h, "the merge's test gate started")
-	if got["suites"] != "daemon,repo-scans,e2e,e2e-emacs" || got["speculative"] != false {
-		t.Fatalf("start = %v, want the daemon's selection, not speculative", got)
+	if got["suites"] != "daemon,repo-scans,e2e,e2e-emacs" {
+		t.Fatalf("start = %v, want the daemon's selection", got)
 	}
 }
 

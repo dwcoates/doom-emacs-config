@@ -1559,13 +1559,12 @@ func TestTheHeadCarriesItsStages(t *testing.T) {
 	}
 }
 
-func TestAWaitingMergeCarriesWhenAndWhereItWasPutInLine(t *testing.T) {
+func TestAWaitingMergeCarriesWhenItWasPutInLine(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 	queued := time.UnixMilli(9_000)
 	line := inLine("w1", "w2")
 	line[1].QueuedAt = queued
-	line[1].PlacedAtFront = true
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
 
 	// Act.
@@ -1573,61 +1572,8 @@ func TestAWaitingMergeCarriesWhenAndWhereItWasPutInLine(t *testing.T) {
 
 	// Assert.
 	waiting := firstQueue(t, r).GetWaiting()[0]
-	if waiting.GetQueuedAtMs() != queued.UnixMilli() || waiting.GetPlacement().GetFront() == nil {
-		t.Fatalf("waiting = %v, want queued at %d, placed at the front", waiting, queued.UnixMilli())
-	}
-}
-
-func TestAWaitingMergesPlacementSaysWhyItStandsWhereItDoes(t *testing.T) {
-	tests := []struct {
-		name         string
-		front        bool
-		returned     bool
-		wantFront    bool
-		wantReturned bool
-	}{
-		{name: "a merge put in line at the back carries no placement"},
-		{name: "the user's front placement is front", front: true, wantFront: true},
-		{name: "a merge back from a repair is returned", returned: true, wantReturned: true},
-		{name: "a front merge back from a repair is returned", front: true, returned: true, wantReturned: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			line := inLine("w1", "w2")
-			line[1].PlacedAtFront, line[1].Returned = tt.front, tt.returned
-			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
-
-			// Act.
-			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
-
-			// Assert.
-			placement := firstQueue(t, r).GetWaiting()[0].GetPlacement()
-			if (placement.GetFront() != nil) != tt.wantFront || (placement.GetReturned() != nil) != tt.wantReturned {
-				t.Fatalf("placement = %v, want front %v returned %v", placement, tt.wantFront, tt.wantReturned)
-			}
-			if !tt.wantFront && !tt.wantReturned && placement != nil {
-				t.Fatalf("placement = %v, want none", placement)
-			}
-		})
-	}
-}
-
-func TestAReturnedMergeWaitingBehindTheHeadIsNotDrawnRacing(t *testing.T) {
-	// Arrange: the returned merge is admitted in the store, yet waits.
-	r, _ := newResolver(t)
-	line := inLine("w1", "w2")
-	line[0].Admitted = true
-	line[1].Returned = true
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
-
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
-
-	// Assert.
-	if waiting := firstQueue(t, r).GetWaiting()[0]; waiting.GetRacing() != nil {
-		t.Fatalf("waiting = %v, want the returned merge drawn waiting, not racing", waiting)
+	if waiting.GetQueuedAtMs() != queued.UnixMilli() {
+		t.Fatalf("waiting = %v, want queued at %d", waiting, queued.UnixMilli())
 	}
 }
 
@@ -1766,7 +1712,7 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w2", "w1"},
 		Line:        inLine("w2"),
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1_700_000_000_000)}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1_700_000_000_000), Repair: sidebar.RepairFixingTests}},
 	})
 
 	// Act.
@@ -1777,24 +1723,38 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	if got := queue.GetHead().GetSubject().GetName(); got != "two" {
 		t.Fatalf("head = %q, want two, the merge now at the head", got)
 	}
-	aside := queue.GetRemediating()
-	if len(aside) != 1 || aside[0].GetSubject().GetName() != "one" || aside[0].GetSinceMs() != 1_700_000_000_000 {
-		t.Fatalf("remediating = %v, want one, since 1700000000000", aside)
+	aside := queue.GetFixingTests()
+	if aside.GetSubject().GetName() != "one" || aside.GetSinceMs() != 1_700_000_000_000 {
+		t.Fatalf("fixing tests = %v, want one, since 1700000000000", aside)
 	}
 }
 
-func TestAMergeRemediatingOutOfLineCarriesWhatItRepairs(t *testing.T) {
+func TestAMergeOutOfLineIsDrawnAtTheRepairSlotItHoldsOrAwaits(t *testing.T) {
 	cases := []struct {
 		name   string
-		reason *frontendv1.RosterMergeQueueRemediatingReason
-		want   func(*frontendv1.RosterMergeQueueRemediatingReason) bool
+		repair sidebar.QueueRepair
+		want   func(*frontendv1.RosterRepoMergeQueue) string
 	}{
-		{name: "its failing tests",
-			reason: &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Tests{Tests: &frontendv1.RosterMergeQueueRemediatingTests{}}},
-			want:   func(r *frontendv1.RosterMergeQueueRemediatingReason) bool { return r.GetTests() != nil }},
-		{name: "its rebase's conflicts",
-			reason: &frontendv1.RosterMergeQueueRemediatingReason{Reason: &frontendv1.RosterMergeQueueRemediatingReason_Conflicts{Conflicts: &frontendv1.RosterMergeQueueRemediatingConflicts{}}},
-			want:   func(r *frontendv1.RosterMergeQueueRemediatingReason) bool { return r.GetConflicts() != nil }},
+		{name: "the merge holding the fixing-tests slot", repair: sidebar.RepairFixingTests,
+			want: func(q *frontendv1.RosterRepoMergeQueue) string { return q.GetFixingTests().GetSubject().GetName() }},
+		{name: "the merge holding the resolving-conflicts slot", repair: sidebar.RepairResolvingConflicts,
+			want: func(q *frontendv1.RosterRepoMergeQueue) string {
+				return q.GetResolvingConflicts().GetSubject().GetName()
+			}},
+		{name: "a merge awaiting the fixing-tests slot", repair: sidebar.RepairAwaitingFixingTests,
+			want: func(q *frontendv1.RosterRepoMergeQueue) string {
+				if len(q.GetAwaitingFixingTests()) != 1 {
+					return ""
+				}
+				return q.GetAwaitingFixingTests()[0].GetSubject().GetName()
+			}},
+		{name: "a merge awaiting the resolving-conflicts slot", repair: sidebar.RepairAwaitingResolvingConflicts,
+			want: func(q *frontendv1.RosterRepoMergeQueue) string {
+				if len(q.GetAwaitingResolvingConflicts()) != 1 {
+					return ""
+				}
+				return q.GetAwaitingResolvingConflicts()[0].GetSubject().GetName()
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1803,18 +1763,64 @@ func TestAMergeRemediatingOutOfLineCarriesWhatItRepairs(t *testing.T) {
 			r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 				Workspaces:  []ids.WorkspaceID{"w2", "w1"},
 				Line:        inLine("w2"),
-				Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), RemediatingFor: tc.reason}},
+				Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: tc.repair}},
 			})
 
 			// Act
 			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 			// Assert
-			aside := queuedGroups(latest(t, r))[0].GetQueue().GetRemediating()
-			if len(aside) != 1 || !tc.want(aside[0].GetReason()) {
-				t.Fatalf("remediating = %v, want one carrying %s", aside, tc.name)
+			if got := tc.want(queuedGroups(latest(t, r))[0].GetQueue()); got != "one" {
+				t.Fatalf("drawn at %s: %q, want one", tc.name, got)
 			}
 		})
+	}
+}
+
+func TestASecondHolderOfARepairSlotIsRecordedAndNotDrawn(t *testing.T) {
+	// Arrange: two merges both claim the fixing-tests slot.
+	r, log := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+		Workspaces: []ids.WorkspaceID{"w1", "w2"},
+		Remediating: []sidebar.QueueEntry{
+			{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: sidebar.RepairFixingTests},
+			{Workspace: "w2", Credited: "w2", SlotSince: time.UnixMilli(2), Repair: sidebar.RepairFixingTests},
+		},
+	})
+
+	// Act
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert
+	if got := queuedGroups(latest(t, r))[0].GetQueue().GetFixingTests().GetSubject().GetName(); got != "one" {
+		t.Fatalf("fixing tests = %q, want the first holder, one", got)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+		Message: "a second merge holds a repair slot of the queue, so it is not drawn"})
+	if !ok || rec.Context["workspace_id"] != "w2" || rec.Context["repair"] != "fixing_tests" {
+		t.Fatalf("ERROR record = %+v (found %v), want the second holder named with its slot", rec, ok)
+	}
+}
+
+func TestAMergeOutOfLineNamingNoRepairSlotIsRecordedAndNotDrawn(t *testing.T) {
+	// Arrange
+	r, log := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+		Workspaces:  []ids.WorkspaceID{"w1"},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1)}},
+	})
+
+	// Act
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert
+	queue := queuedGroups(latest(t, r))[0].GetQueue()
+	if queue.FixingTests != nil || queue.ResolvingConflicts != nil || len(queue.AwaitingFixingTests) != 0 || len(queue.AwaitingResolvingConflicts) != 0 {
+		t.Fatalf("queue = %v, want the merge drawn at no slot", queue)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+		Message: "a merge out of line names no repair slot, so it is not drawn"}); !ok {
+		t.Fatal("no ERROR record of the merge naming no slot")
 	}
 }
 
@@ -1823,7 +1829,7 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	r, _ := newResolver(t)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w1"},
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1)}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: sidebar.RepairResolvingConflicts}},
 	})
 
 	// Act.
@@ -1834,8 +1840,8 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	if len(groups) != 1 {
 		t.Fatalf("queue groups = %d, want the queue listed while a merge remediates", len(groups))
 	}
-	if queue := groups[0].GetQueue(); queue.Head != nil || len(queue.GetRemediating()) != 1 {
-		t.Fatalf("queue = %v, want no head and the remediating merge", queue)
+	if queue := groups[0].GetQueue(); queue.Head != nil || queue.GetResolvingConflicts() == nil {
+		t.Fatalf("queue = %v, want no head and the merge resolving conflicts", queue)
 	}
 }
 
@@ -1896,42 +1902,5 @@ func TestAGithubStandingOfAWorkspaceNotInTheRegistryIsRecordedAndNotDrawn(t *tes
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.queue_lines",
 		Message: "a workspace standing in a GitHub merge queue is not in the registry, so it is not drawn"}); !ok {
 		t.Fatalf("no error record of the unregistered standing")
-	}
-}
-
-func TestTheMergeQueueRacingMergeCarriesWhenItTookItsRacingSlot(t *testing.T) {
-	// Arrange: w2, admitted behind the head, races it.
-	r, _ := newResolver(t)
-	line := inLine("w1", "w2")
-	line[0].Admitted = true
-	line[1].Admitted = true
-	line[1].QueuedAt = time.UnixMilli(1_700_000_000_000)
-	line[1].SlotSince = time.UnixMilli(1_700_000_900_000)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
-
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
-
-	// Assert.
-	waiting := queuedGroups(latest(t, r))[0].GetQueue().GetWaiting()
-	if len(waiting) != 1 || waiting[0].GetRacing().GetSinceMs() != 1_700_000_900_000 {
-		t.Fatalf("waiting = %v, want two racing since 1700000900000", waiting)
-	}
-}
-
-func TestTheMergeQueueWaitingMergeCarriesNoRacingSlot(t *testing.T) {
-	// Arrange: w2 waits its turn behind the head.
-	r, _ := newResolver(t)
-	line := inLine("w1", "w2")
-	line[1].SlotSince = time.UnixMilli(1_700_000_900_000)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
-
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
-
-	// Assert.
-	waiting := queuedGroups(latest(t, r))[0].GetQueue().GetWaiting()
-	if len(waiting) != 1 || waiting[0].Racing != nil {
-		t.Fatalf("waiting = %v, want two waiting with no racing slot", waiting)
 	}
 }
