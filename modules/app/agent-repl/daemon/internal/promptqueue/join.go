@@ -233,11 +233,8 @@ func (q *queue) joinLocked(ctx context.Context, d *delivery, sub Submission, run
 			// THE PROMPT WAS ANSWERED WHEN IT WAS FIRST SENT: nothing joins
 			// the running turn, and the entry retires as delivered
 			// (alreadyRecorded, without the pop: the running turn's end pops).
-			log.Error(opJoin, "the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins", dlog.Context{
-				"cause":               err.Error(),
-				"invariant_violation": "a delivered prompt's hold is retired with its delivery",
-			})
-			_ = q.closeTurn(ctx, sub.WS, sub.Turn, wsm.CloseWithdrawn, log)
+			q.closeRecorded(ctx, sub.WS, sub.Turn, err, opJoin,
+				"the vendor already recorded the prompt sent to join the running turn, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing joins", log)
 			_ = q.retireDelivered(ctx, sub.WS, sub.Turn, log)
 			return joinGone
 		}

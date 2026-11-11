@@ -128,18 +128,27 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 // Recorded at ERROR: a delivery repeated is a lost record, never a race. The
 // caller holds the delivery lock (d) and has already retired the opening.
 func (q *queue) alreadyRecorded(ctx context.Context, d *delivery, ws ids.WorkspaceID, turn ids.TurnID, cause error, log dlog.Logger) Disposition {
-	log.Error(opDeliver, "the vendor already recorded the prompt, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing is started", dlog.Context{
-		"turn":                string(turn),
-		"cause":               cause.Error(),
-		"invariant_violation": "a delivered prompt's hold is retired with its delivery",
-	})
-	_ = q.closeTurn(ctx, ws, turn, wsm.CloseWithdrawn, log)
+	q.closeRecorded(ctx, ws, turn, cause, opDeliver,
+		"the vendor already recorded the prompt, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing is started", log)
 	d.afterUnlock(func() {
 		next := q.lockDelivery(ws)
 		defer next.unlock()
 		q.popIfIdle(ctx, next, log)
 	})
 	return Disposition{Delivered: true}
+}
+
+// closeRecorded is what every refusal of a prompt the vendor already
+// recorded (ErrPromptRecorded) owes, whichever path delivered it: the lost
+// delivery recorded at ERROR under OP with MESSAGE, and the turn row recorded
+// for this delivery closed as withdrawn, since nothing runs for it.
+func (q *queue) closeRecorded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, cause error, op, message string, log dlog.Logger) {
+	log.Error(op, message, dlog.Context{
+		"turn":                string(turn),
+		"cause":               cause.Error(),
+		"invariant_violation": "a delivered prompt's hold is retired with its delivery",
+	})
+	_ = q.closeTurn(ctx, ws, turn, wsm.CloseWithdrawn, log)
 }
 
 // acceptOpenedTurn is the handover a successful StartTurn owes: the
