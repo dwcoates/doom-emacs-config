@@ -1508,6 +1508,10 @@ type MergeQueueEntry struct {
 	// every active slot ticks from SlotSince.
 	Slot      MergeSlot
 	SlotSince time.Time
+	// ColdGated reports that the entry's workspace stands at its cold gate
+	// (mergecoldgate.go): the entry keeps its place in line and is skipped,
+	// never admitted, until the gate is passed.
+	ColdGated bool
 	// Aside is the repair a remediating entry is out of line for, and so
 	// the repair slot it holds or awaits; MergeAsideNone for every other
 	// entry.

@@ -262,11 +262,13 @@ type slotRow struct {
 	state     MergeQueueState
 	aside     MergeAside
 	slot      MergeSlot
+	coldGated bool
 }
 
 // mergeSlotsOf answers the slot each of ROWS (one queue, in sequence order)
 // holds: the first entry in line is the head and every other one in line
-// waits; the first remediating entry fixing tests holds that slot and every
+// waits, except that a queued entry standing at its cold gate waits at its
+// place and never heads (mergecoldgate.go); the first remediating entry fixing tests holds that slot and every
 // later one awaits it, in sequence order; every entry resolving conflicts
 // holds the resolving-conflicts slot; a requested one holds none. It is the ONE definition of a slot, so the store's stamp, the
 // roster's line and the grant of a released repair slot can never disagree.
@@ -298,7 +300,7 @@ func mergeSlotsOf(rows []slotRow) ([]MergeSlot, error) {
 			held[holds] = true
 			out[i] = holds
 		case MergeQueued, MergeAdmitted:
-			if headed {
+			if headed || (row.state == MergeQueued && row.coldGated) {
 				out[i] = MergeSlotWaiting
 				continue
 			}
@@ -317,7 +319,7 @@ func mergeSlotsOf(rows []slotRow) ([]MergeSlot, error) {
 func SlotsOf(entries []MergeQueueEntry) ([]MergeSlot, error) {
 	rows := make([]slotRow, len(entries))
 	for i, entry := range entries {
-		rows[i] = slotRow{workspace: entry.Workspace, state: entry.State, aside: entry.Aside, slot: entry.Slot}
+		rows[i] = slotRow{workspace: entry.Workspace, state: entry.State, aside: entry.Aside, slot: entry.Slot, coldGated: entry.ColdGated}
 	}
 	return mergeSlotsOf(rows)
 }
@@ -335,7 +337,7 @@ func SlotsOf(entries []MergeQueueEntry) ([]MergeSlot, error) {
 // Cleared first, the index meets only the stamps the derivation answers, so
 // a refusal from it is a true second holder.
 func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Time) error {
-	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, aside, slot FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, aside, slot, cold_gated FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
 	if err != nil {
 		return err
 	}
@@ -347,7 +349,7 @@ func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Tim
 			aside int64
 			slot  int64
 		)
-		if err := rows.Scan(&row.workspace, &state, &aside, &slot); err != nil {
+		if err := rows.Scan(&row.workspace, &state, &aside, &slot, &row.coldGated); err != nil {
 			rows.Close()
 			return err
 		}
