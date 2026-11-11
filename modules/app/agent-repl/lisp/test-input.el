@@ -5996,3 +5996,44 @@ the composer took the keyboard for."
     ;; Assert
     (should (equal (agent-repl-test-input--composer-text) ""))
     (should (member "[agent-repl] Asked main (doom)…" agent-repl-test-input--messages))))
+
+;;;; ---- agent-repl--input-string-parts --------------------------------------
+
+(defun agent-repl-test-input--marked (path)
+  "Return the one image-marker character for the PNG at PATH."
+  (propertize "￼" agent-repl--input-image-marker-property
+              (list :path path :media-type "image/png")))
+
+(ert-deftest agent-repl-input-string-parts-reads-words-alone ()
+  "Text with no marker is one part, its words without properties."
+  (should (equal (agent-repl--input-string-parts (propertize "fix it" 'face 'bold))
+                 '("fix it"))))
+
+(ert-deftest agent-repl-input-string-parts-reads-an-empty-text-as-nothing ()
+  "An empty text has no parts."
+  (should (equal (agent-repl--input-string-parts "") nil)))
+
+(ert-deftest agent-repl-input-string-parts-reads-images-in-place ()
+  "Each marker is its image, in its place among the words."
+  (should (equal (agent-repl--input-string-parts
+                  (concat "look " (agent-repl-test-input--marked "/a.png") " and"))
+                 '("look " (:path "/a.png" :media-type "image/png") " and"))))
+
+(ert-deftest agent-repl-input-string-parts-reads-two-like-markers-as-two-images ()
+  "Two adjacent markers carrying the same plist are two images."
+  (let ((marker (agent-repl-test-input--marked "/a.png")))
+    (should (equal (agent-repl--input-string-parts (concat marker marker))
+                   '((:path "/a.png" :media-type "image/png")
+                     (:path "/a.png" :media-type "image/png"))))))
+
+(ert-deftest agent-repl-input-parts-reads-the-composer-through-string-parts ()
+  "The composer's reader is the string reader over the buffer's text."
+  (with-temp-buffer
+    (insert "look " (agent-repl-test-input--marked "/a.png"))
+    (let ((read-text nil))
+      (cl-letf* ((string-parts (symbol-function 'agent-repl--input-string-parts))
+                 ((symbol-function 'agent-repl--input-string-parts)
+                  (lambda (text) (setq read-text text) (funcall string-parts text))))
+        (should (equal (agent-repl--input-parts)
+                       '("look " (:path "/a.png" :media-type "image/png"))))
+        (should (equal-including-properties read-text (buffer-string)))))))

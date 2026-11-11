@@ -647,20 +647,27 @@ name serves both sides.")
 
 (defun agent-repl--input-parts ()
   "Return the current composer's contents as ordered PARTS.
+See `agent-repl--input-string-parts', which reads the buffer's text."
+  (agent-repl--input-string-parts (buffer-string)))
+
+(defun agent-repl--input-string-parts (text)
+  "Return TEXT, a string carrying image markers, as ordered PARTS.
 Each part is a string of words or an image plist `(:path :media-type)',
-in buffer order; adjacent words form one string.  EVERY marker character
+in TEXT\='s order; adjacent words form one string.  EVERY marker character
 is its own image, even when two neighbors carry the same plist (a yanked
-copy of an image shares its original's)."
-  (let ((pos (point-min))
-        (end (point-max))
+copy of an image shares its original's).  The ONE reader of image
+markers: the composer's buffer and a creation prompt's minibuffer text
+\=(`agent-repl-verbs--said') are both read here."
+  (let ((pos 0)
+        (end (length text))
         (parts nil))
     (while (< pos end)
-      (let ((image (get-text-property pos agent-repl--input-image-marker-property))
+      (let ((image (get-text-property pos agent-repl--input-image-marker-property text))
             (next (next-single-property-change
-                   pos agent-repl--input-image-marker-property nil end)))
+                   pos agent-repl--input-image-marker-property text end)))
         (if image
             (dotimes (_ (- next pos)) (push image parts))
-          (push (buffer-substring-no-properties pos next) parts))
+          (push (substring-no-properties text pos next) parts))
         (setq pos next)))
     (nreverse parts)))
 
