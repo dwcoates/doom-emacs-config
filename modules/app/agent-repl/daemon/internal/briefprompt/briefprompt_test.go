@@ -76,6 +76,30 @@ func TestSubmitSendsTheComposedBriefDeferred(t *testing.T) {
 	}
 }
 
+func TestSubmitAsSendsTheComposedBriefUnderItsDelivery(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery wsm.Delivery
+	}{
+		{name: "ordinary", delivery: wsm.DeliveryOrdinary},
+		{name: "deferred", delivery: wsm.DeliveryDeferred},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			prompts := &fakePrompts{}
+
+			// Act
+			turn, err := composer(nil, nil).SubmitAs(context.Background(), prompts, "ws-1", "a-brief", map[string]string{"x": "y"}, "a-notice", origin, tt.delivery)
+
+			// Assert
+			if err != nil || turn != "turn-1" || prompts.delivery != tt.delivery || prompts.text != "a-brief:y" {
+				t.Fatalf("SubmitAs = %q, %v; submitted %+v", turn, err, prompts)
+			}
+		})
+	}
+}
+
 func TestSubmitNamesTheStepThatFailed(t *testing.T) {
 	cause := errors.New("cause")
 	tests := []struct {
@@ -121,6 +145,7 @@ func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 		"../prwatch/poller.go",
 		"../mainsync/mainsync.go",
 		"../gather/gather.go",
+		"../slackwatch/digest.go",
 	} {
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			// Arrange
