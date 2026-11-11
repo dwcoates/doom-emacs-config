@@ -653,6 +653,36 @@ describe("a vendor notice draws as its outcome card", () => {
     expect([el.classList.contains("tool-fold"), el.querySelector(".outcome-marker-expansion")]).toEqual([false, null]);
   });
 
+  it("offers the sign-in action under the words when the daemon set it", () => {
+    const el = drawFeedResponse(
+      response({ notice: { ...NOTICE, signIn: {} }, result: { case: "success", value: { prose: { prose: servedProse("Login expired") } } } }),
+      rowContext(),
+    );
+    const row = el.querySelector(".outcome-marker-actions");
+    expect(row?.innerHTML).toBe(drawSignInActions("outcome-marker-actions", "outcome-marker-action", "x").innerHTML);
+  });
+
+  it("opens the login overlay from the notice's sign-in", () => {
+    const el = drawFeedResponse(
+      response({ notice: { ...NOTICE, signIn: {} }, result: { case: "success", value: { prose: { prose: servedProse("Login expired") } } } }),
+      rowContext(),
+    );
+    const opened: HTMLElement[] = [];
+    const stop = answerLoginRequests((control) => opened.push(control));
+    const action = el.querySelector(`[${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`) as HTMLElement;
+    action.click();
+    stop();
+    expect(opened).toEqual([action]);
+  });
+
+  it("offers no sign-in action on a notice the daemon did not set it on", () => {
+    const el = drawFeedResponse(
+      response({ notice: NOTICE, result: { case: "success", value: { prose: { prose: servedProse("hi") } } } }),
+      rowContext(),
+    );
+    expect(el.querySelector(`[${SIGN_IN_ACTION_ATTRIBUTE}="${SIGN_IN_ACTION}"]`)).toBeNull();
+  });
+
   it("refuses a notice with no marker", () => {
     expect(() =>
       drawFeedResponse(response({ notice: {}, result: { case: "success", value: { prose: { prose: servedProse("hi") } } } }), rowContext()),
