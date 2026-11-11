@@ -20,6 +20,7 @@ import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../
 import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import { contextCutUpsertKey } from "../../src/store/keys.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
@@ -8825,18 +8826,27 @@ describe("the vendor's init when it names no real model", () => {
   });
 });
 
-describe("the vendor's own compaction, announced through system:status", () => {
-  /** Every context cut this session wrote, newest last. */
-  function contextCuts(h: Harness): conversationv1.ContextCut[] {
-    return h.persistence.buffered.flatMap((entry) => {
-      if (entry.item.kind !== "frame") return [];
-      const result = entry.item.frame.result;
-      if (result.case !== "update") return [];
-      const update = result.value.update;
-      return update.case === "contextCut" ? [update.value] : [];
-    });
-  }
+/**
+ * Every context cut the session wrote, in the order it wrote them, with the
+ * entry that carried each. The one reading of a cut off the buffered writes,
+ * so every test reads cuts the same way.
+ */
+function contextCutWrites(h: Harness): { entry: (typeof h.persistence.buffered)[number]; cut: conversationv1.ContextCut }[] {
+  return h.persistence.buffered.flatMap((entry) => {
+    if (entry.item.kind !== "frame") return [];
+    const result = entry.item.frame.result;
+    if (result.case !== "update") return [];
+    const update = result.value.update;
+    return update.case === "contextCut" ? [{ entry, cut: update.value }] : [];
+  });
+}
 
+/** Every context cut the session wrote, in the order it wrote them. */
+function contextCuts(h: Harness): conversationv1.ContextCut[] {
+  return contextCutWrites(h).map(({ cut }) => cut);
+}
+
+describe("the vendor's own compaction, announced through system:status", () => {
   it("pushes `compacting` when the vendor says it started", async () => {
     const h = harness();
     await started(h);
@@ -10296,17 +10306,6 @@ describe("the cold gate's COMPACT remediation", () => {
       },
     });
 
-  /** Every context cut this session wrote, in the order it wrote them. */
-  function contextCuts(h: Harness): conversationv1.ContextCut[] {
-    return h.persistence.buffered.flatMap((entry) => {
-      if (entry.item.kind !== "frame") return [];
-      const result = entry.item.frame.result;
-      if (result.case !== "update") return [];
-      const update = result.value.update;
-      return update.case === "contextCut" ? [update.value] : [];
-    });
-  }
-
   it("WRITES the cut it held until the session had an identity", async () => {
     // The remediation runs before the identity is settled, so its page line
     // cannot be keyed yet — it waits rather than vanishing.
@@ -10322,6 +10321,30 @@ describe("the cold gate's COMPACT remediation", () => {
     await pending;
 
     expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
+  });
+
+  it("KEYS the cut on the boundary it appended, so the sidecar's fold of that record is the same store entry", async () => {
+    // TWO WRITES, ONE ENTRY. The sidecar folds the appended compact_boundary
+    // into `session:context_cut:<its uuid>`; a cut keyed anywhere else is a
+    // second entry, and the feed drew the compaction twice (2026-11-11).
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    const boundary = readFileSync(path.join(projectDir(h.configDir, h.cwd), "resume-1.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { subtype?: string; uuid?: string })
+      .find((record) => record.subtype === "compact_boundary");
+    const keys = contextCutWrites(h).map(({ entry }) => entry.upsertKey);
+    expect(keys).toEqual([contextCutUpsertKey(boundary?.uuid ?? "")]);
   });
 
   it("refuses vendor_start_failed when the summarizing session ends in a failure subtype", async () => {

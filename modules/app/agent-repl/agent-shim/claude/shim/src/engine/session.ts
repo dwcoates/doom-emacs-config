@@ -59,7 +59,7 @@ import {
   VendorStartError,
   type VendorStartBound,
 } from "./start-failure.js";
-import { terminalUpsertKey } from "../store/keys.js";
+import { contextCutUpsertKey, terminalUpsertKey } from "../store/keys.js";
 import { updateEntry } from "../store/update-entry.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeDetachedWorkAnswer } from "../store/detached-work.js";
@@ -1238,9 +1238,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * the identity is settled — a row cannot be written yet, and dropping it
    * would lose the one page line that makes the compaction visible in the feed
    * rather than only in the transcript. They are written the moment the
-   * identity exists, in the order they happened.
+   * identity exists, in the order they happened, each with the boundary it
+   * names (writeContextCut).
    */
-  const pendingContextCuts: conversationv1.ContextCut[] = [];
+  const pendingContextCuts: { cut: conversationv1.ContextCut; boundary: string | undefined }[] = [];
 
   // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
   // store_unreachable fault and opens a degraded window when the store stops
@@ -5816,7 +5817,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (pendingContextCuts.length > 0) {
       const held = pendingContextCuts.splice(0, pendingContextCuts.length);
       LOGGER.debug({ held: held.length }, "writing the context cuts held until the session had an identity");
-      for (const cut of held) writeContextCut(cut);
+      for (const { cut, boundary } of held) writeContextCut(cut, boundary);
     }
     started = true;
     // THE CATALOG IS ALREADY IN HAND: `proveLive` pulled it, because that pull
@@ -6139,9 +6140,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const spend = { model: asked.model, tokens: summarizerSpentTokens(asked.usage) };
     try {
       const durationMs = deps.nowMs() - startedAtMs;
-      appendCompactionLines(
-        transcript,
-        compactionLines({
+      const lines = compactionLines({
           ambient: readAmbient(transcript),
           summary,
           preTokens: facts.contextTokens,
@@ -6161,13 +6160,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           // stating the session's own mode there is what keeps a revival from
           // coming back in a mode nobody chose.
           permissionMode: toVendorPermissionMode(permissionMode),
-        }),
-      );
+      });
+      appendCompactionLines(transcript, lines);
       // THE COMPACTION IS A BOUNDARY. Whatever the anchor named is on the far
       // side of the summary now, so the next real prompt after keep-alives
       // carries them rather than resuming at a uuid this cut may have orphaned.
       rewind.clearAnchor("the shim compacted the conversation");
       rewindWatch = undefined;
+      // THE CUT IS THE BOUNDARY JUST APPENDED: the sidecar folds that same
+      // record out of the transcript, so both writes name one store entry.
       writeContextCut(
         contextCutCompacted({
           summary,
@@ -6176,6 +6177,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           durationMs,
           requested: true,
         }),
+        lines.boundaryUuid,
       );
       coldCompactionFigures = { tokensBefore: facts.contextTokens, tokensAfter: outputTokens, spend };
       phase(
@@ -6329,8 +6331,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
   }
 
-  /** The `context_cut` page line, on the conversation's own book. */
-  function writeContextCut(cut: conversationv1.ContextCut): void {
+  /**
+   * The `context_cut` page line, on the conversation's own book.
+   *
+   * A CUT THAT APPENDED A BOUNDARY is keyed on that boundary's uuid
+   * (contextCutUpsertKey), the one spelling the sidecar's fold of the same
+   * record reaches, so the two planes' writes are one store entry and the feed
+   * draws one divider (2026-11-11: a cold gate's compaction drew two, because
+   * this write was keyed on the instant). A cut with no boundary (a failed
+   * compaction) has no record on the file plane, so this write is its only
+   * producer and is keyed on the instant.
+   */
+  function writeContextCut(cut: conversationv1.ContextCut, boundary?: string): void {
     if (identity === undefined) {
       // NEVER DROPPED, only DEFERRED. A row needs the agent id the identity
       // settles, and the cold gate's remediation runs before that — so the cut
@@ -6339,16 +6351,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         { arm: cut.cut.case ?? "", pending: pendingContextCuts.length + 1 },
         "a context cut was produced before the session had an identity; held until one exists",
       );
-      pendingContextCuts.push(cut);
+      pendingContextCuts.push({ cut, boundary });
       return;
     }
     const agentId = identity.agentId;
     deps.persistence.write([
       updateEntry({
         agentId,
-        upsertKey: terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`),
+        upsertKey:
+          boundary === undefined
+            ? terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`)
+            : contextCutUpsertKey(boundary),
         source: {
-          vendorUuid: `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
+          vendorUuid: boundary ?? `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
           discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
         },
         keepalive: false,
