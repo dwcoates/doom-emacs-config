@@ -626,6 +626,9 @@ message HostFault {
     SessionFaultVendorStartRejected vendor_start_rejected = 18;
     // The vendor kept failing to start for the whole retry window.
     SessionFaultVendorStartFailed vendor_start_failed = 19;
+    // A keep-alive that was due could not be armed or sent, or was not sent
+    // before the cache lapsed.
+    SessionFaultKeepaliveUndelivered keepalive_undelivered = 20;
   }
 }
 

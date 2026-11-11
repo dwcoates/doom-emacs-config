@@ -86,6 +86,9 @@ message DaemonFault {
     // ones an earlier daemon left standing. A handover whose successor would
     // not start is `successor_spawn_failed` instead.
     DaemonFaultDeployFailed deploy_failed = 9;
+    // The cache keeper's loop stopped before the daemon did: no keep-alive
+    // goes out for any workspace until the next daemon runs its own.
+    DaemonFaultKeepaliveDriveStopped keepalive_drive_stopped = 10;
   }
 }
 message DaemonFaultAdoptionWindowExpired {
@@ -115,6 +118,13 @@ message DaemonFaultPromptsDirMissing {
   string path = 1;
 }
 message DaemonFaultWsmReadOnly {}
+// THE CACHE KEEPER IS NOT RUNNING (2026-11-11: a keeper that cannot run lets
+// every workspace's cache lapse with nothing said). It stands until the next
+// daemon boots, whose process runs its own keeper.
+message DaemonFaultKeepaliveDriveStopped {
+  // Why the keeper's loop ended, verbatim.
+  string cause = 1;
+}
 message DaemonFaultDeployFailed {
   // THE ARM IS THE STEP THAT FAILED, and it carries the very refusal the
   // Deploy rpc answered its caller with, so the fault and the answer cannot
