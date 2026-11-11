@@ -68,3 +68,42 @@ func TestAsksStandingAnswersNothingForAFeedWithNoOpenAsk(t *testing.T) {
 		t.Fatalf("AsksStanding = %v, want none", asks)
 	}
 }
+
+func TestOpenAsksListsEveryOpenCardOldestFirstWithWhetherItCanBeAnswered(t *testing.T) {
+	// Arrange: a consent ask, then a question whose batch a delivery claims.
+	h := newHarness(t)
+	h.ask("p-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+	})
+	h.pose("q-1", &conversationv1.AgentQuestionStart{Batch: twoQuestionBatch()})
+	h.resolver.state(testWorkspace).questionAsks["q-1"].delivering = true
+
+	// Act
+	open := openAsks(h.resolver.state(testWorkspace))
+
+	// Assert
+	if len(open) != 2 || open[0].id != "p-1" || !open[0].answerable || open[1].id != "q-1" || open[1].answerable {
+		t.Fatalf("openAsks = %+v, want p-1 answerable then q-1 claimed", open)
+	}
+}
+
+// TestTheAnswerRoutingAndTheReconciliationReadTheSameOpenAsks pins that both
+// readers of the open asks share one rule: the oldest ask a typed answer goes
+// to is the oldest ask the reconciliation is handed.
+func TestTheAnswerRoutingAndTheReconciliationReadTheSameOpenAsks(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.pose("q-1", &conversationv1.AgentQuestionStart{Batch: twoQuestionBatch()})
+	h.ask("p-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+	})
+
+	// Act
+	standing, found := h.resolver.StandingAsk(testWorkspace, nil)
+	asks := h.resolver.AsksStanding(testWorkspace)
+
+	// Assert
+	if !found || len(asks) == 0 || asks[0].GetQuestion().GetId().GetValue() != standing.ID {
+		t.Fatalf("StandingAsk = %+v, AsksStanding = %v, want the same oldest ask", standing, standingKeys(asks))
+	}
+}

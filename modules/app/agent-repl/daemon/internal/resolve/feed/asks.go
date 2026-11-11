@@ -20,40 +20,66 @@ import (
 func (r *resolver) AsksStanding(ws ids.WorkspaceID) []*conversationv1.SessionOpenAsk {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := r.state(ws)
-	type standing struct {
-		opened uint64
-		ask    *conversationv1.SessionOpenAsk
+	open := openAsks(r.state(ws))
+	asks := make([]*conversationv1.SessionOpenAsk, 0, len(open))
+	for _, a := range open {
+		switch a.kind {
+		case AskPermission:
+			asks = append(asks, &conversationv1.SessionOpenAsk{
+				Agent: a.agent,
+				Ask: &conversationv1.SessionOpenAsk_Permission{Permission: &conversationv1.AgentPermission{
+					Id:     &conversationv1.AgentPermissionId{Value: a.id},
+					Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{}},
+				}},
+			})
+		case AskQuestion:
+			asks = append(asks, &conversationv1.SessionOpenAsk{
+				Agent: a.agent,
+				Ask: &conversationv1.SessionOpenAsk_Question{Question: &conversationv1.AgentQuestion{
+					Id:     &conversationv1.AgentQuestionId{Value: a.id},
+					Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{Batch: a.batch}},
+				}},
+			})
+		}
 	}
-	var found []standing
+	return asks
+}
+
+// openAsk is one ask whose card stands open on the workspace's feeds.
+type openAsk struct {
+	kind AskKind
+	id   string
+	// opened is the workspace's ask sequence at the card's first draw.
+	opened uint64
+	// agent is who asked.
+	agent *conversationv1.AgentId
+	// at is where the card is drawn.
+	at placement
+	// batch is a question's batch as served; nil for a consent ask.
+	batch *conversationv1.AgentQuestionBatch
+	// answerable is whether an answer can go to it now: a question batch
+	// claimed by a delivery in flight, or not yet drawn, is not.
+	answerable bool
+}
+
+// openAsks is every ask whose card stands open, oldest first: THE ONE RULE for
+// which asks are open, read by the answer routing (oldestStandingAsk) and the
+// session watcher's reconciliation (AsksStanding) alike.
+func openAsks(s *wsState) []openAsk {
+	var open []openAsk
 	for id, p := range s.permissionRows {
 		if p.card.GetOpen() == nil {
 			continue
 		}
-		found = append(found, standing{opened: p.opened, ask: &conversationv1.SessionOpenAsk{
-			Agent: p.agent,
-			Ask: &conversationv1.SessionOpenAsk_Permission{Permission: &conversationv1.AgentPermission{
-				Id:     &conversationv1.AgentPermissionId{Value: id},
-				Result: &conversationv1.AgentPermission_Start{Start: &conversationv1.AgentPermissionStart{}},
-			}},
-		}})
+		open = append(open, openAsk{kind: AskPermission, id: id, opened: p.opened, agent: p.agent, at: p.feed, answerable: true})
 	}
 	for id, q := range s.questionAsks {
 		if !q.open {
 			continue
 		}
-		found = append(found, standing{opened: q.opened, ask: &conversationv1.SessionOpenAsk{
-			Agent: q.agent,
-			Ask: &conversationv1.SessionOpenAsk_Question{Question: &conversationv1.AgentQuestion{
-				Id:     &conversationv1.AgentQuestionId{Value: id},
-				Result: &conversationv1.AgentQuestion_Start{Start: &conversationv1.AgentQuestionStart{Batch: q.batch}},
-			}},
-		}})
+		open = append(open, openAsk{kind: AskQuestion, id: id, opened: q.opened, agent: q.agent, at: q.at, batch: q.batch,
+			answerable: !q.delivering && q.row != nil})
 	}
-	sort.Slice(found, func(i, j int) bool { return found[i].opened < found[j].opened })
-	asks := make([]*conversationv1.SessionOpenAsk, 0, len(found))
-	for _, f := range found {
-		asks = append(asks, f.ask)
-	}
-	return asks
+	sort.Slice(open, func(i, j int) bool { return open[i].opened < open[j].opened })
+	return open
 }
