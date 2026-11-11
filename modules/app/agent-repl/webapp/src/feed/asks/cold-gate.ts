@@ -78,6 +78,7 @@ import type {
   FeedColdGateModel,
   FeedColdGateResolved,
   FeedColdGateResolvedCompact,
+  FeedColdGateSignIn,
   FeedColdGateStanding,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { AgentReplClient } from "../../rpc/client.js";
@@ -103,6 +104,7 @@ import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
 import { stampedAge } from "./stamped-age.js";
 import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
+import { drawSignInAction } from "../../login/request.js";
 
 const PATH = "FeedColdGate";
 
@@ -237,9 +239,35 @@ export function drawFeedColdGateStanding(
   // twice, so the two can never disagree.
   card.style.setProperty(COLD_GATE_HEAT_PROPERTY, figure.style.color);
   card.append(drawLead(figure, drawFeedColdGateModel(model, `${path}.model`)));
+  if (u.signIn !== undefined) card.append(drawFeedColdGateSignIn(u.signIn, `${path}.sign_in`));
 
   card.append(drawActions(rc, menu, resume, path));
   return card;
+}
+
+/** The class of the gate's sign-in notice. */
+export const COLD_GATE_SIGN_IN_CLASS = "cold-gate-sign-in";
+
+/**
+ * THE SIGN-IN NOTICE: the gate's last answer was refused because the vendor
+ * rejected the account's credential. The vendor's sentence, verbatim, then the
+ * sign-in action, which opens the page's one login overlay (the topbar's
+ * account cell opens the same one). It sits above the choices because it is
+ * what must happen before any of them can bring the session back.
+ */
+function drawFeedColdGateSignIn(u: FeedColdGateSignIn, path: string): HTMLElement {
+  const cause = requireMessage(u.cause, `${path}.cause`);
+  requireMessage(u.action, `${path}.action`);
+  const notice = document.createElement("div");
+  notice.className = COLD_GATE_SIGN_IN_CLASS;
+  const sentence = document.createElement("span");
+  sentence.className = "cold-gate-sign-in-cause";
+  sentence.textContent = cause.text;
+  const actions = document.createElement("span");
+  actions.className = "cold-gate-sign-in-actions";
+  actions.append(drawSignInAction("cold-gate-sign-in-action", "feed.cold-gate-sign-in"));
+  notice.append(sentence, actions);
+  return notice;
 }
 
 /** The card property its frame and dividers read the token figure's color from. */
