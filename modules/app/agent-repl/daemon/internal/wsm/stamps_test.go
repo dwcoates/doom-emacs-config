@@ -19,6 +19,11 @@ func TestStamps(t *testing.T) {
 			ws:   Workspace{CreatedAt: created, LastActivityAt: &activity, LastSelectedAt: &selected, MergedAt: &merged},
 			want: []string{"workspace_created", "workspace_activity", "workspace_selected", "workspace_merged"},
 		},
+		{
+			name: "a close is a signal",
+			ws:   Workspace{CreatedAt: created, Closed: true, Closure: &Closure{At: merged, By: CloseByUser}},
+			want: []string{"workspace_created", "workspace_closed"},
+		},
 		{name: "an unset stamp is no signal", ws: Workspace{CreatedAt: created, MergedAt: &merged}, want: []string{"workspace_created", "workspace_merged"}},
 	}
 	for _, tc := range cases {
@@ -49,6 +54,11 @@ func TestLastTouchedIsTheNewestStamp(t *testing.T) {
 	}{
 		{name: "a bare record was last touched at its creation", ws: Workspace{CreatedAt: older}, want: Stamp{At: older, Signal: "workspace_created"}},
 		{name: "a later selection wins", ws: Workspace{CreatedAt: older, LastSelectedAt: &newer}, want: Stamp{At: newer, Signal: "workspace_selected"}},
+		{
+			name: "a later close wins",
+			ws:   Workspace{CreatedAt: older, Closed: true, Closure: &Closure{At: newer, By: CloseByUser}},
+			want: Stamp{At: newer, Signal: "workspace_closed"},
+		},
 		{name: "an earlier activity loses to the creation", ws: Workspace{CreatedAt: newer, LastActivityAt: &older}, want: Stamp{At: newer, Signal: "workspace_created"}},
 	}
 	for _, tc := range cases {

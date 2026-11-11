@@ -10,7 +10,8 @@ type Stamp struct {
 }
 
 // Stamps is every instant the record says somebody was there: its creation,
-// and its last activity, last selection and merge where set. It is the one
+// and its last activity, last selection, merge and close where set. The close
+// counts: closing a workspace is the last thing somebody did with it. It is the one
 // reading of a record's activity, shared by every sweep that judges idleness
 // (the landed-worktree reaper, the storage sweep).
 func (ws Workspace) Stamps() []Stamp {
@@ -26,6 +27,9 @@ func (ws Workspace) Stamps() []Stamp {
 		if stamp.at != nil {
 			stamps = append(stamps, Stamp{At: *stamp.at, Signal: stamp.signal})
 		}
+	}
+	if ws.Closure != nil {
+		stamps = append(stamps, Stamp{At: ws.Closure.At, Signal: "workspace_closed"})
 	}
 	return stamps
 }

@@ -41,6 +41,9 @@ func TestTheNewestSignalIsTheLastActivity(t *testing.T) {
 		{name: "workspace activity", record: func(ws *wsm.Workspace) { ws.LastActivityAt = &recent }, want: "workspace_activity"},
 		{name: "workspace selected", record: func(ws *wsm.Workspace) { ws.LastSelectedAt = &recent }, want: "workspace_selected"},
 		{name: "workspace merged", record: func(ws *wsm.Workspace) { ws.MergedAt = &recent }, want: "workspace_merged"},
+		{name: "workspace closed", record: func(ws *wsm.Workspace) {
+			ws.Closed, ws.Closure = true, &wsm.Closure{At: recent, By: wsm.CloseByUser}
+		}, want: "workspace_closed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
