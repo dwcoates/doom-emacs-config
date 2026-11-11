@@ -115,3 +115,40 @@ switched off. Designed autonomously (owner request, 2026-11-10).
   rather than `switch_failed`. The retry arm labels it as for any failure.
 - `shim.v1.StartSessionResume.cold_remediation`'s comment now states what the
   shim always did: a set remediation is carried out warm or cold.
+- Implementation (2026-11-11), across the systems that produce or consume
+  the change:
+  - wsm (layout 123): the binding records the start work it owes
+    (`owed_start_work`: a compaction, or a summary of another conversation)
+    in the bind's own transaction and forgets the previous binding's; a
+    settled start records the summary the next prompt delivers
+    (`owed_context_summaries`).
+  - Fleet (`daemon/internal/workspace/owedstart.go`): every StartSession the
+    bring-up sends reads the owed work afresh and carries it (an owed
+    compaction is the resume's `compact` remediation at the cold gate's
+    default summarizer, replacing any other; an owed summary is its
+    `carry_summary`), and the answer that succeeded with it settles it with
+    the summary it carried. The parked bridge's resume template carries none.
+    A start that failed on it is labeled, so the switch answers
+    `compaction_failed`.
+  - Workspace verbs (`daemon/internal/workspace/queuebypass.go`): the four
+    options inside the one switch. Full and compacted main fork the queue
+    conversation, the compacted fork owing a compaction, and drop a parked
+    bypass conversation's binding (its transcript stays on disk; logged);
+    existing resumes the parked one; existing plus compacted main resumes it
+    owing a summary of the queue conversation. A workspace that ran no
+    conversation owes nothing. An existing option with nothing parked is
+    refused `no_bypass_conversation` before anything changes.
+  - Prompt handler: the carried summary opens the next prompt that carries a
+    workspace note, meta-wrapped through `prompts/queue-bypass-context-summary.md`;
+    taken once, put back when the queue refuses the prompt.
+  - Topbar resolver: the off chip serves the options with daemon-composed
+    labels, the existing two only while the bypass conversation is parked.
+  - CLI: no verb took the mode before, so `workspace set WS -queue-bypass
+    on|off [-context full|compacted|existing|existing-plus-compacted]` was
+    added beside `-remote-control`, documented in the workspaces skill. An
+    agent names the mode, never a toggle.
+  - Webapp: the off chip opens the menu through the reveal layer, the shared
+    row rule and the one pick path; the on chip still releases it through
+    `toggle`.
+  - Elisp: no command takes the mode, and no wire pin names the new arms, so
+    nothing changed there.
