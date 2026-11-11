@@ -186,6 +186,9 @@ type Deps struct {
 	// Stat stats a workspace's directory (os.Stat): a workspace whose
 	// directory is gone owes no keep-alive (beatPlanFor).
 	Stat func(name string) (fs.FileInfo, error)
+	// Faults records the keep-alives the keeper owed and did not deliver, and
+	// its own loop stopping (delivery.go).
+	Faults Faults
 }
 
 // edgeKind is what one queued event is.
@@ -309,6 +312,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the parked conversations' keep-alive requests")
 	case deps.Stat == nil:
 		return nil, errors.New("cachelapse: the keeper needs to stat the workspaces' directories")
+	case deps.Faults == nil:
+		return nil, errors.New("cachelapse: the keeper needs the fault records")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
@@ -423,6 +428,7 @@ func (k *Keeper) enqueue(e edge) {
 // ctx ends.
 func (k *Keeper) Run(ctx context.Context) error {
 	if err := k.restore(ctx); err != nil {
+		k.driveStopped(ctx, err)
 		return err
 	}
 	for {
@@ -471,8 +477,8 @@ func (k *Keeper) restore(ctx context.Context) error {
 		if leaving(ctx, log, opLapse, "listing the workspaces to re-arm their cache lapses", err) {
 			return nil
 		}
-		log.Error(opLapse, "could not list the workspaces to re-arm their cache lapses", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("cachelapse: list the workspaces: %w", err)
+		// Recorded at ERROR by driveStopped, which owns the keeper's stop.
+		return fmt.Errorf("cachelapse: list the workspaces to re-arm their cache lapses and keep-alives: %w", err)
 	}
 	for _, ws := range workspaces {
 		if ws.CacheLapse != nil {
@@ -750,8 +756,9 @@ type shimFailure struct {
 // what it was told, and the stand-down is recorded where it was ordered. A call the
 // daemon's exit cancelled is INFO (leaving). Anything else is an ERROR. It is
 // THE ONE triage of a failed shim call in this package
-// (TestShimCallFailureTriageHasOneHome).
-func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) {
+// (TestShimCallFailureTriageHasOneHome). It answers whether the call FAILED,
+// the one triage recorded at ERROR.
+func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimFailure, fields dlog.Context, err error) bool {
 	switch {
 	case errors.Is(err, shimclient.ErrStandDownOrdered):
 		log.Info(op, words.stoodDown, dlog.WithCause(fields, err))
@@ -760,7 +767,9 @@ func shimCallFailed(ctx context.Context, log dlog.Logger, op string, words shimF
 	case leaving(ctx, log, op, words.doing, err):
 	default:
 		log.Error(op, words.failed, dlog.WithCause(fields, err))
+		return true
 	}
+	return false
 }
 
 // leaving reports whether ERR is the Run loop's own lifetime ending (the

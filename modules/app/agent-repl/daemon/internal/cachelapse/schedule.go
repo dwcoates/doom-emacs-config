@@ -124,9 +124,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			delete(k.noBeat, ws)
 			return beatPlan{}, false
 		}
-		if !leaving(ctx, log, opDrive, "reading the workspace to time its keep-alive", err) {
-			log.Error(opDrive, "could not read the workspace; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", "could not read the workspace; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	none := func(why string) (beatPlan, bool) {
@@ -155,9 +153,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// while the entry stands.
 	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
 	if err != nil {
-		if !leaving(ctx, log, opDrive, "reading whether the workspace has a merge queued", err) {
-			log.Error(opDrive, "could not read whether the workspace has a merge queued; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", "could not read whether the workspace has a merge queued; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	if record.KeepaliveHeld() && !queued {
@@ -171,9 +167,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	runs, _, err := bringup.OnlyVisible(ctx, k.deps.DB, log, []wsm.Workspace{record})
 	if err != nil {
-		if !leaving(ctx, log, opDrive, "reading whether the workspace runs", err) {
-			log.Error(opDrive, "could not read whether the workspace runs; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace runs", "could not read whether the workspace runs; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	if len(runs) == 0 {
@@ -181,9 +175,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
-		if !leaving(ctx, log, opDrive, "reading the workspace's session to time its keep-alive", err) {
-			log.Error(opDrive, "could not read the workspace's session; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace's session to time its keep-alive", "could not read the workspace's session; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	if !found {
@@ -322,16 +314,19 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			return
 		case errors.As(err, &failed):
 			observe(BeatOutcomeSubmitFailed)
-			log.Error(opDrive, "the keep-alive's submission failed; it is asked again shortly",
-				dlog.WithCause(dlog.Merge(fields, dlog.Context{"retry_in": BeatRetry.String()}), err))
+			k.undelivered(ctx, log, opDrive, ws, due, "submitting the keep-alive", "the keep-alive's submission failed; it is asked again shortly",
+				dlog.Merge(fields, dlog.Context{"retry_in": BeatRetry.String()}), err)
 		default:
 			observe(BeatOutcomeShimUnreachable)
-			shimCallFailed(ctx, log, opDrive, shimFailure{
+			const failed = "could not ask the shim for its keep-alive; it is asked again shortly"
+			if shimCallFailed(ctx, log, opDrive, shimFailure{
 				doing:     "asking the shim for its keep-alive",
 				died:      "the shim died under the keep-alive; the death is recorded by daemon.shimclient.exit, and the next session's coming up sends it",
 				stoodDown: "the shim was being stood down by this daemon under the keep-alive; the next session's coming up sends it",
-				failed:    "could not ask the shim for its keep-alive; it is asked again shortly",
-			}, fields, err)
+				failed:    failed,
+			}, fields, err) {
+				k.raiseUndelivered(ctx, log, ws, due, failed+": "+err.Error())
+			}
 		}
 		k.beats[ws] = now.Add(BeatRetry)
 		return
@@ -340,6 +335,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	case answer.GetSent() != nil:
 		observe(BeatOutcomeSent)
 		log.Info(opDrive, "sent the workspace's keep-alive", fields)
+		k.delivered(ctx, log, ws)
 		// THE BEAT MOVES THE CACHE CLOCK, and it is recorded before the
 		// stand-down, whose edges re-time the next beat from that clock.
 		k.sent[ws] = now
@@ -378,8 +374,10 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			dlog.Merge(fields, dlog.Context{"live_items": answer.GetSkipped().GetDetachedWorkLive().GetLiveItems()}))
 	case answer.GetSkipped().GetCacheLapsed() != nil:
 		observe(BeatOutcomeCacheLapsed)
+		lapsed := time.UnixMilli(answer.GetSkipped().GetCacheLapsed().GetLapsedAtMs())
 		log.Info(opDrive, "the cache had already lapsed; no keep-alive is sent until a turn moves its clock",
-			dlog.Merge(fields, dlog.Context{"lapsed_at_ms": answer.GetSkipped().GetCacheLapsed().GetLapsedAtMs()}))
+			dlog.Merge(fields, dlog.Context{"lapsed_at_ms": lapsed.UnixMilli()}))
+		k.missed(ctx, log, ws, due, lapsed)
 		if k.markCold(ctx, ws, "the shim judged the cache lapsed") != nil {
 			// UNMARKED, the beat would be asked again at once and judged lapsed
 			// again: it is asked again shortly instead, and markCold recorded
@@ -505,9 +503,12 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})
 		k.retryRestore(ws)
 	default:
-		log.Error(opRestore, "the parked session could not be restored; it is asked again shortly",
-			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})
-		k.retryRestore(ws)
+		due := k.beats[ws]
+		k.undelivered(ctx, log, opRestore, ws, due, "restoring the parked session", "the parked session could not be restored for its keep-alive; it is asked again shortly",
+			dlog.Context{"retry_in": BeatRetry.String()}, err)
+		if ctx.Err() == nil {
+			k.retryRestore(ws)
+		}
 	}
 	k.pump(ctx)
 }

@@ -265,6 +265,8 @@ type harness struct {
 	// statErr, when set, is what stating each workspace directory answers;
 	// a directory absent from it exists.
 	statErr map[string]error
+	// faults are the fault records the keeper opened and closed.
+	faults *fakeFaults
 }
 
 type nextKeepaliveCall struct {
@@ -326,6 +328,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		clock:      clocktest.New(now),
 		log:        dlog.NewTestSurfaces(),
 		telemetry:  &fakeTelemetry{},
+		faults:     &fakeFaults{},
 	}
 	keeper, err := New(Deps{
 		DB: h.db,
@@ -365,7 +368,8 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Parked: func(_ context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
 			return h.parkedRequests[ws], nil
 		},
-		Stat: func(dir string) (fs.FileInfo, error) { return nil, h.statErr[dir] },
+		Stat:   func(dir string) (fs.FileInfo, error) { return nil, h.statErr[dir] },
+		Faults: h.faults,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -417,6 +421,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			NextKeepalive:   func(ids.WorkspaceID, time.Time) {},
 			Parked:          func(context.Context, ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) { return nil, nil },
 			Stat:            func(string) (fs.FileInfo, error) { return nil, nil },
+			Faults:          &fakeFaults{},
 		}
 	}
 	tests := []struct {
@@ -439,6 +444,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "views' next keep-alive", strip: func(d *Deps) { d.NextKeepalive = nil }},
 		{name: "parked keep-alive requests", strip: func(d *Deps) { d.Parked = nil }},
 		{name: "directory stat", strip: func(d *Deps) { d.Stat = nil }},
+		{name: "fault records", strip: func(d *Deps) { d.Faults = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
