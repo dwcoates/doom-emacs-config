@@ -2,8 +2,12 @@
 
 - `-originator emoji-ack|user-or-workspace` states who is creating the
   workspace, which decides the kind of workspace it is (`lifecycle-stages.md`). The default is `user-or-workspace`. `emoji-ack` is only for
-  the Slack emoji-ack reaction system's dispatch (gns-sockets), requires
-  `-slack-thread URL`, and is refused beside an async merge.
+  the daemon's Slack reaction initiator (an `announced` binding,
+  `slack bind`), requires `-slack-thread URL`, and is refused beside an
+  async merge.
+  - `-slack-subscribe listen|respond|interact` (only beside `-slack-thread`)
+    subscribes the new workspace to that thread at creation; a subscription
+    Slack refuses fails the create (`slack-threads.md`).
   - The daemon never infers the kind: `-slack-thread` alone does not make a
     workspace emoji-ack. It records the thread and stores it as a reference
     link labelled "Originating Slack thread".

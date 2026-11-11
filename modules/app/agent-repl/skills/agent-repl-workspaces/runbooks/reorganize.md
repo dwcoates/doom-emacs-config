@@ -23,8 +23,9 @@ user in the same response what it reorganized and why.
    - c. TEXT tells the governor that it is this workspace moved, what is done
      and what remains, and to do these first:
      - re-establish every subscription this session held to anything outside
-       agent-repl (a Slack thread's `/gns-sockets subscribe <url> respond`,
-       for one), since a fork is a new session;
+       agent-repl (a Slack thread's `workspace slack-subscribe here -thread
+       <url> -mode <mode>`, in the mode `workspace slack-subscriptions here`
+       shows, for one), since a fork is a new session;
      - store this workspace's links with `workspace link here`;
      - adopt each workspace step d names (`workspace set WS -parent here`).
    - d. Hand this workspace's children to the governor: TEXT names each
