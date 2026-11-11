@@ -2785,7 +2785,7 @@ composer: with text in it `C-RET' sends the latest held prompt now."
   "Return the composer flash for a numbered answer's refusal CAUSE."
   (pcase (plist-get cause :arm)
     (:ask-not-standing "the card was already answered")
-    (:ask-session-ended "the question's session ended before it was answered; nothing was sent")
+    (:ask-session-ended agent-repl--input-ask-session-ended-flash)
     (:unserved-value "the card no longer offers that choice")
     (:no-standing-offer "the card offers no always allow")
     (:no-session "the workspace has no session")

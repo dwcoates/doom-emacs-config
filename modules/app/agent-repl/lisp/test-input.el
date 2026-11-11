@@ -2467,6 +2467,11 @@ unknown arm."
     (agent-repl--send :user-sent)
     (should (equal (agent-repl-test-input--composer-text) "use OAuth"))))
 
+(ert-deftest agent-repl-input-ask-session-ended-reads-alike-typed-and-numbered ()
+  "A typed answer and a numbered answer to a dead ask say the same sentence."
+  (should (equal (agent-repl--input-answer-refusal-text (list :arm :ask-session-ended :value nil))
+                 agent-repl--input-ask-session-ended-flash)))
+
 (ert-deftest agent-repl-input-ask-session-ended-is-not-queued ()
   "The card was settled abandoned, so nothing is held for a re-drive."
   (agent-repl-test-input--with
