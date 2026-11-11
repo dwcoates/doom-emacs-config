@@ -188,6 +188,9 @@ type Deps struct {
 	// Summaries answers the note a prompt to a workspace with no summary
 	// closes with (wssummary.Keeper).
 	Summaries OwedSummaries
+	// PromptsDir is where the briefs are read from: the BriefContextSummary
+	// note a prompt opens with is composed from it.
+	PromptsDir string
 	// Panels resolves a recognized panel command. It is a FUNCTION because the
 	// four panels are assembled from facts this package does not own (the
 	// session's status, the tracker's checklist, the MCP roster, the context

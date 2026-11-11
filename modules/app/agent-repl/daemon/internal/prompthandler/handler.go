@@ -15,18 +15,26 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
 
 // The handler's operation names. Every logical branch records under one of
 // them, per the logging contract.
+// BriefContextSummary is the brief the note carrying a queue-bypass switch's
+// summary of the queue conversation is composed from.
+const BriefContextSummary = "queue-bypass-context-summary"
+
 const (
 	opNew       = "daemon.prompthandler.new"
 	opSubmit    = "daemon.prompthandler.submit"
 	opRecognize = "daemon.prompthandler.recognize"
 	opPanel     = "daemon.prompthandler.panel"
 	opRefuse    = "daemon.prompthandler.refuse"
+	// opContextSummary files the summary a queue-bypass switch carried into
+	// the bypass conversation, delivered by the workspace's next prompt.
+	opContextSummary = "daemon.prompthandler.context_summary"
 )
 
 // handler is SubmitPrompt's body: thin, stateless, done at submission. It owns
@@ -55,6 +63,8 @@ func newHandler(deps Deps) (*handler, error) {
 		return nil, fmt.Errorf("the prompt handler needs a standing-ask answerer")
 	case deps.Summaries == nil:
 		return nil, fmt.Errorf("the prompt handler needs the workspace summaries' keeper")
+	case deps.PromptsDir == "":
+		return nil, fmt.Errorf("the prompt handler needs the briefs' directory")
 	}
 	if deps.MintTurn == nil {
 		deps.MintTurn = wsm.NewTurnID
@@ -162,10 +172,15 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if err != nil {
 		return Outcome{}, err
 	}
+	said, restore, err := h.openWithContextSummary(ctx, ws, said, origin, sentBy, target, ask, log)
+	if err != nil {
+		return Outcome{}, err
+	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
 	})
 	if err != nil {
+		restore()
 		return Outcome{}, err
 	}
 	if err := h.accept(ctx, ws, c, log); err != nil {
@@ -212,6 +227,62 @@ func (h *handler) askForOwedSummary(ctx context.Context, ws ids.WorkspaceID, sai
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
 	})
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, nil
+}
+
+// openWithContextSummary opens SAID with the summary of the workspace's queue
+// conversation that a queue-bypass switch carried into its bypass
+// conversation (wsm.TakeOwedContextSummary), meta-wrapped through the
+// BriefContextSummary brief, so it is in context when the agent reads the
+// prompt and no agent turn is started for it. Only a prompt that carries a
+// workspace note opens with it (carriesWorkspaceNote). The summary is TAKEN,
+// so exactly one prompt carries it; RESTORE puts it back for the next prompt
+// when the queue refuses this one. A summary that cannot be composed is
+// restored before the failure is answered, so it is never lost.
+func (h *handler) openWithContextSummary(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk, log dlog.Logger) (_ *conversationv1.UserSaid, restore func(), _ error) {
+	none := func() {}
+	if !carriesWorkspaceNote(said, origin, sentBy, target, ask) {
+		return said, none, nil
+	}
+	summary, owed, err := h.deps.DB.TakeOwedContextSummary(ctx, ws)
+	if err != nil {
+		log.Error(opContextSummary, "could not take the context summary the workspace's next prompt owes; the prompt was not forwarded", dlog.Context{"cause": err.Error()})
+		return nil, none, fmt.Errorf("take the context summary of %q: %w", ws, err)
+	}
+	if !owed {
+		return said, none, nil
+	}
+	restore = func() {
+		if err := h.deps.DB.RestoreOwedContextSummary(context.WithoutCancel(ctx), ws, summary); err != nil {
+			log.Error(opContextSummary, "could not put back the context summary of a prompt the queue refused; it is lost", dlog.Context{"summary_chars": len(summary), "cause": err.Error()})
+		}
+	}
+	note, err := contextSummaryNote(h.deps.PromptsDir, summary)
+	if err != nil {
+		log.Error(opContextSummary, "could not compose the note carrying the context summary; the prompt was not forwarded", dlog.Context{"brief": BriefContextSummary, "cause": err.Error()})
+		restore()
+		return nil, none, fmt.Errorf("compose the context summary of %q: %w", ws, err)
+	}
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
+	blocks = append(blocks, &conversationv1.UserContentBlock{
+		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
+	})
+	blocks = append(blocks, said.GetContent().GetBlocks()...)
+	log.Info(opContextSummary, "the prompt opens with the context summary the queue-bypass switch carried", dlog.Context{"summary_chars": len(summary)})
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, restore, nil
+}
+
+// contextSummaryNote composes the meta-wrapped note carrying SUMMARY from the
+// BriefContextSummary brief in PROMPTSDIR.
+func contextSummaryNote(promptsDir, summary string) (string, error) {
+	brief, err := prompts.Load(promptsDir, BriefContextSummary)
+	if err != nil {
+		return "", fmt.Errorf("read the %s brief: %w", BriefContextSummary, err)
+	}
+	note, err := brief.Splice(map[string]string{"summary": summary})
+	if err != nil {
+		return "", fmt.Errorf("splice the %s brief: %w", BriefContextSummary, err)
+	}
+	return prompts.Wrap(note + "\n\n"), nil
 }
 
 // answerPanel resolves a recognized panel and MIRRORS it into the root feed as

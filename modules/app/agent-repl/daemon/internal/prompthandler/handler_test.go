@@ -3,7 +3,9 @@ package prompthandler
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -17,6 +19,7 @@ import (
 	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/wsm"
 )
@@ -24,7 +27,7 @@ import (
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		return Deps{
-			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{}, Summaries: &fakeOwed{},
+			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{}, Summaries: &fakeOwed{}, PromptsDir: "p",
 			Panels: func(context.Context, ids.WorkspaceID, conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 				return nil, nil
 			},
@@ -42,6 +45,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"panel source", func(d *Deps) { d.Panels = nil }},
 		{"standing-ask answerer", func(d *Deps) { d.Asks = nil }},
 		{"summaries' keeper", func(d *Deps) { d.Summaries = nil }},
+		{"briefs' directory", func(d *Deps) { d.PromptsDir = "" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1223,5 +1227,184 @@ func TestCarriesWorkspaceNote(t *testing.T) {
 				t.Fatalf("carriesWorkspaceNote = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// wantContextNote is the note the test corpus composes for SUMMARY.
+func wantContextNote(summary string) string {
+	return prompts.Wrap("the queue conversation: " + summary + "\n\n")
+}
+
+func TestAPromptOpensWithTheCarriedContextSummary(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.contextSummary = "the queue fixed the footer"
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got, want := forwardedTexts(t, h), []string{wantContextNote("the queue fixed the footer"), "now land it"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want the note as its own block then the user's words %q", got, want)
+	}
+	if h.db.contextSummary != "" {
+		t.Fatalf("context summary = %q, want it taken", h.db.contextSummary)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opContextSummary,
+		Message: "the prompt opens with the context summary the queue-bypass switch carried"}); !ok {
+		t.Fatalf("records = %+v, want the delivery at INFO", h.log.Records())
+	}
+}
+
+func TestAPromptOwingBothNotesOpensWithTheSummaryAndClosesWithTheAsk(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.contextSummary = "the queue fixed the footer"
+	h.owed.note = owedNoteText
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got, want := forwardedTexts(t, h), []string{wantContextNote("the queue fixed the footer"), "now land it", owedNoteText}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want %q", got, want)
+	}
+}
+
+func TestAPromptCarryingNoDirectiveLeavesTheContextSummaryOwed(t *testing.T) {
+	tests := []struct {
+		name   string
+		said   string
+		origin conversationv1.PromptOrigin
+	}{
+		{name: "a daemon-born brief", said: "hello", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE},
+		{name: "a slash command the vendor runs", said: "/review the diff", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.contextSummary = "the queue fixed the footer"
+
+			// Act
+			_, err := h.h.Submit(context.Background(), theWorkspace, userSaid(tt.said), "key-1", tt.origin, nil, wsm.DeliveryOrdinary, nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{tt.said}) {
+				t.Fatalf("forwarded blocks = %q, want the prompt alone", got)
+			}
+			if h.db.contextSummary != "the queue fixed the footer" {
+				t.Fatalf("context summary = %q, want it still owed", h.db.contextSummary)
+			}
+		})
+	}
+}
+
+func TestAPromptTheQueueRefusesPutsTheContextSummaryBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.contextSummary = "the queue fixed the footer"
+	h.queue.submitErr = errors.New("the queue is closed")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) {
+		t.Fatalf("Submit = %v, want the queue's refusal", err)
+	}
+	if h.db.contextSummary != "the queue fixed the footer" {
+		t.Fatalf("context summary = %q, want it put back for the next prompt", h.db.contextSummary)
+	}
+}
+
+func TestAContextSummaryThatCannotBeDeliveredFailsTheSubmission(t *testing.T) {
+	tests := []struct {
+		name         string
+		arrange      func(h *harness)
+		message      string
+		wantRestored bool
+	}{
+		{
+			name:    "the summary cannot be taken",
+			arrange: func(h *harness) { h.db.takeErr = errors.New("the state database is locked") },
+			message: "could not take the context summary the workspace's next prompt owes; the prompt was not forwarded",
+		},
+		{
+			name:         "the note cannot be composed",
+			arrange:      func(h *harness) { h.h.deps.PromptsDir = t.TempDir() },
+			message:      "could not compose the note carrying the context summary; the prompt was not forwarded",
+			wantRestored: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.contextSummary = "the queue fixed the footer"
+			tt.arrange(h)
+
+			// Act
+			_, err := h.submit("now land it")
+
+			// Assert
+			if err == nil {
+				t.Fatal("Submit = nil, want the failure")
+			}
+			if n := len(h.queue.forwarded()); n != 0 {
+				t.Fatalf("forwarded %d submissions, want none", n)
+			}
+			if got := len(h.db.restored) == 1; got != tt.wantRestored {
+				t.Fatalf("restored = %q, want restored %v", h.db.restored, tt.wantRestored)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opContextSummary, Message: tt.message}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", h.log.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestAFailedRestoreOfTheContextSummaryIsLogged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.contextSummary = "the queue fixed the footer"
+	h.db.restoreErr = errors.New("the state database is locked")
+	h.queue.submitErr = errors.New("the queue is closed")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) {
+		t.Fatalf("Submit = %v, want the queue's refusal", err)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opContextSummary,
+		Message: "could not put back the context summary of a prompt the queue refused; it is lost"}); !ok {
+		t.Fatalf("records = %+v, want the lost summary at ERROR", h.log.Records())
+	}
+}
+
+func TestTheContextSummaryBriefSplicesItsSummary(t *testing.T) {
+	// Arrange
+	dir := filepath.Join("..", "..", "..", "prompts")
+
+	// Act
+	note, err := contextSummaryNote(dir, "SUMMARY-TEXT")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("contextSummaryNote over the shipped corpus: %v", err)
+	}
+	if !strings.HasPrefix(note, prompts.MetaOpen) || !strings.Contains(note, "SUMMARY-TEXT") {
+		t.Fatalf("note = %q, want the meta-wrapped brief carrying the summary", note)
 	}
 }
