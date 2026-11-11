@@ -163,8 +163,12 @@ message StartSessionResume {
   // The vendor's own identity for it, as a previous StartSession reported.
   string vendor_session_id = 1;
   // What to do about a cold context. UNSET means "refuse if cold" — the
-  // daemon's first attempt, which learns the cost before paying it. Set only
-  // on the retry that follows a `cold` failure; a warm context ignores it.
+  // daemon's first attempt, which learns the cost before paying it. Set on
+  // the retry that follows a `cold` failure, and on the start of a
+  // conversation that OWES a compaction (a queue-bypass switch that chose a
+  // compacted fork of the ordinary conversation). A SET REMEDIATION IS
+  // CARRIED OUT WHETHER OR NOT THE CONTEXT IS COLD: `compact` compacts a warm
+  // context too, which is what the owed compaction relies on.
   optional conversation.v1.SessionColdRemediation cold_remediation = 2;
   // Set when this resume REBINDS the workspace to a different conversation —
   // the user chose it (BindWorkspaceSession), rather than the workspace
@@ -211,11 +215,37 @@ message StartSessionResume {
   // with no recorded session). The shim then reads the transcript's last
   // response model back, and SessionStarted.effective_model reports it.
   optional conversation.v1.AgentModel model = 5;
+  // A SUMMARY OF ANOTHER CONVERSATION THIS RESUME CARRIES (a queue-bypass
+  // switch that chose the parked bypass conversation plus a compacted summary
+  // of the ordinary one). The shim summarizes the named conversation with the
+  // cold gate's own summarizer, on an ephemeral fork that writes nothing to
+  // either transcript, and answers the summary on the success
+  // (StartSessionSuccess.carried_summary); the daemon delivers it into the
+  // resumed conversation. A summary that does not complete fails the start
+  // as vendor_start_failed with its `compaction` marker set. UNSET on every
+  // other resume.
+  optional StartSessionCarrySummary carry_summary = 6;
 }
 
 // This resume is a rebind: the workspace's book becomes the resumed
 // conversation's own. Presence is the fact.
 message StartSessionRebind {}
+
+// The conversation a resume carries a summary of, and how it is summarized.
+message StartSessionCarrySummary {
+  // The vendor's id for the summarized conversation: another conversation of
+  // the same workspace, whose transcript sits in the same account root.
+  string vendor_session_id = 1;
+  // The summarizer's model and scope: the cold gate's compaction choice,
+  // imported whole. Both are required.
+  conversation.v1.SessionColdCompact summarizer = 2;
+}
+
+// The summary a resume carried, as the summarizer wrote it.
+message StartSessionCarriedSummary {
+  // The summary text, verbatim. Never empty.
+  string text = 1;
+}
 
 // THE ARM IS THE OUTCOME.
 message StartSessionResponse {
@@ -248,6 +278,9 @@ message StartSessionResponse {
 message StartSessionSuccess {
   // The opened session, whole — the same facts every surface reads.
   conversation.v1.SessionStarted session = 1;
+  // The summary the resume's carry_summary asked for. SET exactly when the
+  // request set carry_summary, and UNSET otherwise.
+  optional StartSessionCarriedSummary carried_summary = 2;
 }
 
 // The session could not be opened as asked. THE ARM IS WHY.
@@ -306,7 +339,14 @@ message StartSessionVendorStartFailed {
     // Deterministic: the same request will fail the same way.
     StartSessionVendorStartRejected rejected = 2;
   }
+  // SET WHEN THE FAILURE WAS THE COMPACTION OR SUMMARY THE START WAS ASKED
+  // FOR (cold_remediation's `compact`, or carry_summary), rather than the
+  // vendor's opening itself. Presence is the fact; the retry arm above
+  // labels it as for any other failure, and `detail` carries its account.
+  optional StartSessionCompactionFailed compaction = 3;
 }
+// The failure was the asked-for compaction or summary. Presence is the fact.
+message StartSessionCompactionFailed {}
 // The vendor start failed for a reason that can pass: it stayed silent past
 // its liveness bound, its process or stream ended before it was ready, or the
 // API answered with a transient error (overloaded, a server error, a network

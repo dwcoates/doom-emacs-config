@@ -37,6 +37,32 @@ switched off. Designed autonomously (owner request, 2026-11-10).
 - The SDK's `skillOverrides` flag setting (`off`) hides a skill from the
   listing and the Skill tool; the shim checks the session's reported commands
   for its absence at start.
+- Taking the mode may name how the bypass session gets its context (owner
+  request, 2026-11-11), through a menu on the chip drawn as the topbar's other
+  menus are: a full fork of the queue conversation, a compacted fork of it, the
+  parked bypass conversation, or the parked bypass conversation plus a
+  compacted summary of the queue conversation. The last two are offered only
+  while a bypass conversation is parked; the daemon decides, the webapp never
+  infers. Releasing the mode is unchanged. `toggle`, and an `on` naming no
+  context, keep the behavior from before the menu.
+- The other topbar menus (model, effort, permission mode, account) carry a
+  daemon-composed `display_name` and no hint, so the context options carry a
+  `display_name` alone.
+- Compaction reuses the shim's one summarizer (the cold gate's): the
+  compacted fork is compacted at its first start by the `compact` remediation
+  `StartSessionResume.cold_remediation` already carries, which the shim
+  carries out whether or not the context is cold. The summary of the queue
+  conversation is written by the same summarizer on an ephemeral fork, which
+  writes nothing to either transcript. Its model and scope are the cold gate's
+  defaults (Haiku, the whole transcript).
+- The summary reaches the bypass conversation as a meta-wrapped note that
+  opens the user's next prompt, the way the owed-summary note closes one: no
+  agent turn is started for it, and it is in context when the user next
+  prompts.
+- The compaction or summary a switch owes is DURABLE: it is recorded with the
+  binding, carried by every start of the workspace until one succeeds, and
+  forgotten by any later binding. A start that fails on it fails the switch
+  with `compaction_failed`; the next start asks for it again.
 
 ## Landed changes
 
@@ -56,3 +82,36 @@ switched off. Designed autonomously (owner request, 2026-11-10).
   landing section and whether the merge-queue skill is switched off.
 - Sweep: nothing obviated. The warning chip's message family stays: the
   heading draws the same list.
+- `frontend.v1.TopbarQueueBypassContext` (topbar.proto): the four ways the
+  bypass session gets its context, a oneof of empty arms (`full_main`,
+  `compacted_main`, `existing`, `existing_plus_compacted_main`). It is the
+  TYPED ECHO TOKEN the chip's menu rows serve and the request echoes, so the
+  arms are declared once. It lives in `frontend.v1` because the daemon serves
+  it in the topbar view and `frontend.v1` may not import `agentrepl.v1`; the
+  request imports it, as other endpoints import `frontend.v1.FeedId`.
+- `frontend.v1.TopbarQueueBypassOff.options` (field 1,
+  `TopbarQueueBypassContextOption`: `context`, `display_name`): the menu's
+  rows in display order, the two main-context options always and the two
+  existing ones only while a bypass conversation is parked.
+- `agentrepl.v1.UpdateQueueBypassModeOn.context` (field 1, optional
+  `frontend.v1.TopbarQueueBypassContext`): the settled "oneof context with
+  four empty-message arms" lands as the echo token holding that oneof, rather
+  than a second oneof declared on the request, which would respell the
+  topbar's vocabulary. Unset is the default behavior; set with no arm is
+  InvalidArgument.
+- `agentrepl.v1.UpdateQueueBypassModeError`: `no_bypass_conversation` (8,
+  empty: an existing option named while nothing is parked; nothing changed)
+  and `compaction_failed` (9, `detail`: the compaction or summary did not
+  complete; the swap stands and the next start asks again).
+- `shim.v1.StartSessionResume.carry_summary` (6, `StartSessionCarrySummary`:
+  `vendor_session_id`, `summarizer` as the imported
+  `conversation.v1.SessionColdCompact`) and
+  `shim.v1.StartSessionSuccess.carried_summary` (2,
+  `StartSessionCarriedSummary.text`): the resume that carries a summary of
+  another conversation of the workspace, and the summary it answers.
+- `shim.v1.StartSessionVendorStartFailed.compaction` (3,
+  `StartSessionCompactionFailed`, presence is the fact): the failure was the
+  asked-for compaction or summary, so the daemon answers `compaction_failed`
+  rather than `switch_failed`. The retry arm labels it as for any failure.
+- `shim.v1.StartSessionResume.cold_remediation`'s comment now states what the
+  shim always did: a set remediation is carried out warm or cold.

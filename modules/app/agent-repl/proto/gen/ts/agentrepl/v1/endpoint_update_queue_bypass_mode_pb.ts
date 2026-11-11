@@ -15,6 +15,13 @@
 // the first time); releasing it does the reverse. Neither conversation's cache
 // is spent by the other, and the one not running is kept for the next switch.
 //
+// TAKING IT MAY NAME HOW THE BYPASS SESSION GETS ITS CONTEXT
+// (UpdateQueueBypassModeOn.context, owner request 2026-11-11): a full or a
+// compacted fork of the ordinary conversation, which replaces the parked
+// bypass conversation, or the parked bypass conversation, alone or with a
+// compacted summary of the ordinary one carried into it. Releasing never
+// does: it resumes the ordinary conversation as it stands.
+//
 // ONLY A PERSONAL ACCOUNT MAY HOLD IT: a work account's workspace is refused,
 // and its topbar draws no chip at all.
 //
@@ -27,6 +34,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { TopbarQueueBypassContext } from "../../frontend/v1/topbar_pb";
+import { file_frontend_v1_topbar } from "../../frontend/v1/topbar_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -35,7 +44,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_queue_bypass_mode.proto.
  */
 export const file_agentrepl_v1_endpoint_update_queue_bypass_mode: GenFile = /*@__PURE__*/
-  fileDesc("CjRhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3F1ZXVlX2J5cGFzc19tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEigAIKHFVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIzCgJvbhgCIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVPbkgAEjUKA29mZhgDIAEoCzImLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVPZmZIABI7CgZ0b2dnbGUYBCABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlVG9nZ2xlSABCCAoGYWN0aW9uIhkKF1VwZGF0ZVF1ZXVlQnlwYXNzTW9kZU9uIhoKGFVwZGF0ZVF1ZXVlQnlwYXNzTW9kZU9mZiIdChtVcGRhdGVRdWV1ZUJ5cGFzc01vZGVUb2dnbGUiowEKHVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVJlc3BvbnNlEj0KB3N1Y2Nlc3MYASABKAsyKi5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlU3VjY2Vzc0gAEjkKBWVycm9yGAIgASgLMiguYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZUVycm9ySABCCAoGcmVzdWx0IioKHFVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVN1Y2Nlc3MSCgoCb24YASABKAgizQQKGlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZUVycm9yElAKEXVua25vd25fd29ya3NwYWNlGAEgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVVua25vd25Xb3Jrc3BhY2VIABJZChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjcuYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASUAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlVHJhbnNmZXJyaW5nQXdheUgAEkYKDHdvcmtfYWNjb3VudBgEIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVXb3JrQWNjb3VudEgAEkoKDmhlbGRfZWxzZXdoZXJlGAUgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZUhlbGRFbHNld2hlcmVIABJJCg50dXJuX2luX2ZsaWdodBgGIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVUdXJuSW5GbGlnaHRIABJICg1zd2l0Y2hfZmFpbGVkGAcgASgLMi8uYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVN3aXRjaEZhaWxlZEgAQgcKBWNhdXNlIicKJVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVVua25vd25Xb3Jrc3BhY2UiQQopVXBkYXRlUXVldWVCeXBhc3NNb2RlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjgKJVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIiCiBVcGRhdGVRdWV1ZUJ5cGFzc01vZGVXb3JrQWNjb3VudCJTCiJVcGRhdGVRdWV1ZUJ5cGFzc01vZGVIZWxkRWxzZXdoZXJlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiIwohVXBkYXRlUXVldWVCeXBhc3NNb2RlVHVybkluRmxpZ2h0IjMKIVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVN3aXRjaEZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CjRhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3F1ZXVlX2J5cGFzc19tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEigAIKHFVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIzCgJvbhgCIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVPbkgAEjUKA29mZhgDIAEoCzImLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVPZmZIABI7CgZ0b2dnbGUYBCABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlVG9nZ2xlSABCCAoGYWN0aW9uImIKF1VwZGF0ZVF1ZXVlQnlwYXNzTW9kZU9uEjsKB2NvbnRleHQYASABKAsyJS5mcm9udGVuZC52MS5Ub3BiYXJRdWV1ZUJ5cGFzc0NvbnRleHRIAIgBAUIKCghfY29udGV4dCIaChhVcGRhdGVRdWV1ZUJ5cGFzc01vZGVPZmYiHQobVXBkYXRlUXVldWVCeXBhc3NNb2RlVG9nZ2xlIqMBCh1VcGRhdGVRdWV1ZUJ5cGFzc01vZGVSZXNwb25zZRI9CgdzdWNjZXNzGAEgASgLMiouYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVN1Y2Nlc3NIABI5CgVlcnJvchgCIAEoCzIoLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVFcnJvckgAQggKBnJlc3VsdCIqChxVcGRhdGVRdWV1ZUJ5cGFzc01vZGVTdWNjZXNzEgoKAm9uGAEgASgIIvoFChpVcGRhdGVRdWV1ZUJ5cGFzc01vZGVFcnJvchJQChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIzLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVVbmtub3duV29ya3NwYWNlSAASWQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI3LmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAElAKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVRyYW5zZmVycmluZ0F3YXlIABJGCgx3b3JrX2FjY291bnQYBCABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlV29ya0FjY291bnRIABJKCg5oZWxkX2Vsc2V3aGVyZRgFIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVIZWxkRWxzZXdoZXJlSAASSQoOdHVybl9pbl9mbGlnaHQYBiABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlVHVybkluRmxpZ2h0SAASSAoNc3dpdGNoX2ZhaWxlZBgHIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVRdWV1ZUJ5cGFzc01vZGVTd2l0Y2hGYWlsZWRIABJZChZub19ieXBhc3NfY29udmVyc2F0aW9uGAggASgLMjcuYWdlbnRyZXBsLnYxLlVwZGF0ZVF1ZXVlQnlwYXNzTW9kZU5vQnlwYXNzQ29udmVyc2F0aW9uSAASUAoRY29tcGFjdGlvbl9mYWlsZWQYCSABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUXVldWVCeXBhc3NNb2RlQ29tcGFjdGlvbkZhaWxlZEgAQgcKBWNhdXNlIicKJVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVVua25vd25Xb3Jrc3BhY2UiQQopVXBkYXRlUXVldWVCeXBhc3NNb2RlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjgKJVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIiCiBVcGRhdGVRdWV1ZUJ5cGFzc01vZGVXb3JrQWNjb3VudCJTCiJVcGRhdGVRdWV1ZUJ5cGFzc01vZGVIZWxkRWxzZXdoZXJlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiIwohVXBkYXRlUXVldWVCeXBhc3NNb2RlVHVybkluRmxpZ2h0IjMKIVVwZGF0ZVF1ZXVlQnlwYXNzTW9kZVN3aXRjaEZhaWxlZBIOCgZkZXRhaWwYASABKAkiKwopVXBkYXRlUXVldWVCeXBhc3NNb2RlTm9CeXBhc3NDb252ZXJzYXRpb24iNwolVXBkYXRlUXVldWVCeXBhc3NNb2RlQ29tcGFjdGlvbkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_topbar, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateQueueBypassModeRequest
@@ -96,6 +105,18 @@ export const UpdateQueueBypassModeRequestSchema: GenMessage<UpdateQueueBypassMod
  * @generated from message agentrepl.v1.UpdateQueueBypassModeOn
  */
 export type UpdateQueueBypassModeOn = Message<"agentrepl.v1.UpdateQueueBypassModeOn"> & {
+  /**
+   * How the bypass session gets its context: the option the chip's menu
+   * served, echoed back unchanged (a typed echo token, so its four arms are
+   * declared once, in frontend.v1, and never respelled here). UNSET keeps the
+   * behavior every caller had before the menu: a full fork of the ordinary
+   * conversation while no bypass conversation is parked, and the parked one
+   * resumed while one is. A context that is set with no arm set is
+   * InvalidArgument.
+   *
+   * @generated from field: optional frontend.v1.TopbarQueueBypassContext context = 1;
+   */
+  context?: TopbarQueueBypassContext | undefined;
 };
 
 /**
@@ -255,6 +276,26 @@ export type UpdateQueueBypassModeError = Message<"agentrepl.v1.UpdateQueueBypass
      */
     value: UpdateQueueBypassModeSwitchFailed;
     case: "switchFailed";
+  } | {
+    /**
+     * The context named the parked bypass conversation (existing, or existing
+     * plus compacted main), and the workspace parks none. Nothing changed.
+     *
+     * @generated from field: agentrepl.v1.UpdateQueueBypassModeNoBypassConversation no_bypass_conversation = 8;
+     */
+    value: UpdateQueueBypassModeNoBypassConversation;
+    case: "noBypassConversation";
+  } | {
+    /**
+     * The compaction or summary the context asked for did not complete. The
+     * switch stands as the conversation swap left it: the hold is taken, the
+     * queue is stopped, and the bypass conversation is bound; its next start
+     * asks for the compaction again.
+     *
+     * @generated from field: agentrepl.v1.UpdateQueueBypassModeCompactionFailed compaction_failed = 9;
+     */
+    value: UpdateQueueBypassModeCompactionFailed;
+    case: "compactionFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -393,4 +434,40 @@ export type UpdateQueueBypassModeSwitchFailed = Message<"agentrepl.v1.UpdateQueu
  */
 export const UpdateQueueBypassModeSwitchFailedSchema: GenMessage<UpdateQueueBypassModeSwitchFailed> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_queue_bypass_mode, 13);
+
+/**
+ * No bypass conversation is parked to resume.
+ *
+ * @generated from message agentrepl.v1.UpdateQueueBypassModeNoBypassConversation
+ */
+export type UpdateQueueBypassModeNoBypassConversation = Message<"agentrepl.v1.UpdateQueueBypassModeNoBypassConversation"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateQueueBypassModeNoBypassConversation.
+ * Use `create(UpdateQueueBypassModeNoBypassConversationSchema)` to create a new message.
+ */
+export const UpdateQueueBypassModeNoBypassConversationSchema: GenMessage<UpdateQueueBypassModeNoBypassConversation> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_queue_bypass_mode, 14);
+
+/**
+ * The compaction or summary did not complete.
+ *
+ * @generated from message agentrepl.v1.UpdateQueueBypassModeCompactionFailed
+ */
+export type UpdateQueueBypassModeCompactionFailed = Message<"agentrepl.v1.UpdateQueueBypassModeCompactionFailed"> & {
+  /**
+   * The shim's own account of the failure, verbatim.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateQueueBypassModeCompactionFailed.
+ * Use `create(UpdateQueueBypassModeCompactionFailedSchema)` to create a new message.
+ */
+export const UpdateQueueBypassModeCompactionFailedSchema: GenMessage<UpdateQueueBypassModeCompactionFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_queue_bypass_mode, 15);
 
