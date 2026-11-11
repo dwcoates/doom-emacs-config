@@ -31,15 +31,21 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// One repository's merge queue.
+// One repository's merge queue. A queue has THREE ACTIVE SLOTS, each held by
+// at most one merge: the head (the one merge running its test gate and
+// landing), fixing tests, and resolving conflicts (both out of line). So at
+// most one entry is running, at most one is fixing_tests and at most one is
+// resolving_conflicts; every other merge out of line awaits its repair's slot.
 type MergeQueueStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The repository whose queue this is.
 	Repository *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
 	// Whether the queue advances.
 	Advance *MergeQueueStatusAdvance `protobuf:"bytes,2,opt,name=advance,proto3" json:"advance,omitempty"`
-	// Every merge in line, front first: the running merge (when one runs) is
-	// first, then every waiting merge in the order it will run.
+	// Every merge of the queue: those in line, front first -- the running
+	// merge (when one runs), then every waiting merge in the order it will run
+	// -- then every merge out of line: the holder of each repair slot, then the
+	// merges awaiting each slot, in the order each will be granted it.
 	Entries       []*MergeQueueStatusEntry `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -532,7 +538,9 @@ type MergeQueueStatusEntryStage struct {
 	//
 	//	*MergeQueueStatusEntryStage_Waiting
 	//	*MergeQueueStatusEntryStage_Running
-	//	*MergeQueueStatusEntryStage_Remediating
+	//	*MergeQueueStatusEntryStage_FixingTests
+	//	*MergeQueueStatusEntryStage_ResolvingConflicts
+	//	*MergeQueueStatusEntryStage_AwaitingRepair
 	Stage         isMergeQueueStatusEntryStage_Stage `protobuf_oneof:"stage"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -593,10 +601,28 @@ func (x *MergeQueueStatusEntryStage) GetRunning() *MergeQueueStatusEntryStageRun
 	return nil
 }
 
-func (x *MergeQueueStatusEntryStage) GetRemediating() *MergeQueueStatusEntryStageRemediating {
+func (x *MergeQueueStatusEntryStage) GetFixingTests() *MergeQueueStatusEntryStageFixingTests {
 	if x != nil {
-		if x, ok := x.Stage.(*MergeQueueStatusEntryStage_Remediating); ok {
-			return x.Remediating
+		if x, ok := x.Stage.(*MergeQueueStatusEntryStage_FixingTests); ok {
+			return x.FixingTests
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStage) GetResolvingConflicts() *MergeQueueStatusEntryStageResolvingConflicts {
+	if x != nil {
+		if x, ok := x.Stage.(*MergeQueueStatusEntryStage_ResolvingConflicts); ok {
+			return x.ResolvingConflicts
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStage) GetAwaitingRepair() *MergeQueueStatusEntryStageAwaitingRepair {
+	if x != nil {
+		if x, ok := x.Stage.(*MergeQueueStatusEntryStage_AwaitingRepair); ok {
+			return x.AwaitingRepair
 		}
 	}
 	return nil
@@ -616,46 +642,60 @@ type MergeQueueStatusEntryStage_Running struct {
 	Running *MergeQueueStatusEntryStageRunning `protobuf:"bytes,2,opt,name=running,proto3,oneof"`
 }
 
-type MergeQueueStatusEntryStage_Remediating struct {
-	// Out of line: it stepped aside from the head (or from the race behind
-	// it) while an agent turn of its own repairs it -- the failures its test
-	// suite finished with, or the conflicts its rebase met -- and returns to
-	// the line once that turn ends, at the first waiting place. Listed after
-	// every entry in line.
-	Remediating *MergeQueueStatusEntryStageRemediating `protobuf:"bytes,3,opt,name=remediating,proto3,oneof"`
+type MergeQueueStatusEntryStage_FixingTests struct {
+	// Out of line, holding the queue's FIXING-TESTS slot: its whole test
+	// suite finished with failures at the head, its session fixes them, and
+	// it returns to the line at the first waiting place once that turn ends,
+	// running its suite again (one of its fixing attempts).
+	FixingTests *MergeQueueStatusEntryStageFixingTests `protobuf:"bytes,4,opt,name=fixing_tests,json=fixingTests,proto3,oneof"`
+}
+
+type MergeQueueStatusEntryStage_ResolvingConflicts struct {
+	// Out of line, holding the queue's RESOLVING-CONFLICTS slot: its rebase
+	// met conflicts -- at the head, or in the background while it waited --
+	// and its session resolves them; it returns to the line at the first
+	// waiting place once the resolution ends. Spends no fixing attempt.
+	ResolvingConflicts *MergeQueueStatusEntryStageResolvingConflicts `protobuf:"bytes,5,opt,name=resolving_conflicts,json=resolvingConflicts,proto3,oneof"`
+}
+
+type MergeQueueStatusEntryStage_AwaitingRepair struct {
+	// Out of line, waiting for a repair slot another merge holds. Nothing is
+	// handed its session until it is granted the slot, which the holder's
+	// return to the line grants to the first merge awaiting it.
+	AwaitingRepair *MergeQueueStatusEntryStageAwaitingRepair `protobuf:"bytes,6,opt,name=awaiting_repair,json=awaitingRepair,proto3,oneof"`
 }
 
 func (*MergeQueueStatusEntryStage_Waiting) isMergeQueueStatusEntryStage_Stage() {}
 
 func (*MergeQueueStatusEntryStage_Running) isMergeQueueStatusEntryStage_Stage() {}
 
-func (*MergeQueueStatusEntryStage_Remediating) isMergeQueueStatusEntryStage_Stage() {}
+func (*MergeQueueStatusEntryStage_FixingTests) isMergeQueueStatusEntryStage_Stage() {}
 
-// Remediating out of line, and why.
-type MergeQueueStatusEntryStageRemediating struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// What the merge's turn out of line repairs. Always set by the daemon; a
-	// set reason whose arm this schema revision does not name is a reason a
-	// newer daemon added.
-	Reason        *MergeQueueStatusEntryStageRemediatingReason `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+func (*MergeQueueStatusEntryStage_ResolvingConflicts) isMergeQueueStatusEntryStage_Stage() {}
+
+func (*MergeQueueStatusEntryStage_AwaitingRepair) isMergeQueueStatusEntryStage_Stage() {}
+
+// Holding the fixing-tests slot. No fields: the arm is the fact.
+type MergeQueueStatusEntryStageFixingTests struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeQueueStatusEntryStageRemediating) Reset() {
-	*x = MergeQueueStatusEntryStageRemediating{}
+func (x *MergeQueueStatusEntryStageFixingTests) Reset() {
+	*x = MergeQueueStatusEntryStageFixingTests{}
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeQueueStatusEntryStageRemediating) String() string {
+func (x *MergeQueueStatusEntryStageFixingTests) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeQueueStatusEntryStageRemediating) ProtoMessage() {}
+func (*MergeQueueStatusEntryStageFixingTests) ProtoMessage() {}
 
-func (x *MergeQueueStatusEntryStageRemediating) ProtoReflect() protoreflect.Message {
+func (x *MergeQueueStatusEntryStageFixingTests) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -667,47 +707,32 @@ func (x *MergeQueueStatusEntryStageRemediating) ProtoReflect() protoreflect.Mess
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeQueueStatusEntryStageRemediating.ProtoReflect.Descriptor instead.
-func (*MergeQueueStatusEntryStageRemediating) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeQueueStatusEntryStageFixingTests.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageFixingTests) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *MergeQueueStatusEntryStageRemediating) GetReason() *MergeQueueStatusEntryStageRemediatingReason {
-	if x != nil {
-		return x.Reason
-	}
-	return nil
-}
-
-// WHY A MERGE STEPPED ASIDE. THE ARM IS THE REASON: each is a step that waits
-// on an agent turn, and the merge returns to the line once that turn ends.
-type MergeQueueStatusEntryStageRemediatingReason struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Which repair the turn out of line makes.
-	//
-	// Types that are valid to be assigned to Reason:
-	//
-	//	*MergeQueueStatusEntryStageRemediatingReason_Tests
-	//	*MergeQueueStatusEntryStageRemediatingReason_Conflicts
-	Reason        isMergeQueueStatusEntryStageRemediatingReason_Reason `protobuf_oneof:"reason"`
+// Holding the resolving-conflicts slot. No fields: the arm is the fact.
+type MergeQueueStatusEntryStageResolvingConflicts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingReason) Reset() {
-	*x = MergeQueueStatusEntryStageRemediatingReason{}
+func (x *MergeQueueStatusEntryStageResolvingConflicts) Reset() {
+	*x = MergeQueueStatusEntryStageResolvingConflicts{}
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingReason) String() string {
+func (x *MergeQueueStatusEntryStageResolvingConflicts) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeQueueStatusEntryStageRemediatingReason) ProtoMessage() {}
+func (*MergeQueueStatusEntryStageResolvingConflicts) ProtoMessage() {}
 
-func (x *MergeQueueStatusEntryStageRemediatingReason) ProtoReflect() protoreflect.Message {
+func (x *MergeQueueStatusEntryStageResolvingConflicts) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -719,81 +744,37 @@ func (x *MergeQueueStatusEntryStageRemediatingReason) ProtoReflect() protoreflec
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeQueueStatusEntryStageRemediatingReason.ProtoReflect.Descriptor instead.
-func (*MergeQueueStatusEntryStageRemediatingReason) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeQueueStatusEntryStageResolvingConflicts.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageResolvingConflicts) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingReason) GetReason() isMergeQueueStatusEntryStageRemediatingReason_Reason {
-	if x != nil {
-		return x.Reason
-	}
-	return nil
-}
-
-func (x *MergeQueueStatusEntryStageRemediatingReason) GetTests() *MergeQueueStatusEntryStageRemediatingTests {
-	if x != nil {
-		if x, ok := x.Reason.(*MergeQueueStatusEntryStageRemediatingReason_Tests); ok {
-			return x.Tests
-		}
-	}
-	return nil
-}
-
-func (x *MergeQueueStatusEntryStageRemediatingReason) GetConflicts() *MergeQueueStatusEntryStageRemediatingConflicts {
-	if x != nil {
-		if x, ok := x.Reason.(*MergeQueueStatusEntryStageRemediatingReason_Conflicts); ok {
-			return x.Conflicts
-		}
-	}
-	return nil
-}
-
-type isMergeQueueStatusEntryStageRemediatingReason_Reason interface {
-	isMergeQueueStatusEntryStageRemediatingReason_Reason()
-}
-
-type MergeQueueStatusEntryStageRemediatingReason_Tests struct {
-	// Its whole test suite finished with failures; its fixing turn repairs
-	// them, and on its return it runs its suite again, spending one of its
-	// fixing attempts.
-	Tests *MergeQueueStatusEntryStageRemediatingTests `protobuf:"bytes,1,opt,name=tests,proto3,oneof"`
-}
-
-type MergeQueueStatusEntryStageRemediatingReason_Conflicts struct {
-	// Its rebase onto the target's tip met conflicts; its session resolves
-	// them, and on its return it rebases onto the tip again. Spends no
-	// fixing attempt, and may step aside again if it conflicts again.
-	Conflicts *MergeQueueStatusEntryStageRemediatingConflicts `protobuf:"bytes,2,opt,name=conflicts,proto3,oneof"`
-}
-
-func (*MergeQueueStatusEntryStageRemediatingReason_Tests) isMergeQueueStatusEntryStageRemediatingReason_Reason() {
-}
-
-func (*MergeQueueStatusEntryStageRemediatingReason_Conflicts) isMergeQueueStatusEntryStageRemediatingReason_Reason() {
-}
-
-// Remediating its failing tests. No fields.
-type MergeQueueStatusEntryStageRemediatingTests struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+// Awaiting a repair slot, and where in its line for it.
+type MergeQueueStatusEntryStageAwaitingRepair struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The slot it waits for.
+	Slot *MergeQueueStatusEntryStageAwaitingRepairSlot `protobuf:"bytes,1,opt,name=slot,proto3" json:"slot,omitempty"`
+	// Its 1-based place among the merges awaiting that slot: 1 is granted the
+	// slot next.
+	Place         uint32 `protobuf:"varint,2,opt,name=place,proto3" json:"place,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingTests) Reset() {
-	*x = MergeQueueStatusEntryStageRemediatingTests{}
+func (x *MergeQueueStatusEntryStageAwaitingRepair) Reset() {
+	*x = MergeQueueStatusEntryStageAwaitingRepair{}
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingTests) String() string {
+func (x *MergeQueueStatusEntryStageAwaitingRepair) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeQueueStatusEntryStageRemediatingTests) ProtoMessage() {}
+func (*MergeQueueStatusEntryStageAwaitingRepair) ProtoMessage() {}
 
-func (x *MergeQueueStatusEntryStageRemediatingTests) ProtoReflect() protoreflect.Message {
+func (x *MergeQueueStatusEntryStageAwaitingRepair) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -805,32 +786,53 @@ func (x *MergeQueueStatusEntryStageRemediatingTests) ProtoReflect() protoreflect
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeQueueStatusEntryStageRemediatingTests.ProtoReflect.Descriptor instead.
-func (*MergeQueueStatusEntryStageRemediatingTests) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeQueueStatusEntryStageAwaitingRepair.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageAwaitingRepair) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{11}
 }
 
-// Resolving its rebase's conflicts. No fields.
-type MergeQueueStatusEntryStageRemediatingConflicts struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+func (x *MergeQueueStatusEntryStageAwaitingRepair) GetSlot() *MergeQueueStatusEntryStageAwaitingRepairSlot {
+	if x != nil {
+		return x.Slot
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStageAwaitingRepair) GetPlace() uint32 {
+	if x != nil {
+		return x.Place
+	}
+	return 0
+}
+
+// WHICH REPAIR SLOT A MERGE AWAITS. THE ARM IS THE SLOT.
+type MergeQueueStatusEntryStageAwaitingRepairSlot struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The fixing-tests slot, or the resolving-conflicts slot.
+	//
+	// Types that are valid to be assigned to Slot:
+	//
+	//	*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests
+	//	*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts
+	Slot          isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot `protobuf_oneof:"slot"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingConflicts) Reset() {
-	*x = MergeQueueStatusEntryStageRemediatingConflicts{}
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) Reset() {
+	*x = MergeQueueStatusEntryStageAwaitingRepairSlot{}
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MergeQueueStatusEntryStageRemediatingConflicts) String() string {
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MergeQueueStatusEntryStageRemediatingConflicts) ProtoMessage() {}
+func (*MergeQueueStatusEntryStageAwaitingRepairSlot) ProtoMessage() {}
 
-func (x *MergeQueueStatusEntryStageRemediatingConflicts) ProtoReflect() protoreflect.Message {
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) ProtoReflect() protoreflect.Message {
 	mi := &file_agentrepl_v1_merge_queue_status_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -842,9 +844,54 @@ func (x *MergeQueueStatusEntryStageRemediatingConflicts) ProtoReflect() protoref
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MergeQueueStatusEntryStageRemediatingConflicts.ProtoReflect.Descriptor instead.
-func (*MergeQueueStatusEntryStageRemediatingConflicts) Descriptor() ([]byte, []int) {
+// Deprecated: Use MergeQueueStatusEntryStageAwaitingRepairSlot.ProtoReflect.Descriptor instead.
+func (*MergeQueueStatusEntryStageAwaitingRepairSlot) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) GetSlot() isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot {
+	if x != nil {
+		return x.Slot
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) GetFixingTests() *MergeQueueStatusEntryStageFixingTests {
+	if x != nil {
+		if x, ok := x.Slot.(*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests); ok {
+			return x.FixingTests
+		}
+	}
+	return nil
+}
+
+func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) GetResolvingConflicts() *MergeQueueStatusEntryStageResolvingConflicts {
+	if x != nil {
+		if x, ok := x.Slot.(*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts); ok {
+			return x.ResolvingConflicts
+		}
+	}
+	return nil
+}
+
+type isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot interface {
+	isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot()
+}
+
+type MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests struct {
+	// Its whole suite failed at the head; it fixes its tests once granted.
+	FixingTests *MergeQueueStatusEntryStageFixingTests `protobuf:"bytes,1,opt,name=fixing_tests,json=fixingTests,proto3,oneof"`
+}
+
+type MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts struct {
+	// Its rebase conflicted; it resolves the conflicts once granted.
+	ResolvingConflicts *MergeQueueStatusEntryStageResolvingConflicts `protobuf:"bytes,2,opt,name=resolving_conflicts,json=resolvingConflicts,proto3,oneof"`
+}
+
+func (*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests) isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot() {
+}
+
+func (*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts) isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot() {
 }
 
 // Waiting. No fields.
@@ -965,20 +1012,23 @@ const file_agentrepl_v1_merge_queue_status_proto_rawDesc = "" +
 	"\x04kind\"$\n" +
 	"\"MergeQueueStatusEntryKindOwnBranch\"_\n" +
 	"#MergeQueueStatusEntryKindAsyncMerge\x128\n" +
-	"\trequester\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\trequester\"\x98\x02\n" +
+	"\trequester\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\trequester\"\xfe\x03\n" +
 	"\x1aMergeQueueStatusEntryStage\x12K\n" +
 	"\awaiting\x18\x01 \x01(\v2/.agentrepl.v1.MergeQueueStatusEntryStageWaitingH\x00R\awaiting\x12K\n" +
-	"\arunning\x18\x02 \x01(\v2/.agentrepl.v1.MergeQueueStatusEntryStageRunningH\x00R\arunning\x12W\n" +
-	"\vremediating\x18\x03 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageRemediatingH\x00R\vremediatingB\a\n" +
-	"\x05stage\"z\n" +
-	"%MergeQueueStatusEntryStageRemediating\x12Q\n" +
-	"\x06reason\x18\x01 \x01(\v29.agentrepl.v1.MergeQueueStatusEntryStageRemediatingReasonR\x06reason\"\xe7\x01\n" +
-	"+MergeQueueStatusEntryStageRemediatingReason\x12P\n" +
-	"\x05tests\x18\x01 \x01(\v28.agentrepl.v1.MergeQueueStatusEntryStageRemediatingTestsH\x00R\x05tests\x12\\\n" +
-	"\tconflicts\x18\x02 \x01(\v2<.agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflictsH\x00R\tconflictsB\b\n" +
-	"\x06reason\",\n" +
-	"*MergeQueueStatusEntryStageRemediatingTests\"0\n" +
-	".MergeQueueStatusEntryStageRemediatingConflicts\"#\n" +
+	"\arunning\x18\x02 \x01(\v2/.agentrepl.v1.MergeQueueStatusEntryStageRunningH\x00R\arunning\x12X\n" +
+	"\ffixing_tests\x18\x04 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageFixingTestsH\x00R\vfixingTests\x12m\n" +
+	"\x13resolving_conflicts\x18\x05 \x01(\v2:.agentrepl.v1.MergeQueueStatusEntryStageResolvingConflictsH\x00R\x12resolvingConflicts\x12a\n" +
+	"\x0fawaiting_repair\x18\x06 \x01(\v26.agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairH\x00R\x0eawaitingRepairB\a\n" +
+	"\x05stageJ\x04\b\x03\x10\x04R\vremediating\"'\n" +
+	"%MergeQueueStatusEntryStageFixingTests\".\n" +
+	",MergeQueueStatusEntryStageResolvingConflicts\"\x90\x01\n" +
+	"(MergeQueueStatusEntryStageAwaitingRepair\x12N\n" +
+	"\x04slot\x18\x01 \x01(\v2:.agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlotR\x04slot\x12\x14\n" +
+	"\x05place\x18\x02 \x01(\rR\x05place\"\xff\x01\n" +
+	",MergeQueueStatusEntryStageAwaitingRepairSlot\x12X\n" +
+	"\ffixing_tests\x18\x01 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageFixingTestsH\x00R\vfixingTests\x12m\n" +
+	"\x13resolving_conflicts\x18\x02 \x01(\v2:.agentrepl.v1.MergeQueueStatusEntryStageResolvingConflictsH\x00R\x12resolvingConflictsB\x06\n" +
+	"\x04slot\"#\n" +
 	"!MergeQueueStatusEntryStageWaiting\"N\n" +
 	"!MergeQueueStatusEntryStageRunning\x12)\n" +
 	"\x10step_description\x18\x01 \x01(\tR\x0fstepDescriptionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -997,23 +1047,23 @@ func file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP() []byte {
 
 var file_agentrepl_v1_merge_queue_status_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_merge_queue_status_proto_goTypes = []any{
-	(*MergeQueueStatus)(nil),                               // 0: agentrepl.v1.MergeQueueStatus
-	(*MergeQueueStatusAdvance)(nil),                        // 1: agentrepl.v1.MergeQueueStatusAdvance
-	(*MergeQueueStatusAdvanceRunning)(nil),                 // 2: agentrepl.v1.MergeQueueStatusAdvanceRunning
-	(*MergeQueueStatusAdvancePaused)(nil),                  // 3: agentrepl.v1.MergeQueueStatusAdvancePaused
-	(*MergeQueueStatusEntry)(nil),                          // 4: agentrepl.v1.MergeQueueStatusEntry
-	(*MergeQueueStatusEntryKind)(nil),                      // 5: agentrepl.v1.MergeQueueStatusEntryKind
-	(*MergeQueueStatusEntryKindOwnBranch)(nil),             // 6: agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
-	(*MergeQueueStatusEntryKindAsyncMerge)(nil),            // 7: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
-	(*MergeQueueStatusEntryStage)(nil),                     // 8: agentrepl.v1.MergeQueueStatusEntryStage
-	(*MergeQueueStatusEntryStageRemediating)(nil),          // 9: agentrepl.v1.MergeQueueStatusEntryStageRemediating
-	(*MergeQueueStatusEntryStageRemediatingReason)(nil),    // 10: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason
-	(*MergeQueueStatusEntryStageRemediatingTests)(nil),     // 11: agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests
-	(*MergeQueueStatusEntryStageRemediatingConflicts)(nil), // 12: agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts
-	(*MergeQueueStatusEntryStageWaiting)(nil),              // 13: agentrepl.v1.MergeQueueStatusEntryStageWaiting
-	(*MergeQueueStatusEntryStageRunning)(nil),              // 14: agentrepl.v1.MergeQueueStatusEntryStageRunning
-	(*v1.RepositoryRef)(nil),                               // 15: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                                // 16: workspace.v1.WorkspaceRef
+	(*MergeQueueStatus)(nil),                             // 0: agentrepl.v1.MergeQueueStatus
+	(*MergeQueueStatusAdvance)(nil),                      // 1: agentrepl.v1.MergeQueueStatusAdvance
+	(*MergeQueueStatusAdvanceRunning)(nil),               // 2: agentrepl.v1.MergeQueueStatusAdvanceRunning
+	(*MergeQueueStatusAdvancePaused)(nil),                // 3: agentrepl.v1.MergeQueueStatusAdvancePaused
+	(*MergeQueueStatusEntry)(nil),                        // 4: agentrepl.v1.MergeQueueStatusEntry
+	(*MergeQueueStatusEntryKind)(nil),                    // 5: agentrepl.v1.MergeQueueStatusEntryKind
+	(*MergeQueueStatusEntryKindOwnBranch)(nil),           // 6: agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
+	(*MergeQueueStatusEntryKindAsyncMerge)(nil),          // 7: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
+	(*MergeQueueStatusEntryStage)(nil),                   // 8: agentrepl.v1.MergeQueueStatusEntryStage
+	(*MergeQueueStatusEntryStageFixingTests)(nil),        // 9: agentrepl.v1.MergeQueueStatusEntryStageFixingTests
+	(*MergeQueueStatusEntryStageResolvingConflicts)(nil), // 10: agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
+	(*MergeQueueStatusEntryStageAwaitingRepair)(nil),     // 11: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
+	(*MergeQueueStatusEntryStageAwaitingRepairSlot)(nil), // 12: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
+	(*MergeQueueStatusEntryStageWaiting)(nil),            // 13: agentrepl.v1.MergeQueueStatusEntryStageWaiting
+	(*MergeQueueStatusEntryStageRunning)(nil),            // 14: agentrepl.v1.MergeQueueStatusEntryStageRunning
+	(*v1.RepositoryRef)(nil),                             // 15: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                              // 16: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_merge_queue_status_proto_depIdxs = []int32{
 	15, // 0: agentrepl.v1.MergeQueueStatus.repository:type_name -> workspace.v1.RepositoryRef
@@ -1029,15 +1079,17 @@ var file_agentrepl_v1_merge_queue_status_proto_depIdxs = []int32{
 	16, // 10: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge.requester:type_name -> workspace.v1.WorkspaceRef
 	13, // 11: agentrepl.v1.MergeQueueStatusEntryStage.waiting:type_name -> agentrepl.v1.MergeQueueStatusEntryStageWaiting
 	14, // 12: agentrepl.v1.MergeQueueStatusEntryStage.running:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRunning
-	9,  // 13: agentrepl.v1.MergeQueueStatusEntryStage.remediating:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediating
-	10, // 14: agentrepl.v1.MergeQueueStatusEntryStageRemediating.reason:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason
-	11, // 15: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests
-	12, // 16: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	9,  // 13: agentrepl.v1.MergeQueueStatusEntryStage.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
+	10, // 14: agentrepl.v1.MergeQueueStatusEntryStage.resolving_conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
+	11, // 15: agentrepl.v1.MergeQueueStatusEntryStage.awaiting_repair:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
+	12, // 16: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair.slot:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
+	9,  // 17: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
+	10, // 18: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.resolving_conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_merge_queue_status_proto_init() }
@@ -1056,11 +1108,13 @@ func file_agentrepl_v1_merge_queue_status_proto_init() {
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[8].OneofWrappers = []any{
 		(*MergeQueueStatusEntryStage_Waiting)(nil),
 		(*MergeQueueStatusEntryStage_Running)(nil),
-		(*MergeQueueStatusEntryStage_Remediating)(nil),
+		(*MergeQueueStatusEntryStage_FixingTests)(nil),
+		(*MergeQueueStatusEntryStage_ResolvingConflicts)(nil),
+		(*MergeQueueStatusEntryStage_AwaitingRepair)(nil),
 	}
-	file_agentrepl_v1_merge_queue_status_proto_msgTypes[10].OneofWrappers = []any{
-		(*MergeQueueStatusEntryStageRemediatingReason_Tests)(nil),
-		(*MergeQueueStatusEntryStageRemediatingReason_Conflicts)(nil),
+	file_agentrepl_v1_merge_queue_status_proto_msgTypes[12].OneofWrappers = []any{
+		(*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests)(nil),
+		(*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

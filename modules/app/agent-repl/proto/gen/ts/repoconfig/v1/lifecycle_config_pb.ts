@@ -400,8 +400,8 @@ export const DeployConcurrentThroughDeploySchema: GenMessage<DeployConcurrentThr
  * order: rebase the branch onto the target's tip (its owner resolving any
  * conflict), run the tests (its owner fixing a failure, a bounded number of
  * times), land a non-fast-forward merge commit on the target, and tag the
- * landing when `version_tag` is set. Queued deploys behind the head rebase and
- * test ahead of their turn (racing), which only a local merge does.
+ * landing when `version_tag` is set. Only the queue's head runs these steps:
+ * a merge waiting behind it is only rebased in the background, git alone.
  *
  * @generated from message repoconfig.v1.DeployLocalMerge
  */
