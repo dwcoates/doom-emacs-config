@@ -16,13 +16,14 @@ import (
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"agentrepl/testrun/internal/outtail"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
 )
 
 // TailBytes bounds how much of a failed unit's output its event carries; the
 // run's log holds all of it.
-const TailBytes = 4000
+const TailBytes = outtail.Bytes
 
 // Emitter writes a run's events to one stream.
 //
@@ -73,7 +74,7 @@ func UnitEndedOf(res run.Result, output []byte) *testrunv1.TestRunUnitEnded {
 	case run.Passed:
 		ended.Verdict = &testrunv1.TestRunUnitEnded_Passed{Passed: &testrunv1.TestRunUnitPassed{}}
 	case run.Failed:
-		ended.Verdict = &testrunv1.TestRunUnitEnded_Failed{Failed: &testrunv1.TestRunUnitFailed{ExitCode: int32(res.Exit), OutputTail: tail(output)}}
+		ended.Verdict = &testrunv1.TestRunUnitEnded_Failed{Failed: &testrunv1.TestRunUnitFailed{ExitCode: int32(res.Exit), OutputTail: outtail.Of(output)}}
 	case run.Cancelled:
 		ended.WallMs = 0
 		ended.Verdict = &testrunv1.TestRunUnitEnded_Cancelled{Cancelled: &testrunv1.TestRunUnitCancelled{CancelledByUnitId: res.CancelledBy}}
@@ -99,21 +100,6 @@ func testResultOf(t testtimes.Test) *testrunv1.TestRunTestResult {
 		panic("events: a test with an outcome testtimes does not define: " + t.Outcome)
 	}
 	return r
-}
-
-// tail is the end of a unit's output, at most TailBytes, cut at a line start
-// where one falls inside the window.
-func tail(output []byte) string {
-	if len(output) <= TailBytes {
-		return string(output)
-	}
-	cut := output[len(output)-TailBytes:]
-	for i, b := range cut {
-		if b == '\n' && i+1 < len(cut) {
-			return string(cut[i+1:])
-		}
-	}
-	return string(cut)
 }
 
 // Ended states how the run ended, from every unit's result and the suites

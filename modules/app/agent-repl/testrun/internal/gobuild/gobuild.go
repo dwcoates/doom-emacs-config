@@ -37,6 +37,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"agentrepl/testrun/internal/outtail"
 )
 
 // Options is one module build.
@@ -182,19 +184,13 @@ func Build(o Options, goTest GoTest) (Result, error) {
 	}
 	if len(lost) > 0 {
 		return Result{}, fmt.Errorf("gobuild: go test neither built nor failed to build %s; its stderr: %s; its output: %s",
-			strings.Join(lost, ", "), strings.TrimSpace(string(stderr)), tail(stdout))
+			strings.Join(lost, ", "), strings.TrimSpace(string(stderr)), quotedTail(stdout))
 	}
 	return res, nil
 }
 
-// tail is the end of a long output, for an error that quotes it.
-func tail(b []byte) string {
-	const n = 4000
-	if len(b) > n {
-		b = b[len(b)-n:]
-	}
-	return strings.TrimSpace(string(b))
-}
+// quotedTail is the end of a long output, for an error that quotes it.
+func quotedTail(b []byte) string { return strings.TrimSpace(outtail.Of(b)) }
 
 // event is the part of a `go test -json` record the build reads.
 type event struct {
