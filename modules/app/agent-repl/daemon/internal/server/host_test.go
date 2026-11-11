@@ -1033,6 +1033,7 @@ func TestHostFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "vendor start retrying", kind: health.KindVendorStartRetrying},
 		{name: "vendor start rejected", kind: health.KindVendorStartRejected},
 		{name: "vendor start failed", kind: health.KindVendorStartFailed},
+		{name: "keepalive undelivered", kind: health.KindKeepaliveUndelivered},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -1332,6 +1333,21 @@ func TestHostFaultCarriesTheVendorFailedLastCause(t *testing.T) {
 	arm := got.GetVendorStartFailed()
 	if arm.GetFailedAttempts() != 40 || arm.GetLastCause() != "liveness timeout" || arm.GetFailingSinceMs() != 1700000000000 {
 		t.Fatalf("vendor_start_failed = %+v, want the recorded evidence", arm)
+	}
+}
+
+func TestHostFaultCarriesTheUndeliveredKeepalivesCauseAndDue(t *testing.T) {
+	// Arrange
+	due := time.UnixMilli(1_700_000_000_000)
+	f := wsm.Fault{Kind: health.KindKeepaliveUndelivered, Evidence: health.KeepaliveUndeliveredEvidence("the shim could not be asked", due)}
+
+	// Act
+	got, _ := hostFault(f)
+
+	// Assert
+	arm := got.GetKeepaliveUndelivered()
+	if arm.GetCause() != "the shim could not be asked" || arm.GetDueAtMs() != due.UnixMilli() {
+		t.Fatalf("keepalive_undelivered = %+v, want the recorded evidence", arm)
 	}
 }
 

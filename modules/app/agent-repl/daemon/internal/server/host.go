@@ -602,6 +602,8 @@ func hostFault(f wsm.Fault) (*agentreplv1.HostFault, bool) {
 		out.Kind = &agentreplv1.HostFault_VendorStartRejected{VendorStartRejected: health.VendorStartRejectedArm(f)}
 	case health.KindVendorStartFailed:
 		out.Kind = &agentreplv1.HostFault_VendorStartFailed{VendorStartFailed: health.VendorStartFailedArm(f)}
+	case health.KindKeepaliveUndelivered:
+		out.Kind = &agentreplv1.HostFault_KeepaliveUndelivered{KeepaliveUndelivered: health.KeepaliveUndeliveredArm(f)}
 	default:
 		return nil, false
 	}
