@@ -2843,7 +2843,8 @@ Each cause says why and what happens next, never one sentence for all."
     (:cold-gate "the session is parked at its cold gate; answer the gate to decide when that prompt goes")
     (:session-refused "the session refused that prompt into the running turn; it goes when that turn ends")
     (arm
-     (agent-repl--error nil "elisp.input.release-refused-unknown-cause cause=%S" arm)
+     (agent-repl--error '(:agent-repl-central "wording a refusal's cause, which names no workspace")
+                        "elisp.input.release-refused-unknown-cause cause=%S" arm)
      (error "agent-repl: a release refused for an unknown cause %S" arm))))
 
 (defconst agent-repl--input-not-held-arms '(:no-such-hold :already-delivered)
