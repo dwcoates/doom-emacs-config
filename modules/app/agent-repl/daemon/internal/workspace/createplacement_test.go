@@ -28,6 +28,17 @@ func requesterIn(t *testing.T, f *fixture, repoDir string) *ids.WorkspaceID {
 	return &ws.ID
 }
 
+// registeredFactsOf answers the facts the create of workspace ID registered
+// its row with, nil when none was.
+func registeredFactsOf(f *fixture, id ids.WorkspaceID) *wsm.RegisterFacts {
+	for i := range f.db.registered {
+		if f.db.registered[i].CreationJob == id {
+			return &f.db.registered[i]
+		}
+	}
+	return nil
+}
+
 // refusalOf unwraps err as the typed refusal it must be.
 func refusalOf(t *testing.T, err error) *Refusal {
 	t.Helper()
@@ -52,12 +63,7 @@ func TestCreateWithAPlacementRegistersTheRowPlacedAndAddsNoFilingNote(t *testing
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	var facts *wsm.RegisterFacts
-	for i := range f.db.registered {
-		if f.db.registered[i].CreationJob == created.ID {
-			facts = &f.db.registered[i]
-		}
-	}
+	facts := registeredFactsOf(f, created.ID)
 	if facts == nil || facts.Placement == nil || facts.Placement.Into != "later" || facts.Placement.CreatedBy != *spec.Requester {
 		t.Fatalf("registered facts = %+v, want the placement into %q created by the requester", facts, "later")
 	}

@@ -114,12 +114,7 @@ func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndHidden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateIntake: %v", err)
 	}
-	var facts *wsm.RegisterFacts
-	for i := range f.db.registered {
-		if f.db.registered[i].CreationJob == created.ID {
-			facts = &f.db.registered[i]
-		}
-	}
+	facts := registeredFactsOf(f, created.ID)
 	if facts == nil || !facts.Intake || !facts.Hidden {
 		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Hidden", facts)
 	}

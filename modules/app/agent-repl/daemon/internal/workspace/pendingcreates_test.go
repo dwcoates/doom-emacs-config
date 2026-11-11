@@ -909,12 +909,16 @@ func TestCreateKeyDistinguishesHiddenAndEveryPlacement(t *testing.T) {
 		return CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it"}
 	}
 	variants := map[string]func(*CreateSpec){
-		"plain":         func(*CreateSpec) {},
-		"hidden":        func(s *CreateSpec) { s.Hidden = true },
-		"into auth":     func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "auth"} },
-		"into billing":  func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "billing"} },
-		"new auth":      func(s *CreateSpec) { s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth"}} },
-		"new auth with": func(s *CreateSpec) { s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a"}}} },
+		"plain":        func(*CreateSpec) {},
+		"hidden":       func(s *CreateSpec) { s.Hidden = true },
+		"into auth":    func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "auth"} },
+		"into billing": func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "billing"} },
+		"new auth": func(s *CreateSpec) {
+			s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth"}}
+		},
+		"new auth with": func(s *CreateSpec) {
+			s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a"}}}
+		},
 	}
 	seen := map[string]string{}
 	for name, mutate := range variants {
