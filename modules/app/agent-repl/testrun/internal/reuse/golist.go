@@ -233,7 +233,7 @@ func AddPatternWalk(set *InputSet, repo, dir string) error {
 }
 
 // MemoGoList is l answering each distinct listing once per run: every keyed
-// suite lists the runner, and a suite's packages (DecidePackages) read the
+// suite lists the runner, and a suite's packages (Derive) read the
 // same `go list -deps -test ./...` its input set did, so the run's planning
 // spends each listing's CPU, outside any unit, once. Callers must not change
 // the packages they are answered.
