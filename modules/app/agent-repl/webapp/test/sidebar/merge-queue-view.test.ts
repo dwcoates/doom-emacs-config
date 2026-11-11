@@ -39,6 +39,7 @@ import {
   drawRosterMergeQueueWaiting,
   MERGE_QUEUE_LABEL_CLASS,
   placementLabel,
+  MERGE_QUEUE_POSITION_CLASS,
   MERGE_QUEUE_CARD_LINE_CLASS,
   githubPlaceText,
   MERGE_QUEUE_CLASS,
@@ -281,6 +282,24 @@ describe("drawRosterMergeQueue", () => {
     ]);
   });
 
+  it("numbers the waiting merges by their order in the line, skipping the head and a remediating merge", () => {
+    const { sc } = daemon();
+    const draw = (order: string[]) =>
+      [
+        ...drawRosterMergeQueue(
+          create(RosterRepoMergeQueueSchema, {
+            head: mergingHead("w0"),
+            remediating: [remediatingMerge("wr", NOW)],
+            waiting: order.map((id) => waitingMerge(id)),
+          }),
+          sc,
+          "queue",
+        ).children,
+      ].map((el) => [el.getAttribute("data-workspace"), el.querySelector(`.${MERGE_QUEUE_POSITION_CLASS}`)?.textContent ?? null]);
+    expect(draw(["w1", "w2", "w3"])).toEqual([["w0", null], ["wr", null], ["w1", "1"], ["w2", "2"], ["w3", "3"]]);
+    expect(draw(["w3", "w1", "w2"])).toEqual([["w0", null], ["wr", null], ["w3", "1"], ["w1", "2"], ["w2", "3"]]);
+  });
+
   it("is a rows box no grouping drag arranges", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1") }), sc, "queue");
@@ -406,17 +425,6 @@ describe("drawRosterMergeQueue", () => {
       drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), remediating: [unreasoned] }), sc, "queue"),
     ).toThrow(MalformedView);
   });
-
-  it("numbers no waiting merge: each opens with its name", () => {
-    const { sc } = daemon();
-    const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), waiting: [waitingMerge("w1"), waitingMerge("w2")] });
-    const body = drawRosterMergeQueue(queue, sc, "queue");
-    expect([...body.querySelectorAll(`.${MERGE_QUEUE_WAITING_CLASS}`)].map((el) => [...el.children].slice(0, 1).map((child) => child.textContent))).toEqual([
-      ["w1"],
-      ["w2"],
-    ]);
-  });
-
 });
 
 describe("dragging a waiting merge", () => {
@@ -633,10 +641,11 @@ describe("drawRosterMergeQueueStage", () => {
 });
 
 describe("drawRosterMergeQueueWaiting", () => {
-  it("draws its name and how long it has waited, and no bullet or place number", () => {
+  it("draws its position, its name and how long it has waited", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), 1, sc, "w");
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["sb-mq-position", "1"],
       ["sb-mq-name", "one"],
       ["sb-mq-clock", formatTickedElapsed(3_000)],
     ]);
@@ -646,6 +655,7 @@ describe("drawRosterMergeQueueWaiting", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(
       waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_600_000), racingSinceMs: BigInt(NOW - 4_000) }),
+      1,
       sc,
       "w",
     );
@@ -658,7 +668,7 @@ describe("drawRosterMergeQueueWaiting", () => {
     { name: "marks a merge put in line at the back with no label", init: {}, want: null },
   ])("$name", ({ init, want }) => {
     const { sc } = daemon();
-    const labels = [...drawRosterMergeQueueWaiting(waitingMerge("w1", init), sc, "w").querySelectorAll(`.${MERGE_QUEUE_LABEL_CLASS}`)];
+    const labels = [...drawRosterMergeQueueWaiting(waitingMerge("w1", init), 1, sc, "w").querySelectorAll(`.${MERGE_QUEUE_LABEL_CLASS}`)];
     expect(labels.map((label) => label.textContent)).toEqual(want === null ? [] : [want]);
   });
 
@@ -668,8 +678,8 @@ describe("drawRosterMergeQueueWaiting", () => {
 
   it("draws the returned label as a peer of the front label, in the queue label's class", () => {
     const { sc } = daemon();
-    const front = drawRosterMergeQueueWaiting(waitingMerge("w1", { front: true }), sc, "w").querySelector(".sb-mq-front");
-    const returned = drawRosterMergeQueueWaiting(waitingMerge("w1", { returned: true }), sc, "w").querySelector(".sb-mq-returned");
+    const front = drawRosterMergeQueueWaiting(waitingMerge("w1", { front: true }), 1, sc, "w").querySelector(".sb-mq-front");
+    const returned = drawRosterMergeQueueWaiting(waitingMerge("w1", { returned: true }), 1, sc, "w").querySelector(".sb-mq-returned");
     expect(front?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
     expect(returned?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
     expect(returned?.classList.contains("sb-mq-front")).toBe(false);
@@ -715,7 +725,7 @@ describe("a click on a merge in the queue", () => {
           `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
         ) as HTMLElement,
     ],
-    ["a waiting line", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueWaiting(waitingMerge("w3"), sc, "w")],
+    ["a waiting line", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w")],
     [
       "a head card opening its bubble",
       (sc: ReturnType<typeof selecting>["sc"]) =>
@@ -738,7 +748,7 @@ describe("a click on a merge in the queue", () => {
 
   it("never greys a line while its select is in flight", async () => {
     const { sc } = selecting();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w3"), sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w");
     line.click();
     const busy = line.classList.contains("is-busy");
     await settled();
@@ -747,7 +757,7 @@ describe("a click on a merge in the queue", () => {
 
   it("selects as a row does when the merge has no bubble", async () => {
     const { asked, sc } = selecting();
-    drawRosterMergeQueueWaiting(waitingMerge("w2"), sc, "w").click();
+    drawRosterMergeQueueWaiting(waitingMerge("w2"), 1, sc, "w").click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", "w2"]]);
   });

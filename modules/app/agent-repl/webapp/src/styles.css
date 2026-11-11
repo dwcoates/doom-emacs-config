@@ -1092,9 +1092,9 @@ body {
    every merge waiting behind it a step smaller, in a grey between the folded
    and the open header's (owner request, 2026-10-27): the one merge running
    stands out from the line it leads without the line fading away. A waiting
-   merge is not numbered; its line opens with a bullet where the number stood
-   (owner request, 2026-10-27), in the name's own color, and its name follows
-   the bullet. */
+   merge's line opens with its position among the waiting merges (owner
+   request, 2026-11-11), in the name's own color, and its name follows. */
+#ws-sidebar .sb-mq-position { font-variant-numeric: tabular-nums; margin-right: 0.4em; }
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
 /* THE HEAD'S NAME AND ITS LIVE STAGE WEAR THE OPEN REPOSITORY NAMES' INK
    (owner request, 2026-10-28): at the full --fg they read brighter than
