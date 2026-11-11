@@ -1,6 +1,14 @@
 // endpoint_select_in_editor.proto — SelectInEditor: a HOST-RAISED switch. WEB
-// section. The rail's row click calls this rather than SelectWorkspace, so a
-// switch made in a page is the EDITOR'S OWN SWITCH, exactly as fast as a key.
+// section. EVERY SELECTION A PAGE MAKES calls this rather than SelectWorkspace
+// (a rail row, a merge queue entry, a thread, a feed's jump to a workspace), so
+// a switch made in a page is the EDITOR'S OWN SWITCH, exactly as fast as a key.
+//
+// A PAGE NEVER CALLS SelectWorkspace. A select the daemon makes moves the
+// frame only through the roster's follow, which waits while a minibuffer is
+// active or another switch Emacs asked for is unanswered; until then the rail
+// draws the workspace selected while the frame shows another, a partial
+// selection (a merge queue entry's click, 2026-11-11). Relayed, the click is
+// the editor's own switch, which moves the frame at once.
 //
 // WHY THE EDITOR MAKES IT. Emacs moves its frame the moment it requests a
 // switch (a tab chord, a picker, a banner click), and the roster's `current`
@@ -26,6 +34,8 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SelectWorkspaceNotYetAdopted, SelectWorkspaceStandingDown, SelectWorkspaceSuccess, SelectWorkspaceTransferringAway, SelectWorkspaceUnknownWorkspace, SelectWorkspaceWorkspaceRefMismatch } from "./endpoint_select_workspace_pb";
 import { file_agentrepl_v1_endpoint_select_workspace } from "./endpoint_select_workspace_pb";
+import type { FeedId } from "../../frontend/v1/feed_pb";
+import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -34,7 +44,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_select_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2luX2VkaXRvci5wcm90bxIMYWdlbnRyZXBsLnYxIkYKFVNlbGVjdEluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIo4BChZTZWxlY3RJbkVkaXRvclJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuU2VsZWN0SW5FZGl0b3JTdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuU2VsZWN0SW5FZGl0b3JFcnJvckgAQggKBnJlc3VsdCKSAQoVU2VsZWN0SW5FZGl0b3JTdWNjZXNzEjYKB3JlbGF5ZWQYASABKAsyIy5hZ2VudHJlcGwudjEuU2VsZWN0SW5FZGl0b3JSZWxheWVkSAASOAoIc2VsZWN0ZWQYAiABKAsyJC5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlU3VjY2Vzc0gAQgcKBXJvdXRlIhcKFVNlbGVjdEluRWRpdG9yUmVsYXllZCKWAwoTU2VsZWN0SW5FZGl0b3JFcnJvchJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkIKDXN0YW5kaW5nX2Rvd24YBSABKAsyKS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlU3RhbmRpbmdEb3duSABCBwoFY2F1c2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_select_workspace, file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X2luX2VkaXRvci5wcm90bxIMYWdlbnRyZXBsLnYxInsKFVNlbGVjdEluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEigKBnJldmVhbBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgkKB19yZXZlYWwijgEKFlNlbGVjdEluRWRpdG9yUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5TZWxlY3RJbkVkaXRvclN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5TZWxlY3RJbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IpIBChVTZWxlY3RJbkVkaXRvclN1Y2Nlc3MSNgoHcmVsYXllZBgBIAEoCzIjLmFnZW50cmVwbC52MS5TZWxlY3RJbkVkaXRvclJlbGF5ZWRIABI4CghzZWxlY3RlZBgCIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSABCBwoFcm91dGUiFwoVU2VsZWN0SW5FZGl0b3JSZWxheWVkIpYDChNTZWxlY3RJbkVkaXRvckVycm9yEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASQgoNc3RhbmRpbmdfZG93bhgFIAEoCzIpLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdGFuZGluZ0Rvd25IAEIHCgVjYXVzZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_endpoint_select_workspace, file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SelectInEditorRequest
@@ -46,6 +56,19 @@ export type SelectInEditorRequest = Message<"agentrepl.v1.SelectInEditorRequest"
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * A ROW OF THE CLICKED WORKSPACE'S ROOT FEED TO REVEAL, exactly as
+   * SelectWorkspaceRequest.reveal: its page brings the row on screen, opens
+   * it and marks it (WebWorkspaceRevealRow). Unset reveals nothing. On the
+   * relayed route the daemon asks the page for the reveal as it relays the
+   * click, and a page not yet listening takes it when it attaches; on the
+   * daemon's route it rides the select. A merge queue entry for an async merge
+   * sets it to the merge's bubble in its requester's feed.
+   *
+   * @generated from field: optional frontend.v1.FeedId reveal = 2;
+   */
+  reveal?: FeedId | undefined;
 };
 
 /**

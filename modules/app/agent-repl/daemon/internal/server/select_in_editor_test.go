@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -269,4 +270,97 @@ func TestTheDaemonsSelectIsOneSelectForBothRpcs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// selectInEditorRevealing calls SelectInEditor for the harness's workspace,
+// naming ROW to reveal ("" names none).
+func selectInEditorRevealing(t *testing.T, h *harness, row string) *agentreplv1.SelectInEditorResponse {
+	t.Helper()
+	req := &agentreplv1.SelectInEditorRequest{Workspace: ref()}
+	if row != "" {
+		req.Reveal = &frontendv1.FeedId{Value: row}
+	}
+	resp, err := h.Client.SelectInEditor(context.Background(), connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("SelectInEditor: %v", err)
+	}
+	return resp.Msg
+}
+
+func TestSelectInEditorNamingARowRevealsItOnThePage(t *testing.T) {
+	tests := []struct {
+		name          string
+		hostStream    bool
+		attachedFirst bool
+		wantRelayed   bool
+	}{
+		{name: "relayed, to a page that listens", hostStream: true, attachedFirst: true, wantRelayed: true},
+		{name: "relayed, to a page that attaches after the click", hostStream: true, attachedFirst: false, wantRelayed: true},
+		{name: "the daemon's route, to a page that listens", hostStream: false, attachedFirst: true},
+		{name: "the daemon's route, to a page that attaches after the click", hostStream: false, attachedFirst: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.hostStream {
+				holdHostStream(t, h)
+			}
+			var stream *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse]
+			if tt.attachedFirst {
+				stream = openWeb(t, h)
+			}
+
+			// Act.
+			resp := selectInEditorRevealing(t, h, "row-merge-head")
+			if !tt.attachedFirst {
+				stream = openWeb(t, h)
+			}
+
+			// Assert.
+			if got := resp.GetSuccess().GetRelayed() != nil; got != tt.wantRelayed {
+				t.Fatalf("result = %v, want relayed %v", resp.GetResult(), tt.wantRelayed)
+			}
+			if got := receiveWebEvent(t, stream).GetRevealRow().GetRow().GetValue(); got != "row-merge-head" {
+				t.Fatalf("revealed %q, want the click's row", got)
+			}
+		})
+	}
+}
+
+func TestSelectInEditorRelayedNamingNoRowRevealsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	holdHostStream(t, h)
+	selectInEditorRevealing(t, h, "")
+	stream := openWeb(t, h)
+
+	// Act.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+
+	// Assert.
+	if push := receiveWebEvent(t, stream); push.GetTransferred() == nil {
+		t.Fatalf("the page was handed %v, want no reveal", push)
+	}
+}
+
+func TestSelectInEditorRecordsTheRelaysRevealAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	holdHostStream(t, h)
+
+	// Act.
+	selectInEditorRevealing(t, h, "row-merge-head")
+
+	// Assert.
+	for _, rec := range log.Records() {
+		if rec.Operation == "SelectInEditor" && rec.Level == "info" &&
+			rec.Message == "relayed a row click to the editor, which makes the switch" &&
+			rec.Context["reveal"] == "row-merge-head" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the relay at info naming the reveal", log.Records())
 }

@@ -1122,6 +1122,10 @@ func (s *server) SelectWorkspace(
 // THE ROUTE IS DECIDED BY THE EVENT'S OWN DELIVERY (publish.Events.Emit): the
 // daemon selects only when the relay reached no host stream at all, so a click
 // is never both relayed and selected, and never neither.
+//
+// A REVEAL THE CLICK CARRIES is asked of the page on either route: as the click
+// is relayed, since the editor's own select carries none, or with the daemon's
+// select, exactly as SelectWorkspace reveals it.
 func (s *server) SelectInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectInEditorRequest],
@@ -1132,16 +1136,20 @@ func (s *server) SelectInEditor(
 	if done {
 		return answer(resp, cerr)
 	}
+	reveal := req.Msg.GetReveal()
 	if heard := s.pushSelectRequested(subject.Record.ID); heard > 0 {
 		subject.Log.Info(rpc, "relayed a row click to the editor, which makes the switch",
-			dlog.Context{"host_streams": heard})
+			dlog.Context{"host_streams": heard, "reveal": reveal.GetValue()})
+		if reveal.GetValue() != "" {
+			s.revealRow(subject.Log, subject.Record.ID, reveal)
+		}
 		resp.Result = &agentreplv1.SelectInEditorResponse_Success{Success: &agentreplv1.SelectInEditorSuccess{
 			Route: &agentreplv1.SelectInEditorSuccess_Relayed{Relayed: &agentreplv1.SelectInEditorRelayed{}},
 		}}
 		return connect.NewResponse(resp), nil
 	}
 	subject.Log.Info(rpc, "no host stream holds the workspace; the daemon selects it", nil)
-	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.Switch{History: workspace.RecordSelection}, nil, resp)
+	selected, cerr := s.selectSubject(ctx, rpc, subject, workspace.Switch{History: workspace.RecordSelection}, reveal, resp)
 	if selected == nil {
 		return answer(resp, cerr)
 	}
