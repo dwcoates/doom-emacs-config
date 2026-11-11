@@ -179,21 +179,27 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	return Outcome{Recognition: RecognizedNone, Turn: turn, Disposition: disposition}, nil
 }
 
+// carriesWorkspaceNote reports whether a prompt may carry a note the daemon
+// owes the workspace's agent. Only a prompt that carries a directive does —
+// the user's own, or another workspace's agent's — and only one to the main
+// agent: a thread question, a bubble-addressed prompt and a daemon-born brief
+// are never anyone's statement of the workspace's task. Nor does a slash
+// command the vendor runs: the vendor reads the whole prompt as the command
+// and its argument, so a note with it would become part of the command.
+func carriesWorkspaceNote(said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk) bool {
+	if target != nil || ask != nil || (sentBy == nil && !promptorigin.UserSent(origin)) {
+		return false
+	}
+	return !sessioncommand.Parse(saidText(said)).Slash
+}
+
 // askForOwedSummary closes SAID with the note asking the workspace's agent for
 // its summary while none stands (wssummary): a new workspace, or one whose
-// /clear dropped it. Only a prompt that carries a directive asks — the user's
-// own, or another workspace's agent's — and only one to the main agent: a
-// thread question, a bubble-addressed prompt and a daemon-born brief are
-// never anyone's statement of the workspace's task. Nor does a slash command
-// the vendor runs: the vendor reads the whole prompt as the command and its
-// argument, so a note after it would become the command's argument. The note
-// rides as its own text block, wholly a meta span, so the bubble draws the
-// user's words alone.
+// /clear dropped it. Only a prompt that carries a workspace note asks
+// (carriesWorkspaceNote). The note rides as its own text block, wholly a meta
+// span, so the bubble draws the user's words alone.
 func (h *handler) askForOwedSummary(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk) (*conversationv1.UserSaid, error) {
-	if target != nil || ask != nil || (sentBy == nil && !promptorigin.UserSent(origin)) {
-		return said, nil
-	}
-	if sessioncommand.Parse(saidText(said)).Slash {
+	if !carriesWorkspaceNote(said, origin, sentBy, target, ask) {
 		return said, nil
 	}
 	note, owed, err := h.deps.Summaries.OwedNote(ctx, ws)

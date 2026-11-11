@@ -1194,3 +1194,34 @@ func TestAFailedOwedSummaryReadForwardsNothing(t *testing.T) {
 		t.Fatalf("forwarded %d submissions, want none", n)
 	}
 }
+
+func TestCarriesWorkspaceNote(t *testing.T) {
+	sender := ids.WorkspaceID("ws-sender")
+	tests := []struct {
+		name   string
+		said   string
+		origin conversationv1.PromptOrigin
+		sentBy *ids.WorkspaceID
+		target *feedid.Ref
+		ask    *wsm.ThreadAsk
+		want   bool
+	}{
+		{name: "the user's own prompt", said: "fix it", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, want: true},
+		{name: "another workspace's agent's prompt", said: "fix it", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sentBy: &sender, want: true},
+		{name: "a daemon-born brief", said: "fix it", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE},
+		{name: "a prompt to a subagent's bubble", said: "fix it", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, target: bubbleRef(theWorkspace)},
+		{name: "a thread question", said: "fix it", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, ask: &wsm.ThreadAsk{}},
+		{name: "a slash command the vendor runs", said: "/review the diff", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := carriesWorkspaceNote(userSaid(tt.said), tt.origin, tt.sentBy, tt.target, tt.ask)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("carriesWorkspaceNote = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
