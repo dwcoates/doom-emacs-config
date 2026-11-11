@@ -31,6 +31,25 @@ export interface ViewChange<T extends ViewValue> {
   control: HTMLElement;
 }
 
+/** One held piece of a view change: its `view.ts` key and its asked value. */
+export interface ViewPiece {
+  key: string;
+  value: ViewValue;
+}
+
+/**
+ * A view change holding several pieces at once, which ONE request changes
+ * together: a drag of a rule sizes the sections on both of its sides.
+ */
+export interface ViewChanges {
+  /** Every piece painted at once and asked for. */
+  pieces: readonly ViewPiece[];
+  /** The request's change arm. */
+  change: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"];
+  /** The control the gesture landed on, where a refusal is drawn. */
+  control: HTMLElement;
+}
+
 /**
  * Paint, hold and ask. Answers once the ask has settled, with whether it
  * took; a failed ask has already been released and repainted.
@@ -39,11 +58,20 @@ export async function changeView<T extends ViewValue>(
   sc: SidebarContext,
   spec: ViewChange<T>,
 ): Promise<boolean> {
+  return changeViews(sc, { pieces: [{ key: spec.key, value: spec.value }], change: spec.change, control: spec.control });
+}
+
+/**
+ * Paint and hold every piece, and ask for them in one request. Answers once
+ * the ask has settled, with whether it took; a failed ask has already
+ * released every piece and repainted it.
+ */
+export async function changeViews(sc: SidebarContext, spec: ViewChanges): Promise<boolean> {
   log.debug("changing the sidebar view for every page", {
     operation: "sidebar.view.change",
-    context: { key: spec.key, value: spec.value, change: spec.change?.case },
+    context: { pieces: spec.pieces.map((piece) => `${piece.key}=${String(piece.value)}`).join(" "), change: spec.change?.case },
   });
-  const token = sc.view.ask(spec.key, spec.value);
+  const tokens = spec.pieces.map((piece) => ({ key: piece.key, token: sc.view.ask(piece.key, piece.value) }));
   const took = await fireVerb(spec.control, {
     sc,
     rpc: "UpdateSidebarView",
@@ -51,7 +79,7 @@ export async function changeView<T extends ViewValue>(
     schema: UpdateSidebarViewResponseSchema,
     refusalText: (cause) => updateSidebarViewRefusal(cause as never),
   });
-  if (!took) sc.view.abandon(spec.key, token);
+  if (!took) for (const { key, token } of tokens) sc.view.abandon(key, token);
   return took;
 }
 
