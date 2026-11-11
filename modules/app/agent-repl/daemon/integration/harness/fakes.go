@@ -405,7 +405,9 @@ const FakeHotspot = "Harness Hotspot"
 // STATEFUL where the daemon reads back what it wrote: `pmset -a disablesleep`
 // writes the value `pmset -g` reports, through the fake `sudo`, which runs
 // the command it is handed. No test ever touches the real machine's power or
-// network settings, and `mac-brightness` keeps the level it was set to.
+// network settings, `mac-brightness` keeps the level it was set to, and the
+// display is asleep once `pmset displaysleepnow` ran until `caffeinate -u`
+// wakes it (FakeDisplay).
 var fakeHostTools = map[string]string{
 	"sudo": `#!/bin/sh
 [ "$1" = "-n" ] && shift
@@ -417,7 +419,13 @@ case "$1" in
   -g) if [ "$2" = ps ]; then printf "Now drawing from 'Battery Power'\n"; exit 0; fi
       printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n' "$(cat "$state" 2>/dev/null || echo 0)" ;;
   -a) [ "$2" = disablesleep ] && printf '%s\n' "$3" > "$state" ;;
+  displaysleepnow) printf 'asleep\n' > "$(dirname "$0")/display.state" ;;
 esac
+exit 0
+`,
+	// Declared user activity (` + "`caffeinate -u`" + `) wakes the display pmset slept.
+	"caffeinate": `#!/bin/sh
+[ "$1" = -u ] && printf 'awake\n' > "$(dirname "$0")/display.state"
 exit 0
 `,
 	"networksetup": `#!/bin/sh
@@ -454,6 +462,20 @@ func FakeBrightnessLevel(t testing.TB, dir string) string {
 	}
 	if err != nil {
 		t.Fatalf("harness: read the fake brightness: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// FakeDisplay answers whether the fake host's display is "asleep" or "awake",
+// "awake" when nothing ever slept it.
+func FakeDisplay(t testing.TB, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "display.state"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "awake"
+	}
+	if err != nil {
+		t.Fatalf("harness: read the fake display: %v", err)
 	}
 	return strings.TrimSpace(string(b))
 }
