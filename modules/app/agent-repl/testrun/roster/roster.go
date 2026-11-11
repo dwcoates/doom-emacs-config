@@ -509,6 +509,10 @@ var shimUnitInputs = func() map[string][]string {
 		"test/convert/place.test.ts":                   {src + "convert/attachments.ts"},
 		"test/integration-support/detach-gate.test.ts": {shim + "test/integration/"},
 		"test/store/stub-client.test.ts":               {shim + "test/store/"},
+		// It bundles the fake store's process entry, with the shim's bundle
+		// options, in a child node: the bundle reads the entry's whole graph.
+		"test/fakes/store-server-main.test.ts": {shim + "test/fakes/", src, shim + "build-options.mjs", "proto/gen/ts/", "proto/ts/",
+			"agent-shim/logging/ts/"},
 	}
 	// The source scans, each over the shim's own sources.
 	for _, f := range []string{"test/convert/detached.test.ts", "test/convert/effort.test.ts",
