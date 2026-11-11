@@ -922,30 +922,29 @@ an entry without one is a violated invariant and fails hard."
                     (lambda (a b) (> (funcall instant a) (funcall instant b))))
               agent-repl--switch-recent-limit))
 
-(defun agent-repl--switch-update-ms (entry)
-  "Return ENTRY's update recency, epoch ms, for the switcher to rank by.
-The daemon's `RosterRowLastUpdated': the latest of the workspace's
-lifecycle instants and of its last status change.  A live local
-workspace no roster push carries yet is being registered right now, so
-nothing has been updated more recently: it ranks as `most-positive-fixnum'.
-A ROW WITHOUT THE INSTANT IS A VIOLATED INVARIANT -- the decoder refuses
-a row that does not state it -- and fails hard."
+(defun agent-repl--switch-selected-ms (entry)
+  "Return ENTRY's selection recency, epoch ms, for the switcher to rank by.
+The daemon's `RosterRowLastSelected': when the workspace was last made the
+current one, by ANY means (`SPC p p', `M-<number>', a sidebar click).  A
+live local workspace no roster push carries yet is being registered right
+now, so nothing has been selected more recently: it ranks as
+`most-positive-fixnum'.  A workspace never selected states no instant
+\(the field is optional on the wire) and ranks as 0, below every selected
+one."
   (let ((row (plist-get entry :row)))
     (if (null row)
         most-positive-fixnum
-      (or (agent-repl-roster-row-instant-ms row :last-updated)
-          (agent-repl--switch-entry-invariant-failed
-           "switch-update-ms" entry "update recency")))))
+      (or (agent-repl-roster-row-instant-ms row :last-selected) 0))))
 
 (defun agent-repl--switch-by-recency (entries)
-  "Return ENTRIES most recently updated first (`agent-repl--switch-update-ms').
-THE SWITCHER'S ONE ORDER (owner request, 2026-10-14): whatever most
-recently happened to a workspace -- a turn resolving, an open, a close or
-kill, a status change -- brings it to the top, whichever section it sits
-in.  Ties keep ENTRIES' own order: `sort' is stable."
+  "Return ENTRIES most recently selected first (`agent-repl--switch-selected-ms').
+THE SWITCHER'S ONE ORDER (owner request, 2026-11-11): the workspace
+selected most recently, by any means, is at the top, whichever section it
+sits in.  Ties, such as workspaces never selected, keep ENTRIES' own
+order: `sort' is stable."
   (sort (copy-sequence entries)
-        (lambda (a b) (> (agent-repl--switch-update-ms a)
-                         (agent-repl--switch-update-ms b)))))
+        (lambda (a b) (> (agent-repl--switch-selected-ms a)
+                         (agent-repl--switch-selected-ms b)))))
 
 (defun agent-repl--switch-curated (entries)
   "Return the ENTRIES `SPC p p' offers.
@@ -1148,7 +1147,7 @@ own display sort (`agent-repl--switch-table')."
 
 WHICH WORKSPACES ARE OFFERED: the current and recent ones
 \(`agent-repl--switch-curated'), or with ALL non-nil every known one --
-either way most recently updated first (`agent-repl--switch-by-recency').
+either way most recently selected first (`agent-repl--switch-by-recency').
 Each line shows the workspace's status mark and its columns
 \(`agent-repl--switch-affixation').
 
@@ -1220,7 +1219,7 @@ daemon-minted and there is no spelling of it Emacs could construct."
 
 With no argument, completes over the open and hidden workspaces, the
 most recently merged and the ones the user most recently closed -- the
-daemon's roster is the source of what exists -- most recently updated
+daemon's roster is the source of what exists -- most recently selected
 first, and stands on the chosen one, opening it first when it is closed
 or has no tab here.  See
 `agent-repl--switch-to-known-workspace'; `agent-repl-switch-to-any-workspace'
