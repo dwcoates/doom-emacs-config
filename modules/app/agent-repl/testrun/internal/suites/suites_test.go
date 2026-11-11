@@ -1306,15 +1306,17 @@ func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
 	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
 
 	// Act
-	split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+	splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+	split := splits[0]
+	chunk := split.Chunk(split.Group+"#00", []string{"test/integration/a.integration.test.ts"})
 	argv := strings.Join(chunk.Argv, " ")
-	if split.Group != "webapp[integration]" || !strings.Contains(argv, "--config vitest.integration.config.ts") || !strings.Contains(argv, "--maxWorkers=1") {
+	if len(splits) != 1 || split.Group != "webapp[integration]/test/integration/a.integration.test.ts" ||
+		!strings.Contains(argv, "--config vitest.integration.config.ts") || !strings.Contains(argv, "--maxWorkers=1") {
 		t.Fatalf("group %q argv %q, want the integration group under its config, one worker", split.Group, argv)
 	}
 }
@@ -1327,7 +1329,7 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 	}{
 		{name: "a coverage run", coverage: true, want: []string{
 			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
-			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]#00",
+			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]%test%integration%a.integration.test.ts#00",
 		}},
 		{name: "an ordinary run", coverage: false},
 	}
@@ -1337,13 +1339,13 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 			dir, work := t.TempDir(), t.TempDir()
 			l := Layout{Module: dir, Work: work, Coverage: tt.coverage}
 			s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
-			split, err := vitestIntegrationSplit(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+			splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Act
-			chunk := split.Chunk("webapp[integration]#00", []string{"test/integration/a.integration.test.ts"})
+			chunk := splits[0].Chunk(splits[0].Group+"#00", []string{"test/integration/a.integration.test.ts"})
 
 			// Assert
 			argv := strings.ReplaceAll(strings.Join(chunk.Argv, " "), work, "WORK")
@@ -1575,5 +1577,108 @@ func TestVitestNamedChunkPassesItsNames(t *testing.T) {
 	i := slices.Index(argv, "-t")
 	if i < 0 || argv[i+1] != VitestNamePattern([]string{"a suite"}) || argv[len(argv)-1] != "src/a.test.ts" {
 		t.Fatalf("argv = %v, want -t with the names' pattern and the file", argv)
+	}
+}
+
+func TestEveryVitestFileIsItsOwnSplit(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir(), Coverage: true}
+	files := []string{"test/a.test.ts", "test/sub/a.test.ts"}
+
+	// Act
+	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, dir, files)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []string
+	for _, sp := range u.Splits {
+		groups = append(groups, sp.Group)
+		if len(sp.Items) != 1 {
+			t.Errorf("%s holds %v, want its one file", sp.Group, sp.Items)
+		}
+	}
+	if want := []string{"webapp/test/a.test.ts", "webapp/test/sub/a.test.ts"}; !slices.Equal(groups, want) {
+		t.Fatalf("groups = %v, want %v", groups, want)
+	}
+	for _, a := range u.Atomic {
+		if a.ID == "webapp:coverage" && !slices.Equal(a.Deps, groups) {
+			t.Fatalf("the coverage merge waits on %v, want every file", a.Deps)
+		}
+	}
+	first := strings.Join(u.Splits[0].Chunk("webapp/test/a.test.ts#00", files[:1]).Argv, " ")
+	second := strings.Join(u.Splits[1].Chunk("webapp/test/sub/a.test.ts#00", files[1:]).Argv, " ")
+	if strings.Contains(first, "--coverage.all=false") || !strings.Contains(second, "--coverage.all=false") {
+		t.Fatalf("first %q second %q, want only the first file's chunk to carry the all-files pass", first, second)
+	}
+	if !strings.Contains(first, "webapp%test%a.test.ts#00") || !strings.Contains(second, "webapp%test%sub%a.test.ts#00") {
+		t.Fatalf("first %q second %q, want each chunk's outputs under its own tag", first, second)
+	}
+}
+
+func TestEveryERTFileIsItsOwnSplitAfterTheFakeDaemon(t *testing.T) {
+	// Arrange
+	module := t.TempDir()
+	lisp := filepath.Join(module, "lisp")
+	if err := os.MkdirAll(lisp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aggregator := "(load (expand-file-name \"test-helpers.el\" dir))\n(load (expand-file-name \"test-a.el\" dir))\n"
+	if err := os.WriteFile(filepath.Join(lisp, "test-agent-repl.el"), []byte(aggregator), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	u, err := ertUnits(Layout{Repo: module, Module: module, Work: t.TempDir()}, roster.Suite{Name: "ert", Kind: roster.ERT, Path: "lisp"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []string
+	for _, sp := range u.Splits {
+		groups = append(groups, sp.Group)
+		if !slices.Equal(sp.Deps, []string{"ert:fakedaemon"}) {
+			t.Errorf("%s waits on %v, want the fake daemon's build", sp.Group, sp.Deps)
+		}
+	}
+	if want := []string{"ert/test-helpers.el", "ert/test-a.el"}; !slices.Equal(groups, want) {
+		t.Fatalf("groups = %v, want %v", groups, want)
+	}
+}
+
+func TestVitestFileOfGroup(t *testing.T) {
+	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
+	tests := []struct {
+		group, file, config string
+		wantErr             bool
+	}{
+		{group: "webapp/test/a.test.ts", file: "test/a.test.ts", config: VitestConfig},
+		{group: "webapp[integration]/test/i.test.ts", file: "test/i.test.ts", config: "vitest.integration.config.ts"},
+		{group: "webapp", wantErr: true},
+		{group: "shim/test/a.test.ts", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.group, func(t *testing.T) {
+			// Act
+			file, config, err := VitestFileOfGroup(s, tt.group)
+
+			// Assert
+			if (err != nil) != tt.wantErr || file != tt.file || config != tt.config {
+				t.Fatalf("VitestFileOfGroup = %q %q %v, want %q %q error %v", file, config, err, tt.file, tt.config, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUnitTagSpellsSlashesSoTwoDirectoriesNeverShareOne(t *testing.T) {
+	// Act
+	a, b := unitTag("webapp/test/x/a.test.ts#00"), unitTag("webapp/test/y/a.test.ts#00")
+
+	// Assert
+	if a == b || strings.Contains(a, "/") {
+		t.Fatalf("tags = %q %q, want distinct names with no slash", a, b)
 	}
 }

@@ -210,6 +210,15 @@ func AddPatternWalk(set *InputSet, repo, dir string) error {
 				return filepath.SkipDir
 			}
 			if _, err := os.Lstat(filepath.Join(abs, "go.mod")); err == nil {
+				// The go command lists a nested module's directory to find
+				// its go.mod, and stops there.
+				rel, err := filepath.Rel(repo, abs)
+				if err != nil {
+					return fmt.Errorf("reuse: place %s under %s: %w", abs, repo, err)
+				}
+				if err := set.AddDir(filepath.ToSlash(rel)); err != nil {
+					return err
+				}
 				return filepath.SkipDir
 			} else if !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("reuse: stat %s: %w", filepath.Join(abs, "go.mod"), err)

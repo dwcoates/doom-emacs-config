@@ -737,17 +737,28 @@ func planCmd(log *run.Log, argv []string) int {
 		}
 	}
 	r := reuse.Runner{Deps: d, Files: func() ([]string, error) { return reuse.ExecRepoFiles(d.Repo) }}
-	verdicts, err := r.Decide(selected, args.ReuseMode())
-	if err != nil {
-		log.Errorf("%v", err)
-		return 1
+	layout := suites.Layout{Repo: d.Repo, Module: d.Module, Work: work, Self: self}
+	sandboxErr := r.Probe()
+	var verdicts []reuse.SuiteVerdict
+	for _, s := range selected {
+		u, err := suites.Build(layout, s)
+		if err != nil {
+			log.Errorf("%s could not be planned: %v", s.Name, err)
+			return 1
+		}
+		v, err := r.Decide(s, u, args.ReuseMode(), sandboxErr)
+		if err != nil {
+			log.Errorf("%v", err)
+			return 1
+		}
+		verdicts = append(verdicts, v)
 	}
 	unplaced, err := r.Unplaced(verdicts)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1
 	}
-	doc := reuse.BuildPlan(verdicts, unplaced, d.Probe() == nil)
+	doc := reuse.BuildPlan(verdicts, unplaced, sandboxErr == nil)
 	if asJSON {
 		err = reuse.WritePlanJSON(os.Stdout, doc)
 	} else {

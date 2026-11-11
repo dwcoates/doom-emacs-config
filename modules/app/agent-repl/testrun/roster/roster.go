@@ -6,7 +6,10 @@
 package roster
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -125,35 +128,52 @@ type Suite struct {
 	// (`-harness SCRIPT=TestA,TestB`) hands it exactly those, so one failing
 	// test reruns without the rest of the suite.
 	GoTests *GoTests
-	// Reuse marks a suite a run may skip when every input it reads is
-	// byte-identical to inputs an earlier run passed whole
-	// (agentrepl/testrun/internal/reuse). Nil means the suite ALWAYS runs: the
-	// end-to-end suites run every system for real, and a shell harness's
-	// inputs are a call graph no tool derives.
+	// Reuse declares what the suite's units read beyond what the runner
+	// derives (agentrepl/testrun/internal/reuse): a run skips every unit whose
+	// inputs are byte-identical to inputs an earlier run passed that unit on.
+	// EVERY SUITE DECLARES IT, or names why it never can in NeverReused; Check
+	// refuses a suite with neither, or with both.
 	Reuse *Reuse
-	// PackageReuse marks a keyed GoModule suite whose unit-test packages are
-	// each reused on their own (agentrepl/testrun/internal/reuse,
-	// packages.go): a run that does not reuse the whole suite still skips
-	// every package whose own inputs are byte-identical to inputs an earlier
-	// run passed it on. Its integration pass is never reused per package.
-	PackageReuse *PackageReuse
+	// NeverReused is why the suite can never be reused: it runs whole in
+	// every run that selects it, unconfined, and is never recorded. Only a
+	// suite whose reads no profile can confine (a container's daemon reads
+	// the checkout outside it) or whose verdict is not a function of its
+	// inputs (a latency measurement) is named here.
+	NeverReused string
 }
 
-// PackageReuse is what each unit-test package of a suite reads beyond its
-// build graph, which the Go tool's own listing derives (`go list -deps
-// -test`). Each package runs under a profile that refuses every read in the
-// checkout outside ITS input set, so an input missing here fails the package;
-// it never lets a stale pass through.
+// Reuse is what a keyed suite's units read beyond what the runner derives for
+// each of them (a Go package's build graph from `go list -deps -test`, a
+// vitest file's import graph, an ERT file's loaded sources, a script suite's
+// own script). Every unit runs under a profile refusing every read in the
+// checkout outside ITS input set, so an input missing here fails the unit; it
+// never lets a stale pass through.
 //
-// Paths are spelled as Reuse's are, and packages are named by their path
-// relative to Suite.Path ("." the root).
-type PackageReuse struct {
-	// Inputs are the files and subtrees a package's tests read as data
-	// outside its build graph: the prompts, the vocabulary, the goldens, a
-	// tree a source scan walks.
-	Inputs map[string][]string
-	// Never names each package whose reads cannot be enumerated, with why:
-	// it runs whenever its suite runs, under the suite's own profile, and is
+// THE UNIT is what the runner records one pass for: a Go package (unit or
+// integration, named by its path relative to Suite.Path, "." the root, and
+// "[tags]" after a tagged pass's: "integration[integration]"), a vitest test
+// file or an ERT test file (named by its path relative to Suite.Path), a
+// suite-wide check ("vet", "vet[perf]", "typecheck"), or, for a script or e2e
+// suite, the whole suite (named "").
+//
+// Paths are spelled as Suite.Path is: relative to the module root, or to the
+// repository root when they start with "/". A path ending in "/" is a whole
+// subtree; any other path is one file.
+type Reuse struct {
+	// Inputs are the files and subtrees EVERY unit of the suite reads as data:
+	// for a script or e2e suite, everything it reads beyond its script.
+	Inputs []string
+	// Generated are subtrees the suite's own run builds or installs before it
+	// reads them (a bundle the integration build writes, an npm install). They
+	// are readable and never hashed, so each one must be produced by the run
+	// itself from hashed inputs, never left over from an earlier one.
+	Generated []string
+	// Units are what one unit reads beyond Inputs and its derived graph, by
+	// unit name: the prompts, the vocabulary, the goldens, a tree a source
+	// scan walks.
+	Units map[string][]string
+	// Never names each unit whose reads cannot be enumerated, with why: it
+	// runs whenever its suite runs, under the suite's own envelope, and is
 	// never recorded.
 	Never map[string]string
 }
@@ -174,25 +194,6 @@ type Parallel struct {
 	// Slots is the core slots a chunk holds: the cores its overlapped tests
 	// use together on average, as measured. At least one.
 	Slots int
-}
-
-// Reuse is what a keyed suite reads beyond its build graph. Its units run
-// under a profile that refuses every read in the checkout outside the input
-// set, so an input missing here fails the suite; it never lets a stale pass
-// through.
-//
-// Paths are spelled as Suite.Path is: relative to the module root, or to the
-// repository root when they start with "/". A path ending in "/" is a whole
-// subtree; any other path is one file.
-type Reuse struct {
-	// Inputs are the files and subtrees the suite's tests read as data: the
-	// prompts, the vocabulary, fixtures, and the trees a source scan walks.
-	Inputs []string
-	// Generated are subtrees the suite's own run builds or installs before it
-	// reads them (a bundle the integration build writes, an npm install). They
-	// are readable and never hashed, so each one must be produced by the run
-	// itself from hashed inputs, never left over from an earlier one.
-	Generated []string
 }
 
 // Program is one binary a run builds ONCE, into its programs directory, for
@@ -258,47 +259,55 @@ func LookupProgram(name string) (Program, bool) {
 // Suites is the roster. Order is report order only; the scheduler decides run
 // order.
 var Suites = []Suite{
-	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true},
-	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true},
-	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true},
-	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true},
-	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true},
-	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true},
-	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true},
-	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true},
-	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true},
-	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true},
-	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true},
-	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true},
-	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true},
-	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true},
-	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true},
-	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true},
-	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true},
-	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true},
-	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true},
-	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true},
-	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh"},
-	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh"},
-	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true},
-	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true},
-	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true},
-	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh"},
-	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh"},
-	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh"},
-	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh"},
-	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh"},
-	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh"},
-	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh"},
-	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh"},
-	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh"},
-	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh"},
+	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true, Reuse: harness("bin/", "lisp/test-agent-repl.el", "test_time.csv", "testrun/", "/.claude/safe-test-run.sh")},
+	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true,
+		Reuse: harness("bin/", "daemon/internal/checkout/checkout.go")},
+	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true, Reuse: harness("bin/", "lisp/test-helpers.el", "e2e/sandbox/bin/entrypoint.sh", "/.githooks/pre-commit")},
+	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true, NeverReused: "it walks the whole module for every requirements.json, so no input set short of the checkout covers it"},
+	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: harness("bin/", "scripts/")},
+	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: harness("bin/", "scripts/", "/.githooks/")},
+	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true, Reuse: harness("bin/", "lisp/elisp-build.el")},
+	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: harness("bin/", "proto/vocab/latencies.json")},
+	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: harness("skills/agent-repl-metrics/", "bin/")},
+	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: harness("skills/gns-auth-renew/", "bin/")},
+	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: harness("bin/", "e2e/realtest/")},
+	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: harness("scripts/", "bin/")},
+	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: harness("scripts/", "bin/")},
+	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: harness("scripts/", "bin/")},
+	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh", Reuse: harness("/.githooks/", "/.claude/", "bin/")},
+	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh", Reuse: harness("/.claude/", "bin/", "lisp/test-agent-repl.el")},
+	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh", Reuse: harness("/.githooks/", "bin/")},
+	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh", Reuse: harness("/.githooks/", "bin/")},
+	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: harness("/.claude/", "/.githooks/", "bin/")},
+	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: harness("/bin/", "bin/")},
+	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: harness("/bin/", "bin/")},
 	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Inputs: []string{
 		// The Doom module files and the data the Emacs layer reads.
 		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
 		"logging-contract.md", "metaprompt.md",
 	}}},
-	{Name: "testrun", Kind: GoModule, Path: "testrun"},
+	{Name: "testrun", Kind: GoModule, Path: "testrun", Reuse: &Reuse{
+		// The canonical timing history, which the runner's own test parses.
+		Units: map[string][]string{"internal/cli": {"test_time.csv"}},
+		Never: map[string]string{
+			"internal/reuse":  "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
+			"roster":          "its scans walk the whole repository for test scripts and every path the roster names",
+			"internal/suites": "its tests plan every roster suite against the real tree, running the go command and Emacs over it",
+		}}},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
 	// `--suites daemon` (or webapp, shim) run unit and integration together,
 	// as the owner's test policy asks of one complete change set (AGENTS.md,
@@ -309,32 +318,11 @@ var Suites = []Suite{
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
 		TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}},
-		Reuse: &Reuse{Inputs: []string{
-			// Source scans walk the daemon's own tree; the briefs and the
-			// vocabulary are read as data.
-			"daemon/", "prompts/", "proto/vocab/",
-			// The agent CLI's tests check every command a skill names, and that
-			// each API skill links the front door.
-			"skills/", "bin/agent-repld",
-			// gitclient pins the markers the merge queue's hook spells.
-			"/.githooks/reference-transaction",
-			// lifecycleconfig pins the repository's own lifecycle config to the
-			// pipeline its queue runs, and to the scripts it names.
-			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/",
-			// The daemon half of every mocked-vendor scenario
-			// (integration/scenariogoldens_test.go) reads the shim's goldens
-			// and keeps its own feed.json beside them.
-			"testdata/scenario-goldens/",
-			// internal/prose holds the daemon's parse to the old webapp
-			// parser's golden answers, and writes the webapp's parsed-prose
-			// fixture from its inputs, failing while it is stale.
-			"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/",
-		}},
-		// EACH UNIT-TEST PACKAGE IS REUSED ON ITS OWN, keyed on the build
-		// graph `go list -deps -test` names for it; what its tests read
-		// beyond that graph is declared here, and every other read in the
-		// checkout is refused while it runs.
-		PackageReuse: daemonPackageReuse},
+		// EACH PACKAGE IS REUSED ON ITS OWN, keyed on the build graph `go list
+		// -deps -test` names for it; what its tests read beyond that graph is
+		// declared per package, and every other read in the checkout is
+		// refused while it runs.
+		Reuse: &Reuse{Units: daemonUnitInputs}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
 		Reuse: &Reuse{Inputs: []string{
@@ -362,13 +350,15 @@ var Suites = []Suite{
 	// the merge gate's selection checked against every suite's real
 	// dependencies, the mock-rule source scan, and the scans pinning that
 	// every Go reader goes through the proto helpers. Their own module, so no
-	// system's reuse key covers the other systems' trees; they always run.
-	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans"},
+	// system's reuse key covers the other systems' trees.
+	{Name: "repo-scans", Kind: GoModule, Path: "daemon/reposcans",
+		NeverReused: "its scans read the whole module, every untracked build output in it included, so no input set short of the checkout covers them"},
 	{Name: "webapp", Kind: Vitest, Path: "webapp", IntegrationConfig: "vitest.integration.config.ts",
 		Reuse: &Reuse{Inputs: []string{
-			// What the webapp imports from outside its package, the glyph
-			// pictures its tests compare, and the scripts its npm hooks run.
-			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/ts/", "images/",
+			// The vocabulary and the glyph pictures its tests read as data, and
+			// the scripts its npm hooks run. What it imports, from inside its
+			// package or out, is each file's import graph.
+			"proto/vocab/", "images/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 		},
 			// THE BUILT DIST IS AN OUTPUT, built from the hashed sources by the
@@ -383,31 +373,36 @@ var Suites = []Suite{
 	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"},
 		Reuse: &Reuse{Inputs: []string{
-			// What the shim imports from outside its package, the lock helper
-			// its integration build compiles, the metaprompt its suite reads
-			// back, and the scripts its npm hooks run.
-			"proto/gen/ts/", "proto/ts/", "proto/vocab/", "agent-shim/logging/", "agent-shim/shim-lock/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
+			// The vocabulary, the lock helper its integration build compiles,
+			// the metaprompt its suite reads back, and the scripts its npm
+			// hooks run. What it imports is each file's import graph.
+			"proto/vocab/", "agent-shim/shim-lock/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"}}},
-	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh"},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/")},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
-	{Name: "webapp-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"webapp"}, Runs: RunsInCoverage},
-	{Name: "shim-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"agent-shim/claude/shim"}, Runs: RunsInCoverage},
+	{Name: "webapp-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"webapp"}, Runs: RunsInCoverage, NeverReused: onlyInCoverage},
+	{Name: "shim-coverage-honesty", Kind: Script, Path: "bin/coverage-honesty.sh", Args: []string{"agent-shim/claude/shim"}, Runs: RunsInCoverage, NeverReused: onlyInCoverage},
 	// The e2e perf phase (e2e/PERF-SPEC.md section D4): a latency
 	// measurement that needs its own run, so each mode runs only when named.
-	{Name: "e2e-perf", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"report"}, Runs: RunsWhenNamed},
-	{Name: "e2e-perf-enforce", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"enforce"}, Runs: RunsWhenNamed},
-	{Name: "e2e-perf-baseline", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"baseline"}, Runs: RunsWhenNamed},
+	{Name: "e2e-perf", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"report"}, Runs: RunsWhenNamed, NeverReused: perfMeasurement},
+	{Name: "e2e-perf-enforce", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"enforce"}, Runs: RunsWhenNamed, NeverReused: perfMeasurement},
+	{Name: "e2e-perf-baseline", Kind: Script, Path: "bin/e2e-perf.sh", Args: []string{"baseline"}, Runs: RunsWhenNamed, NeverReused: perfMeasurement},
 	// The TLDR-tree grammar: its corpus, and the committed parser checked
 	// against what grammar.js generates.
-	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh"},
-	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh"},
+	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh",
+		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
+	// The density report scans every system's logging calls.
+	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness("bin/", "daemon/",
+		"agent-shim/claude/shim-sidecar/", "agent-shim/shim-store/", "agent-shim/logging/go/", "agent-shim/claude/shim/src/",
+		"webapp/src/", "lisp/")},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
-		Programs: map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}}},
+		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
+		NeverReused: "its sandbox staging walks the whole module, every untracked build output in it included, so no input set short of the checkout covers it"},
 	// Two slots: the sandbox container is capped to the width it is given
 	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
 	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two
@@ -420,13 +415,25 @@ var Suites = []Suite{
 	// rather than paying a second container start for tests of about three
 	// seconds each.
 	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", Slots: 2, NeedsWebappDist: true,
-		GoTests: &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}},
+		GoTests:     &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"},
+		NeverReused: "its tests run inside a docker container, whose daemon reads the checkout outside any profile the runner applies"},
 }
 
-// daemonPackageReuse is what each daemon unit-test package reads beyond its
-// build graph, found by running every package confined to its build graph
-// alone (2026-11-10) and declaring each read it was refused.
-var daemonPackageReuse = &PackageReuse{Inputs: map[string][]string{
+// harness is a script suite's declaration: its one unit, the whole suite,
+// reads its script and paths.
+func harness(paths ...string) *Reuse { return &Reuse{Inputs: paths} }
+
+// The reasons shared by several suites that are never reused.
+const (
+	onlyInCoverage  = "it runs only in a coverage run, which reuses nothing"
+	perfMeasurement = "its verdict is a latency measurement of this run, not a function of its inputs"
+)
+
+// daemonUnitInputs is what each daemon package reads beyond its build graph,
+// found by running every package confined to its build graph alone
+// (2026-11-10, the integration pass 2026-11-11) and declaring each read it was
+// refused.
+var daemonUnitInputs = map[string][]string{
 	// The structural source scans: each walks the daemon's tree, or the part
 	// of it named, so any change there reruns it.
 	".":                                   {"daemon/"},
@@ -510,7 +517,14 @@ var daemonPackageReuse = &PackageReuse{Inputs: map[string][]string{
 	// prose holds the daemon's parse to the old webapp parser's golden
 	// answers, and to the webapp's parsed-prose fixture.
 	"internal/prose": {"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/"},
-}}
+	// The integration pass boots the daemon on the briefs, the vocabulary and
+	// the repository's lifecycle config, and the daemon half of every
+	// mocked-vendor scenario (integration/scenariogoldens_test.go) reads the
+	// shim's goldens and keeps its own feed.json beside them.
+	"integration[integration]": {"daemon/", "prompts/", "proto/vocab/", "skills/", "bin/agent-repld",
+		"/.githooks/reference-transaction", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh",
+		"bin/push-release.sh", "bin/hooks/", "testdata/scenario-goldens/"},
+}
 
 // AlwaysRunRegions are the parts of the repository that only suites which
 // ALWAYS run read: the end-to-end suites' tree and the scripts the harnesses
@@ -578,6 +592,41 @@ var NotSuites = map[string]string{
 	// A container-free entry to the e2e Go suite, which the roster runs as
 	// the "e2e" suite directly (Kind E2E); rostering this would run it twice.
 	"bin/test-e2e.sh": "a manual entry to the e2e suite the roster already runs",
+}
+
+// Check refuses a roster whose reuse declarations cannot be what they say:
+// a suite that declares neither its inputs (Reuse) nor why it never can be
+// reused (NeverReused), or both, and a suite whose declaration both lists a
+// unit's inputs and names that unit never reused. Every run starts with it,
+// so an undeclared suite fails loudly instead of silently always running.
+func Check(suites []Suite) error {
+	var errs []error
+	for _, s := range suites {
+		never := strings.TrimSpace(s.NeverReused) != ""
+		switch {
+		case s.Reuse == nil && !never:
+			errs = append(errs, fmt.Errorf("roster: %s declares no Reuse and no NeverReused reason: declare its inputs, or write why it can never be reused", s.Name))
+		case s.Reuse != nil && s.NeverReused != "":
+			errs = append(errs, fmt.Errorf("roster: %s declares both Reuse and NeverReused", s.Name))
+		}
+		if s.Reuse == nil {
+			continue
+		}
+		var both []string
+		for unit, why := range s.Reuse.Never {
+			if strings.TrimSpace(why) == "" {
+				errs = append(errs, fmt.Errorf("roster: %s names its unit %q never reused without a reason", s.Name, unit))
+			}
+			if _, ok := s.Reuse.Units[unit]; ok {
+				both = append(both, unit)
+			}
+		}
+		sort.Strings(both)
+		for _, unit := range both {
+			errs = append(errs, fmt.Errorf("roster: %s both declares its unit %q's inputs and names it never reused", s.Name, unit))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Resolve turns a roster path into an absolute one: a path starting with "/"

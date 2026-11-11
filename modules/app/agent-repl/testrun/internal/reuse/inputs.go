@@ -191,3 +191,12 @@ func (s *InputSet) Overlap() error {
 	}
 	return nil
 }
+
+// AddAll places every placement of o in s.
+func (s *InputSet) AddAll(o *InputSet) {
+	for _, pair := range [][2]map[string]bool{{s.files, o.files}, {s.dirs, o.dirs}, {s.flats, o.flats}, {s.trees, o.trees}, {s.generated, o.generated}} {
+		for p := range pair[1] {
+			pair[0][p] = true
+		}
+	}
+}

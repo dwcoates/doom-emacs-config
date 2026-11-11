@@ -15,7 +15,8 @@ func TestUnplacedNamesEveryFileNoRegionHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []roster.Suite{lockSuite, harnessSuite, {Name: "e2e", Kind: roster.E2E, Path: "e2e"}}
+	never := roster.Suite{Name: "background-harness", Kind: roster.Script, Path: "bin/test-background.sh", NeverReused: "x"}
+	all := []roster.Suite{lockSuite, never, {Name: "e2e", Kind: roster.E2E, Path: "e2e", NeverReused: "x"}}
 	regions, err := BuildRegions(f.d, all, []string{"scripts/"}, []string{"docs/", "/README.md"}, map[string]*InputSet{"lock": lockSet})
 	if err != nil {
 		t.Fatal(err)
@@ -23,8 +24,8 @@ func TestUnplacedNamesEveryFileNoRegionHolds(t *testing.T) {
 	files := []string{
 		fixtureModule + "/lock/lock.go",           // the keyed suite's build graph
 		fixtureModule + "/prompts/p.md",           // the keyed suite's declared input
-		fixtureModule + "/bin/test-background.sh", // an always-run suite's own script
-		fixtureModule + "/e2e/world_test.go",      // an always-run suite's own tree
+		fixtureModule + "/bin/test-background.sh", // a never-reused suite's own script
+		fixtureModule + "/e2e/world_test.go",      // a never-reused suite's own tree
 		fixtureModule + "/scripts/x.sh",           // an always-run region
 		fixtureModule + "/docs/guide.md",          // read by no suite
 		"README.md",                               // read by no suite, at the repository root
