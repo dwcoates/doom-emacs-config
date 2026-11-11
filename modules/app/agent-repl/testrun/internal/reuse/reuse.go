@@ -3,7 +3,6 @@ package reuse
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -131,44 +130,11 @@ func decideOne(d Deps, v *Verdict, mode Mode) error {
 	if err != nil {
 		return err
 	}
-	key, err := ComputeKey(d.Repo, set, facts)
-	if err != nil {
-		return fmt.Errorf("reuse: key %s: %w", s.Name, err)
-	}
-	profile, err := Profile(d.Repo, d.DenyRoots, set)
-	if err != nil {
-		return fmt.Errorf("reuse: %s's profile: %w", s.Name, err)
-	}
-	path := filepath.Join(d.ProfileDir, s.Name+".sb")
-	if err := os.WriteFile(path, []byte(profile), 0o644); err != nil {
-		return fmt.Errorf("reuse: write %s's profile: %w", s.Name, err)
-	}
-	v.Keyed, v.Key, v.Set, v.Profile = true, key, set, path
-	switch mode {
-	case NoReuse:
-		v.Why = "--no-reuse"
-		return nil
-	case Targeted:
-		v.Why = "a targeted run neither reuses nor records"
-		return nil
-	}
-	rec, ok, err := d.Store.Lookup(s.Name, key.Digest)
+	dec, err := decideKeyed(d, s.Name, set, facts, mode)
 	if err != nil {
 		return err
 	}
-	if ok {
-		v.Reused = &rec
-		return nil
-	}
-	newest, ok, err := d.Store.Newest(s.Name)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		v.Why = "no record"
-		return nil
-	}
-	v.Why = "changed since its newest green record: " + nameEntries(key.Manifest.Changed(newest.Manifest))
+	v.Keyed, v.Key, v.Set, v.Profile, v.Reused, v.Why = true, dec.Key, set, dec.Profile, dec.Reused, dec.Why
 	return nil
 }
 
@@ -494,8 +460,7 @@ func RecordPasses(d Deps, mode Mode, verdicts []Verdict, results []run.SuiteResu
 			d.Log.Infof("%s ran confined to its inputs: a failure reading a checkout file with \"operation not permitted\" is a read its Reuse does not declare (testrun/roster; AGENTS.md, \"A run reuses an earlier pass of a suite's exact inputs\")", v.Suite.Name)
 		}
 	}
-	var branch, commit string
-	var dirty, headRead bool
+	r := recorder{d: d}
 	for _, v := range verdicts {
 		if !v.Keyed || v.Reused != nil || !passed[v.Suite.Name] {
 			continue
@@ -504,34 +469,13 @@ func RecordPasses(d Deps, mode Mode, verdicts []Verdict, results []run.SuiteResu
 		if err != nil {
 			return err
 		}
-		after, err := ComputeKey(d.Repo, v.Set, facts)
+		recorded, err := r.record(v.Suite.Name, v.Suite.Name, v.Set, facts, v.Key, units[v.Suite.Name])
 		if err != nil {
-			return fmt.Errorf("reuse: re-key %s after its run: %w", v.Suite.Name, err)
-		}
-		if after.Digest != v.Key.Digest {
-			d.Log.Errorf("%s: not recorded, its inputs changed while it ran: %s", v.Suite.Name, nameEntries(after.Manifest.Changed(v.Key.Manifest)))
-			continue
-		}
-		stale, err := staleInstall(d.Repo, v.Set)
-		if err != nil {
-			return fmt.Errorf("reuse: check %s's installed packages: %w", v.Suite.Name, err)
-		}
-		if stale != "" {
-			d.Log.Errorf("%s: not recorded, it ran on packages its key does not name: %s", v.Suite.Name, stale)
-			continue
-		}
-		if !headRead {
-			if branch, commit, dirty, err = d.Head(); err != nil {
-				return fmt.Errorf("reuse: read the checkout's HEAD: %w", err)
-			}
-			headRead = true
-		}
-		rec := Record{Suite: v.Suite.Name, Key: v.Key.Digest, PassedAt: d.Now(), Checkout: d.Repo,
-			Branch: branch, Commit: commit, Dirty: dirty, Units: units[v.Suite.Name], Manifest: v.Key.Manifest}
-		if err := d.Store.Put(rec); err != nil {
 			return err
 		}
-		d.Log.Infof("%s: recorded a green run (inputs %s)", v.Suite.Name, v.Key.Short())
+		if recorded {
+			d.Log.Infof("%s: recorded a green run (inputs %s)", v.Suite.Name, v.Key.Short())
+		}
 	}
 	return nil
 }

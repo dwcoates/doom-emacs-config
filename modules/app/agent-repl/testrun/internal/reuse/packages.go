@@ -3,8 +3,6 @@ package reuse
 import (
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -200,40 +198,11 @@ func decidePackage(d Deps, v *PackageVerdict, mode Mode, g packageGraph) error {
 	if err != nil {
 		return err
 	}
-	key, err := ComputeKey(d.Repo, set, packageFacts(d, g.suite, v.Package, g.tools))
-	if err != nil {
-		return fmt.Errorf("reuse: key %s: %w", v.Name(), err)
-	}
-	profile, err := Profile(d.Repo, d.DenyRoots, set)
-	if err != nil {
-		return fmt.Errorf("reuse: %s's profile: %w", v.Name(), err)
-	}
-	path := filepath.Join(d.ProfileDir, v.Name()+".sb")
-	if err := os.WriteFile(path, []byte(profile), 0o644); err != nil {
-		return fmt.Errorf("reuse: write %s's profile: %w", v.Name(), err)
-	}
-	v.Keyed, v.Key, v.Set, v.Profile = true, key, set, path
-	if mode == NoReuse {
-		v.Why = "--no-reuse"
-		return nil
-	}
-	rec, ok, err := d.Store.Lookup(v.Name(), key.Digest)
+	dec, err := decideKeyed(d, v.Name(), set, packageFacts(d, g.suite, v.Package, g.tools), mode)
 	if err != nil {
 		return err
 	}
-	if ok {
-		v.Reused = &rec
-		return nil
-	}
-	newest, ok, err := d.Store.Newest(v.Name())
-	if err != nil {
-		return err
-	}
-	if !ok {
-		v.Why = "no record"
-		return nil
-	}
-	v.Why = "changed since its newest green record: " + nameEntries(key.Manifest.Changed(newest.Manifest))
+	v.Keyed, v.Key, v.Set, v.Profile, v.Reused, v.Why = true, dec.Key, set, dec.Profile, dec.Reused, dec.Why
 	return nil
 }
 
@@ -327,8 +296,7 @@ func RecordPackagePasses(d Deps, mode Mode, verdicts []PackageVerdict, results [
 			failed[g] = true
 		}
 	}
-	var branch, commit string
-	var dirty, headRead bool
+	r := recorder{d: d}
 	recorded := map[string]int{}
 	tools := map[string]map[string]string{}
 	for _, v := range verdicts {
@@ -346,26 +314,13 @@ func RecordPackagePasses(d Deps, mode Mode, verdicts []PackageVerdict, results [
 			}
 			tools[v.Suite] = t
 		}
-		after, err := ComputeKey(d.Repo, v.Set, packageFacts(d, v.Entry, v.Package, tools[v.Suite]))
+		ok, err := r.record(v.Name(), g, v.Set, packageFacts(d, v.Entry, v.Package, tools[v.Suite]), v.Key, ran[g])
 		if err != nil {
-			return fmt.Errorf("reuse: re-key %s after its run: %w", v.Name(), err)
-		}
-		if after.Digest != v.Key.Digest {
-			d.Log.Errorf("%s: not recorded, its inputs changed while it ran: %s", g, nameEntries(after.Manifest.Changed(v.Key.Manifest)))
-			continue
-		}
-		if !headRead {
-			if branch, commit, dirty, err = d.Head(); err != nil {
-				return fmt.Errorf("reuse: read the checkout's HEAD: %w", err)
-			}
-			headRead = true
-		}
-		rec := Record{Suite: v.Name(), Key: v.Key.Digest, PassedAt: d.Now(), Checkout: d.Repo,
-			Branch: branch, Commit: commit, Dirty: dirty, Units: ran[g], Manifest: v.Key.Manifest}
-		if err := d.Store.Put(rec); err != nil {
 			return err
 		}
-		recorded[v.Suite]++
+		if ok {
+			recorded[v.Suite]++
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(recorded)) {
 		d.Log.Infof("%s: recorded the green runs of %d packages", name, recorded[name])
