@@ -1397,3 +1397,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo: remove the fixed CEE skill worktree cleanup row
 - 2026-11-11 workspace-gather (landed in queue bypass mode): agent-repld workspace gather asks many workspaces one prompt and reports their answers as one update, at completion or 5 minutes, then each later answer as it arrives
 - 2026-11-11 signin-start-rejection (landed in queue bypass mode): a start the vendor rejected for the credential offers sign-in (footer and cold gate), and a completed sign-in retries it
+- 2026-11-11 signin-auto-login (landed in queue bypass mode): a needed sign-in opens the login by itself; the footer and cold-gate sign-in buttons are removed
