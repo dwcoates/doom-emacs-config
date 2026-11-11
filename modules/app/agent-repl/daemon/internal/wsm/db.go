@@ -360,11 +360,26 @@ type DB interface {
 	// BindSession records a workspace's session bound to a different
 	// conversation and, in the same transaction, forgets the fork the
 	// workspace was: its lineage and any fork it still owed.
-	BindSession(ctx context.Context, sess Session) error
+	// OWED, when set, is the work the bound conversation's next start owes.
+	BindSession(ctx context.Context, sess Session, owed *OwedStartWork) error
 	// BindSessionToOwnFork binds a workspace's session, with no vendor id, to
 	// a fork of its own conversation that the next bring-up makes, recording
 	// the owed fork in the same transaction.
-	BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string) error
+	// OWED, when set, is the work the fork's first start owes.
+	BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string, owed *OwedStartWork) error
+	// OwedStartWork answers the work the next start of a workspace's
+	// conversation owes, and whether it owes any.
+	OwedStartWork(ctx context.Context, id WorkspaceID) (OwedStartWork, bool, error)
+	// SettleOwedStartWork retires the owed work a start carried out and, in
+	// the same transaction, records the summary it answered (empty: none) for
+	// the workspace's next prompt.
+	SettleOwedStartWork(ctx context.Context, id WorkspaceID, summary string) error
+	// TakeOwedContextSummary takes the summary the workspace's next prompt
+	// delivers, deleting it in the same transaction.
+	TakeOwedContextSummary(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// RestoreOwedContextSummary puts back a taken summary whose prompt the
+	// queue refused.
+	RestoreOwedContextSummary(ctx context.Context, id WorkspaceID, summary string) error
 	// PutPendingFork records that a workspace is to be forked from its parent
 	// at its first bring-up.
 	PutPendingFork(ctx context.Context, fork PendingFork) error
@@ -691,7 +706,9 @@ type DB interface {
 	ReleaseQueueBypass(ctx context.Context, id WorkspaceID) error
 	// SwapParkedConversation parks the conversation a workspace steps out of
 	// and swaps the two conversations' cache clocks, in one transaction.
-	SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time) error
+	// RESUMESPARKED is false when the conversation bound replaces the parked
+	// one (a fork discarding the parked bypass conversation's binding).
+	SwapParkedConversation(ctx context.Context, id WorkspaceID, steppedOut string, at time.Time, resumesParked bool) error
 	// SetParkedKeepalive records the parked conversation's keep-alive answered.
 	SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
 	// MarkParkedCold records the parked conversation's cache lapsed.

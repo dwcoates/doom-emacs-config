@@ -76,15 +76,52 @@ func (s *store) PutSession(ctx context.Context, sess Session) error {
 // the conversation a fork continues, and a workspace bound elsewhere no longer
 // continues it, so a lineage kept past the bind would draw another
 // conversation's past under the chosen one.
-func (s *store) BindSession(ctx context.Context, sess Session) error {
+//
+// OWED, when set, is the work the next start of the bound conversation owes
+// (OwedStartWork), recorded in the same transaction.
+func (s *store) BindSession(ctx context.Context, sess Session, owed *OwedStartWork) error {
 	const op = "daemon.wsm.bind_session"
 	if sess.HostSessionID == "" {
 		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
 	}
-	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
+	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir, "owed": owedField(owed)}
+	if err := validOwed(owed); err != nil {
+		s.log.Error(op, "refused a binding owing malformed start work", withError(fields, err))
+		return err
+	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		return bindSessionTx(ctx, tx, sess)
+		if err := bindSessionTx(ctx, tx, sess); err != nil {
+			return err
+		}
+		return insertOwed(ctx, tx, sess.Workspace, owed)
 	})
+}
+
+// validOwed refuses malformed owed work; nil owes none.
+func validOwed(owed *OwedStartWork) error {
+	if owed == nil {
+		return nil
+	}
+	return validOwedStartWork(*owed)
+}
+
+// insertOwed records OWED inside the caller's transaction; nil records none.
+func insertOwed(ctx context.Context, tx *sql.Tx, ws WorkspaceID, owed *OwedStartWork) error {
+	if owed == nil {
+		return nil
+	}
+	return insertOwedStartWork(ctx, tx, ws, *owed)
+}
+
+// owedField is OWED as a log field.
+func owedField(owed *OwedStartWork) string {
+	switch {
+	case owed == nil:
+		return "none"
+	case owed.Compact:
+		return "compact"
+	}
+	return "summary_of:" + owed.SummaryOf
 }
 
 // BindSessionToOwnFork binds workspace SESS.Workspace to a fork of its own
@@ -93,9 +130,16 @@ func (s *store) BindSession(ctx context.Context, sess Session) error {
 // was is forgotten as BindSession forgets it, and the own fork is recorded as
 // owed. There is no moment at which the record names no conversation and owes
 // no fork, so no bring-up can come up fresh in between.
-func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string) error {
+//
+// OWED, when set, is the work the fork's first start owes, recorded in the
+// same transaction.
+func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVendorSessionID string, owed *OwedStartWork) error {
 	const op = "daemon.wsm.bind_session_to_own_fork"
-	fields := dlog.Context{"workspace": string(sess.Workspace), "parent_vendor_session_id": parentVendorSessionID, "config_dir": sess.ConfigDir}
+	fields := dlog.Context{"workspace": string(sess.Workspace), "parent_vendor_session_id": parentVendorSessionID, "config_dir": sess.ConfigDir, "owed": owedField(owed)}
+	if err := validOwed(owed); err != nil {
+		s.log.Error(op, "refused an own fork owing malformed start work", withError(fields, err))
+		return err
+	}
 	if sess.HostSessionID == "" {
 		return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionIdentityMissing)
 	}
@@ -113,17 +157,22 @@ func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVe
 		if err := bindSessionTx(ctx, tx, sess); err != nil {
 			return err
 		}
-		return insertPendingFork(ctx, tx, fork)
+		if err := insertPendingFork(ctx, tx, fork); err != nil {
+			return err
+		}
+		return insertOwed(ctx, tx, sess.Workspace, owed)
 	})
 }
 
 // bindSessionTx is the one bind, inside the caller's transaction: the session
-// upsert, then the forgetting of the fork the workspace was.
+// upsert, then the forgetting of the fork the workspace was, and of the start
+// work and the context summary the previous binding owed, which were about
+// the conversation it bound.
 func bindSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	if err := putSessionTx(ctx, tx, sess); err != nil {
 		return err
 	}
-	for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns"} {
+	for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns", "owed_start_work", "owed_context_summaries"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
 			return err
 		}

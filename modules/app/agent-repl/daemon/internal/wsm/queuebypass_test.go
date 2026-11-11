@@ -17,7 +17,7 @@ func swappedOnce(t *testing.T) (*store, Workspace, time.Time) {
 		t.Fatalf("SetLastKeepalive: %v", err)
 	}
 	switchAt := instant.Add(time.Hour)
-	if err := s.SwapParkedConversation(ctx, ws.ID, "vendor-queue", switchAt); err != nil {
+	if err := s.SwapParkedConversation(ctx, ws.ID, "vendor-queue", switchAt, true); err != nil {
 		t.Fatalf("SwapParkedConversation: %v", err)
 	}
 	return s, ws, switchAt
@@ -68,7 +68,7 @@ func TestASwapBackBindsTheParkedConversationsOwnClock(t *testing.T) {
 	}
 
 	// Act
-	err := s.SwapParkedConversation(ctx, ws.ID, "vendor-bypass", switchAt.Add(20*time.Minute))
+	err := s.SwapParkedConversation(ctx, ws.ID, "vendor-bypass", switchAt.Add(20*time.Minute), true)
 
 	// Assert
 	if err != nil {
@@ -93,7 +93,7 @@ func TestASwapBindsAColdParkedConversationCold(t *testing.T) {
 	}
 
 	// Act
-	err := s.SwapParkedConversation(ctx, ws.ID, "vendor-bypass", switchAt.Add(time.Minute))
+	err := s.SwapParkedConversation(ctx, ws.ID, "vendor-bypass", switchAt.Add(time.Minute), true)
 
 	// Assert
 	if err != nil {
@@ -105,6 +105,31 @@ func TestASwapBindsAColdParkedConversationCold(t *testing.T) {
 	}
 }
 
+func TestASwapThatReplacesTheParkedConversationBindsNoClock(t *testing.T) {
+	// Arrange: the bypass conversation was beaten, then the workspace
+	// switched back and parked it with that clock.
+	s, ws, switchAt := swappedOnce(t)
+	ctx := context.Background()
+	if err := s.SetLastKeepalive(ctx, ws.ID, switchAt.Add(10*time.Minute)); err != nil {
+		t.Fatalf("SetLastKeepalive: %v", err)
+	}
+	if err := s.SwapParkedConversation(ctx, ws.ID, "vendor-bypass", switchAt.Add(20*time.Minute), true); err != nil {
+		t.Fatalf("SwapParkedConversation: %v", err)
+	}
+
+	// Act: a fresh fork replaces the parked bypass conversation.
+	err := s.SwapParkedConversation(ctx, ws.ID, "vendor-queue", switchAt.Add(30*time.Minute), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SwapParkedConversation: %v", err)
+	}
+	record, _ := s.Workspace(ctx, ws.ID)
+	if record.CacheClock() != nil {
+		t.Fatalf("bound CacheClock() = %v, want none: the fork reads no cache of the discarded conversation", record.CacheClock())
+	}
+}
+
 func TestASwapRefusesABlankConversationAndWritesNothing(t *testing.T) {
 	// Arrange
 	s, logs := testStore(t)
@@ -112,7 +137,7 @@ func TestASwapRefusesABlankConversationAndWritesNothing(t *testing.T) {
 	ctx := context.Background()
 
 	// Act
-	err := s.SwapParkedConversation(ctx, ws.ID, " ", instant)
+	err := s.SwapParkedConversation(ctx, ws.ID, " ", instant, true)
 
 	// Assert
 	if err == nil {

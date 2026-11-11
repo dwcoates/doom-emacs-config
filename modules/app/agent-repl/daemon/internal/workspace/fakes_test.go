@@ -66,6 +66,15 @@ type fakeDB struct {
 	bypassErr error
 	// parkedConversations are the conversations SwapParkedConversation parked.
 	parkedConversations map[ids.WorkspaceID]string
+	// swapResumedParked is each swap's resumesParked.
+	swapResumedParked map[ids.WorkspaceID]bool
+	// owedWork is the start work each binding owes; owedWorkErr fails its
+	// read and settleErr its settlement.
+	owedWork    map[ids.WorkspaceID]wsm.OwedStartWork
+	owedWorkErr error
+	settleErr   error
+	// contextSummaries are the summaries each workspace's next prompt owes.
+	contextSummaries map[ids.WorkspaceID]string
 
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
 	// summaryErr fails that read.
@@ -1454,27 +1463,84 @@ func (d *fakeDB) Lineage(_ context.Context, id ids.WorkspaceID) ([]wsm.ForkLinea
 
 // BindSession records the session and forgets the workspace's fork records,
 // as the store does in one transaction.
-func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
+func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session, owed *wsm.OwedStartWork) error {
 	d.bindSessionCalls = append(d.bindSessionCalls, s)
 	delete(d.pendingForks, s.Workspace)
 	delete(d.lineage, s.Workspace)
+	delete(d.owedWork, s.Workspace)
+	delete(d.contextSummaries, s.Workspace)
+	if owed != nil {
+		if d.owedWork == nil {
+			d.owedWork = map[ids.WorkspaceID]wsm.OwedStartWork{}
+		}
+		d.owedWork[s.Workspace] = *owed
+	}
 	return d.PutSession(ctx, s)
+}
+
+// OwedStartWork answers the work the binding recorded as owed.
+func (d *fakeDB) OwedStartWork(_ context.Context, id ids.WorkspaceID) (wsm.OwedStartWork, bool, error) {
+	if d.owedWorkErr != nil {
+		return wsm.OwedStartWork{}, false, d.owedWorkErr
+	}
+	owed, found := d.owedWork[id]
+	return owed, found, nil
+}
+
+// SettleOwedStartWork retires the owed work and records the summary, as the
+// store does in one transaction; settling work nobody owes is refused.
+func (d *fakeDB) SettleOwedStartWork(_ context.Context, id ids.WorkspaceID, summary string) error {
+	if d.settleErr != nil {
+		return d.settleErr
+	}
+	if _, found := d.owedWork[id]; !found {
+		return fmt.Errorf("fake wsm: workspace %s owes no start work to settle", id)
+	}
+	delete(d.owedWork, id)
+	if summary != "" {
+		if d.contextSummaries == nil {
+			d.contextSummaries = map[ids.WorkspaceID]string{}
+		}
+		d.contextSummaries[id] = summary
+	}
+	return nil
+}
+
+// TakeOwedContextSummary takes the owed summary.
+func (d *fakeDB) TakeOwedContextSummary(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	summary, found := d.contextSummaries[id]
+	delete(d.contextSummaries, id)
+	return summary, found, nil
+}
+
+// RestoreOwedContextSummary puts a taken summary back unless a newer stands.
+func (d *fakeDB) RestoreOwedContextSummary(_ context.Context, id ids.WorkspaceID, summary string) error {
+	if _, found := d.contextSummaries[id]; found {
+		return nil
+	}
+	if d.contextSummaries == nil {
+		d.contextSummaries = map[ids.WorkspaceID]string{}
+	}
+	d.contextSummaries[id] = summary
+	return nil
 }
 
 // SwapParkedConversation records the conversation a queue-bypass switch
 // stepped the workspace out of, and when.
-func (d *fakeDB) SwapParkedConversation(_ context.Context, id ids.WorkspaceID, steppedOut string, _ time.Time) error {
+func (d *fakeDB) SwapParkedConversation(_ context.Context, id ids.WorkspaceID, steppedOut string, _ time.Time, resumesParked bool) error {
 	if d.parkedConversations == nil {
 		d.parkedConversations = map[ids.WorkspaceID]string{}
+		d.swapResumedParked = map[ids.WorkspaceID]bool{}
 	}
 	d.parkedConversations[id] = steppedOut
+	d.swapResumedParked[id] = resumesParked
 	return nil
 }
 
 // BindSessionToOwnFork binds the session with no conversation and records the
 // own fork it owes, as the store does in one transaction.
-func (d *fakeDB) BindSessionToOwnFork(ctx context.Context, s wsm.Session, parentVendorSessionID string) error {
-	if err := d.BindSession(ctx, s); err != nil {
+func (d *fakeDB) BindSessionToOwnFork(ctx context.Context, s wsm.Session, parentVendorSessionID string, owed *wsm.OwedStartWork) error {
+	if err := d.BindSession(ctx, s, owed); err != nil {
 		return err
 	}
 	if d.pendingForks == nil {

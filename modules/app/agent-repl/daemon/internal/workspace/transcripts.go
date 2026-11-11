@@ -282,6 +282,9 @@ type conversationBinding struct {
 	vendorSessionID string
 	// ownForkOf is the conversation an own fork copies; empty otherwise.
 	ownForkOf string
+	// owed is the work the bound conversation's next start owes, recorded
+	// with the binding (wsm.OwedStartWork); nil owes none.
+	owed *wsm.OwedStartWork
 }
 
 // swapConversation is the one session swap a bind and a queue-bypass switch
@@ -403,9 +406,9 @@ func (v *verbs) recordBinding(ctx context.Context, log dlog.Logger, ws ids.Works
 	// no longer continues the one its lineage describes. An own fork is owed
 	// in the same write, so the start makes it rather than coming up fresh.
 	if to.ownForkOf != "" {
-		err = v.deps.DB.BindSessionToOwnFork(ctx, session, to.ownForkOf)
+		err = v.deps.DB.BindSessionToOwnFork(ctx, session, to.ownForkOf, to.owed)
 	} else {
-		err = v.deps.DB.BindSession(ctx, session)
+		err = v.deps.DB.BindSession(ctx, session, to.owed)
 	}
 	if err != nil {
 		log.Error(opBindSession, "could not record the new binding", dlog.Context{

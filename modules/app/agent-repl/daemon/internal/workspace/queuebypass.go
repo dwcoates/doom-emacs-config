@@ -158,7 +158,7 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 	// THE CONVERSATION STEPPED OUT OF IS PARKED BEFORE THE SWAP STOPS IT: the
 	// record names it until the swap rewrites the binding.
 	if current != "" {
-		if err := v.deps.DB.SwapParkedConversation(ctx, ws, current, v.now()); err != nil {
+		if err := v.deps.DB.SwapParkedConversation(ctx, ws, current, v.now(), true); err != nil {
 			return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the conversation stepped out of could not be kept: %s", err.Error()), false,
 				map[string]any{"detail": "the conversation stepped out of could not be kept: " + err.Error()})
 		}
