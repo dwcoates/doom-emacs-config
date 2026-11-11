@@ -9,6 +9,8 @@
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
 //     RosterHiddenSection.fold, RosterOpenSection.fold.
+//   - a band section's height: RosterMergeQueueSection.height,
+//     RosterMergedSection.height, RosterHiddenSection.height.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -45,7 +47,62 @@ message UpdateSidebarViewRequest {
   oneof change {
     // Fold or unfold one section.
     SidebarViewFoldSection fold_section = 1;
+    // Size one or more of the band sections below the Open section, as a
+    // drag of the rule between two sections asks.
+    SidebarViewSizeSections size_sections = 4;
   }
+}
+
+// ---- Section heights: the lines a band section's viewport shows ----
+
+// SIZE THE BAND SECTIONS. A drag of the rule between two sections changes
+// the height of the sections on either side of it at once, so one request
+// carries every section it sizes and the daemon records them in one write:
+// no page ever draws one side of a drag without the other.
+//
+// The Open section is never sized: it takes whatever room the bands below it
+// leave, so a sized band keeps its lines however the rail's height changes.
+message SidebarViewSizeSections {
+  // One entry per section sized, each section at most once. Empty, or a
+  // section named twice, is a malformed request (Connect InvalidArgument).
+  repeated SidebarViewSectionSize sizes = 1;
+}
+
+// One band section's height.
+message SidebarViewSectionSize {
+  // WHICH SECTION. THE ARM IS THE SECTION; unset is malformed. The arm
+  // messages are the ones SidebarViewFoldSection names its sections with.
+  oneof section {
+    // The Merge Queue section (frontend.v1.RosterMergeQueueSection).
+    SidebarViewMergeQueue merge_queue = 1;
+    // The Recently Merged section (frontend.v1.RosterMergedSection).
+    SidebarViewRecentlyMerged recently_merged = 2;
+    // The Hidden Workspaces section (frontend.v1.RosterHiddenSection).
+    SidebarViewHidden hidden = 3;
+  }
+  // WHAT HEIGHT. THE ARM IS THE HEIGHT; unset is malformed.
+  oneof height {
+    // Fit the section as the page decides, by its share of the rail
+    // (webapp src/sidebar/band-fit.ts): the height of a section nobody has
+    // sized, and what a double click on a rule restores.
+    SidebarViewSectionFitted fitted = 4;
+    // Show exactly this many of the section's lines.
+    SidebarViewSectionLines lines = 5;
+  }
+}
+
+// The page fits the section by its share of the rail. DELIBERATELY EMPTY:
+// the arm is the fact.
+message SidebarViewSectionFitted {}
+
+// A section sized by hand, in LINES rather than pixels: a line is a row, a
+// folded header or a queue's card (band-fit.ts), so every page shows the same
+// rows whatever its height in pixels, and no line is cut through.
+message SidebarViewSectionLines {
+  // How many of the section's first lines its viewport shows. 0 shows its
+  // header alone. A section holding fewer lines shows every one it holds, and
+  // a rail too short for every sized section shrinks them, lowest first.
+  uint32 lines = 1;
 }
 
 // Fold or unfold one section.
