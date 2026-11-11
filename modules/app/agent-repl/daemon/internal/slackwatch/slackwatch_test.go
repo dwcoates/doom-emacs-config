@@ -740,3 +740,19 @@ func TestEveryBriefComposesFromTheShippedPrompts(t *testing.T) {
 		t.Fatalf("composed:\n%s\n---\n%s\n---\n%s", r.prompts.got[0].text, listen, subscribed)
 	}
 }
+
+func TestSubscribeAtCreationRecordsACreationSubscription(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+
+	// Act
+	err := r.w.SubscribeAtCreation(context.Background(), r.ws.ID, r.ws.Name, threadURL, wsm.SlackThreadModeRespond)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sub := r.sub(t); sub.Origin != wsm.SlackThreadOriginCreation || sub.Mode != wsm.SlackThreadModeRespond {
+		t.Fatalf("subscription = %+v, want a respond subscription taken at creation", sub)
+	}
+}
