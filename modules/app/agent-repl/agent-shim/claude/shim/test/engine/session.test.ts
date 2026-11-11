@@ -8826,18 +8826,27 @@ describe("the vendor's init when it names no real model", () => {
   });
 });
 
-describe("the vendor's own compaction, announced through system:status", () => {
-  /** Every context cut this session wrote, newest last. */
-  function contextCuts(h: Harness): conversationv1.ContextCut[] {
-    return h.persistence.buffered.flatMap((entry) => {
-      if (entry.item.kind !== "frame") return [];
-      const result = entry.item.frame.result;
-      if (result.case !== "update") return [];
-      const update = result.value.update;
-      return update.case === "contextCut" ? [update.value] : [];
-    });
-  }
+/**
+ * Every context cut the session wrote, in the order it wrote them, with the
+ * entry that carried each. The one reading of a cut off the buffered writes,
+ * so every test reads cuts the same way.
+ */
+function contextCutWrites(h: Harness): { entry: (typeof h.persistence.buffered)[number]; cut: conversationv1.ContextCut }[] {
+  return h.persistence.buffered.flatMap((entry) => {
+    if (entry.item.kind !== "frame") return [];
+    const result = entry.item.frame.result;
+    if (result.case !== "update") return [];
+    const update = result.value.update;
+    return update.case === "contextCut" ? [{ entry, cut: update.value }] : [];
+  });
+}
 
+/** Every context cut the session wrote, in the order it wrote them. */
+function contextCuts(h: Harness): conversationv1.ContextCut[] {
+  return contextCutWrites(h).map(({ cut }) => cut);
+}
+
+describe("the vendor's own compaction, announced through system:status", () => {
   it("pushes `compacting` when the vendor says it started", async () => {
     const h = harness();
     await started(h);
@@ -10297,17 +10306,6 @@ describe("the cold gate's COMPACT remediation", () => {
       },
     });
 
-  /** Every context cut this session wrote, in the order it wrote them. */
-  function contextCuts(h: Harness): conversationv1.ContextCut[] {
-    return h.persistence.buffered.flatMap((entry) => {
-      if (entry.item.kind !== "frame") return [];
-      const result = entry.item.frame.result;
-      if (result.case !== "update") return [];
-      const update = result.value.update;
-      return update.case === "contextCut" ? [update.value] : [];
-    });
-  }
-
   it("WRITES the cut it held until the session had an identity", async () => {
     // The remediation runs before the identity is settled, so its page line
     // cannot be keyed yet — it waits rather than vanishing.
@@ -10345,10 +10343,7 @@ describe("the cold gate's COMPACT remediation", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as { subtype?: string; uuid?: string })
       .find((record) => record.subtype === "compact_boundary");
-    const keys = h.persistence.buffered
-      .filter((entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "update"
-        && entry.item.frame.result.value.update.case === "contextCut")
-      .map((entry) => entry.upsertKey);
+    const keys = contextCutWrites(h).map(({ entry }) => entry.upsertKey);
     expect(keys).toEqual([contextCutUpsertKey(boundary?.uuid ?? "")]);
   });
 
