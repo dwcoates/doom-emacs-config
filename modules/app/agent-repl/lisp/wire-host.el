@@ -207,6 +207,11 @@ Rotates on restart within one session; fault windows scope to it."
 `SessionFaultVendorStartFailed'."
   (agent-repl-wire-decode-session-fault-vendor-start-failed value))
 
+(defun agent-repl-wire-decode-host-fault-keepalive-undelivered (value)
+  "Decode HostFault's `keepalive_undelivered' kind arm from VALUE as a
+`SessionFaultKeepaliveUndelivered'."
+  (agent-repl-wire-decode-session-fault-keepalive-undelivered value))
+
 (defun agent-repl-wire-decode-host-fault-kind (value)
   "Decode HostFault's `kind' oneof from the object VALUE.
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -231,7 +236,8 @@ fault the consumer would have to parse."
        (finalAnswerUnresolved :final-answer-unresolved agent-repl-wire-decode-host-fault-final-answer-unresolved)
        (vendorStartRetrying :vendor-start-retrying agent-repl-wire-decode-host-fault-vendor-start-retrying)
        (vendorStartRejected :vendor-start-rejected agent-repl-wire-decode-host-fault-vendor-start-rejected)
-       (vendorStartFailed :vendor-start-failed agent-repl-wire-decode-host-fault-vendor-start-failed)))))
+       (vendorStartFailed :vendor-start-failed agent-repl-wire-decode-host-fault-vendor-start-failed)
+       (keepaliveUndelivered :keepalive-undelivered agent-repl-wire-decode-host-fault-keepalive-undelivered)))))
 
 (defun agent-repl-wire-decode-host-fault (value)
   "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
@@ -240,7 +246,7 @@ verbatim with SessionHealth's `SessionFault' — the stream reporting a
 fault never changes its class."
   (let ((object (agent-repl-wire--object "HostFault" value)))
     (agent-repl-wire--check-keys
-     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed keepaliveUndelivered))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)

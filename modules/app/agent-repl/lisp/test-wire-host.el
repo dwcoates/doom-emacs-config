@@ -2326,6 +2326,15 @@ carries: the turn, the unit, and the `why' that IS this kind's substatus."
                    :kind (:arm :vendor-start-failed
                           :value (:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000))))))
 
+(ert-deftest agent-repl-test-wire-host-fault-keepalive-undelivered-kind ()
+  "HostFault's `keepalive_undelivered' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"keepaliveUndelivered\":{\"cause\":\"submit failed\",\"dueAtMs\":\"2000\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :keepalive-undelivered
+                          :value (:cause "submit failed" :due-at-ms 2000))))))
+
 (ert-deftest agent-repl-test-wire-host-fault-unset-kind-is-a-breach ()
   "A fault with no kind is a breach: `detail' supplements the class, never
 replaces it."
@@ -2341,12 +2350,12 @@ replaces it."
                  '("HostFault" shimDead "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-fault-kind-arms-pinned ()
-  "HostFault's kind oneof has exactly the seventeen arms decoded here."
+  "HostFault's kind oneof has exactly the eighteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
                         "HostFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed" "keepaliveUndelivered")
                        #'string<))))
 
 

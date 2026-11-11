@@ -4191,6 +4191,14 @@ oneof unset, which every consumer reads as a contract breach."
     (agent-repl-wire-verbs--check-keys message json '(cause))
     (list :cause (agent-repl-wire-verbs--decode-string message 'cause json))))
 
+(defun agent-repl-wire-decode-daemon-fault-keepalive-drive-stopped (json)
+  "Decode DaemonFaultKeepaliveDriveStopped from JSON into (:cause).
+The cache keeper's loop stopped before the daemon did: no keep-alive goes
+out for any workspace until the next daemon runs its own."
+  (let ((message "DaemonFaultKeepaliveDriveStopped"))
+    (agent-repl-wire-verbs--check-keys message json '(cause))
+    (list :cause (agent-repl-wire-verbs--decode-string message 'cause json))))
+
 (defun agent-repl-wire-decode-daemon-fault-deploy-failed-build (json)
   "Decode DaemonFaultDeployFailed's `build' step arm from JSON as a
 `DeployBuildFailed'."
@@ -4274,6 +4282,11 @@ contract breach."
 `DaemonFaultDeployFailed'."
   (agent-repl-wire-decode-daemon-fault-deploy-failed json))
 
+(defun agent-repl-wire-decode-daemon-fault-kind-keepalive-drive-stopped (json)
+  "Decode DaemonFault's `keepalive_drive_stopped' kind arm from JSON as a
+`DaemonFaultKeepaliveDriveStopped'."
+  (agent-repl-wire-decode-daemon-fault-keepalive-drive-stopped json))
+
 (defun agent-repl-wire-decode-daemon-fault-kind (json)
   "Decode DaemonFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE KIND IS A TYPED ARM: `detail' carries only what prose must, so a
@@ -4286,12 +4299,13 @@ fault with no kind is a contract breach."
                  (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
                  (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
                  (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable)
-                 (list 'deployFailed :deploy-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-failed))))
+                 (list 'deployFailed :deploy-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-failed)
+                 (list 'keepaliveDriveStopped :keepalive-drive-stopped #'agent-repl-wire-decode-daemon-fault-kind-keepalive-drive-stopped))))
 
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable deployFailed))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable deployFailed keepaliveDriveStopped))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 
@@ -4470,6 +4484,11 @@ ANSWERED at all."
 `SessionFaultVendorStartFailed'."
   (agent-repl-wire-decode-session-fault-vendor-start-failed json))
 
+(defun agent-repl-wire-decode-session-fault-kind-keepalive-undelivered (json)
+  "Decode SessionFault's `keepalive_undelivered' kind arm from JSON as a
+`SessionFaultKeepaliveUndelivered'."
+  (agent-repl-wire-decode-session-fault-keepalive-undelivered json))
+
 (defun agent-repl-wire-decode-session-fault-kind (json)
   "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -4492,7 +4511,8 @@ it, so a fault with no kind is a contract breach."
                  (list 'finalAnswerUnresolved :final-answer-unresolved #'agent-repl-wire-decode-session-fault-kind-final-answer-unresolved)
                  (list 'vendorStartRetrying :vendor-start-retrying #'agent-repl-wire-decode-session-fault-kind-vendor-start-retrying)
                  (list 'vendorStartRejected :vendor-start-rejected #'agent-repl-wire-decode-session-fault-kind-vendor-start-rejected)
-                 (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-session-fault-kind-vendor-start-failed))))
+                 (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-session-fault-kind-vendor-start-failed)
+                 (list 'keepaliveUndelivered :keepalive-undelivered #'agent-repl-wire-decode-session-fault-kind-keepalive-undelivered))))
 
 (defun agent-repl-wire-decode-session-fault (json)
   "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
@@ -4500,7 +4520,7 @@ Deliberately NOT DaemonFault: a session's fault classes are the session
 controller's own vocabulary — the host stream's HostFault carries the first
 fourteen, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed keepaliveUndelivered))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-session-fault-kind json))))
 
