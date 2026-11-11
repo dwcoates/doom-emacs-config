@@ -1395,3 +1395,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-10 land-send-now (landed in queue bypass mode): Send now on a held prompt interrupts an agent-started turn and delivers at its real end; every other blocker waits visibly on the card; only an edit, a cold gate or a refused join refuses, with a typed cause
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo row: storing an owned PR link waits on a GitHub read
 - 2026-11-10 merge-queue-stall-triage (landed in queue bypass mode): todo: remove the fixed CEE skill worktree cleanup row
+- 2026-11-11 workspace-gather (landed in queue bypass mode): agent-repld workspace gather asks many workspaces one prompt and reports their answers as one update, at completion or 5 minutes, then each later answer as it arrives
