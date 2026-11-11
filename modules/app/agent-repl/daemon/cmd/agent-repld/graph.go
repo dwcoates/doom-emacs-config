@@ -880,8 +880,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Accounts:   accounts,
 		Supervisor: supervisor,
 		Sinks: sessionwatcher.Sinks{
-			Feed:       feedResolver,
-			Footer:     footerResolver,
+			Feed: feedResolver,
+			// A TURN THE VENDOR REJECTED FOR THE CREDENTIAL opens the login
+			// by itself (signInSensingFooter).
+			Footer:     signInSensingFooter{FooterSink: footerResolver, topbar: topbarResolver},
 			Topbar:     topbarResolver,
 			Sidebar:    sidebarResolver,
 			Holds:      feedResolver,
@@ -1122,6 +1124,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:       footerResolver,
 		Roster:       sidebarResolver,
 		Starts:       verbsRef,
+		Requests:     topbarResolver,
 		Log:          log,
 	})
 	if err != nil {
@@ -2428,7 +2431,6 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		SubStatus: line.Cell.SubStatus,
 		Detail:    line.Detail,
 		At:        line.At,
-		SignIn:    health.SignInCures(line.Record),
 	})
 	// THE ROSTER TAKES THE NETWORK FAULT FROM THE SAME DOOR, so the footer's
 	// network_fault and the roster's never stand on different facts. Every

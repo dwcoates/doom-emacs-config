@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LOGIN_REQUESTED_EVENT, type LoginRequestedDetail } from "../../src/login/request.js";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -566,29 +565,6 @@ describe("the salient kinds", () => {
     expect(
       cell.querySelector(".footer-activity-vendor-start")?.textContent,
     ).toBe(text);
-  });
-
-  it("draws no sign-in beside a vendor-start line the daemon offered none on", () => {
-    const cell = salientCell("vendorStart", { text: "Claude SDK failed to start · restart: SPC o C-c" }, "vendorFault");
-    expect(cell.querySelector('[data-action="sign-in"]')).toBeNull();
-  });
-
-  it("asks the page's login overlay to open from the vendor-start line's sign-in", () => {
-    const cell = salientCell(
-      "vendorStart",
-      { text: "Claude SDK refused to start: Failed to authenticate · sign in to retry", signIn: {} },
-      "vendorFault",
-    );
-    const asked: HTMLElement[] = [];
-    const onRequest = (event: Event): void => {
-      event.preventDefault();
-      asked.push((event as CustomEvent<LoginRequestedDetail>).detail.control);
-    };
-    document.addEventListener(LOGIN_REQUESTED_EVENT, onRequest);
-    const button = cell.querySelector('.footer-vendor-start-actions [data-action="sign-in"]') as HTMLElement;
-    button.click();
-    document.removeEventListener(LOGIN_REQUESTED_EVENT, onRequest);
-    expect(asked).toEqual([button]);
   });
 
   it.each([

@@ -401,6 +401,12 @@ func (f *Fleet) noteVendorRejected(ctx context.Context, log dlog.Logger, ws ids.
 	}
 	f.openTerminal(ctx, log, ws, health.KindVendorStartRejected, "the vendor refused to start", evidence, signIn)
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorRejected, Text: cause})
+	if signIn {
+		// THE LOGIN OPENS BY ITSELF: every strip spending as this account
+		// asks the page for it, and a completed sign-in retries the start
+		// (Fleet.SignedIn).
+		f.deps.Topbar.RequestSignIn(ws)
+	}
 }
 
 // openTerminal files a terminal vendor-start fault, replacing the one this
@@ -516,20 +522,14 @@ func (f *Fleet) noteRosterVendor(ws ids.WorkspaceID) {
 // sign-in just renewed.
 //
 // A STANDING COLD GATE IS THE USER'S CHOICE, so it is never re-spent here (a
-// compaction costs tokens): its sign-in notice leaves the row, the rejection
-// the sign-in answered is closed, and the gate stands for the user to answer
-// again; the answer is false. With no gate standing, the fault is left to the
+// compaction costs tokens): the rejection the sign-in answered is closed, and
+// the gate stands for the user to answer again; the answer is false. With no gate standing, the fault is left to the
 // retried start, whose session retires it (its lifetime ends at a started
 // session), and the answer is true. Nothing to answer is false.
 func (f *Fleet) SignedIn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
 	f.mu.Lock()
 	gate, gated := f.coldGates[ws]
 	gated = gated && !gate.answering
-	noticed := gated && gate.signIn != ""
-	if noticed {
-		gate.signIn = ""
-		f.coldGates[ws] = gate
-	}
 	run := f.vendorRunLocked(ws)
 	cured := run.terminal != "" && run.signIn
 	answered := run.terminal
@@ -537,13 +537,9 @@ func (f *Fleet) SignedIn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		run.terminal, run.signIn = "", false
 	}
 	f.mu.Unlock()
-	if noticed {
-		f.logTransition(ws, "cold_gate_sign_in", true, false, dlog.Context{"reason": "signed_in"})
-		f.publishColdGateRow(ws)
-	}
 	switch {
 	case !cured:
-		log.Debug(opBringUp, "a sign-in completed and no start rejected for the credential stands; nothing to retry", dlog.Context{"cold_gate_notice": noticed})
+		log.Debug(opBringUp, "a sign-in completed and no start rejected for the credential stands; nothing to retry", nil)
 		return false
 	case gated:
 		f.closeFault(context.WithoutCancel(ctx), log, answered)

@@ -35,6 +35,11 @@ func (s *starts) OnSignedIn(ws ids.WorkspaceID) error {
 	return s.err
 }
 
+// answers records every root whose sign-in request was answered.
+type answers struct{ roots []string }
+
+func (a *answers) SignInAnswered(configDir string) { a.roots = append(a.roots, configDir) }
+
 // surface adapts a recorder to the footer's and roster's error-free half.
 type surface struct{ r *recorder }
 
@@ -59,7 +64,7 @@ func newFanoutWithStarts(t *testing.T, list func(context.Context) ([]wsm.Workspa
 	footer, roster, log := &recorder{}, &recorder{}, dlog.NewTestLogger()
 	f, err := New(Deps{
 		Workspaces: list, ConfigDirFor: rootByPrefix,
-		Feed: feed, Footer: surface{footer}, Roster: surface{roster}, Starts: st, Log: log,
+		Feed: feed, Footer: surface{footer}, Roster: surface{roster}, Starts: st, Requests: &answers{}, Log: log,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -126,7 +131,7 @@ func TestSignedInWithAnUnreadableWorkspaceListTellsNothingAndLogsTheCause(t *tes
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	list := func(context.Context) ([]wsm.Workspace, error) { return nil, nil }
 	full := func() Deps {
-		return Deps{Workspaces: list, ConfigDirFor: rootByPrefix, Feed: &recorder{}, Footer: surface{&recorder{}}, Roster: surface{&recorder{}}, Starts: &starts{}, Log: dlog.NewTestLogger()}
+		return Deps{Workspaces: list, ConfigDirFor: rootByPrefix, Feed: &recorder{}, Footer: surface{&recorder{}}, Roster: surface{&recorder{}}, Starts: &starts{}, Requests: &answers{}, Log: dlog.NewTestLogger()}
 	}
 	cases := []struct {
 		name   string
@@ -139,6 +144,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{"footer", func(d *Deps) { d.Footer = nil }, "feed, the footer and the roster"},
 		{"roster", func(d *Deps) { d.Roster = nil }, "feed, the footer and the roster"},
 		{"starts", func(d *Deps) { d.Starts = nil }, "bring-up"},
+		{"requests", func(d *Deps) { d.Requests = nil }, "sign-in requests"},
 		{"logger", func(d *Deps) { d.Log = nil }, "logger"},
 	}
 	for _, tc := range cases {
@@ -189,4 +195,25 @@ func TestSignedInRecordsARetryThatCouldNotBeAskedFor(t *testing.T) {
 		}
 	}
 	t.Fatalf("no ERROR record naming the workspace and the cause: %v", log.Records())
+}
+
+func TestALoginEndingAnswersItsRootsSignInRequest(t *testing.T) {
+	// Arrange
+	requests := &answers{}
+	f, err := New(Deps{
+		Workspaces:   func(context.Context) ([]wsm.Workspace, error) { return nil, nil },
+		ConfigDirFor: rootByPrefix, Feed: &recorder{}, Footer: surface{&recorder{}}, Roster: surface{&recorder{}},
+		Starts: &starts{}, Requests: requests, Log: dlog.NewTestLogger(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act
+	f.LoginEnded(context.Background(), "A")
+
+	// Assert
+	if !slices.Equal(requests.roots, []string{"A"}) {
+		t.Fatalf("answered %v, want A", requests.roots)
+	}
 }

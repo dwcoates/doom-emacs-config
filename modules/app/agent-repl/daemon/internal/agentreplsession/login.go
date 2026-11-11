@@ -20,6 +20,10 @@ type LoginSessions interface {
 // (internal/signin).
 type LoginSignIns interface {
 	SignedIn(ctx context.Context, configDir string)
+	// LoginEnded is told of EVERY end of a login flow on the root, signed in
+	// or not: the request that opened the login by itself is answered either
+	// way, and no page asks for it again until the next determination.
+	LoginEnded(ctx context.Context, configDir string)
 }
 
 // LoginWatch tells a login made THROUGH agent-repl from a flow that was opened
@@ -91,6 +95,9 @@ func (w *LoginWatch) LoginOpened(configDir string) {
 func (w *LoginWatch) LoginEnded(configDir string) {
 	const op = "daemon.agentreplsession.login_ended"
 	fields := dlog.Context{"config_dir": configDir}
+	// THE REQUEST THAT OPENED THIS LOGIN IS ANSWERED, whatever the flow made:
+	// a reader who closed it is not asked again for the same determination.
+	w.signIns.LoginEnded(context.Background(), configDir)
 	w.mu.Lock()
 	flow, ok := w.opened[configDir]
 	delete(w.opened, configDir)

@@ -1105,10 +1105,6 @@ type Cards interface {
 	// ReraiseColdGate stands the gate for VENDORSESSIONID again from the cold
 	// facts it was first raised with, answering false when those are gone.
 	ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
-	// OfferColdGateSignIn puts the sign-in notice on the standing gate, whose
-	// last answer the vendor refused for the account's credential (REFUSAL is
-	// its words), answering false when no gate stands.
-	OfferColdGateSignIn(ws ids.WorkspaceID, refusal string) bool
 	// PermissionModes answers EXACTLY the switchable set the topbar's picker
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.

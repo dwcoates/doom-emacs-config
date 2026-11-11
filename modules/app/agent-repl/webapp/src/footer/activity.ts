@@ -122,7 +122,6 @@ import { withEditorNotice, type EditorNotice } from "./editor-notice.js";
 import { footerAgeSpan, footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { coldGateFiguredLine, statusWords, textLine } from "./parts.js";
-import { drawSignInAction } from "../login/request.js";
 import { pressurePercentColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
@@ -1022,26 +1021,11 @@ export function drawFooterStatusActivityTurnEnded(
   return line;
 }
 
-/**
- * WHY THE VENDOR IS NOT UP: the daemon's composed sentence, then — when the
- * daemon set it (`FooterStatusActivityVendorStart.sign_in`: the vendor
- * rejected the account's credential) — the sign-in action, which opens the
- * page's one login overlay, the same flow the topbar's account cell opens.
- */
 export function drawFooterStatusActivityVendorStart(
   u: FooterStatusActivityVendorStart,
 ): HTMLElement {
-  const line = textLine("footer-activity-vendor-start", u.text);
-  if (u.signIn === undefined) return line;
-  const actions = document.createElement("span");
-  actions.className = FOOTER_VENDOR_START_ACTIONS_CLASS;
-  actions.append(drawSignInAction("footer-vendor-start-sign-in", "footer.vendor-start-sign-in"));
-  line.append(actions);
-  return line;
+  return textLine("footer-activity-vendor-start", u.text);
 }
-
-/** The class of the vendor-start line's action group. */
-export const FOOTER_VENDOR_START_ACTIONS_CLASS = "footer-vendor-start-actions";
 
 /**
  * A STANDING DAEMON FAULT: the kind, then what it says.

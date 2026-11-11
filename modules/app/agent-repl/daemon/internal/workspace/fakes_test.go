@@ -3093,8 +3093,6 @@ type fakeCards struct {
 	ended          []string
 	reraised       []string
 	reraiseRefused bool
-	// signInOffers is every sign-in notice put on a standing gate.
-	signInOffers []string
 	// coldGatesCleared counts the retirements the resolve path made.
 	coldGatesCleared int
 	modes            []string
@@ -3183,11 +3181,6 @@ func (c *fakeCards) ReraiseColdGate(_ ids.WorkspaceID, vendorSessionID string) b
 		return false
 	}
 	c.reraised = append(c.reraised, vendorSessionID)
-	return true
-}
-
-func (c *fakeCards) OfferColdGateSignIn(_ ids.WorkspaceID, refusal string) bool {
-	c.signInOffers = append(c.signInOffers, refusal)
 	return true
 }
 
@@ -3731,6 +3724,9 @@ func (f *fixture) workspaceInRepo(t *testing.T, id ids.WorkspaceID, repoDir stri
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct {
 	topbar.Resolver
+	// signIns records every workspace a sign-in was requested for; nil
+	// watches none.
+	signIns *[]ids.WorkspaceID
 	// effortSettings records every effort settings read the verbs installed,
 	// in order; warnings every warning-strip line they raised, by key.
 	effortSettings *[]claudesettings.Effort
@@ -4556,4 +4552,11 @@ func (d *fakeDB) WorkspaceSummaryOf(_ context.Context, ws ids.WorkspaceID) (stri
 	}
 	summary, ok := d.storedSummaries[ws]
 	return summary, ok, nil
+}
+
+// RequestSignIn records the workspace a sign-in was requested for.
+func (t stubTopbar) RequestSignIn(ws ids.WorkspaceID) {
+	if t.signIns != nil {
+		*t.signIns = append(*t.signIns, ws)
+	}
 }

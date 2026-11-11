@@ -244,6 +244,13 @@ type Resolver interface {
 	// every strip spending as it, so a "Make default" on one workspace is
 	// drawn on all of them at once. Its sole producer is SetDefaultModel.
 	SetLoginDefaultModel(configDir, model string)
+	// RequestSignIn asks every strip spending as WS's account root to open the
+	// login by itself: the daemon determined the root must sign in again (a
+	// turn or a start the vendor rejected for the credential).
+	RequestSignIn(ws ids.WorkspaceID)
+	// SignInAnswered ends the request standing on CONFIG_DIR once its login
+	// flow ends, signed in or closed.
+	SignInAnswered(configDir string)
 	// SetDetachedUnmodeled installs the live detached-unmodeled items, one
 	// warning each. Nothing on the shim's streams announces them —
 	// DetachableWork has no unmodeled arm — so the daemon states the set.

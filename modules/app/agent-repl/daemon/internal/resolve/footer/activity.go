@@ -152,13 +152,8 @@ func (r *resolver) vendorFaultActivity(s *wsState) *frontendv1.FooterStatusVendo
 		// WHY THE VENDOR IS NOT UP: the sentence the health package composed
 		// out of the standing vendor fault's evidence, drawn verbatim.
 		line = salient(start.At)
-		vendorStart := &frontendv1.FooterStatusActivityVendorStart{Text: start.Detail}
-		if start.SignIn {
-			// A SIGN-IN CURES THIS REFUSAL: the action rides the line that
-			// names it, and a completed sign-in retries the start.
-			vendorStart.SignIn = &frontendv1.FooterVendorStartSignIn{}
-		}
-		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_VendorStart{VendorStart: vendorStart}
+		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_VendorStart{
+			VendorStart: &frontendv1.FooterStatusActivityVendorStart{Text: start.Detail}}
 	case s.blocked != nil && s.blocked.kind == blockedAuth && s.authLine != nil:
 		line = salient(s.authLine.at)
 		line.Kind = &frontendv1.FooterStatusVendorFaultSalient_Authenticating{
