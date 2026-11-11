@@ -12293,8 +12293,8 @@ export type FeedMergeTestSuite = Message<"frontend.v1.FeedMergeTestSuite"> & {
     case: "failed";
   } | {
     /**
-     * The suite did not run in this gate: every input it reads hashed to a
-     * key an earlier run passed whole. Its counts stay UNSET.
+     * The suite did not run in this gate: every one of its units' inputs
+     * hashed to a key an earlier run passed. Its counts stay UNSET.
      *
      * @generated from field: frontend.v1.FeedMergeTestSuiteReused reused = 7;
      */
@@ -12485,12 +12485,12 @@ export const FeedMergeTestSuiteFailedSchema: GenMessage<FeedMergeTestSuiteFailed
   messageDesc(file_frontend_v1_feed, 397);
 
 /**
- * A suite this gate did not run because its inputs are byte-identical to ones
- * an earlier run passed whole (the test runner's input key: every file it
- * reads, its toolchain and its environment). Drawn green, with the run that
- * passed it named, so a reader can tell it from a pass in this gate. Only a
- * system's own unit and integration suites are ever reused; the end-to-end
- * suites always run.
+ * A suite this gate did not run because every one of its units' inputs is
+ * byte-identical to inputs an earlier run passed that unit on (the test
+ * runner's per-unit input key: every file the unit reads, its toolchain and
+ * its environment). Drawn green, with the newest run that passed one of its
+ * units named, so a reader can tell it from a pass in this gate. A suite the
+ * roster marks never reused always runs.
  *
  * @generated from message frontend.v1.FeedMergeTestSuiteReused
  */
