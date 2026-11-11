@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // foldRequester names who asked for a fold: RPC, and the request id the
@@ -20,7 +21,7 @@ func foldRequester(rpc string, header http.Header) workspace.FoldRequester {
 }
 
 // UpdateSidebarView changes one piece of the sidebar's view state — a
-// section's fold — which the roster push carries to every page. A change to what the view already holds is success.
+// section's fold, or the band sections' heights — which the roster push carries to every page. A change to what the view already holds is success.
 func (s *server) UpdateSidebarView(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateSidebarViewRequest],
@@ -41,6 +42,8 @@ func (s *server) UpdateSidebarView(
 		if answered {
 			return answer(resp, cerr)
 		}
+	case *agentreplv1.UpdateSidebarViewRequest_SizeSections:
+		err = s.deps.Verbs.SizeSections(ctx, sectionHeightChanges(change.SizeSections))
 	default:
 		// validateUpdateSidebarViewRequest refuses an unset arm, and every arm
 		// the contract names is a case above: reaching here is a validator
@@ -87,5 +90,41 @@ func (s *server) foldSection(
 		return false, nil, s.deps.Verbs.FoldChildren(ctx, ids.WorkspaceID(section.Workspace.GetId()), folded, requester)
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: section arm %T passed validation that no case handles", section))
+	}
+}
+
+// sectionHeightChanges maps a validated SidebarViewSizeSections onto the
+// heights the store records, one per section it names.
+func sectionHeightChanges(size *agentreplv1.SidebarViewSizeSections) []wsm.SectionHeightChange {
+	changes := make([]wsm.SectionHeightChange, 0, len(size.GetSizes()))
+	for _, entry := range size.GetSizes() {
+		changes = append(changes, wsm.SectionHeightChange{Section: bandSection(entry), Height: sectionHeight(entry)})
+	}
+	return changes
+}
+
+// bandSection is the band section ENTRY names.
+func bandSection(entry *agentreplv1.SidebarViewSectionSize) wsm.BandSection {
+	switch section := entry.GetSection().(type) {
+	case *agentreplv1.SidebarViewSectionSize_MergeQueue:
+		return wsm.BandMergeQueue
+	case *agentreplv1.SidebarViewSectionSize_RecentlyMerged:
+		return wsm.BandMerged
+	case *agentreplv1.SidebarViewSectionSize_Hidden:
+		return wsm.BandHidden
+	default:
+		panic(fmt.Sprintf("UpdateSidebarView: size section arm %T passed validation that no case handles", section))
+	}
+}
+
+// sectionHeight is the height ENTRY asks for.
+func sectionHeight(entry *agentreplv1.SidebarViewSectionSize) wsm.SectionHeight {
+	switch height := entry.GetHeight().(type) {
+	case *agentreplv1.SidebarViewSectionSize_Fitted:
+		return wsm.FittedHeight()
+	case *agentreplv1.SidebarViewSectionSize_Lines:
+		return wsm.SizedHeight(height.Lines.GetLines())
+	default:
+		panic(fmt.Sprintf("UpdateSidebarView: size height arm %T passed validation that no case handles", height))
 	}
 }

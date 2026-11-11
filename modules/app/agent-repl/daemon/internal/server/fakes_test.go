@@ -513,6 +513,10 @@ type fakeVerbs struct {
 	// those verbs answers instead.
 	sectionFolds   []sectionFold
 	sectionFoldErr error
+	// sectionSizes records every SizeSections call's changes, and
+	// sectionSizeErr is what each answers.
+	sectionSizes   [][]wsm.SectionHeightChange
+	sectionSizeErr error
 	closeErr       error
 	// closedBy is every cause Close was asked with, in order.
 	closedBy  []wsm.CloseCause
@@ -2807,6 +2811,11 @@ func (v *fakeVerbs) FoldMergeQueueSection(_ context.Context, folded bool) error 
 func (v *fakeVerbs) FoldHiddenSection(_ context.Context, folded bool) error {
 	v.sectionFolds = append(v.sectionFolds, sectionFold{hidden: true, folded: folded})
 	return v.sectionFoldErr
+}
+
+func (v *fakeVerbs) SizeSections(_ context.Context, changes []wsm.SectionHeightChange) error {
+	v.sectionSizes = append(v.sectionSizes, changes)
+	return v.sectionSizeErr
 }
 
 func (v *fakeVerbs) FoldOpenSection(_ context.Context, folded bool) error {

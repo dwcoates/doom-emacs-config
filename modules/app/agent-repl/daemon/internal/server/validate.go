@@ -993,6 +993,34 @@ func validateUpdateSidebarViewRequest(req *agentreplv1.UpdateSidebarViewRequest)
 		return invalid("change", "a change arm is required")
 	case *agentreplv1.UpdateSidebarViewRequest_FoldSection:
 		return validateSidebarViewFoldSection(change.FoldSection)
+	case *agentreplv1.UpdateSidebarViewRequest_SizeSections:
+		return validateSidebarViewSizeSections(change.SizeSections)
+	}
+	return nil
+}
+
+// validateSidebarViewSizeSections is SidebarViewSizeSections' base function:
+// at least one size, each with a section arm and a height arm, and no
+// section named twice.
+func validateSidebarViewSizeSections(size *agentreplv1.SidebarViewSizeSections) *connect.Error {
+	if len(size.GetSizes()) == 0 {
+		return invalid("size_sections.sizes", "at least one section size is required")
+	}
+	seen := map[string]bool{}
+	for i, entry := range size.GetSizes() {
+		field := fmt.Sprintf("size_sections.sizes[%d]", i)
+		section := entry.GetSection()
+		if section == nil {
+			return invalid(field+".section", "a section arm is required")
+		}
+		arm := fmt.Sprintf("%T", section)
+		if seen[arm] {
+			return invalid(field+".section", "a section is sized at most once per request")
+		}
+		seen[arm] = true
+		if entry.GetHeight() == nil {
+			return invalid(field+".height", "a height arm is required")
+		}
 	}
 	return nil
 }

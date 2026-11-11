@@ -89,6 +89,39 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{},
 		},
 		{
+			name: "sizing two bands at once keeps the folds",
+			write: func(s *store) error {
+				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
+					return err
+				}
+				return s.SetSectionHeights(context.Background(), []SectionHeightChange{
+					{Section: BandMergeQueue, Height: SizedHeight(4)},
+					{Section: BandHidden, Height: SizedHeight(0)},
+				})
+			},
+			want: SidebarView{HiddenFolded: true, MergeQueueHeight: SizedHeight(4), HiddenHeight: SizedHeight(0)},
+		},
+		{
+			name: "sizing the recently merged section before anything else mints the view",
+			write: func(s *store) error {
+				return s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandMerged, Height: SizedHeight(12)}})
+			},
+			want: SidebarView{MergedHeight: SizedHeight(12)},
+		},
+		{
+			name: "fitting a sized section again replaces its height and keeps the others",
+			write: func(s *store) error {
+				if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{
+					{Section: BandMerged, Height: SizedHeight(2)},
+					{Section: BandHidden, Height: SizedHeight(3)},
+				}); err != nil {
+					return err
+				}
+				return s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandMerged, Height: FittedHeight()}})
+			},
+			want: SidebarView{HiddenHeight: SizedHeight(3)},
+		},
+		{
 			name: "unfolding the band again replaces the fold",
 			write: func(s *store) error {
 				if err := s.SetMergedSectionFolded(context.Background(), true); err != nil {
@@ -286,4 +319,59 @@ func TestTheDefaultViewExpandsTheMergeQueueSection(t *testing.T) {
 	if DefaultSidebarView.MergeQueueFolded {
 		t.Fatal("the default view folds the Merge Queue section; a merge in flight must be in sight")
 	}
+}
+
+func TestSidebarViewRefusesAStoredHeightOutOfRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines int64
+	}{{"negative", -1}, {"beyond uint32", 1 << 33}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			if err := s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: BandHidden, Height: SizedHeight(1)}}); err != nil {
+				t.Fatalf("SetSectionHeights: %v", err)
+			}
+			if _, err := s.db().Exec(`UPDATE sidebar_view SET hidden_lines = ? WHERE id = 1`, tt.lines); err != nil {
+				t.Fatalf("corrupt the height: %v", err)
+			}
+
+			// Act
+			_, err := s.SidebarView(context.Background())
+
+			// Assert
+			if err == nil {
+				t.Fatalf("SidebarView read a height of %d lines without error", tt.lines)
+			}
+		})
+	}
+}
+
+func TestSetSectionHeightsRefusesNoChange(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("SetSectionHeights handed no change did not panic")
+		}
+	}()
+
+	// Act
+	_ = s.SetSectionHeights(context.Background(), nil)
+}
+
+func TestSetSectionHeightsRefusesAnUnknownSection(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("SetSectionHeights handed an unknown section did not panic")
+		}
+	}()
+
+	// Act
+	_ = s.SetSectionHeights(context.Background(), []SectionHeightChange{{Section: "open_lines", Height: SizedHeight(1)}})
 }

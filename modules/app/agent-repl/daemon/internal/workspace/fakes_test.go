@@ -216,7 +216,9 @@ type fakeDB struct {
 	setMergeQueueFoldedErr error
 	setHiddenFoldedErr     error
 	setOpenFoldedErr       error
-	viewErr                error
+	// setSectionHeightsErr fails the band section heights write.
+	setSectionHeightsErr error
+	viewErr              error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
@@ -4413,6 +4415,29 @@ func (d *fakeDB) SetHiddenSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.HiddenFolded = folded
+	d.view = &view
+	return nil
+}
+
+// SetSectionHeights records every band section height CHANGES names, all or
+// none.
+func (d *fakeDB) SetSectionHeights(_ context.Context, changes []wsm.SectionHeightChange) error {
+	if d.setSectionHeightsErr != nil {
+		return d.setSectionHeightsErr
+	}
+	view := d.currentView()
+	for _, c := range changes {
+		switch c.Section {
+		case wsm.BandMergeQueue:
+			view.MergeQueueHeight = c.Height
+		case wsm.BandMerged:
+			view.MergedHeight = c.Height
+		case wsm.BandHidden:
+			view.HiddenHeight = c.Height
+		default:
+			panic("fakeDB: unknown band section " + string(c.Section))
+		}
+	}
 	d.view = &view
 	return nil
 }

@@ -636,6 +636,9 @@ type Verbs interface {
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
+	// SizeSections records the heights of the band sections a drag of the
+	// rules between them changed, in one write, and republishes the roster.
+	SizeSections(ctx context.Context, changes []wsm.SectionHeightChange) error
 	// CreateSubsection adds a named subsection at the bottom of a
 	// repository's section and republishes the roster (arrange.go).
 	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error)

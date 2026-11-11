@@ -2011,3 +2011,60 @@ func TestADeployMediatorTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryBandSectionStatesItsHeight(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*wsm.SidebarView, wsm.SectionHeight)
+		read func(t *testing.T, r sidebar.Resolver) (fitted bool, lines uint32, sized bool)
+	}{
+		{
+			name: "merge queue",
+			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.MergeQueueHeight = h },
+			read: func(t *testing.T, r sidebar.Resolver) (bool, uint32, bool) {
+				s := latest(t, r).GetMergeQueue()
+				return s.GetFitted() != nil, s.GetSized().GetLines(), s.GetSized() != nil
+			},
+		},
+		{
+			name: "recently merged",
+			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.MergedHeight = h },
+			read: func(t *testing.T, r sidebar.Resolver) (bool, uint32, bool) {
+				s := latest(t, r).GetRecentlyMerged()
+				return s.GetFitted() != nil, s.GetSized().GetLines(), s.GetSized() != nil
+			},
+		},
+		{
+			name: "hidden",
+			set:  func(v *wsm.SidebarView, h wsm.SectionHeight) { v.HiddenHeight = h },
+			read: func(t *testing.T, r sidebar.Resolver) (bool, uint32, bool) {
+				s := latest(t, r).GetHidden()
+				return s.GetFitted() != nil, s.GetSized().GetLines(), s.GetSized() != nil
+			},
+		},
+	}
+	heights := []struct {
+		name   string
+		height wsm.SectionHeight
+	}{{"fitted", wsm.FittedHeight()}, {"sized to none", wsm.SizedHeight(0)}, {"sized to eight", wsm.SizedHeight(8)}}
+	for _, tt := range tests {
+		for _, h := range heights {
+			t.Run(tt.name+" "+h.name, func(t *testing.T) {
+				// Arrange.
+				r, _ := newResolver(t)
+				reg := registry(workspace("w1", "one"))
+				tt.set(&reg.View, h.height)
+
+				// Act.
+				r.SetRegistry(reg)
+
+				// Assert: exactly one arm is set, and it is the recorded height.
+				fitted, lines, sized := tt.read(t, r)
+				wantLines, wantSized := h.height.Lines()
+				if fitted == sized || sized != wantSized || lines != wantLines {
+					t.Fatalf("height = fitted %v, sized %v (%d lines); want sized %v (%d lines)", fitted, sized, lines, wantSized, wantLines)
+				}
+			})
+		}
+	}
+}

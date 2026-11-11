@@ -389,3 +389,102 @@ func TestEverySingletonSectionFoldSharesOneShape(t *testing.T) {
 		})
 	}
 }
+
+func TestSizeSectionsRecordsEveryHeightAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name    string
+		prior   wsm.SidebarView
+		changes []wsm.SectionHeightChange
+		want    wsm.SidebarView
+	}{
+		{
+			name:    "a drag under the Open section sizes the Merge Queue section alone",
+			changes: []wsm.SectionHeightChange{{Section: wsm.BandMergeQueue, Height: wsm.SizedHeight(7)}},
+			want:    wsm.SidebarView{MergeQueueHeight: wsm.SizedHeight(7)},
+		},
+		{
+			name: "a drag between two bands sizes both at once",
+			changes: []wsm.SectionHeightChange{
+				{Section: wsm.BandMerged, Height: wsm.SizedHeight(2)},
+				{Section: wsm.BandHidden, Height: wsm.SizedHeight(0)},
+			},
+			want: wsm.SidebarView{MergedHeight: wsm.SizedHeight(2), HiddenHeight: wsm.SizedHeight(0)},
+		},
+		{
+			name:    "a fitted height replaces a sized one and keeps the folds",
+			prior:   wsm.SidebarView{HiddenFolded: true, HiddenHeight: wsm.SizedHeight(4), MergedHeight: wsm.SizedHeight(3)},
+			changes: []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.FittedHeight()}},
+			want:    wsm.SidebarView{HiddenFolded: true, MergedHeight: wsm.SizedHeight(3)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := tt.prior
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.SizeSections(context.Background(), tt.changes)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SizeSections: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if got := f.sidebar.registries[0].View; got != tt.want {
+				t.Fatalf("republished view = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSizeSectionsLogsEachHeight(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.SizeSections(context.Background(), []wsm.SectionHeightChange{
+		{Section: wsm.BandMergeQueue, Height: wsm.SizedHeight(5)},
+		{Section: wsm.BandMerged, Height: wsm.FittedHeight()},
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SizeSections: %v", err)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == opSizeSections {
+			if r.Context[string(wsm.BandMergeQueue)] != uint32(5) || r.Context[string(wsm.BandMerged)] != "fitted" {
+				t.Fatalf("size record context = %v, want each section's height", r.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no info record under %s: %v", opSizeSections, f.log.logger.Records())
+}
+
+func TestSizeSectionsSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setSectionHeightsErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.SizeSections(context.Background(), []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.SizedHeight(1)}})
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed height write was answered as success")
+	}
+	if !loggedAtError(f, opSizeSections) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if f.db.view != nil {
+		t.Fatalf("view = %+v after a failed write, want it untouched", *f.db.view)
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed write", len(f.sidebar.registries))
+	}
+}

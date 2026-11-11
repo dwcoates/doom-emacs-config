@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math"
 
 	"agent-repld/internal/dlog"
 )
@@ -81,6 +83,21 @@ const mergeQueueFoldedDDL = `
 ALTER TABLE sidebar_view ADD COLUMN merge_queue_folded INTEGER NOT NULL DEFAULT 0;
 `
 
+// sectionHeightsDDL is the layout-172 addition: the lines each band section
+// below the Open section shows (agentrepl.v1.UpdateSidebarView's
+// size_sections, owner request 2026-11-11: the rules between the sections are
+// dragged). NULL is FITTED, the height of a section nobody has sized, which
+// is how every section drew before.
+//
+// Like the other column-add steps it is an ALTER, applied after sidebar_view
+// on a fresh file and as its own step on a migrated one. IT IS ADDITIVE: the
+// previous build names no such column.
+const sectionHeightsDDL = `
+ALTER TABLE sidebar_view ADD COLUMN merge_queue_lines INTEGER;
+ALTER TABLE sidebar_view ADD COLUMN merged_lines INTEGER;
+ALTER TABLE sidebar_view ADD COLUMN hidden_lines INTEGER;
+`
+
 // openShowsDDL is the layout-76 addition, kept as shipped because deployed
 // files carry it: what the open-workspaces section's repository sections
 // showed, their open workspaces (0) or their merge queues (1). THE TOGGLE WAS
@@ -137,6 +154,76 @@ type SidebarView struct {
 	HiddenFolded bool
 	// OpenFolded is whether the open-workspaces section is collapsed.
 	OpenFolded bool
+	// MergeQueueHeight is the Merge Queue section's height.
+	MergeQueueHeight SectionHeight
+	// MergedHeight is the Recently Merged section's height.
+	MergedHeight SectionHeight
+	// HiddenHeight is the hidden-workspaces section's height.
+	HiddenHeight SectionHeight
+}
+
+// SectionHeight is a band section's height: FITTED by the page (the zero
+// value), or SIZED to a number of lines by a drag of the rules beside it. The
+// fields are unexported so a line count without the sized mark, or the mark
+// without its count, cannot be built.
+type SectionHeight struct {
+	sized bool
+	lines uint32
+}
+
+// FittedHeight is the height of a section the page fits by its share of the
+// rail.
+func FittedHeight() SectionHeight { return SectionHeight{} }
+
+// SizedHeight is the height of a section sized to show LINES lines.
+func SizedHeight(lines uint32) SectionHeight { return SectionHeight{sized: true, lines: lines} }
+
+// Lines is the sized height's line count, and false for a fitted height.
+func (h SectionHeight) Lines() (uint32, bool) { return h.lines, h.sized }
+
+// BandSection names a band section a height is recorded for.
+type BandSection string
+
+// The band sections, each named by its sidebar_view column.
+const (
+	BandMergeQueue BandSection = "merge_queue_lines"
+	BandMerged     BandSection = "merged_lines"
+	BandHidden     BandSection = "hidden_lines"
+)
+
+// SectionHeightChange is one band section's new height.
+type SectionHeightChange struct {
+	Section BandSection
+	Height  SectionHeight
+}
+
+// column is the sidebar_view column SECTION's height lives in. A section no
+// constant names is a caller's bug.
+func (b BandSection) column() string {
+	switch b {
+	case BandMergeQueue, BandMerged, BandHidden:
+		return string(b)
+	}
+	panic(fmt.Sprintf("wsm: %q names no band section", string(b)))
+}
+
+// heightValue is HEIGHT as its column stores it: NULL for fitted.
+func heightValue(h SectionHeight) any {
+	if lines, sized := h.Lines(); sized {
+		return int64(lines)
+	}
+	return nil
+}
+
+// heightOf reads a height column back: NULL is fitted.
+func heightOf(lines sql.NullInt64) (SectionHeight, error) {
+	if !lines.Valid {
+		return FittedHeight(), nil
+	}
+	if lines.Int64 < 0 || lines.Int64 > math.MaxUint32 {
+		return SectionHeight{}, fmt.Errorf("sidebar_view: a section height of %d lines is out of range", lines.Int64)
+	}
+	return SizedHeight(uint32(lines.Int64)), nil
 }
 
 // DefaultSidebarView is the view nobody has changed: the recently-merged band
@@ -172,14 +259,51 @@ func (s *store) SetOpenSectionFolded(ctx context.Context, folded bool) error {
 		`UPDATE sidebar_view SET open_folded = ? WHERE id = 1`, folded)
 }
 
+// SetSectionHeights records every band section height in CHANGES in ONE
+// write, leaving the rest of the view as it stands, so a drag that sizes the
+// sections on both sides of a rule is never read half done.
+func (s *store) SetSectionHeights(ctx context.Context, changes []SectionHeightChange) error {
+	if len(changes) == 0 {
+		panic("wsm: SetSectionHeights handed no change")
+	}
+	fields := dlog.Context{}
+	for _, c := range changes {
+		lines, sized := c.Height.Lines()
+		if sized {
+			fields[c.Section.column()] = lines
+		} else {
+			fields[c.Section.column()] = "fitted"
+		}
+	}
+	return s.write(ctx, "daemon.wsm.set_section_heights", fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := mintSidebarView(ctx, tx); err != nil {
+			return err
+		}
+		for _, c := range changes {
+			if _, err := tx.ExecContext(ctx, `UPDATE sidebar_view SET `+c.Section.column()+` = ? WHERE id = 1`, heightValue(c.Height)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// mintSidebarView inserts the singleton at DefaultSidebarView when nobody has
+// changed the view yet, so the columns a write leaves alone keep their
+// defaults.
+func mintSidebarView(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO sidebar_view (id, merged_folded) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`,
+		DefaultSidebarView.MergedFolded)
+	return err
+}
+
 // updateSidebarView writes one column of the singleton, first minting the row
 // at DefaultSidebarView when nobody has changed the view yet, in the same
 // transaction, so the columns this write leaves alone keep their defaults.
 func (s *store) updateSidebarView(ctx context.Context, op string, fields dlog.Context, update string, value any) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO sidebar_view (id, merged_folded) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`,
-			DefaultSidebarView.MergedFolded); err != nil {
+		if err := mintSidebarView(ctx, tx); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, update, value)
@@ -194,13 +318,22 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	view := DefaultSidebarView
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var read SidebarView
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, merge_queue_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
-			Scan(&read.MergedFolded, &read.MergeQueueFolded, &read.HiddenFolded, &read.OpenFolded)
+		var queueLines, mergedLines, hiddenLines sql.NullInt64
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, merge_queue_folded, hidden_folded, open_folded, merge_queue_lines, merged_lines, hidden_lines FROM sidebar_view WHERE id = 1`).
+			Scan(&read.MergedFolded, &read.MergeQueueFolded, &read.HiddenFolded, &read.OpenFolded, &queueLines, &mergedLines, &hiddenLines)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		for _, h := range []struct {
+			into *SectionHeight
+			from sql.NullInt64
+		}{{&read.MergeQueueHeight, queueLines}, {&read.MergedHeight, mergedLines}, {&read.HiddenHeight, hiddenLines}} {
+			if *h.into, err = heightOf(h.from); err != nil {
+				return err
+			}
 		}
 		view = read
 		return nil

@@ -709,6 +709,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 	}
 	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the Recently Merged band", log)
 	setMergedFold(section, r.state.reg.View.MergedFolded)
+	setMergedHeight(section, r.state.reg.View.MergedHeight)
 	return section
 }
 
@@ -738,6 +739,7 @@ func (r *resolver) mergeQueueSection(log dlog.Logger) *frontendv1.RosterMergeQue
 			"repo_id": string(repo), "invariant_violation": "a merge queue's workspaces name a registered repository"})
 	}
 	setMergeQueueFold(section, r.state.reg.View.MergeQueueFolded)
+	setMergeQueueHeight(section, r.state.reg.View.MergeQueueHeight)
 	return section
 }
 
@@ -766,6 +768,7 @@ func (r *resolver) hiddenSection(hidden []wsm.Workspace, rc rowContext, log dlog
 		HiddenRows: rows,
 	}
 	setHiddenFold(section, r.state.reg.View.HiddenFolded)
+	setHiddenHeight(section, r.state.reg.View.HiddenHeight)
 	return section
 }
 
@@ -832,6 +835,36 @@ func setMergeQueueFold(section *frontendv1.RosterMergeQueueSection, folded bool)
 		return
 	}
 	section.Fold = &frontendv1.RosterMergeQueueSection_Expanded{Expanded: &frontendv1.RosterMergeQueueSectionExpanded{}}
+}
+
+// setMergeQueueHeight states the Merge Queue section's height. The height is
+// the daemon's so every page draws the same one (UpdateSidebarView).
+func setMergeQueueHeight(section *frontendv1.RosterMergeQueueSection, height wsm.SectionHeight) {
+	if lines, sized := height.Lines(); sized {
+		section.Height = &frontendv1.RosterMergeQueueSection_Sized{Sized: &frontendv1.RosterMergeQueueSectionSized{Lines: lines}}
+		return
+	}
+	section.Height = &frontendv1.RosterMergeQueueSection_Fitted{Fitted: &frontendv1.RosterMergeQueueSectionFitted{}}
+}
+
+// setMergedHeight states the Recently Merged section's height. The height is
+// the daemon's so every page draws the same one (UpdateSidebarView).
+func setMergedHeight(section *frontendv1.RosterMergedSection, height wsm.SectionHeight) {
+	if lines, sized := height.Lines(); sized {
+		section.Height = &frontendv1.RosterMergedSection_Sized{Sized: &frontendv1.RosterMergedSectionSized{Lines: lines}}
+		return
+	}
+	section.Height = &frontendv1.RosterMergedSection_Fitted{Fitted: &frontendv1.RosterMergedSectionFitted{}}
+}
+
+// setHiddenHeight states the hidden section's height. The height is the
+// daemon's so every page draws the same one (UpdateSidebarView).
+func setHiddenHeight(section *frontendv1.RosterHiddenSection, height wsm.SectionHeight) {
+	if lines, sized := height.Lines(); sized {
+		section.Height = &frontendv1.RosterHiddenSection_Sized{Sized: &frontendv1.RosterHiddenSectionSized{Lines: lines}}
+		return
+	}
+	section.Height = &frontendv1.RosterHiddenSection_Fitted{Fitted: &frontendv1.RosterHiddenSectionFitted{}}
 }
 
 // sectionHeader composes a repository or Recently Merged header: its label and
