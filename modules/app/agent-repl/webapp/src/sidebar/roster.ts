@@ -20,6 +20,7 @@
  * highlight through `RosterRowCurrent`, deliberately, so no client can compute
  * it differently. The field is validated and logged, and that is all.
  */
+import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
 import {
   BAND_FLOOR,
   HIDDEN_SECTION_CLASS,
@@ -104,7 +105,6 @@ import {
 } from "./deploys-fold.js";
 import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
-import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
@@ -640,6 +640,8 @@ function headerLabel(header: HTMLElement): HTMLElement {
 export interface HeadedBoxWire {
   header?: RosterSectionHeader;
   fold: RosterSectionFold;
+  /** A band section's height (section-resize.ts); only the bands carry one. */
+  height?: RosterSectionHeight;
 }
 
 /** How one kind of headed section is identified and decorated. */
@@ -663,6 +665,11 @@ export interface HeadedBoxShape {
    * (a repository with no rows still draws, so the grouping does not flicker).
    */
   leftOut?: { when: (header: RosterSectionHeader, path: string) => boolean; attribute: string };
+  /**
+   * A band section below the Open section, whose height the daemon holds and
+   * a drag of its rule sets (section-resize.ts): its wire carries `height`.
+   */
+  resizable?: true;
 }
 
 /** How a rows-bodied headed section is identified, decorated and drawn. */
@@ -720,6 +727,10 @@ export function drawHeadedBox(
     shape.countless === true,
   );
   const drawnBody = body();
+  if (shape.resizable === true) {
+    if (u.height === undefined) throw new Error(`${path}: a band section's wire carries no height`);
+    drawSectionHeight(section, shape.foldKey, drawRosterSectionHeight(u.height, `${path}.height`), sc);
+  }
   if (shape.leftOut?.when(header, `${path}.header`) === true) {
     section.hidden = true;
     section.setAttribute(shape.leftOut.attribute, "true");
@@ -773,6 +784,7 @@ export function drawRosterMergedSection(
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
       decorateHeader: (header) => header.appendChild(drawMergedTodayCount(facts.flat(), sc)),
+      resizable: true,
     },
     groups,
   );
@@ -792,7 +804,7 @@ export function drawGroupedSection(
   u: HeadedBoxWire,
   sc: SidebarContext,
   path: string,
-  shape: Pick<HeadedBoxShape, "foldKey" | "className" | "target" | "decorateHeader">,
+  shape: Pick<HeadedBoxShape, "foldKey" | "className" | "target" | "decorateHeader" | "resizable">,
   groups: HTMLElement[],
 ): HTMLElement {
   return drawHeadedBox(
@@ -842,6 +854,7 @@ export function drawRosterMergeQueueSection(
       className: MERGE_QUEUE_SECTION_CLASS,
       target: { case: "mergeQueue", value: {} },
       decorateHeader: (header) => header.appendChild(drawQueueCount(total)),
+      resizable: true,
     },
     groups,
   );
@@ -1147,6 +1160,7 @@ export function drawRosterHiddenSection(
       className: HIDDEN_SECTION_CLASS,
       target: { case: "hidden", value: {} },
       place: "hidden",
+      resizable: true,
       leftOut: {
         when: (header, headerPath) =>
           drawRosterSectionCount(requireMessage(header.count, `${headerPath}.count`), `${headerPath}.count`) === 0,

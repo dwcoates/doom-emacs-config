@@ -47,6 +47,8 @@ import {
   mergedGroupFacts,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
+import { RESIZE_HANDLE_CLASS } from "../../src/sidebar/section-resize.js";
+import { BAND_SIZED_ATTRIBUTE } from "../../src/sidebar/band-fit.js";
 import { REARRANGED_ATTRIBUTE } from "../../src/drag.js";
 import {
   MERGE_QUEUE_CLASS,
@@ -2885,5 +2887,68 @@ describe("drawRepositoryGroup", () => {
   it("is the one box both sections' groups are drawn in", () => {
     // A group box made by hand could miss its section or repository, which its fold is keyed by.
     expect([rosterSource.match(/drawRepositoryGroup\("(merge-queue|recently-merged)"/g)?.length, rosterSource.match(/className = MERGED_GROUP_CLASS/g)?.length]).toEqual([2, 1]);
+  });
+});
+
+describe("a band section's height", () => {
+  /** A rail drawing one row in every band, each band sized as SIZED says. */
+  const sizedRail = (sized: { queue?: number; merged?: number; hidden?: number } = {}) =>
+    drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })],
+        mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("q-0") } })], false, sized.queue ?? null),
+        merged: mergedSection([MERGED_ROW], false, sized.merged ?? null),
+        hidden: hiddenSection([HIDDEN_ROW], 1, false, sized.hidden ?? null),
+      }),
+      sidebarContext(),
+    );
+  const BANDS = [
+    { name: "Merge Queue", cls: ".merge-queue-section", sized: { queue: 4 } },
+    { name: "Recently Merged", cls: ".merged-section", sized: { merged: 4 } },
+    { name: "Hidden Workspaces", cls: ".hidden-section", sized: { hidden: 4 } },
+  ];
+
+  it.each(BANDS)("states the lines a sized $name section shows", ({ cls, sized }) => {
+    const section = pane(sizedRail(sized)).querySelector(cls) as HTMLElement;
+    expect(section.getAttribute(BAND_SIZED_ATTRIBUTE)).toBe("4");
+  });
+
+  it.each(BANDS)("states no lines on a fitted $name section", ({ cls }) => {
+    const section = pane(sizedRail()).querySelector(cls) as HTMLElement;
+    expect(section.hasAttribute(BAND_SIZED_ATTRIBUTE)).toBe(false);
+  });
+
+  it("draws the grip over every band's rule, the one shape every band shares", () => {
+    const drawn = pane(sizedRail());
+    const grips = [...drawn.querySelectorAll(`:scope > .repo > .${RESIZE_HANDLE_CLASS}`)].map((grip) => (grip.parentElement as HTMLElement).getAttribute("data-section"));
+    expect(grips).toEqual(["merge-queue", "merged", "hidden"]);
+  });
+
+  it("refuses a band section whose wire carries no height arm", () => {
+    const section = hiddenSection([HIDDEN_ROW], 1, false);
+    section.height = { case: undefined };
+    expect(() => drawWorkspaceRoster(roster({ hidden: section }), sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("offers the resize cursor on a band's rule under an open section", () => {
+    const drawn = sizedRail();
+    expect(inRail(drawn, () => cascadedValue(pane(drawn).querySelector(`.hidden-section > .${RESIZE_HANDLE_CLASS}`) as Element, "cursor"))).toBe("row-resize");
+  });
+
+  it("offers no resize cursor on a band's rule under no open section", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ open: openSection(true), mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("q-0") } })]) }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(pane(drawn).querySelector(`.merge-queue-section > .${RESIZE_HANDLE_CLASS}`) as Element, "cursor"))).not.toBe("row-resize");
+  });
+
+  it("takes no room with the grip, its margins cancelling its height", () => {
+    const drawn = sizedRail();
+    const lengths = inRail(drawn, () => {
+      const grip = pane(drawn).querySelector(`.hidden-section > .${RESIZE_HANDLE_CLASS}`) as Element;
+      return ["height", "margin-top", "margin-bottom"].map((property) => Number.parseFloat(cascadedValue(grip, property)));
+    });
+    expect(lengths.reduce((sum, px) => sum + px, 0)).toBe(0);
   });
 });

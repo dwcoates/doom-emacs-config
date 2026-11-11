@@ -41,6 +41,7 @@ import { createDeploysFold, installDeploysFoldReset } from "./deploys-fold.js";
 import { createDeploysMore } from "./deploys-more.js";
 import { openScope } from "./scope.js";
 import { installFocusFold } from "./section-fold.js";
+import { installSectionResize } from "./section-resize.js";
 import { pageFocusLeft, type FocusLeft } from "../focus-left.js";
 import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
@@ -392,6 +393,10 @@ function mountSidebarIn(
   // that lives as long as the rail.
   const focusFoldScope = openScope(rail);
   const removeFocusFold = installFocusFold(host, focusFoldScope.context, focusLeft);
+  // THE RULES BETWEEN THE SECTIONS ARE DRAGGED (section-resize.ts, owner
+  // request 2026-11-11): each drag paints the heights it asks for and the
+  // band fit draws them at once.
+  const removeSectionResize = installSectionResize(body, focusFoldScope.context, () => bandFit.refit());
 
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
@@ -567,6 +572,7 @@ function mountSidebarIn(
       transients.dispose();
       removeDeploysFoldReset();
       removeFocusFold();
+      removeSectionResize();
       focusFoldScope.dispose(host);
       rail.deploysMore.dispose();
       versionNotices?.dispose();

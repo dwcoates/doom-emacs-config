@@ -1457,6 +1457,21 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   padding-top: 0;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
 }
+/* THE RULE ABOVE AN OPEN BAND IS DRAGGED (owner request, 2026-11-11;
+   src/sidebar/section-resize.ts): a grip a few pixels tall straddles the
+   rule. Its margins cancel its height, so it takes no room in the fit, and a
+   folded band, whose rule moves nothing, draws none. It offers the resize
+   cursor only while an open section stands above it to take the room. */
+#ws-sidebar .repo > .sb-band-resize {
+  position: relative;
+  z-index: 1;
+  height: 7px;
+  margin-top: -4px;
+  margin-bottom: -3px;
+}
+#ws-sidebar .sb-pane > .repo:not(.folded):not([hidden]) ~ .repo > .sb-band-resize { cursor: row-resize; }
+#ws-sidebar .repo.folded > .sb-band-resize { display: none; }
+html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 /* Above the rule: the gap less the 3.3px a row or a folded subsection
    header reaches below its baseline, or the 0.8px a folded band's header
    does. */

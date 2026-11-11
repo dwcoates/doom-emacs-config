@@ -386,19 +386,28 @@ function sectionFold(
  * daemon-held fold is COLLAPSED unless said, as the rail leaves it once the
  * focus has left the page.
  */
-export function mergedSection(rows: RosterRow[] = [], collapsed: boolean = true): RosterMergedSection {
-  return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], collapsed);
+export function mergedSection(rows: RosterRow[] = [], collapsed: boolean = true, sized: number | null = null): RosterMergedSection {
+  return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], collapsed, sized);
+}
+
+/**
+ * A band section's height arm: SIZED lines, or FITTED (null) as the daemon
+ * draws a section nobody has sized.
+ */
+export function bandHeight(sized: number | null): { case: "fitted"; value: object } | { case: "sized"; value: { lines: number } } {
+  return sized === null ? { case: "fitted", value: {} } : { case: "sized", value: { lines: sized } };
 }
 
 /**
  * The Recently Merged section carrying GROUPS and its fold stated. Its header
  * counts nothing, as the daemon draws it.
  */
-export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean = true): RosterMergedSection {
+export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean = true, sized: number | null = null): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
     header: { label: { text: "Recently Merged" } },
     groups,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    height: bandHeight(sized),
   });
 }
 
@@ -407,11 +416,12 @@ export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean =
  * stated: EXPANDED unless said, as the daemon draws a section nobody has
  * folded. Its header's count is the web app's, summed over GROUPS' queues.
  */
-export function mergeQueueBand(groups: RosterMergeQueueRepoGroup[] = [], collapsed: boolean = false): RosterMergeQueueSection {
+export function mergeQueueBand(groups: RosterMergeQueueRepoGroup[] = [], collapsed: boolean = false, sized: number | null = null): RosterMergeQueueSection {
   return create(RosterMergeQueueSectionSchema, {
     header: { label: { text: "Merge Queue" } },
     groups,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    height: bandHeight(sized),
   });
 }
 
@@ -461,11 +471,13 @@ export function hiddenSection(
   rows: RosterRow[] = [],
   count: number = rows.length,
   collapsed: boolean = false,
+  sized: number | null = null,
 ): RosterHiddenSection {
   return create(RosterHiddenSectionSchema, {
     header: { label: { text: "Hidden" }, count: { workspaces: count } },
     hiddenRows: { rows: rows.map(hiddenRow) },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    height: bandHeight(sized),
   });
 }
 

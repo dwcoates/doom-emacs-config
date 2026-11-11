@@ -32,6 +32,10 @@ import {
   regionStops,
   REGION_SELECTOR,
   sectionRegions,
+  BAND_SIZED_ATTRIBUTE,
+  bandSize,
+  fittedSection,
+  sizeSectionLines,
 } from "../../src/sidebar/band-fit.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
@@ -1299,5 +1303,158 @@ describe("sectionRegions", () => {
     const found = sectionRegions(root).map((r) => r.region);
     // Assert
     expect(found).toEqual([...root.querySelectorAll(REGION_SELECTOR)]);
+  });
+});
+
+describe("sizeSectionLines", () => {
+  /** Every section's stops, ROW px a line. */
+  const all = (o: number, q: number, m: number, h: number) => ({ open: stops(o), queue: stops(q), merged: stops(m), hidden: stops(h) });
+  const FITTED = { open: 14, queue: 3, merged: 0, hidden: 3 };
+
+  it.each([
+    {
+      name: "a sized Merge Queue section its lines, the Open section the rest",
+      room: 20 * ROW,
+      s: all(40, 10, 10, 10),
+      sizes: { queue: 5, merged: null, hidden: null },
+      fitted: FITTED,
+      want: { open: 12, queue: 5, merged: 0, hidden: 3 },
+    },
+    {
+      name: "a section sized beyond its lines every line it holds",
+      room: 20 * ROW,
+      s: all(40, 0, 0, 4),
+      sizes: { queue: null, merged: null, hidden: 50 },
+      fitted: { open: 16, queue: 0, merged: 0, hidden: 4 },
+      want: { open: 16, queue: 0, merged: 0, hidden: 4 },
+    },
+    {
+      name: "a section sized to none its header alone",
+      room: 20 * ROW,
+      s: all(40, 0, 10, 10),
+      sizes: { queue: null, merged: 0, hidden: null },
+      fitted: { open: 14, queue: 0, merged: 3, hidden: 3 },
+      want: { open: 17, queue: 0, merged: 0, hidden: 3 },
+    },
+    {
+      name: "a short rail's unsized band shrunk before the sized one",
+      room: 5 * ROW,
+      s: all(10, 10, 0, 10),
+      sizes: { queue: 4, merged: null, hidden: null },
+      fitted: { open: 0, queue: 2, merged: 0, hidden: 3 },
+      want: { open: 0, queue: 4, merged: 0, hidden: 1 },
+    },
+    {
+      name: "a rail too short for the sized bands shrinking the lowest first",
+      room: 3 * ROW,
+      s: all(10, 10, 0, 10),
+      sizes: { queue: 2, merged: null, hidden: 4 },
+      fitted: { open: 0, queue: 2, merged: 0, hidden: 1 },
+      want: { open: 0, queue: 2, merged: 0, hidden: 1 },
+    },
+    {
+      name: "the room a whole Open section leaves to the unsized bands",
+      room: 20 * ROW,
+      s: all(3, 10, 30, 2),
+      sizes: { queue: 2, merged: null, hidden: null },
+      fitted: { open: 3, queue: 10, merged: 1, hidden: 2 },
+      want: { open: 3, queue: 2, merged: 13, hidden: 2 },
+    },
+  ])("allocates $name", ({ room, s, sizes, fitted, want }) => {
+    // Arrange / Act
+    const got = sizeSectionLines(room, s, sizes, fitted);
+    // Assert
+    expect(got).toEqual(want);
+  });
+
+  it.each([
+    { name: "a negative size", sizes: { queue: -1, merged: null, hidden: null }, s: all(3, 3, 3, 3) },
+    { name: "a fractional size", sizes: { queue: null, merged: 1.5, hidden: null }, s: all(3, 3, 3, 3) },
+    { name: "stops not starting at zero", sizes: { queue: 1, merged: null, hidden: null }, s: { ...all(3, 3, 3, 3), queue: [5, 20] } },
+  ])("refuses $name", ({ sizes, s }) => {
+    // Arrange / Act / Assert
+    expect(() => sizeSectionLines(100, s, sizes, { open: 0, queue: 0, merged: 0, hidden: 0 })).toThrow(RangeError);
+  });
+});
+
+describe("bandSize", () => {
+  it("reads a fitted section as null", () => {
+    // Arrange
+    const section = document.createElement("div");
+    // Act / Assert
+    expect(bandSize(section)).toBeNull();
+  });
+
+  it("reads the lines a sized section states", () => {
+    // Arrange
+    const section = document.createElement("div");
+    section.setAttribute(BAND_SIZED_ATTRIBUTE, "7");
+    // Act / Assert
+    expect(bandSize(section)).toBe(7);
+  });
+
+  it("refuses a stated size that is no line count", () => {
+    // Arrange
+    const section = document.createElement("div");
+    section.setAttribute(BAND_SIZED_ATTRIBUTE, "two");
+    // Act / Assert
+    expect(() => bandSize(section)).toThrow(RangeError);
+  });
+
+  it("logs a stated size that is no line count", async () => {
+    // Arrange
+    const section = document.createElement("div");
+    section.className = "hidden-section";
+    section.setAttribute(BAND_SIZED_ATTRIBUTE, "-3");
+    const capture = captureLogRecords("error");
+    // Act
+    expect(() => bandSize(section)).toThrow(RangeError);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit.malformed-size");
+    expect(record.context).toMatchObject({ band: "hidden-section", sized: "-3" });
+  });
+});
+
+describe("fitBands with a sized band", () => {
+  it("gives a sized Hidden Workspaces its lines and the Open section the rest", () => {
+    // Arrange — room for twenty lines; a folded Deploys group is one line.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    band(rail.pane, "hidden-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
+    laidOut(rail, 500, 100);
+    // Act
+    const got = fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(got).toEqual({ queue: 0, open: 11, merged: 1, hidden: 8 });
+  });
+
+  it("logs the sizes it fitted by", async () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    band(rail.pane, "hidden-section").setAttribute(BAND_SIZED_ATTRIBUTE, "8");
+    laidOut(rail, 500, 100);
+    const capture = captureLogRecords("debug");
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.band-fit");
+    expect(record.context).toMatchObject({ queue_sized: null, merged_sized: null, hidden_sized: 8 });
+  });
+
+  it("records what it measured of each section for a drag of its rule", () => {
+    // Arrange
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    laidOut(rail, 500, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    const hidden = fittedSection(band(rail.pane, "hidden-section"));
+    expect([hidden?.lines, hidden?.stops.length]).toEqual([5, 11]);
+  });
+
+  it("has measured nothing of a section never fitted", () => {
+    // Arrange
+    const rail = drawn({ open: 3, hidden: 3 });
+    // Act / Assert
+    expect(fittedSection(band(rail.pane, "hidden-section"))).toBeNull();
   });
 });

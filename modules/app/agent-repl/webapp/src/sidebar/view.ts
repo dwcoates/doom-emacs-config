@@ -6,7 +6,8 @@
  * Every workspace has its own page, and each page draws the view the roster
  * push carries — a section's fold (`RosterRepoSection.fold`,
  * `RosterMergedSection.fold`, `RosterHiddenSection.fold`,
- * `RosterOpenSection.fold`), and whether the open section's repository
+ * `RosterOpenSection.fold`), a band section's height
+ * (`RosterHiddenSection.height` and its siblings, `section-resize.ts`), and whether the open section's repository
  * sections show their merge queues (`RosterOpenSection.shows`,
  * `merge-queue-view.ts`) — so a change asked for in one page reaches every
  * page on the same push.
@@ -28,8 +29,12 @@
  */
 import { log } from "../log.js";
 
-/** A piece of view state's value: a fold, collapsed or not, or the merge queues, shown or not. */
-export type ViewValue = boolean;
+/**
+ * A piece of view state's value: a fold, collapsed or not; the merge queues,
+ * shown or not; or a band section's height, its lines or null while it is
+ * fitted.
+ */
+export type ViewValue = boolean | number | null;
 
 /** Paint one copy of a piece of view state. */
 export type ViewPaint<T extends ViewValue> = (value: T) => void;
@@ -37,6 +42,11 @@ export type ViewPaint<T extends ViewValue> = (value: T) => void;
 /** The key a section's fold is held under. */
 export function foldViewKey(sectionKey: string): string {
   return `fold:${sectionKey}`;
+}
+
+/** The key a band section's height is held under. */
+export function heightViewKey(sectionKey: string): string {
+  return `height:${sectionKey}`;
 }
 
 /** The attribute a section's fold control, its header, carries (`section-fold.ts`). */
