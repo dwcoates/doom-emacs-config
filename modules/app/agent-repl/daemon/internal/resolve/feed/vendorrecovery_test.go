@@ -308,11 +308,6 @@ func TestATransientNoticeOlderThanTheNewestServiceIsRetiredAsItIsDrawn(t *testin
 }
 
 func TestCureOfIsTheOneRetirementRule(t *testing.T) {
-	noticeRow := func(subject *conversationv1.AgentResponseSynthesizedNotice) *frontendv1.FeedRow {
-		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
-			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Notice: drawnNotice(subject)}},
-		}}}
-	}
 	ending := func(errored *frontendv1.FeedTurnEndedErrored) *frontendv1.FeedRow {
 		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_TurnEnded{TurnEnded: &frontendv1.FeedTurnEnded{
 			Outcome: &frontendv1.FeedTurnEnded_Errored{Errored: errored},
@@ -327,12 +322,12 @@ func TestCureOfIsTheOneRetirementRule(t *testing.T) {
 		want    cardCure
 		answers bool
 	}{
-		{name: "trouble waiting cures leaves on service", row: noticeRow(transientSubject()), want: cardCure{subject: "vendor_transient", service: true}, answers: true},
-		{name: "an exhausted allowance leaves on service", row: noticeRow(usageLimitSubject()), want: cardCure{subject: "usage_limit", service: true}, answers: true},
-		{name: "the account refused leaves on service or sign-in", row: noticeRow(accountSubject()), want: cardCure{subject: "account", service: true, signIn: true}, answers: true},
-		{name: "an approaching allowance stays", row: noticeRow(usageWarningSubject())},
-		{name: "a changed window stays", row: noticeRow(usageTransitionSubject())},
-		{name: "an unclassified notice stays", row: noticeRow(unclassifiedSubject())},
+		{name: "trouble waiting cures leaves on service", row: noticeRowOf(transientSubject()), want: cardCure{subject: "vendor_transient", service: true}, answers: true},
+		{name: "an exhausted allowance leaves on service", row: noticeRowOf(usageLimitSubject()), want: cardCure{subject: "usage_limit", service: true}, answers: true},
+		{name: "the account refused leaves on service or sign-in", row: noticeRowOf(accountSubject()), want: cardCure{subject: "account", service: true, signIn: true}, answers: true},
+		{name: "an approaching allowance stays", row: noticeRowOf(usageWarningSubject())},
+		{name: "a changed window stays", row: noticeRowOf(usageTransitionSubject())},
+		{name: "an unclassified notice stays", row: noticeRowOf(unclassifiedSubject())},
 		{name: "an overloaded ending leaves on service", row: ending(&frontendv1.FeedTurnEndedErrored{
 			Marker: vendorFault(&frontendv1.FeedOutcomeVendorFaultExpansion{}),
 			Error:  &frontendv1.FeedTurnEndedErrored_Overloaded{Overloaded: &frontendv1.FeedTurnErrorOverloaded{}},

@@ -29,6 +29,13 @@ func (h *harness) subjectNotice(unit, text, turn string, subject *conversationv1
 		}, nil), &conversationv1.TurnId{Value: turn}, nil)
 }
 
+// noticeRowOf is a bare notice row whose producer classed it SUBJECT.
+func noticeRowOf(subject *conversationv1.AgentResponseSynthesizedNotice) *frontendv1.FeedRow {
+	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+		Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Notice: drawnNotice(subject)}},
+	}}}
+}
+
 // The notice subjects, as a producer classes them.
 func unclassifiedSubject() *conversationv1.AgentResponseSynthesizedNotice {
 	return &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{Unclassified: &conversationv1.AgentNoticeUnclassified{}}}

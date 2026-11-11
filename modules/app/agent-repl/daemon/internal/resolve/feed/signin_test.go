@@ -328,12 +328,8 @@ func TestLeavesOnSignIn(t *testing.T) {
 		{name: "a broken bubble", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{}}}},
 		}}}, want: true},
-		{name: "an account notice", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
-			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Notice: drawnNotice(accountSubject())}},
-		}}}, want: true},
-		{name: "a transient notice", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
-			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Notice: drawnNotice(transientSubject())}},
-		}}}},
+		{name: "an account notice", row: noticeRowOf(accountSubject()), want: true},
+		{name: "a transient notice", row: noticeRowOf(transientSubject())},
 		{name: "a model response", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{}},
 		}}}},
