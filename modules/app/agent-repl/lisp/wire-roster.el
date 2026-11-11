@@ -1422,44 +1422,15 @@ reached the head.  The standing is never unset."
 
 (defun agent-repl-wire-decode-roster-merge-queue-waiting (value)
   "Decode VALUE as `RosterMergeQueueWaiting'.
-A plist `(:subject SUBJECT :queued-at-ms MS :placement PLACEMENT :racing
-RACING)'.  PLACEMENT is nil for a merge put in line the ordinary way, and
-otherwise `RosterMergeQueueWaitingPlacement''s decode.  RACING is nil while
-the merge waits, and `(:since-ms MS)' while it is worked on behind the head,
-MS when it took that slot."
+A plist `(:subject SUBJECT :queued-at-ms MS)': a merge waiting behind the
+head, and when it was put in line."
   (let ((object (agent-repl-wire--object "RosterMergeQueueWaiting" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placement racing))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs))
     (agent-repl-wire--decoded
      "RosterMergeQueueWaiting"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueWaiting" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)
-           :placement (agent-repl-wire--decode-optional-message
-                       "RosterMergeQueueWaiting" 'placement object
-                       #'agent-repl-wire-decode-roster-merge-queue-waiting-placement)
-           :racing (agent-repl-wire--decode-optional-message
-                    "RosterMergeQueueWaiting" 'racing object
-                    #'agent-repl-wire-decode-roster-merge-queue-waiting-racing)))))
-
-(defun agent-repl-wire-decode-roster-merge-queue-waiting-placement (value)
-  "Decode VALUE as `RosterMergeQueueWaitingPlacement'.
-`(:arm ARM :value nil)', ARM `:front' for a merge the user put at the
-front and `:returned' for one back from a repair out of line; nil for a
-set placement whose arm this build does not name, which draws no label."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueWaitingPlacement" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueWaitingPlacement" object '(front returned))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueWaitingPlacement"
-     (agent-repl-wire--decode-oneof
-      "RosterMergeQueueWaitingPlacement" 'placement object
-      `((front :front ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueWaitingFront" v)))
-        (returned :returned ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueWaitingReturned" v))))
-      t))))
-
-(defun agent-repl-wire-decode-roster-merge-queue-waiting-racing (value)
-  "Decode VALUE as `RosterMergeQueueWaitingRacing'.
-A plist `(:since-ms MS)': when the merge took its racing slot."
-  (agent-repl-wire--decode-roster-merge-queue-span "RosterMergeQueueWaitingRacing" value '(sinceMs)))
+           :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-pauser (value)
   "Decode VALUE as `RosterMergeQueuePauser', `(:arm ARM :value V)'.
@@ -1491,17 +1462,22 @@ them), and t for a hard stop."
 
 (defun agent-repl-wire-decode-roster-repo-merge-queue (value)
   "Decode VALUE as `RosterRepoMergeQueue'.
-A plist `(:head HEAD :waiting WAITING :paused PAUSED :remediating
-REMEDIATING :github GITHUB)': the merge at the head (nil only while the line
-is empty and a merge remediates or a workspace stands in a GitHub merge
-queue), the merges waiting behind it, the queue's pause
+A plist `(:head HEAD :waiting WAITING :paused PAUSED :fixing-tests FIXING
+:resolving-conflicts RESOLVING :awaiting-fixing-tests AWAITING-FIXING
+:awaiting-resolving-conflicts AWAITING-RESOLVING :github GITHUB)': the
+merge at the head (nil only while the line is empty and a merge stands out
+of line or a workspace stands in a GitHub merge queue), the merges waiting
+behind it, the queue's pause
 \(`agent-repl-wire-decode-roster-merge-queue-paused'), nil while it runs,
-the merges remediating out of line
-\(`agent-repl-wire-decode-roster-merge-queue-remediating'), and the
-workspaces standing in a GitHub merge queue
+the one merge holding each repair slot (nil while it is free), the merges
+awaiting each slot in the order each is granted it
+\(`agent-repl-wire-decode-roster-merge-queue-repair'), and the workspaces
+standing in a GitHub merge queue
 \(`agent-repl-wire-decode-roster-merge-queue-github-entry')."
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
-    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused remediating github))
+    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object
+                                 '(head waiting paused fixingTests resolvingConflicts
+                                        awaitingFixingTests awaitingResolvingConflicts github))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1511,9 +1487,18 @@ workspaces standing in a GitHub merge queue
            :paused (agent-repl-wire--decode-optional-message
                     "RosterRepoMergeQueue" 'paused object
                     #'agent-repl-wire-decode-roster-merge-queue-paused)
-           :remediating (agent-repl-wire--decode-repeated
-                         "RosterRepoMergeQueue" 'remediating object
-                         #'agent-repl-wire-decode-roster-merge-queue-remediating)
+           :fixing-tests (agent-repl-wire--decode-optional-message
+                          "RosterRepoMergeQueue" 'fixingTests object
+                          (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueFixingTests" v)))
+           :resolving-conflicts (agent-repl-wire--decode-optional-message
+                                 "RosterRepoMergeQueue" 'resolvingConflicts object
+                                 (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueResolvingConflicts" v)))
+           :awaiting-fixing-tests (agent-repl-wire--decode-repeated
+                                   "RosterRepoMergeQueue" 'awaitingFixingTests object
+                                   (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingFixingTests" v)))
+           :awaiting-resolving-conflicts (agent-repl-wire--decode-repeated
+                                          "RosterRepoMergeQueue" 'awaitingResolvingConflicts object
+                                          (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingResolvingConflicts" v)))
            :github (agent-repl-wire--decode-repeated
                     "RosterRepoMergeQueue" 'github object
                     #'agent-repl-wire-decode-roster-merge-queue-github-entry)))))
@@ -1547,37 +1532,20 @@ and how many entries the queue holds."
      (list :place (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'place object)
            :total (agent-repl-wire--decode-uint32 "RosterMergeQueueGithubPlace" 'total object)))))
 
-(defun agent-repl-wire-decode-roster-merge-queue-remediating (value)
-  "Decode VALUE as `RosterMergeQueueRemediating'.
-A plist `(:subject SUBJECT :since-ms MS :reason REASON)': a merge
-remediating out of line, when it stepped aside, and what it repairs
-\(`agent-repl-wire-decode-roster-merge-queue-remediating-reason')."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueRemediating" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueRemediating" object '(subject sinceMs reason))
+(defun agent-repl-wire-decode-roster-merge-queue-repair (message value)
+  "Decode VALUE as MESSAGE, one merge at or awaiting a repair slot.
+MESSAGE is one of the four shapes that share it:
+`RosterMergeQueueFixingTests', `RosterMergeQueueResolvingConflicts',
+`RosterMergeQueueAwaitingFixingTests' and
+`RosterMergeQueueAwaitingResolvingConflicts'.  A plist `(:subject SUBJECT
+:since-ms MS)': the merge, and when it took its slot or began awaiting it."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(subject sinceMs))
     (agent-repl-wire--decoded
-     "RosterMergeQueueRemediating"
+     message
      (list :subject (agent-repl-wire--decode-message
-                     "RosterMergeQueueRemediating" 'subject object
-                     #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueRemediating" 'sinceMs object)
-           :reason (agent-repl-wire--decode-message
-                    "RosterMergeQueueRemediating" 'reason object
-                    #'agent-repl-wire-decode-roster-merge-queue-remediating-reason)))))
-
-(defun agent-repl-wire-decode-roster-merge-queue-remediating-reason (value)
-  "Decode VALUE as `RosterMergeQueueRemediatingReason'.
-`:tests' for a merge fixing its failing tests, `:conflicts' for one
-resolving its rebase's conflicts, and nil for a reason set with no arm
-this build names."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueRemediatingReason" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueRemediatingReason" object '(tests conflicts))
-    (plist-get
-     (agent-repl-wire--decode-oneof
-      "RosterMergeQueueRemediatingReason" 'reason object
-      `((tests :tests ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueRemediatingTests" v)))
-        (conflicts :conflicts ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueRemediatingConflicts" v))))
-      t)
-     :arm)))
+                     message 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :since-ms (agent-repl-wire--decode-int64 message 'sinceMs object)))))
 
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.

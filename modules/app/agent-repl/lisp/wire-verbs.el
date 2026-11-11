@@ -3876,14 +3876,6 @@ directly ahead of or behind.  Both are required."
           (list (list :ahead-of 'aheadOf #'agent-repl-wire-encode-update-merge-queue-move-to-anchor)
                 (list :behind 'behind #'agent-repl-wire-encode-update-merge-queue-move-to-anchor))))))
 
-(defun agent-repl-wire-encode-update-merge-queue-disable-racing (_value)
-  "Encode UpdateMergeQueueDisableRacing.  Empty: the switch is daemon-wide."
-  nil)
-
-(defun agent-repl-wire-encode-update-merge-queue-enable-racing (_value)
-  "Encode UpdateMergeQueueEnableRacing.  Empty: the switch is daemon-wide."
-  nil)
-
 (defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
   "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-pause value))
@@ -3908,14 +3900,6 @@ directly ahead of or behind.  Both are required."
   "Encode UpdateMergeQueueRequest's `move_to' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-move-to value))
 
-(defun agent-repl-wire-encode-update-merge-queue-request-disable-racing (value)
-  "Encode UpdateMergeQueueRequest's `disable_racing' action arm from VALUE."
-  (agent-repl-wire-encode-update-merge-queue-disable-racing value))
-
-(defun agent-repl-wire-encode-update-merge-queue-request-enable-racing (value)
-  "Encode UpdateMergeQueueRequest's `enable_racing' action arm from VALUE."
-  (agent-repl-wire-encode-update-merge-queue-enable-racing value))
-
 (defun agent-repl-wire-encode-update-merge-queue-request (request)
   "Encode UpdateMergeQueueRequest from plist REQUEST.
 REQUEST is (:action ONEOF :requester REQUESTER), both required: every
@@ -3931,9 +3915,7 @@ queue action names who asked, so the daemon records it."
                (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)
                (list :move-up 'moveUp #'agent-repl-wire-encode-update-merge-queue-request-move-up)
                (list :move-down 'moveDown #'agent-repl-wire-encode-update-merge-queue-request-move-down)
-               (list :move-to 'moveTo #'agent-repl-wire-encode-update-merge-queue-request-move-to)
-               (list :disable-racing 'disableRacing #'agent-repl-wire-encode-update-merge-queue-request-disable-racing)
-               (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)))))
+               (list :move-to 'moveTo #'agent-repl-wire-encode-update-merge-queue-request-move-to)))))
 
 (defun agent-repl-wire-decode-update-merge-queue-success (json)
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
@@ -3986,16 +3968,6 @@ for that workspace."
 named a RepositoryRef the daemon's registry does not hold."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownRepository" json))
 
-(defun agent-repl-wire-decode-update-merge-queue-racing-already-disabled (json)
-  "Decode UpdateMergeQueueRacingAlreadyDisabled from JSON.  Empty: racing is
-already disabled."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingAlreadyDisabled" json))
-
-(defun agent-repl-wire-decode-update-merge-queue-racing-not-disabled (json)
-  "Decode UpdateMergeQueueRacingNotDisabled from JSON.  Empty: racing is not
-disabled."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueRacingNotDisabled" json))
-
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -4028,20 +4000,12 @@ disabled."
   "Decode UpdateMergeQueueError's `unknown_repository' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-repository json))
 
-(defun agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled (json)
-  "Decode UpdateMergeQueueError's `racing_already_disabled' cause arm from JSON."
-  (agent-repl-wire-decode-update-merge-queue-racing-already-disabled json))
-
-(defun agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled (json)
-  "Decode UpdateMergeQueueError's `racing_not_disabled' cause arm from JSON."
-  (agent-repl-wire-decode-update-merge-queue-racing-not-disabled json))
-
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository racingAlreadyDisabled racingNotDisabled))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4052,9 +4016,7 @@ arm this codec does not know is refused as an unknown field."
          (list 'alreadyPaused :already-paused #'agent-repl-wire-decode-update-merge-queue-error-already-paused)
          (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
          (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
-         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
-         (list 'racingAlreadyDisabled :racing-already-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-already-disabled)
-         (list 'racingNotDisabled :racing-not-disabled #'agent-repl-wire-decode-update-merge-queue-error-racing-not-disabled))))))
+         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."
