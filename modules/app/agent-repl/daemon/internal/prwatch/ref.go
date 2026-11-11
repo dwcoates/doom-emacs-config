@@ -14,12 +14,14 @@ import (
 	"strconv"
 	"strings"
 
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/wsm"
 )
 
-// pullPath is a github.com pull request's path: /owner/repo/pull/number,
-// optionally followed by a tab (/files, /commits) or a fragment.
-var pullPath = regexp.MustCompile(`^/([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)/pull/([1-9][0-9]*)(?:/.*)?$`)
+// pullPath is a github.com pull request's path: /owner/repo/pull/number
+// (pullrefs.PullPathPattern), optionally followed by a tab (/files, /commits)
+// or a fragment.
+var pullPath = regexp.MustCompile(`^` + pullrefs.PullPathPattern + `(?:/.*)?$`)
 
 // ParseURL answers the pull request a github.com url names, and false for any
 // other url.
@@ -41,7 +43,7 @@ func ParseURL(raw string) (wsm.PullRequestKey, bool) {
 
 // URLOf is the pull request's web address.
 func URLOf(pr wsm.PullRequestKey) string {
-	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.Number)
+	return pullrefs.Target{Owner: pr.Owner, Repo: pr.Repo}.PullURL(strconv.FormatUint(uint64(pr.Number), 10))
 }
 
 // remoteShapes are the spellings of a github.com remote: scp-like ssh

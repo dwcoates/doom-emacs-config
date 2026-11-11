@@ -2,6 +2,7 @@ package pullrefs
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -195,5 +196,12 @@ func TestLinkifyAnswersTheRepoReferencesItLinked(t *testing.T) {
 				t.Fatalf("Linkify(%q) named %+v, want %+v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRefsScansThePullPathPattern(t *testing.T) {
+	// Assert: the address Refs scans for is the shape prwatch.ParseURL reads.
+	if !strings.Contains(pullURL.String(), PullPathPattern) {
+		t.Fatalf("pullURL = %q, want it built on PullPathPattern", pullURL.String())
 	}
 }

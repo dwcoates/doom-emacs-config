@@ -17,10 +17,16 @@ func (r Ref) URL() string {
 	return r.PullURL(r.Number)
 }
 
+// PullPathPattern is the unanchored pattern of a github.com pull request's
+// path, `/<owner>/<repo>/pull/<number>`, capturing the three in that order.
+// It is THE ONE spelling of that shape: prwatch.ParseURL anchors it to read
+// one url, Refs scans text for it.
+const PullPathPattern = `/([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)/pull/([1-9][0-9]*)`
+
 // pullURL is a pull request's address on GitHub, wherever it is written:
 // owner, repository, number. A url that runs on into a word byte (more digits,
 // a letter) is not one, which the scan checks after the match.
-var pullURL = regexp.MustCompile(`https?://(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)`)
+var pullURL = regexp.MustCompile(`https?://(?:www\.)?github\.com` + PullPathPattern)
 
 // Refs answers every pull request MARKDOWN names by its full address, in the
 // order written. It reads the text whole, code and links alike: an address is

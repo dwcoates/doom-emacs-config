@@ -81,7 +81,8 @@ func (o Owners) TargetFor(configDir, repoDir string) (Target, bool) {
 	return Target{Owner: owner, Repo: filepath.Base(filepath.Clean(repoDir))}, true
 }
 
-// PullURL is the address of pull request NUMBER in T.
+// PullURL is the address of pull request NUMBER in T: THE ONE spelling of a
+// pull request's web address (prwatch.URLOf builds through it too).
 func (t Target) PullURL(number string) string {
 	return "https://github.com/" + t.Owner + "/" + t.Repo + "/pull/" + number
 }
