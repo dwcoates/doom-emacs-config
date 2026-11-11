@@ -545,6 +545,94 @@ func TestCreateRefusesAnUnknownOriginator(t *testing.T) {
 	}
 }
 
+func TestCreateSendsBornHiddenOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *bool
+	}{
+		{name: "-hidden is born hidden", args: []string{"-hidden"}, want: boolPtr(true)},
+		{name: "unnamed is unset", args: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := only[*agentreplv1.CreateWorkspaceRequest](t, f).Hidden; (got == nil) != (tt.want == nil) || (got != nil && *got != *tt.want) {
+				t.Fatalf("hidden = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateSendsThePlacementItNames(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *agentreplv1.CreateWorkspacePlacement
+	}{
+		{name: "an existing subsection", args: []string{"-subsection", "auth"},
+			want: &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: "auth"}}},
+		{name: "a new subsection of its own", args: []string{"-new-subsection", "auth"},
+			want: &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_NewSubsection{NewSubsection: &agentreplv1.CreateWorkspaceNewSubsection{Name: "auth"}}}},
+		{name: "a new subsection gathering workspaces", args: []string{"-new-subsection", "auth", "-gather", "a, b,c"},
+			want: &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_NewSubsection{NewSubsection: &agentreplv1.CreateWorkspaceNewSubsection{Name: "auth", Gather: []string{"a", "b", "c"}}}}},
+		{name: "no placement", args: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := only[*agentreplv1.CreateWorkspaceRequest](t, f).GetPlacement(); !proto.Equal(got, tt.want) {
+				t.Fatalf("placement = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateRefusesAPlacementFlagMisuse(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "both subsection flags", args: []string{"-subsection", "a", "-new-subsection", "b"}, wantErr: "-subsection and -new-subsection are alternatives"},
+		{name: "gather beside an existing subsection", args: []string{"-subsection", "a", "-gather", "x"}, wantErr: "-gather goes with -new-subsection"},
+		{name: "gather alone", args: []string{"-gather", "x"}, wantErr: "-gather goes with -new-subsection"},
+		{name: "an empty gathered name", args: []string{"-new-subsection", "a", "-gather", "x,,y"}, wantErr: "-gather names workspaces separated by commas"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), tt.wantErr) {
+				t.Fatalf("exit %d, requests %v, stderr %q; want a usage failure saying %q", code, f.client.requests, f.errOut.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3043,3 +3131,5 @@ func TestPlaceMarksEveryArrangementItSendsAsTheAgents(t *testing.T) {
 		})
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

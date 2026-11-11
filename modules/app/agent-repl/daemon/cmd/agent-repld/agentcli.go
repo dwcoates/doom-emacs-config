@@ -625,10 +625,18 @@ func workspaceCreate(c *cliCall, args []string) int {
 	pre, post := hookFlags(fs)
 	slackThread := fs.String("slack-thread", "", "the link of the Slack message the workspace acts on; its hooks read it as AGENT_REPL_SLACK_THREAD and {{slack_thread}}")
 	originator := fs.String("originator", originatorUserOrWorkspace, "who creates the workspace: emoji-ack (the Slack emoji-ack system, with -slack-thread) or user-or-workspace")
+	hidden := fs.Bool("hidden", false, "born hidden: the workspace is never drawn in the sidebar until it is shown")
+	subsection := fs.String("subsection", "", "file the workspace into this existing subsection of its repository, by name")
+	newSubsection := fs.String("new-subsection", "", "file the workspace into a new subsection of this name, with -gather's workspaces")
+	gather := fs.String("gather", "", "comma-separated names of open, unsectioned, top-level workspaces gathered into -new-subsection")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
+	}
+	placed, err := createPlacement(*subsection, *newSubsection, *gather)
+	if err != nil {
+		return c.usageFailed("%v", err)
 	}
 	if len(positionals) != 0 || *repository == "" || *relationship == "" || *contextOrigin == "" {
 		return c.usageFailed("-repository, -relationship and -context are required, and nothing is positional")
@@ -712,10 +720,41 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if *slackThread != "" {
 		req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: *slackThread}
 	}
+	if *hidden {
+		req.Hidden = hidden
+	}
+	req.Placement = placed
 	// A DAEMON HANDING OVER names its successor, and the client sends the
 	// same create there once (newRedirectingClient), as it does every call.
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
+}
+
+// createPlacement reads -subsection, -new-subsection and -gather: nil when
+// none is given, an existing subsection for -subsection, and a new one
+// gathering -gather's comma-separated names for -new-subsection. The two
+// subsection flags are alternatives, and -gather belongs to the new one.
+func createPlacement(subsection, newSubsection, gather string) (*agentreplv1.CreateWorkspacePlacement, error) {
+	switch {
+	case subsection != "" && newSubsection != "":
+		return nil, errors.New("-subsection and -new-subsection are alternatives")
+	case gather != "" && newSubsection == "":
+		return nil, errors.New("-gather goes with -new-subsection")
+	case subsection != "":
+		return &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: subsection}}, nil
+	case newSubsection != "":
+		fresh := &agentreplv1.CreateWorkspaceNewSubsection{Name: newSubsection}
+		if gather != "" {
+			for _, name := range strings.Split(gather, ",") {
+				if name = strings.TrimSpace(name); name == "" {
+					return nil, fmt.Errorf("-gather names workspaces separated by commas, not %q", gather)
+				}
+				fresh.Gather = append(fresh.Gather, name)
+			}
+		}
+		return &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_NewSubsection{NewSubsection: fresh}}, nil
+	}
+	return nil, nil
 }
 
 // landsIntoMain is -lands-into's spelling of the primary branch.
