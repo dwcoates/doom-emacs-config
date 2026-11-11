@@ -339,6 +339,19 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		if !v.deps.Cards.ReraiseColdGate(ws, vendorSessionID) {
 			log.Error(opColdGate, "the failed re-open's gate could not stand again: its cold facts are gone",
 				dlog.Context{"choice": choice})
+			return
+		}
+		// A CREDENTIAL THE VENDOR REJECTED is the user's to renew: the gate
+		// that stands again offers the sign-in beside its choices.
+		var label *startLabel
+		if errors.As(err, &label) && label.signIn != "" {
+			if !v.deps.Cards.OfferColdGateSignIn(ws, label.signIn) {
+				log.Error(opColdGate, "the re-raised gate was gone before its sign-in notice could be put on it",
+					dlog.Context{"choice": choice, "refusal": label.signIn})
+			} else {
+				log.Info(opColdGate, "the re-open was refused for the account's credential; the gate offers the sign-in",
+					dlog.Context{"choice": choice, "refusal": label.signIn})
+			}
 		}
 	}
 }

@@ -239,6 +239,20 @@ func (f *verbsForwarder) answerColdGate(ctx context.Context, ws ids.WorkspaceID,
 	return verbs.AnswerColdGate(ctx, ws, answer)
 }
 
+// OnSignedIn is a completed sign-in's retry of a start the vendor rejected for
+// the credential, for the sign-in fan-out, built BEFORE the verbs that own
+// it. A sign-in completes only through a login flow the server serves, so one
+// arriving before the verbs are bound is a wiring defect, answered as an
+// error the fan-out records.
+func (f *verbsForwarder) OnSignedIn(ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a sign-in completed")
+	if err != nil {
+		return err
+	}
+	verbs.OnSignedIn(ws)
+	return nil
+}
+
 // publishRegistry is the roster's durable-half republish for a component built
 // BEFORE the verbs, which own it. The republish reads the verbs out of the
 // forwarder when it runs; one asked for before they are bound is a wiring

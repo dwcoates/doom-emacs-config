@@ -4014,6 +4014,83 @@ func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *te
 	}
 }
 
+// ---- the gate's sign-in notice ----
+
+func TestAGateOfferedTheSignInDrawsTheRefusalAndTheAction(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+
+	// Act.
+	offered := f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
+
+	// Assert.
+	notice := lastGateStanding(t, f).GetSignIn()
+	if !offered || notice.GetCause().GetText() != "Failed to authenticate" || notice.GetAction() == nil {
+		t.Fatalf("offered = %v, sign_in = %v, want the refusal and the action", offered, notice)
+	}
+}
+
+func TestNoGateStandingTakesNoSignInNotice(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	offered := f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
+
+	// Assert.
+	if offered || len(f.feed.synthesized) != 0 {
+		t.Fatalf("offered = %v with rows %v, want refused and nothing published", offered, f.feed.synthesized)
+	}
+}
+
+func TestAGateRaisedAfreshCarriesNoSignInNotice(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
+
+	// Act.
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetSignIn(); got != nil {
+		t.Fatalf("sign_in = %v, want none on a gate raised afresh", got)
+	}
+}
+
+func TestARejectionTheSignInCuresIsLabeledWithTheRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		label *shimv1.StartSessionVendorStartFailed
+		want  string
+	}{
+		{"a rejected credential", rejectedFor(credentialRejected()), credentialRejected().GetMessage()},
+		{"a credential lacking permission", rejectedFor(permissionRefused()), ""},
+		{"a rejection that was no API answer", rejectedVendorStart(), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.response = vendorRefusal(tc.label, "the vendor refused")
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			var label *startLabel
+			if !errors.As(err, &label) || label.signIn != tc.want {
+				t.Fatalf("Start = %v, want a rejection labeled with sign-in %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestAHeldCountChangeWithNoGatePublishesNoRow(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

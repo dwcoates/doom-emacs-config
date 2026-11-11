@@ -85,7 +85,11 @@ type startLabel struct {
 	network bool
 	// cause is the shim's own account, drawn verbatim.
 	cause string
-	err   error
+	// signIn is the vendor's refusal of the account's credential, "" unless
+	// the shim's typed refusal is one a sign-in cures
+	// (ladder.ApiFailureCuredBySignIn). Set only on a rejection.
+	signIn string
+	err    error
 }
 
 func (l *startLabel) Error() string { return l.err.Error() }
@@ -120,6 +124,9 @@ type vendorRun struct {
 	// terminal fault REPLACES it, so a revival that meets the same spent
 	// window does not stack a second one.
 	terminal ids.FaultID
+	// signIn reports that the terminal fault is a rejection a sign-in cures
+	// (health.SignInCures): a completed sign-in answers it.
+	signIn bool
 	// cancel ends the bring-up in flight that is asking, nil when none is;
 	// done is closed when that bring-up has returned.
 	cancel context.CancelCauseFunc
@@ -258,7 +265,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if !label.retryable {
 			f.closeRetrying(ctx, log, ws)
 			if label.vendor {
-				f.noteVendorRejected(ctx, log, ws, label.cause)
+				f.noteVendorRejected(ctx, log, ws, label.cause, label.signIn != "")
 			} else {
 				f.noteSessionRefused(ctx, log, ws, err)
 			}
@@ -355,7 +362,7 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 		f.closeRetrying(ctx, log, ws)
 		log.Error(opBringUp, "the vendor kept failing to start for the whole retry window; nothing retries until a restart", fields)
 		f.openTerminal(ctx, log, ws, health.KindVendorStartFailed,
-			"the vendor failed to start for the whole retry window", evidence)
+			"the vendor failed to start for the whole retry window", evidence, false)
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorFailed})
 		return 0, false
 	}
@@ -382,17 +389,24 @@ func (f *Fleet) noteRetryableFailure(ctx context.Context, log dlog.Logger, ws id
 }
 
 // noteVendorRejected files `vendor_start_rejected`: the vendor refused the
-// start for a reason asking again cannot fix.
-func (f *Fleet) noteVendorRejected(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause string) {
-	log.Error(opBringUp, "the vendor refused to start; nothing retries until a restart", dlog.Context{"cause": cause})
-	f.openTerminal(ctx, log, ws, health.KindVendorStartRejected,
-		"the vendor refused to start", map[string]string{health.EvidenceCause: cause})
+// start for a reason asking again cannot fix. SIGNIN marks a refusal a
+// sign-in cures, which is then what retries the start (Fleet.SignedIn).
+func (f *Fleet) noteVendorRejected(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause string, signIn bool) {
+	evidence := map[string]string{health.EvidenceCause: cause}
+	if signIn {
+		evidence[health.EvidenceSignInCures] = "true"
+		log.Error(opBringUp, "the vendor rejected the account's credential; the start retries once a sign-in completes", dlog.Context{"cause": cause})
+	} else {
+		log.Error(opBringUp, "the vendor refused to start; nothing retries until a restart", dlog.Context{"cause": cause})
+	}
+	f.openTerminal(ctx, log, ws, health.KindVendorStartRejected, "the vendor refused to start", evidence, signIn)
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepVendorRejected, Text: cause})
 }
 
 // openTerminal files a terminal vendor-start fault, replacing the one this
-// fleet filed before it (opened first, then the old one closed).
-func (f *Fleet) openTerminal(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string, evidence map[string]string) {
+// fleet filed before it (opened first, then the old one closed). SIGNIN
+// records that a sign-in cures it.
+func (f *Fleet) openTerminal(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, kind, detail string, evidence map[string]string, signIn bool) {
 	id, opened := f.openVendorFault(ctx, log, ws, kind, detail, evidence)
 	if !opened {
 		return
@@ -401,6 +415,7 @@ func (f *Fleet) openTerminal(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	run := f.vendorRunLocked(ws)
 	previous := run.terminal
 	run.terminal = id
+	run.signIn = signIn
 	f.mu.Unlock()
 	if previous != "" {
 		f.closeFault(ctx, log, previous)
@@ -467,6 +482,7 @@ func (f *Fleet) endVendorRun(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// the fleet forgets it so it is never closed twice.
 	hadTerminal := run.terminal != ""
 	run.terminal = ""
+	run.signIn = false
 	f.mu.Unlock()
 	f.closeRetrying(ctx, log, ws)
 	if hadTerminal {
@@ -492,4 +508,51 @@ func (f *Fleet) noteRosterVendor(ws ids.WorkspaceID) {
 	}
 	f.mu.Unlock()
 	f.deps.VendorStarts(ws, state)
+}
+
+// SignedIn takes a completed sign-in for the workspace's account root and
+// answers whether the workspace's start must be RETRIED: a standing
+// `vendor_start_rejected` this fleet filed is a refusal of the credential the
+// sign-in just renewed.
+//
+// A STANDING COLD GATE IS THE USER'S CHOICE, so it is never re-spent here (a
+// compaction costs tokens): its sign-in notice leaves the row, the rejection
+// the sign-in answered is closed, and the gate stands for the user to answer
+// again; the answer is false. With no gate standing, the fault is left to the
+// retried start, whose session retires it (its lifetime ends at a started
+// session), and the answer is true. Nothing to answer is false.
+func (f *Fleet) SignedIn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	gate, gated := f.coldGates[ws]
+	gated = gated && !gate.answering
+	noticed := gated && gate.signIn != ""
+	if noticed {
+		gate.signIn = ""
+		f.coldGates[ws] = gate
+	}
+	run := f.vendorRunLocked(ws)
+	cured := run.terminal != "" && run.signIn
+	answered := run.terminal
+	if cured && gated {
+		run.terminal, run.signIn = "", false
+	}
+	f.mu.Unlock()
+	if noticed {
+		f.logTransition(ws, "cold_gate_sign_in", true, false, dlog.Context{"reason": "signed_in"})
+		f.publishColdGateRow(ws)
+	}
+	switch {
+	case !cured:
+		log.Debug(opBringUp, "a sign-in completed and no start rejected for the credential stands; nothing to retry", dlog.Context{"cold_gate_notice": noticed})
+		return false
+	case gated:
+		f.closeFault(context.WithoutCancel(ctx), log, answered)
+		f.noteRosterVendor(ws)
+		f.publishHost(ws)
+		log.Info(opBringUp, "a sign-in answered the credential the vendor rejected; the cold gate stands for the user's answer", dlog.Context{"fault": string(answered)})
+		return false
+	default:
+		log.Info(opBringUp, "a sign-in answered the credential the vendor rejected; the start is retried", dlog.Context{"fault": string(answered)})
+		return true
+	}
 }

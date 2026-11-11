@@ -1121,6 +1121,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Feed:         feedResolver,
 		Footer:       footerResolver,
 		Roster:       sidebarResolver,
+		Starts:       verbsRef,
 		Log:          log,
 	})
 	if err != nil {
@@ -2427,6 +2428,7 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 		SubStatus: line.Cell.SubStatus,
 		Detail:    line.Detail,
 		At:        line.At,
+		SignIn:    health.SignInCures(line.Record),
 	})
 	// THE ROSTER TAKES THE NETWORK FAULT FROM THE SAME DOOR, so the footer's
 	// network_fault and the roster's never stand on different facts. Every

@@ -307,7 +307,19 @@ const (
 	EvidenceCause = "cause"
 	// EvidenceFailingSinceMs is the run's first failure, in epoch ms.
 	EvidenceFailingSinceMs = "failing_since_ms"
+	// EvidenceSignInCures is "true" on a `vendor_start_rejected` fault whose
+	// refusal a sign-in cures: the vendor rejected the account's credential
+	// (ladder.ApiFailureCuredBySignIn over the shim's typed refusal). Absent
+	// on every other fault.
+	EvidenceSignInCures = "sign_in_cures"
 )
+
+// SignInCures reports whether F is a standing vendor-start rejection a
+// sign-in cures (EvidenceSignInCures): the footer offers the sign-in beside
+// its line, and a completed sign-in retries the start.
+func SignInCures(f wsm.Fault) bool {
+	return f.Kind == KindVendorStartRejected && f.Evidence[EvidenceSignInCures] == "true"
+}
 
 // VendorStartLine composes the ONE line the footer's `vendor_start` salient
 // draws for a standing vendor-start fault, out of the fault's own evidence
@@ -319,6 +331,9 @@ func VendorStartLine(f wsm.Fault) string {
 		return fmt.Sprintf("Claude SDK did not start (attempt %d): %s · retrying",
 			evidenceUint32(f, EvidenceFailedAttempts), f.Evidence[EvidenceCause])
 	case KindVendorStartRejected:
+		if SignInCures(f) {
+			return fmt.Sprintf("Claude SDK refused to start: %s · sign in to retry", f.Evidence[EvidenceCause])
+		}
 		return fmt.Sprintf("Claude SDK refused to start: %s · restart: SPC o C-c", f.Evidence[EvidenceCause])
 	case KindVendorStartFailed:
 		return "Claude SDK failed to start · restart: SPC o C-c"

@@ -290,10 +290,13 @@ type recordingFooter struct {
 	footer.Resolver
 	opened []string
 	closed []string
+	// faults is every fault opened, whole.
+	faults []footer.Fault
 }
 
 func (f *recordingFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
 	f.opened = append(f.opened, fault.ID)
+	f.faults = append(f.faults, fault)
 }
 
 func (f *recordingFooter) CloseFault(_ ids.WorkspaceID, id string) {
@@ -341,6 +344,34 @@ func testFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver,
 // networkLine is a workspace network fault's line.
 func networkLine(id ids.FaultID) health.FaultLine {
 	return health.FaultLine{ID: id, Kind: health.KindNetworkUnreachable, Cell: health.FaultCell{Status: health.FaultStatusNetworkFault, SubStatus: health.FaultSubStatusOffline}}
+}
+
+func TestTheFaultSinkTellsTheFooterWhetherASignInCuresTheFault(t *testing.T) {
+	tests := []struct {
+		name     string
+		evidence map[string]string
+		want     bool
+	}{
+		{"a rejection a sign-in cures", map[string]string{health.EvidenceSignInCures: "true"}, true},
+		{"a rejection a sign-in does not cure", map[string]string{}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			footerSink := &recordingFooter{}
+			sink := testFaultSurfaces(footerSink, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+			line := health.FaultLine{ID: "f-1", Kind: health.KindVendorStartRejected,
+				Record: wsm.Fault{Kind: health.KindVendorStartRejected, Evidence: tc.evidence}}
+
+			// Act
+			sink.FaultOpened("ws-1", line)
+
+			// Assert
+			if len(footerSink.faults) != 1 || footerSink.faults[0].SignIn != tc.want {
+				t.Fatalf("footer faults = %+v, want one with SignIn %v", footerSink.faults, tc.want)
+			}
+		})
+	}
 }
 
 func TestTheFaultSinkPassesANetworkFaultsEdgesToTheFeed(t *testing.T) {

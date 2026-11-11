@@ -682,6 +682,52 @@ func TestAnswerColdGateOpensTheFaultThatPutsTheFailureOnTheFooter(t *testing.T) 
 	}
 }
 
+func TestAReopenRefusedForTheCredentialOffersTheSignInOnTheGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		resumeErr error
+		want      []string
+	}{
+		{"a rejected credential", &startLabel{vendor: true, cause: "refused", signIn: "Failed to authenticate", err: errFake}, []string{"Failed to authenticate"}},
+		{"a rejection no sign-in cures", &startLabel{vendor: true, cause: "refused", err: errFake}, nil},
+		{"a failure that is no vendor rejection", errors.New("the producer has already written rows"), nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			standingGate(f)
+			f.fleet.resumeErr = tc.resumeErr
+
+			// Act.
+			_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+			// Assert.
+			if !slices.Equal(f.cards.signInOffers, tc.want) {
+				t.Fatalf("sign-in notices = %v, want %v", f.cards.signInOffers, tc.want)
+			}
+		})
+	}
+}
+
+func TestAReopenWhoseGateCannotStandAgainOffersNoSignIn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.cards.reraiseRefused = true
+	f.fleet.resumeErr = &startLabel{vendor: true, cause: "refused", signIn: "Failed to authenticate", err: errFake}
+
+	// Act.
+	_ = f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	if len(f.cards.signInOffers) != 0 {
+		t.Fatalf("sign-in notices = %v, want none on a gate that could not stand again", f.cards.signInOffers)
+	}
+}
+
 func TestAnswerColdGateStandsTheGateAgainWhenTheReopenFailed(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

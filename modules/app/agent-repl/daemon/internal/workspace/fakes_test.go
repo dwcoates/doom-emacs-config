@@ -2708,6 +2708,16 @@ type fakeSessions struct {
 	// vendorCancels counts every CancelVendorStart asked.
 	vendorRunning bool
 	vendorCancels []ids.WorkspaceID
+	// signInRetries makes SignedIn answer that a rejected start must be
+	// retried; signedIn is every workspace SignedIn was asked about.
+	signInRetries bool
+	signedIn      []ids.WorkspaceID
+}
+
+// SignedIn records the workspace and answers signInRetries.
+func (s *fakeSessions) SignedIn(_ context.Context, _ dlog.Logger, ws ids.WorkspaceID) bool {
+	s.signedIn = append(s.signedIn, ws)
+	return s.signInRetries
 }
 
 // CancelVendorStart records the cancellation and reports vendorRunning.
@@ -3083,6 +3093,8 @@ type fakeCards struct {
 	ended          []string
 	reraised       []string
 	reraiseRefused bool
+	// signInOffers is every sign-in notice put on a standing gate.
+	signInOffers []string
 	// coldGatesCleared counts the retirements the resolve path made.
 	coldGatesCleared int
 	modes            []string
@@ -3171,6 +3183,11 @@ func (c *fakeCards) ReraiseColdGate(_ ids.WorkspaceID, vendorSessionID string) b
 		return false
 	}
 	c.reraised = append(c.reraised, vendorSessionID)
+	return true
+}
+
+func (c *fakeCards) OfferColdGateSignIn(_ ids.WorkspaceID, refusal string) bool {
+	c.signInOffers = append(c.signInOffers, refusal)
 	return true
 }
 

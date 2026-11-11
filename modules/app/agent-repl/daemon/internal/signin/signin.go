@@ -31,6 +31,13 @@ type Surface interface {
 	OnSignedIn(ws ids.WorkspaceID)
 }
 
+// Starts is the bring-up's half: it retries a start the vendor rejected for
+// the credential the sign-in renewed. Its error says the retry could not even
+// be asked for (the bring-up is not wired yet); the fan-out records it.
+type Starts interface {
+	OnSignedIn(ws ids.WorkspaceID) error
+}
+
 // Deps is what the fan-out needs.
 type Deps struct {
 	// Workspaces lists every registered workspace (wsm.DB.ListWorkspaces).
@@ -42,6 +49,9 @@ type Deps struct {
 	Feed   Feed
 	Footer Surface
 	Roster Surface
+	// Starts is the workspaces' bring-up: a start the vendor rejected for the
+	// credential the sign-in renewed is retried (workspace.Verbs.OnSignedIn).
+	Starts Starts
 	// Log is the daemon's logger.
 	Log dlog.Logger
 }
@@ -60,6 +70,8 @@ func New(deps Deps) (*Fanout, error) {
 		return nil, errors.New("signin: an account-root router is required")
 	case deps.Feed == nil, deps.Footer == nil, deps.Roster == nil:
 		return nil, errors.New("signin: the feed, the footer and the roster are all required")
+	case deps.Starts == nil:
+		return nil, errors.New("signin: the workspaces' bring-up is required")
 	case deps.Log == nil:
 		return nil, errors.New("signin: a logger is required")
 	}
@@ -91,6 +103,10 @@ func (f *Fanout) SignedIn(ctx context.Context, configDir string) {
 		_ = f.deps.Feed.OnSignedIn(ws.ID)
 		f.deps.Footer.OnSignedIn(ws.ID)
 		f.deps.Roster.OnSignedIn(ws.ID)
+		if err := f.deps.Starts.OnSignedIn(ws.ID); err != nil {
+			f.deps.Log.Error(opSignedIn, "a sign-in completed and the workspace's rejected start could not be retried",
+				dlog.Context{"config_dir": configDir, "workspace": string(ws.ID), "cause": err.Error()})
+		}
 	}
 	fields["workspaces"] = answered
 	f.deps.Log.Info(opSignedIn, "a sign-in completed; every workspace on its account root was told", fields)
