@@ -141,10 +141,118 @@ func (g *ImportGraph) imports(f string) ([]string, error) {
 			out = append(out, r)
 		}
 	}
+	globbed, err := g.globs(f, src)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, globbed...)
 	g.mu.Lock()
 	g.direct[f] = out
 	g.mu.Unlock()
 	return out, nil
+}
+
+// globCallPattern finds an import.meta.glob call's pattern argument: one
+// string, or a list of them.
+var globCallPattern = regexp.MustCompile(`\bimport\.meta\.glob(?:Eager)?\s*\(\s*(\[[^\]]*\]|["'][^"'\n]+["'])`)
+
+// globs is every file the import.meta.glob calls in src (the file f) match:
+// vite expands each into an import of every match. A negated pattern ("!")
+// is skipped, which only places more; a pattern that is not relative names
+// no file of the package.
+func (g *ImportGraph) globs(f string, src []byte) ([]string, error) {
+	var out []string
+	for _, call := range globCallPattern.FindAllSubmatch(src, -1) {
+		for _, lit := range stringLiteral.FindAllSubmatch(call[1], -1) {
+			pattern := string(lit[1])
+			if !strings.HasPrefix(pattern, "./") && !strings.HasPrefix(pattern, "../") {
+				continue
+			}
+			matches, err := g.expandGlob(path.Join(path.Dir(f), pattern))
+			if err != nil {
+				return nil, fmt.Errorf("reuse: %s globs %q: %w", f, pattern, err)
+			}
+			out = append(out, matches...)
+		}
+	}
+	return out, nil
+}
+
+// expandGlob is every file of the checkout the repository-relative glob
+// matches: "**/" any directories, "*" and "?" within one name.
+func (g *ImportGraph) expandGlob(glob string) ([]string, error) {
+	if glob == ".." || strings.HasPrefix(glob, "../") {
+		return nil, fmt.Errorf("it reaches outside the checkout")
+	}
+	segments := strings.Split(glob, "/")
+	fixed := 0
+	for fixed < len(segments) && !strings.ContainsAny(segments[fixed], "*?[{") {
+		fixed++
+	}
+	if fixed == len(segments) {
+		ok, err := g.isFile(glob)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return []string{glob}, nil
+	}
+	base := path.Join(segments[:fixed]...)
+	re, err := globRegexp(glob)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	root := g.abs(base)
+	err = filepath.WalkDir(root, func(abs string, e fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) && abs == root {
+			return filepath.SkipAll
+		}
+		if err != nil {
+			return fmt.Errorf("walk %s: %w", abs, err)
+		}
+		if e.IsDir() {
+			if e.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(g.repo, abs)
+		if err != nil {
+			return err
+		}
+		if rel = filepath.ToSlash(rel); re.MatchString(rel) {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out, err
+}
+
+// globRegexp spells a glob as an anchored regular expression.
+func globRegexp(glob string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(glob); i++ {
+		switch c := glob[i]; {
+		case strings.HasPrefix(glob[i:], "**/"):
+			b.WriteString("(?:[^/]+/)*")
+			i += 2
+		case strings.HasPrefix(glob[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case c == '*':
+			b.WriteString("[^/]*")
+		case c == '?':
+			b.WriteString("[^/]")
+		case c == '{' || c == '[':
+			return nil, fmt.Errorf("the glob %q uses a brace or class this scan does not read", glob)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
 }
 
 // resolve answers the file a relative specifier from directory dir names,

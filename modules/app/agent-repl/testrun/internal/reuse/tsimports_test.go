@@ -192,3 +192,57 @@ func TestClosurePlacesAJavaScriptModulesDeclarations(t *testing.T) {
 		t.Fatalf("Closure = %q, want %q", got, want)
 	}
 }
+
+func TestClosureFollowsImportMetaGlobs(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{
+		"p/test/x.test.ts":        `const s = import.meta.glob(["../src/**/*.ts", "!../src/skip.ts", "./webkit/*-page.ts"], { query: "?raw" });`,
+		"p/src/a.ts":              "",
+		"p/src/deep/b.ts":         "",
+		"p/src/c.css":             "",
+		"p/test/webkit/x-page.ts": "",
+		"p/test/webkit/y.ts":      "",
+	})
+
+	// Act
+	got, err := NewImportGraph(root).Closure([]string{"p/test/x.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"p/src/a.ts", "p/src/deep/b.ts", "p/test/webkit/x-page.ts", "p/test/x.test.ts"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Closure = %q, want %q", got, want)
+	}
+}
+
+func TestGlobRegexp(t *testing.T) {
+	tests := []struct {
+		glob, path string
+		want       bool
+		wantErr    bool
+	}{
+		{glob: "p/src/**/*.ts", path: "p/src/a.ts", want: true},
+		{glob: "p/src/**/*.ts", path: "p/src/x/y/a.ts", want: true},
+		{glob: "p/src/**/*.ts", path: "p/src/a.css"},
+		{glob: "p/*-page.ts", path: "p/x-page.ts", want: true},
+		{glob: "p/*-page.ts", path: "p/d/x-page.ts"},
+		{glob: "p/?.ts", path: "p/a.ts", want: true},
+		{glob: "p/{a,b}.ts", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.glob+" "+tt.path, func(t *testing.T) {
+			// Act
+			re, err := globRegexp(tt.glob)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tt.wantErr)
+			}
+			if err == nil && re.MatchString(tt.path) != tt.want {
+				t.Fatalf("%s matches %s = %v, want %v", re, tt.path, !tt.want, tt.want)
+			}
+		})
+	}
+}

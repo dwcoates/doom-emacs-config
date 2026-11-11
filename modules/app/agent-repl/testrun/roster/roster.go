@@ -366,7 +366,8 @@ var Suites = []Suite{
 			// test. Hashed, a run that rebuilt a stale dist after keying the
 			// suite refused to record its green pass ("its inputs changed while
 			// it ran", 2026-10-16).
-			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"}}},
+			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"},
+			Units:     webappUnitInputs}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
 	// `npm run test:integration` always has.
@@ -431,6 +432,70 @@ const (
 	perfMeasurement = "its verdict is a latency measurement of this run, not a function of its inputs"
 )
 
+// webappUnitInputs is what each webapp test file reads beyond its import
+// graph, found by running every file confined to its graph (2026-11-11) and
+// declaring each read it was refused.
+var webappUnitInputs = func() map[string][]string {
+	out := map[string][]string{}
+	// The source scans, each over the webapp's own sources.
+	for _, f := range []string{
+		"test/bubble/consolidation.test.ts", "test/bubble/copy-room.test.ts", "test/code-block.test.ts",
+		"test/columns.test.ts", "test/connect-hook.test.ts", "test/connection-id.test.ts", "test/control.test.ts",
+		"test/copy-control.test.ts", "test/count-noun.test.ts", "test/document-runtime.test.ts",
+		"test/dom.test.ts", "test/drawn-status.test.ts", "test/elapsed-clock.test.ts", "test/error-cause.test.ts",
+		"test/feed/asks/ask-words.test.ts", "test/feed/bubble-selection.test.ts",
+		"test/feed/cards/exit-line.test.ts", "test/feed/cards/tool-head.test.ts", "test/feed/left-view.test.ts",
+		"test/feed/renderers.test.ts", "test/feed/rows/blocks.test.ts", "test/feed/rows/handback-badge.test.ts",
+		"test/feed/subtree-box.test.ts", "test/feed/title-fold.test.ts", "test/footer/activity.test.ts",
+		"test/footer/clock-span.test.ts", "test/frame.test.ts", "test/heat.test.ts",
+		"test/held/held-prompt.test.ts", "test/host/answers.test.ts", "test/link.test.ts",
+		"test/listeners.test.ts", "test/markdown.test.ts", "test/merge-glyph.test.ts",
+		"test/merge-queue-move.test.ts", "test/page-size.test.ts", "test/page-teardown.test.ts",
+		"test/per-document.test.ts", "test/percent-gradient.test.ts", "test/placement.test.ts",
+		"test/pointer-rest.test.ts", "test/pressure-color-call-sites.test.ts", "test/reduced-motion.test.ts",
+		"test/regexp.test.ts", "test/rpc/control-call.test.ts", "test/rpc/gesture.test.ts",
+		"test/rpc/merge-queue-refusal.test.ts", "test/rpc/oneof.test.ts", "test/rpc/page-streams.test.ts",
+		"test/rpc/refusal.test.ts", "test/rpc/refuse.test.ts", "test/rpc/requester.test.ts",
+		"test/rpc/transport.test.ts", "test/selection.test.ts", "test/sidebar/arrange.test.ts",
+		"test/sidebar/children.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
+		"test/sidebar/row.test.ts", "test/sidebar/section-fold.test.ts", "test/sidebar/verbs.test.ts",
+		"test/timers.test.ts", "test/topbar/chip-toggle.test.ts", "test/topbar/pick.test.ts",
+		"test/type-out.test.ts", "test/wall-latency.test.ts", "test/webkit-stylesheets.test.ts",
+	} {
+		out[f] = []string{"webapp/src/"}
+	}
+	// The scans over the webapp's own tests and their helpers.
+	for _, f := range []string{
+		"test/agent-only-arms.test.ts", "test/bubble/still.test.ts", "test/deferred-animation.test.ts",
+		"test/dom-rect.test.ts", "test/drag-pointer.test.ts", "test/failure-sink.test.ts",
+		"test/feed/harness.test.ts", "test/files-under.test.ts", "test/frame-queue.test.ts",
+		"test/host/popup-channel.test.ts", "test/integration/harness.self.test.ts",
+		"test/jsdom-capabilities.test.ts", "test/log-capture.test.ts", "test/page-transition.test.ts",
+		"test/prose.test.ts", "test/roster-apps.test.ts", "test/roster-families.test.ts",
+		"test/rpc/app-context.test.ts", "test/selectable.test.ts", "test/settled.test.ts",
+		"test/source-text.test.ts", "test/stylesheet.test.ts", "test/tail-triggers.test.ts",
+		"test/visibility-doc.test.ts",
+	} {
+		out[f] = []string{"webapp/test/"}
+	}
+	// The page the app boots from.
+	for _, f := range []string{
+		"test/integration/bubble-selection.integration.test.ts", "test/integration/client-log.integration.test.ts",
+		"test/integration/composer.integration.test.ts", "test/integration/failures.integration.test.ts",
+		"test/integration/feed-click-hold.integration.test.ts", "test/integration/feed-kinds.integration.test.ts",
+		"test/integration/feed-routing.integration.test.ts", "test/integration/feed-tail.integration.test.ts",
+		"test/integration/footer.integration.test.ts", "test/integration/held.integration.test.ts",
+		"test/integration/lifecycle.integration.test.ts", "test/integration/merge-queue-offer.integration.test.ts",
+		"test/integration/news-digest.integration.test.ts", "test/integration/page-mux.integration.test.ts",
+		"test/integration/refusals.integration.test.ts", "test/integration/sidebar.integration.test.ts",
+		"test/integration/streams.integration.test.ts", "test/integration/topbar.integration.test.ts",
+		"test/main.test.ts",
+	} {
+		out[f] = []string{"webapp/index.html"}
+	}
+	return out
+}()
+
 // shimUnitInputs is what each shim test file reads beyond its import graph,
 // found by running every file confined to its graph (2026-11-11) and
 // declaring each read it was refused.
@@ -442,19 +507,23 @@ var shimUnitInputs = func() map[string][]string {
 		"scripts/capture/capture.test.mjs":             {shim + "scripts/capture/prompts.json"},
 		"test/build-options.test.ts":                   {shim + "build.mjs", shim + "test/fakes/build-store-server.mjs"},
 		"test/convert/place.test.ts":                   {src + "convert/attachments.ts"},
-		"test/integration-support/detach-gate.test.ts": {shim + "test/integration/detached.test.ts"},
+		"test/integration-support/detach-gate.test.ts": {shim + "test/integration/"},
 		"test/store/stub-client.test.ts":               {shim + "test/store/"},
 	}
 	// The source scans, each over the shim's own sources.
-	for _, f := range []string{"test/convert/detached.test.ts", "test/convert/effort.test.ts", "test/engine/vendor-paths.test.ts",
+	for _, f := range []string{"test/convert/detached.test.ts", "test/convert/effort.test.ts",
 		"test/log-classification.test.ts", "test/store/update-entry.test.ts", "test/vendor-guard.test.ts",
 		"test/engine/serial-probe.test.ts", "test/engine/side-query.test.ts", "test/engine/vendor-probe.test.ts"} {
 		out[f] = []string{src}
 	}
 	// The scans over the shim's own tests.
-	for _, f := range []string{"test/log-records.test.ts", "test/vendor-transcript.test.ts", "test/temp-dir.test.ts"} {
+	for _, f := range []string{"test/log-records.test.ts", "test/vendor-transcript.test.ts"} {
 		out[f] = []string{tests}
 	}
+	// The temp-directory rule's scan covers the tests and the capture
+	// scripts; the vendor-path scan covers the sources and the tests.
+	out["test/temp-dir.test.ts"] = []string{tests, shim + "scripts/"}
+	out["test/engine/vendor-paths.test.ts"] = []string{src, tests}
 	// The recorded vendor streams, read as data.
 	for _, f := range []string{"test/convert/fold.test.ts", "test/convert/goldens/fixtures.test.ts", "test/convert/goldens/invariants.test.ts",
 		"test/convert/goldens/record-plane.test.ts", "test/convert/goldens/scenarios.test.ts", "test/fake/golden-conformance.test.ts"} {

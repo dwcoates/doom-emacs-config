@@ -880,3 +880,43 @@ func TestReuseHoldsAcrossCheckouts(t *testing.T) {
 		})
 	}
 }
+
+func TestACancelledUnitRecordsNoOutcome(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcomes []run.Outcome
+		wantLast bool
+	}{
+		{"every spec cancelled", []run.Outcome{run.Cancelled}, false},
+		{"one spec passed, one cancelled", []run.Outcome{run.Passed, run.Cancelled}, false},
+		{"one spec failed, one cancelled", []run.Outcome{run.Failed, run.Cancelled}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			v := f.decide(t, Reusing, harnessSuite, harnessUnits())
+			var results []run.Result
+			for i, o := range tt.outcomes {
+				r := run.Result{Outcome: o}
+				r.Spec.ID = fmt.Sprintf("harness#%02d", i)
+				results = append(results, r)
+			}
+
+			// Act
+			err := RecordOutcomes(f.d, Reusing, []SuiteVerdict{v}, results)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			last, ok, err := f.d.Store.Last("harness")
+			if err != nil || ok != tt.wantLast || (ok && !last.Failed) {
+				t.Fatalf("last = %+v %v (%v), want an outcome %v", last, ok, err, tt.wantLast)
+			}
+			if _, passed, _ := f.d.Store.Lookup("harness", v.Units[0].Key.Digest); passed {
+				t.Fatal("a unit with a cancelled spec was recorded a pass")
+			}
+		})
+	}
+}
