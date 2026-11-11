@@ -8,7 +8,6 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-store/internal/logging"
-	"google.golang.org/protobuf/proto"
 )
 
 // peerdelivery.go — the delivery index: which books hold the two ends of each
@@ -56,11 +55,6 @@ const (
 	// peerDeliveryDeleteSQL binds (position): the row is not, or is no longer,
 	// either end of a cross-session message.
 	peerDeliveryDeleteSQL = `DELETE FROM peer_delivery WHERE position = ?`
-
-	// peerDeliveryBackfillSQL binds (the page-line kind): every page line
-	// stored before the table existed. Read once, in the create's own
-	// transaction.
-	peerDeliveryBackfillSQL = `SELECT position, book_agent_id, frame FROM entry WHERE kind = ? AND book_agent_id IS NOT NULL`
 
 	// peerDeliveryBooksSQL binds (delivery id, the page-line kind): every
 	// (end, book) holding a live page line with that delivery id. At package
@@ -141,44 +135,17 @@ func (d *DB) writePeerDelivery(ctx context.Context, tx *sql.Tx, position int64, 
 // on every read path: the open fails (never nukes) rather than leaving a
 // delivery out of the index.
 func backfillPeerDeliveries(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, peerDeliveryBackfillSQL, kindPageLine)
+	lines, err := storedPageLines(ctx, tx, "their peer deliveries")
 	if err != nil {
-		return storagef(err, "reading the page lines to index their peer deliveries")
+		return err
 	}
-	type delivery struct {
-		position int64
-		book     string
-		id       string
-		end      string
-	}
-	var deliveries []delivery
-	for rows.Next() {
-		var position int64
-		var book string
-		var frame []byte
-		if err := rows.Scan(&position, &book, &frame); err != nil {
-			rows.Close() //nolint:errcheck // the scan already failed
-			return storagef(err, "scanning a page line to index its peer delivery")
+	for _, l := range lines {
+		id, end := peerDeliveryOf(l.entry.GetAgentUpdate().GetServeableFrame())
+		if id == "" {
+			continue
 		}
-		entry := &storev1.StoreEntry{}
-		if err := proto.Unmarshal(frame, entry); err != nil {
-			rows.Close() //nolint:errcheck // the decode already failed
-			return storagef(err, "stored frame at position %d cannot be decoded", position)
-		}
-		if id, end := peerDeliveryOf(entry.GetAgentUpdate().GetServeableFrame()); id != "" {
-			deliveries = append(deliveries, delivery{position: position, book: book, id: id, end: end})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close() //nolint:errcheck // the iteration already failed
-		return storagef(err, "iterating the page lines to index their peer deliveries")
-	}
-	if err := rows.Close(); err != nil {
-		return storagef(err, "closing the page-line listing")
-	}
-	for _, p := range deliveries {
-		if _, err := tx.ExecContext(ctx, peerDeliveryUpsertSQL, p.position, p.book, p.id, p.end); err != nil {
-			return storagef(err, "indexing the peer delivery %q at position %d", p.id, p.position)
+		if _, err := tx.ExecContext(ctx, peerDeliveryUpsertSQL, l.position, l.book, id, end); err != nil {
+			return storagef(err, "indexing the peer delivery %q at position %d", id, l.position)
 		}
 	}
 	return nil

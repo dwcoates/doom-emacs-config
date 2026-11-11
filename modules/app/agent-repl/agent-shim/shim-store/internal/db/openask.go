@@ -55,10 +55,6 @@ const (
 	// askLineDeleteSQL binds (position): the row is not, or is no longer, an ask.
 	askLineDeleteSQL = `DELETE FROM ask_line WHERE position = ?`
 
-	// askLineBackfillSQL binds (the page-line kind): every page line stored
-	// before the table existed. Read once, in the create's own transaction.
-	askLineBackfillSQL = `SELECT position, book_agent_id, frame FROM entry WHERE kind = ? AND book_agent_id IS NOT NULL`
-
 	// liveAsksSQL binds (session, the page-line kind): every open ask line in
 	// the session's lineage, oldest first, with its stored frame. At package
 	// scope so the suite EXPLAINs the production text itself.
@@ -114,42 +110,16 @@ func (d *DB) writeAskLine(ctx context.Context, tx *sql.Tx, position int64, book 
 // frame that cannot be decoded is a LOUD failure, as on every read path: the
 // open fails (never nukes) rather than leaving an ask out of the index.
 func backfillAskLines(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, askLineBackfillSQL, kindPageLine)
+	lines, err := storedPageLines(ctx, tx, "their asks")
 	if err != nil {
-		return storagef(err, "reading the page lines to index their asks")
-	}
-	type askLine struct {
-		position int64
-		book     string
-		open     bool
-	}
-	var lines []askLine
-	for rows.Next() {
-		var position int64
-		var book string
-		var frame []byte
-		if err := rows.Scan(&position, &book, &frame); err != nil {
-			rows.Close() //nolint:errcheck // the scan already failed
-			return storagef(err, "scanning a page line to index its ask")
-		}
-		entry := &storev1.StoreEntry{}
-		if err := proto.Unmarshal(frame, entry); err != nil {
-			rows.Close() //nolint:errcheck // the decode already failed
-			return storagef(err, "stored frame at position %d cannot be decoded", position)
-		}
-		if ask, open := askOf(entry.GetAgentUpdate().GetServeableFrame()); ask != nil {
-			lines = append(lines, askLine{position: position, book: book, open: open})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close() //nolint:errcheck // the iteration already failed
-		return storagef(err, "iterating the page lines to index their asks")
-	}
-	if err := rows.Close(); err != nil {
-		return storagef(err, "closing the page-line listing")
+		return err
 	}
 	for _, l := range lines {
-		if _, err := tx.ExecContext(ctx, askLineUpsertSQL, l.position, l.book, l.open); err != nil {
+		ask, open := askOf(l.entry.GetAgentUpdate().GetServeableFrame())
+		if ask == nil {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, askLineUpsertSQL, l.position, l.book, open); err != nil {
 			return storagef(err, "indexing the ask at position %d", l.position)
 		}
 	}
