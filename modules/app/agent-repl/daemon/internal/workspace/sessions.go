@@ -308,12 +308,16 @@ type FleetDeps struct {
 	// reconnected are delivered (promptqueue.Queue.ReleaseReconnectHolds).
 	SessionsUp func(ws ids.WorkspaceID)
 	// ColdGateRaised is told that a workspace's session parked at its cold
-	// gate, so a merge it has in the queue leaves it (owner ruling,
-	// 2026-10-13: a queued merge whose session went cold is ejected). Nil
+	// gate, so a merge it has in the queue keeps its place there, skipped
+	// (owner ruling, 2026-11-11, reversing the 2026-10-13 ejection). Nil
 	// tells nobody. JUDGED is a gate a shim judged just now, as opposed to
 	// one raised again (from its record, after a failed answer, carried over
 	// a handover).
 	ColdGateRaised func(ws ids.WorkspaceID, judged bool)
+	// ColdGateRetired is told that a workspace's recorded cold gate was
+	// retired (retireRecordedGate): a session came up, or the workspace was
+	// pointed at another conversation. Nil tells nobody.
+	ColdGateRetired func(ws ids.WorkspaceID)
 	// PayColdGate answers WS's standing cold gate through the verb the
 	// editor's answer takes (agentrepl.v1.AnswerColdGate). The parked bridge
 	// calls it with the pay answer when a prompt typed on claude.ai reaches a

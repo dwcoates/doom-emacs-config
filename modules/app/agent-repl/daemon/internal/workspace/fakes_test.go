@@ -2342,6 +2342,8 @@ type fakeMerge struct {
 	// raises the merge-queue question.
 	queued     bool
 	closed     []ids.WorkspaceID
+	// hidden are the workspaces OnHidden was told of, in order.
+	hidden []ids.WorkspaceID
 	enqueued   []ids.WorkspaceID
 	enqueueErr error
 	// steps records the restart's suspension and take-back, in order, and
@@ -2429,6 +2431,11 @@ func (m *fakeMerge) OnInterrupt(_ context.Context, ws ids.WorkspaceID) bool {
 
 func (m *fakeMerge) OnWorkspaceClosed(_ context.Context, ws ids.WorkspaceID) {
 	m.closed = append(m.closed, ws)
+}
+
+// OnHidden records the hidden workspace.
+func (m *fakeMerge) OnHidden(ws ids.WorkspaceID) {
+	m.hidden = append(m.hidden, ws)
 }
 
 func (m *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueued, error) {
