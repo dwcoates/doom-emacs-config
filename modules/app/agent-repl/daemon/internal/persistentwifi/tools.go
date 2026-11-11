@@ -26,6 +26,8 @@ package persistentwifi
 
 import (
 	"fmt"
+
+	"agent-repld/internal/appfreeze"
 	"path/filepath"
 	"strings"
 )
@@ -59,10 +61,15 @@ type Tools struct {
 	// macOS has no built-in command for. Optional: absent, leaving the hotspot
 	// goes straight to a radio restart.
 	WifiUtil string
-	// Brightness reads (no argument) and sets (one level, 0.0 to 1.0) the
-	// built-in display's brightness, for the lid-close dim. Optional: absent,
-	// a display move is skipped and says so.
+	// Caffeinate wakes the display the quiet state put to sleep (`-u`,
+	// declared user activity).
+	Caffeinate string
+	// Brightness sets (one level, 0.0 to 1.0) the built-in display's
+	// brightness, only to undo a lid dim an earlier build left in force.
+	// Optional: absent, that dim is reported for the user to undo.
 	Brightness string
+	// Ps lists the process table for the application freezer.
+	Ps string
 }
 
 // DefaultTools is the production layout: the system tools where macOS ships
@@ -74,7 +81,9 @@ func DefaultTools() Tools {
 		Ipconfig:     "/usr/sbin/ipconfig",
 		Networksetup: "/usr/sbin/networksetup",
 		WifiUtil:     "/opt/homebrew/bin/wifi-util",
+		Caffeinate:   "/usr/bin/caffeinate",
 		Brightness:   "/opt/homebrew/bin/mac-brightness",
+		Ps:           "/bin/ps",
 	}
 }
 
@@ -88,7 +97,9 @@ func ToolsIn(dir string) Tools {
 		Ipconfig:     in(d.Ipconfig),
 		Networksetup: in(d.Networksetup),
 		WifiUtil:     in(d.WifiUtil),
+		Caffeinate:   in(d.Caffeinate),
 		Brightness:   in(d.Brightness),
+		Ps:           in(d.Ps),
 	}
 }
 
@@ -97,6 +108,10 @@ func ToolsIn(dir string) Tools {
 type Config struct {
 	Tools   Tools
 	Hotspot string
+	// FreezeApps are the applications the quiet state freezes
+	// (appfreeze.AppsFromEnv). A fake host freezes none unless the variable
+	// names some: its process table is a fake tool's.
+	FreezeApps []string
 	// FakeLid is EnvLid's value; empty is the operating system's lid
 	// (SystemLid).
 	FakeLid string
@@ -137,6 +152,16 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
 		}
 		cfg.Tools = ToolsIn(dir)
+	}
+	switch {
+	case lid != "" && getenv(appfreeze.EnvApps) == "":
+		cfg.FreezeApps = nil
+	default:
+		apps, err := appfreeze.AppsFromEnv(getenv)
+		if err != nil {
+			return Config{}, fmt.Errorf("persistentwifi: %w", err)
+		}
+		cfg.FreezeApps = apps
 	}
 	if hotspot := getenv(EnvHotspot); hotspot != "" {
 		if strings.TrimSpace(hotspot) == "" {

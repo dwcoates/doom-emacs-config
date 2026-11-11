@@ -3,13 +3,15 @@ package persistentwifi
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
-	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 
+	"agent-repld/internal/appfreeze"
 	"agent-repld/internal/dlog"
 )
 
@@ -27,126 +29,129 @@ func (h *harness) lastStanding(t *testing.T) *harness {
 	return h
 }
 
-func TestALidCloseWithTheModeOnDims(t *testing.T) {
-	// Arrange.
-	h := newHarness(t).standing(pmsetOn, summary(true, hotspot))
-	h.r.on(argBrightnessRead, answer{out: "0.81"})
-	h.r.on(argLidDim, answer{})
+func TestALidCloseWithTheModeOnEntersTheQuietState(t *testing.T) {
+	// Arrange
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
+	h.r.on(argPowerSource, answer{out: onBattery})
+	h.r.on(argDisplaySleep, answer{})
 
-	// Act.
+	// Act
 	h.hear(LidClosed)
 
-	// Assert.
-	if h.r.count(argLidDim) != 1 || h.dims.kept() == nil || *h.dims.kept() != 0.81 {
-		t.Fatalf("calls = %v, kept = %v, want a dim keeping 0.81", h.r.ran(), h.dims.kept())
+	// Assert
+	if !slices.Equal(h.viewMoves, []bool{true}) || h.freezer.count("freeze") != 1 || h.r.count(argDisplaySleep) != 1 {
+		t.Fatalf("views %v, freezer %v, calls %v: want views stopped, one freeze, one display sleep", h.viewMoves, h.freezer.calls, h.r.ran())
 	}
 	last := h.lastStanding(t).changes[len(h.changes)-1]
-	if last.GetLidClosed() == nil || last.GetLidDim().GetRestoreLevel() != 0.81 {
-		t.Fatalf("standing = %v, want the lid closed and dimmed from 0.81", last)
+	q := last.GetQuiet()
+	if last.GetLidClosed() == nil || q == nil || q.GetDisplayAsleep() == nil ||
+		len(q.GetFrozenApps()) != 1 || q.GetFrozenApps()[0].GetName() != "Slack" || q.GetFrozenApps()[0].GetProcesses() != 4 {
+		t.Fatalf("standing = %v, want the lid closed and quiet with Slack's 4 processes frozen and the display asleep", last)
 	}
-	infos := h.records(dlog.LevelInfo, opDisplay)
+	if !slices.Equal(h.telemetry.set, []bool{true}) {
+		t.Fatalf("gauge set %v, want [true]", h.telemetry.set)
+	}
+	infos := h.records(dlog.LevelInfo, opQuiet)
 	if len(infos) != 1 || infos[0].Context["trigger"] != "lid_closed" {
-		t.Fatalf("display INFO records = %+v, want one for the closed lid", infos)
+		t.Fatalf("INFO records = %+v, want the one entering record", infos)
 	}
 }
 
-func TestALidOpenRestoresThePreCloseLevel(t *testing.T) {
-	// Arrange.
-	h := newHarness(t).standing(pmsetOn, summary(true, hotspot))
-	h.r.on(argBrightnessRead, answer{out: "0.81"})
-	h.r.on(argLidDim, answer{})
-	h.r.on(argBrightness("0.81"), answer{})
+func TestALidOpenLeavesTheQuietStateInReverse(t *testing.T) {
+	// Arrange
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
+	h.r.on(argPowerSource, answer{out: onBattery})
+	h.r.on(argDisplaySleep, answer{})
+	h.r.on(argDisplayWake, answer{})
 	h.hear(LidClosed)
 
-	// Act.
+	// Act
 	h.hear(LidOpen)
 
-	// Assert.
-	if h.r.count(argBrightness("0.81")) != 1 || h.dims.kept() != nil || h.dims.clears != 1 {
-		t.Fatalf("calls = %v, kept = %v, want a restore to 0.81 that cleared the level", h.r.ran(), h.dims.kept())
+	// Assert
+	calls := h.r.ran()
+	if h.r.count(argDisplayWake) != 1 || !slices.Equal(h.freezer.calls, []string{"freeze:lid_closed", "thaw:lid_open"}) {
+		t.Fatalf("calls %v, freezer %v: want one wake and one thaw", calls, h.freezer.calls)
 	}
-	last := h.changes[len(h.changes)-1]
-	if last.GetLidOpen() == nil || last.GetLidDim() != nil {
-		t.Fatalf("standing = %v, want the lid open and no dim", last)
+	if !slices.Equal(h.viewMoves, []bool{true, false}) {
+		t.Fatalf("views %v, want stopped then resumed", h.viewMoves)
+	}
+	if last := h.changes[len(h.changes)-1]; last.GetLidOpen() == nil || last.GetQuiet() != nil {
+		t.Fatalf("standing = %v, want the lid open and no quiet state", last)
+	}
+	if !slices.Equal(h.telemetry.set, []bool{true, false}) {
+		t.Fatalf("gauge set %v, want [true false]", h.telemetry.set)
 	}
 }
 
-func TestALidCloseWithTheModeOffLeavesTheBrightnessAlone(t *testing.T) {
-	// Arrange.
+func TestALidCloseWithTheModeOffStaysAwake(t *testing.T) {
+	// Arrange
 	h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
 
-	// Act.
+	// Act
 	h.hear(LidClosed)
 
-	// Assert.
-	for _, c := range h.r.ran() {
-		if strings.HasPrefix(c, tools.Brightness) {
-			t.Fatalf("ran %q with the mode off", c)
-		}
+	// Assert
+	if h.freezer.count("freeze") != 0 || h.r.count(argDisplaySleep) != 0 || len(h.viewMoves) != 0 {
+		t.Fatalf("freezer %v, calls %v, views %v: want nothing quieted", h.freezer.calls, h.r.ran(), h.viewMoves)
 	}
-	if last := h.changes[len(h.changes)-1]; last.GetLidClosed() == nil || last.GetLidDim() != nil {
-		t.Fatalf("standing = %v, want the lid closed and no dim", last)
+	if last := h.changes[len(h.changes)-1]; last.GetLidClosed() == nil || last.GetQuiet() != nil {
+		t.Fatalf("standing = %v, want the lid closed and no quiet state", last)
 	}
 }
 
-func TestALidCloseWhoseBrightnessCannotBeReadIsNotDimmed(t *testing.T) {
-	// Arrange.
-	h := newHarness(t).standing(pmsetOn, summary(true, hotspot))
-	h.r.on(argBrightnessRead, answer{out: "IOKit error", code: 1})
+func TestADaemonHearingAnOpenLidThawsAKeptFrozenSet(t *testing.T) {
+	// Arrange: nothing stands in this daemon; a kept set from an earlier one
+	// is the freezer's to thaw.
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
 
-	// Act.
-	h.hear(LidClosed)
-
-	// Assert.
-	if h.r.count(argLidDim) != 0 || h.dims.kept() != nil {
-		t.Fatalf("calls = %v, kept = %v, want no dim and nothing kept", h.r.ran(), h.dims.kept())
-	}
-	errs := h.records(dlog.LevelError, opDisplay)
-	if len(errs) != 1 || errs[0].Context["trigger"] != "lid_closed" || !strings.Contains(errs[0].Context["cause"].(string), "IOKit error") {
-		t.Fatalf("display ERROR records = %+v, want one carrying the tool's cause", errs)
-	}
-	if last := h.changes[len(h.changes)-1]; last.GetLidDim() != nil {
-		t.Fatalf("standing = %v, want no dim", last)
-	}
-}
-
-func TestARestartWithAKeptLevelStandsDimmedAndRestoresOnOpen(t *testing.T) {
-	// Arrange: the previous daemon dimmed the closed lid from 0.6.
-	h := newHarness(t).standing(pmsetOn, summary(true, hotspot)).keep(0.6)
-	h.r.on(argBrightness("0.6"), answer{})
-
-	// Act.
-	h.c.Refresh(context.Background())
-	h.hear(LidClosed)
-	closed := h.changes[len(h.changes)-1]
+	// Act
 	h.hear(LidOpen)
 
-	// Assert.
-	if h.changes[0].GetLidDim().GetRestoreLevel() != 0.6 {
-		t.Fatalf("boot standing = %v, want the kept dim of 0.6", h.changes[0])
-	}
-	if closed.GetLidClosed() == nil || closed.GetLidDim().GetRestoreLevel() != 0.6 {
-		t.Fatalf("closed standing = %v, want closed and still dimmed from 0.6", closed)
-	}
-	if h.r.count(argBrightnessRead) != 0 || h.r.count(argBrightness("0.6")) != 1 || h.dims.kept() != nil {
-		t.Fatalf("calls = %v, kept = %v, want no re-dim and one restore to 0.6", h.r.ran(), h.dims.kept())
+	// Assert
+	if !slices.Equal(h.freezer.calls, []string{"thaw:lid_open"}) || len(h.viewMoves) != 0 {
+		t.Fatalf("freezer %v, views %v: want one thaw and no view move", h.freezer.calls, h.viewMoves)
 	}
 }
 
-func TestUpdateOnWithTheLidClosedAfterARestartKeepsTheKeptLevel(t *testing.T) {
-	// Arrange.
-	h := newHarness(t).standing(pmsetOff, summary(true, hotspot)).keep(0.6).withLid(lidClosed)
-	scriptPower(h.r, "1")
+func TestARepeatedClosedLidNeverFreezesTwice(t *testing.T) {
+	// Arrange
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.r.on(argPowerSource, answer{out: onBattery})
+	h.r.on(argDisplaySleep, answer{})
+	h.hear(LidClosed)
 
-	// Act.
-	resp := h.c.Update(context.Background(), update("on"))
+	// Act
+	h.hear(LidClosed)
 
-	// Assert.
-	if resp.GetSuccess().GetDisplay().GetUnchanged() == nil || h.r.count(argBrightnessRead) != 0 {
-		t.Fatalf("display = %v with calls %v, want unchanged and no read", resp.GetSuccess().GetDisplay(), h.r.ran())
+	// Assert
+	if h.freezer.count("freeze") != 1 || h.r.count(argDisplaySleep) != 1 {
+		t.Fatalf("freezer %v, calls %v: want one freeze and one sleep", h.freezer.calls, h.r.ran())
 	}
-	if resp.GetSuccess().GetState().GetLidDim().GetRestoreLevel() != 0.6 {
-		t.Fatalf("state = %v, want the kept dim of 0.6", resp.GetSuccess().GetState())
+}
+
+func TestAFailedDisplaySleepIsTriedAgainOnTheNextLidReport(t *testing.T) {
+	// Arrange
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.r.on(argPowerSource, answer{out: onBattery})
+	h.r.on(argDisplaySleep, answer{out: "no display", code: 1}, answer{})
+	h.hear(LidClosed)
+	awake := h.changes[len(h.changes)-1].GetQuiet().GetDisplayAwake()
+
+	// Act
+	h.hear(LidClosed)
+
+	// Assert
+	if awake == nil || !strings.Contains(awake.GetDetail(), "no display") {
+		t.Fatalf("first standing's display = %v, want awake with the cause", awake)
+	}
+	if h.changes[len(h.changes)-1].GetQuiet().GetDisplayAsleep() == nil || h.freezer.count("freeze") != 1 {
+		t.Fatalf("standing %v, freezer %v: want the display asleep after the retry and still one freeze", h.changes[len(h.changes)-1], h.freezer.calls)
+	}
+	if errs := h.records(dlog.LevelError, opDisplay); len(errs) != 1 {
+		t.Fatalf("ERROR records = %+v, want the one failed sleep", errs)
 	}
 }
 

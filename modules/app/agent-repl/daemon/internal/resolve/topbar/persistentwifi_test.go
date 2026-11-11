@@ -68,7 +68,6 @@ func TestPersistentWifiChipProjectsTheLid(t *testing.T) {
 	cases := []struct {
 		name        string
 		lid         func(*agentreplv1.PersistentWifiState)
-		dim         *agentreplv1.PersistentWifiLidDim
 		arm         string
 		wantTooltip string
 	}{
@@ -79,12 +78,11 @@ func TestPersistentWifiChipProjectsTheLid(t *testing.T) {
 				s.Lid = &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}}
 			},
 			wantTooltip: "Closing laptop lid disables agents. Lid open."},
-		{name: "a closed lid with a dim in force", arm: "closed",
+		{name: "a closed lid", arm: "closed",
 			lid: func(s *agentreplv1.PersistentWifiState) {
 				s.Lid = &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}}
 			},
-			dim:         &agentreplv1.PersistentWifiLidDim{RestoreLevel: 0.81},
-			wantTooltip: "Closing laptop lid disables agents. Lid closed. Display dimmed for the closed lid; it returns to 81%."},
+			wantTooltip: "Closing laptop lid disables agents. Lid closed."},
 		{name: "no lid", arm: "none",
 			lid: func(s *agentreplv1.PersistentWifiState) {
 				s.Lid = &agentreplv1.PersistentWifiState_NoLid{NoLid: &agentreplv1.PersistentWifiNoLid{}}
@@ -94,7 +92,7 @@ func TestPersistentWifiChipProjectsTheLid(t *testing.T) {
 			lid: func(s *agentreplv1.PersistentWifiState) {
 				s.Lid = &agentreplv1.PersistentWifiState_LidUnwatched{LidUnwatched: &agentreplv1.PersistentWifiLidUnwatched{Detail: "IOPMrootDomain was not found"}}
 			},
-			wantTooltip: "Closing laptop lid disables agents. The lid is not being watched, so the display does not follow it: IOPMrootDomain was not found."},
+			wantTooltip: "Closing laptop lid disables agents. The lid is not being watched, so a closed lid does not quiet the machine: IOPMrootDomain was not found."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +101,6 @@ func TestPersistentWifiChipProjectsTheLid(t *testing.T) {
 			if tc.lid != nil {
 				tc.lid(state)
 			}
-			state.LidDim = tc.dim
 
 			// Act.
 			chip := persistentWifiChip(state)

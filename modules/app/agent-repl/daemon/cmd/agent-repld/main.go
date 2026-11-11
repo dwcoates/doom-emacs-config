@@ -175,6 +175,11 @@ var processStarted = time.Now()
 const defaultZettelSocket = "~/.cache/agent-repl/sock/zettel.sock"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == thawGuardVerb {
+		// THE GUARD STARTS NOTHING: it waits for the daemon that started it
+		// to be gone, then thaws a frozen set no daemon owns.
+		os.Exit(runThawGuard(os.Args[2:], os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == deployVerb {
 		// THE VERB STARTS NOTHING: it asks the serving daemon to deploy and
 		// prints the daemon's decisions.

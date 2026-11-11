@@ -97,8 +97,7 @@ func TestUpdateOnWithTheLidClosedOnACRunsHighPower(t *testing.T) {
 	h.r.on(argPowerSource, answer{out: onAC})
 	scriptPower(h.r, "1")
 	h.r.on(argEnergy(false), answer{})
-	h.r.on(argBrightnessRead, answer{out: "0.5"})
-	h.r.on(argLidDim, answer{})
+	h.r.on(argDisplaySleep, answer{})
 
 	resp := h.c.Update(context.Background(), update("on"))
 
@@ -142,9 +141,6 @@ func TestReconcileEnergyFollowsTheLidAndThePowerSource(t *testing.T) {
 			if tc.want != "" {
 				h.r.on(argPower("powermode", tc.want), answer{})
 			}
-			h.dims.level = ptr(0.5) // a dim in force keeps the display step quiet
-			h.r.on(argBrightnessRead, answer{out: "0.5"})
-			h.r.on(argBrightness("0.5"), answer{})
 			rd := h.c.readLocked(context.Background())
 
 			h.c.reconcileEnergyLocked(context.Background(), rd, "beat")
@@ -226,8 +222,7 @@ func TestALidCloseMovesTheEnergyModeWhenPluggedIn(t *testing.T) {
 	h := newHarness(t).standing(pmsetIn(true, energyModeLowPower), summary(true, "Home"))
 	h.r.on(argPowerSource, answer{out: onAC})
 	h.r.on(argPower("powermode", energyModeHighPower), answer{})
-	h.r.on(argBrightnessRead, answer{out: "0.5"})
-	h.r.on(argLidDim, answer{})
+	h.r.on(argDisplaySleep, answer{})
 
 	h.hear(LidClosed)
 
@@ -238,8 +233,6 @@ func TestALidCloseMovesTheEnergyModeWhenPluggedIn(t *testing.T) {
 
 func TestALidOpenMovesTheEnergyModeBackToLow(t *testing.T) {
 	h := newHarness(t).standing(pmsetIn(true, energyModeHighPower), summary(true, "Home"))
-	h.dims.level = ptr(0.5)
-	h.r.on(argBrightness("0.5"), answer{})
 	h.r.on(argPower("powermode", energyModeLowPower), answer{})
 
 	h.hear(LidOpen)

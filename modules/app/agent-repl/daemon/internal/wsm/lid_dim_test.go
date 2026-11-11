@@ -3,10 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
-	"math"
 	"testing"
-
-	"agent-repld/internal/dlog"
 )
 
 func TestLidDimLevelIsAbsentUntilKept(t *testing.T) {
@@ -22,48 +19,24 @@ func TestLidDimLevelIsAbsentUntilKept(t *testing.T) {
 	}
 }
 
-func TestPutLidDimLevelRoundTripsAndReplacesTheOneInForce(t *testing.T) {
+func TestLidDimLevelReadsALevelAnEarlierBuildKept(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	if err := s.PutLidDimLevel(context.Background(), 0.81); err != nil {
-		t.Fatalf("PutLidDimLevel: %v", err)
-	}
+	corrupt(t, s, `INSERT INTO persistent_wifi_lid_dim (id, restore_level) VALUES (1, 0)`)
 
 	// Act
-	if err := s.PutLidDimLevel(context.Background(), 0.4); err != nil {
-		t.Fatalf("PutLidDimLevel: %v", err)
-	}
 	got, ok, err := s.LidDimLevel(context.Background())
 
 	// Assert
-	if err != nil || !ok || got != 0.4 {
-		t.Fatalf("LidDimLevel() = (%v, %v, %v), want 0.4 in force", got, ok, err)
-	}
-	if n := scalar[int](t, s, `SELECT count(*) FROM persistent_wifi_lid_dim`); n != 1 {
-		t.Fatalf("%d rows, want the one singleton", n)
-	}
-}
-
-func TestPutLidDimLevelKeepsZero(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-
-	// Act
-	err := s.PutLidDimLevel(context.Background(), 0)
-	got, ok, readErr := s.LidDimLevel(context.Background())
-
-	// Assert
-	if err != nil || readErr != nil || !ok || got != 0 {
-		t.Fatalf("LidDimLevel() = (%v, %v, %v) after keeping 0 (%v), want 0 in force", got, ok, readErr, err)
+	if err != nil || !ok || got != 0 {
+		t.Fatalf("LidDimLevel() = (%v, %v, %v), want 0 in force", got, ok, err)
 	}
 }
 
 func TestClearLidDimLevelEndsTheDim(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	if err := s.PutLidDimLevel(context.Background(), 0.5); err != nil {
-		t.Fatalf("PutLidDimLevel: %v", err)
-	}
+	corrupt(t, s, `INSERT INTO persistent_wifi_lid_dim (id, restore_level) VALUES (1, 0.5)`)
 
 	// Act
 	err := s.ClearLidDimLevel(context.Background())
@@ -72,29 +45,6 @@ func TestClearLidDimLevelEndsTheDim(t *testing.T) {
 	// Assert
 	if err != nil || readErr != nil || ok {
 		t.Fatalf("after ClearLidDimLevel (%v): ok %v, err %v, want no dim in force", err, ok, readErr)
-	}
-}
-
-func TestPutLidDimLevelRefusesALevelOutsideZeroToOne(t *testing.T) {
-	for _, level := range []float64{-0.1, 1.5, math.NaN()} {
-		t.Run("", func(t *testing.T) {
-			// Arrange
-			s, log := testStore(t)
-
-			// Act
-			err := s.PutLidDimLevel(context.Background(), level)
-
-			// Assert
-			if err == nil {
-				t.Fatalf("PutLidDimLevel(%v) = nil, want a refusal", level)
-			}
-			if n := scalar[int](t, s, `SELECT count(*) FROM persistent_wifi_lid_dim`); n != 0 {
-				t.Fatalf("%d rows after the refusal, want none", n)
-			}
-			if len(dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.put_lid_dim_level"})) != 1 {
-				t.Fatalf("records = %+v, want one ERROR for the refusal", log.Records())
-			}
-		})
 	}
 }
 

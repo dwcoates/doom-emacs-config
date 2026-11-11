@@ -3,241 +3,182 @@ package persistentwifi
 import (
 	"context"
 	"errors"
-	"strings"
+	"slices"
 	"testing"
-
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
 )
 
-func TestDisplayMoveFor(t *testing.T) {
-	cases := []struct {
-		name   string
-		lid    lidKind
-		mode   modeKnown
-		dimmed bool
-		want   displayMove
+func TestQuietWanted(t *testing.T) {
+	tests := []struct {
+		name     string
+		lid      lidKind
+		mode     modeKnown
+		standing bool
+		want     bool
 	}{
-		{name: "a closed lid with the mode on dims", lid: lidClosed, mode: modeIsOn, want: moveDim},
-		{name: "a closed lid with a dim in force stays dimmed", lid: lidClosed, mode: modeIsOn, dimmed: true, want: moveNone},
-		{name: "a closed lid with the mode off is left alone", lid: lidClosed, mode: modeIsOff, want: moveNone},
-		{name: "a closed lid with the mode unknown is left alone", lid: lidClosed, mode: modeUnknown, want: moveNone},
-		{name: "an open lid with the mode on is left alone", lid: lidOpen, mode: modeIsOn, want: moveNone},
-		{name: "an open lid with a dim in force restores", lid: lidOpen, mode: modeIsOn, dimmed: true, want: moveRestore},
-		{name: "an open lid restores whatever the mode", lid: lidOpen, mode: modeUnknown, dimmed: true, want: moveRestore},
-		{name: "the mode off with a dim in force restores under a closed lid", lid: lidClosed, mode: modeIsOff, dimmed: true, want: moveRestore},
-		{name: "no lid with a dim in force restores", lid: lidNone, mode: modeIsOn, dimmed: true, want: moveRestore},
-		{name: "an unwatched lid with the mode on is left alone", lid: lidUnwatched, mode: modeIsOn, want: moveNone},
-		{name: "an unheard lid with a dim in force and the mode on is left alone", lid: lidUnheard, mode: modeIsOn, dimmed: true, want: moveNone},
+		{name: "closed and on enters", lid: lidClosed, mode: modeIsOn, want: true},
+		{name: "closed and off stays out", lid: lidClosed, mode: modeIsOff},
+		{name: "closed and off leaves", lid: lidClosed, mode: modeIsOff, standing: true},
+		{name: "closed with an unknown mode keeps a standing state", lid: lidClosed, mode: modeUnknown, standing: true, want: true},
+		{name: "closed with an unknown mode enters nothing", lid: lidClosed, mode: modeUnknown},
+		{name: "open and on leaves", lid: lidOpen, mode: modeIsOn, standing: true},
+		{name: "no lid never enters", lid: lidNone, mode: modeIsOn},
+		{name: "an unwatched lid leaves", lid: lidUnwatched, mode: modeIsOn, standing: true},
+		{name: "an unheard lid leaves even with an unknown mode", lid: lidUnheard, mode: modeUnknown, standing: true},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := displayMoveFor(tc.lid, tc.mode, tc.dimmed)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := quietWanted(tt.lid, tt.mode, tt.standing)
 
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("displayMoveFor() = %s, want %s", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestParseBrightness(t *testing.T) {
-	cases := []struct {
-		out     string
-		want    float64
-		wantErr bool
-	}{
-		{out: "0.81\n", want: 0.81},
-		{out: "0", want: 0},
-		{out: "1", want: 1},
-		{out: "1.5", wantErr: true},
-		{out: "-0.1", wantErr: true},
-		{out: "NaN", wantErr: true},
-		{out: "usage: mac-brightness", wantErr: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.out, func(t *testing.T) {
-			// Act.
-			got, err := parseBrightness(tc.out)
-
-			// Assert.
-			if (err != nil) != tc.wantErr || got != tc.want {
-				t.Fatalf("parseBrightness(%q) = (%v, %v), want (%v, error %v)", tc.out, got, err, tc.want, tc.wantErr)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("quietWanted(%v, %v, %v) = %v, want %v", tt.lid, tt.mode, tt.standing, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestFormatLevelIsTheShortestDecimal(t *testing.T) {
-	cases := map[float64]string{0: "0", 0.81: "0.81", 1: "1"}
-	for level, want := range cases {
-		t.Run(want, func(t *testing.T) {
-			// Act, Assert.
-			if got := formatLevel(level); got != want {
-				t.Fatalf("formatLevel(%v) = %q, want %q", level, got, want)
+	tests := []struct {
+		level float64
+		want  string
+	}{
+		{level: 0, want: "0"},
+		{level: 0.81, want: "0.81"},
+		{level: 1, want: "1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act and assert
+			if got := formatLevel(tt.level); got != tt.want {
+				t.Fatalf("formatLevel(%v) = %q, want %q", tt.level, got, tt.want)
 			}
 		})
 	}
 }
 
-// keep stands a kept pre-close level in the store.
-func (h *harness) keep(level float64) *harness {
-	h.dims.level = &level
-	return h
+func TestUpdateMovesTheQuietStateByTheLid(t *testing.T) {
+	tests := []struct {
+		name        string
+		lid         lidKind
+		action      string
+		quietBefore bool
+		script      func(*harness)
+		wantArm     string
+		wantFreezer []string
+		wantQuiet   bool
+	}{
+		{name: "on with the lid closed sleeps the display and freezes", lid: lidClosed, action: "on",
+			script:  func(h *harness) { h.r.on(argDisplaySleep, answer{}) },
+			wantArm: "slept", wantFreezer: []string{"freeze:update"}, wantQuiet: true},
+		{name: "on with the lid open moves nothing", lid: lidOpen, action: "on",
+			wantArm: "unchanged", wantFreezer: []string{"thaw:update"}},
+		{name: "off with the quiet state standing wakes and thaws", lid: lidClosed, action: "off", quietBefore: true,
+			script:  func(h *harness) { h.r.on(argDisplayWake, answer{}) },
+			wantArm: "woke", wantFreezer: []string{"thaw:update"}},
+		{name: "on with the display sleep failing answers failed and stays quiet", lid: lidClosed, action: "on",
+			script:  func(h *harness) { h.r.on(argDisplaySleep, answer{out: "refused", code: 1}) },
+			wantArm: "failed", wantFreezer: []string{"freeze:update"}, wantQuiet: true},
+		{name: "off with the wake failing answers failed and leaves anyway", lid: lidClosed, action: "off", quietBefore: true,
+			script:  func(h *harness) { h.r.on(argDisplayWake, answer{out: "refused", code: 1}) },
+			wantArm: "failed", wantFreezer: []string{"thaw:update"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			before, after := pmsetOff, pmsetOn
+			if tt.action == "off" {
+				before, after = pmsetOn, pmsetOff
+			}
+			h := newHarness(t).withLid(tt.lid)
+			h.r.on(argPmsetRead, answer{out: before}, answer{out: after})
+			h.r.on(argPorts, answer{out: ports})
+			if tt.action == "on" {
+				h.r.on(argSummary, answer{out: summary(true, hotspot)})
+			} else {
+				h.r.on(argSummary, answer{out: summary(true, "Home")})
+			}
+			scriptPower(h.r, map[string]string{"on": "1", "off": "0"}[tt.action])
+			if tt.quietBefore {
+				h.c.quiet, h.c.displayAsleep = true, true
+			}
+			if tt.script != nil {
+				tt.script(h)
+			}
+
+			// Act
+			resp := h.c.Update(context.Background(), update(tt.action))
+
+			// Assert
+			display := resp.GetSuccess().GetDisplay()
+			if display == nil || displayArm(display) != tt.wantArm {
+				t.Fatalf("display = %v (calls %v), want %s", display, h.r.ran(), tt.wantArm)
+			}
+			if !slices.Equal(h.freezer.calls, tt.wantFreezer) {
+				t.Fatalf("freezer calls %v, want %v", h.freezer.calls, tt.wantFreezer)
+			}
+			if got := resp.GetSuccess().GetState().GetQuiet() != nil; got != tt.wantQuiet {
+				t.Fatalf("standing quiet = %v, want %v", got, tt.wantQuiet)
+			}
+			if tt.wantArm == "failed" && len(h.records(dlog.LevelError, opDisplay)) != 1 {
+				t.Fatalf("ERROR records = %+v, want the one failed display step", h.records(dlog.LevelError, opDisplay))
+			}
+		})
+	}
 }
 
-func TestUpdateMovesTheDisplayByTheLid(t *testing.T) {
-	cases := []struct {
-		name      string
-		action    string
-		pmset     string
-		lid       lidKind
-		kept      *float64
-		want      func(*agentreplv1.UpdatePersistentWifiModeDisplay) bool
-		wantCalls []string
-		wantKept  *float64
+func TestRefreshUndoesAnEarlierBuildsLidDim(t *testing.T) {
+	tests := []struct {
+		name       string
+		level      *float64
+		getErr     error
+		clearErr   error
+		toolExists bool
+		setFails   bool
+		wantSet    bool
+		wantKept   bool
+		wantErrors int
+		wantInfos  int
 	}{
-		{name: "turning on with the lid open leaves the brightness alone", action: "on", pmset: pmsetOff, lid: lidOpen,
-			want: func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool { return d.GetUnchanged() != nil }},
-		{name: "turning on with the lid closed keeps the level and dims", action: "on", pmset: pmsetOff, lid: lidClosed,
-			want:      func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool { return d.GetDimmed().GetRestoreLevel() == 0.81 },
-			wantCalls: []string{argBrightnessRead, argLidDim}, wantKept: ptr(0.81)},
-		{name: "turning off while dimmed restores the kept level", action: "off", pmset: pmsetOn, lid: lidClosed, kept: ptr(0.81),
-			want:      func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool { return d.GetRestored().GetLevel() == 0.81 },
-			wantCalls: []string{argBrightness("0.81")}},
-		{name: "turning off with the lid open and no dim leaves the brightness alone", action: "off", pmset: pmsetOn, lid: lidOpen,
-			want: func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool { return d.GetUnchanged() != nil }},
+		{name: "no dim kept touches nothing", toolExists: true},
+		{name: "a kept dim is set back and cleared", level: ptr(0.6), toolExists: true, wantSet: true, wantInfos: 1},
+		{name: "an unreadable dim is recorded", getErr: errors.New("disk"), toolExists: true, wantErrors: 1},
+		{name: "a missing tool keeps the dim", level: ptr(0.6), wantKept: true, wantErrors: 1},
+		{name: "a failed set keeps the dim", level: ptr(0.6), toolExists: true, setFails: true, wantSet: true, wantKept: true, wantErrors: 1},
+		{name: "a failed clear is recorded", level: ptr(0.6), toolExists: true, clearErr: errors.New("locked"), wantSet: true, wantKept: true, wantErrors: 1},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			on := tc.action == "on"
-			// Turning on finds the hotspot already joined and turning off finds
-			// another network, so neither runs a hotspot step's tools.
-			link := summary(true, hotspot)
-			if !on {
-				link = summary(true, "Home")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t).standing(pmsetOff, summary(true, "Home"))
+			h.dims.level, h.dims.getErr, h.dims.clearErr = tt.level, tt.getErr, tt.clearErr
+			h.exists[tools.Brightness] = tt.toolExists
+			if tt.setFails {
+				h.r.on(argBrightness("0.6"), answer{out: "IOKit", code: 1})
+			} else {
+				h.r.on(argBrightness("0.6"), answer{})
 			}
-			h := newHarness(t).standing(tc.pmset, link).withLid(tc.lid)
-			h.dims.level = tc.kept
-			value := "0"
-			if on {
-				value = "1"
-			}
-			scriptPower(h.r, value)
-			h.r.on(argBrightnessRead, answer{out: "0.81\n"})
-			h.r.on(argLidDim, answer{})
-			h.r.on(argBrightness("0.81"), answer{})
 
-			// Act.
-			resp := h.c.Update(context.Background(), update(tc.action))
+			// Act
+			h.c.Refresh(context.Background())
 
-			// Assert.
-			display := resp.GetSuccess().GetDisplay()
-			if !tc.want(display) {
-				t.Fatalf("display = %v", display)
+			// Assert
+			if got := h.r.count(argBrightness("0.6")) == 1; got != tt.wantSet {
+				t.Fatalf("set the level = %v (calls %v), want %v", got, h.r.ran(), tt.wantSet)
 			}
-			var calls []string
-			for _, c := range h.r.ran() {
-				if strings.HasPrefix(c, tools.Brightness) {
-					calls = append(calls, c)
-				}
+			if got := h.dims.kept() != nil; got != tt.wantKept {
+				t.Fatalf("dim kept = %v, want %v", got, tt.wantKept)
 			}
-			if strings.Join(calls, "|") != strings.Join(tc.wantCalls, "|") {
-				t.Fatalf("brightness calls = %q, want %q", calls, tc.wantCalls)
+			if got := len(h.records(dlog.LevelError, opDisplay)); got != tt.wantErrors {
+				t.Fatalf("ERROR records = %d, want %d", got, tt.wantErrors)
 			}
-			if got := h.dims.kept(); (got == nil) != (tc.wantKept == nil) || (got != nil && *got != *tc.wantKept) {
-				t.Fatalf("kept level = %v, want %v", got, tc.wantKept)
-			}
-			if got := resp.GetSuccess().GetState().GetLidDim(); (got == nil) != (tc.wantKept == nil) {
-				t.Fatalf("standing lid_dim = %v, want set=%v", got, tc.wantKept != nil)
-			}
-			if errs := h.records(dlog.LevelError, opDisplay); len(errs) != 0 {
-				t.Fatalf("display ERROR records = %+v, want none", errs)
+			if got := len(h.records(dlog.LevelInfo, opDisplay)); got != tt.wantInfos {
+				t.Fatalf("INFO records = %d, want %d", got, tt.wantInfos)
 			}
 		})
 	}
 }
 
 func ptr(f float64) *float64 { return &f }
-
-func TestMoveDisplayFailuresAreRecordedAndAnsweredFailed(t *testing.T) {
-	cases := []struct {
-		name       string
-		lid        lidKind
-		mode       modeKnown
-		arrange    func(*harness)
-		wantDetail string
-		wantKept   *float64
-		wantDim    bool
-	}{
-		{name: "an unreadable kept level moves nothing", lid: lidOpen, mode: modeIsOn,
-			arrange:    func(h *harness) { h.dims.getErr = errors.New("database is locked") },
-			wantDetail: "the kept pre-close brightness could not be read"},
-		{name: "a level that cannot be kept is not dimmed", lid: lidClosed, mode: modeIsOn,
-			arrange: func(h *harness) {
-				h.r.on(argBrightnessRead, answer{out: "0.5"})
-				h.dims.putErr = errors.New("disk full")
-			},
-			wantDetail: "could not be kept"},
-		{name: "a dim the tool refuses forgets the kept level", lid: lidClosed, mode: modeIsOn,
-			arrange: func(h *harness) {
-				h.r.on(argBrightnessRead, answer{out: "0.5"})
-				h.r.on(argLidDim, answer{out: "no display", code: 1})
-			},
-			wantDetail: "could not be dimmed"},
-		{name: "a dim the tool refuses whose level cannot be forgotten stays in force", lid: lidClosed, mode: modeIsOn,
-			arrange: func(h *harness) {
-				h.r.on(argBrightnessRead, answer{out: "0.5"})
-				h.r.on(argLidDim, answer{out: "no display", code: 1})
-				h.dims.clearErr = errors.New("database is locked")
-			},
-			wantDetail: "could not be dimmed", wantKept: ptr(0.5), wantDim: true},
-		{name: "a restore the tool refuses keeps the level", lid: lidOpen, mode: modeIsOn,
-			arrange: func(h *harness) {
-				h.keep(0.5)
-				h.r.on(argBrightness("0.5"), answer{out: "no display", code: 1})
-			},
-			wantDetail: "could not be restored", wantKept: ptr(0.5), wantDim: true},
-		{name: "a restore whose level cannot be cleared still ends the dim", lid: lidOpen, mode: modeIsOn,
-			arrange: func(h *harness) {
-				h.keep(0.5)
-				h.r.on(argBrightness("0.5"), answer{})
-				h.dims.clearErr = errors.New("database is locked")
-			},
-			wantDetail: "restored to 0.5, but the kept level could not be cleared", wantKept: ptr(0.5)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t).withLid(tc.lid)
-			tc.arrange(h)
-
-			// Act.
-			var d *agentreplv1.UpdatePersistentWifiModeDisplay
-			func() {
-				h.c.mu.Lock()
-				defer h.c.mu.Unlock()
-				d = h.c.moveDisplayLocked(context.Background(), tc.mode, "test")
-			}()
-
-			// Assert.
-			if !strings.Contains(d.GetFailed().GetDetail(), tc.wantDetail) {
-				t.Fatalf("display = %v, want failed naming %q", d, tc.wantDetail)
-			}
-			errs := h.records(dlog.LevelError, opDisplay)
-			if len(errs) != 1 || errs[0].Context["trigger"] != "test" || errs[0].Context["lid"] != h.c.lid.name() {
-				t.Fatalf("display ERROR records = %+v, want one naming the trigger and the lid", errs)
-			}
-			if got := h.dims.kept(); (got == nil) != (tc.wantKept == nil) || (got != nil && *got != *tc.wantKept) {
-				t.Fatalf("kept level = %v, want %v", got, tc.wantKept)
-			}
-			if (h.c.dim != nil) != tc.wantDim {
-				t.Fatalf("dim in force = %v, want %v", h.c.dim, tc.wantDim)
-			}
-		})
-	}
-}
