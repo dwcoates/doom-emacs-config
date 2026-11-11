@@ -404,34 +404,6 @@ func TestTheVendorStartLineIsDrawnUnderEachVendorStep(t *testing.T) {
 	}
 }
 
-func TestTheVendorStartLineOffersTheSignInOnlyWhenItCures(t *testing.T) {
-	tests := []struct {
-		name   string
-		signIn bool
-	}{
-		{"a rejection a sign-in cures", true},
-		{"a rejection a sign-in does not cure", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-			connected(h)
-			fault := vendorFaultOf(t, "fault-1", health.KindVendorStartRejected)
-			fault.SignIn = tt.signIn
-
-			// Act
-			h.r.OpenFault(testWS, fault)
-
-			// Assert
-			got := h.view(t).GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetVendorStart().GetSignIn() != nil
-			if got != tt.signIn {
-				t.Fatalf("vendor_start sign_in drawn = %v, want %v", got, tt.signIn)
-			}
-		})
-	}
-}
-
 // THE VENDOR STEP OUTRANKS A DEAD LINK THAT NEVER CONNECTED: a spawned shim
 // stopped after its vendor failed is not a shim that would not start.
 func TestAVendorFaultOutranksADeadLinkThatNeverConnected(t *testing.T) {

@@ -16,6 +16,12 @@ import (
 type fakeLogins struct {
 	began    []time.Time
 	signedIn []string
+	// ended is every root whose login flow ended.
+	ended []string
+}
+
+func (l *fakeLogins) LoginEnded(_ context.Context, configDir string) {
+	l.ended = append(l.ended, configDir)
 }
 
 func (l *fakeLogins) LoginCompleted(_ context.Context, at time.Time) { l.began = append(l.began, at) }
@@ -235,6 +241,37 @@ func TestALoginFlowFansOutItsRootOnlyWhenItMadeALogin(t *testing.T) {
 			// Assert.
 			if strings.Join(logins.signedIn, ",") != strings.Join(tc.want, ",") {
 				t.Fatalf("fanned out %v, want %v", logins.signedIn, tc.want)
+			}
+		})
+	}
+}
+
+func TestEveryEndOfALoginFlowAnswersItsRootsRequest(t *testing.T) {
+	before := account.LoginRecord{Block: `{"emailAddress":"a@b.c","profileFetchedAt":1}`}
+	cases := []struct {
+		name   string
+		after  account.LoginRecord
+		opened bool
+	}{
+		{name: "a flow that made a login", after: account.LoginRecord{Block: `{"emailAddress":"a@b.c","profileFetchedAt":2}`}, opened: true},
+		{name: "a flow the reader closed without logging in", after: before, opened: true},
+		{name: "a flow whose opening was never read", opened: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			records := &scriptedRecords{answers: []account.LoginRecord{before, tc.after}, errs: []error{nil, nil}}
+			w, logins, _ := watchOver(t, records, t0, t0.Add(time.Minute))
+			if tc.opened {
+				w.LoginOpened(root)
+			}
+
+			// Act.
+			w.LoginEnded(root)
+
+			// Assert.
+			if len(logins.ended) != 1 || logins.ended[0] != root {
+				t.Fatalf("ended %v, want %s told once", logins.ended, root)
 			}
 		})
 	}

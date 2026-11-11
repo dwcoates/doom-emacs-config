@@ -93,8 +93,24 @@ export interface TopbarDeps {
 }
 
 export interface TopbarWatchDeps {
-  /** Raise the login overlay — the logged-out account chip's click. */
-  readonly openLogin: (control: HTMLElement) => void;
+  /**
+   * Raise the login overlay — the account chip's click, which hands its own
+   * control, or the daemon's request for a sign-in, which hands none.
+   */
+  readonly openLogin: (control?: HTMLElement) => void;
+}
+
+/**
+ * THE LOGIN OPENS BY ITSELF when the daemon asks for it
+ * (`TopbarAccount.sign_in_request`: the account must sign in again). It answers
+ * the request id to open the login for, or null: no request stands, or this
+ * page already opened the login for that request, so a later push of the same
+ * strip does not reopen a login the reader closed.
+ */
+export function signInRequestToOpen(view: TopbarView, opened: string | null): string | null {
+  const id = view.account?.signInRequest?.requestId;
+  if (id === undefined || id === "" || id === opened) return null;
+  return id;
 }
 
 export interface TopbarHandle extends Handle {
@@ -167,6 +183,8 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
       log.info("watching the topbar", { operation: "topbar.watch" });
       const watching: TopbarContext = { ...cc, ctx, openLogin: watchDeps.openLogin };
       tc = watching;
+      /** The sign-in request this page last opened the login for. */
+      let openedSignIn: string | null = null;
       stream = watchStream(ctx, {
         name: "WatchTopbar",
         schema: WatchTopbarResponseSchema,
@@ -179,6 +197,15 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
           // Remembered only once it drew, so a malformed push never becomes
           // the view a failure change redraws over.
           view = next;
+          const request = signInRequestToOpen(next, openedSignIn);
+          if (request !== null) {
+            openedSignIn = request;
+            log.info("the daemon asked for a sign-in; opening the login", {
+              operation: "topbar.sign-in-requested",
+              context: { request_id: request },
+            });
+            watchDeps.openLogin();
+          }
         },
       });
     },

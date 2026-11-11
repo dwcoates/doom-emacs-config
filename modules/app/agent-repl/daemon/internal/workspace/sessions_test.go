@@ -775,6 +775,9 @@ type fleetFixture struct {
 	topbarWarnings []string
 	// topbarRemote is every remote-control mode the fleet stated to the strip.
 	topbarRemote []bool
+	// signIns is every workspace the fleet asked the topbar to open the login
+	// for.
+	signIns []ids.WorkspaceID
 	log          *fakeSurfaces
 	watcher      *fakeWatcher
 	links        *recordingLinkSink
@@ -939,7 +942,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			return f.payErr
 		},
 		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
-		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
+		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{signIns: &f.signIns, coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow, remoteControl: &f.topbarRemote}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},
 			Footer:    footerLinkSink{rec: f.links},
@@ -4011,54 +4014,6 @@ func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *te
 	// Assert.
 	if got := lastGateStanding(t, f).GetCompactAndResume(); got != nil {
 		t.Fatalf("compact_and_resume = %v, want none once nothing is held", got)
-	}
-}
-
-// ---- the gate's sign-in notice ----
-
-func TestAGateOfferedTheSignInDrawsTheRefusalAndTheAction(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
-
-	// Act.
-	offered := f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
-
-	// Assert.
-	notice := lastGateStanding(t, f).GetSignIn()
-	if !offered || notice.GetCause().GetText() != "Failed to authenticate" || notice.GetAction() == nil {
-		t.Fatalf("offered = %v, sign_in = %v, want the refusal and the action", offered, notice)
-	}
-}
-
-func TestNoGateStandingTakesNoSignInNotice(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-
-	// Act.
-	offered := f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
-
-	// Assert.
-	if offered || len(f.feed.synthesized) != 0 {
-		t.Fatalf("offered = %v with rows %v, want refused and nothing published", offered, f.feed.synthesized)
-	}
-}
-
-func TestAGateRaisedAfreshCarriesNoSignInNotice(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
-	f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
-
-	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
-
-	// Assert.
-	if got := lastGateStanding(t, f).GetSignIn(); got != nil {
-		t.Fatalf("sign_in = %v, want none on a gate raised afresh", got)
 	}
 }
 

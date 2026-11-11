@@ -875,22 +875,6 @@ func TestASignInUnderAStandingGateClosesTheRejectionAndRetriesNothing(t *testing
 	}
 }
 
-func TestASignInUnderAStandingGateLeavesItsNotice(t *testing.T) {
-	// Arrange.
-	f := newFleetFixture(t)
-	ws := f.workspace("w1")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
-	f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
-
-	// Act.
-	_ = f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
-
-	// Assert.
-	if got := lastGateStanding(t, f).GetSignIn(); got != nil {
-		t.Fatalf("sign_in = %v, want the notice gone once signed in", got)
-	}
-}
-
 func TestAStartedSessionForgetsTheRejectionsSignIn(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
@@ -905,5 +889,33 @@ func TestAStartedSessionForgetsTheRejectionsSignIn(t *testing.T) {
 	// Assert.
 	if retry {
 		t.Fatal("SignedIn = true, want false once a session started")
+	}
+}
+
+func TestAStartRejectedForTheCredentialOpensTheLogin(t *testing.T) {
+	tests := []struct {
+		name  string
+		label *shimv1.StartSessionVendorStartFailed
+		want  int
+	}{
+		{"a rejected credential", rejectedFor(credentialRejected()), 1},
+		{"a credential lacking permission", rejectedFor(permissionRefused()), 0},
+		{"a rejection that was no API answer", rejectedVendorStart(), 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.response = vendorRefusal(tc.label, "the vendor refused")
+
+			// Act.
+			_ = f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if len(f.signIns) != tc.want {
+				t.Fatalf("login requests = %v, want %d", f.signIns, tc.want)
+			}
+		})
 	}
 }

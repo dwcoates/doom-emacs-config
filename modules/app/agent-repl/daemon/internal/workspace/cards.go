@@ -89,12 +89,6 @@ func (c *cards) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	return c.fleet.ReraiseColdGate(ws, vendorSessionID)
 }
 
-// OfferColdGateSignIn puts the sign-in notice on the standing gate, in the
-// fleet.
-func (c *cards) OfferColdGateSignIn(ws ids.WorkspaceID, refusal string) bool {
-	return c.fleet.OfferColdGateSignIn(ws, refusal)
-}
-
 // Models answers exactly the model catalog the topbar's selector served.
 func (c *cards) Models(ws ids.WorkspaceID) ([]string, bool) {
 	return c.topbar.ModelCatalog(ws)

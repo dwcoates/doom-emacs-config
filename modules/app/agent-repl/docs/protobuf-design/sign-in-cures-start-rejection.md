@@ -92,3 +92,35 @@ Designed autonomously (the owner did not ask to co-design).
 
 No declaration is obviated: every new field is additive and nothing stopped
 being referenced.
+
+## Correction (2026-11-11): the login opens by itself; the two actions are retired
+
+- **What was wrong.** The owner asked for the sign-in to happen
+  AUTOMATICALLY ("an automatic authentication option like is done logging in
+  via the topbar"); the first landing read "option" as an action to click and
+  added two (`FooterStatusActivityVendorStart.sign_in`,
+  `FeedColdGateStanding.sign_in`). The owner: "i did not ask for a button ...
+  i asked for it to automatically pop up when authentication is determined to
+  be needed again", and "lose whatever button you added". Root cause: the
+  request's operative word ("automatic") was weighed below its noun
+  ("option"), and the assumption was recorded instead of being checked.
+- **Retired.** Both fields and their messages (`FooterVendorStartSignIn`,
+  `FeedColdGateSignIn`, `FeedColdGateSignInCause`); tags 2 and 6 reserved.
+  The pre-existing turn sign-in actions (marker, broken bubble; owner request
+  2026-10-12) are untouched.
+- **Added: `frontend.v1.TopbarAccount.sign_in_request` (field 4),
+  `TopbarAccountSignInRequest`.** The daemon raises a request, with a fresh
+  id, on every strip spending as the account the moment it determines a
+  sign-in is needed: a turn whose failure `ladder.FailureCuredBySignIn`
+  names, or a start rejected for the credential (the shim's typed
+  `api_failure`). The page opens the topbar's own login overlay by itself,
+  once per id. The request clears when that account's login flow ends,
+  signed in or closed by the user, so a dismissed login does not reopen until
+  the next determination.
+- **Why on the topbar.** The account cell is the component that owns the
+  login flow (its click is `OpenLogin`), and every workspace page draws it,
+  so whichever page the reader is on opens the one login.
+- **Kept.** A completed sign-in still retries a rejected start (Restart), and
+  under a standing cold gate closes the rejection and leaves the gate for the
+  user's answer. The footer's line still says "sign in to retry", which is
+  text, not an action.

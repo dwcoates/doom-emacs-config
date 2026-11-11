@@ -38,6 +38,12 @@ type Starts interface {
 	OnSignedIn(ws ids.WorkspaceID) error
 }
 
+// Requests is the topbar's half: the request that opened the login by itself
+// for an account root.
+type Requests interface {
+	SignInAnswered(configDir string)
+}
+
 // Deps is what the fan-out needs.
 type Deps struct {
 	// Workspaces lists every registered workspace (wsm.DB.ListWorkspaces).
@@ -52,6 +58,9 @@ type Deps struct {
 	// Starts is the workspaces' bring-up: a start the vendor rejected for the
 	// credential the sign-in renewed is retried (workspace.Verbs.OnSignedIn).
 	Starts Starts
+	// Requests ends the topbar's request that opened the login by itself,
+	// once the root's login flow ends (topbar.Resolver.SignInAnswered).
+	Requests Requests
 	// Log is the daemon's logger.
 	Log dlog.Logger
 }
@@ -72,6 +81,8 @@ func New(deps Deps) (*Fanout, error) {
 		return nil, errors.New("signin: the feed, the footer and the roster are all required")
 	case deps.Starts == nil:
 		return nil, errors.New("signin: the workspaces' bring-up is required")
+	case deps.Requests == nil:
+		return nil, errors.New("signin: the topbar's sign-in requests are required")
 	case deps.Log == nil:
 		return nil, errors.New("signin: a logger is required")
 	}
@@ -110,4 +121,11 @@ func (f *Fanout) SignedIn(ctx context.Context, configDir string) {
 	}
 	fields["workspaces"] = answered
 	f.deps.Log.Info(opSignedIn, "a sign-in completed; every workspace on its account root was told", fields)
+}
+
+// LoginEnded takes the end of a login flow on CONFIG_DIR, signed in or not:
+// the request that opened the login by itself is answered, so no page opens it
+// again until the daemon next finds a sign-in needed.
+func (f *Fanout) LoginEnded(_ context.Context, configDir string) {
+	f.deps.Requests.SignInAnswered(configDir)
 }

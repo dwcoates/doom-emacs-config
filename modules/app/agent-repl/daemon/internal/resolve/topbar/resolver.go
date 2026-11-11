@@ -3,6 +3,7 @@ package topbar
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,11 @@ type resolver struct {
 	// agentReplSession is agent-repl's session, which every strip's
 	// connectivity indicator carries; nil before any session began.
 	agentReplSession *frontendv1.TopbarAgentReplSession
+	// signInRequests is the standing sign-in request of each account root
+	// that must sign in again, by root (RequestSignIn), under mu; signInSeq
+	// mints each request's id.
+	signInRequests map[string]string
+	signInSeq      uint64
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
@@ -70,7 +76,8 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		keepalives: wsm.NextKeepalives{},
 		topics:     map[ids.WorkspaceID]*publish.Topic[*frontendv1.TopbarView]{},
 
-		daemonRaised: map[string]DaemonWarning{},
+		daemonRaised:   map[string]DaemonWarning{},
+		signInRequests: map[string]string{},
 	}, nil
 }
 
@@ -493,6 +500,9 @@ func sessionlessReason(s *wsState) string {
 // out cannot run a turn and a blank would read as "loading".
 func (r *resolver) account(s *wsState) *frontendv1.TopbarAccount {
 	out := &frontendv1.TopbarAccount{Options: accountOptions(s.accountOptions)}
+	if id, ok := r.signInRequests[s.accountConfigDir]; ok && s.accountConfigDir != "" {
+		out.SignInRequest = &frontendv1.TopbarAccountSignInRequest{RequestId: id}
+	}
 	if s.email == "" {
 		out.State = &frontendv1.TopbarAccount_LoggedOut{
 			LoggedOut: &frontendv1.TopbarAccountLoggedOut{},
@@ -649,6 +659,50 @@ func (r *resolver) SetLoginDefaultModel(configDir, model string) {
 				s.defaultModel = model
 			}
 		})
+}
+
+// RequestSignIn asks every strip spending as WS's account root to open the
+// login by itself (TopbarAccount.sign_in_request): the daemon determined that
+// the root must sign in again. Each call is a NEW request, so a later
+// determination opens the login again even after an earlier one was answered.
+// A workspace whose account cell was never installed names no root to ask
+// for, which is a wiring defect recorded at ERROR.
+func (r *resolver) RequestSignIn(ws ids.WorkspaceID) {
+	r.mu.Lock()
+	root := r.stateLocked(ws).accountConfigDir
+	r.mu.Unlock()
+	if root == "" {
+		r.log.Global().Error("daemon.topbar.request_sign_in",
+			"a sign-in was found needed for a workspace whose account root the topbar was never told; the login cannot be asked for",
+			dlog.Context{"workspace": string(ws)})
+		return
+	}
+	var id string
+	r.eachStrip("daemon.topbar.request_sign_in", "the account must sign in again; every strip spending as it asks for the login",
+		dlog.Context{"config_dir": root, "workspace": string(ws)},
+		func() {
+			r.signInSeq++
+			id = strconv.FormatUint(r.signInSeq, 10)
+			r.signInRequests[root] = id
+		},
+		func(*wsState) {})
+}
+
+// SignInAnswered ends the sign-in request standing on CONFIG_DIR: its login
+// flow ended, signed in or closed by the user, so no strip asks for it again
+// until the next RequestSignIn. A root with no request standing changes
+// nothing.
+func (r *resolver) SignInAnswered(configDir string) {
+	r.mu.Lock()
+	_, standing := r.signInRequests[configDir]
+	r.mu.Unlock()
+	if !standing {
+		return
+	}
+	r.eachStrip("daemon.topbar.sign_in_answered", "the account's login flow ended; no strip asks for the login any more",
+		dlog.Context{"config_dir": configDir},
+		func() { delete(r.signInRequests, configDir) },
+		func(*wsState) {})
 }
 
 // SetDetachedUnmodeled installs the live detached-unmodeled items.

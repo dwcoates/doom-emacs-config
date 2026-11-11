@@ -348,6 +348,24 @@ message TopbarAccount {
   // omitted the current root would leave the reader with an empty menu and no
   // way to tell it apart from a menu that failed to load.
   repeated TopbarAccountOption options = 3;
+  // THE DAEMON ASKS FOR THE LOGIN. SET from the moment the daemon determines
+  // that the account this workspace spends as must sign in again -- the vendor
+  // rejected its credential, on a turn or on a session's start -- until a
+  // login flow for that account ends (signed in, or closed by the user). The
+  // page OPENS THE LOGIN BY ITSELF on a request it has not opened for yet:
+  // the same overlay the cell's own click opens (OpenLogin), with nothing for
+  // the reader to click first. Every strip spending as the account carries
+  // the same request, so whichever workspace the reader is looking at opens
+  // it. UNSET when no sign-in is needed.
+  optional TopbarAccountSignInRequest sign_in_request = 4;
+}
+// One determination that the account must sign in again.
+message TopbarAccountSignInRequest {
+  // Names this determination, so a page opens the login ONCE for it: the same
+  // id republished (any later push of the strip) opens nothing again, and a
+  // later determination is a new id. Opaque to the client; compared for
+  // equality only.
+  string request_id = 1;
 }
 message TopbarAccountLoggedIn {
   // The logged-in email, verbatim.

@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
-import { TopbarViewSchema, type TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import { TopbarViewSchema, type TopbarView, TopbarAccountSignInRequestSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { createControl } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
-import { drawChipRun, drawTopbarView, mountTopbar } from "../../src/topbar/topbar.js";
+import { drawChipRun, drawTopbarView, mountTopbar, signInRequestToOpen } from "../../src/topbar/topbar.js";
 import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
 import { pagePresence } from "../../src/presence.js";
 import type { AppContext } from "../../src/rpc/context.js";
@@ -339,6 +339,69 @@ describe("mountTopbar", () => {
       },
     });
   }
+
+  /** A view whose account carries the sign-in request ID. */
+  function requesting(id: string): TopbarView {
+    const v = view();
+    v.account!.signInRequest = create(TopbarAccountSignInRequestSchema, { requestId: id });
+    return v;
+  }
+
+  it("opens the login by itself when the daemon asks for a sign-in", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const openLogin = vi.fn();
+    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    // ACT
+    handle.watch(daemon([requesting("1")]), { openLogin });
+    await settle();
+    // ASSERT
+    expect(openLogin).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it("opens the login once for a request a later push repeats", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const openLogin = vi.fn();
+    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    // ACT
+    handle.watch(daemon([requesting("1"), requesting("1")]), { openLogin });
+    await settle();
+    // ASSERT
+    expect(openLogin).toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it("opens the login again for a later request", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const openLogin = vi.fn();
+    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    // ACT
+    handle.watch(daemon([requesting("1"), view(), requesting("2")]), { openLogin });
+    await settle();
+    // ASSERT
+    expect(openLogin).toHaveBeenCalledTimes(2);
+    handle.dispose();
+  });
+
+  it("opens no login while no sign-in is requested", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    document.body.replaceChildren(host);
+    const openLogin = vi.fn();
+    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    // ACT
+    handle.watch(daemon([view()]), { openLogin });
+    await settle();
+    // ASSERT
+    expect(openLogin).not.toHaveBeenCalled();
+    handle.dispose();
+  });
 
   it("draws the strip from the first push", async () => {
     // ARRANGE
@@ -948,5 +1011,22 @@ describe("the no-session cells", () => {
     ".topbar-model-button,\n.topbar-effort-button,\n.topbar-mode-button,\n.topbar-context-figure,\n.topbar-remote-control-button,\n.topbar-wifi-button,\n.topbar-heading-warnings",
   ])("leaves the inline inset of %s to the group", (selector) => {
     expect(withoutBlockComments(ruleBody(selector))).not.toMatch(/(?:^|[;\s])padding(?:-inline)?(?:-left|-right)?\s*:/);
+  });
+});
+
+describe("signInRequestToOpen", () => {
+  it.each([
+    ["no request", undefined, null, null],
+    ["a request not yet opened", "7", null, "7"],
+    ["the request already opened", "7", "7", null],
+    ["a newer request than the one opened", "8", "7", "8"],
+  ] as const)("answers %s", (_case, id, opened, want) => {
+    // ARRANGE
+    const v = view();
+    if (id !== undefined) v.account!.signInRequest = create(TopbarAccountSignInRequestSchema, { requestId: id });
+    // ACT
+    const got = signInRequestToOpen(v, opened);
+    // ASSERT
+    expect(got).toBe(want);
   });
 });
