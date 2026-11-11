@@ -372,3 +372,10 @@ func (w *Watcher) Status(ctx context.Context) (Login, []wsm.SlackThreadSubscript
 	}
 	return login, subs, settings, polls, nil
 }
+
+// SubscribeAtCreation subscribes the workspace a create is making to the
+// thread it is created for (workspace.SlackThreadSubscriber).
+func (w *Watcher) SubscribeAtCreation(ctx context.Context, ws ids.WorkspaceID, name, url string, mode wsm.SlackThreadMode) error {
+	_, _, err := w.Subscribe(ctx, Workspace{ID: ws, Name: name}, url, mode, wsm.SlackThreadOriginCreation)
+	return err
+}

@@ -674,6 +674,12 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		log.Error(opCreate, "an emoji-ack create names no Slack message", nil)
 		return errors.New("create: an emoji-ack create names the Slack message it was dispatched for")
 	}
+	// A SUBSCRIPTION AT CREATION IS TO THE THREAD THE WORKSPACE IS CREATED
+	// FOR, so a spec subscribing to none is its builder's defect.
+	if spec.SlackSubscribe != "" && (spec.SlackThread == "" || !spec.SlackSubscribe.Valid()) {
+		log.Error(opCreate, "a create spec subscribes to a Slack thread it names no thread or no mode for", dlog.Context{"mode": string(spec.SlackSubscribe), "thread_url": spec.SlackThread})
+		return fmt.Errorf("create: a subscription at creation names the Slack thread and a mode, not %q in mode %q", spec.SlackThread, spec.SlackSubscribe)
+	}
 	// A BASE IS A MERGE WORKSPACE'S ALONE: every other workspace is cut from
 	// its source's tip, which no request names.
 	if spec.BaseRef != "" && spec.MergeOf == nil {

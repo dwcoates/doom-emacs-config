@@ -767,7 +767,7 @@ func createKey(spec CreateSpec) string {
 		ContextSelection                                       *heldSelection
 		FromOrigin, OneShot                                    bool
 		Name, Model, Priority, PermissionMode, Consent, Prompt string
-		SlackThread, Originator                                string
+		SlackThread, SlackSubscribe, Originator                string
 		PreDeploy, PostDeploy                                  []string
 		// Omitted when empty, so a create of words alone keys as it did
 		// before prompts carried images.
@@ -778,7 +778,7 @@ func createKey(spec CreateSpec) string {
 		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
 		// keys, and is refused by the create's validation rather than here.
-		SlackThread: spec.SlackThread, Originator: fmt.Sprint(int(spec.originator)),
+		SlackThread: spec.SlackThread, SlackSubscribe: string(spec.SlackSubscribe), Originator: fmt.Sprint(int(spec.originator)),
 		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent),
 		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
@@ -863,6 +863,9 @@ type heldSpec struct {
 	PermissionMode       string         `json:"permission_mode,omitempty"`
 	Priority             *int           `json:"priority,omitempty"`
 	SlackThread          string         `json:"slack_thread,omitempty"`
+	// SlackSubscribe is the subscription at creation's mode; a row written
+	// before it existed has none, which is what its create meant.
+	SlackSubscribe string `json:"slack_subscribe,omitempty"`
 	// Originator is the spec's kind (lifecycleconfig.Originator.String). A
 	// create held by a build before originators were recorded carries none,
 	// and resumes as user_or_workspace: that build had no emoji-ack kind.
@@ -962,7 +965,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester),
 		ConsentedUngatedMode: spec.ConsentedUngatedMode, PreDeploy: hookBytes(spec.DeployHooks.PreDeploy),
 		PostDeploy: hookBytes(spec.DeployHooks.PostDeploy), Name: spec.Name, Model: spec.Model, PermissionMode: spec.PermissionMode,
-		SlackThread: spec.SlackThread, Originator: spec.originator.String(),
+		SlackThread: spec.SlackThread, SlackSubscribe: string(spec.SlackSubscribe), Originator: spec.originator.String(),
 		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 	}
 	if spec.Priority != nil {
@@ -1012,6 +1015,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	spec.ForkFrom, spec.Requester = optionalID(held.ForkFrom), optionalID(held.Requester)
 	spec.ConsentedUngatedMode, spec.DeployHooks = held.ConsentedUngatedMode, wsm.DeployHooks{PreDeploy: pre, PostDeploy: post}
 	spec.Name, spec.Model, spec.PermissionMode, spec.SlackThread = held.Name, held.Model, held.PermissionMode, held.SlackThread
+	spec.SlackSubscribe = wsm.SlackThreadMode(held.SlackSubscribe)
 	spec.Hidden, spec.Placement = held.Hidden, createPlacementOf(held.Placement)
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)

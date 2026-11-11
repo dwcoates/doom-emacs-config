@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
@@ -110,7 +111,24 @@ func (v *verbs) recordOrigin(ctx context.Context, log dlog.Logger, record wsm.Wo
 		log.Error(opCreate, "could not store the originating Slack thread among the links", dlog.WithCause(fields, err))
 		return fmt.Errorf("create %q: store its originating thread: %w", record.Name, err)
 	}
+	if spec.SlackSubscribe == "" {
+		return nil
+	}
+	// A SUBSCRIPTION SLACK REFUSES FAILS THE CREATE: a workspace created to
+	// converse in a thread that never hears it is the failure, hidden.
+	fields["mode"] = string(spec.SlackSubscribe)
+	if err := v.deps.SlackThreads.SubscribeAtCreation(ctx, record.ID, record.Name, spec.SlackThread, spec.SlackSubscribe); err != nil {
+		log.Error(opCreate, "could not subscribe the workspace to the Slack thread it was created for", dlog.WithCause(fields, err))
+		return fmt.Errorf("create %q: subscribe it to its Slack thread: %w", record.Name, err)
+	}
+	log.Info(opCreate, "subscribed the workspace to the Slack thread it was created for", fields)
 	return nil
+}
+
+// SlackThreadSubscriber subscribes a workspace to a Slack thread at its
+// creation.
+type SlackThreadSubscriber interface {
+	SubscribeAtCreation(ctx context.Context, ws ids.WorkspaceID, name, url string, mode wsm.SlackThreadMode) error
 }
 
 // runCreationScripts runs the stage's script hooks, in order, from the
