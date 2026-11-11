@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_question.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_question: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX3F1ZXN0aW9uLnByb3RvEgxhZ2VudHJlcGwudjEiogEKFUFuc3dlclF1ZXN0aW9uUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiUKCHF1ZXN0aW9uGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjMKB2Fuc3dlcnMYAyADKAsyIi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25BbnN3ZXIijAEKFEFuc3dlclF1ZXN0aW9uQW5zd2VyEhUKDXF1ZXN0aW9uX3RleHQYASABKAkSDgoGY2hvc2VuGAIgAygJEj4KCm90aGVyX3RleHQYAyABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25PdGhlclRleHRIAIgBAUINCgtfb3RoZXJfdGV4dCInChdBbnN3ZXJRdWVzdGlvbk90aGVyVGV4dBIMCgR0ZXh0GAEgASgJIo4BChZBbnN3ZXJRdWVzdGlvblJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25TdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25FcnJvckgAQggKBnJlc3VsdCIXChVBbnN3ZXJRdWVzdGlvblN1Y2Nlc3Mi9AQKE0Fuc3dlclF1ZXN0aW9uRXJyb3ISSQoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Vbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIwLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbldvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25UcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAQgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uTm90WWV0QWRvcHRlZEgAEkYKEGFza19ub3Rfc3RhbmRpbmcYBSABKAsyKi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Bc2tOb3RTdGFuZGluZ0gAEkMKDnVuc2VydmVkX3ZhbHVlGAYgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uVW5zZXJ2ZWRWYWx1ZUgAEloKG211bHRpX3BpY2tfb25fc2luZ2xlX3NlbGVjdBgHIAEoCzIzLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbk11bHRpUGlja09uU2luZ2xlU2VsZWN0SAASOwoKbm9fc2Vzc2lvbhgIIAEoCzIlLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbk5vU2Vzc2lvbkgAQgcKBWNhdXNlIiAKHkFuc3dlclF1ZXN0aW9uVW5rbm93bldvcmtzcGFjZSI6CiJBbnN3ZXJRdWVzdGlvbldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIxCh5BbnN3ZXJRdWVzdGlvblRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSI/ChtBbnN3ZXJRdWVzdGlvbk5vdFlldEFkb3B0ZWQSFAoHYWRkcmVzcxgBIAEoCUgAiAEBQgoKCF9hZGRyZXNzIh4KHEFuc3dlclF1ZXN0aW9uQXNrTm90U3RhbmRpbmciKwobQW5zd2VyUXVlc3Rpb25VbnNlcnZlZFZhbHVlEgwKBHRleHQYASABKAkiJwolQW5zd2VyUXVlc3Rpb25NdWx0aVBpY2tPblNpbmdsZVNlbGVjdCIZChdBbnN3ZXJRdWVzdGlvbk5vU2Vzc2lvbkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX3F1ZXN0aW9uLnByb3RvEgxhZ2VudHJlcGwudjEiogEKFUFuc3dlclF1ZXN0aW9uUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiUKCHF1ZXN0aW9uGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjMKB2Fuc3dlcnMYAyADKAsyIi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25BbnN3ZXIijAEKFEFuc3dlclF1ZXN0aW9uQW5zd2VyEhUKDXF1ZXN0aW9uX3RleHQYASABKAkSDgoGY2hvc2VuGAIgAygJEj4KCm90aGVyX3RleHQYAyABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25PdGhlclRleHRIAIgBAUINCgtfb3RoZXJfdGV4dCInChdBbnN3ZXJRdWVzdGlvbk90aGVyVGV4dBIMCgR0ZXh0GAEgASgJIo4BChZBbnN3ZXJRdWVzdGlvblJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25TdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25FcnJvckgAQggKBnJlc3VsdCIXChVBbnN3ZXJRdWVzdGlvblN1Y2Nlc3MivgUKE0Fuc3dlclF1ZXN0aW9uRXJyb3ISSQoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Vbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIwLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbldvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25UcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAQgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uTm90WWV0QWRvcHRlZEgAEkYKEGFza19ub3Rfc3RhbmRpbmcYBSABKAsyKi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Bc2tOb3RTdGFuZGluZ0gAEkgKEWFza19zZXNzaW9uX2VuZGVkGAkgASgLMisuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uQXNrU2Vzc2lvbkVuZGVkSAASQwoOdW5zZXJ2ZWRfdmFsdWUYBiABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25VbnNlcnZlZFZhbHVlSAASWgobbXVsdGlfcGlja19vbl9zaW5nbGVfc2VsZWN0GAcgASgLMjMuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uTXVsdGlQaWNrT25TaW5nbGVTZWxlY3RIABI7Cgpub19zZXNzaW9uGAggASgLMiUuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uTm9TZXNzaW9uSABCBwoFY2F1c2UiIAoeQW5zd2VyUXVlc3Rpb25Vbmtub3duV29ya3NwYWNlIjoKIkFuc3dlclF1ZXN0aW9uV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkFuc3dlclF1ZXN0aW9uVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIj8KG0Fuc3dlclF1ZXN0aW9uTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiHgocQW5zd2VyUXVlc3Rpb25Bc2tOb3RTdGFuZGluZyIfCh1BbnN3ZXJRdWVzdGlvbkFza1Nlc3Npb25FbmRlZCIrChtBbnN3ZXJRdWVzdGlvblVuc2VydmVkVmFsdWUSDAoEdGV4dBgBIAEoCSInCiVBbnN3ZXJRdWVzdGlvbk11bHRpUGlja09uU2luZ2xlU2VsZWN0IhkKF0Fuc3dlclF1ZXN0aW9uTm9TZXNzaW9uQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.AnswerQuestionRequest
@@ -212,6 +212,17 @@ export type AnswerQuestionError = Message<"agentrepl.v1.AnswerQuestionError"> & 
     case: "askNotStanding";
   } | {
     /**
+     * The card was standing, and the session that posed the question batch no longer
+     * holds it: the session ended before anyone answered, so nothing was sent
+     * and the card is settled abandoned. A client tells the user the ask's
+     * session ended, never that it was already answered.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionAskSessionEnded ask_session_ended = 9;
+     */
+    value: AnswerQuestionAskSessionEnded;
+    case: "askSessionEnded";
+  } | {
+    /**
      * A question text or option label the batch never served.
      *
      * @generated from field: agentrepl.v1.AnswerQuestionUnservedValue unserved_value = 6;
@@ -333,6 +344,21 @@ export const AnswerQuestionAskNotStandingSchema: GenMessage<AnswerQuestionAskNot
   messageDesc(file_agentrepl_v1_endpoint_answer_question, 10);
 
 /**
+ * The abandoned-ask refusal. Empty: the arm is the whole fact.
+ *
+ * @generated from message agentrepl.v1.AnswerQuestionAskSessionEnded
+ */
+export type AnswerQuestionAskSessionEnded = Message<"agentrepl.v1.AnswerQuestionAskSessionEnded"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionAskSessionEnded.
+ * Use `create(AnswerQuestionAskSessionEndedSchema)` to create a new message.
+ */
+export const AnswerQuestionAskSessionEndedSchema: GenMessage<AnswerQuestionAskSessionEnded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 11);
+
+/**
  * @generated from message agentrepl.v1.AnswerQuestionUnservedValue
  */
 export type AnswerQuestionUnservedValue = Message<"agentrepl.v1.AnswerQuestionUnservedValue"> & {
@@ -349,7 +375,7 @@ export type AnswerQuestionUnservedValue = Message<"agentrepl.v1.AnswerQuestionUn
  * Use `create(AnswerQuestionUnservedValueSchema)` to create a new message.
  */
 export const AnswerQuestionUnservedValueSchema: GenMessage<AnswerQuestionUnservedValue> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_answer_question, 11);
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 12);
 
 /**
  * @generated from message agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
@@ -362,7 +388,7 @@ export type AnswerQuestionMultiPickOnSingleSelect = Message<"agentrepl.v1.Answer
  * Use `create(AnswerQuestionMultiPickOnSingleSelectSchema)` to create a new message.
  */
 export const AnswerQuestionMultiPickOnSingleSelectSchema: GenMessage<AnswerQuestionMultiPickOnSingleSelect> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_answer_question, 12);
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 13);
 
 /**
  * @generated from message agentrepl.v1.AnswerQuestionNoSession
@@ -375,5 +401,5 @@ export type AnswerQuestionNoSession = Message<"agentrepl.v1.AnswerQuestionNoSess
  * Use `create(AnswerQuestionNoSessionSchema)` to create a new message.
  */
 export const AnswerQuestionNoSessionSchema: GenMessage<AnswerQuestionNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_answer_question, 13);
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 14);
 

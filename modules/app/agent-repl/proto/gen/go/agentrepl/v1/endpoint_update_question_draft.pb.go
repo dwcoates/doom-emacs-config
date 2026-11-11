@@ -436,6 +436,7 @@ type UpdateQuestionDraftError struct {
 	//	*UpdateQuestionDraftError_TransferringAway
 	//	*UpdateQuestionDraftError_NotYetAdopted
 	//	*UpdateQuestionDraftError_AskNotStanding
+	//	*UpdateQuestionDraftError_AskSessionEnded
 	//	*UpdateQuestionDraftError_UnservedValue
 	//	*UpdateQuestionDraftError_NoSession
 	Cause         isUpdateQuestionDraftError_Cause `protobuf_oneof:"cause"`
@@ -525,6 +526,15 @@ func (x *UpdateQuestionDraftError) GetAskNotStanding() *UpdateQuestionDraftAskNo
 	return nil
 }
 
+func (x *UpdateQuestionDraftError) GetAskSessionEnded() *UpdateQuestionDraftAskSessionEnded {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateQuestionDraftError_AskSessionEnded); ok {
+			return x.AskSessionEnded
+		}
+	}
+	return nil
+}
+
 func (x *UpdateQuestionDraftError) GetUnservedValue() *UpdateQuestionDraftUnservedValue {
 	if x != nil {
 		if x, ok := x.Cause.(*UpdateQuestionDraftError_UnservedValue); ok {
@@ -573,6 +583,14 @@ type UpdateQuestionDraftError_AskNotStanding struct {
 	AskNotStanding *UpdateQuestionDraftAskNotStanding `protobuf:"bytes,5,opt,name=ask_not_standing,json=askNotStanding,proto3,oneof"`
 }
 
+type UpdateQuestionDraftError_AskSessionEnded struct {
+	// The card was standing, and the session that posed the question batch no longer
+	// holds it: the session ended before anyone answered, so nothing was sent
+	// and the card is settled abandoned. A client tells the user the ask's
+	// session ended, never that it was already answered.
+	AskSessionEnded *UpdateQuestionDraftAskSessionEnded `protobuf:"bytes,8,opt,name=ask_session_ended,json=askSessionEnded,proto3,oneof"`
+}
+
 type UpdateQuestionDraftError_UnservedValue struct {
 	// A question text or option label the batch never served, or a confirm
 	// on a question that is not a multi-select.
@@ -594,6 +612,8 @@ func (*UpdateQuestionDraftError_TransferringAway) isUpdateQuestionDraftError_Cau
 func (*UpdateQuestionDraftError_NotYetAdopted) isUpdateQuestionDraftError_Cause() {}
 
 func (*UpdateQuestionDraftError_AskNotStanding) isUpdateQuestionDraftError_Cause() {}
+
+func (*UpdateQuestionDraftError_AskSessionEnded) isUpdateQuestionDraftError_Cause() {}
 
 func (*UpdateQuestionDraftError_UnservedValue) isUpdateQuestionDraftError_Cause() {}
 
@@ -811,6 +831,43 @@ func (*UpdateQuestionDraftAskNotStanding) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{11}
 }
 
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+type UpdateQuestionDraftAskSessionEnded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateQuestionDraftAskSessionEnded) Reset() {
+	*x = UpdateQuestionDraftAskSessionEnded{}
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateQuestionDraftAskSessionEnded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateQuestionDraftAskSessionEnded) ProtoMessage() {}
+
+func (x *UpdateQuestionDraftAskSessionEnded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateQuestionDraftAskSessionEnded.ProtoReflect.Descriptor instead.
+func (*UpdateQuestionDraftAskSessionEnded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{12}
+}
+
 type UpdateQuestionDraftUnservedValue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The unserved text, as echoed.
@@ -821,7 +878,7 @@ type UpdateQuestionDraftUnservedValue struct {
 
 func (x *UpdateQuestionDraftUnservedValue) Reset() {
 	*x = UpdateQuestionDraftUnservedValue{}
-	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -833,7 +890,7 @@ func (x *UpdateQuestionDraftUnservedValue) String() string {
 func (*UpdateQuestionDraftUnservedValue) ProtoMessage() {}
 
 func (x *UpdateQuestionDraftUnservedValue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -846,7 +903,7 @@ func (x *UpdateQuestionDraftUnservedValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateQuestionDraftUnservedValue.ProtoReflect.Descriptor instead.
 func (*UpdateQuestionDraftUnservedValue) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateQuestionDraftUnservedValue) GetText() string {
@@ -864,7 +921,7 @@ type UpdateQuestionDraftNoSession struct {
 
 func (x *UpdateQuestionDraftNoSession) Reset() {
 	*x = UpdateQuestionDraftNoSession{}
-	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -876,7 +933,7 @@ func (x *UpdateQuestionDraftNoSession) String() string {
 func (*UpdateQuestionDraftNoSession) ProtoMessage() {}
 
 func (x *UpdateQuestionDraftNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -889,7 +946,7 @@ func (x *UpdateQuestionDraftNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateQuestionDraftNoSession.ProtoReflect.Descriptor instead.
 func (*UpdateQuestionDraftNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP(), []int{14}
 }
 
 var File_agentrepl_v1_endpoint_update_question_draft_proto protoreflect.FileDescriptor
@@ -915,13 +972,14 @@ const file_agentrepl_v1_endpoint_update_question_draft_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2(.agentrepl.v1.UpdateQuestionDraftSuccessH\x00R\asuccess\x12>\n" +
 	"\x05error\x18\x02 \x01(\v2&.agentrepl.v1.UpdateQuestionDraftErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1c\n" +
-	"\x1aUpdateQuestionDraftSuccess\"\xb3\x05\n" +
+	"\x1aUpdateQuestionDraftSuccess\"\x93\x06\n" +
 	"\x18UpdateQuestionDraftError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.UpdateQuestionDraftUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v25.agentrepl.v1.UpdateQuestionDraftWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12`\n" +
 	"\x11transferring_away\x18\x03 \x01(\v21.agentrepl.v1.UpdateQuestionDraftTransferringAwayH\x00R\x10transferringAway\x12X\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2..agentrepl.v1.UpdateQuestionDraftNotYetAdoptedH\x00R\rnotYetAdopted\x12[\n" +
-	"\x10ask_not_standing\x18\x05 \x01(\v2/.agentrepl.v1.UpdateQuestionDraftAskNotStandingH\x00R\x0easkNotStanding\x12W\n" +
+	"\x10ask_not_standing\x18\x05 \x01(\v2/.agentrepl.v1.UpdateQuestionDraftAskNotStandingH\x00R\x0easkNotStanding\x12^\n" +
+	"\x11ask_session_ended\x18\b \x01(\v20.agentrepl.v1.UpdateQuestionDraftAskSessionEndedH\x00R\x0faskSessionEnded\x12W\n" +
 	"\x0eunserved_value\x18\x06 \x01(\v2..agentrepl.v1.UpdateQuestionDraftUnservedValueH\x00R\runservedValue\x12K\n" +
 	"\n" +
 	"no_session\x18\a \x01(\v2*.agentrepl.v1.UpdateQuestionDraftNoSessionH\x00R\tnoSessionB\a\n" +
@@ -935,7 +993,8 @@ const file_agentrepl_v1_endpoint_update_question_draft_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
 	"\n" +
 	"\b_address\"#\n" +
-	"!UpdateQuestionDraftAskNotStanding\"6\n" +
+	"!UpdateQuestionDraftAskNotStanding\"$\n" +
+	"\"UpdateQuestionDraftAskSessionEnded\"6\n" +
 	" UpdateQuestionDraftUnservedValue\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x1e\n" +
 	"\x1cUpdateQuestionDraftNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -952,7 +1011,7 @@ func file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescGZIP() []byte
 	return file_agentrepl_v1_endpoint_update_question_draft_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_update_question_draft_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_update_question_draft_proto_goTypes = []any{
 	(*UpdateQuestionDraftRequest)(nil),              // 0: agentrepl.v1.UpdateQuestionDraftRequest
 	(*UpdateQuestionDraftShow)(nil),                 // 1: agentrepl.v1.UpdateQuestionDraftShow
@@ -966,14 +1025,15 @@ var file_agentrepl_v1_endpoint_update_question_draft_proto_goTypes = []any{
 	(*UpdateQuestionDraftTransferringAway)(nil),     // 9: agentrepl.v1.UpdateQuestionDraftTransferringAway
 	(*UpdateQuestionDraftNotYetAdopted)(nil),        // 10: agentrepl.v1.UpdateQuestionDraftNotYetAdopted
 	(*UpdateQuestionDraftAskNotStanding)(nil),       // 11: agentrepl.v1.UpdateQuestionDraftAskNotStanding
-	(*UpdateQuestionDraftUnservedValue)(nil),        // 12: agentrepl.v1.UpdateQuestionDraftUnservedValue
-	(*UpdateQuestionDraftNoSession)(nil),            // 13: agentrepl.v1.UpdateQuestionDraftNoSession
-	(*v1.WorkspaceRef)(nil),                         // 14: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                              // 15: frontend.v1.FeedId
+	(*UpdateQuestionDraftAskSessionEnded)(nil),      // 12: agentrepl.v1.UpdateQuestionDraftAskSessionEnded
+	(*UpdateQuestionDraftUnservedValue)(nil),        // 13: agentrepl.v1.UpdateQuestionDraftUnservedValue
+	(*UpdateQuestionDraftNoSession)(nil),            // 14: agentrepl.v1.UpdateQuestionDraftNoSession
+	(*v1.WorkspaceRef)(nil),                         // 15: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                              // 16: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_update_question_draft_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.UpdateQuestionDraftRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.UpdateQuestionDraftRequest.question:type_name -> frontend.v1.FeedId
+	15, // 0: agentrepl.v1.UpdateQuestionDraftRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.UpdateQuestionDraftRequest.question:type_name -> frontend.v1.FeedId
 	1,  // 2: agentrepl.v1.UpdateQuestionDraftRequest.show:type_name -> agentrepl.v1.UpdateQuestionDraftShow
 	2,  // 3: agentrepl.v1.UpdateQuestionDraftRequest.pick:type_name -> agentrepl.v1.UpdateQuestionDraftPick
 	3,  // 4: agentrepl.v1.UpdateQuestionDraftRequest.confirm:type_name -> agentrepl.v1.UpdateQuestionDraftConfirm
@@ -984,13 +1044,14 @@ var file_agentrepl_v1_endpoint_update_question_draft_proto_depIdxs = []int32{
 	9,  // 9: agentrepl.v1.UpdateQuestionDraftError.transferring_away:type_name -> agentrepl.v1.UpdateQuestionDraftTransferringAway
 	10, // 10: agentrepl.v1.UpdateQuestionDraftError.not_yet_adopted:type_name -> agentrepl.v1.UpdateQuestionDraftNotYetAdopted
 	11, // 11: agentrepl.v1.UpdateQuestionDraftError.ask_not_standing:type_name -> agentrepl.v1.UpdateQuestionDraftAskNotStanding
-	12, // 12: agentrepl.v1.UpdateQuestionDraftError.unserved_value:type_name -> agentrepl.v1.UpdateQuestionDraftUnservedValue
-	13, // 13: agentrepl.v1.UpdateQuestionDraftError.no_session:type_name -> agentrepl.v1.UpdateQuestionDraftNoSession
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	12, // 12: agentrepl.v1.UpdateQuestionDraftError.ask_session_ended:type_name -> agentrepl.v1.UpdateQuestionDraftAskSessionEnded
+	13, // 13: agentrepl.v1.UpdateQuestionDraftError.unserved_value:type_name -> agentrepl.v1.UpdateQuestionDraftUnservedValue
+	14, // 14: agentrepl.v1.UpdateQuestionDraftError.no_session:type_name -> agentrepl.v1.UpdateQuestionDraftNoSession
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_question_draft_proto_init() }
@@ -1013,6 +1074,7 @@ func file_agentrepl_v1_endpoint_update_question_draft_proto_init() {
 		(*UpdateQuestionDraftError_TransferringAway)(nil),
 		(*UpdateQuestionDraftError_NotYetAdopted)(nil),
 		(*UpdateQuestionDraftError_AskNotStanding)(nil),
+		(*UpdateQuestionDraftError_AskSessionEnded)(nil),
 		(*UpdateQuestionDraftError_UnservedValue)(nil),
 		(*UpdateQuestionDraftError_NoSession)(nil),
 	}
@@ -1023,7 +1085,7 @@ func file_agentrepl_v1_endpoint_update_question_draft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_question_draft_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_question_draft_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

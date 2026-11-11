@@ -65,6 +65,11 @@ message AnswerPermissionError {
     AnswerPermissionNotYetAdopted not_yet_adopted = 4;
     // The permission card is no longer standing.
     AnswerPermissionAskNotStanding ask_not_standing = 5;
+    // The card was standing, and the session that posed the consent ask no longer
+    // holds it: the session ended before anyone answered, so nothing was sent
+    // and the card is settled abandoned. A client tells the user the ask's
+    // session ended, never that it was already answered.
+    AnswerPermissionAskSessionEnded ask_session_ended = 8;
     // A standing allow was picked where none was offered.
     AnswerPermissionNoStandingOffer no_standing_offer = 6;
     // The workspace has no session to answer to.
@@ -90,5 +95,8 @@ message AnswerPermissionNotYetAdopted {
   optional string address = 1;
 }
 message AnswerPermissionAskNotStanding {}
+
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+message AnswerPermissionAskSessionEnded {}
 message AnswerPermissionNoStandingOffer {}
 message AnswerPermissionNoSession {}

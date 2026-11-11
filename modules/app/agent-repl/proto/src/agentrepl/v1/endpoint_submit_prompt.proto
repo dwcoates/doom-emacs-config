@@ -292,6 +292,11 @@ message SubmitPromptError {
     // answer, so it is not delivered as a prompt instead. The composer
     // keeps the text.
     SubmitPromptAskNotStanding ask_not_standing = 15;
+    // The card was standing, and the session that posed the ask no longer
+    // holds it: the session ended before anyone answered, so nothing was sent
+    // and the card is settled abandoned. A client tells the user the ask's
+    // session ended, never that it was already answered.
+    SubmitPromptAskSessionEnded ask_session_ended = 20;
     // A prompt of origin PROMPT_ORIGIN_AGENT_SENT begins with a slash command.
     // Nothing was submitted: an agent performs acts on a conversation through
     // the rpcs that name them (CompactWorkspace), and the rest -- clearing it
@@ -340,6 +345,9 @@ message SubmitPromptSlashCommandFromAgent {
 message SubmitPromptThreadAwaitingFirstAnswer {}
 // The settled-ask refusal. Empty: the arm is the whole fact.
 message SubmitPromptAskNotStanding {}
+
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+message SubmitPromptAskSessionEnded {}
 
 // The model a `/model` act named is not in this session's catalog.
 message SubmitPromptModelNotInCatalog {

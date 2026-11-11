@@ -59,3 +59,25 @@ was routed to that dead ask, so the workspace could never be prompted again.
     orphaned before this change are answered too.
   - The shim settles every answered ask as abandoned before it states its
     session's facts.
+
+### `ask_session_ended` on `agentrepl.v1.AnswerPermissionError`, `agentrepl.v1.AnswerQuestionError`, `agentrepl.v1.UpdateQuestionDraftError` and `agentrepl.v1.SubmitPromptError`
+
+- WHAT: a new empty refusal arm on each endpoint that delivers an answer to an
+  ask.
+  - The card was standing when the answer was sent.
+  - The shim refused the answer `no_open_ask`, because the session that posed
+    the ask no longer holds it.
+  - The daemon settles the card abandoned through the same path a live settle
+    takes, and answers this arm.
+- WHY: the existing `ask_not_standing` arm drew "the ask was already answered".
+  - That was false for an ask whose session ended.
+  - The user could not tell why the workspace refused every answer and every
+    prompt.
+- WHY A NEW ARM, not a cause inside `ask_not_standing`:
+  - `ask_not_standing` stays the arm for a card the daemon no longer stands.
+  - The new arm is for a card it stood until this very refusal.
+  - Two facts get two arms, and the client switches on the arm.
+- CONSEQUENCES:
+  - Emacs's wire decoders list every arm they accept, so each of the three
+    decoders Emacs uses gains it (`lisp/wire-verbs.el`).
+  - The webapp's refusal texts gain it too.
