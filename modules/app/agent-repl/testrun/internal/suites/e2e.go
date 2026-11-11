@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -30,10 +29,7 @@ func e2eUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []string) (U
 	u := Units{Atomic: goVets(s, dir)}
 	b := moduleBuild(l, s.Name, dir, "", false)
 	for i, rel := range pkgs {
-		p := goPkg{Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel],
-			Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
-			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir()}
-		u.Programs = append(u.Programs, p.Programs...)
+		p := b.pkgOf(l, s, rel)
 		if l.Coverage {
 			p.SpawnedCovDir = SpawnedCovDir(l, s.Name, i)
 		}

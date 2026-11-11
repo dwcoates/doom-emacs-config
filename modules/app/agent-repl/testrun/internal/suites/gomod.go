@@ -124,15 +124,10 @@ func goIntegrationUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []
 	u := Units{Atomic: []run.Spec{vet}}
 	b := moduleBuild(l, s.Name, dir, tag, false)
 	for i, rel := range pkgs {
-		p := goPkg{
-			Suite: s.Name, Module: dir, Rel: rel, Tags: tag, Parallel: s.TestParallel[rel],
-			Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
-			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
-		}
+		p := b.pkgOf(l, s, rel)
 		if l.Coverage && len(p.Programs) > 0 {
 			p.SpawnedCovDir = SpawnedCovDir(l, s.Name+"-"+tag, i)
 		}
-		u.Programs = append(u.Programs, p.Programs...)
 		if err := u.addPackage(&b, p); err != nil {
 			return Units{}, err
 		}
@@ -157,12 +152,24 @@ func moduleBuild(l Layout, suite, dir, tags string, cover bool) GoBuild {
 	}
 }
 
-// addPackage adds p's units to u, each recorded as needing p's binary from b.
+// pkgOf is the package rel of suite s as this build makes it: its binary
+// under the build's directory, its units after the build, the build's tags.
+func (b GoBuild) pkgOf(l Layout, s roster.Suite, rel string) goPkg {
+	return goPkg{
+		Suite: s.Name, Module: b.Options.Module, Rel: rel, Tags: b.Options.Tags, Parallel: s.TestParallel[rel],
+		Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
+		Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
+	}
+}
+
+// addPackage adds p's units to u, each recorded as needing p's binary from b,
+// and the programs p's tests spawn.
 func (u *Units) addPackage(b *GoBuild, p goPkg, extra ...run.Spec) error {
 	check, split, err := p.units()
 	if err != nil {
 		return err
 	}
+	u.Programs = append(u.Programs, p.Programs...)
 	for _, a := range extra {
 		b.need(a.ID, p.Rel)
 		u.Atomic = append(u.Atomic, a)
@@ -184,12 +191,7 @@ func goModuleUnitsForPackages(l Layout, s roster.Suite, dir string, pkgs []strin
 	b := moduleBuild(l, s.Name, dir, "", l.Coverage)
 	var reportDeps []string
 	for i, rel := range pkgs {
-		p := goPkg{
-			Suite: s.Name, Module: dir, Rel: rel, Parallel: s.TestParallel[rel],
-			Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
-			Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
-		}
-		u.Programs = append(u.Programs, p.Programs...)
+		p := b.pkgOf(l, s, rel)
 		if l.Coverage {
 			p.CovDir = filepath.Join(covRoot, fmt.Sprintf("%03d", i))
 			if len(p.Programs) > 0 {
