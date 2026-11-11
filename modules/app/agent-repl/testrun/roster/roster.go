@@ -319,7 +319,7 @@ var Suites = []Suite{
 			// Their tests list the runner's ERT driver directory, the
 			// daemon's and the webapp's trees, and the module's root.
 			"gofunc":                            {"e2e/"},
-			"internal/redundancy/gomeasure":     {"daemon/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/", "tree-sitter-tldr/"},
+			"internal/redundancy/gomeasure":     {"daemon/", "e2e/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/", "tree-sitter-tldr/"},
 			"internal/redundancy/vitestmeasure": {"webapp"},
 		},
 		Never: map[string]string{
@@ -328,6 +328,7 @@ var Suites = []Suite{
 			"internal/suites":  "its tests plan every roster suite against the real tree, running the go command and Emacs over it",
 			"internal/run":     "its test walks the whole module for every Go test file",
 			"internal/testdir": "its test walks the whole module for every Go test file",
+			"testenv":          "its test walks the whole module for every suite's program use",
 		}}},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
 	// `--suites daemon` (or webapp, shim) run unit and integration together,
