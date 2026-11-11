@@ -24,7 +24,16 @@ func (r *recorder) TurnEndedUnobserved(ws ids.WorkspaceID) {
 }
 func (r *recorder) NeedsInput(ws ids.WorkspaceID) { r.got = append(r.got, "needs_input:"+string(ws)) }
 func (r *recorder) Landed(ws ids.WorkspaceID)     { r.got = append(r.got, "landed:"+string(ws)) }
-func (r *recorder) Closed(before wsm.Workspace)   { r.got = append(r.got, "closed:"+string(before.ID)) }
+func (r *recorder) Closed(before wsm.Workspace, how wsm.CloseHow) {
+	r.got = append(r.got, "closed:"+string(before.ID)+":"+how.String())
+}
+func (r *recorder) Deployed(ws ids.WorkspaceID, failure string) {
+	r.got = append(r.got, "deployed:"+string(ws)+":"+failure)
+}
+func (r *recorder) Evicted(ws ids.WorkspaceID, reason string) {
+	r.got = append(r.got, "evicted:"+string(ws)+":"+reason)
+}
+func (r *recorder) ColdGated(ws ids.WorkspaceID) { r.got = append(r.got, "cold_gated:"+string(ws)) }
 func (r *recorder) PullRequestOwned(ws ids.WorkspaceID, pr wsm.PullRequestKey) {
 	r.got = append(r.got, "pull_request:"+string(ws)+":"+pr.String())
 }
@@ -42,7 +51,13 @@ func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 		{name: "a turn ending unobserved", edge: func(h *Hub) { h.TurnEndedUnobserved(ws) }, want: "turn_ended_unobserved:ws-1"},
 		{name: "an ask opening", edge: func(h *Hub) { h.NeedsInput(ws) }, want: "needs_input:ws-1"},
 		{name: "a landing", edge: func(h *Hub) { h.Landed(ws) }, want: "landed:ws-1"},
-		{name: "a close", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}) }, want: "closed:ws-1"},
+		{name: "a close", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}, wsm.HowClosed) }, want: "closed:ws-1:closed"},
+		{name: "a kill", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}, wsm.HowKilled) }, want: "closed:ws-1:killed"},
+		{name: "a nuke", edge: func(h *Hub) { h.Closed(wsm.Workspace{ID: ws}, wsm.HowNuked) }, want: "closed:ws-1:nuked"},
+		{name: "a deploy that ran", edge: func(h *Hub) { h.Deployed(ws, "") }, want: "deployed:ws-1:"},
+		{name: "a deploy that failed", edge: func(h *Hub) { h.Deployed(ws, "the build failed") }, want: "deployed:ws-1:the build failed"},
+		{name: "an eviction", edge: func(h *Hub) { h.Evicted(ws, "dequeued") }, want: "evicted:ws-1:dequeued"},
+		{name: "a cold gate", edge: func(h *Hub) { h.ColdGated(ws) }, want: "cold_gated:ws-1"},
 		{name: "a pull request taken as the workspace's own", edge: func(h *Hub) { h.PullRequestOwned(ws, pr) }, want: "pull_request:ws-1:acme/definitions#7"},
 		{name: "a merge queue landing", edge: func(h *Hub) {
 			h.QueueChanged(merge.QueueChange{Kind: merge.QueueChangeLanded, Subject: merge.QueueMember{Workspace: ws}})
@@ -67,8 +82,9 @@ func TestTheHubTellsEveryObserverEveryEdge(t *testing.T) {
 	}
 }
 
-func TestOnlyALandedQueueChangeIsAnEdge(t *testing.T) {
-	for _, kind := range []merge.QueueChangeKind{merge.QueueChangeEnqueued, merge.QueueChangeStarted, merge.QueueChangeFailed, merge.QueueChangeDequeued} {
+func TestOnlyALandedOrUnlandedLeavingQueueChangeIsAnEdge(t *testing.T) {
+	for _, kind := range []merge.QueueChangeKind{merge.QueueChangeEnqueued, merge.QueueChangeRequeued, merge.QueueChangeStarted, merge.QueueChangeStepped,
+		merge.QueueChangeReordered, merge.QueueChangePaused, merge.QueueChangeResumed} {
 		t.Run(kind.String(), func(t *testing.T) {
 			// Arrange
 			r := &recorder{}
@@ -79,6 +95,60 @@ func TestOnlyALandedQueueChangeIsAnEdge(t *testing.T) {
 			// Assert
 			if len(r.got) != 0 {
 				t.Errorf("observer told %v, want nothing", r.got)
+			}
+		})
+	}
+}
+
+func TestAMergeLeavingTheQueueUnlandedIsItsSubjectsEviction(t *testing.T) {
+	tests := []struct {
+		name   string
+		change merge.QueueChange
+		want   string
+	}{
+		{name: "a failed merge that recorded its cause", change: merge.QueueChange{Kind: merge.QueueChangeFailed, Cause: "pick_failed"}, want: "evicted:ws-1:pick failed"},
+		{name: "a failed merge that recorded none", change: merge.QueueChange{Kind: merge.QueueChangeFailed}, want: "evicted:ws-1:failed"},
+		{name: "a merge taken off the queue", change: merge.QueueChange{Kind: merge.QueueChangeDequeued, Cause: "dequeued"}, want: "evicted:ws-1:dequeued"},
+		{name: "a merge abandoned by a restart", change: merge.QueueChange{Kind: merge.QueueChangeDequeued, Cause: "restart_failed"}, want: "evicted:ws-1:restart failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+			tt.change.Subject = merge.QueueMember{Workspace: ws}
+
+			// Act
+			New(r).QueueChanged(tt.change)
+
+			// Assert
+			if !slices.Equal(r.got, []string{tt.want}) {
+				t.Errorf("observer told %v, want [%s]", r.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestADeployEndTellsEachWorkspaceItsLandingCarries(t *testing.T) {
+	tests := []struct {
+		name string
+		end  merge.DeployEnd
+		want []string
+	}{
+		{name: "a build that runs", end: merge.DeployEnd{Landed: []ids.WorkspaceID{"ws-1", "ws-2"}}, want: []string{"deployed:ws-1:", "deployed:ws-2:"}},
+		{name: "a deploy that failed", end: merge.DeployEnd{Failure: "the build failed", Landed: []ids.WorkspaceID{"ws-1"}}, want: []string{"deployed:ws-1:the build failed"}},
+		{name: "a deploy carrying no landing tells nobody", end: merge.DeployEnd{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+
+			// Act
+			New(r).DeployEnded(tt.end)
+
+			// Assert
+			if !slices.Equal(r.got, tt.want) {
+				t.Errorf("observer told %v, want %v", r.got, tt.want)
 			}
 		})
 	}
@@ -109,9 +179,12 @@ func TestReportingEdgesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
 	tests := []struct {
 		name string
 		ws   wsm.Workspace
+		how  wsm.CloseHow
 		want []string
 	}{
-		{name: "an open workspace closing is told", ws: wsm.Workspace{ID: ws}, want: []string{"closed:ws-1"}},
+		{name: "an open workspace closing is told", ws: wsm.Workspace{ID: ws}, want: []string{"closed:ws-1:closed"}},
+		{name: "a kill is told as a kill", ws: wsm.Workspace{ID: ws}, how: wsm.HowKilled, want: []string{"closed:ws-1:killed"}},
+		{name: "a nuke is told as a nuke", ws: wsm.Workspace{ID: ws}, how: wsm.HowNuked, want: []string{"closed:ws-1:nuked"}},
 		{name: "re-closing a closed workspace tells nothing", ws: wsm.Workspace{ID: ws, Closed: true}},
 	}
 	for _, tt := range tests {
@@ -122,7 +195,7 @@ func TestReportingEdgesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {
 			db := ReportingEdges(inner, New(r), dlog.NewTestLogger())
 
 			// Act
-			err := db.MarkClosed(context.Background(), ws, wsm.Closure{By: wsm.CloseByUser})
+			err := db.MarkClosed(context.Background(), ws, wsm.Closure{By: wsm.CloseByUser, How: tt.how})
 
 			// Assert
 			if err != nil || inner.closed != 1 {

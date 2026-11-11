@@ -105,6 +105,41 @@ func TestKillRecordsTheUsersClose(t *testing.T) {
 	}
 }
 
+func TestKillTellsItsCloseAsAKill(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert: the close that tells the workspace's followers is the fast
+	// half's, the first write.
+	closures := f.db.closures["w1"]
+	if len(closures) == 0 || closures[0].How != wsm.HowKilled {
+		t.Fatalf("close records = %+v, want the first told as a kill", closures)
+	}
+}
+
+func TestNukeTellsItsCloseAsANuke(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Nuke(context.Background(), "w1"); err != nil {
+		t.Fatalf("Nuke: %v", err)
+	}
+
+	// Assert.
+	closures := f.db.closures["w1"]
+	if len(closures) == 0 || closures[0].How != wsm.HowNuked {
+		t.Fatalf("close records = %+v, want the first told as a nuke", closures)
+	}
+}
+
 func TestKillLeavesTheWorkspaceRecordInPlace(t *testing.T) {
 	// Arrange: Kill destroys no data.
 	f := newFixture(t)

@@ -1,6 +1,6 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s depletion, pause and resume (following one workspace''s merge is `workspace subscribe`, `/agent-repl-workspaces`''). Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
 argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | requeue | discard | move-up | move-down | pause [-hard] [-to-land] | resume | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
@@ -125,13 +125,14 @@ Either kind:
   on agent-repl's master arrives once the build carrying it runs; a report that
   the repository's deploy stage is held or the rollout failed means the
   running build does NOT carry it.
-- d. A notice that a subscribed queue changed: act only as far as the work the
-  subscription was taken for calls for; otherwise report it in one line and
-  STOP. NEVER poll the queue between notices. A notice that waited behind your
-  turns lists every change since the last one you were told, oldest first, and
-  its queue is the queue as it stands when it reaches you. A notice saying the
-  subscription ended is the last; subscribe again only if the work you
-  subscribed for still needs it.
+- d. A notice that a subscribed queue depleted, was paused or was resumed: act
+  only as far as the work the subscription was taken for calls for; otherwise
+  report it in one line and STOP. A paused notice means the queue is held; the
+  resumed notice that follows says it runs again. NEVER poll the queue between
+  notices. A notice that waited behind your turns lists every change since the
+  last one you were told, oldest first, and its queue is the queue as it stands
+  when it reaches you. A notice saying the subscription ended is the last;
+  subscribe again only if the work you subscribed for still needs it.
 - e. A landing report for an instrumentation round: reproduce, read the records
   the round added, and either remediate (landing the fix as the next round) or
   add the records still missing and land them as the next async merge. While a
@@ -225,16 +226,22 @@ Either kind:
     attempt, and if its rebase on return conflicts again it steps aside again.
   - A merge with nobody in line behind it repairs in place, holding the head.
   - It survives a daemon restart.
-- `merge-queue subscribe [-repository here|DIR]` has this workspace told as
-  the queue changes (to land after it drains, to report a landing) instead of
-  polling it. It is told, in one short line each, a merge put in line, a
-  merge leaving the queue (landed, failed or taken off), and each deploy of
-  the daemon's own checkout ending (its build running, or failed), naming the
-  landings it carries; never a merge's start or steps. It ends on
-  `merge-queue unsubscribe`, on the workspace's close, and on its own when a
-  queue in scope depletes (a merge leaves and none is left in line), that
-  notice being its last; subscribe again to follow the next work, and to hear
-  a deploy that ends after the depletion.
+- `merge-queue subscribe [-repository here|DIR]` has this workspace told, in
+  one short line naming the queue, when the queue AS A WHOLE depletes, is
+  paused, or is resumed, instead of polling it. It is never told what one
+  merge does (put in line, started, stepped, landed, failed, taken off,
+  deployed). It ends on `merge-queue unsubscribe`, on the workspace's close,
+  and on its own when a queue in scope depletes, that notice being its last
+  (subscribe again to follow the next work).
+- To watch ONE workspace's merge land, deploy or be evicted, subscribe to that
+  workspace, not the queue: `workspace subscribe WS` (`/agent-repl-workspaces`)
+  holds `-events lifecycle` by default, which tells landed, deployed (the
+  running build carries the landing; a failed deploy is told as such, and
+  means the running build does NOT carry it), evicted (with the reason),
+  closed (as closed, killed or nuked) and cold_gated. WS need not have a merge
+  in line yet, and each workspace watched takes its own subscription, which
+  ends on its terminal notice or on `workspace unsubscribe WS`. Waiting for
+  'after X lands' is this, never a queue subscription.
 - A repository whose `.agent-repl/lifecycle.yaml` sets `deploy_checks` holds
   its queue's head after every deploy until the deploy is checked.
   - Deploys in a row form a chain, which one hidden intake workspace checks.

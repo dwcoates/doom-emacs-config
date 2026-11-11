@@ -190,7 +190,19 @@ func TestEachEdgeIsToldToTheSubscribersThatAskedForIt(t *testing.T) {
 		{name: "a turn ending", edge: func(s *Service) { s.TurnEnded(followed) }, event: wsm.WorkspaceEventTurnEnded, words: "ended a turn."},
 		{name: "an ask opening", edge: func(s *Service) { s.NeedsInput(followed) }, event: wsm.WorkspaceEventNeedsInput, words: "is waiting on the user"},
 		{name: "a landing", edge: func(s *Service) { s.Landed(followed) }, event: wsm.WorkspaceEventLanded, words: "landed its branch."},
-		{name: "a close", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: followed}) }, event: wsm.WorkspaceEventClosed, words: "closed."},
+		{name: "a close", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: followed}, wsm.HowClosed) }, event: wsm.WorkspaceEventClosed, words: "closed."},
+		{name: "a kill", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: followed}, wsm.HowKilled) }, event: wsm.WorkspaceEventClosed,
+			words: "was killed: its session was force-stopped, and its worktree, branch and records are kept."},
+		{name: "a nuke", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: followed}, wsm.HowNuked) }, event: wsm.WorkspaceEventClosed,
+			words: "was nuked: its worktree, branch and record are destroyed"},
+		{name: "a deploy whose build runs", edge: func(s *Service) { s.Deployed(followed, "") }, event: wsm.WorkspaceEventDeployed,
+			words: "deployed: the running build carries its landing."},
+		{name: "a deploy that failed", edge: func(s *Service) { s.Deployed(followed, "the build failed") }, event: wsm.WorkspaceEventDeployed,
+			words: "landed, but its deploy failed (the build failed): master holds the change and the running build does not carry it."},
+		{name: "an eviction", edge: func(s *Service) { s.Evicted(followed, "pick failed") }, event: wsm.WorkspaceEventEvicted,
+			words: "had its merge leave the queue without landing (pick failed)."},
+		{name: "a cold gate", edge: func(s *Service) { s.ColdGated(followed) }, event: wsm.WorkspaceEventColdGated,
+			words: "parked at its cold gate: nothing runs there until the gate is answered."},
 		{name: "a pull request taken as its own", edge: func(s *Service) {
 			s.PullRequestOwned(followed, wsm.PullRequestKey{Owner: "acme", Repo: "definitions", Number: 7})
 		}, event: wsm.WorkspaceEventPullRequest,
@@ -263,10 +275,10 @@ func TestAParentIsToldAsTheParentAndASubscriberAsASubscriber(t *testing.T) {
 
 // otherEvent is an event other than E.
 func otherEvent(e wsm.WorkspaceEvent) wsm.WorkspaceEvent {
-	if e == wsm.WorkspaceEventClosed {
+	if e == wsm.WorkspaceEventPullRequest {
 		return wsm.WorkspaceEventLanded
 	}
-	return wsm.WorkspaceEventClosed
+	return wsm.WorkspaceEventPullRequest
 }
 
 func TestATurnEndNoDaemonWatchedIsToldToNobody(t *testing.T) {
@@ -412,7 +424,7 @@ func TestTheSupersedingNoticeCarriesTheStatusAsItNowStands(t *testing.T) {
 	f.s.TurnStarted(followed)
 
 	// Act
-	f.s.Closed(wsm.Workspace{ID: followed})
+	f.s.Closed(wsm.Workspace{ID: followed}, wsm.HowClosed)
 	f.deliverAll()
 
 	// Assert
@@ -501,12 +513,18 @@ func TestBothNotifiersShareOneSupersession(t *testing.T) {
 func TestEventSentencePanicsOnAPullRequestMismatchedToItsEvent(t *testing.T) {
 	pr := wsm.PullRequestKey{Owner: "acme", Repo: "definitions", Number: 7}
 	tests := []struct {
-		name  string
-		event wsm.WorkspaceEvent
-		pr    wsm.PullRequestKey
+		name   string
+		event  wsm.WorkspaceEvent
+		pr     wsm.PullRequestKey
+		detail string
 	}{
 		{name: "a pull request event naming no pull request", event: wsm.WorkspaceEventPullRequest},
 		{name: "another event naming a pull request", event: wsm.WorkspaceEventLanded, pr: pr},
+		{name: "an event that carries no detail told with one", event: wsm.WorkspaceEventLanded, detail: "surprise"},
+		{name: "a cold gate told with a detail", event: wsm.WorkspaceEventColdGated, detail: "surprise"},
+		{name: "a close told with no how", event: wsm.WorkspaceEventClosed},
+		{name: "a close told with a how no close has", event: wsm.WorkspaceEventClosed, detail: "vanished"},
+		{name: "an eviction told with no reason", event: wsm.WorkspaceEventEvicted},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -518,7 +536,7 @@ func TestEventSentencePanicsOnAPullRequestMismatchedToItsEvent(t *testing.T) {
 			}()
 
 			// Act
-			EventSentence("followed", tt.event, tt.pr)
+			EventSentence("followed", tt.event, tt.pr, tt.detail)
 		})
 	}
 }
@@ -531,10 +549,14 @@ func TestEveryDeclaredWorkspaceNoticeEventHasItsStoreEvent(t *testing.T) {
 		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED:       wsm.WorkspaceEventLanded,
 		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED:       wsm.WorkspaceEventClosed,
 		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST: wsm.WorkspaceEventPullRequest,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_DEPLOYED:     wsm.WorkspaceEventDeployed,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_EVICTED:      wsm.WorkspaceEventEvicted,
+		agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_COLD_GATED:   wsm.WorkspaceEventColdGated,
 	}
 	for number := range agentreplv1.WorkspaceNoticeEvent_name {
 		event := agentreplv1.WorkspaceNoticeEvent(number)
-		if event == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED {
+		// The bundle is no event: TestTheLifecycleBundle... holds it.
+		if event == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED || event == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE {
 			continue
 		}
 		t.Run(event.String(), func(t *testing.T) {
@@ -551,6 +573,80 @@ func TestEveryDeclaredWorkspaceNoticeEventHasItsStoreEvent(t *testing.T) {
 			// Assert
 			if got != wsm.NewWorkspaceEvents(stored) || back != event {
 				t.Errorf("EventsOf(%s) = %s, EventProto(%s) = %s; want each the other's", event, got, stored, back)
+			}
+		})
+	}
+}
+
+func TestTheLifecycleBundleIsWhatASubscriptionNamingNoEventsHolds(t *testing.T) {
+	const (
+		bundle = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE
+		turn   = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED
+	)
+	lifecycle := wsm.NewWorkspaceEvents(wsm.WorkspaceEventLanded, wsm.WorkspaceEventClosed, wsm.WorkspaceEventDeployed, wsm.WorkspaceEventEvicted, wsm.WorkspaceEventColdGated)
+	tests := []struct {
+		name   string
+		events []agentreplv1.WorkspaceNoticeEvent
+		want   wsm.WorkspaceEvents
+	}{
+		{name: "no events", want: lifecycle},
+		{name: "the bundle named", events: []agentreplv1.WorkspaceNoticeEvent{bundle}, want: lifecycle},
+		{name: "the bundle named twice", events: []agentreplv1.WorkspaceNoticeEvent{bundle, bundle}, want: lifecycle},
+		{name: "the bundle and an event it holds", events: []agentreplv1.WorkspaceNoticeEvent{bundle, agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED}, want: lifecycle},
+		{name: "the bundle and a turn event asked for by name", events: []agentreplv1.WorkspaceNoticeEvent{bundle, turn}, want: lifecycle | wsm.NewWorkspaceEvents(wsm.WorkspaceEventTurnEnded)},
+		{name: "a turn event alone holds no lifecycle event", events: []agentreplv1.WorkspaceNoticeEvent{turn}, want: wsm.NewWorkspaceEvents(wsm.WorkspaceEventTurnEnded)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := EventsOf(tt.events)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("EventsOf(%v) = %s, want %s", tt.events, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheLifecycleBundleHoldsNoTurnEventNeedsInputOrPullRequest(t *testing.T) {
+	// Arrange
+	lifecycle := wsm.LifecycleWorkspaceEvents()
+
+	// Act, Assert
+	for _, event := range []wsm.WorkspaceEvent{wsm.WorkspaceEventTurnStarted, wsm.WorkspaceEventTurnEnded, wsm.WorkspaceEventNeedsInput, wsm.WorkspaceEventPullRequest} {
+		if lifecycle.Has(event) {
+			t.Errorf("the lifecycle bundle holds %s, which each wakes the subscriber and must be asked for by name", event)
+		}
+	}
+	if !lifecycle.Valid() {
+		t.Errorf("the lifecycle bundle %s is not a valid subscription", lifecycle)
+	}
+}
+
+func TestANoticeHeadlineSaysHowACloseEndedAndWhetherADeployFailed(t *testing.T) {
+	tests := []struct {
+		name   string
+		event  wsm.WorkspaceEvent
+		detail string
+		want   string
+	}{
+		{name: "a close", event: wsm.WorkspaceEventClosed, detail: "closed", want: "workspace `followed`: closed"},
+		{name: "a kill", event: wsm.WorkspaceEventClosed, detail: "killed", want: "workspace `followed`: killed"},
+		{name: "a nuke", event: wsm.WorkspaceEventClosed, detail: "nuked", want: "workspace `followed`: nuked"},
+		{name: "a deploy whose build runs", event: wsm.WorkspaceEventDeployed, want: "workspace `followed`: deployed"},
+		{name: "a deploy that failed", event: wsm.WorkspaceEventDeployed, detail: "the build failed", want: "workspace `followed`: deploy failed"},
+		{name: "a cold gate", event: wsm.WorkspaceEventColdGated, want: "workspace `followed`: cold gated"},
+		{name: "an eviction", event: wsm.WorkspaceEventEvicted, detail: "dequeued", want: "workspace `followed`: evicted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := NoticeValues(tt.event, tt.detail, []string{"s"}, idleStatus(), false)["label"]
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("label = %q, want %q", got, tt.want)
 			}
 		})
 	}

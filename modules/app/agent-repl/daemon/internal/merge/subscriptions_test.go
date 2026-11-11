@@ -307,8 +307,12 @@ func TestAFailedMergeIsReportedFailed(t *testing.T) {
 	admitted(t, h)
 
 	// Assert.
-	if change := lastChange(t, h); change.Kind != QueueChangeFailed || change.Subject.Workspace != theWorkspace {
+	change := lastChange(t, h)
+	if change.Kind != QueueChangeFailed || change.Subject.Workspace != theWorkspace {
 		t.Fatalf("last change = %+v, want the merge failed", change)
+	}
+	if change.Cause != causeFailed {
+		t.Fatalf("cause = %q, want the failed merge's recorded cause %q, which tells a follower why it was evicted", change.Cause, causeFailed)
 	}
 }
 

@@ -26,7 +26,7 @@ func TestALatchIsReleasedOnlyByItsWorkspacesTurnEndOrClose(t *testing.T) {
 	}{
 		{name: "a turn ending", edge: func(l *Latches) { l.TurnEnded(ws) }, released: true},
 		{name: "turns an adoption found ended", edge: func(l *Latches) { l.TurnEndedUnobserved(ws) }, released: true},
-		{name: "the workspace closing", edge: func(l *Latches) { l.Closed(wsm.Workspace{ID: ws}) }, released: true},
+		{name: "the workspace closing", edge: func(l *Latches) { l.Closed(wsm.Workspace{ID: ws}, wsm.HowClosed) }, released: true},
 		{name: "a turn starting", edge: func(l *Latches) { l.TurnStarted(ws) }},
 		{name: "an ask opening", edge: func(l *Latches) { l.NeedsInput(ws) }},
 		{name: "a landing", edge: func(l *Latches) { l.Landed(ws) }},

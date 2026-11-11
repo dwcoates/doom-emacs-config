@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"slices"
@@ -39,7 +40,10 @@ func TestWorkspaceEventsAreASet(t *testing.T) {
 		{name: "the pull request event", events: []WorkspaceEvent{WorkspaceEventPullRequest}, wantValid: true, wantName: "pull_request"},
 		{name: "members name in order", events: []WorkspaceEvent{WorkspaceEventClosed, WorkspaceEventTurnStarted}, wantValid: true, wantName: "turn_started,closed"},
 		{name: "no event", wantValid: false},
-		{name: "an undeclared event", events: []WorkspaceEvent{9}, wantValid: false},
+		{name: "the deployed event", events: []WorkspaceEvent{WorkspaceEventDeployed}, wantValid: true, wantName: "deployed"},
+		{name: "the evicted event", events: []WorkspaceEvent{WorkspaceEventEvicted}, wantValid: true, wantName: "evicted"},
+		{name: "the cold gated event", events: []WorkspaceEvent{WorkspaceEventColdGated}, wantValid: true, wantName: "cold_gated"},
+		{name: "an undeclared event", events: []WorkspaceEvent{20}, wantValid: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -310,6 +314,51 @@ func TestAChildsOpenParentFollowsItWithoutSubscribing(t *testing.T) {
 	}
 }
 
+func TestTheLifecycleBundleIsTheOutcomesOfAWorkspacesWork(t *testing.T) {
+	// Act
+	got := LifecycleWorkspaceEvents().Members()
+
+	// Assert
+	want := []WorkspaceEvent{WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventDeployed, WorkspaceEventEvicted, WorkspaceEventColdGated}
+	if !slices.Equal(got, want) {
+		t.Errorf("LifecycleWorkspaceEvents() = %v, want %v", got, want)
+	}
+}
+
+func TestCloseHowIsNamedInANotice(t *testing.T) {
+	tests := []struct {
+		how  CloseHow
+		want string
+	}{
+		{HowClosed, "closed"}, {HowKilled, "killed"}, {HowNuked, "nuked"}, {CloseHow(9), "CloseHow(9)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act
+			got := tt.how.String()
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestADecodedClosureCarriesNoHow(t *testing.T) {
+	// Arrange: a closed row as the registry stores it.
+	at := sql.NullInt64{Int64: 1, Valid: true}
+	by := sql.NullString{String: string(CloseByUser), Valid: true}
+
+	// Act
+	closure, err := decodeClosure(Workspace{ID: "w1", Closed: true}, at, by)
+
+	// Assert
+	if err != nil || closure == nil || closure.How != HowClosed {
+		t.Fatalf("decodeClosure = %+v, %v; want the zero how, since it is told and never stored", closure, err)
+	}
+}
+
 func TestWorkspaceEventsMembersAreInDeclaredOrder(t *testing.T) {
 	tests := []struct {
 		name string
@@ -318,7 +367,8 @@ func TestWorkspaceEventsMembersAreInDeclaredOrder(t *testing.T) {
 	}{
 		{name: "the empty set", set: 0},
 		{name: "every event", set: AllWorkspaceEvents(), want: []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventTurnEnded,
-			WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventPullRequest}},
+			WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventPullRequest,
+			WorkspaceEventDeployed, WorkspaceEventEvicted, WorkspaceEventColdGated}},
 		{name: "some events, given out of order", set: NewWorkspaceEvents(WorkspaceEventPullRequest, WorkspaceEventTurnStarted),
 			want: []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventPullRequest}},
 	}

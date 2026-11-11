@@ -1657,16 +1657,16 @@ func TestAFailedHandBackNeverSaysTheMergeWorkspaceIsShown(t *testing.T) {
 	}
 }
 
-func TestPayOwedTellsTheQueueHowTheDeployEnded(t *testing.T) {
+func TestPayOwedTellsTheDeployReporterHowTheDeployEndedAndWhichWorkspacesItCarries(t *testing.T) {
 	cases := []struct {
 		name        string
 		coveredOnly bool
 		deployErr   error
 		want        merge.DeployEnd
 	}{
-		{name: "a deploy whose build runs", coveredOnly: true, want: merge.DeployEnd{Carried: []string{"a-merge"}}},
-		{name: "a deploy that failed", coveredOnly: true, deployErr: errors.New("the build failed"), want: merge.DeployEnd{Failure: "the build failed", Carried: []string{"a-merge"}}},
-		{name: "a fresh boot", coveredOnly: false, want: merge.DeployEnd{Boot: true, Carried: []string{"a-merge"}}},
+		{name: "a deploy whose build runs", coveredOnly: true, want: merge.DeployEnd{Landed: []ids.WorkspaceID{"ws-merge-a"}}},
+		{name: "a deploy that failed", coveredOnly: true, deployErr: errors.New("the build failed"), want: merge.DeployEnd{Failure: "the build failed", Landed: []ids.WorkspaceID{"ws-merge-a"}}},
+		{name: "a fresh boot", coveredOnly: false, want: merge.DeployEnd{Boot: true, Landed: []ids.WorkspaceID{"ws-merge-a"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1689,7 +1689,7 @@ func TestPayOwedTellsTheQueueHowTheDeployEnded(t *testing.T) {
 	}
 }
 
-func TestPayOwedTellsTheQueueOfADeployThatCarriedNoReport(t *testing.T) {
+func TestPayOwedTellsTheDeployReporterOfADeployThatCarriedNoReport(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 
@@ -1697,12 +1697,12 @@ func TestPayOwedTellsTheQueueOfADeployThatCarriedNoReport(t *testing.T) {
 	f.svc.PayOwed(context.Background(), true, nil)
 
 	// Assert
-	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil || f.deploys.ends[0].Failure != "" {
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Landed != nil || f.deploys.ends[0].Failure != "" {
 		t.Fatalf("told %+v, want one finished deploy carrying nothing", f.deploys.ends)
 	}
 }
 
-func TestPayOwedTellsTheQueueOfTheDeployEvenWhenTheReportsCannotBeRead(t *testing.T) {
+func TestPayOwedTellsTheDeployReporterEvenWhenTheReportsCannotBeRead(t *testing.T) {
 	// Arrange: a registry that refuses every read.
 	f := newFixture(t)
 	if err := f.db.Close(); err != nil {
@@ -1713,7 +1713,7 @@ func TestPayOwedTellsTheQueueOfTheDeployEvenWhenTheReportsCannotBeRead(t *testin
 	f.svc.PayOwed(context.Background(), true, nil)
 
 	// Assert
-	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil {
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Landed != nil {
 		t.Fatalf("told %+v, want the deploy told with no landing named", f.deploys.ends)
 	}
 	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); !ok {

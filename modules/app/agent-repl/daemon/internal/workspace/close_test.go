@@ -55,6 +55,9 @@ func TestCloseRecordsWhoAskedForIt(t *testing.T) {
 			if len(closures) != 1 || closures[0].By != tt.by || closures[0].At.IsZero() {
 				t.Fatalf("close records = %+v, want one by %s with its instant", closures, tt.by)
 			}
+			if closures[0].How != wsm.HowClosed {
+				t.Fatalf("close record = %+v, want it told as a plain close", closures[0])
+			}
 		})
 	}
 }
