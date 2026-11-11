@@ -494,7 +494,7 @@ func TestAFailedKeyedSuiteIsToldItRanConfined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.log.info) != 1 || !strings.HasPrefix(f.log.info[0], "lock ran confined to its inputs") {
+	if len(f.log.info) != 1 || !strings.HasPrefix(f.log.info[0], `lock ran confined to its inputs: a failure reading a checkout file with "operation not permitted", or a listing of a checkout directory that comes back empty (filepath.Glob drops the refusal), is a read its Reuse does not declare`) {
 		t.Fatalf("info = %v", f.log.info)
 	}
 }

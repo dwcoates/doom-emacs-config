@@ -332,7 +332,7 @@ func TestRecordPackagePassesRecordsOnlyWholePasses(t *testing.T) {
 	if got := reusedOf(f.decidePackages(t, Reusing)); !slices.Equal(got, []string{"a"}) {
 		t.Fatalf("reused %v, want only a, whose every chunk passed", got)
 	}
-	want := `daemon:b ran confined to its own inputs: a failure reading a checkout file with "operation not permitted" is a read its PackageReuse does not declare`
+	want := `daemon:b ran confined to its own inputs: a failure reading a checkout file with "operation not permitted", or a listing of a checkout directory that comes back empty (filepath.Glob drops the refusal), is a read its PackageReuse does not declare`
 	if !slices.ContainsFunc(f.log.info, func(l string) bool { return strings.HasPrefix(l, want) }) {
 		t.Fatalf("info = %q, want the failed package told it ran confined", f.log.info)
 	}
