@@ -1761,17 +1761,12 @@ message FooterStatusAgentReplFaultSalient {
 message FooterStatusActivityVendorStart {
   // The composed line. Never empty.
   string text = 1;
-  // The sign-in action, drawn after the line. SET only while the standing
-  // fault is a `vendor_rejection` whose refusal a sign-in cures (the vendor
-  // rejected the account's credential); UNSET otherwise, and nothing is drawn.
-  // A sign-in completed for the workspace's account root retries the start,
-  // and the action leaves with the fault.
-  optional FooterVendorStartSignIn sign_in = 2;
+  // Tag 2 (`sign_in`) is RETIRED: the line draws no action of its own; a
+  // sign-in the daemon finds needed opens the login by itself
+  // (TopbarAccount.sign_in_request).
+  reserved 2;
+  reserved "sign_in";
 }
-// The vendor-start line's sign-in action. EMPTY: presence draws the action,
-// and its click opens the page's one login flow, the same flow the topbar's
-// account cell opens.
-message FooterVendorStartSignIn {}
 
 // A close was requested and has not completed.
 message FooterStatusClosing {
