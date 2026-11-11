@@ -216,6 +216,7 @@ func TestTheAuthorLabelOfAGitHubNoticeIsItsSubject(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "Pull request"},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE, "GitHub merge queue"},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE, "GitHub workflow run"},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SLACK_THREAD_NOTICE, "Slack thread"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.origin.String(), func(t *testing.T) {
