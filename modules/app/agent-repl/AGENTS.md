@@ -1905,6 +1905,8 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - Linux uses the distribution's, the first of `apt`, `dnf`, `pacman` and `zypper` on PATH, so no distribution is singled out.
   - A `program` names its package for each under `install` (a name, or a list when one tool takes several packages), and `go_install` or `manual` only where no package manager carries it.
   - A Linux install runs through sudo, which asks for a password only on a terminal; an install it cannot run says so, with the command for the user to run.
+  - A program some Linux distribution does not package names a pinned `release` instead (VictoriaMetrics, which Fedora lacks, and whose Debian package starts a system-wide copy on the same port): the publisher's archive for each machine (`linux-arm64`, `linux-amd64`), its sha256, and the `file` inside it. Install checks the archive against the pin and puts the program into the user's bin dir; an archive that differs is refused, and the fix is a new pin.
+  - A program is looked for on PATH and then in the user's bin dir (`~/.local/bin`), where a release and the Linux Emacs build are installed. Whether that dir is on the user's PATH is the `command_link` entry's to report, once.
   - A Linux machine whose package manager an entry has no package for reports the entry `missing` with "add install.<manager>": the manifest is inadequate, and the fix is the missing package name.
 - **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.

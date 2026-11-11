@@ -8,11 +8,23 @@
       "why": "stores 30 days of agent-repl's runtime metrics for agents to query (the agent-repl-metrics skill)",
       "profile": "run",
       "platforms": [
-        "darwin"
+        "darwin",
+        "linux"
       ],
       "command": "victoria-metrics",
       "install": {
-        "brew": "victoriametrics"
+        "brew": "victoriametrics",
+        "release": {
+          "file": "victoria-metrics-prod",
+          "linux-arm64": {
+            "url": "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.154.0/victoria-metrics-linux-arm64-v1.154.0.tar.gz",
+            "sha256": "6dbeb72f924007ebb9abadfd8a555a420950af13631bb32143c5f4e5010dec2d"
+          },
+          "linux-amd64": {
+            "url": "https://github.com/VictoriaMetrics/VictoriaMetrics/releases/download/v1.154.0/victoria-metrics-linux-amd64-v1.154.0.tar.gz",
+            "sha256": "2ba3edae969a4b52a55e78d2721067541b0ee94774190dbd87fea0602aa57b8f"
+          }
+        }
       }
     },
     {

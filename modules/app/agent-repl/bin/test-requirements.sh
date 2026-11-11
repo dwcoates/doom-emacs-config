@@ -131,13 +131,13 @@ test_the_real_manifests_honor_the_contract() {
 test_every_linux_program_names_its_package_for_each_main_linux_package_manager() {
   # A Linux program comes from apt, dnf and pacman alike, so no distribution
   # family is left with "add install.<manager>"; only a program no package
-  # manager carries (a go_install, or a manual step on every platform) names
-  # none of them.
+  # manager carries (a go_install, a pinned release, or a manual step on every
+  # platform) names none of them.
   local missing
   missing="$(cd "$MODULE" && find . -name requirements.json -not -path '*/node_modules/*' -print0 \
     | xargs -0 jq -r '.requirements[]
         | select(.kind == "program" and ((.platforms // []) | index("linux")))
-        | select(.install.go_install == null)
+        | select(.install.go_install == null and .install.release == null)
         | select((.install | keys | map(select(. == "apt" or . == "dnf" or . == "pacman" or . == "brew" or . == "brew_cask")) | length) > 0)
         | select(.install.apt == null or .install.dnf == null or .install.pacman == null)
         | .id' | sort -u)"
@@ -481,6 +481,125 @@ test_an_unknown_package_manager_override_is_refused() {
   if [ "$RC" -eq 2 ] && has "AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER=yum is not one of: apt dnf pacman zypper"; then
     pass "an unknown package manager override is refused"
   else fail "pm override" "rc=$RC" "$OUT"; fi
+}
+
+# release_case [PIN [FILE]]: a linux program installed from a pinned release: a
+# tar.gz holding `tool-prod`, pinned to PIN (the archive's real sha256 when
+# absent), its entry naming FILE (tool-prod when absent) as the program, served
+# by a curl stub that copies the fixture to its -o path.
+release_case() {
+  new_case
+  mkdir -p "$CASE/rel"
+  printf '#!/bin/sh\necho tool 1.2.3\n' >"$CASE/rel/tool-prod"
+  (cd "$CASE/rel" && /usr/bin/tar -czf fixture.tar.gz tool-prod)
+  local pin="${1:-$(shasum -a 256 "$CASE/rel/fixture.tar.gz" | cut -d' ' -f1)}"
+  manifest "[{\"id\": \"tool\", \"kind\": \"program\", \"why\": \"w\", \"profile\": \"run\", \"platforms\": [\"linux\"], \"command\": \"tool\", \"install\": {\"release\": {\"file\": \"${2:-tool-prod}\", \"linux-arm64\": {\"url\": \"https://example.test/tool-arm64.tar.gz\", \"sha256\": \"$pin\"}}}}]"
+  write_stub curl 'while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { cp "$STUB_DIR/../rel/fixture.tar.gz" "$2"; exit 0; }; shift; done; exit 7'
+}
+
+RELEASED() { printf '%s\n' "$CASE/home/.local/bin/tool"; }
+
+test_install_installs_a_pinned_release_into_the_bin_dir() {
+  release_case
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=aarch64" PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && [ -x "$(RELEASED)" ] && [ "$("$(RELEASED)")" = "tool 1.2.3" ] && ran "curl -fsSL --retry 2 -o" \
+     && has "install: tool: installed $(RELEASED) from https://example.test/tool-arm64.tar.gz" && has "ok          tool: $(RELEASED)" \
+     && [ ! -e "$CASE/home/.local/bin/.tool.new" ]; then
+    pass "install downloads the release pinned for this machine, checks it, and installs its program into the bin dir, where check finds it"
+  else fail "release install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_missing_release_program_names_the_download_as_its_fix() {
+  release_case
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=arm64" PLATFORM=linux run check
+  if [ "$RC" -eq 1 ] && has "Fix: download the pinned https://example.test/tool-arm64.tar.gz and install its tool-prod as $(RELEASED)" && [ ! -s "$CASE/transcript" ]; then
+    pass "a missing release program's fix names the pinned download, and check downloads nothing"
+  else fail "release fix" "rc=$RC" "$OUT"; fi
+}
+
+test_a_release_unlike_its_pin_installs_nothing() {
+  release_case 0000000000000000000000000000000000000000000000000000000000000000
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=arm64" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: tool: https://example.test/tool-arm64.tar.gz has sha256" \
+     && has "not the pinned 0000000000000000000000000000000000000000000000000000000000000000; the upstream copy changed, so re-pin the entry" \
+     && [ ! -e "$(RELEASED)" ]; then
+    pass "a release whose archive is not the pinned one is refused and installs nothing"
+  else fail "release pin" "rc=$RC" "$OUT"; fi
+}
+
+test_a_machine_with_no_pinned_release_installs_nothing_and_says_to_pin_one() {
+  release_case
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=x86_64" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: tool: no release is pinned for linux-amd64; add install.release.linux-amd64 to its manifest entry" \
+     && has "Fix: no release is pinned for linux-amd64" && ! ran "curl" && [ ! -e "$(RELEASED)" ]; then
+    pass "a machine the entry pins no release for downloads nothing and says which pin to add"
+  else fail "release machine" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_release_lacking_its_program_installs_nothing() {
+  release_case "" other-name
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=arm64" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: tool: https://example.test/tool-arm64.tar.gz holds no other-name; fix the entry's install.release.file" && [ ! -e "$(RELEASED)" ]; then
+    pass "a release archive lacking the entry's program is refused and installs nothing"
+  else fail "release file" "rc=$RC" "$OUT"; fi
+}
+
+test_a_failed_release_download_installs_nothing() {
+  release_case
+  write_stub curl 'exit 22'
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=arm64" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: tool: downloading https://example.test/tool-arm64.tar.gz failed" && [ ! -e "$(RELEASED)" ]; then
+    pass "a failed release download is reported and installs nothing"
+  else fail "release download" "rc=$RC" "$OUT"; fi
+}
+
+test_a_release_that_is_not_an_archive_installs_nothing() {
+  release_case
+  printf 'not an archive\n' >"$CASE/rel/fixture.tar.gz"
+  manifest "$(jq -c --arg pin "$(shasum -a 256 "$CASE/rel/fixture.tar.gz" | cut -d' ' -f1)" '.requirements | .[0].install.release["linux-arm64"].sha256 = $pin' "$CASE/module/requirements.json")"
+  EXTRA_ENV="AGENT_REPL_REQUIREMENTS_ARCH=arm64" PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "ERROR: install: tool: https://example.test/tool-arm64.tar.gz is not a tar.gz tar can unpack" && [ ! -e "$(RELEASED)" ]; then
+    pass "a release that is not a tar.gz is reported and installs nothing"
+  else fail "release archive" "rc=$RC" "$OUT"; fi
+}
+
+test_a_release_lacking_a_field_is_refused() {
+  local path want
+  while IFS='|' read -r path want; do
+    release_case
+    manifest "$(jq -c "del($path) | .requirements" "$CASE/module/requirements.json")"
+    PLATFORM=linux run check
+    if [ "$RC" -eq 2 ] && has "$want"; then pass "a release lacking $path is refused, naming it"; else fail "release field $path" "rc=$RC" "$OUT"; fi
+  done <<'CASES'
+.requirements[0].install.release.file|tool: an install.release needs "file"
+.requirements[0].install.release["linux-arm64"].sha256|tool: install.release.linux-arm64 needs "sha256"
+.requirements[0].install.release["linux-arm64"].url|tool: install.release.linux-arm64 needs "url"
+CASES
+}
+
+test_a_program_in_the_bin_dir_is_found_when_the_dir_is_not_on_path() {
+  new_case; manifest "[$PROGRAM]"
+  mkdir -p "$CASE/home/.local/bin" && printf '#!/bin/sh\n' >"$CASE/home/.local/bin/tool" && chmod +x "$CASE/home/.local/bin/tool"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          tool: $CASE/home/.local/bin/tool"; then
+    pass "a program in the user's bin dir is found even when that dir is not on PATH"
+  else fail "bin dir lookup" "rc=$RC" "$OUT"; fi
+}
+
+test_machine_names_the_platform_and_the_publishers_arch() {
+  local bad="" arch want got
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  while read -r arch want; do
+    got="$(AGENT_REPL_REQUIREMENTS_PLATFORM=linux AGENT_REPL_REQUIREMENTS_ARCH="$arch" machine)"
+    [ "$got" = "$want" ] || bad="$bad [$arch -> $got, want $want]"
+  done <<'CASES'
+aarch64 linux-arm64
+arm64 linux-arm64
+x86_64 linux-amd64
+riscv64 linux-riscv64
+CASES
+  if [ -z "$bad" ]; then pass "machine names the platform and the arch as publishers spell it"; else fail "machine:$bad"; fi
 }
 
 test_an_unmet_optional_entry_does_not_fail_the_run() {

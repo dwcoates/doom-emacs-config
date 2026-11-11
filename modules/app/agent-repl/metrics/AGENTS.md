@@ -8,6 +8,11 @@ store and the sidecar every 15 seconds and keeping 30 days. The plan is
 `docs/METRICS-JUDGEMENT-CALLS.md`. How to query it, add a metric, and when to
 offer one: the `agent-repl-metrics` skill (`skills/agent-repl-metrics/`).
 
+Its program is Homebrew's `victoria-metrics` on macOS and, on Linux, the
+publisher's release pinned by sha256 in `metrics/requirements.json`
+(`install.release`), installed into `~/.local/bin`. A new version is a new pin
+for both machines, in one change.
+
 - `scrape.yml` is the scrape config, copied by `bin/requirements.sh` into
   `~/.cache/agent-repl/metrics/scrape.yml`. Its only targets are the files
   each runtime advertises under `~/.cache/agent-repl/metrics/targets/`

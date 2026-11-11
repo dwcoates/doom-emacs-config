@@ -62,13 +62,16 @@
 # PACKAGES COME FROM THE PLATFORM'S OWN PACKAGE MANAGER: Homebrew on macOS, and
 # on Linux the distribution's, the first of apt, dnf, pacman and zypper on PATH
 # (package_manager). An entry names its package for each under `install`
-# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A Linux install runs as root
+# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A program no Linux package manager
+# carries everywhere names a pinned `release` instead: an archive its
+# publisher ships per machine, checked against its sha256 and installed into
+# the user's bin dir. A Linux install runs as root
 # through sudo, which asks for a password only when it has a terminal to ask
 # on; without one it never prompts (`sudo -n`), and an install it cannot run
 # says so with the command for the user to run.
 #
 # Test seams (bin/test-requirements.sh): AGENT_REPL_REQUIREMENTS_ROOT (the
-# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM,
+# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM, AGENT_REPL_REQUIREMENTS_ARCH,
 # AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER, AGENT_REPL_REQUIREMENTS_BUILD
 # (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, AGENT_REPL_SYSTEMCTL,
 # AGENT_REPL_SYSTEMD_USER_DIR, and HOME / PATH.
@@ -136,6 +139,23 @@ platform() {
     *) err "platform: $(uname -s) is not a platform the manifests describe"; exit 2 ;;
   esac
 }
+
+# machine: this machine as a release names it, `<platform>-<arch>` with the
+# arch spelled the way Go and most publishers do (arm64, amd64).
+machine() {
+  local arch="${AGENT_REPL_REQUIREMENTS_ARCH:-$(uname -m)}"
+  case "$arch" in
+    aarch64) arch=arm64 ;;
+    x86_64) arch=amd64 ;;
+  esac
+  printf '%s-%s\n' "$(platform)" "$arch"
+}
+
+# find_program CMD: the path CMD runs from: PATH's, else the user's bin dir
+# (BIN_DIR), where a source-built Emacs and a pinned release are installed.
+# Whether that dir is on the user's PATH is one entry's to say (the
+# command_link kind), not every program's.
+find_program() { PATH="$PATH:$BIN_DIR" command -v "$1" 2>/dev/null; }
 
 # The Linux package managers install knows, in the order package_manager
 # prefers them.
@@ -280,7 +300,12 @@ validate_entries() {
     (.[] | . as $e |
       (["id", "kind", "why", "profile"][] as $f | select($e[$f] == null) | "\($e._file): \($e.id // "?"): every entry needs \"\($f)\""),
       (select(($e.profile != "run") and ($e.profile != "dev")) | "\($e._file): \($e.id): profile must be run or dev, not \($e.profile)"),
-      (if $e.kind == "program" then need($e; ["command", "install", "platforms"])
+      (if $e.kind == "program" then need($e; ["command", "install", "platforms"]),
+         (select($e.install.release != null) | $e.install.release
+           | (select(.file == null) | "\($e._file): \($e.id): an install.release needs \"file\""),
+             (to_entries[] | select(.key != "file") | .key as $m | .value
+               | ("url", "sha256") as $f | select(.[$f] == null)
+               | "\($e._file): \($e.id): install.release.\($m) needs \"\($f)\""))
        elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"]),
          (select($e.install.source != null) | need($e; ["revision"]),
            (select($e.install.source.repo == null)
@@ -361,9 +386,12 @@ install_text() {
   local e="$1" how pm
   pm="$(package_manager)"
   if [ "$pm" != brew ]; then
-    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" '.install |
+    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" \
+      --arg machine "$(machine)" --arg bin "$BIN_DIR" --arg command "$(field "$e" .command)" '.install |
       if $pm != "" and .[$pm] then "sudo \($argv) \(.[$pm] | if type == "array" then join(" ") else . end)"
       elif .go_install then "go install \(.go_install)"
+      elif .release then (if .release[$machine] then "download the pinned \(.release[$machine].url) and install its \(.release.file) as \($bin)/\($command)"
+                          else "no release is pinned for \($machine); add install.release.\($machine) to its manifest entry" end)
       elif .source then "build \(.source.repo) at the pinned revision and install it"
       elif .manual then .manual
       elif $pm == "" then "install it yourself: no package manager install knows (\($known)) is on PATH"
@@ -385,7 +413,7 @@ check_program() {
   local e="$1" cmd path min args out have
   cmd="$(field "$e" .command)"
   FIX="$(install_text "$e")"
-  if ! path="$(command -v "$cmd" 2>/dev/null)"; then
+  if ! path="$(find_program "$cmd")"; then
     STATUS=missing; DETAIL="$cmd is not on PATH"; return
   fi
   min="$(field "$e" .version.min)"
@@ -412,7 +440,7 @@ check_emacs() {
   local e="$1" cmd path min have lacking
   cmd="$(field "$e" .command)"
   FIX="$(install_text "$e")"
-  if ! path="$(command -v "$cmd" 2>/dev/null)"; then
+  if ! path="$(find_program "$cmd")"; then
     STATUS=missing; DETAIL="$cmd is not on PATH"; return
   fi
   min="$(field "$e" .min)"
@@ -763,7 +791,7 @@ check_service() {
     [ -n "$from" ] || continue
     cmp -s "$MODULE_DIR/$from" "$CACHE_ROOT/$to" || stale="$stale $to"
   done < <(service_files "$e")
-  if [ -n "$command" ] && ! command -v "$command" >/dev/null 2>&1; then
+  if [ -n "$command" ] && ! find_program "$command" >/dev/null; then
     STATUS=missing; DETAIL="$command is not on PATH"
   elif [ -z "$command" ] && [ ! -x "$binary" ]; then
     STATUS=missing; DETAIL="$binary is not built"
@@ -830,6 +858,8 @@ install_program() {
       os_install "$pm" $pkgs
     elif [ -n "$goi" ]; then
       go install "$goi"
+    elif [ -n "$(field "$e" .install.release.file)" ]; then
+      install_release "$e"
     else
       return 1
     fi
@@ -854,6 +884,47 @@ install_program() {
   else
     return 1
   fi
+}
+
+# install_release ENTRY: install the program from the release its entry pins
+# for this machine: download the archive, check it against the pinned sha256,
+# unpack it, and put its `file` into the user's bin dir under the entry's
+# command name. Nothing reaches the bin dir unless the archive is the one
+# pinned: a changed upstream copy is an entry to re-pin, never a file to run.
+install_release() {
+  local e="$1" id m url want have file cmd work
+  id="$(field "$e" .id)"
+  m="$(machine)"
+  url="$(field "$e" ".install.release[\"$m\"].url")"
+  want="$(field "$e" ".install.release[\"$m\"].sha256")"
+  file="$(field "$e" .install.release.file)"
+  cmd="$(field "$e" .command)"
+  if [ -z "$url" ]; then
+    err "install: $id: no release is pinned for $m; add install.release.$m to its manifest entry"; return 1
+  fi
+  work="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-release.XXXXXX")" || { err "install: $id: no temporary directory could be made"; return 1; }
+  if ! curl -fsSL --retry 2 -o "$work/archive.tar.gz" "$url"; then
+    err "install: $id: downloading $url failed"; rm -rf "$work"; return 1
+  fi
+  have="$(sha256_of "$work/archive.tar.gz")"
+  if [ "$have" != "$want" ]; then
+    err "install: $id: $url has sha256 $have, not the pinned $want; the upstream copy changed, so re-pin the entry"; rm -rf "$work"; return 1
+  fi
+  mkdir -p "$work/unpacked"
+  if ! tar -xzf "$work/archive.tar.gz" -C "$work/unpacked"; then
+    err "install: $id: $url is not a tar.gz tar can unpack"; rm -rf "$work"; return 1
+  fi
+  if [ ! -f "$work/unpacked/$file" ]; then
+    err "install: $id: $url holds no $file; fix the entry's install.release.file"; rm -rf "$work"; return 1
+  fi
+  mkdir -p "$BIN_DIR"
+  # Written beside its final name and renamed, so a running copy is never
+  # truncated and a failed copy never leaves half a program.
+  if ! cp "$work/unpacked/$file" "$BIN_DIR/.$cmd.new" || ! chmod 755 "$BIN_DIR/.$cmd.new" || ! mv -f "$BIN_DIR/.$cmd.new" "$BIN_DIR/$cmd"; then
+    err "install: $id: installing $file as $BIN_DIR/$cmd failed"; rm -f "$BIN_DIR/.$cmd.new"; rm -rf "$work"; return 1
+  fi
+  rm -rf "$work"
+  say "install: $id: installed $BIN_DIR/$cmd from $url"
 }
 
 install_emacs() {
@@ -1040,7 +1111,7 @@ install_service() {
   # their logs and databases in them.
   mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$(dirname "$dest")"
   if [ -n "$(field "$e" .command)" ]; then
-    if ! command -v "$(field "$e" .command)" >/dev/null 2>&1; then
+    if ! find_program "$(field "$e" .command)" >/dev/null; then
       err "install: $(field "$e" .id): $(field "$e" .command) is not on PATH; install it first"; return 1
     fi
   else
