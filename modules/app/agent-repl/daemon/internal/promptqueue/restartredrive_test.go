@@ -129,6 +129,21 @@ func TestTheServingSessionResumesWhatTheStandDownOwed(t *testing.T) {
 	}
 }
 
+func TestTheResumptionRunsAsTheTurnItsClaimNamed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	owe(t, h)
+
+	// Act
+	h.q.ReleaseReconnectHolds(theWorkspace)
+
+	// Assert
+	started := h.sender.started()
+	if len(h.db.resumedAs) != 1 || len(started) != 1 || started[0] != h.db.resumedAs[0] {
+		t.Fatalf("claimed as %v, started %v; want the resumption run as the turn its claim recorded the cut turns moving to", h.db.resumedAs, started)
+	}
+}
+
 func TestTheResumptionPaysTheDebt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

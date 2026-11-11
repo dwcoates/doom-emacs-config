@@ -395,6 +395,12 @@ const (
 	// AgentReplUnsubscribeWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// UnsubscribeWorkspace RPC.
 	AgentReplUnsubscribeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeWorkspace"
+	// AgentReplGatherWorkspacesProcedure is the fully-qualified name of the AgentRepl's
+	// GatherWorkspaces RPC.
+	AgentReplGatherWorkspacesProcedure = "/agentrepl.v1.AgentRepl/GatherWorkspaces"
+	// AgentReplGetGatherStatusProcedure is the fully-qualified name of the AgentRepl's GetGatherStatus
+	// RPC.
+	AgentReplGetGatherStatusProcedure = "/agentrepl.v1.AgentRepl/GetGatherStatus"
 	// AgentReplSubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// SubscribeMergeQueue RPC.
 	AgentReplSubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/SubscribeMergeQueue"
@@ -571,6 +577,8 @@ var (
 	agentReplFindWorkspacesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
 	agentReplSubscribeWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
 	agentReplUnsubscribeWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
+	agentReplGatherWorkspacesMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("GatherWorkspaces")
+	agentReplGetGatherStatusMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("GetGatherStatus")
 	agentReplSubscribeMergeQueueMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
 	agentReplUnsubscribeMergeQueueMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
 	agentReplSubscribePullRequestMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SubscribePullRequest")
@@ -1006,6 +1014,13 @@ type AgentReplClient interface {
 	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
 	// End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
 	UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error)
+	// Ask many workspaces the same question on one workspace's behalf, and
+	// bring their answers back to it as ONE update, then each later answer as
+	// its own. See endpoint_gather_workspaces.proto and gather.proto.
+	GatherWorkspaces(context.Context, *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error)
+	// One gather's answers and outstanding targets, now. See
+	// endpoint_get_gather_status.proto.
+	GetGatherStatus(context.Context, *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error)
 	// Tell one workspace's agent about a merge queue's changes, answering with
 	// the queue now. See endpoint_subscribe_merge_queue.proto.
 	SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error)
@@ -1868,6 +1883,19 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUnsubscribeWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		gatherWorkspaces: connect.NewClient[v1.GatherWorkspacesRequest, v1.GatherWorkspacesResponse](
+			httpClient,
+			baseURL+AgentReplGatherWorkspacesProcedure,
+			connect.WithSchema(agentReplGatherWorkspacesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		getGatherStatus: connect.NewClient[v1.GetGatherStatusRequest, v1.GetGatherStatusResponse](
+			httpClient,
+			baseURL+AgentReplGetGatherStatusProcedure,
+			connect.WithSchema(agentReplGetGatherStatusMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		subscribeMergeQueue: connect.NewClient[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse](
 			httpClient,
 			baseURL+AgentReplSubscribeMergeQueueProcedure,
@@ -2090,6 +2118,8 @@ type agentReplClient struct {
 	findWorkspaces                    *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
 	subscribeWorkspace                *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
 	unsubscribeWorkspace              *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
+	gatherWorkspaces                  *connect.Client[v1.GatherWorkspacesRequest, v1.GatherWorkspacesResponse]
+	getGatherStatus                   *connect.Client[v1.GetGatherStatusRequest, v1.GetGatherStatusResponse]
 	subscribeMergeQueue               *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
 	unsubscribeMergeQueue             *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
 	subscribePullRequest              *connect.Client[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse]
@@ -2761,6 +2791,16 @@ func (c *agentReplClient) UnsubscribeWorkspace(ctx context.Context, req *connect
 	return c.unsubscribeWorkspace.CallUnary(ctx, req)
 }
 
+// GatherWorkspaces calls agentrepl.v1.AgentRepl.GatherWorkspaces.
+func (c *agentReplClient) GatherWorkspaces(ctx context.Context, req *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error) {
+	return c.gatherWorkspaces.CallUnary(ctx, req)
+}
+
+// GetGatherStatus calls agentrepl.v1.AgentRepl.GetGatherStatus.
+func (c *agentReplClient) GetGatherStatus(ctx context.Context, req *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error) {
+	return c.getGatherStatus.CallUnary(ctx, req)
+}
+
 // SubscribeMergeQueue calls agentrepl.v1.AgentRepl.SubscribeMergeQueue.
 func (c *agentReplClient) SubscribeMergeQueue(ctx context.Context, req *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error) {
 	return c.subscribeMergeQueue.CallUnary(ctx, req)
@@ -3250,6 +3290,13 @@ type AgentReplHandler interface {
 	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
 	// End a workspace subscription. See endpoint_unsubscribe_workspace.proto.
 	UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error)
+	// Ask many workspaces the same question on one workspace's behalf, and
+	// bring their answers back to it as ONE update, then each later answer as
+	// its own. See endpoint_gather_workspaces.proto and gather.proto.
+	GatherWorkspaces(context.Context, *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error)
+	// One gather's answers and outstanding targets, now. See
+	// endpoint_get_gather_status.proto.
+	GetGatherStatus(context.Context, *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error)
 	// Tell one workspace's agent about a merge queue's changes, answering with
 	// the queue now. See endpoint_subscribe_merge_queue.proto.
 	SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error)
@@ -4108,6 +4155,19 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUnsubscribeWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplGatherWorkspacesHandler := connect.NewUnaryHandler(
+		AgentReplGatherWorkspacesProcedure,
+		svc.GatherWorkspaces,
+		connect.WithSchema(agentReplGatherWorkspacesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplGetGatherStatusHandler := connect.NewUnaryHandler(
+		AgentReplGetGatherStatusProcedure,
+		svc.GetGatherStatus,
+		connect.WithSchema(agentReplGetGatherStatusMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSubscribeMergeQueueHandler := connect.NewUnaryHandler(
 		AgentReplSubscribeMergeQueueProcedure,
 		svc.SubscribeMergeQueue,
@@ -4458,6 +4518,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribeWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeWorkspaceProcedure:
 			agentReplUnsubscribeWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplGatherWorkspacesProcedure:
+			agentReplGatherWorkspacesHandler.ServeHTTP(w, r)
+		case AgentReplGetGatherStatusProcedure:
+			agentReplGetGatherStatusHandler.ServeHTTP(w, r)
 		case AgentReplSubscribeMergeQueueProcedure:
 			agentReplSubscribeMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeMergeQueueProcedure:
@@ -5017,6 +5081,14 @@ func (UnimplementedAgentReplHandler) SubscribeWorkspace(context.Context, *connec
 
 func (UnimplementedAgentReplHandler) UnsubscribeWorkspace(context.Context, *connect.Request[v1.UnsubscribeWorkspaceRequest]) (*connect.Response[v1.UnsubscribeWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GatherWorkspaces(context.Context, *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GatherWorkspaces is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetGatherStatus(context.Context, *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetGatherStatus is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SubscribeMergeQueue(context.Context, *connect.Request[v1.SubscribeMergeQueueRequest]) (*connect.Response[v1.SubscribeMergeQueueResponse], error) {

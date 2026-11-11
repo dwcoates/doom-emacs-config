@@ -1,0 +1,38 @@
+// endpoint_get_gather_status.proto — GetGatherStatus: one gather's answers
+// and outstanding targets, now. AGENT API section. A pull, for a caller that
+// wants the answers outside a notice; the notices are GatherWorkspaces'.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/gather.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetGatherStatusRequest {
+  // The gather, as GatherWorkspaces answered it.
+  GatherRef gather = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message GetGatherStatusResponse {
+  oneof result {
+    GetGatherStatusSuccess success = 1;
+    GetGatherStatusError error = 2;
+  }
+}
+// The gather, as it stands now.
+message GetGatherStatusSuccess {
+  GatherStatus status = 1;
+}
+// Validation failures (an unset or blank ref) are Connect InvalidArgument,
+// never an arm.
+message GetGatherStatusError {
+  oneof cause {
+    // No gather has the ref: none was made, or its caller was forgotten.
+    GetGatherStatusUnknownGather unknown_gather = 1;
+  }
+}
+// The gather is unknown. No fields.
+message GetGatherStatusUnknownGather {}

@@ -52,6 +52,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			// The bubble that answers it counts its span from here.
 			joinedTurn := ids.TurnID(joined.GetValue())
 			s.promptArrived(s.accountOf(recipient, &joinedTurn), s.entryPlace.GetAtMs())
+			// TOLD BEFORE THE JOINED TURN CAN END: this row precedes its
+			// terminal on the session's one ordered stream.
+			r.tellPromptFolded(s, ids.TurnID(turn.GetValue()), joinedTurn)
 			if !placed {
 				return
 			}

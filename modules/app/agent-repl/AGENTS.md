@@ -1223,6 +1223,12 @@ operation writes a command file; that ingress is retired.
   (`~/.claude/skills/<skill>/agent-repld`). The installed skill links into
   the main checkout, so a call always runs the main checkout's build of the
   daemon. The daemon's briefs (`prompts/`) name commands the same way.
+- **One question to many workspaces is a gather, never a fan of prompts that
+  ask for replies.** `agent-repld workspace gather` and `workspace
+  gather-status` (`internal/gather`, `agentrepl.v1.GatherWorkspaces`) bring
+  every target's answer back as one notice; how an agent uses them is
+  `/agent-repl-workspaces`', and how the daemon follows each answer is
+  `daemon/AGENTS.md`'s turn successions section.
 - **A workspace that asked another for an update once a condition is met is
   sent that update when the condition is met, without asking the user.** The
   asking workspace's request is the authorization (`/agent-repl-workspaces`).

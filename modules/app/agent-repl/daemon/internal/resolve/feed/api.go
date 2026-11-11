@@ -638,25 +638,35 @@ type Deps struct {
 	// measures nothing and serves no pace, which is what a test that is not
 	// about pacing wants. Production always wires it.
 	Pacing RevealPacing
-	// Chat is told every turn's answer as this resolver draws it, which is how
-	// a zettel chat thread learns its answers (internal/chat, chatsink.go).
-	// nil tells nobody, which is what a test that is not about chat threads
-	// wants. Production always wires it.
-	Chat ChatSink
+	// Answers is told every turn's answer and every fold as this resolver
+	// draws them, which is how a zettel chat thread learns its answers
+	// (internal/chat) and a workspace gather follows its prompts
+	// (internal/gather), through answersink.go. nil tells nobody, which is
+	// what a test that is about neither wants. Production always wires it.
+	Answers AnswerSink
 }
 
-// ChatSink is told a turn's answer as the feed draws it: its prose while it
-// arrives, its settled answer when the turn concludes on one, and the turn's
-// end. It is told for EVERY workspace; the receiver keeps what concerns the
-// zettel threads it serves.
+// AnswerSink is told a turn's answer as the feed draws it: its prose while it
+// arrives, a prompt folded into it, its settled answer when the turn concludes
+// on one, and the turn's end. It is told for EVERY workspace; the receiver
+// keeps what concerns it.
+//
+// ONE ORDERED STREAM. The feed draws a workspace's rows in the order the
+// session produced them, so a fold into a turn is always told before that
+// turn's answer: a receiver following a prompt across a fold can never see
+// the answer first.
 //
 // CALLED WITH THE RESOLVER'S LOCK HELD: the receiver must never call back
 // into this resolver, and must not block.
-type ChatSink interface {
+type AnswerSink interface {
 	// AnswerProse is the main agent's prose for the turn so far, each time it
 	// grows on the live plane. A replay never tells it: an old turn's prose is
 	// not arriving.
 	AnswerProse(ws ids.WorkspaceID, turn ids.TurnID, markdown string)
+	// PromptFolded is a prompt minted as TURN that the vendor folded into the
+	// running turn INTO, which answers it. It is told on every plane but a
+	// fork's inherited one, like TurnAnswered.
+	PromptFolded(ws ids.WorkspaceID, turn, into ids.TurnID)
 	// TurnAnswered is a turn's concluded answer, its settled markdown. It is
 	// told on EVERY plane, live and replayed, so an answer the receiver missed
 	// live (a daemon that stopped before recording it) is learned again when
@@ -665,6 +675,38 @@ type ChatSink interface {
 	// TurnEnded is a turn's end on the live plane, whatever its outcome, told
 	// after TurnAnswered for a turn that concluded on an answer.
 	TurnEnded(ws ids.WorkspaceID, turn ids.TurnID)
+}
+
+// AnswerSinks tells every sink it holds, in order: the one AnswerSink the
+// resolver is handed when several receivers follow its answers.
+type AnswerSinks []AnswerSink
+
+// AnswerProse implements AnswerSink.
+func (a AnswerSinks) AnswerProse(ws ids.WorkspaceID, turn ids.TurnID, markdown string) {
+	for _, s := range a {
+		s.AnswerProse(ws, turn, markdown)
+	}
+}
+
+// PromptFolded implements AnswerSink.
+func (a AnswerSinks) PromptFolded(ws ids.WorkspaceID, turn, into ids.TurnID) {
+	for _, s := range a {
+		s.PromptFolded(ws, turn, into)
+	}
+}
+
+// TurnAnswered implements AnswerSink.
+func (a AnswerSinks) TurnAnswered(ws ids.WorkspaceID, turn ids.TurnID, markdown string) {
+	for _, s := range a {
+		s.TurnAnswered(ws, turn, markdown)
+	}
+}
+
+// TurnEnded implements AnswerSink.
+func (a AnswerSinks) TurnEnded(ws ids.WorkspaceID, turn ids.TurnID) {
+	for _, s := range a {
+		s.TurnEnded(ws, turn)
+	}
 }
 
 // WarningRaiser is the topbar's raised-warning channel, as this resolver needs

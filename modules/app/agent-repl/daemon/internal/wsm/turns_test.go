@@ -549,7 +549,7 @@ func TestClaimDisplacedTurnClearsTheMark(t *testing.T) {
 	}
 
 	// Act
-	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed.Claimed {
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant); err != nil || !claimed.Claimed {
 		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	got, err := s.AllDisplacedTurns(context.Background())
@@ -573,7 +573,7 @@ func TestClaimDisplacedTurnClosesAnOpenTurn(t *testing.T) {
 	}
 
 	// Act
-	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed.Claimed {
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant); err != nil || !claimed.Claimed {
 		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	open, err := s.OpenTurns(context.Background(), ws.ID)
@@ -600,7 +600,7 @@ func TestClaimDisplacedTurnKeepsAnExistingClose(t *testing.T) {
 	}
 
 	// Act
-	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant.Add(time.Minute)); err != nil || !claimed.Claimed {
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant.Add(time.Minute)); err != nil || !claimed.Claimed {
 		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	var kind int
@@ -619,7 +619,7 @@ func TestClaimDisplacedTurnAnswersFalseForAnUnknownTurn(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	claimed, err := s.ClaimDisplacedTurn(context.Background(), NewTurnID(), instant)
+	claimed, err := s.ClaimDisplacedTurn(context.Background(), NewTurnID(), NewTurnID(), instant)
 
 	// Assert
 	if err != nil || claimed.Claimed {
@@ -635,12 +635,12 @@ func TestASecondClaimOfTheSameDisplacedTurnAnswersFalse(t *testing.T) {
 	if err := s.PutTurn(context.Background(), turn); err != nil {
 		t.Fatalf("PutTurn: %v", err)
 	}
-	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed.Claimed {
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant); err != nil || !claimed.Claimed {
 		t.Fatalf("the first claim = (%v, %v), want (true, nil)", claimed, err)
 	}
 
 	// Act
-	claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant)
+	claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant)
 
 	// Assert
 	if err != nil || claimed.Claimed {
@@ -1116,7 +1116,7 @@ func TestClaimDisplacedTurnReportsItClosedAnOpenTurnAsOrphaned(t *testing.T) {
 	}
 
 	// Act
-	claim, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant)
+	claim, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant)
 
 	// Assert
 	if err != nil || !claim.Claimed || !claim.Closed {
@@ -1140,7 +1140,7 @@ func TestClaimDisplacedTurnReportsItLeftAnExistingCloseStanding(t *testing.T) {
 	}
 
 	// Act
-	claim, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant)
+	claim, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, NewTurnID(), instant)
 
 	// Assert
 	if err != nil || !claim.Claimed || claim.Closed {
@@ -1840,5 +1840,27 @@ func TestTheWorkspaceReadAnswersItsLastQuestionAsked(t *testing.T) {
 				t.Fatalf("last asked = %v, want %v", got.LastAskedAt, instant.Add(*tc.want))
 			}
 		})
+	}
+}
+
+func TestClaimDisplacedTurnRecordsTheResubmission(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s).ID
+	ctx := context.Background()
+	turn := Turn{ID: NewTurnID(), Workspace: ws, Text: "work", Origin: "PROMPT_ORIGIN_USER_SENT", StartedAt: instant, Displaced: true}
+	if err := s.PutTurn(ctx, turn); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	claim, err := s.ClaimDisplacedTurn(ctx, turn.ID, "again", instant)
+
+	// Assert
+	if err != nil || !claim.Claimed {
+		t.Fatalf("ClaimDisplacedTurn = %+v, %v", claim, err)
+	}
+	if got, _ := s.SucceedingTurn(ctx, turn.ID); got != "again" {
+		t.Fatalf("SucceedingTurn = %q, want the resubmission", got)
 	}
 }

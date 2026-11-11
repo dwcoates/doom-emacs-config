@@ -226,7 +226,7 @@ var closePaths = []closePath{
 			if err := w.db.PutTurn(ctx, wsm.Turn{ID: w.turn, Workspace: w.ws, Origin: "webapp", Displaced: true, StartedAt: time.UnixMilli(1_700_000_000_000)}); err != nil {
 				t.Fatalf("PutTurn: %v", err)
 			}
-			if claimed, err := w.h.q.ClaimDisplacedTurn(ctx, w.ws, w.turn); err != nil || !claimed {
+			if claimed, err := w.h.q.ClaimDisplacedTurn(ctx, w.ws, w.turn, "resubmitted-1"); err != nil || !claimed {
 				t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 			}
 		},

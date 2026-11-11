@@ -7,7 +7,6 @@ import (
 	"sort"
 	"time"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -15,7 +14,6 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/landedbranch"
-	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -998,7 +996,8 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 	// mark came down, would have the next boot put the same turn back a second
 	// time. A claim that answers false means the sweep already put it back,
 	// and this owner resubmits NOTHING.
-	claimed, err := r.o.deps.Queue.ClaimDisplacedTurn(ctx, r.ws, displaced.Turn)
+	again := wsm.NewTurnID()
+	claimed, err := r.o.deps.Queue.ClaimDisplacedTurn(ctx, r.ws, displaced.Turn, again)
 	if err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not claim the displaced turn",
 			withField(fields, "error", err.Error()))
@@ -1008,10 +1007,7 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn was already put back by a boot recovery", fields)
 		return
 	}
-	if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
-		WS: r.ws, Turn: wsm.NewTurnID(), Said: saidText(displaced.Text),
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
-	}); err != nil {
+	if _, err := r.o.deps.Queue.Submit(ctx, displacedResubmission(r.ws, again, displaced.Text)); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not resubmit the displaced turn",
 			withField(fields, "error", err.Error()))
 		return

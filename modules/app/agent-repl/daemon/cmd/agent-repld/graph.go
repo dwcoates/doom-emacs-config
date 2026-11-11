@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/editorinstance"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/externalbrowser"
+	"agent-repld/internal/gather"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/handover"
@@ -378,7 +379,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A CREATE HELD FOR ITS REQUESTER'S TURN resumes on these latches, which
 	// only the turn-end and close edges release.
 	turnEnds := turnlatch.New()
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, turnEnds)
+	// A WORKSPACE GATHER follows its targets through the feed's answers (wired
+	// below) and resolves a target that closes on its close edge.
+	gathers := gather.New(gather.Deps{
+		DB:     p.DB,
+		Status: verbsRef.status,
+		Briefs: merge.BriefsFrom(paths.PromptsDir),
+		Clock:  clock.System{},
+		Log:    p.Surfaces,
+	})
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, turnEnds, gathers.Edges())
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -646,8 +656,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	feedResolver, err := feed.New(feed.Deps{
 		Log: p.Surfaces,
 		// A ZETTEL CHAT THREAD LEARNS ITS ANSWERS from the feed, which folds
-		// them (feed.ChatSink).
-		Chat: chatService,
+		// them, and a WORKSPACE GATHER follows its prompts' folds and answers
+		// there (feed.AnswerSink).
+		Answers: feed.AnswerSinks{chatService, gathers},
 		// HISTORY IS READ ONLY ON A READER'S REQUEST, from the workspace's
 		// shim, through the fleet built below (forward.go).
 		History: history,
@@ -1807,6 +1818,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:          sidebarResolver,
 			Memory:           memoryPopups,
 			Chat:             chatService,
+			Gathers:          gathers,
 			Revisions: revision.New(revision.Deps{
 				Shims: fleet, Feed: feedResolver, Status: footerResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
 			}),
@@ -1923,6 +1935,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { queueNotices.Run(ctx, handler) },
 				func(ctx context.Context) { derivedNotices.Run(ctx, handler) },
 				func(ctx context.Context) { followNotices.Run(ctx, handler) },
+				func(ctx context.Context) { gathers.Run(ctx, handler) },
 				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
 				func(ctx context.Context) { mainSync.Run(ctx, handler) },
 				selfCloses.Run,

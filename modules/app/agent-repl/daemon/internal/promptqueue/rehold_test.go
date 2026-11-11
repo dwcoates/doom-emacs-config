@@ -223,6 +223,17 @@ func TestHeldAgainKeepsThePromptsWordsAndPlaceUnderANewTurn(t *testing.T) {
 	}
 }
 
+func TestHeldAgainRecordsTheMoveFromTheTurnItLeft(t *testing.T) {
+	// Arrange
+	held := wsm.HeldPrompt{Workspace: theWorkspace, Turn: "t1", Said: textSaid("the words")}
+	// Act
+	again := heldAgain(held, nil, nil)
+	// Assert
+	if again.ReheldFrom == nil || *again.ReheldFrom != "t1" {
+		t.Fatalf("ReheldFrom = %v, want the turn the prompt left", again.ReheldFrom)
+	}
+}
+
 func TestHeldAgainStandsUnderTheGivenHoldAndVerdict(t *testing.T) {
 	// Arrange
 	kind := wsm.HoldReconnect

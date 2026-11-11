@@ -1,0 +1,245 @@
+// gather.proto — the shapes a WORKSPACE GATHER is described by: the answer
+// of GatherWorkspaces, the read of GetGatherStatus, and the two notices a
+// gather sends its caller. AGENT API section.
+//
+// A GATHER asks many workspaces the same question on one workspace's behalf
+// (its CALLER) and brings their answers back as ONE update. Each accepted
+// target is prompted as `workspace prompt` would prompt it; its ANSWER is the
+// final response of the turn the prompt went into, followed across every move
+// the daemon makes of the prompt (held again, joined into a running turn,
+// resubmitted, resumed after a restart). Targets never reply on purpose.
+//
+// THE FIRST UPDATE is one notice, sent at whichever comes first: every
+// accepted target resolved (a latch), or the gather's deadline. Each target
+// resolved AFTER it is told as its own notice the moment it resolves. A gather
+// is durable: its latch and deadline survive a daemon restart and a handover.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// A gather's identity: daemon-minted, opaque, handed back unchanged to
+// GetGatherStatus.
+message GatherRef {
+  // The daemon-minted identifier. Compare it for equality and echo it back;
+  // never parse or construct one.
+  string id = 1;
+}
+
+// One target of a gather, as the caller named it and the registry holds it.
+message GatherTarget {
+  // The workspace's name when the gather was made: the name every answer and
+  // every outstanding entry is told under.
+  string name = 1;
+  // The workspace, as the registry holds it.
+  workspace.v1.WorkspaceRef workspace = 2;
+}
+
+// A target the daemon refused when the gather was made. It is never part of
+// the gather: it was not prompted, and no notice ever names it.
+message GatherRefusedTarget {
+  // The name exactly as the caller wrote it, since a name that matched no
+  // workspace has no registry spelling.
+  string name = 1;
+  // Why it was refused.
+  GatherRefusal cause = 2;
+}
+
+// Why a target was refused. THE ARM IS THE CAUSE.
+message GatherRefusal {
+  // What stopped the target taking the gather's prompt: a check the gather
+  // made before submitting, or the submission's own refusal.
+  oneof cause {
+    // No registered workspace has the name. A name only closed workspaces
+    // have is `closed` instead, and one several open workspaces have is
+    // `ambiguous_name`.
+    GatherRefusalUnknownWorkspace unknown_workspace = 1;
+    // The workspace is closed: it runs no session to answer.
+    GatherRefusalClosed closed = 2;
+    // The name is the caller's own: a workspace never gathers from itself.
+    GatherRefusalIsCaller is_caller = 3;
+    // A question or a permission ask waits on the user, so the prompt would
+    // wait on the user before it could be answered.
+    GatherRefusalNeedsInput needs_input = 4;
+    // A merge of the workspace is in progress, so the prompt would wait for
+    // the merge before it could be answered.
+    GatherRefusalMerging merging = 5;
+    // The submission refused the prompt, exactly as `workspace prompt` is
+    // refused: a cold gate, the fan-out cap `as_user` lifts, a missing
+    // session, and every other arm of SubmitPromptError.
+    SubmitPromptError prompt_refused = 6;
+    // Several open workspaces have the name, so it names no one target.
+    GatherRefusalAmbiguousName ambiguous_name = 7;
+  }
+}
+// No workspace has the name. No fields.
+message GatherRefusalUnknownWorkspace {}
+// Several open workspaces have the name.
+message GatherRefusalAmbiguousName {
+  // Each open workspace with the name, so the caller can tell them apart.
+  repeated workspace.v1.WorkspaceRef workspaces = 1;
+}
+// The workspace is closed. No fields.
+message GatherRefusalClosed {}
+// The target is the caller. No fields.
+message GatherRefusalIsCaller {}
+// An ask waits on the user. No fields: `workspace status` names it.
+message GatherRefusalNeedsInput {}
+// A merge is in progress. No fields: the workspace's merge bubble names it.
+message GatherRefusalMerging {}
+
+// A target that resolved: it answered, or it closed first.
+message GatherResolvedTarget {
+  // The target.
+  GatherTarget target = 1;
+  // When it resolved, in the host's wall-clock Unix milliseconds.
+  int64 resolved_at_unix_ms = 2;
+  // How it resolved. THE ARM IS HOW.
+  oneof resolution {
+    // The turn the prompt went into ended on a final response.
+    GatherResolvedTargetAnswered answered = 3;
+    // The workspace closed, or was forgotten, before it answered. It never
+    // answers after.
+    GatherResolvedTargetClosed closed = 4;
+  }
+}
+// The target's answer.
+message GatherResolvedTargetAnswered {
+  // The final response's text, in markdown, exactly as the feed settled it.
+  string text = 1;
+}
+// The target closed unanswered. No fields.
+message GatherResolvedTargetClosed {}
+
+// A target that has not resolved, with why, as it stands when the notice or
+// the status read was made.
+message GatherOutstandingTarget {
+  // The target.
+  GatherTarget target = 1;
+  // Why it has not answered yet. THE ARM IS WHY.
+  oneof reason {
+    // Its turn runs: the prompt is being answered, or joins the running work.
+    GatherOutstandingTargetWorking working = 2;
+    // The prompt waits in its held prompts, behind its running work.
+    GatherOutstandingTargetHeld held = 3;
+    // Its session is parked at its cold gate, which the user answers.
+    GatherOutstandingTargetColdGate cold_gate = 4;
+    // A question or a permission ask waits on the user.
+    GatherOutstandingTargetNeedsInput needs_input = 5;
+    // The turn the prompt went into ended without a final response (it
+    // failed, or the user stopped it). It answers only if the daemon resumes
+    // the work.
+    GatherOutstandingTargetEndedWithoutResponse ended_without_response = 6;
+    // The workspace is faulted.
+    GatherOutstandingTargetFaulted faulted = 7;
+  }
+}
+// The target's turn runs. No fields.
+message GatherOutstandingTargetWorking {}
+// The prompt is held. No fields.
+message GatherOutstandingTargetHeld {}
+// The target is at its cold gate. No fields: `workspace status` names the
+// gate, and the user answers it.
+message GatherOutstandingTargetColdGate {}
+// An ask waits on the user. No fields.
+message GatherOutstandingTargetNeedsInput {}
+// The prompt's turn ended without a response. No fields.
+message GatherOutstandingTargetEndedWithoutResponse {}
+// The target is faulted.
+message GatherOutstandingTargetFaulted {
+  // The fault's description, as the workspace's status carries it.
+  string description = 1;
+}
+
+// One gather, as it stands now.
+message GatherStatus {
+  // The gather.
+  GatherRef gather = 1;
+  // The workspace the gather prompts on behalf of, which its notices go to.
+  GatherTarget caller = 2;
+  // The prompt's text, as every target was sent it.
+  string prompt_text = 3;
+  // When the gather was made, in the host's wall-clock Unix milliseconds.
+  int64 created_at_unix_ms = 4;
+  // Where the first update stands.
+  GatherFirstUpdateStanding first_update = 5;
+  // Every target that resolved, in the order they resolved.
+  repeated GatherResolvedTarget resolved = 6;
+  // Every target still outstanding, in the order the caller named them.
+  // Empty once every target resolved.
+  repeated GatherOutstandingTarget outstanding = 7;
+}
+
+// Whether the first update was told. THE ARM IS THE STANDING.
+message GatherFirstUpdateStanding {
+  // Not told yet, or told.
+  oneof standing {
+    // Not told: it is told when every target resolved, or at the deadline.
+    GatherFirstUpdateStandingPending pending = 1;
+    // Told.
+    GatherFirstUpdateStandingTold told = 2;
+  }
+}
+// The first update waits.
+message GatherFirstUpdateStandingPending {
+  // When the first update is told if a target is still outstanding then, in
+  // the host's wall-clock Unix milliseconds.
+  int64 deadline_at_unix_ms = 1;
+}
+// The first update was told.
+message GatherFirstUpdateStandingTold {
+  // When it was told, in the host's wall-clock Unix milliseconds.
+  int64 told_at_unix_ms = 1;
+  // What told it.
+  GatherFirstUpdateTrigger trigger = 2;
+}
+
+// What sent the first update. THE ARM IS WHICH.
+message GatherFirstUpdateTrigger {
+  // The latch or the deadline: whichever came first.
+  oneof trigger {
+    // Every accepted target resolved.
+    GatherFirstUpdateTriggerAllResolved all_resolved = 1;
+    // The deadline passed with a target still outstanding.
+    GatherFirstUpdateTriggerTimedOut timed_out = 2;
+  }
+}
+// Every target resolved. No fields.
+message GatherFirstUpdateTriggerAllResolved {}
+// The deadline passed. No fields.
+message GatherFirstUpdateTriggerTimedOut {}
+
+// One notice a gather sends its caller. The notice's words carry this message
+// as protojson, so the caller reads typed arms rather than sentences.
+message GatherNotice {
+  // The gather the notice is about.
+  GatherRef gather = 1;
+  // Which notice. THE ARM IS WHICH.
+  oneof notice {
+    // The first update: told once.
+    GatherNoticeFirstUpdate first_update = 2;
+    // A target resolved after the first update.
+    GatherNoticeLaterAnswer later_answer = 3;
+  }
+}
+// The first update: every answer so far, and every target still outstanding.
+message GatherNoticeFirstUpdate {
+  // What sent it.
+  GatherFirstUpdateTrigger trigger = 1;
+  // Every target that resolved, in the order they resolved.
+  repeated GatherResolvedTarget resolved = 2;
+  // Every target still outstanding, with why. Empty when the latch sent it.
+  repeated GatherOutstandingTarget outstanding = 3;
+}
+// One target resolved after the first update.
+message GatherNoticeLaterAnswer {
+  // The target, and how it resolved.
+  GatherResolvedTarget resolved = 1;
+  // How many targets are still outstanding after it.
+  uint32 outstanding_count = 2;
+}

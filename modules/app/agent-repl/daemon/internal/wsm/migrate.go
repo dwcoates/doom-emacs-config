@@ -226,6 +226,8 @@ var migrations = []migration{
 	{To: 119, Name: "retire_github_failure_notices", Kind: MigrationAdditive, Rewrite: retireGithubFailureNotices},
 	{To: 120, Name: "page_residency", Kind: MigrationAdditive, DDL: pageResidencyDDL},
 	{To: 121, Name: "held_sent_now", Kind: MigrationAdditive, DDL: heldSentNowDDL},
+	// IT IS ADDITIVE: three new tables the previous build never names.
+	{To: 122, Name: "gathers", Kind: MigrationAdditive, DDL: turnSuccessionsDDL + gathersDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

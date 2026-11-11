@@ -112,6 +112,7 @@ func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 		"../workspacenotice/workspacenotice.go",
 		"../prwatch/poller.go",
 		"../mainsync/mainsync.go",
+		"../gather/gather.go",
 	} {
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			// Arrange

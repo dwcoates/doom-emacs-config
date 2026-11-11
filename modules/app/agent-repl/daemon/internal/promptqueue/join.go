@@ -489,9 +489,21 @@ func (state *wsState) takeFoldedLocked(turn ids.TurnID) []joiningPrompt {
 // behind whatever the turn end delivered first.
 func (q *queue) resubmitFolded(ws ids.WorkspaceID, failed ids.TurnID, folded []joiningPrompt, log dlog.Logger) {
 	for _, prompt := range folded {
-		fields := dlog.Context{"failed_turn": string(failed), "folded_turn": string(prompt.turn)}
+		again := wsm.NewTurnID()
+		fields := dlog.Context{"failed_turn": string(failed), "folded_turn": string(prompt.turn), "resubmitted_turn": string(again)}
+		// THE MOVE IS RECORDED BEFORE THE NEW TURN IS SUBMITTED, so what
+		// follows the prompt already follows it there when it runs. A move
+		// that could not be recorded leaves the prompt unresubmitted: it
+		// would run as a turn nothing following it can find.
+		if err := q.deps.DB.RecordTurnSuccession(context.Background(), wsm.TurnSuccession{
+			Workspace: ws, Turn: prompt.turn, Kind: wsm.SuccessionResubmitted, Successor: again, At: q.deps.Now(),
+		}); err != nil {
+			fields["cause"] = err.Error()
+			log.Error(opJoin, "could not record the move of a prompt folded into a turn that failed; it is not resubmitted and stays unanswered", fields)
+			continue
+		}
 		disposition, err := q.Submit(context.Background(), Submission{
-			WS: ws, Turn: wsm.NewTurnID(), Said: prompt.said, Origin: prompt.origin, SentBy: prompt.sentBy,
+			WS: ws, Turn: again, Said: prompt.said, Origin: prompt.origin, SentBy: prompt.sentBy,
 			// DEFERRED: it runs as its own turn and never interrupts one the
 			// failed turn's end delivered ahead of it.
 			Delivery: wsm.DeliveryDeferred,

@@ -955,3 +955,38 @@ func TestTakeBackRefusesWhenTheWaitingMergesLeaseCannotBeSettled(t *testing.T) {
 		})
 	}
 }
+
+func TestDisplacedResubmissionPutsTheTextBackUnderTheClaimedTurn(t *testing.T) {
+	// Act
+	sub := displacedResubmission("ws-1", "again", "the displaced work")
+
+	// Assert
+	if sub.WS != "ws-1" || sub.Turn != "again" || sub.Said.GetContent().GetBlocks()[0].GetText().GetText() != "the displaced work" ||
+		sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME {
+		t.Fatalf("submission = %+v, want the text put back under the claimed turn and the displaced-turn origin", sub)
+	}
+}
+
+// TestBothDisplacedPutBacksSubmitTheOneShape holds the merge's release and the
+// boot sweep to displacedResubmission, so a hand-rolled put-back that mints its
+// own turn (and so names a turn its claim never recorded) fails here.
+func TestBothDisplacedPutBacksSubmitTheOneShape(t *testing.T) {
+	for _, file := range []string{"terminal.go", "recover.go"} {
+		t.Run(file, func(t *testing.T) {
+			// Arrange
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(raw)
+
+			// Assert
+			if !strings.Contains(source, "displacedResubmission(") {
+				t.Errorf("%s does not put a displaced turn back through displacedResubmission", file)
+			}
+			if file == "terminal.go" && strings.Contains(source, "PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME") {
+				t.Errorf("%s spells the displaced-turn submission by hand", file)
+			}
+		})
+	}
+}

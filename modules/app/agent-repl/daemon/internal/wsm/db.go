@@ -388,13 +388,16 @@ type DB interface {
 	// false means somebody else already did, and the caller must not put the
 	// turn back. It is what makes the resubmission exactly-once with two
 	// possible owners (the merge's own release and the boot recovery).
-	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (DisplacedClaim, error)
+	// A claim that takes the record also records the turn succeeded by
+	// resubmittedAs (SuccessionResubmitted), in the same transaction.
+	ClaimDisplacedTurn(ctx context.Context, turn TurnID, resubmittedAs TurnID, at time.Time) (DisplacedClaim, error)
 	// OweResumption records that a stand-down this daemon ordered cut turn on
 	// ws, so the next session that serves ws resumes it (owedresumptions.go).
 	OweResumption(ctx context.Context, ws WorkspaceID, turn TurnID, at time.Time) error
 	// ClaimResumptions takes every resumption ws is owed and answers how many,
-	// exactly once across every boot and session-up edge.
-	ClaimResumptions(ctx context.Context, ws WorkspaceID) (int, error)
+	// exactly once across every boot and session-up edge, recording each cut
+	// turn succeeded by resumedAs in the same transaction.
+	ClaimResumptions(ctx context.Context, ws WorkspaceID, resumedAs TurnID, at time.Time) (int, error)
 	// OwedTurns answers the turns ws is owed a resumption for, unclaimed.
 	OwedTurns(ctx context.Context, ws WorkspaceID) ([]TurnID, error)
 	// OweHandBack records a landed async merge's report as owed until the
@@ -771,6 +774,28 @@ type DB interface {
 	// UnsubscribeWorkspace ends a subscriber's subscription to a workspace,
 	// answering whether one stood.
 	UnsubscribeWorkspace(ctx context.Context, subscriber, followed WorkspaceID) (bool, error)
+	// RecordTurnSuccession records one move of a prompt from a turn to
+	// another (turnsuccessions.go).
+	RecordTurnSuccession(ctx context.Context, m TurnSuccession) error
+	// SucceedingTurn follows a turn's moves to the turn now carrying its
+	// prompt.
+	SucceedingTurn(ctx context.Context, turn TurnID) (TurnID, error)
+	// PutGather records a new gather and its targets (gathers.go).
+	PutGather(ctx context.Context, g Gather) error
+	// Gather reads one gather, ErrNotFound when none has the id.
+	Gather(ctx context.Context, id GatherID) (Gather, error)
+	// GatherByKey reads the gather holding an idempotency key, if one does.
+	GatherByKey(ctx context.Context, key string) (Gather, bool, error)
+	// UnsettledGathers reads every gather something is still owed about.
+	UnsettledGathers(ctx context.Context) ([]Gather, error)
+	// GathersOutstandingOn reads every gather with an outstanding target on ws.
+	GathersOutstandingOn(ctx context.Context, ws WorkspaceID) ([]Gather, error)
+	// ResolveGatherTarget records a target's resolution, once.
+	ResolveGatherTarget(ctx context.Context, id GatherID, ws WorkspaceID, r GatherResolution) (bool, error)
+	// MarkGatherFirstTold records a gather's first update told.
+	MarkGatherFirstTold(ctx context.Context, id GatherID, told GatherFirstTold) error
+	// MarkGatherTargetTold records one target's later notice told.
+	MarkGatherTargetTold(ctx context.Context, id GatherID, ws WorkspaceID, at time.Time) error
 	// WorkspaceSubscribers loads every subscription following a workspace.
 	WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error)
 	// SubscribePullRequest records a pull-request subscription, replacing the
