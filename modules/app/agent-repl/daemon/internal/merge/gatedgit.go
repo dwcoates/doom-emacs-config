@@ -137,6 +137,14 @@ func (g *gatedGit) ResolveRef(ctx context.Context, repoDir, ref string) (string,
 	return g.inner.ResolveRef(ctx, repoDir, ref)
 }
 
+func (g *gatedGit) ListRefs(ctx context.Context, repoDir, prefix string) ([]string, error) {
+	if err := g.enter("ListRefs"); err != nil {
+		return nil, err
+	}
+	defer g.leave()
+	return g.inner.ListRefs(ctx, repoDir, prefix)
+}
+
 func (g *gatedGit) BranchExists(ctx context.Context, repoDir, branch string) (bool, error) {
 	if err := g.enter("BranchExists"); err != nil {
 		return false, err

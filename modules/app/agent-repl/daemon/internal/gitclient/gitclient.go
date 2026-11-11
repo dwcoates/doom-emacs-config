@@ -208,6 +208,17 @@ func (c *client) yesNo(ctx context.Context, operation, dir, cannotTell string, a
 	return false, failure
 }
 
+// ListRefs answers the full name of every ref under prefix, sorted by name.
+// `for-each-ref` matches a prefix that ends in a slash as a whole path
+// component, and answers nothing (exit 0) when no ref matches.
+func (c *client) ListRefs(ctx context.Context, repoDir, prefix string) ([]string, error) {
+	out, err := c.run(ctx, "daemon.gitclient.list_refs", repoDir, "for-each-ref", "--format=%(refname)", "--sort=refname", prefix)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
 // ResolveRef resolves a ref to a full commit sha. The `^{commit}` peel means a
 // tag resolves to the commit it points at rather than to the tag object, and
 // `--verify` means an unknown ref fails loudly instead of being echoed back.

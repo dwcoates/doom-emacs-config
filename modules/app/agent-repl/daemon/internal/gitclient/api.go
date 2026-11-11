@@ -40,6 +40,9 @@ type Git interface {
 	// a ref that names nothing is an ordinary answer and never an error
 	// record.
 	RefExists(ctx context.Context, repoDir, ref string) (bool, error)
+	// ListRefs answers the full name of every ref under prefix, sorted by
+	// name; none is an empty answer, never an error.
+	ListRefs(ctx context.Context, repoDir, prefix string) ([]string, error)
 	// CreateWorktree creates branch at baseRef and checks it out at
 	// worktreeDir.
 	CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error
