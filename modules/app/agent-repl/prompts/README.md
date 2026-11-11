@@ -82,7 +82,7 @@ A blank prompt would submit an empty turn and a half-substituted one would ship
 
 Not every string the system sends is in this directory. Deliberately excluded:
 
-- **Slash commands** (`/compact`, `/gns-sockets close`, `/create-or-update-pr …`).
+- **Slash commands** (`/compact`, `/create-or-update-pr …`).
   They are commands, not prose, and the CLI parses them.
 - **Wire tokens** such as the classifier's `<<QUEUE-JUMP>>` / `<<QUEUE-HOLD>>`.
   The answer is extracted by exact match, so rewording them would break every

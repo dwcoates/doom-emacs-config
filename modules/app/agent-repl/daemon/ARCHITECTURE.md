@@ -81,6 +81,14 @@ daemon/
                    call. Guard, binary resolution, stdin discipline, deadline
     merge/         merge orchestrator (per-repo queue, two methods, tabs, lease, test gate at the head, the two repair slots, briefs, ledger,
                    queue-change reports and subscription records)
+    gnsclient/     the daemon's one way to Slack: the user's own `gns` CLI (pipe streams, thread reads, posts,
+                   searches, reaction lists), every one-shot call bounded, every failure recorded once here
+    slackwatch/    Slack-thread subscriptions: one stream worker per subscription over the channel's echo
+                   pipe, pending messages and cursor stored together (wsm), one digest per quiet period as a
+                   PROMPT_ORIGIN_SLACK_THREAD_NOTICE prompt (urgent = ordinary delivery, else deferred), posts
+                   with a nonce footer recorded first so a workspace never hears itself; and the reaction
+                   initiator (search + reactions polls, sha256 fired ledger, first-read baseline, one hidden
+                   intake workspace per fired binding)
     mergenotice/   merge queue subscription notices: buffers every reported queue change, and one loop tells each
                    subscriber's agent once of a merge put in line, a merge leaving or a deploy's end, in one short
                    line, as a deferred prompt of origin MERGE_QUEUE_NOTICE

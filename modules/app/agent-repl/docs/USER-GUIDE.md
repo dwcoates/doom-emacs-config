@@ -222,7 +222,7 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - Only `http` and `https` links are accepted.
 - `agent-repld workspace status WS` shows every link as `links`, with whether the menu shows it and whether it is owned.
 - A workspace created for a Slack message (`agent-repld workspace create ... -slack-thread URL`) stores the thread among its links as a reference.
-  - What the thread is told is the repository's hooks' to say (`.agent-repl/lifecycle.yaml`), never agent-repl's own.
+  - What the thread is told of the workspace's progress is the repository's hooks' to say (`.agent-repl/lifecycle.yaml`); a workspace following the thread ("Slack threads a workspace follows", below) also posts there itself.
   - A workspace the Slack emoji-ack reactions create (`-originator emoji-ack`) runs built-in hooks unless its repository replaces them: it says in the thread that work started, announces its pull request there, and reacts `:merged:` on that announcement once the pull request merges.
 - `agent-repld workspace link WS -url URL -label TEXT -owned -announces URL2` stores an owned link that announces URL2, another of the workspace's links, such as the Slack post announcing a pull request.
 - The links are kept across restarts.
@@ -237,6 +237,48 @@ A workspace keeps every link that bears on its task, such as its pull request, t
 - `agent-repld workspace pr-subscriptions WS` lists what a workspace follows, and whether the daemon's reads of each pull request are working.
 - `agent-repld workspace pr-unsubscribe WS -pr URL` stops following one; agents never do this themselves.
 - The daemon reads GitHub as your `gh` login, so it needs `gh auth login` done once.
+
+### Slack threads a workspace follows
+
+- A workspace can follow a Slack thread: `agent-repld workspace slack-subscribe WS -thread URL -mode listen|respond|interact`.
+  - `listen`: the agent reads the thread and posts nothing; it drafts replies for you.
+  - `respond`: the agent replies in the thread on its own, within the task the subscription was opened for.
+  - `interact`: as `respond`, and the agent also does the work the thread asks for and reports back there.
+  - A fresh subscription says in the thread that the workspace attached, naming it and its mode.
+- New messages reach the agent as one "Slack thread" prompt in the feed, once the thread has been quiet for a while.
+  - Usually about 45 seconds after the last message, and never more than 3 minutes after the first one waiting.
+  - A message that reads as urgent (it opens with "stop", "wait" or "@agent", or carries `:warning:` or `:rotating_light:`) is told after about 5 seconds, and may be folded into the agent's running turn.
+  - The workspace's own posts are never told back to it.
+- The agent posts through the daemon (`agent-repld workspace slack-post WS -thread URL -text ":emoji: text"`).
+  - Every post opens with one emoji shortcode, carries a small agent-repl banner naming the workspace, and ends with an italic footer the daemon uses to recognize it.
+  - A post carrying what looks like a secret (an access key, a token) is refused and never sent.
+  - After 20 posts the subscription switches itself to listen and says so in the thread; switching it back with `agent-repld workspace slack-mode WS -thread URL -mode respond` is your approval for 20 more.
+  - A post you approve in listen mode goes through with `-force`.
+- `agent-repld workspace slack-subscriptions WS` lists what a workspace follows, `agent-repld workspace slack-tail WS -thread URL` reads the thread's latest messages, and `agent-repld workspace slack-unsubscribe WS -thread URL` (or `slack-close`) stops following one, saying so in the thread.
+- A subscription ends when its workspace closes, and is kept across restarts.
+- `agent-repld workspace create ... -slack-thread URL -slack-subscribe MODE` creates a workspace already subscribed to the thread.
+- The daemon reads Slack as your `gns` login, so it needs the GNS command line installed and `gns auth login` done once.
+  - `agent-repld slack status` shows the login, every subscription and whether its stream is working, and the emoji reactions below.
+
+### Creating workspaces from Slack emoji
+
+- An emoji you type as `:shortcode:` in one of your own Slack messages, or add as a reaction to any message, can create a workspace for that message.
+  - The daemon checks your messages and reactions about every 3 minutes.
+  - Each message and emoji fires once, ever.
+  - Reactions already on messages when the settings are first complete never fire; only ones you add afterwards do.
+- Firing creates a hidden intake workspace that reads the thread, names the task, and forks itself into the workspace that does it, then closes.
+- The settings are the daemon's, set from a shell:
+  - `agent-repld slack watch-user U…` is your Slack member id, from your Slack profile's "Copy member ID".
+  - `agent-repld slack repository here|DIR` is the repository the workspaces are created in.
+  - `agent-repld slack bind EMOJI -thread announced|subscribed [-mode MODE] [-one-shot] [-priority p1]` binds an emoji.
+    - `announced`: the workspace is an emoji-ack workspace, whose repository's hooks tell the thread that work started and where its pull request is.
+    - `subscribed`: the workspace is created subscribed to the thread in MODE and converses there itself.
+    - `-one-shot` makes it a one-shot that lands its own work, and `-priority` gives it a priority.
+  - `agent-repld slack unbind EMOJI` removes a binding.
+- The gns-sockets bindings, set up the same way here:
+  - `agent-repld slack bind agent-ack -thread announced`
+  - `agent-repld slack bind sockets-ack -thread subscribed -mode respond`
+  - `agent-repld slack bind oneshot-ack -thread announced -one-shot`, and `p1-one-shot`, `p2-one-shot` and `p3-one-shot` the same with `-priority p1`, `p2` or `p3`.
 
 ### The main checkout follows its upstream
 
