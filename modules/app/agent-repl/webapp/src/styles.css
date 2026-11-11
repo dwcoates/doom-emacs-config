@@ -1089,6 +1089,9 @@ body {
    the glyph's own width in the rail's font, measured in WebKit. */
 #ws-sidebar { --mq-glyph-w: 0.81rem; }
 #ws-sidebar .sb-mq-glyph { color: var(--blocked); flex: 0 0 auto; width: var(--mq-glyph-w); text-align: center; }
+/* THE GLYPH IS ITS QUEUE'S PAUSE CONTROL (owner request, 2026-11-11), drawn
+   as the bare glyph it was: no bezel, padding or font of the control's base. */
+#ws-sidebar ar-button.sb-mq-glyph { padding: 0; border: 0; background: none; font: inherit; line-height: inherit; cursor: pointer; }
 #ws-sidebar .sb-mq-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* THE MERGE AT THE HEAD is named in bold (owner request, 2026-10-26), and
    every merge waiting behind it a step smaller, in a grey between the folded
