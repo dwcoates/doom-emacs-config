@@ -844,6 +844,43 @@ func TestScheduleBeatsAQueuedSessionIdlePastTheCutoff(t *testing.T) {
 	}
 }
 
+func TestScheduleOwesNoBeatToAQueuedSessionIdlePastTwiceTheCutoff(t *testing.T) {
+	// Arrange: idle twelve hours, the two six-hour cutoffs a queued merge's
+	// session is kept warm for, so the sweep parks it before the beat.
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	s := liveSession(theWorkspace)
+	s.LastEngagementAt = now.Add(-12 * time.Hour)
+	h.db.sessions[theWorkspace] = s
+	h.db.queued = []ids.WorkspaceID{theWorkspace}
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, armed := h.keeper.beats[theWorkspace]; armed {
+		t.Fatal("a beat was armed for a queued session idle past twice the cutoff")
+	}
+}
+
+func TestScheduleBeatsASessionIdleTwiceTheCutoffWhoseMergeJoinedItsQueueSince(t *testing.T) {
+	// Arrange: idle twelve hours, its merge in line for one: the two cutoffs
+	// count from joining the queue.
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	s := liveSession(theWorkspace)
+	s.LastEngagementAt = now.Add(-12 * time.Hour)
+	h.db.sessions[theWorkspace] = s
+	h.db.queued = []ids.WorkspaceID{theWorkspace}
+	h.db.queuedAt = now.Add(-time.Hour)
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("no beat was armed for a session whose merge joined its queue inside two cutoffs")
+	}
+}
+
 func TestScheduleTimesTheBeatFromTheConfiguredInterval(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), 0))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -210,5 +211,70 @@ func TestIDsNamesEachWorkspaceInOrder(t *testing.T) {
 	// Assert
 	if !slices.Equal(got, []string{"b", "a"}) {
 		t.Fatalf("IDs = %v", got)
+	}
+}
+
+func TestIdleHorizon(t *testing.T) {
+	engaged := time.Date(2026, time.November, 11, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		queuedAt time.Time
+		queued   bool
+		want     time.Time
+	}{
+		{name: "a workspace with no merge queued is idle a cutoff after it engaged", queued: false, want: engaged.Add(24 * time.Hour)},
+		{name: "a merge queued after the engagement is kept warm two cutoffs from joining", queuedAt: engaged.Add(time.Hour), queued: true, want: engaged.Add(49 * time.Hour)},
+		{name: "a merge queued before the engagement is kept warm two cutoffs from the engagement", queuedAt: engaged.Add(-time.Hour), queued: true, want: engaged.Add(48 * time.Hour)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := IdleHorizon(24*time.Hour, engaged, tt.queuedAt, tt.queued)
+
+			// Assert
+			if !got.Equal(tt.want) {
+				t.Fatalf("IdleHorizon = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeQueuedAtAnswersWhenTheEntryJoined(t *testing.T) {
+	// Arrange
+	joined := time.Date(2026, time.November, 11, 9, 0, 0, 0, time.UTC)
+	reg := &fakeRegistry{queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "a", EnqueuedAt: joined}}}}
+
+	// Act
+	at, queued, err := MergeQueuedAt(context.Background(), reg, wsm.Workspace{ID: "a"})
+
+	// Assert
+	if err != nil || !queued || !at.Equal(joined) {
+		t.Fatalf("MergeQueuedAt = %v, %v, %v; want %v, queued", at, queued, err, joined)
+	}
+}
+
+func TestMergeQueuedAtAnswersAWorkspaceWithNoEntry(t *testing.T) {
+	// Arrange
+	reg := &fakeRegistry{queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "a"}}}}
+
+	// Act
+	_, queued, err := MergeQueuedAt(context.Background(), reg, wsm.Workspace{ID: "b"})
+
+	// Assert
+	if err != nil || queued {
+		t.Fatalf("MergeQueuedAt = %v, %v; want not queued", queued, err)
+	}
+}
+
+func TestMergeQueuedAtSurfacesAQueueReadFailure(t *testing.T) {
+	// Arrange
+	reg := &fakeRegistry{queuesErr: errors.New("the store is gone")}
+
+	// Act
+	_, _, err := MergeQueuedAt(context.Background(), reg, wsm.Workspace{ID: "a"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("MergeQueuedAt over a failed read answered no error")
 	}
 }

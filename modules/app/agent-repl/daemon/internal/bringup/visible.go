@@ -3,6 +3,7 @@ package bringup
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -63,29 +64,61 @@ func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[id
 }
 
 // queuedMerges answers which workspaces have an entry standing in a merge
-// queue: every workspace's verdict reads them (wsm.Workspace.Runs).
-func queuedMerges(ctx context.Context, repos RepositoryLister) (map[ids.WorkspaceID]bool, error) {
+// queue, each with when it joined: every workspace's verdict reads them
+// (wsm.Workspace.Runs).
+func queuedMerges(ctx context.Context, repos RepositoryLister) (map[ids.WorkspaceID]time.Time, error) {
 	queues, err := repos.AllMergeQueues(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bringup: read the merge queues to tell which workspaces carry a merge: %w", err)
 	}
-	out := map[ids.WorkspaceID]bool{}
+	out := map[ids.WorkspaceID]time.Time{}
 	for _, entries := range queues {
 		for _, entry := range entries {
-			out[entry.Workspace] = true
+			out[entry.Workspace] = entry.EnqueuedAt
 		}
 	}
 	return out, nil
 }
 
+// QueuedIdleFactor is how many idle cutoffs a workspace whose merge stands in
+// a queue is kept warm for (owner ruling, 2026-11-11): two days of keep-alives
+// at the default day's cutoff, so a long queue's entries reach the head warm,
+// and a merge whose session parks past them waits at its cold gate, skipped.
+const QueuedIdleFactor = 2
+
+// IdleHorizon answers the moment a workspace's session is idle past its
+// cutoff: CUTOFF, the idle sweep's own, after ENGAGED; or, while its merge is
+// QUEUED, QueuedIdleFactor of them after the later of ENGAGED and QUEUEDAT,
+// when it joined its queue. The idle sweep and the cache keeper's keep-alives
+// both read it, so a session is never kept warm past the moment the sweep
+// parks it.
+func IdleHorizon(cutoff time.Duration, engaged, queuedAt time.Time, queued bool) time.Time {
+	if !queued {
+		return engaged.Add(cutoff)
+	}
+	from := engaged
+	if queuedAt.After(from) {
+		from = queuedAt
+	}
+	return from.Add(QueuedIdleFactor * cutoff)
+}
+
+// MergeQueuedAt reports whether WS carries a merge, as MergeQueued does, and
+// when its entry joined its queue.
+func MergeQueuedAt(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (time.Time, bool, error) {
+	queued, err := queuedMerges(ctx, repos)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	at, ok := queued[ws.ID]
+	return at, ok, nil
+}
+
 // MergeQueued reports whether WS carries a merge: an entry of it stands in a
 // merge queue, waiting or running (wsm.Workspace.Runs).
 func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (bool, error) {
-	queued, err := queuedMerges(ctx, repos)
-	if err != nil {
-		return false, err
-	}
-	return queued[ws.ID], nil
+	_, queued, err := MergeQueuedAt(ctx, repos, ws)
+	return queued, err
 }
 
 // OnlyVisible splits pending into the workspaces the daemon runs and the ones
@@ -108,7 +141,8 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, p
 		return nil, nil, err
 	}
 	for _, ws := range pending {
-		if ws.Runs(folded[ws.ID], queued[ws.ID]) {
+		_, inQueue := queued[ws.ID]
+		if ws.Runs(folded[ws.ID], inQueue) {
 			run = append(run, ws)
 			continue
 		}
