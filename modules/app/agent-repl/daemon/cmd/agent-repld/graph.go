@@ -788,9 +788,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: resolve the keep-alive interval: %w", err)
 	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
-		DB:              p.DB,
-		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
-		Parked:          fleet.ParkedKeepalive,
+		DB:   p.DB,
+		Shim: func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
+		// LATE-BOUND like its neighbours: a method value here would bind the
+		// nil fleet this keeper is built before, and the first parked beat
+		// would dereference it (the 2026-11-11 boot loop).
+		Parked:          lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
 		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
