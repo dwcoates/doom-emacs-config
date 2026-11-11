@@ -256,7 +256,7 @@ func (o *orchestrator) stepsAside(ctx context.Context, r *run, why AsideReason) 
 			dlog.Context{"workspace": string(r.ws), "repo": string(r.repo), "reason": why.String(), "error": err.Error()})
 		return false
 	}
-	line := inLine(entries)
+	line := admissible(inLine(entries))
 	at := slices.IndexFunc(line, func(entry wsm.MergeQueueEntry) bool { return entry.Workspace == r.ws })
 	for _, entry := range line[at+1:] {
 		if entry.Workspace != r.ws {

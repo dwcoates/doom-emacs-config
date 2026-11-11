@@ -167,7 +167,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.mu.Unlock()
 		return false
 	}
-	front, entries := standingFront(chain, inLine(stored))
+	front, entries := standingFront(chain, admissible(inLine(stored)))
 	// THE CHAIN IS THE QUEUE'S FRONT, IN ORDER. Every member still in line
 	// stands where its entry stands; anything else is a defect, said once
 	// here and never extended past.
@@ -177,7 +177,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 			o.mu.Unlock()
 			o.deps.Log.Global().Error(op, "the chain does not stand at the front of its queue in queue order; it is not extended", dlog.Context{
 				"repo": string(repo), "member": string(member.ws), "place": i, "entries": len(entries),
-				"chain": seen, "line": lineView(inLine(stored))})
+				"chain": seen, "line": lineView(admissible(inLine(stored)))})
 			return false
 		}
 	}
@@ -424,7 +424,7 @@ func (o *orchestrator) inChain(repo wsm.RepoKey, ws ids.WorkspaceID) bool {
 // entry stands first in line: the merge ahead of it landed, or left the
 // queue. Only the pump calls it.
 func (o *orchestrator) promote(repo wsm.RepoKey, entries []wsm.MergeQueueEntry) (*run, bool) {
-	line := inLine(entries)
+	line := admissible(inLine(entries))
 	if len(line) == 0 || line[0].State != wsm.MergeAdmitted {
 		return nil, false
 	}

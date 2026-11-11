@@ -493,12 +493,23 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine). The exit keeps
 	// the request off the queue unless the merge landed (wsm.leaveQueueInTx),
 	// and closes nothing: an async merge's merge workspace stays open under
-	// its name until the merge is requeued or discarded.
+	// its name until the merge is requeued or discarded. A RUN TAKEN OFF
+	// AT ITS WORKSPACE'S COLD GATE leaves it only to stand at its own place
+	// again, waiting and skipped, under a new bubble (coldgate.go).
+	requeued := out.abandoned.requeues()
+	var ledger ids.LeaseID
+	if requeued {
+		ledger = ids.LeaseID(wsm.NewLeaseID())
+	}
 	if err := r.o.leaveLine(r, func() error {
+		if requeued {
+			return r.o.deps.DB.RequeueColdGatedMerge(ctx, r.repo, r.ws, "", ledger)
+		}
 		return r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out))
 	}); err != nil {
 		log.Error(op, "could not drop the finished merge's queue entry", dlog.Context{
-			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+			"workspace": string(r.ws), "repo": string(r.repo), "requeued": requeued, "error": err.Error()})
+		requeued = false
 	}
 	defer r.o.armRepairs(ctx, r.repo)
 	r.o.mu.Lock()
@@ -506,13 +517,18 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		delete(r.o.running, r.repo)
 	}
 	delete(r.o.runsByWorkspace, r.ws)
-	delete(r.o.repoOf, r.ws)
 	// A MERGE THAT ENDED OUT OF LINE -- a resolving rebase that gave up --
 	// leaves its repair slot with its entry, and the slot passes on.
 	r.o.forgetRemediationLocked(r.ws)
-	// The bubble's ledger identity retires with the merge it addressed; a
-	// later merge of the same workspace gets a bubble of its own.
-	delete(r.o.ledgerOf, r.ws)
+	if requeued {
+		// The merge back in line is drawn under the new bubble from here.
+		r.o.ledgerOf[r.ws] = ledger
+	} else {
+		delete(r.o.repoOf, r.ws)
+		// The bubble's ledger identity retires with the merge it addressed; a
+		// later merge of the same workspace gets a bubble of its own.
+		delete(r.o.ledgerOf, r.ws)
+	}
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
 
@@ -1463,8 +1479,17 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
 		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause})
+		// A MERGE PUT BACK IN LINE HAS NOT ENDED: its requester is told
+		// nothing until it does.
+		if !cause.requeues() {
+			r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause})
+		}
 	})
+	if cause.requeues() {
+		// Its facts are the waiting merge's, which the teardown's republish
+		// drew under its new bubble.
+		return
+	}
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the
 	// footer and the roster are concerned.
@@ -1496,7 +1521,9 @@ func (r *run) closeOpenRounds(ctx context.Context, outcome string) {
 // keeps its bubble open, as every non-success end does.
 func (o *orchestrator) closeReleasedBubble(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, cause AbandonCause) {
 	const op = "daemon.merge.abandoned"
-	if !cause.releases() {
+	// A BUBBLE A MERGE PUT BACK IN LINE LEFT BEHIND is closed as a released
+	// one: its merge goes on under a new bubble.
+	if !cause.releases() && !cause.requeues() {
 		return
 	}
 	at := o.bubbleOf(ws)

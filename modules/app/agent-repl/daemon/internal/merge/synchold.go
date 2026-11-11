@@ -43,7 +43,7 @@ func (o *orchestrator) HoldTargetForSync(ctx context.Context, dir string) (func(
 		unmark()
 		return nil, false, err
 	}
-	if len(inLine(entries)) > 0 {
+	if len(admissible(inLine(entries))) > 0 {
 		unmark()
 		return nil, false, nil
 	}
