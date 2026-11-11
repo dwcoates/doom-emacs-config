@@ -263,8 +263,7 @@ func packageProfiles(verdicts []PackageVerdict) map[string]string {
 func ReportPackages(log Logger, verdicts []PackageVerdict) {
 	for _, v := range verdicts {
 		if v.Reused != nil {
-			log.Infof("%s: reused package %s's green run (inputs %s, passed %s on %s)", v.Suite, v.Package, v.Key.Short(),
-				v.Reused.PassedAt.Local().Format("2006-01-02 15:04"), Source(*v.Reused))
+			log.Infof("%s: reused package %s's green run (%s)", v.Suite, v.Package, passedClause(v.Key, *v.Reused))
 			continue
 		}
 		log.Infof("%s: package %s runs: %s", v.Suite, v.Package, v.Why)
@@ -273,13 +272,7 @@ func ReportPackages(log Logger, verdicts []PackageVerdict) {
 
 // ReusedPackageNames is every reused package, as "<suite>:<package>".
 func ReusedPackageNames(verdicts []PackageVerdict) []string {
-	var out []string
-	for _, v := range verdicts {
-		if v.Reused != nil {
-			out = append(out, v.Group())
-		}
-	}
-	return out
+	return reusedOnes(verdicts, func(v PackageVerdict) (string, bool) { return v.Group(), v.Reused != nil })
 }
 
 // RecordPackagePasses stores a pass for every keyed package of the run all of

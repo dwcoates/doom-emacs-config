@@ -115,3 +115,21 @@ func (r *recorder) record(name, label string, set *InputSet, facts Facts, key Ke
 func confinedRefusal(field string) string {
 	return `a failure reading a checkout file with "operation not permitted", or a listing of a checkout directory that comes back empty (filepath.Glob drops the refusal), is a read its ` + field + ` does not declare`
 }
+
+// passedClause names the inputs a reused subject's record passed on, and when
+// and where it passed, as both reports say it.
+func passedClause(key Key, r Record) string {
+	return fmt.Sprintf("inputs %s, passed %s on %s", key.Short(), r.PassedAt.Local().Format("2006-01-02 15:04"), Source(r))
+}
+
+// reusedOnes is the name of every verdict reused, in order: name answers a
+// verdict's name and whether it was reused.
+func reusedOnes[V any](verdicts []V, name func(V) (string, bool)) []string {
+	var out []string
+	for _, v := range verdicts {
+		if n, reused := name(v); reused {
+			out = append(out, n)
+		}
+	}
+	return out
+}

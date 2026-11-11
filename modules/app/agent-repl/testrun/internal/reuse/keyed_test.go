@@ -325,3 +325,77 @@ func TestSuitesAndPackagesTellAConfinedFailureAlike(t *testing.T) {
 		})
 	}
 }
+
+func TestPassedClause(t *testing.T) {
+	key := Key{Digest: "4ad2933f8e55" + strings.Repeat("0", 52)}
+	at := mustTime(t, "2026-11-10 09:30")
+	tests := []struct {
+		name string
+		rec  Record
+		want string
+	}{
+		{name: "a clean checkout names its commit", rec: Record{PassedAt: at, Branch: "master", Commit: "0123456789abcdef"},
+			want: "inputs 4ad2933f8e55, passed 2026-11-10 09:30 on master 0123456789"},
+		{name: "a dirty checkout never claims its commit", rec: Record{PassedAt: at, Branch: "master", Commit: "0123456789abcdef", Dirty: true},
+			want: "inputs 4ad2933f8e55, passed 2026-11-10 09:30 on " + Source(Record{Branch: "master", Commit: "0123456789abcdef", Dirty: true})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := passedClause(key, tt.rec)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("passedClause = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReusedOnes(t *testing.T) {
+	type verdict struct {
+		name   string
+		reused bool
+	}
+	tests := []struct {
+		name     string
+		verdicts []verdict
+		want     []string
+	}{
+		{name: "none reused", verdicts: []verdict{{"a", false}, {"b", false}}, want: nil},
+		{name: "the reused ones, in order", verdicts: []verdict{{"a", true}, {"b", false}, {"c", true}}, want: []string{"a", "c"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := reusedOnes(tt.verdicts, func(v verdict) (string, bool) { return v.name, v.reused })
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("reusedOnes = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSuitesAndPackagesReportAReuseAlike pins that the suite report and the
+// package report both say a reuse through passedClause, so a hand-written
+// clause at either site fails here.
+func TestSuitesAndPackagesReportAReuseAlike(t *testing.T) {
+	// Arrange
+	key := Key{Digest: "4ad2933f8e55" + strings.Repeat("0", 52)}
+	rec := Record{PassedAt: mustTime(t, "2026-11-10 09:30"), Branch: "master", Commit: "0123456789abcdef"}
+	want := passedClause(key, rec)
+	suites, packages := &logLines{}, &logLines{}
+
+	// Act
+	Report(suites, []Verdict{{Suite: lockSuite, Keyed: true, Key: key, Reused: &rec}})
+	ReportPackages(packages, []PackageVerdict{{Suite: "daemon", Package: "p", Key: key, Reused: &rec}})
+
+	// Assert
+	for _, log := range []*logLines{suites, packages} {
+		if len(log.info) != 1 || !strings.Contains(log.info[0], "("+want+")") {
+			t.Fatalf("info = %q, want the reuse said through %q", log.info, want)
+		}
+	}
+}

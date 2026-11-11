@@ -366,8 +366,7 @@ func Report(log Logger, verdicts []Verdict) {
 	for _, v := range verdicts {
 		switch {
 		case v.Reused != nil:
-			log.Infof("%s: reused a green run (inputs %s, passed %s on %s)", v.Suite.Name, v.Key.Short(),
-				v.Reused.PassedAt.Local().Format("2006-01-02 15:04"), Source(*v.Reused))
+			log.Infof("%s: reused a green run (%s)", v.Suite.Name, passedClause(v.Key, *v.Reused))
 		case v.Keyed:
 			log.Infof("%s: runs (inputs %s): %s", v.Suite.Name, v.Key.Short(), v.Why)
 		}
@@ -567,11 +566,5 @@ func staleInstall(repo string, set *InputSet) (string, error) {
 
 // ReusedNames is the reused suites' names, in verdict order.
 func ReusedNames(verdicts []Verdict) []string {
-	var out []string
-	for _, v := range verdicts {
-		if v.Reused != nil {
-			out = append(out, v.Suite.Name)
-		}
-	}
-	return out
+	return reusedOnes(verdicts, func(v Verdict) (string, bool) { return v.Suite.Name, v.Reused != nil })
 }
