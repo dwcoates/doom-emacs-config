@@ -1402,3 +1402,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-11 merge-queue-stall-triage (landed in queue bypass mode): shim: a cold gate's compaction draws one divider, not two with the held prompt between them
 - 2026-11-11 merge-queue-stall-triage (landed in queue bypass mode): org/todo: record that bypass landings run no layout check
 - 2026-11-11 intake-born-hidden-placed (landed in queue bypass mode): workspace create: an intake is born hidden, and a create can file its workspace into a subsection (-hidden, -subsection, -new-subsection -gather)
+- 2026-11-11 wsm-lock-and-parked-nil (landed in queue bypass mode): The daemon no longer crash-loops on a parked keep-alive, and no longer drops SQLite's locks on its state database (the cause of the 2026-11-11 corruption)
