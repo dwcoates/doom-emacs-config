@@ -185,10 +185,21 @@ type PruneReport struct {
 	Families int
 	// Held are the files skipped because a writer holds them.
 	Held []string
-	// Removed are the files removed.
+	// Removed are the files removed, or under RemoveFamilies' judgeOnly the
+	// files that would be.
 	Removed []string
+	// Sizes is what each file of Removed held, in bytes.
+	Sizes map[string]int64
 	// Kept is how many examined files are still inside the retention.
 	Kept int
+}
+
+// pruneRule is which files of an unheld family one pass removes.
+type pruneRule struct {
+	// expired answers whether a file with this last write goes.
+	expired func(lastWrite time.Time) bool
+	// judgeOnly proves and reports exactly as a pass does and removes nothing.
+	judgeOnly bool
 }
 
 // PruneDirectory removes, from every log family in dir that owned names and no
@@ -212,6 +223,24 @@ func PruneDirectory(dir string, now time.Time, retention time.Duration, owned fu
 	if retention <= 0 {
 		return PruneReport{}, fmt.Errorf("prune log directory %q: retention %v is not positive", dir, retention)
 	}
+	cutoff := now.Add(-retention)
+	return pruneFamilies(dir, owned, pruneRule{expired: func(lastWrite time.Time) bool { return lastWrite.Before(cutoff) }})
+}
+
+// RemoveFamilies removes, from every log family in dir that owned names and no
+// writer holds, EVERY file whatever its age: the door for a caller that knows
+// by other means that nothing will read the family again (the daemon's storage
+// sweep, for a workspace nobody touched in days). The proof that nobody holds
+// a family is PruneDirectory's, and a held family is skipped whole.
+//
+// judgeOnly takes the same locks and reports the files a removal would take,
+// and removes nothing.
+func RemoveFamilies(dir string, owned func(base string) bool, judgeOnly bool) (PruneReport, error) {
+	return pruneFamilies(dir, owned, pruneRule{expired: func(time.Time) bool { return true }, judgeOnly: judgeOnly})
+}
+
+// pruneFamilies applies rule to every owned family of dir nobody holds.
+func pruneFamilies(dir string, owned func(base string) bool, rule pruneRule) (PruneReport, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return PruneReport{}, fmt.Errorf("read log directory %q to prune it: %w", dir, err)
@@ -233,14 +262,13 @@ func PruneDirectory(dir string, now time.Time, retention time.Duration, owned fu
 	}
 	sort.Strings(bases)
 
-	cutoff := now.Add(-retention)
-	var report PruneReport
+	report := PruneReport{Sizes: map[string]int64{}}
 	var errs []error
 	for _, base := range bases {
 		report.Families++
 		gens := families[base]
 		sort.Ints(gens)
-		if err := pruneFamily(filepath.Join(dir, base), gens, cutoff, &report); err != nil {
+		if err := pruneFamily(filepath.Join(dir, base), gens, rule, &report); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -249,7 +277,7 @@ func PruneDirectory(dir string, now time.Time, retention time.Duration, owned fu
 
 // pruneFamily ages one family under the exclusive lock on its current file.
 // gens lists the generation numbers present, 0 being the current file.
-func pruneFamily(current string, gens []int, cutoff time.Time, report *PruneReport) error {
+func pruneFamily(current string, gens []int, rule pruneRule, report *PruneReport) error {
 	var lock *os.File
 	if len(gens) > 0 && gens[0] == 0 {
 		f, outcome, err := lockExclusive(current)
@@ -267,12 +295,12 @@ func pruneFamily(current string, gens []int, cutoff time.Time, report *PruneRepo
 	}
 	var errs []error
 	for _, gen := range gens {
-		if err := pruneAlone(generationPath(current, gen), cutoff, report); err != nil {
+		if err := pruneAlone(generationPath(current, gen), rule, report); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if lock != nil {
-		if err := removeIfExpired(current, lock, cutoff, report); err != nil {
+		if err := removeIfExpired(current, lock, rule, report); err != nil {
 			errs = append(errs, err)
 		}
 		if err := lock.Close(); err != nil {
@@ -285,7 +313,7 @@ func pruneFamily(current string, gens []int, cutoff time.Time, report *PruneRepo
 // pruneAlone locks one file exclusively and removes it when it is expired. A
 // held file is skipped: a retiring child may still write the generation its
 // descriptor was renamed into.
-func pruneAlone(path string, cutoff time.Time, report *PruneReport) error {
+func pruneAlone(path string, rule pruneRule, report *PruneReport) error {
 	f, outcome, err := lockExclusive(path)
 	if err != nil {
 		return err
@@ -297,28 +325,31 @@ func pruneAlone(path string, cutoff time.Time, report *PruneReport) error {
 	case lockGone:
 		return nil
 	}
-	err = removeIfExpired(path, f, cutoff, report)
+	err = removeIfExpired(path, f, rule, report)
 	if closeErr := f.Close(); closeErr != nil {
 		err = errors.Join(err, fmt.Errorf("release the prune lock on %q: %w", path, closeErr))
 	}
 	return err
 }
 
-// removeIfExpired removes path, whose exclusive lock f holds, when the file's
-// last write is before cutoff.
-func removeIfExpired(path string, f *os.File, cutoff time.Time, report *PruneReport) error {
+// removeIfExpired removes path, whose exclusive lock f holds, when rule says
+// the file's last write has expired it.
+func removeIfExpired(path string, f *os.File, rule pruneRule, report *PruneReport) error {
 	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("stat %q for its age: %w", path, err)
 	}
-	if !info.ModTime().Before(cutoff) {
+	if !rule.expired(info.ModTime()) {
 		report.Kept++
 		return nil
 	}
-	if err := removeIfPresent(path); err != nil {
-		return err
+	if !rule.judgeOnly {
+		if err := removeIfPresent(path); err != nil {
+			return err
+		}
 	}
 	report.Removed = append(report.Removed, path)
+	report.Sizes[path] = info.Size()
 	return nil
 }
 
