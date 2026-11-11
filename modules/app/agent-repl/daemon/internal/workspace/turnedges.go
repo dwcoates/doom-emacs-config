@@ -70,11 +70,21 @@ func (r *TurnEdgeRunner) NeedsInput(ids.WorkspaceID) {}
 func (r *TurnEdgeRunner) Landed(ids.WorkspaceID) {}
 
 // Closed implements wsedges.Observer: no turn-edge work waits on a close.
-func (r *TurnEdgeRunner) Closed(wsm.Workspace) {}
+func (r *TurnEdgeRunner) Closed(wsm.Workspace, wsm.CloseHow) {}
 
 // PullRequestOwned implements wsedges.Observer: no turn-edge work waits on a
 // pull request.
 func (r *TurnEdgeRunner) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
+// Deployed implements wsedges.Observer: no turn-edge work waits on a deploy.
+func (r *TurnEdgeRunner) Deployed(ids.WorkspaceID, string) {}
+
+// Evicted implements wsedges.Observer: no turn-edge work waits on an eviction.
+func (r *TurnEdgeRunner) Evicted(ids.WorkspaceID, string) {}
+
+// ColdGated implements wsedges.Observer: no turn-edge work waits on a cold
+// gate.
+func (r *TurnEdgeRunner) ColdGated(ids.WorkspaceID) {}
 
 // Run carries out every reported edge's work, in order, until ctx ends, then
 // carries out every one still pending before it returns.

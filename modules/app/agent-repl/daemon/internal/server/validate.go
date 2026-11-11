@@ -1458,9 +1458,8 @@ func validateSubscribeWorkspaceRequest(req *agentreplv1.SubscribeWorkspaceReques
 	if err := validateWorkspaceRef("followed", req.GetFollowed()); err != nil {
 		return err
 	}
-	if len(req.GetEvents()) == 0 {
-		return invalid("events", "a subscription names at least one event")
-	}
+	// NO EVENT IS THE LIFECYCLE BUNDLE (workspacesubs.EventsOf), so an empty
+	// list is a valid request.
 	for _, e := range req.GetEvents() {
 		if e == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_UNSPECIFIED {
 			return invalid("events", "an unspecified event is no event")

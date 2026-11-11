@@ -193,7 +193,7 @@ func (s *Service) Landed(ws ids.WorkspaceID) {
 
 // Closed implements wsedges.Observer: a workspace closing tells its sources
 // only when its branch never landed, since its landing was told at the edge.
-func (s *Service) Closed(before wsm.Workspace) {
+func (s *Service) Closed(before wsm.Workspace, _ wsm.CloseHow) {
 	if before.MergedAt == nil {
 		s.Report(Event{Kind: ClosedWithoutLanding, Workspace: before})
 	}
@@ -202,6 +202,15 @@ func (s *Service) Closed(before wsm.Workspace) {
 // PullRequestOwned implements wsedges.Observer: a pull request is no derived
 // event.
 func (s *Service) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
+// Deployed implements wsedges.Observer: a deploy is no derived event.
+func (s *Service) Deployed(ids.WorkspaceID, string) {}
+
+// Evicted implements wsedges.Observer: an eviction is no derived event.
+func (s *Service) Evicted(ids.WorkspaceID, string) {}
+
+// ColdGated implements wsedges.Observer: a cold gate is no derived event.
+func (s *Service) ColdGated(ids.WorkspaceID) {}
 
 // Run delivers every reported event, in order, until ctx ends, then delivers
 // every event still pending before it returns.

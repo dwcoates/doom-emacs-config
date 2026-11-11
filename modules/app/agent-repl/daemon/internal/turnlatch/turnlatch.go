@@ -52,7 +52,7 @@ func (l *Latches) TurnEnded(ws ids.WorkspaceID) { l.release(ws) }
 func (l *Latches) TurnEndedUnobserved(ws ids.WorkspaceID) { l.release(ws) }
 
 // Closed implements wsedges.Observer: a closed workspace ends no further turn.
-func (l *Latches) Closed(before wsm.Workspace) { l.release(before.ID) }
+func (l *Latches) Closed(before wsm.Workspace, _ wsm.CloseHow) { l.release(before.ID) }
 
 // TurnStarted implements wsedges.Observer: no latch waits on a start.
 func (l *Latches) TurnStarted(ids.WorkspaceID) {}
@@ -65,3 +65,12 @@ func (l *Latches) Landed(ids.WorkspaceID) {}
 
 // PullRequestOwned implements wsedges.Observer: no latch waits on a link.
 func (l *Latches) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
+// Deployed implements wsedges.Observer: no latch waits on a deploy.
+func (l *Latches) Deployed(ids.WorkspaceID, string) {}
+
+// Evicted implements wsedges.Observer: no latch waits on an eviction.
+func (l *Latches) Evicted(ids.WorkspaceID, string) {}
+
+// ColdGated implements wsedges.Observer: no latch waits on a cold gate.
+func (l *Latches) ColdGated(ids.WorkspaceID) {}

@@ -48,7 +48,7 @@ func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 	// refused at: a workspace with open children is not killed
 	// (wsm/family.go), and a refused kill must leave its queued merge where it
 	// stands.
-	if err := v.markClosedFirst(ctx, log, opKill, ws); err != nil {
+	if err := v.markClosedFirst(ctx, log, opKill, ws, wsm.HowKilled); err != nil {
 		return nil, fmt.Errorf("kill %q: %w", ws, err)
 	}
 	// A WAITING MERGE ENDS WITH THE WORKSPACE. Close refuses outright while a
@@ -64,8 +64,11 @@ func (v *verbs) BeginKill(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 // roster push arriving while the session dies must already say closed, or it
 // would stand the tab again. A shim dying under the teardown is not revived
 // either, since a closed workspace's session is never brought back.
-func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID) error {
-	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser}); err != nil {
+//
+// HOW is how the workspace ends (killed or nuked), which the close edge tells
+// its followers (wsm.Closure.How).
+func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID, how wsm.CloseHow) error {
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByUser, How: how}); err != nil {
 		if refusedByFamily(log, op, err) {
 			return err
 		}
@@ -174,7 +177,7 @@ func (v *verbs) BeginNuke(ctx context.Context, ws ids.WorkspaceID) (Teardown, er
 	// for a kill; then the waiting merge goes, for the same reason Kill drops
 	// it: the nuke destroys the very worktree the merge would have run
 	// against.
-	if err := v.markClosedFirst(ctx, log, opNuke, ws); err != nil {
+	if err := v.markClosedFirst(ctx, log, opNuke, ws, wsm.HowNuked); err != nil {
 		return nil, fmt.Errorf("nuke %q: %w", ws, err)
 	}
 	v.deps.Merge.OnWorkspaceClosed(ctx, ws)

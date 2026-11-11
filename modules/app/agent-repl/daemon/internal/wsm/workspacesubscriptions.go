@@ -53,10 +53,22 @@ const (
 	WorkspaceEventLanded
 	WorkspaceEventClosed
 	WorkspaceEventPullRequest
+	// WorkspaceEventDeployed is the build carrying the workspace's landing
+	// running (or its deploy failing).
+	WorkspaceEventDeployed
+	// WorkspaceEventEvicted is the workspace's merge leaving its queue
+	// without landing.
+	WorkspaceEventEvicted
+	// WorkspaceEventColdGated is the workspace's session parking at its cold
+	// gate.
+	WorkspaceEventColdGated
 )
 
 // workspaceEvents is every declared event, in order.
-var workspaceEvents = []WorkspaceEvent{WorkspaceEventTurnStarted, WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventPullRequest}
+var workspaceEvents = []WorkspaceEvent{
+	WorkspaceEventTurnStarted, WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed,
+	WorkspaceEventPullRequest, WorkspaceEventDeployed, WorkspaceEventEvicted, WorkspaceEventColdGated,
+}
 
 // String names the event in log records and in a notice.
 func (e WorkspaceEvent) String() string {
@@ -73,6 +85,12 @@ func (e WorkspaceEvent) String() string {
 		return "closed"
 	case WorkspaceEventPullRequest:
 		return "pull_request"
+	case WorkspaceEventDeployed:
+		return "deployed"
+	case WorkspaceEventEvicted:
+		return "evicted"
+	case WorkspaceEventColdGated:
+		return "cold_gated"
 	}
 	return fmt.Sprintf("WorkspaceEvent(%d)", int(e))
 }
@@ -91,6 +109,17 @@ func NewWorkspaceEvents(events ...WorkspaceEvent) WorkspaceEvents {
 
 // AllWorkspaceEvents is every declared event.
 func AllWorkspaceEvents() WorkspaceEvents { return NewWorkspaceEvents(workspaceEvents...) }
+
+// LifecycleWorkspaceEvents is the bundle a subscription names `lifecycle` (and
+// the one it holds when it names nothing): the outcomes of a workspace's work.
+// Turn events and needs_input are NOT in it, because each notice wakes the
+// subscriber at the cost of a full read of its context, so a follower that
+// wants them asks for them by name. A pull request taken as the workspace's
+// own is not an outcome either; it is how a follower finds a pull request to
+// follow.
+func LifecycleWorkspaceEvents() WorkspaceEvents {
+	return NewWorkspaceEvents(WorkspaceEventLanded, WorkspaceEventClosed, WorkspaceEventDeployed, WorkspaceEventEvicted, WorkspaceEventColdGated)
+}
 
 // Members are the set's events, in declared order.
 func (s WorkspaceEvents) Members() []WorkspaceEvent {

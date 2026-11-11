@@ -205,7 +205,7 @@ func (s *Service) Edges() Edges { return Edges{s: s} }
 type Edges struct{ s *Service }
 
 // Closed implements wsedges.Observer.
-func (e Edges) Closed(before wsm.Workspace) { e.s.loop.Report(closeEvent{ws: before.ID}) }
+func (e Edges) Closed(before wsm.Workspace, _ wsm.CloseHow) { e.s.loop.Report(closeEvent{ws: before.ID}) }
 
 // TurnStarted implements wsedges.Observer.
 func (Edges) TurnStarted(ids.WorkspaceID) {}
@@ -225,6 +225,15 @@ func (Edges) Landed(ids.WorkspaceID) {}
 
 // PullRequestOwned implements wsedges.Observer.
 func (Edges) PullRequestOwned(ids.WorkspaceID, wsm.PullRequestKey) {}
+
+// Deployed implements wsedges.Observer.
+func (Edges) Deployed(ids.WorkspaceID, string) {}
+
+// Evicted implements wsedges.Observer.
+func (Edges) Evicted(ids.WorkspaceID, string) {}
+
+// ColdGated implements wsedges.Observer.
+func (Edges) ColdGated(ids.WorkspaceID) {}
 
 // ---- making a gather ----
 
