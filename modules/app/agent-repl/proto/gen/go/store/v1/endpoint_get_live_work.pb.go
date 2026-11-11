@@ -193,8 +193,17 @@ type GetLiveWorkSuccess struct {
 	// Non-agent detached runs (a shell) with no terminal, each with its owner,
 	// oldest announcement first.
 	LiveDetachedRuns []*GetLiveWorkDetached `protobuf:"bytes,4,rep,name=live_detached_runs,json=liveDetachedRuns,proto3" json:"live_detached_runs,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Every ask the record holds a start for and no settle, across the whole
+	// lineage (the main agent's and every subagent's), oldest first. Each is
+	// the ask exactly as its start frame recorded it, under the agent whose book
+	// holds it, so the caller restates the batch or prompt in the settle it
+	// writes. A freshly started session's permission gate holds no ask, so the
+	// shim settles every one of these as abandoned
+	// (AgentQuestionSuccess.abandoned, AgentPermissionSuccess.abandoned): the
+	// vendor process that asked is gone. EMPTY when nothing is open.
+	OpenAsks      []*v1.SessionOpenAsk `protobuf:"bytes,5,rep,name=open_asks,json=openAsks,proto3" json:"open_asks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetLiveWorkSuccess) Reset() {
@@ -244,6 +253,13 @@ func (x *GetLiveWorkSuccess) GetLiveWorkflows() []*v1.DetachedWorkId {
 func (x *GetLiveWorkSuccess) GetLiveDetachedRuns() []*GetLiveWorkDetached {
 	if x != nil {
 		return x.LiveDetachedRuns
+	}
+	return nil
+}
+
+func (x *GetLiveWorkSuccess) GetOpenAsks() []*v1.SessionOpenAsk {
+	if x != nil {
+		return x.OpenAsks
 	}
 	return nil
 }
@@ -496,18 +512,19 @@ var File_store_v1_endpoint_get_live_work_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_get_live_work_proto_rawDesc = "" +
 	"\n" +
-	"%store/v1/endpoint_get_live_work.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\"H\n" +
+	"%store/v1/endpoint_get_live_work.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a#conversation/v1/detached_work.proto\x1a\x1dconversation/v1/session.proto\"H\n" +
 	"\x12GetLiveWorkRequest\x122\n" +
 	"\asession\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\asession\"\x93\x01\n" +
 	"\x13GetLiveWorkResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.store.v1.GetLiveWorkSuccessH\x00R\asuccess\x128\n" +
 	"\afailure\x18\x02 \x01(\v2\x1c.store.v1.GetLiveWorkFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xf9\x01\n" +
+	"\x06result\"\xb7\x02\n" +
 	"\x12GetLiveWorkSuccess\x129\n" +
 	"\vlive_agents\x18\x01 \x03(\v2\x18.conversation.v1.AgentIdR\n" +
 	"liveAgents\x12F\n" +
 	"\x0elive_workflows\x18\x02 \x03(\v2\x1f.conversation.v1.DetachedWorkIdR\rliveWorkflows\x12K\n" +
-	"\x12live_detached_runs\x18\x04 \x03(\v2\x1d.store.v1.GetLiveWorkDetachedR\x10liveDetachedRunsJ\x04\b\x03\x10\x04R\rlive_detached\"z\n" +
+	"\x12live_detached_runs\x18\x04 \x03(\v2\x1d.store.v1.GetLiveWorkDetachedR\x10liveDetachedRuns\x12<\n" +
+	"\topen_asks\x18\x05 \x03(\v2\x1f.conversation.v1.SessionOpenAskR\bopenAsksJ\x04\b\x03\x10\x04R\rlive_detached\"z\n" +
 	"\x13GetLiveWorkDetached\x123\n" +
 	"\x04work\x18\x01 \x01(\v2\x1f.conversation.v1.DetachedWorkIdR\x04work\x12.\n" +
 	"\x05owner\x18\x02 \x01(\v2\x18.conversation.v1.AgentIdR\x05owner\"\xd4\x01\n" +
@@ -543,6 +560,7 @@ var file_store_v1_endpoint_get_live_work_proto_goTypes = []any{
 	(*GetLiveWorkStorageFailure)(nil), // 6: store.v1.GetLiveWorkStorageFailure
 	(*v1.AgentId)(nil),                // 7: conversation.v1.AgentId
 	(*v1.DetachedWorkId)(nil),         // 8: conversation.v1.DetachedWorkId
+	(*v1.SessionOpenAsk)(nil),         // 9: conversation.v1.SessionOpenAsk
 }
 var file_store_v1_endpoint_get_live_work_proto_depIdxs = []int32{
 	7,  // 0: store.v1.GetLiveWorkRequest.session:type_name -> conversation.v1.AgentId
@@ -551,15 +569,16 @@ var file_store_v1_endpoint_get_live_work_proto_depIdxs = []int32{
 	7,  // 3: store.v1.GetLiveWorkSuccess.live_agents:type_name -> conversation.v1.AgentId
 	8,  // 4: store.v1.GetLiveWorkSuccess.live_workflows:type_name -> conversation.v1.DetachedWorkId
 	3,  // 5: store.v1.GetLiveWorkSuccess.live_detached_runs:type_name -> store.v1.GetLiveWorkDetached
-	8,  // 6: store.v1.GetLiveWorkDetached.work:type_name -> conversation.v1.DetachedWorkId
-	7,  // 7: store.v1.GetLiveWorkDetached.owner:type_name -> conversation.v1.AgentId
-	6,  // 8: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
-	5,  // 9: store.v1.GetLiveWorkFailure.invalid_request:type_name -> store.v1.GetLiveWorkInvalidRequest
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	9,  // 6: store.v1.GetLiveWorkSuccess.open_asks:type_name -> conversation.v1.SessionOpenAsk
+	8,  // 7: store.v1.GetLiveWorkDetached.work:type_name -> conversation.v1.DetachedWorkId
+	7,  // 8: store.v1.GetLiveWorkDetached.owner:type_name -> conversation.v1.AgentId
+	6,  // 9: store.v1.GetLiveWorkFailure.storage_failure:type_name -> store.v1.GetLiveWorkStorageFailure
+	5,  // 10: store.v1.GetLiveWorkFailure.invalid_request:type_name -> store.v1.GetLiveWorkInvalidRequest
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_store_v1_endpoint_get_live_work_proto_init() }

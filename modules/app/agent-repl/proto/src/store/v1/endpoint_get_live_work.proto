@@ -27,6 +27,7 @@ package store.v1;
 
 import "conversation/v1/agent_activity.proto";
 import "conversation/v1/detached_work.proto";
+import "conversation/v1/session.proto";
 
 option go_package = "agentrepl/proto/store/v1;storev1";
 
@@ -66,6 +67,15 @@ message GetLiveWorkSuccess {
   // Non-agent detached runs (a shell) with no terminal, each with its owner,
   // oldest announcement first.
   repeated GetLiveWorkDetached live_detached_runs = 4;
+  // Every ask the record holds a start for and no settle, across the whole
+  // lineage (the main agent's and every subagent's), oldest first. Each is
+  // the ask exactly as its start frame recorded it, under the agent whose book
+  // holds it, so the caller restates the batch or prompt in the settle it
+  // writes. A freshly started session's permission gate holds no ask, so the
+  // shim settles every one of these as abandoned
+  // (AgentQuestionSuccess.abandoned, AgentPermissionSuccess.abandoned): the
+  // vendor process that asked is gone. EMPTY when nothing is open.
+  repeated conversation.v1.SessionOpenAsk open_asks = 5;
 }
 
 // One live non-agent detached run, named together with the agent that owns it.

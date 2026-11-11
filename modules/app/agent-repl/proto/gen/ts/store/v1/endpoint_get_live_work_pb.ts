@@ -31,13 +31,15 @@ import type { AgentId } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
 import type { DetachedWorkId } from "../../conversation/v1/detached_work_pb";
 import { file_conversation_v1_detached_work } from "../../conversation/v1/detached_work_pb";
+import type { SessionOpenAsk } from "../../conversation/v1/session_pb";
+import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file store/v1/endpoint_get_live_work.proto.
  */
 export const file_store_v1_endpoint_get_live_work: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSI/ChJHZXRMaXZlV29ya1JlcXVlc3QSKQoHc2Vzc2lvbhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIoEBChNHZXRMaXZlV29ya1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0TGl2ZVdvcmtGYWlsdXJlSABCCAoGcmVzdWx0IswBChJHZXRMaXZlV29ya1N1Y2Nlc3MSLQoLbGl2ZV9hZ2VudHMYASADKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI3Cg5saXZlX3dvcmtmbG93cxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBI5ChJsaXZlX2RldGFjaGVkX3J1bnMYBCADKAsyHS5zdG9yZS52MS5HZXRMaXZlV29ya0RldGFjaGVkSgQIAxAEUg1saXZlX2RldGFjaGVkIm0KE0dldExpdmVXb3JrRGV0YWNoZWQSLQoEd29yaxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBInCgVvd25lchgCIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIqwBChJHZXRMaXZlV29ya0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KD3N0b3JhZ2VfZmFpbHVyZRgCIAEoCzIjLnN0b3JlLnYxLkdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVIABI+Cg9pbnZhbGlkX3JlcXVlc3QYAyABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0SABCBgoEa2luZCIqChlHZXRMaXZlV29ya0ludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIhsKGUdldExpdmVXb3JrU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
+  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSI/ChJHZXRMaXZlV29ya1JlcXVlc3QSKQoHc2Vzc2lvbhgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkIoEBChNHZXRMaXZlV29ya1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0TGl2ZVdvcmtGYWlsdXJlSABCCAoGcmVzdWx0IoACChJHZXRMaXZlV29ya1N1Y2Nlc3MSLQoLbGl2ZV9hZ2VudHMYASADKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZBI3Cg5saXZlX3dvcmtmbG93cxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZBI5ChJsaXZlX2RldGFjaGVkX3J1bnMYBCADKAsyHS5zdG9yZS52MS5HZXRMaXZlV29ya0RldGFjaGVkEjIKCW9wZW5fYXNrcxgFIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uT3BlbkFza0oECAMQBFINbGl2ZV9kZXRhY2hlZCJtChNHZXRMaXZlV29ya0RldGFjaGVkEi0KBHdvcmsYASABKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWQSJwoFb3duZXIYAiABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZCKsAQoSR2V0TGl2ZVdvcmtGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+Cg9zdG9yYWdlX2ZhaWx1cmUYAiABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlSAASPgoPaW52YWxpZF9yZXF1ZXN0GAMgASgLMiMuc3RvcmUudjEuR2V0TGl2ZVdvcmtJbnZhbGlkUmVxdWVzdEgAQgYKBGtpbmQiKgoZR2V0TGl2ZVdvcmtJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIbChlHZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work, file_conversation_v1_session]);
 
 /**
  * Ask for one session's open obligations.
@@ -127,6 +129,20 @@ export type GetLiveWorkSuccess = Message<"store.v1.GetLiveWorkSuccess"> & {
    * @generated from field: repeated store.v1.GetLiveWorkDetached live_detached_runs = 4;
    */
   liveDetachedRuns: GetLiveWorkDetached[];
+
+  /**
+   * Every ask the record holds a start for and no settle, across the whole
+   * lineage (the main agent's and every subagent's), oldest first. Each is
+   * the ask exactly as its start frame recorded it, under the agent whose book
+   * holds it, so the caller restates the batch or prompt in the settle it
+   * writes. A freshly started session's permission gate holds no ask, so the
+   * shim settles every one of these as abandoned
+   * (AgentQuestionSuccess.abandoned, AgentPermissionSuccess.abandoned): the
+   * vendor process that asked is gone. EMPTY when nothing is open.
+   *
+   * @generated from field: repeated conversation.v1.SessionOpenAsk open_asks = 5;
+   */
+  openAsks: SessionOpenAsk[];
 };
 
 /**
