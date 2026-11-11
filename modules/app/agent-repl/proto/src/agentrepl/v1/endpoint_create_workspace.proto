@@ -36,6 +36,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/slack_thread.proto";
 import "agentrepl/v1/lifecycle_config_refusal.proto";
 import "agentrepl/v1/family.proto";
 import "agentrepl/v1/merge_queue_status.proto";
@@ -205,17 +206,23 @@ message WorkspaceOriginatorUserOrWorkspace {}
 
 // THE ORIGINATING THREAD. A workspace created for a Slack message records the
 // message's link and stores it among its links as a reference
-// (WorkspaceLinkReference), labelled "Originating Slack thread". The daemon
-// itself never posts there: what the thread is told is the repository's hooks'
-// to say (repoconfig.v1.LifecycleConfig), and every script hook of the
-// workspace sees the link as AGENT_REPL_SLACK_THREAD and every prompt hook as
-// `{{slack_thread}}`.
+// (WorkspaceLinkReference), labelled "Originating Slack thread". What the
+// thread is told of the workspace's lifecycle is the repository's hooks' to
+// say (repoconfig.v1.LifecycleConfig), and every script hook of the workspace
+// sees the link as AGENT_REPL_SLACK_THREAD and every prompt hook as
+// `{{slack_thread}}`. A create that asks for a subscription is also
+// subscribed to the thread (SubscribeSlackThread), in the same create: a
+// subscription Slack refuses fails the create, which is undone.
 message CreateWorkspaceSlackOrigin {
   // The message's Slack link, as Slack's "Copy link" gives it: an https
   // `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
   // `thread_ts` when the message is a reply. A link that is not one is a
   // malformed request (Connect InvalidArgument).
   string thread_url = 1;
+  // Subscribe the new workspace to the thread in this mode, as a
+  // SlackThreadSubscriptionOriginCreation subscription. UNSET = no
+  // subscription. Set with its mode unset is a malformed request.
+  optional SlackThreadMode subscribe = 2;
 }
 
 // The ordinary workspace create.

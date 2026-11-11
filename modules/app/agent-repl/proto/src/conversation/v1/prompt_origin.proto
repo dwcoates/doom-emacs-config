@@ -296,4 +296,11 @@ enum PromptOrigin {
   // workflow's name, its conclusion, its head commit and its web address.
   // Delivered on arrival and drawn as a workspace notice is.
   PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE = 53 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
+  // A digest of a subscribed Slack thread's new messages
+  // (agentrepl.v1.SubscribeSlackThread), stating the subscription's mode and
+  // what it lets the workspace do. Submitted deferred, or ordinary when a
+  // message reads as urgent so the running turn's classifier may interject
+  // it, and drawn as an ordinary prompt bubble the daemon sent, so the user
+  // reads in the feed what the thread said.
+  PROMPT_ORIGIN_SLACK_THREAD_NOTICE = 54 [(spend_cause) = VENDOR_CALL_CAUSE_AUTOMATED];
 }

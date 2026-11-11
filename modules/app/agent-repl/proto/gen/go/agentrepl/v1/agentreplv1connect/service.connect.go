@@ -473,6 +473,30 @@ const (
 	// AgentReplListGithubWorkflowRunSubscriptionsProcedure is the fully-qualified name of the
 	// AgentRepl's ListGithubWorkflowRunSubscriptions RPC.
 	AgentReplListGithubWorkflowRunSubscriptionsProcedure = "/agentrepl.v1.AgentRepl/ListGithubWorkflowRunSubscriptions"
+	// AgentReplSubscribeSlackThreadProcedure is the fully-qualified name of the AgentRepl's
+	// SubscribeSlackThread RPC.
+	AgentReplSubscribeSlackThreadProcedure = "/agentrepl.v1.AgentRepl/SubscribeSlackThread"
+	// AgentReplUnsubscribeSlackThreadProcedure is the fully-qualified name of the AgentRepl's
+	// UnsubscribeSlackThread RPC.
+	AgentReplUnsubscribeSlackThreadProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeSlackThread"
+	// AgentReplSetSlackThreadModeProcedure is the fully-qualified name of the AgentRepl's
+	// SetSlackThreadMode RPC.
+	AgentReplSetSlackThreadModeProcedure = "/agentrepl.v1.AgentRepl/SetSlackThreadMode"
+	// AgentReplListSlackThreadSubscriptionsProcedure is the fully-qualified name of the AgentRepl's
+	// ListSlackThreadSubscriptions RPC.
+	AgentReplListSlackThreadSubscriptionsProcedure = "/agentrepl.v1.AgentRepl/ListSlackThreadSubscriptions"
+	// AgentReplReadSlackThreadProcedure is the fully-qualified name of the AgentRepl's ReadSlackThread
+	// RPC.
+	AgentReplReadSlackThreadProcedure = "/agentrepl.v1.AgentRepl/ReadSlackThread"
+	// AgentReplPostToSlackThreadProcedure is the fully-qualified name of the AgentRepl's
+	// PostToSlackThread RPC.
+	AgentReplPostToSlackThreadProcedure = "/agentrepl.v1.AgentRepl/PostToSlackThread"
+	// AgentReplGetSlackStatusProcedure is the fully-qualified name of the AgentRepl's GetSlackStatus
+	// RPC.
+	AgentReplGetSlackStatusProcedure = "/agentrepl.v1.AgentRepl/GetSlackStatus"
+	// AgentReplUpdateSlackReactionSettingsProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateSlackReactionSettings RPC.
+	AgentReplUpdateSlackReactionSettingsProcedure = "/agentrepl.v1.AgentRepl/UpdateSlackReactionSettings"
 	// AgentReplNotifyWorkspaceProcedure is the fully-qualified name of the AgentRepl's NotifyWorkspace
 	// RPC.
 	AgentReplNotifyWorkspaceProcedure = "/agentrepl.v1.AgentRepl/NotifyWorkspace"
@@ -654,6 +678,14 @@ var (
 	agentReplSubscribeGithubWorkflowRunMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SubscribeGithubWorkflowRun")
 	agentReplUnsubscribeGithubWorkflowRunMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribeGithubWorkflowRun")
 	agentReplListGithubWorkflowRunSubscriptionsMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("ListGithubWorkflowRunSubscriptions")
+	agentReplSubscribeSlackThreadMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubscribeSlackThread")
+	agentReplUnsubscribeSlackThreadMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UnsubscribeSlackThread")
+	agentReplSetSlackThreadModeMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SetSlackThreadMode")
+	agentReplListSlackThreadSubscriptionsMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("ListSlackThreadSubscriptions")
+	agentReplReadSlackThreadMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ReadSlackThread")
+	agentReplPostToSlackThreadMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("PostToSlackThread")
+	agentReplGetSlackStatusMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("GetSlackStatus")
+	agentReplUpdateSlackReactionSettingsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateSlackReactionSettings")
 	agentReplNotifyWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("NotifyWorkspace")
 	agentReplPassColdGateMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("PassColdGate")
 	agentReplKeepLiveWorkspaceMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("KeepLiveWorkspace")
@@ -1179,6 +1211,29 @@ type AgentReplClient interface {
 	// The workflow runs one workspace waits on. See
 	// endpoint_list_github_workflow_run_subscriptions.proto.
 	ListGithubWorkflowRunSubscriptions(context.Context, *connect.Request[v1.ListGithubWorkflowRunSubscriptionsRequest]) (*connect.Response[v1.ListGithubWorkflowRunSubscriptionsResponse], error)
+	// Tell one workspace's agent about a Slack thread's new messages, as
+	// digests. See endpoint_subscribe_slack_thread.proto.
+	SubscribeSlackThread(context.Context, *connect.Request[v1.SubscribeSlackThreadRequest]) (*connect.Response[v1.SubscribeSlackThreadResponse], error)
+	// End a Slack-thread subscription. See
+	// endpoint_unsubscribe_slack_thread.proto.
+	UnsubscribeSlackThread(context.Context, *connect.Request[v1.UnsubscribeSlackThreadRequest]) (*connect.Response[v1.UnsubscribeSlackThreadResponse], error)
+	// Change what a subscribed workspace may do in its thread. See
+	// endpoint_set_slack_thread_mode.proto.
+	SetSlackThreadMode(context.Context, *connect.Request[v1.SetSlackThreadModeRequest]) (*connect.Response[v1.SetSlackThreadModeResponse], error)
+	// The Slack threads one workspace, or every workspace, follows. See
+	// endpoint_list_slack_thread_subscriptions.proto.
+	ListSlackThreadSubscriptions(context.Context, *connect.Request[v1.ListSlackThreadSubscriptionsRequest]) (*connect.Response[v1.ListSlackThreadSubscriptionsResponse], error)
+	// A Slack thread's latest messages, read at once. See
+	// endpoint_read_slack_thread.proto.
+	ReadSlackThread(context.Context, *connect.Request[v1.ReadSlackThreadRequest]) (*connect.Response[v1.ReadSlackThreadResponse], error)
+	// Post a reply into a subscribed Slack thread for a workspace. See
+	// endpoint_post_to_slack_thread.proto.
+	PostToSlackThread(context.Context, *connect.Request[v1.PostToSlackThreadRequest]) (*connect.Response[v1.PostToSlackThreadResponse], error)
+	// How the daemon's Slack follows stand. See endpoint_get_slack_status.proto.
+	GetSlackStatus(context.Context, *connect.Request[v1.GetSlackStatusRequest]) (*connect.Response[v1.GetSlackStatusResponse], error)
+	// Change one of the Slack reaction initiator's settings. See
+	// endpoint_update_slack_reaction_settings.proto.
+	UpdateSlackReactionSettings(context.Context, *connect.Request[v1.UpdateSlackReactionSettingsRequest]) (*connect.Response[v1.UpdateSlackReactionSettingsResponse], error)
 	// Post a desktop banner attributed to a workspace, whose click brings Emacs
 	// forward and selects that workspace. See endpoint_notify_workspace.proto.
 	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
@@ -2189,6 +2244,57 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		subscribeSlackThread: connect.NewClient[v1.SubscribeSlackThreadRequest, v1.SubscribeSlackThreadResponse](
+			httpClient,
+			baseURL+AgentReplSubscribeSlackThreadProcedure,
+			connect.WithSchema(agentReplSubscribeSlackThreadMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribeSlackThread: connect.NewClient[v1.UnsubscribeSlackThreadRequest, v1.UnsubscribeSlackThreadResponse](
+			httpClient,
+			baseURL+AgentReplUnsubscribeSlackThreadProcedure,
+			connect.WithSchema(agentReplUnsubscribeSlackThreadMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		setSlackThreadMode: connect.NewClient[v1.SetSlackThreadModeRequest, v1.SetSlackThreadModeResponse](
+			httpClient,
+			baseURL+AgentReplSetSlackThreadModeProcedure,
+			connect.WithSchema(agentReplSetSlackThreadModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		listSlackThreadSubscriptions: connect.NewClient[v1.ListSlackThreadSubscriptionsRequest, v1.ListSlackThreadSubscriptionsResponse](
+			httpClient,
+			baseURL+AgentReplListSlackThreadSubscriptionsProcedure,
+			connect.WithSchema(agentReplListSlackThreadSubscriptionsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		readSlackThread: connect.NewClient[v1.ReadSlackThreadRequest, v1.ReadSlackThreadResponse](
+			httpClient,
+			baseURL+AgentReplReadSlackThreadProcedure,
+			connect.WithSchema(agentReplReadSlackThreadMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		postToSlackThread: connect.NewClient[v1.PostToSlackThreadRequest, v1.PostToSlackThreadResponse](
+			httpClient,
+			baseURL+AgentReplPostToSlackThreadProcedure,
+			connect.WithSchema(agentReplPostToSlackThreadMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		getSlackStatus: connect.NewClient[v1.GetSlackStatusRequest, v1.GetSlackStatusResponse](
+			httpClient,
+			baseURL+AgentReplGetSlackStatusProcedure,
+			connect.WithSchema(agentReplGetSlackStatusMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		updateSlackReactionSettings: connect.NewClient[v1.UpdateSlackReactionSettingsRequest, v1.UpdateSlackReactionSettingsResponse](
+			httpClient,
+			baseURL+AgentReplUpdateSlackReactionSettingsProcedure,
+			connect.WithSchema(agentReplUpdateSlackReactionSettingsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		notifyWorkspace: connect.NewClient[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplNotifyWorkspaceProcedure,
@@ -2394,6 +2500,14 @@ type agentReplClient struct {
 	subscribeGithubWorkflowRun         *connect.Client[v1.SubscribeGithubWorkflowRunRequest, v1.SubscribeGithubWorkflowRunResponse]
 	unsubscribeGithubWorkflowRun       *connect.Client[v1.UnsubscribeGithubWorkflowRunRequest, v1.UnsubscribeGithubWorkflowRunResponse]
 	listGithubWorkflowRunSubscriptions *connect.Client[v1.ListGithubWorkflowRunSubscriptionsRequest, v1.ListGithubWorkflowRunSubscriptionsResponse]
+	subscribeSlackThread               *connect.Client[v1.SubscribeSlackThreadRequest, v1.SubscribeSlackThreadResponse]
+	unsubscribeSlackThread             *connect.Client[v1.UnsubscribeSlackThreadRequest, v1.UnsubscribeSlackThreadResponse]
+	setSlackThreadMode                 *connect.Client[v1.SetSlackThreadModeRequest, v1.SetSlackThreadModeResponse]
+	listSlackThreadSubscriptions       *connect.Client[v1.ListSlackThreadSubscriptionsRequest, v1.ListSlackThreadSubscriptionsResponse]
+	readSlackThread                    *connect.Client[v1.ReadSlackThreadRequest, v1.ReadSlackThreadResponse]
+	postToSlackThread                  *connect.Client[v1.PostToSlackThreadRequest, v1.PostToSlackThreadResponse]
+	getSlackStatus                     *connect.Client[v1.GetSlackStatusRequest, v1.GetSlackStatusResponse]
+	updateSlackReactionSettings        *connect.Client[v1.UpdateSlackReactionSettingsRequest, v1.UpdateSlackReactionSettingsResponse]
 	notifyWorkspace                    *connect.Client[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse]
 	passColdGate                       *connect.Client[v1.PassColdGateRequest, v1.PassColdGateResponse]
 	keepLiveWorkspace                  *connect.Client[v1.KeepLiveWorkspaceRequest, v1.KeepLiveWorkspaceResponse]
@@ -3194,6 +3308,46 @@ func (c *agentReplClient) ListGithubWorkflowRunSubscriptions(ctx context.Context
 	return c.listGithubWorkflowRunSubscriptions.CallUnary(ctx, req)
 }
 
+// SubscribeSlackThread calls agentrepl.v1.AgentRepl.SubscribeSlackThread.
+func (c *agentReplClient) SubscribeSlackThread(ctx context.Context, req *connect.Request[v1.SubscribeSlackThreadRequest]) (*connect.Response[v1.SubscribeSlackThreadResponse], error) {
+	return c.subscribeSlackThread.CallUnary(ctx, req)
+}
+
+// UnsubscribeSlackThread calls agentrepl.v1.AgentRepl.UnsubscribeSlackThread.
+func (c *agentReplClient) UnsubscribeSlackThread(ctx context.Context, req *connect.Request[v1.UnsubscribeSlackThreadRequest]) (*connect.Response[v1.UnsubscribeSlackThreadResponse], error) {
+	return c.unsubscribeSlackThread.CallUnary(ctx, req)
+}
+
+// SetSlackThreadMode calls agentrepl.v1.AgentRepl.SetSlackThreadMode.
+func (c *agentReplClient) SetSlackThreadMode(ctx context.Context, req *connect.Request[v1.SetSlackThreadModeRequest]) (*connect.Response[v1.SetSlackThreadModeResponse], error) {
+	return c.setSlackThreadMode.CallUnary(ctx, req)
+}
+
+// ListSlackThreadSubscriptions calls agentrepl.v1.AgentRepl.ListSlackThreadSubscriptions.
+func (c *agentReplClient) ListSlackThreadSubscriptions(ctx context.Context, req *connect.Request[v1.ListSlackThreadSubscriptionsRequest]) (*connect.Response[v1.ListSlackThreadSubscriptionsResponse], error) {
+	return c.listSlackThreadSubscriptions.CallUnary(ctx, req)
+}
+
+// ReadSlackThread calls agentrepl.v1.AgentRepl.ReadSlackThread.
+func (c *agentReplClient) ReadSlackThread(ctx context.Context, req *connect.Request[v1.ReadSlackThreadRequest]) (*connect.Response[v1.ReadSlackThreadResponse], error) {
+	return c.readSlackThread.CallUnary(ctx, req)
+}
+
+// PostToSlackThread calls agentrepl.v1.AgentRepl.PostToSlackThread.
+func (c *agentReplClient) PostToSlackThread(ctx context.Context, req *connect.Request[v1.PostToSlackThreadRequest]) (*connect.Response[v1.PostToSlackThreadResponse], error) {
+	return c.postToSlackThread.CallUnary(ctx, req)
+}
+
+// GetSlackStatus calls agentrepl.v1.AgentRepl.GetSlackStatus.
+func (c *agentReplClient) GetSlackStatus(ctx context.Context, req *connect.Request[v1.GetSlackStatusRequest]) (*connect.Response[v1.GetSlackStatusResponse], error) {
+	return c.getSlackStatus.CallUnary(ctx, req)
+}
+
+// UpdateSlackReactionSettings calls agentrepl.v1.AgentRepl.UpdateSlackReactionSettings.
+func (c *agentReplClient) UpdateSlackReactionSettings(ctx context.Context, req *connect.Request[v1.UpdateSlackReactionSettingsRequest]) (*connect.Response[v1.UpdateSlackReactionSettingsResponse], error) {
+	return c.updateSlackReactionSettings.CallUnary(ctx, req)
+}
+
 // NotifyWorkspace calls agentrepl.v1.AgentRepl.NotifyWorkspace.
 func (c *agentReplClient) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
 	return c.notifyWorkspace.CallUnary(ctx, req)
@@ -3745,6 +3899,29 @@ type AgentReplHandler interface {
 	// The workflow runs one workspace waits on. See
 	// endpoint_list_github_workflow_run_subscriptions.proto.
 	ListGithubWorkflowRunSubscriptions(context.Context, *connect.Request[v1.ListGithubWorkflowRunSubscriptionsRequest]) (*connect.Response[v1.ListGithubWorkflowRunSubscriptionsResponse], error)
+	// Tell one workspace's agent about a Slack thread's new messages, as
+	// digests. See endpoint_subscribe_slack_thread.proto.
+	SubscribeSlackThread(context.Context, *connect.Request[v1.SubscribeSlackThreadRequest]) (*connect.Response[v1.SubscribeSlackThreadResponse], error)
+	// End a Slack-thread subscription. See
+	// endpoint_unsubscribe_slack_thread.proto.
+	UnsubscribeSlackThread(context.Context, *connect.Request[v1.UnsubscribeSlackThreadRequest]) (*connect.Response[v1.UnsubscribeSlackThreadResponse], error)
+	// Change what a subscribed workspace may do in its thread. See
+	// endpoint_set_slack_thread_mode.proto.
+	SetSlackThreadMode(context.Context, *connect.Request[v1.SetSlackThreadModeRequest]) (*connect.Response[v1.SetSlackThreadModeResponse], error)
+	// The Slack threads one workspace, or every workspace, follows. See
+	// endpoint_list_slack_thread_subscriptions.proto.
+	ListSlackThreadSubscriptions(context.Context, *connect.Request[v1.ListSlackThreadSubscriptionsRequest]) (*connect.Response[v1.ListSlackThreadSubscriptionsResponse], error)
+	// A Slack thread's latest messages, read at once. See
+	// endpoint_read_slack_thread.proto.
+	ReadSlackThread(context.Context, *connect.Request[v1.ReadSlackThreadRequest]) (*connect.Response[v1.ReadSlackThreadResponse], error)
+	// Post a reply into a subscribed Slack thread for a workspace. See
+	// endpoint_post_to_slack_thread.proto.
+	PostToSlackThread(context.Context, *connect.Request[v1.PostToSlackThreadRequest]) (*connect.Response[v1.PostToSlackThreadResponse], error)
+	// How the daemon's Slack follows stand. See endpoint_get_slack_status.proto.
+	GetSlackStatus(context.Context, *connect.Request[v1.GetSlackStatusRequest]) (*connect.Response[v1.GetSlackStatusResponse], error)
+	// Change one of the Slack reaction initiator's settings. See
+	// endpoint_update_slack_reaction_settings.proto.
+	UpdateSlackReactionSettings(context.Context, *connect.Request[v1.UpdateSlackReactionSettingsRequest]) (*connect.Response[v1.UpdateSlackReactionSettingsResponse], error)
 	// Post a desktop banner attributed to a workspace, whose click brings Emacs
 	// forward and selects that workspace. See endpoint_notify_workspace.proto.
 	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
@@ -4751,6 +4928,57 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSubscribeSlackThreadHandler := connect.NewUnaryHandler(
+		AgentReplSubscribeSlackThreadProcedure,
+		svc.SubscribeSlackThread,
+		connect.WithSchema(agentReplSubscribeSlackThreadMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUnsubscribeSlackThreadHandler := connect.NewUnaryHandler(
+		AgentReplUnsubscribeSlackThreadProcedure,
+		svc.UnsubscribeSlackThread,
+		connect.WithSchema(agentReplUnsubscribeSlackThreadMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSetSlackThreadModeHandler := connect.NewUnaryHandler(
+		AgentReplSetSlackThreadModeProcedure,
+		svc.SetSlackThreadMode,
+		connect.WithSchema(agentReplSetSlackThreadModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplListSlackThreadSubscriptionsHandler := connect.NewUnaryHandler(
+		AgentReplListSlackThreadSubscriptionsProcedure,
+		svc.ListSlackThreadSubscriptions,
+		connect.WithSchema(agentReplListSlackThreadSubscriptionsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplReadSlackThreadHandler := connect.NewUnaryHandler(
+		AgentReplReadSlackThreadProcedure,
+		svc.ReadSlackThread,
+		connect.WithSchema(agentReplReadSlackThreadMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplPostToSlackThreadHandler := connect.NewUnaryHandler(
+		AgentReplPostToSlackThreadProcedure,
+		svc.PostToSlackThread,
+		connect.WithSchema(agentReplPostToSlackThreadMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplGetSlackStatusHandler := connect.NewUnaryHandler(
+		AgentReplGetSlackStatusProcedure,
+		svc.GetSlackStatus,
+		connect.WithSchema(agentReplGetSlackStatusMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUpdateSlackReactionSettingsHandler := connect.NewUnaryHandler(
+		AgentReplUpdateSlackReactionSettingsProcedure,
+		svc.UpdateSlackReactionSettings,
+		connect.WithSchema(agentReplUpdateSlackReactionSettingsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplNotifyWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplNotifyWorkspaceProcedure,
 		svc.NotifyWorkspace,
@@ -5111,6 +5339,22 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplUnsubscribeGithubWorkflowRunHandler.ServeHTTP(w, r)
 		case AgentReplListGithubWorkflowRunSubscriptionsProcedure:
 			agentReplListGithubWorkflowRunSubscriptionsHandler.ServeHTTP(w, r)
+		case AgentReplSubscribeSlackThreadProcedure:
+			agentReplSubscribeSlackThreadHandler.ServeHTTP(w, r)
+		case AgentReplUnsubscribeSlackThreadProcedure:
+			agentReplUnsubscribeSlackThreadHandler.ServeHTTP(w, r)
+		case AgentReplSetSlackThreadModeProcedure:
+			agentReplSetSlackThreadModeHandler.ServeHTTP(w, r)
+		case AgentReplListSlackThreadSubscriptionsProcedure:
+			agentReplListSlackThreadSubscriptionsHandler.ServeHTTP(w, r)
+		case AgentReplReadSlackThreadProcedure:
+			agentReplReadSlackThreadHandler.ServeHTTP(w, r)
+		case AgentReplPostToSlackThreadProcedure:
+			agentReplPostToSlackThreadHandler.ServeHTTP(w, r)
+		case AgentReplGetSlackStatusProcedure:
+			agentReplGetSlackStatusHandler.ServeHTTP(w, r)
+		case AgentReplUpdateSlackReactionSettingsProcedure:
+			agentReplUpdateSlackReactionSettingsHandler.ServeHTTP(w, r)
 		case AgentReplNotifyWorkspaceProcedure:
 			agentReplNotifyWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplPassColdGateProcedure:
@@ -5764,6 +6008,38 @@ func (UnimplementedAgentReplHandler) UnsubscribeGithubWorkflowRun(context.Contex
 
 func (UnimplementedAgentReplHandler) ListGithubWorkflowRunSubscriptions(context.Context, *connect.Request[v1.ListGithubWorkflowRunSubscriptionsRequest]) (*connect.Response[v1.ListGithubWorkflowRunSubscriptionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListGithubWorkflowRunSubscriptions is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SubscribeSlackThread(context.Context, *connect.Request[v1.SubscribeSlackThreadRequest]) (*connect.Response[v1.SubscribeSlackThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubscribeSlackThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UnsubscribeSlackThread(context.Context, *connect.Request[v1.UnsubscribeSlackThreadRequest]) (*connect.Response[v1.UnsubscribeSlackThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeSlackThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetSlackThreadMode(context.Context, *connect.Request[v1.SetSlackThreadModeRequest]) (*connect.Response[v1.SetSlackThreadModeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetSlackThreadMode is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListSlackThreadSubscriptions(context.Context, *connect.Request[v1.ListSlackThreadSubscriptionsRequest]) (*connect.Response[v1.ListSlackThreadSubscriptionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListSlackThreadSubscriptions is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReadSlackThread(context.Context, *connect.Request[v1.ReadSlackThreadRequest]) (*connect.Response[v1.ReadSlackThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReadSlackThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) PostToSlackThread(context.Context, *connect.Request[v1.PostToSlackThreadRequest]) (*connect.Response[v1.PostToSlackThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PostToSlackThread is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetSlackStatus(context.Context, *connect.Request[v1.GetSlackStatusRequest]) (*connect.Response[v1.GetSlackStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetSlackStatus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateSlackReactionSettings(context.Context, *connect.Request[v1.UpdateSlackReactionSettingsRequest]) (*connect.Response[v1.UpdateSlackReactionSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateSlackReactionSettings is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {

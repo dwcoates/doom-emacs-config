@@ -1,0 +1,113 @@
+// endpoint_post_to_slack_thread.proto — PostToSlackThread: post a reply into
+// a subscribed Slack thread for a workspace. AGENT API section.
+//
+// WHAT IS POSTED. The text, under a small banner naming agent-repl and the
+// workspace, and above a footer carrying the post's nonce, which is recorded
+// before the post is sent, so the post is never told back to the workspace
+// (slack_thread.proto). Every raw link in the text is posted as it is written.
+//
+// WHAT IS REFUSED. A post must open with exactly one Slack emoji shortcode
+// chosen for what the post says (`:white_check_mark: tests pass`), then a
+// space; the `:peepo_*:` shortcodes are the daemon's own announcements and
+// are refused to agents. A text carrying what reads as a secret (an access
+// key, a token, a private key) is refused and never sent. A listen-mode
+// subscription refuses an unforced post, and so does one that reached its
+// post limit (SlackThreadPosts).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message PostToSlackThreadRequest {
+  // The subscribed workspace the post is made for.
+  workspace.v1.WorkspaceRef poster = 1;
+  // The thread (Connect InvalidArgument when no Slack link).
+  string thread_url = 2;
+  // The post's text, in Slack's mrkdwn. Empty is a malformed request
+  // (Connect InvalidArgument).
+  string text = 3;
+  // Whether the user explicitly authorized this post, which lets it through
+  // listen mode and past the post limit. The emoji rule and the secret check
+  // still apply.
+  bool force = 4;
+}
+
+// THE ARM IS THE OUTCOME.
+message PostToSlackThreadResponse {
+  oneof result {
+    PostToSlackThreadSuccess success = 1;
+    PostToSlackThreadError error = 2;
+  }
+}
+
+// The post was made.
+message PostToSlackThreadSuccess {
+  // The posted message's timestamp, as Slack answered it.
+  string ts = 1;
+  // The subscription's posts, this one counted.
+  SlackThreadPosts posts = 2;
+}
+
+message PostToSlackThreadError {
+  oneof cause {
+    // The poster is not in the daemon's registry.
+    PostToSlackThreadUnknownPoster unknown_poster = 1;
+    // The poster holds no subscription to the thread.
+    PostToSlackThreadNotSubscribed not_subscribed = 2;
+    // The text does not open with exactly one emoji shortcode and a space.
+    PostToSlackThreadNoEmojiPrefix no_emoji_prefix = 3;
+    // The text opens with a shortcode reserved for the daemon's own
+    // announcements.
+    PostToSlackThreadReservedEmoji reserved_emoji = 4;
+    // The subscription is in listen mode and the post was not forced.
+    PostToSlackThreadListenMode listen_mode = 5;
+    // The subscription reached its post limit and the post was not forced.
+    PostToSlackThreadPostLimitReached post_limit_reached = 6;
+    // The text carries what reads as a secret.
+    PostToSlackThreadSecret secret = 7;
+    // Slack could not be reached through `gns`, or refused the post.
+    PostToSlackThreadUnreachable unreachable = 8;
+  }
+}
+
+// The poster id is not in the daemon's registry. DELIBERATELY EMPTY.
+message PostToSlackThreadUnknownPoster {}
+
+// No subscription to post through. DELIBERATELY EMPTY.
+message PostToSlackThreadNotSubscribed {}
+
+// No emoji opens the text. DELIBERATELY EMPTY: the rule is the message.
+message PostToSlackThreadNoEmojiPrefix {}
+
+// A reserved shortcode opens the text.
+message PostToSlackThreadReservedEmoji {
+  // The shortcode, without colons.
+  string emoji = 1;
+}
+
+// Listen mode. DELIBERATELY EMPTY.
+message PostToSlackThreadListenMode {}
+
+// The limit was reached.
+message PostToSlackThreadPostLimitReached {
+  // The posts made against the limit.
+  SlackThreadPosts posts = 1;
+}
+
+// A secret was found.
+message PostToSlackThreadSecret {
+  // What each match reads as (`GitHub personal access token`), one per
+  // match, in the order found. The matched text itself is never answered.
+  repeated string kinds = 1;
+}
+
+// The post could not be made.
+message PostToSlackThreadUnreachable {
+  // What `gns` said.
+  string detail = 1;
+}

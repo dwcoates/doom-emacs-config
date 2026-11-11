@@ -1,0 +1,102 @@
+// endpoint_get_slack_status.proto — GetSlackStatus: how the daemon's Slack
+// follows stand: whether `gns` answers, every thread subscription, and the
+// reaction initiator's settings and polls. AGENT API section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_reactions.proto";
+import "agentrepl/v1/slack_thread.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// DELIBERATELY EMPTY: the status is the daemon's, not a workspace's.
+message GetSlackStatusRequest {}
+
+// THE ARM IS THE OUTCOME.
+message GetSlackStatusResponse {
+  oneof result {
+    GetSlackStatusSuccess success = 1;
+    GetSlackStatusError error = 2;
+  }
+}
+
+// The request was served.
+message GetSlackStatusSuccess {
+  // The `gns` login the daemon reads Slack as, as it last stood.
+  GetSlackStatusLogin login = 1;
+  // Every open workspace's thread subscriptions.
+  repeated SlackThreadSubscription subscriptions = 2;
+  // The reaction initiator's settings.
+  SlackReactionSettings reaction_settings = 3;
+  // The reaction initiator's polls.
+  GetSlackStatusReactionPolls reaction_polls = 4;
+}
+
+// The `gns` login. THE ARM IS WHICH.
+message GetSlackStatusLogin {
+  oneof login {
+    // `gns whoami` answered.
+    GetSlackStatusLoginKnown known = 1;
+    // `gns whoami` failed.
+    GetSlackStatusLoginFailed failed = 2;
+  }
+}
+
+// The login.
+message GetSlackStatusLoginKnown {
+  // The GNS username, which names the user's Slack echo pipes.
+  string username = 1;
+}
+
+// The login could not be read.
+message GetSlackStatusLoginFailed {
+  // What `gns whoami` said.
+  string detail = 1;
+}
+
+// The reaction initiator's polls. THE ARM IS WHICH.
+message GetSlackStatusReactionPolls {
+  oneof polls {
+    // The settings are incomplete, so nothing is polled.
+    GetSlackStatusReactionPollsInactive inactive = 1;
+    // The settings are complete and the daemon has not finished a poll yet.
+    GetSlackStatusReactionPollsStarting starting = 2;
+    // The latest poll succeeded.
+    GetSlackStatusReactionPollsSucceeded succeeded = 3;
+    // The latest poll failed.
+    GetSlackStatusReactionPollsFailed failed = 4;
+  }
+}
+
+// Inactive.
+message GetSlackStatusReactionPollsInactive {
+  // What the settings still need, one plain phrase each (`a watch user`,
+  // `a repository`, `a binding`).
+  repeated string missing = 1;
+}
+
+// Not polled yet. DELIBERATELY EMPTY.
+message GetSlackStatusReactionPollsStarting {}
+
+// The latest poll succeeded.
+message GetSlackStatusReactionPollsSucceeded {
+  // When it finished.
+  google.protobuf.Timestamp at = 1;
+  // How many workspaces it created.
+  uint32 fired = 2;
+}
+
+// The latest poll failed.
+message GetSlackStatusReactionPollsFailed {
+  // When it finished.
+  google.protobuf.Timestamp at = 1;
+  // What failed.
+  string detail = 2;
+}
+
+// DELIBERATELY EMPTY: the daemon always has a status to answer; a failure to
+// read its own store is a Connect error.
+message GetSlackStatusError {}

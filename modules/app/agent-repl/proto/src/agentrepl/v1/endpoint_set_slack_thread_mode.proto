@@ -1,0 +1,52 @@
+// endpoint_set_slack_thread_mode.proto — SetSlackThreadMode: change what a
+// subscribed workspace may do in its thread. AGENT API section. A change is
+// announced in the thread; switching to respond or interact also resets the
+// subscription's post count, which is the human approval a subscription that
+// reached its post limit waits for (SlackThreadPosts).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/slack_thread.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetSlackThreadModeRequest {
+  // The subscribed workspace.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The thread (Connect InvalidArgument when no Slack link).
+  string thread_url = 2;
+  // The new mode. REQUIRED.
+  SlackThreadMode mode = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetSlackThreadModeResponse {
+  oneof result {
+    SetSlackThreadModeSuccess success = 1;
+    SetSlackThreadModeError error = 2;
+  }
+}
+
+// The request was served.
+message SetSlackThreadModeSuccess {
+  // The subscription as it now stands.
+  SlackThreadSubscription subscription = 1;
+}
+
+message SetSlackThreadModeError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SetSlackThreadModeUnknownSubscriber unknown_subscriber = 1;
+    // The subscriber holds no subscription to the thread.
+    SetSlackThreadModeNotSubscribed not_subscribed = 2;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SetSlackThreadModeUnknownSubscriber {}
+
+// No subscription to change. DELIBERATELY EMPTY.
+message SetSlackThreadModeNotSubscribed {}
