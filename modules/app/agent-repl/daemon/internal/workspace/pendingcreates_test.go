@@ -863,3 +863,67 @@ func TestAHeldCreatesRequesterIsToldOnlyWhileOpen(t *testing.T) {
 		})
 	}
 }
+
+func TestAHeldRequestKeepsItsHiddenAndPlacement(t *testing.T) {
+	tests := []struct {
+		name      string
+		hidden    bool
+		placement *CreatePlacement
+	}{
+		{name: "hidden", hidden: true},
+		{name: "an existing subsection", placement: &CreatePlacement{Subsection: "auth"}},
+		{name: "a new subsection with a gather", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a", "b"}}}},
+		{name: "a new subsection of its own", placement: &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "solo"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			spec := CreateSpec{
+				Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it",
+				Requester: ptr(ids.WorkspaceID("asker")), Hidden: tt.hidden, Placement: tt.placement,
+			}
+
+			// Act
+			encoded, err := encodeHeldSpec(spec)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			decoded, err := decodeHeldSpec(encoded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if decoded.Hidden != tt.hidden || !reflect.DeepEqual(decoded.Placement, tt.placement) {
+				t.Fatalf("decoded hidden %v placement %+v, want %v and %+v", decoded.Hidden, decoded.Placement, tt.hidden, tt.placement)
+			}
+			if createKey(decoded) != createKey(spec) {
+				t.Fatal("the decoded request keys differently from the one encoded")
+			}
+		})
+	}
+}
+
+func TestCreateKeyDistinguishesHiddenAndEveryPlacement(t *testing.T) {
+	base := func() CreateSpec {
+		return CreateSpec{Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: "/r", InitialPrompt: "fix it"}
+	}
+	variants := map[string]func(*CreateSpec){
+		"plain":         func(*CreateSpec) {},
+		"hidden":        func(s *CreateSpec) { s.Hidden = true },
+		"into auth":     func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "auth"} },
+		"into billing":  func(s *CreateSpec) { s.Placement = &CreatePlacement{Subsection: "billing"} },
+		"new auth":      func(s *CreateSpec) { s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth"}} },
+		"new auth with": func(s *CreateSpec) { s.Placement = &CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: "auth", Gather: []string{"a"}}} },
+	}
+	seen := map[string]string{}
+	for name, mutate := range variants {
+		spec := base()
+		mutate(&spec)
+		key := createKey(spec)
+		if other, dup := seen[key]; dup {
+			t.Fatalf("%q and %q share the key %s: two different creates would be one", name, other, key)
+		}
+		seen[key] = name
+	}
+}

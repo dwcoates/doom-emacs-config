@@ -397,6 +397,20 @@ type RegisterFacts struct {
 	// created workspace never exists without its job and full merge geometry
 	// (RegisterWorkspace). There is no re-keying step for a failure to cut.
 	CreationJob WorkspaceID
+	// Hidden makes a MINTED workspace born hidden: the insert's own
+	// transaction writes the hidden columns, so no roster ever draws the row
+	// visible for an instant. An announcement of an already-registered
+	// workspace ignores it.
+	Hidden bool
+	// Intake makes a MINTED workspace an ephemeral intake workspace
+	// (intake.go) born so: its intake_workspaces row is written in the
+	// insert's transaction. It implies Hidden.
+	Intake bool
+	// Placement files a MINTED workspace into a subsection (or a new one) in
+	// the insert's own transaction. Refused for a child or a merge workspace
+	// (ErrPlacementOnChild, ErrPlacementOnMerge), for an unknown subsection
+	// and for a workspace that cannot be gathered; nothing is written then.
+	Placement *RegisterPlacement
 }
 
 // Priority is the roster's ordering priority, mirroring

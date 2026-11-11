@@ -103,26 +103,53 @@ func TestCreateIntakeCreatesNothingWhenItsBriefWillNotCompose(t *testing.T) {
 	}
 }
 
-func TestAnIntakeWorkspaceIsMarkedBeforeItsSessionStarts(t *testing.T) {
-	// Arrange: the mark fails, so what ran before it is all that ran.
+func TestAnIntakeWorkspaceIsRegisteredBornMarkedAndHidden(t *testing.T) {
+	// Arrange
 	f, repo := intakeFixture(t)
-	f.db.markIntakeErr = errors.New("disk I/O error")
 
 	// Act
-	_, err := f.verbs.CreateIntake(context.Background(), intakeSpec(repo, "an-intake"))
+	created, err := f.verbs.CreateIntake(context.Background(), intakeSpec(repo, "an-intake"))
 
 	// Assert
-	if err == nil {
-		t.Fatal("CreateIntake succeeded with a failed mark")
+	if err != nil {
+		t.Fatalf("CreateIntake: %v", err)
 	}
-	if len(f.fleet.started) != 0 || len(f.queue.submissions) != 0 {
-		t.Fatalf("started %v, submitted %d; want no session and no prompt before the mark", f.fleet.started, len(f.queue.submissions))
+	var facts *wsm.RegisterFacts
+	for i := range f.db.registered {
+		if f.db.registered[i].CreationJob == created.ID {
+			facts = &f.db.registered[i]
+		}
 	}
-	if len(f.git.nuked) != 1 {
-		t.Fatalf("nuked %+v, want the failed create's worktree undone", f.git.nuked)
+	if facts == nil || !facts.Intake || !facts.Hidden {
+		t.Fatalf("registered facts = %+v, want the insert itself to carry Intake and Hidden", facts)
 	}
-	if !hasRecord(f, dlog.LevelError, opCreate) {
-		t.Fatalf("want an ERROR %s record, got %+v", opCreate, f.log.logger.Records())
+}
+
+func TestNoRosterPublishedDuringAnIntakeCreateDrawsItVisible(t *testing.T) {
+	// Arrange
+	f, repo := intakeFixture(t)
+
+	// Act
+	created, err := f.verbs.CreateIntake(context.Background(), intakeSpec(repo, "an-intake"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateIntake: %v", err)
+	}
+	seen := 0
+	for i, reg := range f.sidebar.registries {
+		for _, ws := range reg.Workspaces {
+			if ws.ID != created.ID {
+				continue
+			}
+			seen++
+			if !ws.Hidden {
+				t.Fatalf("roster publication %d carried the intake workspace visible", i)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no roster publication carried the intake workspace, so the test saw nothing")
 	}
 }
 

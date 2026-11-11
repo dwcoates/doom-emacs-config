@@ -148,6 +148,16 @@ type CreateSpec struct {
 	// CreateIntake sets it, beside a name and an initial prompt, on a peer
 	// with a fresh context.
 	Intake bool
+	// Hidden makes the workspace BORN HIDDEN: its row is inserted hidden, in
+	// the insert's own transaction (agentrepl.v1.CreateWorkspaceRequest.hidden).
+	// Intake implies it.
+	Hidden bool
+	// Placement files the workspace into a subsection in the insert's own
+	// transaction (agentrepl.v1.CreateWorkspaceRequest.placement), nil for
+	// none. It needs a Requester, the creator of a new subsection, and is
+	// refused beside Parent and MergeOf. A create with one adds no filing note
+	// to the first message: the creator already filed the workspace.
+	Placement *CreatePlacement
 }
 
 // CreateStage is one stage a Create passes through between acceptance and its

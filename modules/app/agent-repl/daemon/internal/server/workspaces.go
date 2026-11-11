@@ -120,6 +120,10 @@ func (s *server) CreateWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
+	if req.Msg.Placement != nil && req.Msg.GetAsyncMerge() != nil {
+		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmPlacementOnMergeWorkspace,
+			Reason: "a merge workspace is drawn nowhere until revealed, so it is never placed", Info: true})))
+	}
 	if async := req.Msg.GetAsyncMerge(); async != nil {
 		return s.createAsyncMerge(ctx, rpc, resp, repository, req.Msg)
 	}
@@ -130,6 +134,8 @@ func (s *server) CreateWorkspace(
 		ForkFrom:    forkSourceID(req.Msg.GetContextOrigin()),
 		SlackThread: req.Msg.GetSlackOrigin().GetThreadUrl(),
 		Originator:  originatorOf(req.Msg.GetOriginator()),
+		Hidden:      req.Msg.GetHidden(),
+		Placement:   createPlacementOf(req.Msg.GetPlacement()),
 	}
 	if standard := req.Msg.GetStandard(); standard != nil {
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
@@ -1723,4 +1729,17 @@ func originatorOf(originator *agentreplv1.WorkspaceOriginator) lifecycleconfig.O
 		return lifecycleconfig.OriginatorEmojiAck
 	}
 	return lifecycleconfig.OriginatorUserOrWorkspace
+}
+
+// createPlacementOf is the request's placement as the create verb carries it,
+// nil when the request files nothing. validateCreateWorkspaceRequest has
+// already required exactly one target.
+func createPlacementOf(p *agentreplv1.CreateWorkspacePlacement) *workspace.CreatePlacement {
+	if p == nil {
+		return nil
+	}
+	if fresh := p.GetNewSubsection(); fresh != nil {
+		return &workspace.CreatePlacement{NewSubsection: &wsm.NewSubsectionPlacement{Name: fresh.GetName(), Gather: fresh.GetGather()}}
+	}
+	return &workspace.CreatePlacement{Subsection: p.GetSubsection()}
 }

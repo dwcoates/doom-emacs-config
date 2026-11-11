@@ -599,6 +599,21 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.SlackOrigin = &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}
 			return validateCreateWorkspaceRequest(req)
 		}, field: "slack_origin"},
+		{name: "an async merge asking to be born hidden", check: func() *connect.Error {
+			req := validAsyncMerge(nil)
+			req.Hidden = boolPtr(true)
+			return validateCreateWorkspaceRequest(req)
+		}, field: "hidden"},
+		{name: "create with a placement naming no target", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Placement = &agentreplv1.CreateWorkspacePlacement{}
+			}))
+		}, field: "placement.target"},
+		{name: "create with a placement into a blank subsection name", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Placement = &agentreplv1.CreateWorkspacePlacement{Target: &agentreplv1.CreateWorkspacePlacement_Subsection{Subsection: " "}}
+			}))
+		}, field: "placement.subsection"},
 		{name: "create naming no originator", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) { r.Originator = nil }))
 		}, field: "originator"},
@@ -1186,3 +1201,5 @@ func TestEveryModelPickIsValidatedThroughValidateModelPick(t *testing.T) {
 		})
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

@@ -551,6 +551,20 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if req.SlackOrigin != nil {
 			return invalid("slack_origin", "an async merge's workspace is the queue's, and no Slack message started it")
 		}
+		if req.Hidden != nil {
+			return invalid("hidden", "an async merge's workspace is hidden by the queue already")
+		}
+	}
+	if req.Placement != nil {
+		switch req.GetPlacement().GetTarget().(type) {
+		case *agentreplv1.CreateWorkspacePlacement_Subsection:
+			if strings.TrimSpace(req.GetPlacement().GetSubsection()) == "" {
+				return invalid("placement.subsection", "a placement into an existing subsection names it")
+			}
+		case *agentreplv1.CreateWorkspacePlacement_NewSubsection:
+		default:
+			return invalid("placement.target", "a placement names an existing subsection or a new one")
+		}
 	}
 	if req.SlackOrigin != nil {
 		if _, err := slacklink.ParseThread(req.GetSlackOrigin().GetThreadUrl()); err != nil {

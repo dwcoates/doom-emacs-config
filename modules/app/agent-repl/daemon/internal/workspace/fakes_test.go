@@ -294,11 +294,14 @@ type fakeDB struct {
 	listWorkspacesErrAfterRename error
 	markSelfCloseErr             error
 	takeSelfCloseErr             error
-	// intakes are the workspaces MarkIntake marked; markIntakeErr fails the
-	// mark and isIntakeErr the read.
-	intakes       map[ids.WorkspaceID]bool
-	markIntakeErr error
-	isIntakeErr   error
+	// intakes are the workspaces registered born an intake workspace;
+	// isIntakeErr fails the read.
+	intakes     map[ids.WorkspaceID]bool
+	isIntakeErr error
+	// refusePlacementErr is the registry's answer to RefusePlacement, and
+	// placementChecks records every placement it was asked about.
+	refusePlacementErr error
+	placementChecks    []wsm.RegisterPlacement
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -664,6 +667,29 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	if facts.Closure != nil {
 		ws.Closed, ws.Closure = true, facts.Closure
 	}
+	// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, as the store's insert does.
+	if facts.Hidden || facts.Intake {
+		at := time.Unix(1, 0)
+		ws.Hidden, ws.HiddenAt = true, &at
+	}
+	if facts.Intake {
+		d.intakes[id] = true
+	}
+	if p := facts.Placement; p != nil {
+		sub := wsm.Subsection{ID: "sub-born", Repo: ws.Repo}
+		switch {
+		case p.New != nil:
+			sub.Name, sub.CreatedBy = p.New.Name, &p.CreatedBy
+			d.subsections = append(d.subsections, sub)
+		default:
+			for _, existing := range d.subsections {
+				if existing.Repo == ws.Repo && existing.Name == p.Into {
+					sub = existing
+				}
+			}
+		}
+		ws.Subsection = &sub.ID
+	}
 	d.with(ws)
 	d.createdNew = true
 	return ws, true, nil
@@ -985,21 +1011,11 @@ func (d *fakeDB) MarkCloseWhenTurnEnds(_ context.Context, id ids.WorkspaceID, at
 	return nil
 }
 
-// MarkIntake records the fake's intake mark and hides the record, as the
-// store does in one transaction.
-func (d *fakeDB) MarkIntake(_ context.Context, id ids.WorkspaceID, at time.Time) error {
-	if d.markIntakeErr != nil {
-		return d.markIntakeErr
-	}
-	ws, ok := d.workspaces[id]
-	if !ok {
-		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
-	}
-	ws.Hidden = true
-	ws.HiddenAt = &at
-	d.workspaces[id] = ws
-	d.intakes[id] = true
-	return nil
+// RefusePlacement records the placement asked about and answers the scripted
+// refusal.
+func (d *fakeDB) RefusePlacement(_ context.Context, _ string, p wsm.RegisterPlacement, _ *ids.WorkspaceID, _ bool) error {
+	d.placementChecks = append(d.placementChecks, p)
+	return d.refusePlacementErr
 }
 
 // IsIntake answers the fake's intake mark.

@@ -84,26 +84,36 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 		if err := scanWorkspaceRow(ctx, tx, root, "repo_id", &out.Repo); err != nil {
 			return err
 		}
-		if err := insertSubsection(ctx, tx, &out); err != nil {
-			return err
-		}
-		// A subsection just made is open, so the placement expands nothing.
-		if _, err := placeFamilies(ctx, tx, members, &out.ID, AtEnd{}); err != nil {
-			return err
-		}
-		empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, out.ID)
-		if err != nil {
-			return err
-		}
-		if len(empty) > 0 {
-			return ErrNoOpenConstituent
-		}
-		return nil
+		return fileIntoNewAgentSubsection(ctx, tx, &out, members)
 	})
 	if err != nil {
 		return Subsection{}, err
 	}
 	return out, nil
+}
+
+// fileIntoNewAgentSubsection records SUB (an agent-created subsection with
+// its Repo set) after its repository's other subsections and places the
+// families of MEMBERS in it, inside TX: the one write behind an agent's
+// subsection create and a register that files its workspace into a new
+// subsection. A subsection none of whose members is open is
+// ErrNoOpenConstituent.
+func fileIntoNewAgentSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection, members []WorkspaceID) error {
+	if err := insertSubsection(ctx, tx, sub); err != nil {
+		return err
+	}
+	// A subsection just made is open, so the placement expands nothing.
+	if _, err := placeFamilies(ctx, tx, members, &sub.ID, AtEnd{}); err != nil {
+		return err
+	}
+	empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, sub.ID)
+	if err != nil {
+		return err
+	}
+	if len(empty) > 0 {
+		return ErrNoOpenConstituent
+	}
+	return nil
 }
 
 // pruneEmptyAgentSubsections removes, inside TX, every agent-created

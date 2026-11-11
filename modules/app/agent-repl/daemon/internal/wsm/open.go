@@ -650,6 +650,13 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		// A REFUSED ARRANGEMENT is the store answering what was asked (two
 		// repositories related, an anchor elsewhere, a blank name); the verb
 		// turns it into the rpc's arm.
+		// A REFUSED PLACEMENT is the store answering what a create asked (a
+		// child, an unknown subsection, a workspace that cannot be gathered);
+		// the verb turns it into the rpc's arm.
+		if IsPlacementRefusal(err) {
+			s.log.Debug(op, "the placement was refused; nothing was written", withError(fields, err))
+			return err
+		}
 		if isArrangementRefusal(err) {
 			s.log.Debug(op, "the arrangement was refused; nothing was written", withError(fields, err))
 			return err
