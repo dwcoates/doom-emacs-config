@@ -6846,6 +6846,38 @@ describe("GetLiveWork reconciliation", () => {
     ).toBe(true);
   });
 
+  it("settles an ask the record holds open as abandoned: the session that asked it is gone", async () => {
+    // Arrange
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      openAsks: [
+        create(conversationv1.SessionOpenAskSchema, {
+          agent: create(conversationv1.AgentIdSchema, { value: "sub-1" }),
+          ask: {
+            case: "question",
+            value: create(conversationv1.AgentQuestionSchema, {
+              id: create(conversationv1.AgentQuestionIdSchema, { value: "toolu_orphan" }),
+              result: { case: "start", value: create(conversationv1.AgentQuestionStartSchema, {}) },
+            }),
+          },
+        }),
+      ],
+    });
+
+    // Act
+    await started(h);
+
+    // Assert
+    const settle = h.persistence.buffered.find((entry) => entry.upsertKey === "question:toolu_orphan");
+    const update =
+      settle?.item.kind === "frame" && settle.item.frame.result.case === "update"
+        ? settle.item.frame.result.value.update
+        : undefined;
+    expect(
+      update?.case === "question" && update.value.result.case === "success" ? update.value.result.value.outcome.case : undefined,
+    ).toBe("abandoned");
+  });
+
   it("does not close the main agent's own book", async () => {
     const h = harness();
     const response = await started(h);

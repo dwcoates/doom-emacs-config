@@ -14,7 +14,9 @@ import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
 import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import {
+  closingAbandonedAsk,
   closingMonitorTerminal,
+  openAskId,
   findMonitorCall,
   announceLiveWork,
   bashUnitsWithoutCommand,
@@ -680,6 +682,140 @@ describe("closingMonitorTerminal", () => {
     const entry = closingMonitorTerminal(BOOK, RUN, undefined);
 
     expect(entry.upsertKey).toBe(`activity:${RUN.value}`);
+  });
+});
+
+describe("closingAbandonedAsk", () => {
+  const ASKER = create(conversationv1.AgentIdSchema, { value: "toolu_child" });
+  const BATCH = create(conversationv1.AgentQuestionBatchSchema, {
+    questions: [create(conversationv1.AgentQuestionAskedSchema, { header: "Pick" })],
+  });
+  const STARTED = create(conversationv1.AgentActivityStartedAtSchema, { atMs: 1_000n });
+
+  function openQuestion(): conversationv1.SessionOpenAsk {
+    return create(conversationv1.SessionOpenAskSchema, {
+      agent: ASKER,
+      ask: {
+        case: "question",
+        value: create(conversationv1.AgentQuestionSchema, {
+          id: create(conversationv1.AgentQuestionIdSchema, { value: "toolu_q" }),
+          result: { case: "start", value: create(conversationv1.AgentQuestionStartSchema, { batch: BATCH, startedAt: STARTED }) },
+        }),
+      },
+    });
+  }
+
+  function openPermission(): conversationv1.SessionOpenAsk {
+    return create(conversationv1.SessionOpenAskSchema, {
+      agent: ASKER,
+      ask: {
+        case: "permission",
+        value: create(conversationv1.AgentPermissionSchema, {
+          id: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_p" }),
+          gatedCall: create(conversationv1.AgentActivityIdSchema, { value: "toolu_p" }),
+          result: { case: "start", value: create(conversationv1.AgentPermissionStartSchema, { startedAt: STARTED }) },
+        }),
+      },
+    });
+  }
+
+  function updateOf(entry: PersistEntry): conversationv1.AgentUpdate["update"] | undefined {
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    return frame?.result.case === "update" ? frame.result.value.update : undefined;
+  }
+
+  it("settles an open question abandoned, restating its batch and its wait", () => {
+    // Act
+    const entry = closingAbandonedAsk(openQuestion(), 5_000);
+
+    // Assert
+    const update = updateOf(entry);
+    const success =
+      update?.case === "question" && update.value.result.case === "success" ? update.value.result.value : undefined;
+    expect(success?.outcome.case).toBe("abandoned");
+    expect(success?.batch).toEqual(BATCH);
+    expect([success?.settledAt?.atMs, success?.settledAt?.startedAt?.atMs]).toEqual([5_000n, 1_000n]);
+  });
+
+  it("settles an open consent ask abandoned, naming the call it gated", () => {
+    // Act
+    const entry = closingAbandonedAsk(openPermission(), 5_000);
+
+    // Assert
+    const update = updateOf(entry);
+    const permission = update?.case === "permission" ? update.value : undefined;
+    expect(permission?.result.case === "success" ? permission.result.value.decision.case : undefined).toBe("abandoned");
+    expect(permission?.gatedCall?.value).toBe("toolu_p");
+  });
+
+  it.each([
+    { name: "a question", ask: openQuestion, key: "question:toolu_q" },
+    { name: "a consent ask", ask: openPermission, key: "permission:toolu_p" },
+  ])("keys $name's settle by the ask's own row, in the asking agent's book, outside any turn", ({ ask, key }) => {
+    // Act
+    const entry = closingAbandonedAsk(ask(), 5_000);
+
+    // Assert
+    expect([entry.upsertKey, entry.agentId?.value, entry.turn, entry.keepalive]).toEqual([key, "toolu_child", undefined, false]);
+  });
+
+  it("refuses an open ask that names no agent", () => {
+    // Arrange
+    const ask = openQuestion();
+    ask.agent = undefined;
+
+    // Act / Assert
+    expect(() => closingAbandonedAsk(ask, 5_000)).toThrow(/names no agent/);
+  });
+
+  it("refuses an open ask that is not a start", () => {
+    // Arrange
+    const ask = openQuestion();
+    if (ask.ask.case === "question") ask.ask.value.result = { case: undefined, value: undefined };
+
+    // Act / Assert
+    expect(() => closingAbandonedAsk(ask, 5_000)).toThrow(/not an identified start/);
+  });
+
+  it("refuses an open ask that carries neither kind", () => {
+    // Arrange
+    const ask = create(conversationv1.SessionOpenAskSchema, { agent: ASKER });
+
+    // Act / Assert
+    expect(() => closingAbandonedAsk(ask, 5_000)).toThrow(/neither a question nor a consent ask/);
+  });
+});
+
+describe("openAskId", () => {
+  it.each([
+    {
+      name: "a question",
+      ask: create(conversationv1.SessionOpenAskSchema, {
+        ask: { case: "question", value: create(conversationv1.AgentQuestionSchema, { id: { value: "toolu_q" } }) },
+      }),
+      want: "toolu_q",
+    },
+    {
+      name: "a consent ask",
+      ask: create(conversationv1.SessionOpenAskSchema, {
+        ask: { case: "permission", value: create(conversationv1.AgentPermissionSchema, { id: { value: "toolu_p" } }) },
+      }),
+      want: "toolu_p",
+    },
+  ])("answers $name's gate key", ({ ask, want }) => {
+    expect(openAskId(ask)).toBe(want);
+  });
+
+  it("refuses an ask with no identity", () => {
+    const ask = create(conversationv1.SessionOpenAskSchema, {
+      ask: { case: "question", value: create(conversationv1.AgentQuestionSchema, {}) },
+    });
+
+    expect(() => openAskId(ask)).toThrow(/no identity/);
+  });
+
+  it("refuses an ask of neither kind", () => {
+    expect(() => openAskId(create(conversationv1.SessionOpenAskSchema, {}))).toThrow(/neither/);
   });
 });
 

@@ -682,7 +682,7 @@ describe("standing down", () => {
     const pending = gate.canUseTool("Bash", {}, callOptions());
     await Promise.resolve();
 
-    gate.standDown("the session was killed");
+    gate.standDown("the session was killed", "abandoned");
 
     expect(await pending).toEqual({ behavior: "deny", message: "the session was killed" });
   });
@@ -692,7 +692,7 @@ describe("standing down", () => {
     const pending = gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
     await Promise.resolve();
 
-    gate.standDown("the session was killed");
+    gate.standDown("the session was killed", "abandoned");
 
     expect(await pending).toEqual({ behavior: "deny", message: "the session was killed" });
   });
@@ -702,7 +702,7 @@ describe("standing down", () => {
     void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
     await Promise.resolve();
 
-    gate.standDown("x");
+    gate.standDown("x", "denied");
 
     const settled = written[1]?.item;
     const update =
@@ -714,20 +714,72 @@ describe("standing down", () => {
       : undefined).toBe("unanswered");
   });
 
+  it.each([
+    { name: "a question", tool: ASK_USER_QUESTION_TOOL, input: QUESTION_INPUT, kind: "question", arm: "abandoned" },
+    { name: "a consent ask", tool: "Bash", input: {}, kind: "permission", arm: "abandoned" },
+  ])("settles $name stood down by an ending session as ABANDONED", async ({ tool, input, kind, arm }) => {
+    const { gate, written } = gateWith();
+    void gate.canUseTool(tool, input, callOptions());
+    await Promise.resolve();
+
+    gate.standDown("SIGTERM", "abandoned");
+
+    const settled = written[1]?.item;
+    const update =
+      settled?.kind === "frame" && settled.frame.result.case === "update"
+        ? settled.frame.result.value.update
+        : undefined;
+    expect(update?.case).toBe(kind);
+    const outcome =
+      update?.case === "question" && update.value.result.case === "success"
+        ? update.value.result.value.outcome.case
+        : update?.case === "permission" && update.value.result.case === "success"
+          ? update.value.result.value.decision.case
+          : undefined;
+    expect(outcome).toBe(arm);
+  });
+
+  it("settles a consent ask stood down by a stop as the user's DENIAL", async () => {
+    const { gate, written } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    gate.standDown("the main agent was stopped", "denied");
+
+    const settled = written[1]?.item;
+    const update =
+      settled?.kind === "frame" && settled.frame.result.case === "update"
+        ? settled.frame.result.value.update
+        : undefined;
+    expect(update?.case === "permission" && update.value.result.case === "success"
+      ? update.value.result.value.decision.case
+      : undefined).toBe("denied");
+  });
+
+  it("still RESOLVES the vendor's callback as denied when it settles the ask abandoned", async () => {
+    const { gate } = gateWith();
+    const pending = gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    gate.standDown("SIGTERM", "abandoned");
+
+    expect(await pending).toEqual({ behavior: "deny", message: "SIGTERM" });
+  });
+
   it("reports how many callbacks it unwedged", async () => {
     const { gate } = gateWith();
     void gate.canUseTool("Bash", {}, callOptions());
     void gate.canUseTool("Write", {}, callOptions({ toolUseID: "toolu_2" }));
     await Promise.resolve();
 
-    expect(gate.standDown("x")).toBe(2);
+    expect(gate.standDown("x", "denied")).toBe(2);
   });
 
   it("leaves nothing pending", async () => {
     const { gate } = gateWith();
     void gate.canUseTool("Bash", {}, callOptions());
     await Promise.resolve();
-    gate.standDown("x");
+    gate.standDown("x", "denied");
 
     expect(gate.pendingCount).toBe(0);
   });
@@ -936,7 +988,7 @@ describe("an ask whose book is resolved asynchronously", () => {
     // Arrange.
     const { gate, settle } = deferredGate();
     const pending = gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
-    gate.standDown("the main agent was stopped");
+    gate.standDown("the main agent was stopped", "denied");
 
     // Act.
     settle(SUBAGENT);
@@ -950,7 +1002,7 @@ describe("an ask whose book is resolved asynchronously", () => {
     // Arrange.
     const { gate, settle } = deferredGate();
     const pending = gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "a5583" }));
-    gate.standDown("the main agent was stopped");
+    gate.standDown("the main agent was stopped", "denied");
 
     // Act.
     settle(SUBAGENT);
@@ -1552,7 +1604,7 @@ describe("the settle instant an ask states", () => {
     void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
     await Promise.resolve();
     // Act
-    gate.standDown("the session was killed");
+    gate.standDown("the session was killed", "abandoned");
     // Assert
     expect(settledAtOf(written)).toEqual({ atMs: 7000n, startedAtMs: 1000n });
   });
@@ -1641,7 +1693,7 @@ describe("the session hears every ask that blocks the vendor", () => {
     void gate.canUseTool("Bash", {}, { signal: new AbortController().signal, toolUseID: "toolu_p", requestId: "r" });
 
     // Act
-    gate.standDown("SIGTERM");
+    gate.standDown("SIGTERM", "abandoned");
 
     // Assert
     expect(gate.askOpen).toBe(false);
@@ -1926,7 +1978,7 @@ describe("an ask the vendor withdraws", () => {
     // Arrange
     const opened = gate(true);
     const { withdraw } = await withdrawn(opened);
-    opened.gate.standDown("turn t was killed");
+    opened.gate.standDown("turn t was killed", "denied");
 
     // Act: the vendor's cancel for the interrupt the shim just made.
     withdraw();
@@ -1936,30 +1988,43 @@ describe("an ask the vendor withdraws", () => {
     expect(settledAs(opened.written)).toBe("denied");
   });
 
-  it("settles a withdrawn ask as denied on a stand-down", async () => {
+  it("settles a withdrawn ask as abandoned when its query dies", async () => {
     // Arrange
     const opened = gate(true);
     const { withdraw } = await withdrawn(opened);
     withdraw();
 
     // Act
-    opened.gate.standDown("the vendor query died");
+    opened.gate.standDown("the vendor query died", "abandoned");
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("abandoned");
+  });
+
+  it("settles every withdrawn ask as abandoned when the query is replaced", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    const settled = opened.gate.settleWithdrawn("the vendor query was replaced", "abandoned");
+
+    // Assert
+    expect([settled, settledAs(opened.written)]).toEqual([1, "abandoned"]);
+  });
+
+  it("settles a withdrawn ask as denied on a stop", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    opened.gate.standDown("the main agent was stopped", "denied");
 
     // Assert
     expect(settledAs(opened.written)).toBe("denied");
-  });
-
-  it("settles every withdrawn ask as denied when the query is replaced", async () => {
-    // Arrange
-    const opened = gate(true);
-    const { withdraw } = await withdrawn(opened);
-    withdraw();
-
-    // Act
-    const settled = opened.gate.settleWithdrawn("the vendor query was replaced");
-
-    // Assert
-    expect([settled, settledAs(opened.written)]).toEqual([1, "denied"]);
   });
 
   it("settles a withdrawn question as unanswered here when its turn goes on", async () => {

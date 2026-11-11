@@ -1010,7 +1010,7 @@ export class TurnEngine {
       }
       // Callback liveness FIRST: an unresolved canUseTool promise survives an
       // interrupt and wedges the vendor.
-      this.session.gate.standDown("the main agent was stopped");
+      this.session.gate.standDown("the main agent was stopped", "denied");
       await query.interrupt();
       LOGGER.debug({ agent_id: target.value }, "interrupted the main agent");
       return updateAgentDelivered();
@@ -1240,7 +1240,7 @@ export class TurnEngine {
   ): Promise<void> {
     const query = this.session.query();
     // Callback liveness before the interrupt, always.
-    this.session.gate.standDown(`turn ${open.id.value} was killed`);
+    this.session.gate.standDown(`turn ${open.id.value} was killed`, "denied");
     this.session.noteStopCommand(open.id, commandedBy);
     if (query !== undefined) {
       // The session declares the per-task stop (`perTaskStopAffordance`), so
