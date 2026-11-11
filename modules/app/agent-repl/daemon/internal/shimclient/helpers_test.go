@@ -178,6 +178,9 @@ func (s testSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (s testSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (s testSurfaces) RetainDirectory(string, func(string) bool) {}
+func (s testSurfaces) DiscardWorkspace(string, string, bool) (dlog.DiscardReport, error) {
+	return dlog.DiscardReport{}, nil
+}
 
 func (s testSurfaces) DetachDir(string) error { return nil }
 

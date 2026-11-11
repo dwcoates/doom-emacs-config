@@ -115,6 +115,12 @@ type Surfaces interface {
 	// directory that does not exist yet is an ordinary state: it has nothing
 	// to prune.
 	RetainDirectory(dir string, owned func(base string) bool)
+	// DiscardWorkspace removes every daemon-written log file of the workspace
+	// with the minted id ID that no writer outside this daemon holds, whatever
+	// its age, and the canonical links in DIR that named a removed file. It is
+	// the storage sweep's door for a workspace nobody touched in days;
+	// judgeOnly reports what a removal would take and removes nothing.
+	DiscardWorkspace(dir, id string, judgeOnly bool) (DiscardReport, error)
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
 }

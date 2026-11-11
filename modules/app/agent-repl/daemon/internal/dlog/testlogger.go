@@ -316,6 +316,9 @@ func (s *TestSurfaces) BindRecordCounter(RecordCounter) {}
 
 // RetainDirectory implements Surfaces: the double runs no retention pass.
 func (s *TestSurfaces) RetainDirectory(string, func(string) bool) {}
+func (s *TestSurfaces) DiscardWorkspace(string, string, bool) (DiscardReport, error) {
+	return DiscardReport{}, nil
+}
 
 // WorkspaceOrCentral implements Surfaces with the production semantics: the
 // workspace's logger when it resolves, and otherwise the global logger with
