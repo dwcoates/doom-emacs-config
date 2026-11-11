@@ -42,6 +42,12 @@
 import { create } from "@bufbuild/protobuf";
 import { detachableKind, detachedWorkKind } from "../convert/detached.js";
 import { agentActivity, settledAt } from "../convert/entries.js";
+import {
+  abandonedPermissionDecision,
+  abandonedQuestionOutcome,
+  permissionSettle,
+  questionSettle,
+} from "../convert/ask-settles.js";
 import { subagentId } from "../convert/ids.js";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
@@ -361,20 +367,7 @@ export function closingAbandonedAsk(ask: conversationv1.SessionOpenAsk, nowMs: n
         keepalive: false,
         // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
         turn: undefined,
-        update: {
-          case: "question",
-          value: create(conversationv1.AgentQuestionSchema, {
-            id,
-            result: {
-              case: "success",
-              value: create(conversationv1.AgentQuestionSuccessSchema, {
-                batch: start.batch,
-                settledAt: settledAt(nowMs, startedAtMsOf(start.startedAt)),
-                outcome: { case: "abandoned", value: create(conversationv1.AgentQuestionAbandonedSchema, {}) },
-              }),
-            },
-          }),
-        },
+        update: questionSettle(id, start.batch, settledAt(nowMs, startedAtMsOf(start.startedAt)), abandonedQuestionOutcome()),
       });
     }
     case "permission": {
@@ -391,20 +384,12 @@ export function closingAbandonedAsk(ask: conversationv1.SessionOpenAsk, nowMs: n
         keepalive: false,
         // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
         turn: undefined,
-        update: {
-          case: "permission",
-          value: create(conversationv1.AgentPermissionSchema, {
-            id,
-            gatedCall: permission.gatedCall,
-            result: {
-              case: "success",
-              value: create(conversationv1.AgentPermissionSuccessSchema, {
-                settledAt: settledAt(nowMs, startedAtMsOf(permission.result.value.startedAt)),
-                decision: { case: "abandoned", value: create(conversationv1.AgentPermissionAbandonedSchema, {}) },
-              }),
-            },
-          }),
-        },
+        update: permissionSettle(
+          id,
+          permission.gatedCall,
+          settledAt(nowMs, startedAtMsOf(permission.result.value.startedAt)),
+          abandonedPermissionDecision(),
+        ),
       });
     }
     default:

@@ -54,6 +54,12 @@ import { create, equals } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { settledAt } from "../convert/entries.js";
+import {
+  abandonedPermissionDecision,
+  abandonedQuestionOutcome,
+  permissionSettle,
+  questionSettle,
+} from "../convert/ask-settles.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
 import { permissionUpsertKey, questionUpsertKey } from "../store/keys.js";
 import { isUserStop } from "../convert/terminals.js";
@@ -524,9 +530,7 @@ const ABANDONED_QUESTION = Symbol("abandoned");
 function questionOutcome(
   answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION,
 ): conversationv1.AgentQuestionSuccess["outcome"] {
-  if (answers === ABANDONED_QUESTION) {
-    return { case: "abandoned", value: create(conversationv1.AgentQuestionAbandonedSchema, {}) };
-  }
+  if (answers === ABANDONED_QUESTION) return abandonedQuestionOutcome();
   if (answers === undefined) {
     return { case: "unanswered", value: create(conversationv1.AgentQuestionUnansweredSchema, {}) };
   }
@@ -908,22 +912,15 @@ export class PermissionGate {
   ): void {
     const id = questionId(pending.toolUseId);
     this.deps.persist([
-      this.entry(pending.agentId, questionUpsertKey(id), pending.toolUseId, "agent_frame.update.question.success", {
-        case: "question",
-        value: create(conversationv1.AgentQuestionSchema, {
-          id,
-          result: {
-            case: "success",
-            value: create(conversationv1.AgentQuestionSuccessSchema, {
-              batch: pending.batch,
-              // The settle restates the ask's start, so the settled frame
-              // alone states how long the user was asked.
-              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
-              outcome: questionOutcome(answers),
-            }),
-          },
-        }),
-      }),
+      this.entry(
+        pending.agentId,
+        questionUpsertKey(id),
+        pending.toolUseId,
+        "agent_frame.update.question.success",
+        // The settle restates the ask's start, so the settled frame alone
+        // states how long the user was asked.
+        questionSettle(id, pending.batch, settledAt(this.deps.nowMs(), pending.startedAtMs), questionOutcome(answers)),
+      ),
     ]);
   }
 
@@ -1125,22 +1122,15 @@ export class PermissionGate {
     if (decision.case === "denied") this.noteDenied(pending.toolUseId);
     const id = permissionId(pending.toolUseId);
     this.deps.persist([
-      this.entry(pending.agentId, permissionUpsertKey(id), pending.toolUseId, "agent_frame.update.permission.success", {
-        case: "permission",
-        value: create(conversationv1.AgentPermissionSchema, {
-          id,
-          gatedCall: toolCallActivityId(pending.toolUseId),
-          result: {
-            case: "success",
-            value: create(conversationv1.AgentPermissionSuccessSchema, {
-              decision,
-              // The settle restates the ask's start, so the settled frame
-              // alone states how long the user was asked.
-              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
-            }),
-          },
-        }),
-      }),
+      this.entry(
+        pending.agentId,
+        permissionUpsertKey(id),
+        pending.toolUseId,
+        "agent_frame.update.permission.success",
+        // The settle restates the ask's start, so the settled frame alone
+        // states how long the user was asked.
+        permissionSettle(id, toolCallActivityId(pending.toolUseId), settledAt(this.deps.nowMs(), pending.startedAtMs), decision),
+      ),
     ]);
   }
 
@@ -1205,10 +1195,7 @@ export class PermissionGate {
       this.settleQuestion(ask, ABANDONED_QUESTION);
       return;
     }
-    this.settlePermission(ask, {
-      case: "abandoned",
-      value: create(conversationv1.AgentPermissionAbandonedSchema, {}),
-    });
+    this.settlePermission(ask, abandonedPermissionDecision());
   }
 
   /** Record one ask as denied for `reason`: the stand-down's settlement, without the release. */
