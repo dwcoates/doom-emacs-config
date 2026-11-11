@@ -467,6 +467,12 @@ export interface VerbCall<Res extends VerbResponse> {
    * revision). Called before the verb answers.
    */
   took?: (response: Res) => void;
+  /**
+   * What the verb acts on (a repository, the action asked), added to every
+   * record `runVerb` logs for it, so a refusal's or a failure's record names
+   * its target.
+   */
+  context?: Readonly<Record<string, unknown>>;
 }
 
 
@@ -518,7 +524,7 @@ export async function runVerb<Res extends VerbResponse>(
     if (cause.case === "notYetAdopted") {
       log.info(`${spec.rpc} waits on a handover: no daemon serves the workspace yet`, {
         operation: "sidebar.verbs.handover",
-        context: { rpc: spec.rpc, retried_at_incumbent: served !== null },
+        context: { ...spec.context, rpc: spec.rpc, retried_at_incumbent: served !== null },
       });
       setDisabled(control, false);
       return false;
@@ -527,7 +533,7 @@ export async function runVerb<Res extends VerbResponse>(
     if (expected !== undefined) {
       log.info(`${spec.rpc} was answered ${cause.case}`, {
         operation: "sidebar.verbs.expected_answer",
-        context: { rpc: spec.rpc, arm: cause.case, sentence: expected },
+        context: { ...spec.context, rpc: spec.rpc, arm: cause.case, sentence: expected },
       });
       setDisabled(control, false);
       return false;
@@ -538,7 +544,7 @@ export async function runVerb<Res extends VerbResponse>(
       unreachableArm(`${spec.rpc}Error.cause`, cause.case);
     log.warn(`${spec.rpc} was refused`, {
       operation: "sidebar.verbs.refused",
-      context: { rpc: spec.rpc, arm: cause.case, sentence: say },
+      context: { ...spec.context, rpc: spec.rpc, arm: cause.case, sentence: say },
     });
     drawRefusal(control, cause.case, say, refusalDetail(cause));
     setDisabled(control, false);
@@ -551,7 +557,7 @@ export async function runVerb<Res extends VerbResponse>(
     if (isMalformedView(err)) throw err;
     log.error(`${spec.rpc} failed at the transport: ${String(err)}`, {
       operation: "sidebar.verbs.failed",
-      context: { rpc: spec.rpc, cause: err },
+      context: { ...spec.context, rpc: spec.rpc, cause: err },
     });
     drawRefusal(control, "transport", "the daemon could not be reached");
     setDisabled(control, false);
