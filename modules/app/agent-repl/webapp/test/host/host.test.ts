@@ -934,6 +934,20 @@ describe("hello", () => {
     ]);
   });
 
+  it("replays the quiet state to a page that says hello while it stands", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    host.setQuiet(true);
+    const posted = postsTo("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+    host.setQuiet(false);
+
+    // Assert
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "quiet", quiet: true });
+  });
+
   it("replays the editor's held-prompt ingress entries to a page that says hello", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
@@ -1255,6 +1269,33 @@ describe("the webhost's sidebar", () => {
     headline: "lost the connection",
     evidence: [["close", "1006"]],
   } as const;
+
+  it("tells every page the lid-closed quiet state", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toA = postsTo("a");
+    const toB = postsTo("b");
+
+    // Act
+    const outcomes = [parsed(host.setQuiet(true)).outcome, parsed(host.setQuiet(false)).outcome];
+
+    // Assert
+    const quietOn = { channel: HOST_CHANNEL, kind: "quiet", quiet: true };
+    const quietOff = { channel: HOST_CHANNEL, kind: "quiet", quiet: false };
+    expect([outcomes, toA, toB]).toEqual([["quiet", "unquiet"], [quietOn, quietOff], [quietOn, quietOff]]);
+  });
+
+  it("refuses a quiet state that is not a boolean", () => {
+    // Arrange
+    pages(host, "a");
+    const toA = postsTo("a");
+
+    // Act
+    const outcome = parsed(host.setQuiet("yes")).outcome;
+
+    // Assert
+    expect([outcome, toA]).toEqual(["refused", []]);
+  });
 
   it("tells every page Emacs moved its focus", () => {
     // Arrange

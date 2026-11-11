@@ -22,6 +22,7 @@
 import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";
 import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
+import { pageQuiet } from "../quiet.js";
 import { installDaemonLatencyReport, type LatencyReporter } from "../latency-report.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
@@ -66,6 +67,12 @@ export interface SidebarPage {
    * the focus, so the page cannot see this for itself.
    */
   focusMoved(): string;
+  /**
+   * Whether persistent wifi's lid-closed quiet state stands (quiet.ts): the
+   * rail's clock and seen-only work stop while it does. A QUIET that is not a
+   * boolean is refused. Answers `quiet`, `unquiet`, or `refused`.
+   */
+  setQuiet(quiet: unknown): string;
 }
 
 /** A call Emacs made before the page started, queued on the page. */
@@ -192,6 +199,14 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     focusMoved() {
       focusLeft.left(FOCUS_LEFT_EMACS);
       return answer("focusMoved", null, "sent");
+    },
+    setQuiet(value) {
+      if (typeof value !== "boolean") {
+        note("warn", `setQuiet was handed ${JSON.stringify(value)}, which is no boolean`);
+        return answer("setQuiet", null, "refused");
+      }
+      pageQuiet(doc).set(value);
+      return answer("setQuiet", null, value ? "quiet" : "unquiet");
     },
   };
   win.agentReplSidebar = page;

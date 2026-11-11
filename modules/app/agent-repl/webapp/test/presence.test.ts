@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createPresence, pageIsEmbedded, pagePresence, type PresenceCause, type PresenceSource } from "../src/presence.js";
+import { createQuiet } from "../src/quiet.js";
 
 let presence: PresenceSource | null = null;
 
@@ -16,6 +17,50 @@ afterEach(() => {
   presence?.dispose();
   presence = null;
   setVisibility("visible");
+});
+
+describe("presence under the lid-closed quiet state", () => {
+  it("is not seen while the quiet state stands, and tells why", () => {
+    // Arrange
+    const quiet = createQuiet();
+    presence = createPresence(document, false, quiet);
+    const told: Array<[boolean, PresenceCause]> = [];
+    presence.onChange((seen, cause) => told.push([seen, cause]));
+
+    // Act
+    quiet.set(true);
+
+    // Assert
+    expect([presence.seen(), told]).toEqual([false, [[false, "quiet"]]]);
+  });
+
+  it("is seen again when the quiet state ends", () => {
+    // Arrange
+    const quiet = createQuiet();
+    presence = createPresence(document, false, quiet);
+    quiet.set(true);
+
+    // Act
+    quiet.set(false);
+
+    // Assert
+    expect(presence.seen()).toBe(true);
+  });
+
+  it("stops following the quiet state once disposed", () => {
+    // Arrange
+    const quiet = createQuiet();
+    const disposed = createPresence(document, false, quiet);
+    const told: boolean[] = [];
+    disposed.onChange((seen) => told.push(seen));
+    disposed.dispose();
+
+    // Act
+    quiet.set(true);
+
+    // Assert
+    expect(told).toEqual([]);
+  });
 });
 
 describe("presence", () => {

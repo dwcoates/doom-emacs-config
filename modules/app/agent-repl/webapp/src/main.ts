@@ -41,7 +41,7 @@ import "@fontsource-variable/source-serif-4/opsz.css";
 import "@fontsource-variable/source-serif-4/opsz-italic.css";
 // KaTeX's layout and fonts, for the TeX markdown.ts typesets.
 import "katex/dist/katex.min.css";
-import { createTicker } from "./clock.js";
+import { createTicker, DEFAULT_TICK_MS } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
@@ -82,6 +82,7 @@ import { createEditorIngressView } from "./held/editor-ingress.js";
 import { createEditorNotices, type EditorNotices } from "./footer/editor-notice.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
+import { pageQuiet } from "./quiet.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
 import { installDaemonLatencyReport } from "./latency-report.js";
 import { pageSwitchLatencyEnv, watchPageBoot, watchSwitchLatency } from "./switch-latency.js";
@@ -179,6 +180,7 @@ export async function boot(): Promise<void> {
       doc: document,
       win: window,
       presence: pagePresence(),
+      quiet: pageQuiet(document),
       webhostFailures,
       levelWindow,
       editorIngress,
@@ -213,7 +215,7 @@ export async function boot(): Promise<void> {
     // surface (src/selection.ts).
     installTextAffordances(document);
 
-    const ticker = createTicker();
+    const ticker = createTicker(DEFAULT_TICK_MS, pageQuiet(document));
     const ctx = createAppContext({
       client,
       workspace,

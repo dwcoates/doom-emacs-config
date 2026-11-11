@@ -80,6 +80,17 @@ interface FocusMovedMessage {
 }
 
 /**
+ * host -> page: whether persistent wifi's lid-closed quiet state stands
+ * (quiet.ts). Sent to every page when it changes, and to a page that says
+ * hello while it stands.
+ */
+interface QuietMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "quiet";
+  readonly quiet: boolean;
+}
+
+/**
  * host -> page: the reader pressed the webhost's own document (its sidebar):
  * a click inside the webapp outside every page, which ends what a click on
  * the page's own background would (webhost-pressed.ts). Sent to every page,
@@ -177,6 +188,7 @@ export type HostToPage =
   | PresenceMessage
   | DismissDigestMessage
   | FocusMovedMessage
+  | QuietMessage
   | WebhostPressedMessage
   | WebhostFailuresMessage;
 
@@ -303,6 +315,8 @@ export function parseHostToPage(data: unknown): HostToPage | null {
       return { channel: HOST_CHANNEL, kind: "restyleGranted" };
     case "focusMoved":
       return { channel: HOST_CHANNEL, kind: "focusMoved" };
+    case "quiet":
+      return typeof data.quiet === "boolean" ? { channel: HOST_CHANNEL, kind: "quiet", quiet: data.quiet } : null;
     case "webhostPressed":
       return { channel: HOST_CHANNEL, kind: "webhostPressed" };
     case "logLevel": {

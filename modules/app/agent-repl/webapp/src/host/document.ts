@@ -13,7 +13,8 @@
  * Started here once, so the two documents cannot drift.
  */
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
-import { createTicker } from "../clock.js";
+import { createTicker, DEFAULT_TICK_MS } from "../clock.js";
+import { pageQuiet } from "../quiet.js";
 import { createLocalFailures, type LocalFailures } from "../failure/local.js";
 import type { ClientLogLevel, ForwardingLogger } from "../log.js";
 import { installTextAffordances, startPageRuntime } from "../document-runtime.js";
@@ -126,7 +127,7 @@ export function startWebhostDocument(
   const webhostBuild = (deps.webappBuild ?? (() => readWebappBuild(doc)))();
   const ctx = createDaemonContext({
     client,
-    ticker: createTicker(),
+    ticker: createTicker(DEFAULT_TICK_MS, pageQuiet(doc)),
     failures,
     page: connectionId,
     webhostBuild,

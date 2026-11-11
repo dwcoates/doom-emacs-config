@@ -126,7 +126,7 @@ const success = (): UpdatePersistentWifiModeResponse =>
         state: { wifi: { case: "joined", value: { networkName: "phone" } }, mode: { case: "on", value: {} } },
         hotspot: { outcome: { case: "joined", value: { networkName: "phone" } } },
         energyMode: { outcome: { case: "lowPower", value: {} } },
-        display: { outcome: { case: "dimmed", value: {} } },
+        display: { outcome: { case: "slept", value: {} } },
       },
     },
   });
@@ -186,7 +186,7 @@ describe("clicking the persistent-wifi chip", () => {
     const record = await forwardedRecord(capture, "topbar.persistent-wifi-toggled");
     expect([record.level.case, record.context]).toEqual([
       "info",
-      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", energyMode: "lowPower", display: "dimmed" }),
+      expect.objectContaining({ mode: "on", wifi: "joined", hotspot: "joined", energyMode: "lowPower", display: "slept" }),
     ]);
   });
 
@@ -347,7 +347,7 @@ describe("clicking the persistent-wifi chip", () => {
 
 describe("stepOutcomeArm", () => {
   it("answers the set arm's name", () => {
-    expect(stepOutcomeArm({ outcome: { case: "dimmed" } }, "display", "UpdatePersistentWifiModeDisplay")).toBe("dimmed");
+    expect(stepOutcomeArm({ outcome: { case: "slept" } }, "display", "UpdatePersistentWifiModeDisplay")).toBe("slept");
   });
 
   it("throws naming the success field when the step is absent", () => {

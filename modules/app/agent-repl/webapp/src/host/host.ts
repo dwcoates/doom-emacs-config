@@ -27,6 +27,7 @@
  * the page on screen.
  */
 import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
+import { pageQuiet, type QuietSource } from "../quiet.js";
 import { endPage } from "../page-teardown.js";
 import {
   parseWindowLevel,
@@ -55,6 +56,8 @@ import { nextFrame } from "../frame.js";
 export interface HostEnv {
   readonly doc: Document;
   readonly win: Window;
+  /** The webhost's lid-closed quiet state (`setQuiet`); the document's own when omitted. */
+  readonly quiet?: QuietSource;
   /** Where the workspace iframes go; the document's body when omitted. */
   readonly frames?: HTMLElement;
   /** The webhost's own live log threshold, which `setLogLevel` raises. */
@@ -200,6 +203,12 @@ export interface Host {
    * the frame lost the focus), so each lets go of what the pointer raised.
    */
   focusMoved(): string;
+  /**
+   * Tell the webhost and every page whether persistent wifi's lid-closed
+   * quiet state stands (quiet.ts). A QUIET that is not a boolean is refused.
+   * Answers `quiet`, `unquiet`, or `refused`.
+   */
+  setQuiet(quiet: unknown): string;
   /** Whether ID's page has drawn its conversation. */
   drawn(id: string): string;
   /**
@@ -260,6 +269,7 @@ export function createHost(env: HostEnv): Host {
   const { doc, win } = env;
   const atNextFrame = env.frame ?? nextFrame;
   const focusLeft = env.focusLeft ?? pageFocusLeft();
+  const quiet = env.quiet ?? pageQuiet(doc);
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
@@ -363,6 +373,7 @@ export function createHost(env: HostEnv): Host {
     if (frame.heldIngress !== null) {
       post(frame, { channel: HOST_CHANNEL, kind: "heldIngress", entries: frame.heldIngress });
     }
+    if (quiet.quiet()) post(frame, { channel: HOST_CHANNEL, kind: "quiet", quiet: true });
   };
 
   /** Start loading FRAME at its URL. */
@@ -935,6 +946,15 @@ export function createHost(env: HostEnv): Host {
         post(frame, { channel: HOST_CHANNEL, kind: "dismissDigest" });
         return "sent";
       });
+    },
+    setQuiet(value) {
+      if (typeof value !== "boolean") {
+        note("warn", `setQuiet was handed ${JSON.stringify(value)}, which is no boolean`);
+        return answer("setQuiet", null, "refused");
+      }
+      quiet.set(value);
+      broadcast({ channel: HOST_CHANNEL, kind: "quiet", quiet: value });
+      return answer("setQuiet", null, value ? "quiet" : "unquiet");
     },
     focusMoved() {
       broadcast({ channel: HOST_CHANNEL, kind: "focusMoved" });
