@@ -49,6 +49,7 @@ syntax = "proto3";
 
 package frontend.v1;
 
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/api.proto";
 import "conversation/v1/session.proto";
 import "conversation/v1/turn.proto";
@@ -1106,6 +1107,20 @@ message FeedResponseNotice {
   // the detail names the subject when the producer classified one
   // ("allowance exhausted"), and is unset when it did not.
   FeedOutcomeMarker marker = 2;
+  // WHAT THE NOTICE IS ABOUT, as its producer classified it. The client draws
+  // nothing from it (the marker's detail is the drawn subject): it rides the
+  // row so the daemon's feed reads the notice's subject from the row itself,
+  // whichever way the row reached it (live, a history replay, a page loaded on
+  // scroll-back), and retires the notice once its cause is answered (a vendor
+  // serving again, a completed sign-in). Always set on a notice row.
+  conversation.v1.AgentResponseSynthesizedNotice synthesized = 3;
+  // The sign-in action, drawn in the card under the vendor's words. SET only
+  // on a notice whose subject is the account's refusal
+  // (conversation.v1.AgentResponseSynthesizedNotice.account); its click opens
+  // the workspace's login flow, exactly as a broken bubble's
+  // (FeedResponseError.sign_in). A completed sign-in retires the notice, so a
+  // set action never outlives the failure it answers.
+  optional FeedOutcomeSignIn sign_in = 4;
 }
 
 // The arriving state's prose.

@@ -1193,6 +1193,15 @@ message AgentResponseSynthesizedNotice {
     // failed request's kind, so a consumer can retire the notice once the
     // vendor serves again.
     AgentNoticeVendorTransient vendor_transient = 6;
+    // The notice reports that the vendor REFUSED THE ACCOUNT: the session is
+    // signed out, its credential was rejected or expired and could not be
+    // refreshed, its organization may not use the product, the account is on
+    // hold or awaiting verification, or a cloud provider's credential failed.
+    // The producer classifies it by the vendor's declared error class, and by
+    // the vendor's words only where no class was declared. A consumer offers
+    // the sign-in action and retires the notice once a sign-in completes or
+    // the vendor serves again (a refresh the vendor made itself).
+    AgentNoticeAccount account = 7;
   }
 
   // The HTTP status the vendor attached to the notice, when it attached one.
@@ -1205,6 +1214,10 @@ message AgentNoticeUsageTransition {}
 message AgentNoticeUsageWarning {}
 message AgentNoticeUnclassified {}
 message AgentNoticeVendorTransient {}
+// The account-refused subject (AgentResponseSynthesizedNotice.account). EMPTY
+// ON PURPOSE: the vendor's words are the notice's prose, and which account
+// failure it was is not something a consumer acts on differently.
+message AgentNoticeAccount {}
 
 // The block ended without completing.
 message AgentResponseFailure {
