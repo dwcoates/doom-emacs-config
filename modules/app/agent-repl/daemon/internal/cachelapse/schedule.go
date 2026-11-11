@@ -21,7 +21,8 @@ import (
 //
 // THE SHIM STAYS THE JUDGE OF THE BEAT. Whether a keep-alive may go out -- a
 // turn holding the main agent, live detached work its rewind would kill, a
-// cache already lapsed -- is the shim's answer (shim.v1.SendKeepalive), and
+// cache already lapsed, which includes one whose last request left its
+// context uncached (shim.engine.cold.leftContextCached) -- is the shim's answer (shim.v1.SendKeepalive), and
 // the daemon only acts on it: a busy or working session is asked again when
 // it falls free (a busy one an interval on at the latest, since not every
 // busy slot is one the daemon sees end), and a lapsed cache is beaten no more
