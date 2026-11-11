@@ -76,7 +76,13 @@ export type VendorStartCause = "network" | "vendor";
 
 type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
-  | { readonly kind: "vendorStartFailed"; readonly retry: VendorStartRetry; readonly cause: VendorStartCause }
+  | {
+      readonly kind: "vendorStartFailed";
+      readonly retry: VendorStartRetry;
+      readonly cause: VendorStartCause;
+      /** The API's refusal a REJECTED start was, when it was one. */
+      readonly apiFailure?: conversationv1.ApiRequestFailed | undefined;
+    }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
   | { readonly kind: "conversationOwned" }
@@ -93,7 +99,7 @@ export function startSessionFailure(
       cause.kind === "cold"
         ? { case: "cold", value: cause.cold }
         : cause.kind === "vendorStartFailed"
-          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause) }
+          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure) }
           : cause.kind === "unknownSession"
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
@@ -112,9 +118,15 @@ export function startSessionFailure(
 /**
  * The `vendor_start_failed` arm, with its retry label ALWAYS set (a frame with
  * neither arm is malformed and the daemon treats it as a rejection), and a
- * retryable one's cause ALWAYS set too.
+ * retryable one's cause ALWAYS set too. A rejection carries the API's refusal
+ * when it was one (`StartSessionVendorStartRejected.api_failure`); a retryable
+ * failure never does.
  */
-function vendorStartFailed(retry: VendorStartRetry, cause: VendorStartCause): shimv1.StartSessionVendorStartFailed {
+function vendorStartFailed(
+  retry: VendorStartRetry,
+  cause: VendorStartCause,
+  apiFailure: conversationv1.ApiRequestFailed | undefined,
+): shimv1.StartSessionVendorStartFailed {
   switch (retry) {
     case "retryable":
       return create(shimv1.StartSessionVendorStartFailedSchema, {
@@ -130,7 +142,10 @@ function vendorStartFailed(retry: VendorStartRetry, cause: VendorStartCause): sh
       });
     case "rejected":
       return create(shimv1.StartSessionVendorStartFailedSchema, {
-        retry: { case: "rejected", value: create(shimv1.StartSessionVendorStartRejectedSchema, {}) },
+        retry: {
+          case: "rejected",
+          value: create(shimv1.StartSessionVendorStartRejectedSchema, apiFailure === undefined ? {} : { apiFailure }),
+        },
       });
   }
 }

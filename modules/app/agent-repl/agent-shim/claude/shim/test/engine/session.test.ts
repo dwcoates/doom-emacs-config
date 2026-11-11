@@ -587,6 +587,17 @@ function retryLabel(response: shimv1.StartSessionResponse): string | undefined {
   return cause.case === "vendorStartFailed" ? cause.value.retry.case : undefined;
 }
 
+/**
+ * The API refusal kind a REJECTED vendor start carries, `"none"` for a
+ * rejection that carries none, and undefined for any other answer.
+ */
+function rejectedApiFailureKind(response: shimv1.StartSessionResponse): string | undefined {
+  if (response.result.case !== "failure") return undefined;
+  const cause = response.result.value.cause;
+  if (cause.case !== "vendorStartFailed" || cause.value.retry.case !== "rejected") return undefined;
+  return cause.value.retry.value.apiFailure?.kind.case ?? "none";
+}
+
 beforeEach(() => {
   resetAgentBinaryVersionForTest();
   recordAgentBinaryVersion("2.1.999");
@@ -9780,6 +9791,39 @@ describe("the retry label a failed vendor start carries", () => {
   });
 
   it.each([
+    ["an expired OAuth session no status names", errorResultMessage({ errors: ["Failed to authenticate: OAuth session expired and could not be refreshed"] }), "authenticationFailed"],
+    ["a credential rejected by status", statusedErrorResult(401, "invalid x-api-key"), "authenticationFailed"],
+    ["a credential forbidden by status", statusedErrorResult(403, "forbidden"), "permissionDenied"],
+    ["a missing model", statusedErrorResult(404, "model: claude-nope"), "notFound"],
+    ["a refused resume", errorResultMessage({ errors: ["No conversation found with session ID: bf5fcae1"] }), "unmodeled"],
+  ] as const)("types the API refusal of an opening rejected by %s", async (_case, message, kind) => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+
+    // Act.
+    (await untilQuery(h, 0)).query.emit(message);
+
+    // Assert.
+    expect(rejectedApiFailureKind(await pending)).toBe(kind);
+  });
+
+  it("types no API refusal on a start rejected because its child could not spawn", async () => {
+    // Arrange.
+    const h = harness({ initTimeoutMs: AMPLE, liveSignalTimeoutMs: AMPLE, holdLiveSignal: true });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+
+    // Act.
+    first.spec.onChildExit?.({ code: null, signal: null, spawnErrno: "ENOENT" });
+    first.query.emit(hookResponse({ outcome: "success", output: "" }));
+    first.query.fail(new Error("Failed to spawn Claude Code process: spawn claude ENOENT"));
+
+    // Assert.
+    expect(rejectedApiFailureKind(await pending)).toBe("none");
+  });
+
+  it.each([
     ["ENOENT", "rejected"],
     ["EACCES", "rejected"],
     ["EAGAIN", "retryable"],
@@ -10441,6 +10485,44 @@ describe("the cold gate's COMPACT remediation", () => {
 
       // Assert.
       expect(retryLabel(response)).toBe(retry);
+    });
+
+    it("types the API refusal of a summarizer whose credential was rejected", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index === 0) query.emit(erroredSuccess("Failed to authenticate: OAuth session expired and could not be refreshed"));
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(rejectedApiFailureKind(response)).toBe("authenticationFailed");
+    });
+
+    it("types no API refusal on a summary that came back empty", async () => {
+      // Arrange.
+      const h = harness({
+        nowMs: COLD_NOW,
+        onQueryCreated: (query, _spec, index) => {
+          if (index !== 0) return;
+          query.emit({
+            ...(resultMessage("99999999-9999-4999-8999-999999999991") as unknown as Record<string, unknown>),
+            result: "",
+          } as never);
+        },
+      });
+      writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+      // Act.
+      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+      // Assert.
+      expect(rejectedApiFailureKind(response)).toBe("none");
     });
 
     it("labels a result that summarized nothing rejected", async () => {

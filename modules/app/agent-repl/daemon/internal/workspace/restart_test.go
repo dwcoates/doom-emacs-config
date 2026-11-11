@@ -784,3 +784,73 @@ func TestARestartWhenIdleTheRegistryRefusesIsLogged(t *testing.T) {
 		t.Fatalf("records = %+v, want the refusal at ERROR", f.log.logger.Records())
 	}
 }
+
+// ---- a completed sign-in retries a start rejected for the credential ----
+
+func TestASignInRetriesTheRejectedStartThroughARestart(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.fleet.signInRetries = true
+
+	// Act.
+	f.verbs.OnSignedIn("w1")
+	f.verbs.(*verbs).signInRestarts.Wait()
+
+	// Assert.
+	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("starts = %v, want w1's session started by the retry", f.fleet.started)
+	}
+}
+
+func TestASignInWithNothingToRetryRestartsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+
+	// Act.
+	f.verbs.OnSignedIn("w1")
+	f.verbs.(*verbs).signInRestarts.Wait()
+
+	// Assert.
+	if len(f.fleet.signedIn) != 1 || len(f.fleet.started) != 0 {
+		t.Fatalf("asked %v, started %v, want the fleet asked once and nothing started", f.fleet.signedIn, f.fleet.started)
+	}
+}
+
+func TestASignInRetryThatFailsIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.fleet.signInRetries = true
+	f.fleet.startErr = errFake
+
+	// Act.
+	f.verbs.OnSignedIn("w1")
+	f.verbs.(*verbs).signInRestarts.Wait()
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Message == "the start retried after a sign-in failed" {
+			return
+		}
+	}
+	t.Fatalf("no ERROR record for the failed retry: %v", f.log.logger.Records())
+}
+
+func TestASignInForAnUnknownWorkspaceAsksTheFleetNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	f.verbs.OnSignedIn("nope")
+	f.verbs.(*verbs).signInRestarts.Wait()
+
+	// Assert.
+	if len(f.fleet.signedIn) != 0 {
+		t.Fatalf("asked %v, want the fleet not asked about an unregistered workspace", f.fleet.signedIn)
+	}
+}

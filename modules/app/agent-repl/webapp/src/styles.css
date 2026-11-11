@@ -720,7 +720,7 @@
    They are drawn here to the native bezel's measured geometry and colors
    (test/webkit/control.webkit.test.ts holds the geometry to a real button's):
    the same box, a rounded fill, a hairline ring and a soft drop. */
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, .footer-vendor-start-actions ar-button, .cold-gate-sign-in-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
   min-height: 15px;
   padding: 1px 8px 2px 8px;
   border: 1px solid transparent;
@@ -731,15 +731,15 @@
   background-color: #ffffff;
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 -0.5px 0 rgba(0, 0, 0, 0.18);
 }
-:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+:where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, .footer-vendor-start-actions ar-button, .cold-gate-sign-in-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.08), inset 0 -0.5px 0 rgba(0, 0, 0, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, .footer-vendor-start-actions ar-button, .cold-gate-sign-in-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button) {
     background-color: #545453;
     box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
   }
-  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
+  :where(.perm-actions ar-button, .outcome-marker-actions ar-button, .response-cut-short-actions ar-button, .footer-vendor-start-actions ar-button, .cold-gate-sign-in-actions ar-button, ar-button.composer-send, ar-button.command-refused-support, ar-button.merge-workspace-switch-button)[aria-disabled="true"] {
     background-color: #393938;
   }
 }
@@ -5652,6 +5652,18 @@ html[data-page-unshown] {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+/* THE SIGN-IN NOTICE: the vendor rejected the account's credential, so the
+   gate's last answer could not bring the session back. The vendor's sentence,
+   then the sign-in action, on one wrapping line above the choices. */
+.cold-gate-sign-in {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: var(--fg);
+}
+.cold-gate-sign-in-actions { font-size: 0.75rem; }
 /* The figure is the one emphasized word in the sentence: bold, and colored
    inline on the cold-gate gradient (owner, 2026-10-06). */
 .cold-gate-tokens { font-weight: 700; }
@@ -7096,6 +7108,8 @@ bubble-body.bubble-body { display: block; }
    around them stays the cell's own muted register. */
 .footer-activity { color: var(--muted); }
 .footer-activity-age { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The vendor-start line's sign-in action, after the sentence that asks for it. */
+.footer-vendor-start-actions { margin-left: 0.4rem; font-size: 0.75rem; }
 /* THE HOVERED RESPONSE'S USAGE (src/footer/response-usage.ts): its figure in
    its own heat, in the figures the line's age wears. */
 .footer-response-tokens { font-variant-numeric: tabular-nums; }

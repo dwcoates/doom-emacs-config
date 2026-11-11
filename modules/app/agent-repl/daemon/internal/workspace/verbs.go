@@ -90,6 +90,9 @@ type verbs struct {
 	// delivered (createfailed.go), so whoever must know they are done waits
 	// for them rather than for a record to appear.
 	createFailureReports sync.WaitGroup
+	// signInRestarts counts the restarts a completed sign-in started
+	// (OnSignedIn) that have not yet finished.
+	signInRestarts sync.WaitGroup
 	// threadOpens counts the boot's thread opens still running
 	// (OpenThreads).
 	threadOpens sync.WaitGroup

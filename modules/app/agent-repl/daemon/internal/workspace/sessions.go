@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/restarttiming"
@@ -818,6 +819,11 @@ type coldGate struct {
 	// compact-and-resume button, which publishColdGateRow adds from the held
 	// count each time the row is published.
 	standing *frontendv1.FeedColdGateStanding
+	// signIn is the vendor's refusal of the credential that failed this
+	// gate's last answer, "" when none: while set, the row carries the
+	// sign-in notice (frontend.v1.FeedColdGateStanding.sign_in). A gate
+	// raised afresh starts without it.
+	signIn string
 }
 
 // ColdGate answers the menu a STANDING cold gate served, which is what the
@@ -928,6 +934,27 @@ func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	// still held, is stood down, unless the workspace is in remote control and
 	// it holds the gate's bridge again (parkedbridge.go).
 	f.Detach(func(ctx context.Context) { f.settleGateShim(ctx, ws) })
+	return true
+}
+
+// OfferColdGateSignIn puts the sign-in notice on the STANDING gate: its last
+// answer was refused because the vendor rejected the account's credential,
+// whose words REFUSAL carries. It answers false when no gate stands (a gate
+// an answer has taken is not standing). The row is republished with it.
+func (f *Fleet) OfferColdGateSignIn(ws ids.WorkspaceID, refusal string) bool {
+	f.mu.Lock()
+	held, ok := f.coldGates[ws]
+	ok = ok && !held.answering
+	if ok {
+		held.signIn = refusal
+		f.coldGates[ws] = held
+	}
+	f.mu.Unlock()
+	if !ok {
+		return false
+	}
+	f.logTransition(ws, "cold_gate_sign_in", false, true, dlog.Context{"refusal": refusal})
+	f.publishColdGateRow(ws)
 	return true
 }
 
@@ -2886,7 +2913,14 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 				}
 				return nil, labeled(refusal, true, true, failure.GetDetail())
 			case *shimv1.StartSessionVendorStartFailed_Rejected:
-				return nil, labeled(refusal, false, true, failure.GetDetail())
+				// A CREDENTIAL THE VENDOR REJECTED is cured by signing in
+				// again: the ONE predicate a turn's account failure is read
+				// by decides it for a start too.
+				label := labeled(refusal, false, true, failure.GetDetail()).(*startLabel)
+				if refused := retry.Rejected.GetApiFailure(); ladder.ApiFailureCuredBySignIn(refused) {
+					label.signIn = refused.GetMessage()
+				}
+				return nil, label
 			default:
 				log.Error(opBringUp, "the shim's vendor_start_failed states neither retryable nor rejected; treated as a rejection", dlog.Context{
 					"detail":              failure.GetDetail(),
@@ -3006,6 +3040,12 @@ func (f *Fleet) coldGateCard(ws ids.WorkspaceID) (*frontendv1.FeedId, *frontendv
 	standing := proto.Clone(gate.standing).(*frontendv1.FeedColdGateStanding)
 	if held > 0 && standing.GetCompact() != nil {
 		standing.CompactAndResume = &frontendv1.FeedColdGateCompactAndResume{HeldPrompts: uint32(held)}
+	}
+	if gate.signIn != "" {
+		standing.SignIn = &frontendv1.FeedColdGateSignIn{
+			Cause:  &frontendv1.FeedColdGateSignInCause{Text: gate.signIn},
+			Action: &frontendv1.FeedOutcomeSignIn{},
+		}
 	}
 	return coldGateRowID(ws, gate.served.VendorSessionID),
 		&frontendv1.FeedColdGate{State: &frontendv1.FeedColdGate_Standing{Standing: standing}}, true

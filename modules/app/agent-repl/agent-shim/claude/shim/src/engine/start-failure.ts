@@ -8,7 +8,8 @@
  * asking again can help. The catch that answers `vendor_start_failed` only
  * READS the label; it never guesses one.
  */
-import { classifyVendorApiFailure, type VendorApiFailureKind } from "../convert/terminals.js";
+import type { conversationv1 } from "../proto.js";
+import { classifyVendorApiFailure, openingApiFailure, type VendorApiFailureKind } from "../convert/terminals.js";
 import { bindLog } from "../log.js";
 import { classifyAgentFailure } from "./network-resume.js";
 import type { VendorStartCause, VendorStartRetry } from "../service/failures.js";
@@ -34,13 +35,27 @@ export class VendorStartError extends Error {
    * fail: silence, an early end and a transient answer are the vendor's.
    */
   readonly cause: VendorStartCause;
+  /**
+   * The vendor API's own refusal, when a REJECTED start was one: the
+   * daemon reads its kind to decide whether a sign-in cures the start
+   * (`StartSessionVendorStartRejected.api_failure`). Undefined for every
+   * failure that was not an API answer.
+   */
+  readonly apiFailure: conversationv1.ApiRequestFailed | undefined;
 
-  constructor(message: string, retry: VendorStartRetry, bound?: VendorStartBound, cause: VendorStartCause = "vendor") {
+  constructor(
+    message: string,
+    retry: VendorStartRetry,
+    bound?: VendorStartBound,
+    cause: VendorStartCause = "vendor",
+    apiFailure?: conversationv1.ApiRequestFailed,
+  ) {
     super(message);
     this.name = "VendorStartError";
     this.retry = retry;
     this.bound = bound;
     this.cause = cause;
+    this.apiFailure = apiFailure;
   }
 }
 
@@ -67,6 +82,11 @@ export interface OpeningErrorVerdict {
   readonly kind: VendorApiFailureKind;
   readonly retry: VendorStartRetry;
   readonly cause: VendorStartCause;
+  /**
+   * The API's refusal, typed, on a REJECTED verdict only: a retryable answer
+   * is retried by the daemon and offers nothing for the user to cure.
+   */
+  readonly apiFailure: conversationv1.ApiRequestFailed | undefined;
 }
 
 /**
@@ -102,6 +122,15 @@ const TRANSIENT_WORDS =
  * refused resume lands.
  */
 export function openingErrorVerdict(status: number | undefined, text: string): OpeningErrorVerdict {
+  const read = labelOpeningError(status, text);
+  return {
+    ...read,
+    apiFailure: read.retry === "rejected" ? openingApiFailure(status, text) : undefined,
+  };
+}
+
+/** {@link openingErrorVerdict}'s label, before the refusal is typed. */
+function labelOpeningError(status: number | undefined, text: string): Omit<OpeningErrorVerdict, "apiFailure"> {
   const kind = classifyVendorApiFailure(status, undefined, text);
   if (status !== undefined && transientStatus(status)) return { kind, retry: "retryable", cause: "vendor" };
   const said = text.toLowerCase();
@@ -126,6 +155,8 @@ export interface StartFailureLabel {
   readonly retry: VendorStartRetry;
   readonly bound: VendorStartBound | undefined;
   readonly cause: VendorStartCause;
+  /** The API's refusal the failed start carried, when it carried one. */
+  readonly apiFailure: conversationv1.ApiRequestFailed | undefined;
 }
 
 /**
@@ -137,11 +168,13 @@ export interface StartFailureLabel {
  * understood is how a deterministic fault becomes a retry storm.
  */
 export function startFailureLabel(err: unknown): StartFailureLabel {
-  if (err instanceof VendorStartError) return { retry: err.retry, bound: err.bound, cause: err.cause };
+  if (err instanceof VendorStartError) {
+    return { retry: err.retry, bound: err.bound, cause: err.cause, apiFailure: err.apiFailure };
+  }
   // warn: a defect because every path that fails a start labels its error, and this one did not
   LOGGER.warn(
     { cause: err instanceof Error ? err.message : String(err) },
     "a failed start reached the refusal with no retry label; answering it as rejected",
   );
-  return { retry: "rejected", bound: undefined, cause: "vendor" };
+  return { retry: "rejected", bound: undefined, cause: "vendor", apiFailure: undefined };
 }

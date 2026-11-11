@@ -332,7 +332,19 @@ message StartSessionVendorStartVendor {}
 // credential rejection, a missing model, a refused resume, or a hook that
 // blocked the opening. The caller does not retry; the user must change
 // something and restart.
-message StartSessionVendorStartRejected {}
+message StartSessionVendorStartRejected {
+  // THE VENDOR API'S OWN REFUSAL, when the rejection was one: the opening, or
+  // the cold gate's compaction that gates it, ended on an API error result.
+  // Its kind is what tells the caller what the user must change -- an
+  // `authentication_failed` or `oauth_org_not_allowed` is cured by signing in
+  // again, so the caller offers the sign-in and retries the start once a
+  // sign-in for the session's account root completes; any other kind is not.
+  // UNSET when the rejection was not an API answer (a missing binary, a
+  // refused resume, a blocking hook, a query that could not be built), which
+  // no sign-in cures. The kind is the producer's reading of the API's status
+  // and words: an answer that stated no status is classed by its sentence.
+  optional conversation.v1.ApiRequestFailed api_failure = 1;
+}
 message StartSessionUnknownSession {}
 message StartSessionAlreadyStarted {}
 message StartSessionConversationOwned {}

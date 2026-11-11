@@ -696,6 +696,50 @@ func TestVendorStartLineComposesEachSentence(t *testing.T) {
 	}
 }
 
+func TestARejectionASignInCuresAsksForTheSignIn(t *testing.T) {
+	// Arrange
+	f := vendorEvidence(KindVendorStartRejected)
+	f.Evidence[EvidenceSignInCures] = "true"
+
+	// Act
+	got := VendorStartLine(f)
+
+	// Assert
+	if want := "Claude SDK refused to start: supportedModels did not answer in 3s · sign in to retry"; got != want {
+		t.Fatalf("VendorStartLine = %q, want %q", got, want)
+	}
+}
+
+func TestSignInCuresOnlyARejectionThatSaysSo(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		signIn string
+		want   bool
+	}{
+		{"a rejection a sign-in cures", KindVendorStartRejected, "true", true},
+		{"a rejection with no such evidence", KindVendorStartRejected, "", false},
+		{"another vendor kind carrying the evidence", KindVendorStartFailed, "true", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := vendorEvidence(tt.kind)
+			if tt.signIn != "" {
+				f.Evidence[EvidenceSignInCures] = tt.signIn
+			}
+
+			// Act
+			got := SignInCures(f)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("SignInCures = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFaultLineDetailIsTheVendorStartLine(t *testing.T) {
 	// Arrange
 	f := vendorEvidence(KindVendorStartFailed)

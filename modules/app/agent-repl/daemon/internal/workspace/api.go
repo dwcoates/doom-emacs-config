@@ -464,6 +464,10 @@ type Verbs interface {
 	// the bounce is done. A workspace with no session is restarted by the
 	// bounce bringing one up.
 	Restart(ctx context.Context, ws ids.WorkspaceID) error
+	// OnSignedIn takes a completed sign-in for the workspace's account root
+	// (internal/signin): a start the vendor rejected for the credential is
+	// retried through Restart, off the caller's goroutine.
+	OnSignedIn(ws ids.WorkspaceID)
 	// RestartWhenIdle restarts the workspace once it is idle, interrupting
 	// nothing: at once (answering the outcome) when nothing is in flight,
 	// otherwise SCHEDULED with the bounce registry, which runs it when the
@@ -1101,6 +1105,10 @@ type Cards interface {
 	// ReraiseColdGate stands the gate for VENDORSESSIONID again from the cold
 	// facts it was first raised with, answering false when those are gone.
 	ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
+	// OfferColdGateSignIn puts the sign-in notice on the standing gate, whose
+	// last answer the vendor refused for the account's credential (REFUSAL is
+	// its words), answering false when no gate stands.
+	OfferColdGateSignIn(ws ids.WorkspaceID, refusal string) bool
 	// PermissionModes answers EXACTLY the switchable set the topbar's picker
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.
@@ -1211,6 +1219,11 @@ type Sessions interface {
 	// reports whether a run was ended. A restart calls it first so its own
 	// bring-up begins a fresh run with the whole window.
 	CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool
+	// SignedIn takes a completed sign-in for the workspace's account root and
+	// answers whether a start the vendor rejected for the credential must now
+	// be retried (Fleet.SignedIn). A standing cold gate is never re-spent: its
+	// notice leaves and it answers false.
+	SignedIn(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool
 }
 
 // New builds the verbs. Every collaborator a verb reaches is required: a verb

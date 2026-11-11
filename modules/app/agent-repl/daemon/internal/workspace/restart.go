@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimlife"
@@ -351,4 +352,33 @@ func startNotAgentReplFault(err error) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// OnSignedIn takes a completed sign-in for the workspace's account root: when
+// the vendor rejected the workspace's start for the credential the sign-in
+// renewed and no cold gate stands, the start is RETRIED through Restart, off
+// the caller's goroutine (a login watch must not wait on a bring-up). The
+// retry's own failure is recorded where the restart records it, and once more
+// here with the cause.
+//
+// A WORKSPACE THIS DAEMON DOES NOT SERVE is not acted on: the daemon that
+// serves it has its own sign-in fan-out. The refusal is recorded where
+// `owned` raises it.
+func (v *verbs) OnSignedIn(ws ids.WorkspaceID) {
+	_, log, err := v.owned(context.Background(), "SignedIn", ws)
+	if err != nil {
+		return
+	}
+	if !v.deps.Sessions.SignedIn(context.Background(), log, ws) {
+		return
+	}
+	v.signInRestarts.Add(1)
+	inflight.Go(func() {
+		defer v.signInRestarts.Done()
+		if err := v.Restart(context.Background(), ws); err != nil {
+			log.Error(opRestart, "the start retried after a sign-in failed", dlog.Context{"cause": err.Error()})
+			return
+		}
+		log.Info(opRestart, "the start retried after a sign-in brought the session up", nil)
+	})
 }

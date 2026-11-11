@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
@@ -755,5 +756,154 @@ func TestAReconnectLeavesTheVendorsOwnBackoffAlone(t *testing.T) {
 	}
 	if len(f.retryWaits) != 1 {
 		t.Fatalf("waits = %v, want the one backoff", f.retryWaits)
+	}
+}
+
+// ---- a start the vendor rejected for the credential, and the sign-in that cures it ----
+
+// rejectedFor is a vendor-start rejection carrying the API's typed refusal.
+func rejectedFor(refused *conversationv1.ApiRequestFailed) *shimv1.StartSessionVendorStartFailed {
+	return &shimv1.StartSessionVendorStartFailed{
+		Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{ApiFailure: refused}}}
+}
+
+// credentialRejected is the API's refusal of an expired OAuth session.
+func credentialRejected() *conversationv1.ApiRequestFailed {
+	return &conversationv1.ApiRequestFailed{
+		Message: "Failed to authenticate: OAuth session expired and could not be refreshed",
+		Kind:    &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
+	}
+}
+
+// permissionRefused is the API's refusal of a credential that lacks a scope,
+// which no sign-in cures.
+func permissionRefused() *conversationv1.ApiRequestFailed {
+	return &conversationv1.ApiRequestFailed{
+		Message: "forbidden",
+		Kind:    &conversationv1.ApiRequestFailed_PermissionDenied{PermissionDenied: &conversationv1.ApiPermissionDenied{}},
+	}
+}
+
+func TestARejectionTheSignInCuresIsRecordedOnItsFault(t *testing.T) {
+	tests := []struct {
+		name  string
+		label *shimv1.StartSessionVendorStartFailed
+		want  string
+	}{
+		{"a rejected credential", rejectedFor(credentialRejected()), "true"},
+		{"a credential lacking permission", rejectedFor(permissionRefused()), ""},
+		{"a rejection that was no API answer", rejectedVendorStart(), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.client.response = vendorRefusal(tc.label, "the vendor refused")
+
+			// Act.
+			_ = f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if len(f.db.dbFaults) != 1 || f.db.dbFaults[0].Evidence[health.EvidenceSignInCures] != tc.want {
+				t.Fatalf("faults = %+v, want one rejection whose sign_in_cures is %q", f.db.dbFaults, tc.want)
+			}
+		})
+	}
+}
+
+func TestASignInRetriesAStartRejectedForTheCredential(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = vendorRefusal(rejectedFor(credentialRejected()), "the vendor refused")
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Act.
+	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if !retry || len(f.db.dbFaults) != 1 {
+		t.Fatalf("SignedIn = %v with faults %+v, want a retry and the rejection left for the started session to retire", retry, f.db.dbFaults)
+	}
+}
+
+func TestASignInRetriesNoStartRejectedForAnotherCause(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = vendorRefusal(rejectedVendorStart(), "No conversation found")
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Act.
+	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if retry || len(f.db.dbFaults) != 1 {
+		t.Fatalf("SignedIn = %v with faults %+v, want no retry and the rejection standing", retry, f.db.dbFaults)
+	}
+}
+
+func TestASignInWithNothingRejectedRetriesNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if retry {
+		t.Fatal("SignedIn = true, want false with no rejection standing")
+	}
+}
+
+func TestASignInUnderAStandingGateClosesTheRejectionAndRetriesNothing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = vendorRefusal(rejectedFor(credentialRejected()), "the vendor refused")
+	_ = f.fleet.Start(context.Background(), ws.ID)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+
+	// Act.
+	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if retry || openKinds(f)[health.KindVendorStartRejected] != 0 {
+		t.Fatalf("SignedIn = %v with open faults %v, want no retry and the rejection closed", retry, openKinds(f))
+	}
+}
+
+func TestASignInUnderAStandingGateLeavesItsNotice(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.OfferColdGateSignIn(ws.ID, "Failed to authenticate")
+
+	// Act.
+	_ = f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if got := lastGateStanding(t, f).GetSignIn(); got != nil {
+		t.Fatalf("sign_in = %v, want the notice gone once signed in", got)
+	}
+}
+
+func TestAStartedSessionForgetsTheRejectionsSignIn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{vendorRefusal(rejectedFor(credentialRejected()), "the vendor refused")}
+	_ = f.fleet.Start(context.Background(), ws.ID)
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Act.
+	retry := f.fleet.SignedIn(context.Background(), dlog.NewTestLogger(), ws.ID)
+
+	// Assert.
+	if retry {
+		t.Fatal("SignedIn = true, want false once a session started")
 	}
 }

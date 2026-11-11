@@ -162,6 +162,29 @@ function apiRequestFailed(
 }
 
 /**
+ * The vendor API's refusal of a session's OPENING (or of the cold gate's
+ * summarizer that gates it), typed as a turn's failure is.
+ *
+ * AN OPENING'S ERROR RESULT STATES NO ERROR CLASS, only a status (often none)
+ * and a sentence. The class is therefore read off the sentence by
+ * {@link classifyVendorApiFailure}, the same reading the
+ * `shim.vendor.auth_rejected` diagnostic rests on: "Failed to authenticate:
+ * OAuth session expired" is an `authentication_failed`. A stated status still
+ * outranks the sentence (a 403 stays `permission_denied`), exactly as for a
+ * turn, because {@link apiFailureKind} reads the status before the class.
+ */
+export function openingApiFailure(httpStatus: number | undefined, text: string): conversationv1.ApiRequestFailed {
+  const read = classifyVendorApiFailure(httpStatus, undefined, text);
+  const errorClass =
+    read === "shim.vendor.auth_rejected"
+      ? "authentication_failed"
+      : read === "shim.vendor.model_missing"
+        ? "model_not_found"
+        : undefined;
+  return apiRequestFailed(text, httpStatus, errorClass === undefined ? {} : { errorClass }, text);
+}
+
+/**
  * Which arm of the taxonomy this failure is.
  *
  * THREE FACTS, IN THE ORDER OF WHAT EACH CAN SETTLE.

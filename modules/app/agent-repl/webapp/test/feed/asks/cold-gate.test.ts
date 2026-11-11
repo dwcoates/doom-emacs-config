@@ -46,6 +46,7 @@ import {
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 import { installGateDock } from "../../../src/feed/gate-dock.js";
+import { LOGIN_REQUESTED_EVENT, type LoginRequestedDetail } from "../../../src/login/request.js";
 import { coldGatePercentColor } from "../../../src/pressure-color.js";
 import { shellElements } from "../../../src/shell.js";
 import { shellHTML } from "../../shell-html.js";
@@ -74,6 +75,8 @@ function standing(
     noCompact?: boolean;
     /** The served count of prompts held at the gate; absent serves no compact-and-resume. */
     heldPrompts?: number;
+    /** The vendor's refusal of the credential; absent serves no sign-in notice. */
+    signIn?: string;
   } = {},
 ): InitState {
   return {
@@ -95,6 +98,7 @@ function standing(
             },
           }),
       ...(opts.heldPrompts === undefined ? {} : { compactAndResume: { heldPrompts: opts.heldPrompts } }),
+      ...(opts.signIn === undefined ? {} : { signIn: { cause: { text: opts.signIn }, action: {} } }),
     },
   };
 }
@@ -1112,6 +1116,58 @@ describe("a resolved trace this build cannot read", () => {
     expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(
       "malformed view at FeedColdGate.resolved.choice: arm 'rehydrate' is not one this build can draw",
     );
+  });
+});
+
+describe("the sign-in notice", () => {
+  const REFUSAL = "Failed to authenticate: OAuth session expired and could not be refreshed";
+
+  it("is not drawn while the daemon serves none", () => {
+    // Arrange, Act
+    const el = drawFeedColdGate(gate(standing()), askHarness().rc);
+    // Assert
+    expect(el.querySelector(".cold-gate-sign-in")).toBeNull();
+  });
+
+  it("draws the vendor's refusal verbatim", () => {
+    // Arrange, Act
+    const el = drawFeedColdGate(gate(standing({ signIn: REFUSAL })), askHarness().rc);
+    // Assert
+    expect(el.querySelector(".cold-gate-sign-in-cause")?.textContent).toBe(REFUSAL);
+  });
+
+  it("stands above the choices", () => {
+    // Arrange, Act
+    const el = drawFeedColdGate(gate(standing({ signIn: REFUSAL })), askHarness().rc);
+    // Assert
+    const notice = el.querySelector(".cold-gate-sign-in") as HTMLElement;
+    const actions = el.querySelector(".cold-gate-actions") as HTMLElement;
+    expect(notice.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("asks the page's login overlay to open on sign in", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing({ signIn: REFUSAL })), askHarness().rc);
+    const asked: HTMLElement[] = [];
+    const onRequest = (event: Event): void => {
+      event.preventDefault();
+      asked.push((event as CustomEvent<LoginRequestedDetail>).detail.control);
+    };
+    document.addEventListener(LOGIN_REQUESTED_EVENT, onRequest);
+    const button = el.querySelector('.cold-gate-sign-in [data-action="sign-in"]') as HTMLElement;
+    // Act
+    button.click();
+    document.removeEventListener(LOGIN_REQUESTED_EVENT, onRequest);
+    // Assert
+    expect(asked).toEqual([button]);
+  });
+
+  it("refuses a notice served with no action as a malformed view", () => {
+    // Arrange
+    const u = gate(standing({ signIn: REFUSAL }));
+    (u.state.value as { signIn: { action?: unknown } }).signIn.action = undefined;
+    // Act / Assert
+    expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(MalformedView);
   });
 });
 

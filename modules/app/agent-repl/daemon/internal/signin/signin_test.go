@@ -23,6 +23,18 @@ func (r *recorder) OnSignedIn(ws ids.WorkspaceID) error {
 	return r.err
 }
 
+// starts records every workspace whose rejected start it was asked to retry,
+// answering err.
+type starts struct {
+	told []ids.WorkspaceID
+	err  error
+}
+
+func (s *starts) OnSignedIn(ws ids.WorkspaceID) error {
+	s.told = append(s.told, ws)
+	return s.err
+}
+
 // surface adapts a recorder to the footer's and roster's error-free half.
 type surface struct{ r *recorder }
 
@@ -38,15 +50,21 @@ func rootByPrefix(dir string) string {
 
 func newFanout(t *testing.T, list func(context.Context) ([]wsm.Workspace, error), feed *recorder) (*Fanout, *recorder, *recorder, *dlog.TestLogger) {
 	t.Helper()
+	f, footer, roster, _, log := newFanoutWithStarts(t, list, feed, &starts{})
+	return f, footer, roster, log
+}
+
+func newFanoutWithStarts(t *testing.T, list func(context.Context) ([]wsm.Workspace, error), feed *recorder, st *starts) (*Fanout, *recorder, *recorder, *starts, *dlog.TestLogger) {
+	t.Helper()
 	footer, roster, log := &recorder{}, &recorder{}, dlog.NewTestLogger()
 	f, err := New(Deps{
 		Workspaces: list, ConfigDirFor: rootByPrefix,
-		Feed: feed, Footer: surface{footer}, Roster: surface{roster}, Log: log,
+		Feed: feed, Footer: surface{footer}, Roster: surface{roster}, Starts: st, Log: log,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return f, footer, roster, log
+	return f, footer, roster, st, log
 }
 
 func TestSignedInTellsEveryWorkspaceOnTheRootAndNoOther(t *testing.T) {
@@ -108,7 +126,7 @@ func TestSignedInWithAnUnreadableWorkspaceListTellsNothingAndLogsTheCause(t *tes
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	list := func(context.Context) ([]wsm.Workspace, error) { return nil, nil }
 	full := func() Deps {
-		return Deps{Workspaces: list, ConfigDirFor: rootByPrefix, Feed: &recorder{}, Footer: surface{&recorder{}}, Roster: surface{&recorder{}}, Log: dlog.NewTestLogger()}
+		return Deps{Workspaces: list, ConfigDirFor: rootByPrefix, Feed: &recorder{}, Footer: surface{&recorder{}}, Roster: surface{&recorder{}}, Starts: &starts{}, Log: dlog.NewTestLogger()}
 	}
 	cases := []struct {
 		name   string
@@ -120,6 +138,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{"feed", func(d *Deps) { d.Feed = nil }, "feed, the footer and the roster"},
 		{"footer", func(d *Deps) { d.Footer = nil }, "feed, the footer and the roster"},
 		{"roster", func(d *Deps) { d.Roster = nil }, "feed, the footer and the roster"},
+		{"starts", func(d *Deps) { d.Starts = nil }, "bring-up"},
 		{"logger", func(d *Deps) { d.Log = nil }, "logger"},
 	}
 	for _, tc := range cases {
@@ -137,4 +156,37 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSignedInAsksEveryWorkspaceOnTheRootToRetryItsRejectedStart(t *testing.T) {
+	// Arrange
+	list := func(context.Context) ([]wsm.Workspace, error) {
+		return []wsm.Workspace{{ID: "w1", Dir: "/a/one"}, {ID: "w2", Dir: "/b/two"}}, nil
+	}
+	f, _, _, st, _ := newFanoutWithStarts(t, list, &recorder{}, &starts{})
+
+	// Act
+	f.SignedIn(context.Background(), "A")
+
+	// Assert
+	if !slices.Equal(st.told, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("starts told %v, want w1 alone", st.told)
+	}
+}
+
+func TestSignedInRecordsARetryThatCouldNotBeAskedFor(t *testing.T) {
+	// Arrange
+	list := func(context.Context) ([]wsm.Workspace, error) { return []wsm.Workspace{{ID: "w1", Dir: "/a/one"}}, nil }
+	f, _, _, _, log := newFanoutWithStarts(t, list, &recorder{}, &starts{err: errors.New("not wired")})
+
+	// Act
+	f.SignedIn(context.Background(), "A")
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == opSignedIn && r.Context["cause"] == "not wired" && r.Context["workspace"] == "w1" {
+			return
+		}
+	}
+	t.Fatalf("no ERROR record naming the workspace and the cause: %v", log.Records())
 }

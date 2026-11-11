@@ -845,6 +845,42 @@ func TestVerbsForwarderAnswerColdGateReachesTheBoundVerbs(t *testing.T) {
 	}
 }
 
+func TestVerbsForwarderSignInBeforeTheVerbsIsAnError(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+
+	// Act.
+	err := f.OnSignedIn("w1")
+
+	// Assert.
+	if err == nil || err.Error() != "agent-repld: a sign-in completed before the workspace verbs existed" {
+		t.Fatalf("err = %v, want the wiring defect named", err)
+	}
+}
+
+// signingVerbs is a workspace.Verbs whose only live method is the sign-in.
+type signingVerbs struct {
+	workspace.Verbs
+	told []ids.WorkspaceID
+}
+
+func (v *signingVerbs) OnSignedIn(ws ids.WorkspaceID) { v.told = append(v.told, ws) }
+
+func TestVerbsForwarderPassesASignInToTheVerbs(t *testing.T) {
+	// Arrange.
+	verbs := &signingVerbs{}
+	f := &verbsForwarder{}
+	f.bind(verbs)
+
+	// Act.
+	err := f.OnSignedIn("w1")
+
+	// Assert.
+	if err != nil || len(verbs.told) != 1 || verbs.told[0] != "w1" {
+		t.Fatalf("err = %v, told %v, want w1 told", err, verbs.told)
+	}
+}
+
 func TestVerbsForwarderAnswerColdGateBeforeTheVerbsIsAnError(t *testing.T) {
 	// Arrange.
 	f := &verbsForwarder{}

@@ -211,6 +211,10 @@ type Fault struct {
 	Detail string
 	// At is when the fault began standing.
 	At time.Time
+	// SignIn reports that a sign-in cures the fault (health.SignInCures): the
+	// vendor rejected the start for the account's credential. The vendor-start
+	// line then carries the sign-in action.
+	SignIn bool
 }
 
 // ColdGate is the standing cold-context gate, which owns the composer while it

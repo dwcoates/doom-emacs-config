@@ -3043,6 +3043,28 @@ message FeedColdGateStanding {
   // and compact keep them for the user to send. The daemon republishes the
   // row whenever the held count changes.
   optional FeedColdGateCompactAndResume compact_and_resume = 5;
+  // The sign-in notice: the gate's last answer was carried out and the vendor
+  // rejected the account's credential, so the gate stands again with the
+  // sign-in offered. SET only on a gate re-raised by such a refusal; it
+  // leaves once a sign-in completes for the workspace's account root, and
+  // the gate stays standing for the user to answer again. UNSET otherwise.
+  optional FeedColdGateSignIn sign_in = 6;
+}
+// The cold gate's sign-in notice: why the last answer did not bring the
+// session back, and the action that cures it.
+message FeedColdGateSignIn {
+  // The vendor's refusal, verbatim ("Failed to authenticate: OAuth session
+  // expired and could not be refreshed"). Never empty.
+  FeedColdGateSignInCause cause = 1;
+  // The sign-in action. ALWAYS SET: the notice exists only to offer it. Its
+  // click opens the page's one login flow, the same flow the topbar's
+  // account cell opens.
+  FeedOutcomeSignIn action = 2;
+}
+// The refusal's sentence element.
+message FeedColdGateSignInCause {
+  // The sentence, drawn verbatim.
+  string text = 1;
 }
 // The compact-and-resume button's props.
 message FeedColdGateCompactAndResume {
