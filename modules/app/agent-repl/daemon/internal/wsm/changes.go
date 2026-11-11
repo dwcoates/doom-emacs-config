@@ -14,11 +14,20 @@ import (
 // Changes implements DB.
 //
 // A FILE IS FOLLOWED IN THE KERNEL. In WAL mode every commit, this process's
-// or another daemon's, appends to the -wal file, and a checkpoint writes the
-// database file itself; the directory is followed too, so a -wal file made
-// again after the last connection removed it is watched once it exists
-// (kernelevent.Follow). A reader's own reads write neither, so a wait never
-// wakes itself.
+// or another daemon's, appends to the -wal file; the directory is followed
+// too, so a -wal file made again after the last connection removed it is
+// watched once it exists (kernelevent.Follow). A reader's own reads write
+// neither, so a wait never wakes itself.
+//
+// THE DATABASE FILE ITSELF IS NEVER FOLLOWED, nor its -shm file. Following
+// opens a descriptor on each path and closes it at every re-watch, and closing
+// ANY descriptor on a file drops every POSIX lock this process holds on it,
+// SQLite's own included, which SQLite never learns of. With its shared lock on
+// the database gone, another daemon's closing connection took itself for the
+// last one, checkpointed and deleted the -wal this daemon was still writing,
+// and the commits in it were lost: the 2026-11-11 corruption, a zeroed
+// sessions page. A checkpoint changes no committed content, so nothing a
+// follower reads is lost by not following the file.
 //
 // THE -wal WRITES COME BEFORE THE COMMIT CAN BE READ. SQLite appends a
 // commit's frames to the -wal file and only then publishes them in the
@@ -41,10 +50,11 @@ func (s *store) Changes(ctx context.Context) (<-chan error, func()) {
 }
 
 // CommitPaths answers what a commit to the WAL-mode database at PATH changes:
-// its directory, the database file, its -wal file, and the commit signal
-// written after every commit (CommitSignalPath).
+// its directory, its -wal file, and the commit signal written after every
+// commit (CommitSignalPath). Never the database or its -shm file, which SQLite
+// locks (Changes).
 func CommitPaths(path string) []string {
-	return []string{filepath.Dir(path), path, path + "-wal", CommitSignalPath(path)}
+	return []string{filepath.Dir(path), path + "-wal", CommitSignalPath(path)}
 }
 
 // CommitSignalPath is the file every committed write of the database at PATH

@@ -108,15 +108,15 @@ func TestChangesStopEndsTheReports(t *testing.T) {
 	}
 }
 
-func TestCommitPathsNameTheDirectoryTheFileItsLogAndTheCommitSignal(t *testing.T) {
+func TestCommitPathsNameTheDirectoryTheLogAndTheCommitSignalButNoLockedFile(t *testing.T) {
 	// Arrange
 	path := filepath.Join("/state", "wsm.db")
 
 	// Act
 	got := CommitPaths(path)
 
-	// Assert
-	want := []string{"/state", "/state/wsm.db", "/state/wsm.db-wal", "/state/wsm.db-commits"}
+	// Assert: never the database or its -shm, which SQLite holds POSIX locks on.
+	want := []string{"/state", "/state/wsm.db-wal", "/state/wsm.db-commits"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("CommitPaths = %v, want %v", got, want)
 	}
@@ -192,5 +192,33 @@ func TestAnUnwritableCommitSignalIsAnErrorAndTheCommitStands(t *testing.T) {
 	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSignalCommit})
 	if len(records) != 1 || records[0].Context["path"] != signal || records[0].Context["error"] == nil {
 		t.Fatalf("records = %+v, want one ERROR naming the signal and its cause", log.Records())
+	}
+}
+
+func TestFollowingCommitsKeepsTheHandlesSharedLockOnTheDatabase(t *testing.T) {
+	// Arrange: a file database followed, then a commit, whose report comes
+	// only after every followed path was closed and watched again.
+	s, _ := fileStore(t)
+	changes, stop := s.Changes(context.Background())
+	t.Cleanup(stop)
+	if err := s.SetMergedSectionFolded(context.Background(), true); err != nil {
+		t.Fatalf("SetMergedSectionFolded: %v", err)
+	}
+	select {
+	case err := <-changes:
+		if err != nil {
+			t.Fatalf("Changes = %v, want the commit", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Changes never reported the commit")
+	}
+
+	// Act: another process asks who holds SQLite's shared range.
+	held, err := sharedLockHolder(s.path)
+
+	// Assert: this handle still holds it, so no other connection can take
+	// itself for the last and delete the -wal under it.
+	if err != nil || held != os.Getpid() {
+		t.Fatalf("shared range held by pid %d (%v), want this process %d", held, err, os.Getpid())
 	}
 }
