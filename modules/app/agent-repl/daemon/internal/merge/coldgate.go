@@ -235,7 +235,7 @@ func (o *orchestrator) coldGateQueue(ctx context.Context, ws ids.WorkspaceID, ed
 	}
 	fields := dlog.Context{"workspace": string(ws), "edge": edge}
 	if _, refused := Refused(err); refused {
-		o.log(ctx, ws).Debug(opColdGate, "the workspace has no merge on any queue; its cold gate changes nothing there", fields)
+		o.log(ctx, ws).Debug(opColdGate, "the workspace has no merge on any queue; its gate's edge changes nothing there", fields)
 		return "", false
 	}
 	o.log(ctx, ws).Error(opColdGate, "could not read whether the workspace whose cold gate changed has a queued merge", withField(fields, "error", err.Error()))
@@ -253,11 +253,8 @@ func (o *orchestrator) OnHidden(ws ids.WorkspaceID) {
 // workspace is passing its gate without an answer. A workspace with no merge,
 // or whose merge is not at a cold gate, is left as it is.
 func (o *orchestrator) hiddenAtColdGate(ctx context.Context, ws ids.WorkspaceID) {
-	repo, err := o.queueOf(ctx, ws)
-	if err != nil {
-		if _, refused := Refused(err); !refused {
-			o.log(ctx, ws).Error(opColdGate, "could not read whether the hidden workspace has a queued merge", dlog.Context{"workspace": string(ws), "error": err.Error()})
-		}
+	repo, ok := o.coldGateQueue(ctx, ws, "hidden")
+	if !ok {
 		return
 	}
 	entry, err := o.entryOf(ctx, repo, ws)

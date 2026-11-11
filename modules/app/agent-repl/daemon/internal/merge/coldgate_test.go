@@ -5,9 +5,11 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -196,7 +198,7 @@ func TestAColdGateOnAWorkspaceWithNoMergeChangesNothing(t *testing.T) {
 	if got := queueOrderOf(t, h); len(got) != 0 {
 		t.Fatalf("queue = %v, want none", got)
 	}
-	if _, ok := coldGateRecord(h, "debug", "the workspace has no merge on any queue; its cold gate changes nothing there"); !ok {
+	if _, ok := coldGateRecord(h, "debug", "the workspace has no merge on any queue; its gate's edge changes nothing there"); !ok {
 		t.Fatal("the gate of a workspace with no merge was not recorded at DEBUG")
 	}
 }
@@ -516,5 +518,76 @@ func TestColdGateCausesRequeueOrRelease(t *testing.T) {
 				t.Fatalf("%s requeues %v releases %v, want %v and %v", tt.cause, requeues, releases, tt.requeues, tt.releases)
 			}
 		})
+	}
+}
+
+func TestEndAbandonedBubbleEndsAndClosesTheBubbleOfAMergePutBackInLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+	ledger, _ := h.o.leaseOf(theWorkspace)
+	head := headRowID(t, h, theWorkspace)
+	entry := entryIn(t, h, theWorkspace)
+
+	// Act
+	ended := h.o.endAbandonedBubble(context.Background(), theWorkspace, ledger, entry, CauseColdGate, "put back")
+
+	// Assert
+	if !ended || h.feed.lastAbandonedSummary() != "put back" {
+		t.Fatalf("ended %v with %q, want the bubble ended reading the summary", ended, h.feed.lastAbandonedSummary())
+	}
+	if folds := h.feed.foldsOf(theWorkspace); len(folds) != 1 || folds[0].row != head || !folds[0].folded {
+		t.Fatalf("folds = %+v, want the bubble closed once", folds)
+	}
+}
+
+func TestEndAbandonedBubbleLeavesTheBubbleOfAMergeGivenUpOpen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+	ledger, _ := h.o.leaseOf(theWorkspace)
+	entry := entryIn(t, h, theWorkspace)
+
+	// Act
+	ended := h.o.endAbandonedBubble(context.Background(), theWorkspace, ledger, entry, CauseWorkspaceClosed, "given up")
+
+	// Assert
+	if !ended {
+		t.Fatal("the bubble was not ended")
+	}
+	if folds := h.feed.foldsOf(theWorkspace); len(folds) != 0 {
+		t.Fatalf("folds = %+v, want a bubble given up under its workspace closing left open", folds)
+	}
+}
+
+func TestEndAbandonedBubbleOfAnEntryWithNoQueuedTimeIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+	ledger, _ := h.o.leaseOf(theWorkspace)
+	entry := entryIn(t, h, theWorkspace)
+	entry.EnqueuedAt = time.Time{}
+
+	// Act
+	ended := h.o.endAbandonedBubble(context.Background(), theWorkspace, ledger, entry, CauseColdGate, "put back")
+
+	// Assert
+	if ended {
+		t.Fatal("a bubble with no queued time was ended")
+	}
+	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.abandoned",
+		Message: "an abandoned merge's queue entry carries no queued time; its bubble is not ended"})
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["error"] == nil {
+		t.Fatalf("the defect was recorded as %+v, want an ERROR naming the workspace and the cause", rec)
+	}
+}
+
+func TestOnlyEndAbandonedBubbleDrawsAnAbandonedHeadForAMergeWithNoRun(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "}, headAbandoned)")
+
+	// Assert
+	if !slices.Equal(sites, []string{"terminal.go"}) {
+		t.Fatalf("an abandoned head is drawn at %v, want only endAbandonedBubble in terminal.go", sites)
 	}
 }

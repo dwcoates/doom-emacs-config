@@ -1229,25 +1229,8 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 	// the cause key is what makes them countable.
 	o.deps.Log.Global().Info(op, "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
-	if ledger != "" {
-		// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED, as every drawing
-		// of a merge still in line (headClockMS): it never ran, so the queued
-		// span is all it has. A queue entry with no queued time is a defect.
-		queued, err := enqueuedMS(entry)
-		if err != nil {
-			o.deps.Log.Global().Error(op, "an abandoned merge's queue entry carries no queued time; its bubble is not ended",
-				dlog.Context{"workspace": string(ws), "error": err.Error()})
-			return
-		}
-		label := o.abandonedLabel(ctx, ws, entry.Source)
-		o.publishHead(ws, ledger, label, queued,
-			&frontendv1.FeedMergeError{
-				EndedAtMs: o.nowMS(),
-				Reason: &frontendv1.FeedMergeError_Abandoned{
-					Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
-				},
-			}, headAbandoned)
-		o.closeReleasedBubble(ctx, ws, ledger, cause)
+	if ledger != "" && !o.endAbandonedBubble(ctx, ws, ledger, entry, cause, summary) {
+		return
 	}
 	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause}
 	if ledger != "" {
@@ -1261,6 +1244,34 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 	// footer leaves its merging state and the roster sheds every merge arm
 	// only once the bubble a reader is looking at has ended.
 	o.forget(ws)
+}
+
+// endAbandonedBubble ends the bubble LEDGER addresses for a merge with no run
+// in this process on the abandoned terminal reading SUMMARY, and closes it
+// when CAUSE releases or requeues it (closeReleasedBubble). It is the one
+// ending publishAbandonedWith and a merge put back in line at its cold gate
+// share, and answers false when the entry carries no queued time, which is a
+// defect recorded at ERROR: the bubble is not ended.
+func (o *orchestrator) endAbandonedBubble(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, entry wsm.MergeQueueEntry, cause AbandonCause, summary string) bool {
+	const op = "daemon.merge.abandoned"
+	// THE HEAD'S CLOCK RUNS FROM WHEN THE MERGE WAS QUEUED, as every drawing
+	// of a merge still in line (headClockMS): it never ran here, so the queued
+	// span is all it has. A queue entry with no queued time is a defect.
+	queued, err := enqueuedMS(entry)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "an abandoned merge's queue entry carries no queued time; its bubble is not ended",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return false
+	}
+	o.publishHead(ws, ledger, o.abandonedLabel(ctx, ws, entry.Source), queued,
+		&frontendv1.FeedMergeError{
+			EndedAtMs: o.nowMS(),
+			Reason: &frontendv1.FeedMergeError_Abandoned{
+				Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
+			},
+		}, headAbandoned)
+	o.closeReleasedBubble(ctx, ws, ledger, cause)
+	return true
 }
 
 // abandonedLabel is the head's branch line for a merge that never ran. The

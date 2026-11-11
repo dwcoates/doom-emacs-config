@@ -769,31 +769,12 @@ func (o *orchestrator) requeuePendingResume(ctx context.Context, ws ids.Workspac
 	o.ledgerOf[ws] = ledger
 	o.mu.Unlock()
 	log.Info(op, "put a merge a restart took back before it resumed back at its place in line: its lease and progress record go, its entry waits", withField(fields, "ledger", string(ledger)))
-	o.endRequeuedBubble(ctx, ws, lease, entry, o.abandonedSentence(ws, cause, true), cause)
+	o.endAbandonedBubble(ctx, ws, lease, entry, cause, o.abandonedSentence(ws, cause, true))
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
 	o.kick(repo)
 	return nil
-}
-
-// endRequeuedBubble ends the bubble LEDGER addressed for a merge put back in
-// line under CAUSE, reading SUMMARY, and closes it: the merge goes on under a
-// new bubble, so nothing is handed back and its surfaces stay.
-func (o *orchestrator) endRequeuedBubble(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, entry wsm.MergeQueueEntry, summary string, cause AbandonCause) {
-	const op = "daemon.merge.abandoned"
-	queued, err := enqueuedMS(entry)
-	if err != nil {
-		o.log(ctx, ws).Error(op, "a merge put back in line carries no queued time; its old bubble is not ended",
-			dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return
-	}
-	o.publishHead(ws, ledger, o.abandonedLabel(ctx, ws, entry.Source), queued,
-		&frontendv1.FeedMergeError{
-			EndedAtMs: o.nowMS(),
-			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
-		}, headAbandoned)
-	o.closeReleasedBubble(ctx, ws, ledger, cause)
 }
 
 // OnWorkspaceClosed abandons a workspace's WAITING merge when the workspace
