@@ -53,13 +53,13 @@ import {
 } from "../api-usage.js";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
-import { classifyAgentFailure } from "../engine/network-resume.js";
 import { sdkRecordTimestampMs } from "./place.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, settledAt, type ActivityEnvelope, type FrameOrigin } from "./entries.js";
 import { bookFor, spawningCallOf, type FoldContext } from "./fold-context.js";
 import { blockActivityId, refusalActivityId } from "./ids.js";
+import { noticeSubjectOf, synthesizedNotice } from "./notice-subject.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
 
@@ -593,30 +593,6 @@ function noticeText(message: Extract<SdkMessage, { type: "assistant" }>): string
     .join("\n");
 }
 
-/** A status a vendor notice states that waiting cures: a timeout, a rate limit or a 5xx. */
-const TRANSIENT_NOTICE_STATUS = /\bAPI Error:?\s*(408|429|5\d\d)\b/i;
-
-/** The vendor's words for trouble waiting cures that state no status. */
-const TRANSIENT_NOTICE_WORDS =
-  /overloaded|timed out|timeout|connection (error|closed|dropped)|unable to connect|(can'?t|cannot|could not) reach|socket hang up/i;
-
-/**
- * Whether a synthesized notice reports trouble that waiting cures: the vendor
- * classed it a server error, it states a transient status, its words name an
- * overload or a timeout, or the session's own reachability reading calls it a
- * dropped connection. The same reading the sidecar gives the transcript's copy
- * of the notice (assistant.go transientNoticeRecord).
- */
-function transientNotice(errorClass: unknown, text: string): boolean {
-  const declared = typeof errorClass === "string" ? errorClass : undefined;
-  return (
-    declared === "server_error" ||
-    TRANSIENT_NOTICE_STATUS.test(text) ||
-    TRANSIENT_NOTICE_WORDS.test(text) ||
-    classifyAgentFailure({ ...(declared === undefined ? {} : { errorClass: declared }), text }).network
-  );
-}
-
 /**
  * Whether the vendor MARKED this prose as its own synthesized notice.
  *
@@ -635,28 +611,11 @@ function synthesizedSubject(
   // not declare it; observed shapes beat declared types, so both are read.
   const observedMarker = record.isApiErrorMessage === true;
   if (typeof declaredError !== "string" && !observedMarker) return undefined;
-  const subject: conversationv1.AgentResponseSynthesizedNotice["subject"] =
-    declaredError === "rate_limit"
-      ? {
-          case: "usageLimit",
-          value: create(conversationv1.AgentNoticeUsageLimitSchema, {}),
-        }
-      : declaredError === "billing_error"
-        ? { case: "usageLimit", value: create(conversationv1.AgentNoticeUsageLimitSchema, {}) }
-        : transientNotice(declaredError, noticeText(message))
-          ? {
-              case: "vendorTransient",
-              value: create(conversationv1.AgentNoticeVendorTransientSchema, {}),
-            }
-          : {
-              case: "unclassified",
-              value: create(conversationv1.AgentNoticeUnclassifiedSchema, {}),
-            };
-  return create(conversationv1.AgentResponseSynthesizedNoticeSchema, {
-    subject,
-    // The vendor attaches no HTTP status to an assistant record — the status
-    // rides the RESULT (`api_error_status`) — so it stays unset here.
-  });
+  // THE DECLARED CLASS DECIDES, and the words only where it says nothing
+  // (notice-subject.ts, the same reading the sidecar gives the transcript).
+  return synthesizedNotice(
+    noticeSubjectOf(typeof declaredError === "string" ? declaredError : undefined, noticeText(message)),
+  );
 }
 
 /**

@@ -345,6 +345,9 @@ var Suites = []Suite{
 			// internal/recorded holds its home-token rule to the shim's capture
 			// tooling's own vectors and script.
 			"agent-shim/claude/shim/scripts/capture/",
+			// internal/convert holds its notice reading to the one the shim's
+			// stream gives the same notices.
+			"testdata/vendor-notices/",
 		}}},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 1}},
 		Programs: map[string][]string{"integration": {"shim-store"}},

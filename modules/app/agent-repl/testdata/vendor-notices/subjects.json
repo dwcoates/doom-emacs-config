@@ -1,0 +1,28 @@
+{
+  "comment": "Vendor notices as the stream (shim, convert/notice-subject.ts) and the transcript (sidecar, internal/convert/notice_subject.go) read them. Each case is one notice: the vendor's declared error class (null when the record carries none) and its words, and the subject both planes must give it. The texts are the ones observed on the owner's host, read with their class and without it.",
+  "cases": [
+    {"name": "oauth expired, classed", "class": "authentication_failed", "text": "Failed to authenticate: OAuth session expired and could not be refreshed", "subject": "account"},
+    {"name": "oauth expired, unclassed", "class": null, "text": "Failed to authenticate: OAuth session expired and could not be refreshed", "subject": "account"},
+    {"name": "credentials rejected, classed", "class": "authentication_failed", "text": "Failed to authenticate. API Error: Invalid authentication credentials", "subject": "account"},
+    {"name": "credentials rejected, unclassed", "class": null, "text": "Failed to authenticate. API Error: Invalid authentication credentials", "subject": "account"},
+    {"name": "login expired, classed", "class": "authentication_failed", "text": "Login expired · Please run /login", "subject": "account"},
+    {"name": "login expired, unclassed", "class": null, "text": "Login expired · Please run /login", "subject": "account"},
+    {"name": "session limit, classed", "class": "rate_limit", "text": "You've hit your session limit · resets 5pm (America/New_York)", "subject": "usage_limit"},
+    {"name": "session limit, unclassed", "class": null, "text": "You've hit your session limit · resets 5pm (America/New_York)", "subject": "usage_limit"},
+    {"name": "api unreachable, unknown class", "class": "unknown", "text": "API Error: Can't reach the API server at api.anthropic.com (ENOTFOUND)", "subject": "vendor_transient"},
+    {"name": "api unreachable, unclassed", "class": null, "text": "API Error: Can't reach the API server at api.anthropic.com (ENOTFOUND)", "subject": "vendor_transient"},
+    {"name": "connection dropped, unknown class", "class": "unknown", "text": "Connection dropped (ECONNRESET)", "subject": "vendor_transient"},
+    {"name": "connection dropped, unclassed", "class": null, "text": "API Error: Connection dropped (ECONNRESET)", "subject": "vendor_transient"},
+    {"name": "overloaded by its class, whatever its words", "class": "overloaded", "text": "API Error: something went wrong", "subject": "vendor_transient"},
+    {"name": "server error by its class", "class": "server_error", "text": "API Error: something went wrong", "subject": "vendor_transient"},
+    {"name": "billing by its class", "class": "billing_error", "text": "API Error: something went wrong", "subject": "usage_limit"},
+    {"name": "organization refused", "class": "oauth_org_not_allowed", "text": "API Error: something went wrong", "subject": "account"},
+    {"name": "account on hold", "class": "account_on_hold", "text": "API Error: something went wrong", "subject": "account"},
+    {"name": "verification required", "class": "verification_required", "text": "API Error: something went wrong", "subject": "account"},
+    {"name": "cloud credential", "class": "cloud_credential_error", "text": "API Error: something went wrong", "subject": "account"},
+    {"name": "invalid request stays a request failure", "class": "invalid_request", "text": "API Error: 400 invalid_request_error", "subject": "unclassified"},
+    {"name": "model not found", "class": "model_not_found", "text": "API Error: 404 model not found", "subject": "unclassified"},
+    {"name": "output ceiling", "class": "max_output_tokens", "text": "API Error: output limit", "subject": "unclassified"},
+    {"name": "unremarkable words", "class": "unknown", "text": "API Error: nothing recognizable", "subject": "unclassified"}
+  ]
+}

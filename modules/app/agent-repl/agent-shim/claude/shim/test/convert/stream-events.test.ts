@@ -611,10 +611,15 @@ describe("prose the vendor synthesized for trouble waiting cures", () => {
 
   it.each([
     ["an invalid request", { error: "invalid_request" }, "API Error: 400 invalid_request_error"],
-    ["a rejected credential", { error: "authentication_failed" }, "API Error: 401 authentication_error"],
     ["unremarkable words", { error: "unknown" }, "API Error: nothing recognizable"],
   ])("leaves %s unclassified", (_name, record, text) => {
     expect(noticeSubjectOf(record, text)).toBe("unclassified");
+  });
+});
+
+describe("prose the vendor synthesized for a refused account", () => {
+  it("classifies a rejected credential as the ACCOUNT, not as an unclassified failure", () => {
+    expect(noticeSubjectOf({ error: "authentication_failed" }, "API Error: 401 authentication_error")).toBe("account");
   });
 });
 
