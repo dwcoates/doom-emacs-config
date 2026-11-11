@@ -46,7 +46,7 @@ function transcript(lines: unknown[]): string {
   return file;
 }
 
-function lines(): { boundary: Record<string, unknown>; summary: Record<string, unknown> } {
+function lines(): ReturnType<typeof compactionLines> {
   let minted = 0;
   return compactionLines({
     ambient: { ...OBSERVED_AMBIENT, lastUuid: "b60c9557-0ce9-400c-a845-ee915c0a2315" },
@@ -103,6 +103,12 @@ describe("reading the transcript's ambient fields", () => {
 });
 
 describe("the compact_boundary record", () => {
+  it("answers its own uuid as the cut's identity on both planes", () => {
+    const made = lines();
+
+    expect(made.boundaryUuid).toBe(made.boundary.uuid);
+  });
+
   it("has a NULL parentUuid — the chain restarts here", () => {
     expect(lines().boundary.parentUuid).toBeNull();
   });

@@ -189,10 +189,15 @@ interface CompactionLinesSpec {
   readonly newUuid?: () => string;
 }
 
-/** The two records, as objects — the base function the shape tests assert. */
+/**
+ * The two records, as objects — the base function the shape tests assert —
+ * and the boundary's uuid, which is the cut's identity on both planes
+ * (contextCutUpsertKey).
+ */
 export function compactionLines(spec: CompactionLinesSpec): {
   boundary: Record<string, unknown>;
   summary: Record<string, unknown>;
+  boundaryUuid: string;
 } {
   const mint = spec.newUuid ?? randomUUID;
   const timestamp = new Date(spec.atMs).toISOString();
@@ -238,7 +243,7 @@ export function compactionLines(spec: CompactionLinesSpec): {
     timestamp,
     ...ambientFields,
   };
-  return { boundary, summary };
+  return { boundary, summary, boundaryUuid };
 }
 
 /** Append the two records to the transcript. */

@@ -20,6 +20,7 @@ import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../
 import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import { contextCutUpsertKey } from "../../src/store/keys.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
@@ -10322,6 +10323,33 @@ describe("the cold gate's COMPACT remediation", () => {
     await pending;
 
     expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
+  });
+
+  it("KEYS the cut on the boundary it appended, so the sidecar's fold of that record is the same store entry", async () => {
+    // TWO WRITES, ONE ENTRY. The sidecar folds the appended compact_boundary
+    // into `session:context_cut:<its uuid>`; a cut keyed anywhere else is a
+    // second entry, and the feed drew the compaction twice (2026-11-11).
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777777");
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    const boundary = readFileSync(path.join(projectDir(h.configDir, h.cwd), "resume-1.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { subtype?: string; uuid?: string })
+      .find((record) => record.subtype === "compact_boundary");
+    const keys = h.persistence.buffered
+      .filter((entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "update"
+        && entry.item.frame.result.value.update.case === "contextCut")
+      .map((entry) => entry.upsertKey);
+    expect(keys).toEqual([contextCutUpsertKey(boundary?.uuid ?? "")]);
   });
 
   it("refuses vendor_start_failed when the summarizing session ends in a failure subtype", async () => {
