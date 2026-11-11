@@ -7073,7 +7073,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     releaseTurn,
     joinRunningTurn,
     askOpen: () => gate.askOpen,
-    promptRecorded: (turnId) => transcriptIndexOf(requireIdentity().vendorSessionId).holds(promptUuid(turnId)),
+    // A READ, NOT A SEND: the uuid is derived directly, so the `promptUuid`
+    // seam goes on observing exactly the uuids the engine sends under.
+    promptRecorded: (turnId) => transcriptIndexOf(requireIdentity().vendorSessionId).holds(promptVendorUuid(turnId)),
     noteStopCommand: (turn, command) => {
       stopCommand = { turn, command };
       LOGGER.debug(

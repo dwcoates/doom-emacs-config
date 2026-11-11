@@ -620,6 +620,7 @@ export class SendLedger {
           turn_id: send.turnId,
           client_uuid: send.uuid,
           answered_turn_id: answered.turnId,
+          detail: "the vendor answered out of the order its prompts were pushed in",
           invariant_violation: "the vendor answers its queued prompts in the order they were pushed",
         },
         "the vendor answered a later send while an earlier one never had a reply; the earlier send was dropped and its turn is concluded",

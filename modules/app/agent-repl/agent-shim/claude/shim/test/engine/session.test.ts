@@ -15464,9 +15464,12 @@ describe("RollBackSession", () => {
   });
 
   it("interrupts the open turn and waits for its stop result before restarting", async () => {
-    // Arrange
-    const h = await withTranscript(threeTurns());
+    // Arrange: the turn opens BEFORE the transcript records its prompt, as the
+    // vendor writes it; a prompt the transcript already records is refused.
+    const h = harness();
+    await started(h);
     await realPrompt(h, "turn-2");
+    writeTranscript(h.configDir, h.cwd, freshSessionId((await untilQuery(h, 0)).spec), threeTurns());
     const before = h.queries[0]?.query;
     if (before === undefined) throw new Error("no query");
 
