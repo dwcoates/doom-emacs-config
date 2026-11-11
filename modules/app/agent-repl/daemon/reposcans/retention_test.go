@@ -79,3 +79,34 @@ func TestEveryRestatementOfTheStorageSweepWindowsMatchesThePackage(t *testing.T)
 		})
 	}
 }
+
+// TestEveryRestatementOfTheClosedWorkspaceExpiryMatchesTheReaper pins the
+// three days a closed workspace's worktree may go untouched
+// (daemon/internal/worktreereap) to the prose that restates it.
+func TestEveryRestatementOfTheClosedWorkspaceExpiryMatchesTheReaper(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+		want string
+	}{
+		{name: "the window", file: "daemon/internal/worktreereap/reaper.go", want: "DefaultClosedExpireAfter = 3 * 24 * time.Hour"},
+		{name: "AGENTS.md", file: "daemon/AGENTS.md", want: "`AGENT_REPL_WORKTREE_REAP_CLOSED_EXPIRE` (default 3 days"},
+		{name: "the runtime skill", file: "skills/agent-repl-runtime/SKILL.md", want: "the worktree of every closed workspace nobody\n  touched for three days"},
+		{name: "the contract", file: "proto/src/agentrepl/v1/endpoint_reap_worktrees.proto", want: "closed and nobody has touched it for three days"},
+	}
+	root := moduleRootDir(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			source, err := os.ReadFile(filepath.Join(root, tc.file))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.file, err)
+			}
+
+			// Act / Assert.
+			if !strings.Contains(string(source), tc.want) {
+				t.Fatalf("%s no longer states the closed-workspace expiry as %q; update every restatement together", tc.file, tc.want)
+			}
+		})
+	}
+}

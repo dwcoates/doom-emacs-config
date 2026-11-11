@@ -30,6 +30,7 @@ func TestNewRefusesAMissingCollaboratorOrWindow(t *testing.T) {
 		{"log", func(d *Deps) { d.Log = nil }},
 		{"idle threshold", func(d *Deps) { d.IdleAfter = 0 }},
 		{"expiry", func(d *Deps) { d.ExpireAfter = 0 }},
+		{"closed expiry", func(d *Deps) { d.ClosedExpireAfter = 0 }},
 		{"start delay", func(d *Deps) { d.StartDelay = 0 }},
 		{"cadence", func(d *Deps) { d.Every = -time.Hour }},
 	}
@@ -1134,4 +1135,194 @@ func TestTheSweepSummaryCountsExpiries(t *testing.T) {
 		}
 	}
 	t.Fatal("no sweep summary was recorded")
+}
+
+// --- the closed-workspace rule -------------------------------------------
+
+// closedTree is a closed workspace's unlanded tree in a repository nobody
+// else works in (so the unbroken-activity rule never fires), last touched
+// ago before now.
+func closedTree(t *testing.T, ago time.Duration, spec tree) (*world, string, wsm.Workspace) {
+	t.Helper()
+	w := newWorld(t)
+	repo := w.addRepo("repo")
+	spec.name = "closed"
+	if spec.outcome == nil {
+		spec.outcome = unlandedOutcome
+	}
+	spec.touched, spec.born, spec.committed = daysAgo(30), daysAgo(30), daysAgo(30)
+	dir := w.addTree(repo, spec)
+	closure := wsm.Closure{At: now.Add(-ago), By: wsm.CloseByUser}
+	ws := w.register(repo, dir, wsm.Workspace{Name: "closed-name", Branch: "feat/closed", Closed: true, Closure: &closure, CreatedAt: daysAgo(30)})
+	return w, dir, ws
+}
+
+func TestAClosedWorkspacesTreeExpiresByItsOwnIdleness(t *testing.T) {
+	tests := []struct {
+		name string
+		ago  time.Duration
+		// wantExpired is whether the tree is preserved and removed.
+		wantExpired bool
+		wantKept    string
+	}{
+		{"touched inside the idle window, it is kept as recently active", 12 * time.Hour, false, keepActive},
+		{"idle inside the closed window, it is kept as unlanded", 2 * 24 * time.Hour, false, keepUnlanded},
+		{"idle exactly the closed window, it expires", 3 * 24 * time.Hour, true, ""},
+		{"idle past the closed window, it expires", 4 * 24 * time.Hour, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			w, dir, _ := closedTree(t, tt.ago, tree{})
+
+			// Act.
+			report := w.sweep()
+
+			// Assert.
+			if expired := len(report.Expired) == 1 && report.Expired[0] == dir; expired != tt.wantExpired {
+				t.Fatalf("Expired = %v, want expired %v", report.Expired, tt.wantExpired)
+			}
+			if !tt.wantExpired && w.keptFor(dir) != tt.wantKept {
+				t.Fatalf("kept %q, want %q", w.keptFor(dir), tt.wantKept)
+			}
+			w.assertNoWarnings()
+		})
+	}
+}
+
+func TestAClosedWorkspacesExpiryIsPreservedUnderItsWorkspaceAndKeepsItsBranch(t *testing.T) {
+	// Arrange.
+	w, dir, ws := closedTree(t, 4*24*time.Hour, tree{})
+	ref := PreservedRefs(ws.ID) + "20260924T120000Z"
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	calls := strings.Join(w.git.called(), "\n")
+	if !strings.Contains(calls, "preserve "+dir+" "+ref+"\nremove "+dir) {
+		t.Fatalf("git calls = %v, want the preservation at %s immediately before the clean removal", w.git.called(), ref)
+	}
+	if strings.Contains(calls, "delete_branch") || strings.Contains(calls, "force_remove") {
+		t.Fatalf("git calls = %v, want the branch kept and no forced removal", w.git.called())
+	}
+}
+
+func TestAClosedWorkspacesExpiryIsRecordedWithItsWorkspacePathBranchAndRef(t *testing.T) {
+	// Arrange.
+	w, dir, ws := closedTree(t, 4*24*time.Hour, tree{})
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	records := w.records("info", opExpire)
+	if len(records) != 1 {
+		t.Fatalf("expire records = %v, want one", records)
+	}
+	got := records[0].Context
+	want := map[string]any{
+		"workspace": string(ws.ID), "workspace_name": "closed-name", "worktree": dir, "branch": "feat/closed",
+		"preserved_ref": PreservedRefs(ws.ID) + "20260924T120000Z", "preserved_sha": preservedSHA,
+		"expiry_rule": string(expiryClosedIdle), "last_activity_signal": "workspace_closed",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("expire record[%s] = %v, want %v (record %v)", key, got[key], value, got)
+		}
+	}
+}
+
+func TestAClosedWorkspacesDirtyTreeIsForceRemovedAfterItsPreservation(t *testing.T) {
+	// Arrange.
+	w, dir, _ := closedTree(t, 4*24*time.Hour, tree{})
+	w.git.dirty[dir] = true
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	calls := strings.Join(w.git.called(), "\n")
+	if len(report.Expired) != 1 || !strings.Contains(calls, "\nforce_remove "+dir) || strings.Index(calls, "preserve ") > strings.Index(calls, "force_remove ") {
+		t.Fatalf("Expired = %v, git calls = %v, want a preservation then a forced removal", report.Expired, w.git.called())
+	}
+}
+
+func TestAClosedWorkspacesLandedTreeIsRemovedByTheLandedRule(t *testing.T) {
+	// Arrange: its changes are on the default branch.
+	w, dir, _ := closedTree(t, 4*24*time.Hour, tree{outcome: &gitclient.MergeTreeOutcome{Tree: baseTree}})
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Removed) != 1 || report.Removed[0] != dir || len(report.Expired) != 0 {
+		t.Fatalf("report %+v, want the tree removed as landed and nothing expired", report)
+	}
+}
+
+func TestTheClosedWorkspaceRuleLeavesEveryOtherIdleTreeAlone(t *testing.T) {
+	tests := []struct {
+		name     string
+		register func(w *world, repo, dir string)
+		wantKept string
+	}{
+		{"an open workspace's tree", func(w *world, repo, dir string) {
+			w.register(repo, dir, wsm.Workspace{CreatedAt: daysAgo(30)})
+		}, keepOpenWorkspace},
+		{"a tree no workspace names", func(*world, string, string) {}, keepUnlanded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: unlanded and untouched for thirty days.
+			w := newWorld(t)
+			repo := w.addRepo("repo")
+			dir := w.addTree(repo, tree{name: "idle", outcome: unlandedOutcome, touched: daysAgo(30), born: daysAgo(30), committed: daysAgo(30)})
+			tt.register(w, repo, dir)
+
+			// Act.
+			report := w.sweep()
+
+			// Assert.
+			if len(report.Expired) != 0 || w.keptFor(dir) != tt.wantKept {
+				t.Fatalf("Expired = %v kept %q, want it kept as %s", report.Expired, w.keptFor(dir), tt.wantKept)
+			}
+		})
+	}
+}
+
+func TestAClosedWorkspacesFailedPreservationIsAnErrorAndKeepsTheTree(t *testing.T) {
+	// Arrange.
+	w, dir, ws := closedTree(t, 4*24*time.Hour, tree{})
+	w.git.preserveErr[dir] = errors.New("the object store is read-only")
+
+	// Act.
+	report := w.sweep()
+
+	// Assert.
+	if len(report.Expired) != 0 || report.Failures != 1 || report.Kept[reasonPreserveFail] != 1 || w.git.saw("remove "+dir) {
+		t.Fatalf("report %+v calls %v, want the failure counted and the tree kept", report, w.git.called())
+	}
+	errs := w.records("error", opExpire)
+	if len(errs) != 1 || errs[0].Context["workspace"] != string(ws.ID) || errs[0].Context["cause"] != "the object store is read-only" {
+		t.Fatalf("expire errors = %v, want one naming the workspace and the cause", errs)
+	}
+}
+
+func TestARecordTouchedInsideTheIdleWindowKeepsItsTreeWithoutAskingGit(t *testing.T) {
+	// Arrange: an old tree whose workspace record was selected an hour ago.
+	w := newWorld(t)
+	repo := w.addRepo("repo")
+	dir := w.addTree(repo, tree{name: "selected", outcome: unlandedOutcome})
+	selected := now.Add(-time.Hour)
+	closure := wsm.Closure{At: daysAgo(10), By: wsm.CloseByUser}
+	w.register(repo, dir, wsm.Workspace{Closed: true, Closure: &closure, LastSelectedAt: &selected})
+
+	// Act.
+	w.sweep()
+
+	// Assert.
+	if w.keptFor(dir) != keepActive || w.git.saw("admin_dir "+dir) || w.git.saw("is_clean "+dir) {
+		t.Fatalf("kept %q, git calls %v, want it kept as recently active with no git asked about it", w.keptFor(dir), w.git.called())
+	}
 }

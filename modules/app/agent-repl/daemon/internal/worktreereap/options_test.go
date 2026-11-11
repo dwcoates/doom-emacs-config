@@ -210,3 +210,79 @@ func TestSweepWithAnswersHeldElsewhereWhileAnotherProcessSweeps(t *testing.T) {
 		t.Fatalf("SweepWith = %v, want ErrHeldElsewhere", err)
 	}
 }
+
+// closedOnlyWorld is a repository holding a closed workspace's expired tree
+// beside everything a full sweep would also act on: a landed tree no
+// workspace names, a stale registration and a landed workspace's branch.
+func closedOnlyWorld(t *testing.T) (*world, string, string) {
+	t.Helper()
+	w, closed, _ := closedTree(t, 4*24*time.Hour, tree{})
+	repo := w.registry.repos[0].Dir
+	landed := w.addTree(repo, tree{name: "landed"})
+	w.addTree(repo, tree{name: "stale", prunable: true, missing: true})
+	return w, closed, landed
+}
+
+func TestAClosedOnlySweepTakesOnlyClosedWorkspacesTrees(t *testing.T) {
+	// Arrange.
+	w, closed, landed := closedOnlyWorld(t)
+
+	// Act.
+	report := w.sweepWith(Options{ClosedOnly: true})
+
+	// Assert.
+	if !slices.Equal(report.Expired, []string{closed}) || len(report.Removed) != 0 || report.Worktrees != 1 {
+		t.Fatalf("report %+v, want only the closed workspace's tree judged and expired", report)
+	}
+	if w.git.saw("remove "+landed) || w.git.saw("admin_dir "+landed) {
+		t.Fatalf("git calls %v, want nothing asked about the tree no closed workspace names", w.git.called())
+	}
+}
+
+func TestAClosedOnlySweepSkipsARepositoryWithNoIdleClosedWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		register func(w *world, repo, dir string)
+	}{
+		{"no workspace at all", func(*world, string, string) {}},
+		{"only an open workspace", func(w *world, repo, dir string) { w.register(repo, dir, wsm.Workspace{}) }},
+		{"only a closed workspace touched inside the idle window", func(w *world, repo, dir string) {
+			closure := wsm.Closure{At: now.Add(-time.Hour), By: wsm.CloseByUser}
+			w.register(repo, dir, wsm.Workspace{Closed: true, Closure: &closure})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			w := newWorld(t)
+			repo := w.addRepo("repo")
+			dir := w.addTree(repo, tree{name: "tree"})
+			tt.register(w, repo, dir)
+
+			// Act.
+			report := w.sweepWith(Options{ClosedOnly: true})
+
+			// Assert.
+			if len(w.git.called()) != 0 || report.Repositories != 0 {
+				t.Fatalf("git calls %v report %+v, want git asked nothing about the repository", w.git.called(), report)
+			}
+		})
+	}
+}
+
+func TestAClosedOnlySweepHasItsOwnRecords(t *testing.T) {
+	// Arrange.
+	w, _, _ := closedOnlyWorld(t)
+
+	// Act.
+	w.sweepWith(Options{ClosedOnly: true})
+
+	// Assert: a reader counting the schedule's sweeps counts none here.
+	var finished bool
+	for _, r := range w.records("info", opSweep) {
+		finished = finished || r.Message == "the closed-workspace sweep finished"
+	}
+	if !finished || sweepsFinished(w) != 0 {
+		t.Fatalf("sweep records %v, want the closed-workspace sweep's own summary and no full sweep's", w.records("info", opSweep))
+	}
+}

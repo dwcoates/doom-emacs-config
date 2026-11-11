@@ -459,15 +459,16 @@ func (w *world) reaper() *Reaper {
 
 func (w *world) deps() Deps {
 	return Deps{
-		Git:          w.git,
-		Registry:     w.registry,
-		LiveSessions: func() []ids.WorkspaceID { return w.live },
-		Clock:        w.clock,
-		LockPath:     w.lockPath,
-		IdleAfter:    DefaultIdleAfter,
-		ExpireAfter:  DefaultExpireAfter,
-		StartDelay:   DefaultStartDelay,
-		Every:        DefaultEvery,
+		Git:               w.git,
+		Registry:          w.registry,
+		LiveSessions:      func() []ids.WorkspaceID { return w.live },
+		Clock:             w.clock,
+		LockPath:          w.lockPath,
+		IdleAfter:         DefaultIdleAfter,
+		ExpireAfter:       DefaultExpireAfter,
+		ClosedExpireAfter: DefaultClosedExpireAfter,
+		StartDelay:        DefaultStartDelay,
+		Every:             DefaultEvery,
 		WorktreeParent: func(string) (string, error) {
 			return filepath.Join(w.root, "trees"), nil
 		},

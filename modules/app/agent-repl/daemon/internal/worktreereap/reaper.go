@@ -1,7 +1,8 @@
 // Package worktreereap is the daemon's LANDED-WORKTREE REAPER: a low-priority
 // background sweep that removes every linked worktree whose changes have
 // already landed on its repository's default branch, and deletes its branch.
-// It also EXPIRES the linked worktrees that never land: see expiry.go.
+// It also EXPIRES the linked worktrees that never land, and the worktree of
+// every closed workspace nobody touched for days: see expiry.go.
 //
 // The merge queue retires the worktrees it merges. This covers the ones it
 // never saw -- worktrees agents cut for themselves, and branches that landed
@@ -20,7 +21,9 @@
 //
 // A sweep runs on its schedule, or now on request (SweepWith, the
 // ReapWorktrees rpc), where it may judge without acting (Options.DryRun) or
-// skip the windows for closed workspaces' worktrees (Options.Force).
+// skip the windows for closed workspaces' worktrees (Options.Force). Every
+// daemon start also sweeps the closed workspaces' worktrees alone
+// (Options.ClosedOnly): see schedule.go.
 //
 // See daemon/AGENTS.md "The landed-worktree reaper" for the safety gates.
 package worktreereap
@@ -73,6 +76,10 @@ const (
 	// counted over unbroken repository activity (see expiry.go), before it
 	// is preserved and removed.
 	DefaultExpireAfter = 7 * 24 * time.Hour
+	// DefaultClosedExpireAfter is how long a CLOSED workspace's worktree may
+	// go untouched before it is preserved and removed, whatever the
+	// repository's activity (owner ruling 2026-11-11).
+	DefaultClosedExpireAfter = 3 * 24 * time.Hour
 )
 
 // ErrSweepRunning is Sweep's refusal while another sweep of this reaper is in
@@ -94,6 +101,11 @@ type Options struct {
 	// preserved and removed at once. It never touches an open workspace's
 	// worktree, nor one no workspace names.
 	Force bool
+	// ClosedOnly judges only the worktrees of CLOSED workspaces, and skips
+	// the leftovers and the landed branches: the pass every daemon start runs
+	// (schedule.go). A repository with no closed workspace idle past the idle
+	// window is skipped before any git is asked.
+	ClosedOnly bool
 }
 
 // Git is the part of the git leaf the reaper drives.
@@ -138,12 +150,13 @@ type Deps struct {
 	// LockPath is the kernel lock one sweep holds for its whole run, so two
 	// daemons (an incumbent and its handover successor) never sweep at once.
 	LockPath string
-	// IdleAfter, ExpireAfter, StartDelay and Every are the windows; see the
-	// defaults.
-	IdleAfter   time.Duration
-	ExpireAfter time.Duration
-	StartDelay  time.Duration
-	Every       time.Duration
+	// IdleAfter, ExpireAfter, ClosedExpireAfter, StartDelay and Every are the
+	// windows; see the defaults.
+	IdleAfter         time.Duration
+	ExpireAfter       time.Duration
+	ClosedExpireAfter time.Duration
+	StartDelay        time.Duration
+	Every             time.Duration
 	// WorktreeParent answers the directory a repository's linked worktrees
 	// are made in (workspace.WorktreeParent), where its leftovers lie.
 	WorktreeParent func(repoDir string) (string, error)
@@ -177,9 +190,9 @@ func New(deps Deps) (*Reaper, error) {
 		return nil, errors.New("worktreereap: Log is required")
 	case deps.WorktreeParent == nil:
 		return nil, errors.New("worktreereap: WorktreeParent is required")
-	case deps.IdleAfter <= 0, deps.ExpireAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0:
-		return nil, fmt.Errorf("worktreereap: the windows must be positive (idle after %v, expire after %v, start delay %v, every %v)",
-			deps.IdleAfter, deps.ExpireAfter, deps.StartDelay, deps.Every)
+	case deps.IdleAfter <= 0, deps.ExpireAfter <= 0, deps.ClosedExpireAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0:
+		return nil, fmt.Errorf("worktreereap: the windows must be positive (idle after %v, expire after %v, closed expire after %v, start delay %v, every %v)",
+			deps.IdleAfter, deps.ExpireAfter, deps.ClosedExpireAfter, deps.StartDelay, deps.Every)
 	}
 	return &Reaper{deps: deps, guard: sweepguard.New("worktreereap", deps.LockPath, opSweep)}, nil
 }
@@ -288,9 +301,16 @@ func (r *Reaper) sweep(ctx context.Context, opts Options) (Report, error) {
 	}
 	known := newRegistryView(workspaces, r.deps.LiveSessions())
 
-	r.deps.Log.Info(opSweep, "sweeping for landed worktrees", dlog.Context{
+	// A CLOSED-ONLY SWEEP HAS ITS OWN RECORDS, so a reader counting the
+	// schedule's sweeps never counts a start's pass among them.
+	started, stopped, finished := "sweeping for landed worktrees", "the sweep stopped with the daemon", "the sweep finished"
+	if opts.ClosedOnly {
+		started, stopped, finished = "sweeping the worktrees of closed workspaces", "the closed-workspace sweep stopped with the daemon", "the closed-workspace sweep finished"
+	}
+	r.deps.Log.Info(opSweep, started, dlog.Context{
 		"repositories": len(repos), "idle_after": r.deps.IdleAfter.String(), "expire_after": r.deps.ExpireAfter.String(),
-		"dry_run": opts.DryRun, "force": opts.Force,
+		"closed_expire_after": r.deps.ClosedExpireAfter.String(),
+		"dry_run":             opts.DryRun, "force": opts.Force, "closed_only": opts.ClosedOnly,
 	})
 	for _, repo := range repos {
 		if ctx.Err() != nil {
@@ -299,10 +319,10 @@ func (r *Reaper) sweep(ctx context.Context, opts Options) (Report, error) {
 		(&repoSweep{r: r, opts: opts, repo: repo, known: known, workspaces: workspaces, now: now, report: &report}).run(ctx)
 	}
 	if ctx.Err() != nil {
-		r.deps.Log.Info(opSweep, "the sweep stopped with the daemon", summary(report))
+		r.deps.Log.Info(opSweep, stopped, summary(report))
 		return report, ctx.Err()
 	}
-	r.deps.Log.Info(opSweep, "the sweep finished", summary(report))
+	r.deps.Log.Info(opSweep, finished, summary(report))
 	return report, nil
 }
 
@@ -400,6 +420,11 @@ func (s *repoSweep) run(ctx context.Context) {
 	log := s.r.deps.Log
 	repoFields := dlog.Context{"repo": string(s.repo.ID), "repo_dir": s.repo.Dir}
 
+	if s.opts.ClosedOnly && !s.hasIdleClosedWorkspace() {
+		log.Debug(opRepo, "the repository has no closed workspace idle past the idle window; a closed-only sweep asks git nothing about it", repoFields)
+		return
+	}
+
 	present, err := dirPresent(s.repo.Dir)
 	if err != nil {
 		s.fail(ctx, opRepo, "the repository's main worktree could not be read; it is not swept", repoFields, err)
@@ -455,10 +480,17 @@ func (s *repoSweep) run(ctx context.Context) {
 			s.report.Kept[keepMain]++
 			continue
 		}
+		if ws, registered := s.known.byDir[canonical(wt.Dir)]; s.opts.ClosedOnly && !(registered && ws.Closed) {
+			continue
+		}
 		s.report.Worktrees++
 		s.judge(ctx, wt)
 	}
 	if ctx.Err() != nil {
+		return
+	}
+	if s.opts.ClosedOnly {
+		s.report.Repositories++
 		return
 	}
 	s.sweepLeftovers(ctx, worktrees)
@@ -467,6 +499,18 @@ func (s *repoSweep) run(ctx context.Context) {
 	}
 	s.sweepLandedBranches(ctx)
 	s.report.Repositories++
+}
+
+// hasIdleClosedWorkspace reports whether the registry holds a closed workspace
+// of this repository that nobody touched inside the idle window: the only
+// kind of workspace whose worktree a closed-only sweep could take.
+func (s *repoSweep) hasIdleClosedWorkspace() bool {
+	for _, ws := range s.workspaces {
+		if ws.Repo == s.repo.ID && ws.Closed && s.now.Sub(ws.LastTouched().At) >= s.r.deps.IdleAfter {
+			return true
+		}
+	}
+	return false
 }
 
 // prune retires the stale registrations, once per repository, when git
@@ -506,6 +550,7 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 	ws, registered := s.known.byDir[dir]
 	if registered {
 		fields["workspace"] = string(ws.ID)
+		fields["workspace_name"] = ws.Name
 	}
 	// A FORCED SWEEP WAITS OUT NO WINDOW for a closed workspace's tree; an
 	// open one is kept below whatever was asked.
@@ -550,6 +595,19 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 	if !present {
 		s.keep(keepMissing, fields)
 		return
+	}
+
+	// THE RECORD ALONE CAN SAY "RECENTLY ACTIVE", and saying it here asks git
+	// nothing: the worktree's last activity is the newest of several signals,
+	// the record's stamps among them, so a record touched inside the idle
+	// window keeps the tree whatever the others read.
+	if registered && !forced {
+		if touched := ws.LastTouched(); s.now.Sub(touched.At) < s.r.deps.IdleAfter {
+			fields["last_activity"] = touched.At.Format(time.RFC3339)
+			fields["last_activity_signal"] = touched.Signal
+			s.keep(keepActive, fields)
+			return
+		}
 	}
 
 	// ACTIVITY IS READ BEFORE ANY PROBE, so nothing this sweep runs can be
@@ -600,17 +658,35 @@ func (s *repoSweep) judge(ctx context.Context, wt gitclient.Worktree) {
 		}
 	}
 
-	expired, err := s.expired(admin, fields)
-	if err != nil {
-		s.fail(ctx, opJudge, "the worktree's birth could not be read; it is kept", fields, err)
-		return
+	// A CLOSED WORKSPACE'S TREE NOBODY TOUCHED FOR ClosedExpireAfter EXPIRES
+	// whatever the repository's activity: its workspace is closed, so nobody
+	// is coming back to it without reopening, and a reopen restores it.
+	rule := expiryNone
+	if registered && ws.Closed && idle >= s.r.deps.ClosedExpireAfter {
+		rule = expiryClosedIdle
+	} else {
+		expired, err := s.expired(admin, fields)
+		if err != nil {
+			s.fail(ctx, opJudge, "the worktree's birth could not be read; it is kept", fields, err)
+			return
+		}
+		switch {
+		case expired:
+			rule = expiryUnlanded
+		case forced:
+			rule = expiryForced
+		}
 	}
-	if !expired && !forced {
+	if rule == expiryNone {
 		s.keep(unlandedReason, fields)
 		return
 	}
 	fields["unlanded_reason"] = unlandedReason
-	s.expire(ctx, wt, admin, clean, !expired, fields)
+	var owner *wsm.Workspace
+	if registered {
+		owner = &ws
+	}
+	s.expire(ctx, wt, admin, clean, rule, owner, fields)
 }
 
 // expired applies the expiry rule. The worktree's birth is read only when the
@@ -634,27 +710,51 @@ func (s *repoSweep) expired(admin string, fields dlog.Context) (bool, error) {
 	return s.now.Sub(start) >= s.r.deps.ExpireAfter, nil
 }
 
-// expire preserves an expired worktree under refs/agent-repl/reaped/ and then
-// removes it. Its branch is KEPT: what the branch holds never landed. A tree
-// judged clean goes through the clean door, so one that became dirty after the
-// preservation is refused by git and kept; only a tree judged dirty is forced,
-// and what made it dirty is in the preservation commit.
+// expiryRule is which rule expired a worktree.
+type expiryRule string
+
+const (
+	expiryNone expiryRule = ""
+	// expiryUnlanded: ExpireAfter of unbroken repository activity without
+	// landing.
+	expiryUnlanded expiryRule = "unlanded"
+	// expiryClosedIdle: its workspace is closed and nobody touched it for
+	// ClosedExpireAfter.
+	expiryClosedIdle expiryRule = "closed_workspace_idle"
+	// expiryForced: its workspace is closed and a forced sweep took it before
+	// either window ran out.
+	expiryForced expiryRule = "forced"
+)
+
+// expire preserves an expired worktree as a commit under a durable ref
+// (preservedRef) and then removes it. Its branch is KEPT: what the branch
+// holds never landed. A tree judged clean goes through the clean door, so one
+// that became dirty after the preservation is refused by git and kept; only a
+// tree judged dirty is forced, and what made it dirty is in the preservation
+// commit.
 //
-// FORCED is a closed workspace's tree a forced sweep takes before its window
-// ran out; it is preserved and removed exactly as an expired one, and listed
-// apart.
-func (s *repoSweep) expire(ctx context.Context, wt gitclient.Worktree, admin string, clean, forced bool, fields dlog.Context) {
-	ref := reapedRef(admin, s.now)
+// A FORCED tree is preserved and removed exactly as an expired one, and
+// listed apart.
+func (s *repoSweep) expire(ctx context.Context, wt gitclient.Worktree, admin string, clean bool, rule expiryRule, owner *wsm.Workspace, fields dlog.Context) {
+	ref := preservedRef(owner, admin, s.now)
 	fields["preserved_ref"] = ref
+	fields["expiry_rule"] = string(rule)
 	fields["expire_after"] = s.r.deps.ExpireAfter.String()
-	message := fmt.Sprintf("agent-repl: %s (branch %q, head %s) preserved before its removal: it existed for %s of unbroken repository activity without landing",
-		wt.Dir, wt.Branch, wt.Head, s.r.deps.ExpireAfter)
-	if forced {
-		message = fmt.Sprintf("agent-repl: %s (branch %q, head %s) preserved before its removal: its workspace is closed and a forced sweep took it before %s ran out",
-			wt.Dir, wt.Branch, wt.Head, s.r.deps.ExpireAfter)
+	fields["closed_expire_after"] = s.r.deps.ClosedExpireAfter.String()
+	var why string
+	switch rule {
+	case expiryUnlanded:
+		why = fmt.Sprintf("it existed for %s of unbroken repository activity without landing", s.r.deps.ExpireAfter)
+	case expiryClosedIdle:
+		why = fmt.Sprintf("its workspace is closed and nobody touched it for %s", s.r.deps.ClosedExpireAfter)
+	case expiryForced:
+		why = fmt.Sprintf("its workspace is closed and a forced sweep took it before %s ran out", s.r.deps.ExpireAfter)
+	default:
+		panic("worktreereap: a worktree was expired under no rule")
 	}
+	message := fmt.Sprintf("agent-repl: %s (branch %q, head %s) preserved before its removal: %s", wt.Dir, wt.Branch, wt.Head, why)
 	taken := &s.report.Expired
-	if forced {
+	if rule == expiryForced {
 		taken = &s.report.Forced
 	}
 	if s.opts.DryRun {

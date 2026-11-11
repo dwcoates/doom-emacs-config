@@ -107,7 +107,9 @@ the usage.
   landed-worktree reaper now (it also runs once a day): it removes worktrees
   whose changes have landed on the default branch (and their branches),
   preserves and removes worktrees that never landed after a week of
-  repository activity, prunes stale registrations, and removes leftover
+  repository activity and the worktree of every closed workspace nobody
+  touched for three days (its branch is kept, and reopening the workspace
+  restores it), prunes stale registrations, and removes leftover
   directories beside the worktrees that hold nothing but log links, then
   prints what went. `-preview` prints what a sweep would do and changes
   nothing. `-force` takes a CLOSED workspace's worktree at once, landed or

@@ -2939,15 +2939,30 @@ for themselves, and a branch can land by a squash or a cherry-pick the queue
 never saw, so the daemon sweeps for them itself. The decision is PROGRAMMATIC;
 nothing about it is agentic.
 
-**Schedule.** One background loop (`worktree_reaper` in `graph.go`): the first
-sweep `5m` after start, then one every `24h`, so a daemon that restarts daily
-still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
+**Schedule.** One background loop (`worktree_reaper` in `graph.go`): the
+closed workspaces' worktrees are swept AT ONCE when the daemon starts (below),
+then the first full sweep runs `5m` after start and one every `24h`, so a
+daemon that restarts daily still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
 the schedule by hand and never sleeps. **One sweep at a time**: in process a
 `TryLock` refuses a second (`ErrSweepRunning`), and across processes the sweep
 holds `<lock dir>/worktree-reap.lock` (`internal/recordlock`) for its whole run,
 so an incumbent and its handover successor never sweep together; the loser
 records INFO and sweeps nothing. Both locks are `internal/sweepguard`'s, which
 every background sweep runs under.
+
+**The start's sweep** (`Options.ClosedOnly`, owner ruling 2026-11-11). Every
+daemon start expires the closed workspaces' worktrees, on the reaper's own
+background goroutine, so startup never waits for it. It is its OWN sweep and
+not the first full sweep moved earlier: a daemon replaced before `5m` never
+reaches its first full sweep (on 2026-11-10, a day of back-to-back deploys,
+none did), while a full sweep at every start would run `git status` and a
+merge-tree in every idle worktree of every repository every few minutes. The
+closed-only sweep reads the registry first, skips a repository that has no
+closed workspace idle past the idle threshold before asking git anything, and
+otherwise judges only the worktrees closed workspaces name, by the same
+gates and rules as a full sweep; it skips the leftovers and the landed
+branches. It runs under the same guard and kernel lock, and its records read
+"the closed-workspace sweep finished", never "the sweep finished".
 
 **Which repositories.** Every row of `wsm.ListRepositories` -- the
 repositories the daemon registered for its workspaces. The "default branch"
@@ -2980,9 +2995,11 @@ needs git >= 2.38.
    files' mtimes (`<git dir>/worktrees/<name>/{HEAD,index,logs/HEAD}`, from
    `rev-parse --absolute-git-dir`; HEAD is required, the other two may be
    absent), the HEAD commit's COMMITTER time, and -- for a registered
-   workspace -- the record's `created_at`, `last_activity_at`,
-   `last_selected_at` and `merged_at`, must be older than the threshold
-   (`AGENT_REPL_WORKTREE_REAP_IDLE`, default `24h`). The admin files move on
+   workspace -- the record's stamps (`wsm.Workspace.Stamps`: `created_at`,
+   `last_activity_at`, `last_selected_at`, `merged_at` and the close), must
+   be older than the threshold (`AGENT_REPL_WORKTREE_REAP_IDLE`, default
+   `24h`). A record touched inside the threshold keeps its tree before git is
+   asked anything about it. The admin files move on
    every checkout, add, commit, reset and rebase step; the committer time
    covers a commit written elsewhere; the record covers the daemon's own
    knowledge that somebody was there. The merge stamp is also what keeps a
@@ -3004,13 +3021,24 @@ needs git >= 2.38.
    weekend or a holiday nobody worked restarts every clock, and a repository
    idle for a day RIGHT NOW expires nothing. The repository's activity is
    every reflog entry under its common dir (`logs/**` and every
-   `worktrees/*/logs/HEAD`) plus its registered workspaces' `created_at`,
-   `last_activity_at`, `last_selected_at` and `merged_at`, read once per
+   `worktrees/*/logs/HEAD`) plus its registered workspaces' stamps, read once per
    repository BEFORE the prune and every probe. A malformed reflog line, or
    a reftable repository (whose logs this reader does not parse), is an
    ERROR and the repository is not swept. The gates 1-5 run first, so an
    open workspace's checkout, a live session's, a locked tree and a tree
    touched in the last day never expire.
+
+9. **the closed-workspace rule** (owner ruling 2026-11-11): a tree kept by 6
+   or 7 that a CLOSED workspace names is EXPIRED once nobody has touched it
+   for `AGENT_REPL_WORKTREE_REAP_CLOSED_EXPIRE` (default 3 days, by the idle
+   gate's own reading, which counts the close), whatever the repository's
+   activity. Nobody works in a closed workspace without reopening it, and
+   `workspace.Open` restores a missing worktree from its kept branch and
+   records where the expiry preserved its content. A closed workspace's
+   LANDED tree still goes by the landed rule, branch and all. The worktree
+   is found from the registry row that names its directory, in every
+   registered repository; an open workspace's and a repository's main
+   worktree are kept by gates 1 and 3.
 
 **Removal.** `gitclient.RemoveCleanWorktree` -- the same door
 `RemoveWorktree` is (the log sinks are detached first, the prune runs, the
@@ -3026,8 +3054,13 @@ the workspaces it merges.
 **Expiry.** NOTHING IS LOST: the tree is first preserved by
 `gitclient.PreserveWorktree` -- HEAD, staged and unstaged changes and
 untracked files (ignored files excepted) staged through a PRIVATE index into
-one commit on top of HEAD -- at the create-only ref
-`refs/agent-repl/reaped/<worktree id>/<UTC instant>`. Only then is the tree
+one commit on top of HEAD -- at a create-only ref:
+`refs/agent-repl/expired/<workspace id>/<UTC instant>` for a tree a workspace
+names (the id outlives the worktree, so a reopen lists them with
+`worktreereap.PreservedRefs`), `refs/agent-repl/reaped/<worktree id>/<UTC
+instant>` for a tree no workspace names. The expiry's INFO record carries the
+workspace's id and name, the worktree, its branch, the rule
+(`expiry_rule`) and the ref. Only then is the tree
 removed: a tree judged clean through `RemoveCleanWorktree` (so one dirtied
 since is refused and kept), a tree judged dirty through `RemoveWorktree`
 (`--force`; its changes are in the preservation). Its BRANCH IS KEPT, since

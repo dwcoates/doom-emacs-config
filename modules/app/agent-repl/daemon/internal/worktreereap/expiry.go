@@ -23,16 +23,33 @@ import (
 // (RepoIdleGap with no activity anywhere in the repository), so a repository
 // nobody touched for a day -- a weekend, a holiday -- restarts every clock.
 //
+// THE CLOSED-WORKSPACE RULE. The worktree of a CLOSED workspace expires once
+// nobody has touched it for ClosedExpireAfter, whatever the repository's
+// activity: nobody works in a closed workspace without reopening it, and a
+// reopen restores the worktree from its kept branch (workspace.Open).
+//
 // Nothing an expired worktree holds is lost: it is first preserved as a
-// commit under refs/agent-repl/reaped/, and its branch is kept.
+// commit under a durable ref (preservedRef), and its branch is kept.
 
 // RepoIdleGap is "a full day without any activity in the repository": a gap
 // this long between two signs of activity, or between the last one and now,
 // restarts every worktree's expiry clock.
 const RepoIdleGap = 24 * time.Hour
 
-// reapedRefPrefix is where an expired worktree's preservation commit lives.
+// reapedRefPrefix is where the preservation commit of an expired worktree NO
+// WORKSPACE NAMES lives, under the worktree's own id.
 const reapedRefPrefix = "refs/agent-repl/reaped/"
+
+// expiredRefPrefix is where the preservation commit of an expired worktree
+// that IS A WORKSPACE'S lives, under the workspace's id: the id outlives the
+// worktree, so a reopen finds what the expiry preserved (PreservedRefs).
+const expiredRefPrefix = "refs/agent-repl/expired/"
+
+// PreservedRefs is the prefix every preservation of WS's expired worktree
+// lives under, for `for-each-ref`.
+func PreservedRefs(ws ids.WorkspaceID) string {
+	return expiredRefPrefix + string(ws) + "/"
+}
 
 // repoActivity is every instant the repository shows somebody at work: every
 // reflog entry under the common dir (every ref's log, and every linked
@@ -179,4 +196,14 @@ func bornAt(admin string) (time.Time, error) {
 // the sweep's instant, so two expiries never claim one ref.
 func reapedRef(admin string, at time.Time) string {
 	return reapedRefPrefix + filepath.Base(admin) + "/" + at.UTC().Format("20060102T150405Z")
+}
+
+// preservedRef is the ref an expired worktree's preservation commit is
+// created at: under its workspace's id when a workspace names it (OWNER), and
+// under the worktree's own id otherwise.
+func preservedRef(owner *wsm.Workspace, admin string, at time.Time) string {
+	if owner == nil {
+		return reapedRef(admin, at)
+	}
+	return PreservedRefs(owner.ID) + at.UTC().Format("20060102T150405Z")
 }

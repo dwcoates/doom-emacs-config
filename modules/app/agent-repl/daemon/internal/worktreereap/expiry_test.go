@@ -255,3 +255,38 @@ func TestReapedRefNamesTheWorktreeAndTheInstantInUTC(t *testing.T) {
 		t.Fatalf("reapedRef = %q, want %q", got, want)
 	}
 }
+
+func TestPreservedRef(t *testing.T) {
+	at := time.Date(2026, 10, 7, 9, 30, 15, 0, time.FixedZone("x", 3600))
+	cases := []struct {
+		name  string
+		owner *wsm.Workspace
+		want  string
+	}{
+		{name: "a workspace's tree is preserved under the workspace's id", owner: &wsm.Workspace{ID: "0123456789abcdef"},
+			want: "refs/agent-repl/expired/0123456789abcdef/20261007T083015Z"},
+		{name: "a tree no workspace names is preserved under its own id", owner: nil,
+			want: "refs/agent-repl/reaped/feat-x1/20261007T083015Z"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := preservedRef(tc.owner, "/repo/.git/worktrees/feat-x1", at)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("preservedRef = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPreservedRefsIsTheWorkspacesOwnPrefix(t *testing.T) {
+	// Act.
+	got := PreservedRefs("0123456789abcdef")
+
+	// Assert: it ends in a slash, so another workspace's id never matches.
+	if want := "refs/agent-repl/expired/0123456789abcdef/"; got != want {
+		t.Fatalf("PreservedRefs = %q, want %q", got, want)
+	}
+}
