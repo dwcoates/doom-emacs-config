@@ -105,6 +105,7 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 			log.Info(opTurnEnded, "the turn ended while another turn already runs; what is held waits for that one", dlog.Context{
 				"turn_in_flight": string(*running),
 			})
+			q.endJoinRanBeforeItsTurn(ws, turn, *running, log)
 			if joinStood && *running == joined.turn {
 				q.onJoinedTurnStood(ws, joined, log)
 				return
@@ -781,6 +782,30 @@ func (q *queue) allOwed(ctx context.Context, ws ids.WorkspaceID, turns []ids.Tur
 		}
 	}
 	return len(turns) > 0
+}
+
+// endJoinRanBeforeItsTurn takes back ENDED's join when ENDED was still waiting
+// to join RUNNING, and records it at ERROR. The vendor runs one turn at a
+// time, so a prompt sent to join can end only after the turn it joined ended
+// (it then stands in that turn's place) or folded into it (it then closes as
+// folded): one ending while the turn it joined still stands in flight means
+// that turn is in flight here with nothing running it (doom, 2026-11-11: a
+// re-delivered prompt the vendor dropped stood in flight under every prompt
+// sent to join it). The join is over either way, so it is cleared rather than
+// left to keep every later prompt waiting "behind" it.
+func (q *queue) endJoinRanBeforeItsTurn(ws ids.WorkspaceID, ended, running ids.TurnID, log dlog.Logger) {
+	q.mu.Lock()
+	state := q.stateLocked(ws)
+	joined, wasJoining := state.endJoiningLocked(ended)
+	q.mu.Unlock()
+	if !wasJoining || joined.into != running {
+		return
+	}
+	log.Error(opJoin, "a prompt sent to join the running turn ran and ended while that turn still stands in flight; nothing runs the turn it joined", dlog.Context{
+		"joining_turn":        string(ended),
+		"joined_turn":         string(running),
+		"invariant_violation": "a prompt sent to join runs only after the turn it joined ends",
+	})
 }
 
 // joinNotStood records, at ERROR, a prompt sent to join a turn that ended
