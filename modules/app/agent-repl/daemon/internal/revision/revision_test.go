@@ -441,3 +441,24 @@ func TestTheRevisionBriefDeclaresTheResponseAndTheWords(t *testing.T) {
 		t.Fatalf("the brief does not splice exactly the response and the words: %v", err)
 	}
 }
+
+func TestTheRevisionBriefDiscouragesToolUse(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(repoPromptsDir, Brief)
+	if err != nil {
+		t.Fatalf("load the brief: %v", err)
+	}
+
+	// Act.
+	text, err := brief.Splice(map[string]string{"response": "r", "words": "w"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("splice the brief: %v", err)
+	}
+	for _, want := range []string{"without using any tools", "strong last resort"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the brief lacks %q:\n%s", want, text)
+		}
+	}
+}
