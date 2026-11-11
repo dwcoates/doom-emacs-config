@@ -708,3 +708,11 @@ func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Requ
 func (s *fakeServer) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
 	return handleUnary[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](ctx, s, "NotifyWorkspace", req.Msg)
 }
+
+func (s *fakeServer) GatherWorkspaces(ctx context.Context, req *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error) {
+	return handleUnary[v1.GatherWorkspacesRequest, v1.GatherWorkspacesResponse](ctx, s, "GatherWorkspaces", req.Msg)
+}
+
+func (s *fakeServer) GetGatherStatus(ctx context.Context, req *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error) {
+	return handleUnary[v1.GetGatherStatusRequest, v1.GetGatherStatusResponse](ctx, s, "GetGatherStatus", req.Msg)
+}
