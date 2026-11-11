@@ -300,7 +300,7 @@ var Suites = []Suite{
 		// What a test file reads from the suite's directory as data.
 		"test-threads.el":      {"lisp/open-chats.agent-repl-chats"},
 		"test-spell.el":        {"lisp/requirements.json"},
-		"test-test-helpers.el": {"lisp/test-agent-repl.el"},
+		"test-test-helpers.el": {"lisp/"},
 	}, Inputs: []string{
 		// The Doom module files and the data the Emacs layer reads.
 		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
@@ -308,9 +308,9 @@ var Suites = []Suite{
 	}}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun", Reuse: &Reuse{
 		// The canonical timing history, which the runner's own test parses.
-		// Its tests find the module's root and the runner's own directories
-		// by listing them.
-		Inputs: []string{".", "testrun", "testrun/internal", "testrun/ert", "testrun/vitest"},
+		// Its tests find the module's root by listing it, and its scans walk
+		// the runner's own tree.
+		Inputs: []string{".", "testrun/"},
 		Units: map[string][]string{
 			"internal/cli":   {"test_time.csv"},
 			"caselist":       {"daemon/cmd/agent-repld/testredundancycli.go"},
@@ -318,11 +318,9 @@ var Suites = []Suite{
 			"reap":           {"daemon/integration/harness/runroot.go"},
 			// Their tests list the runner's ERT driver directory, the
 			// daemon's and the webapp's trees, and the module's root.
-			"gofunc":                            {"testrun/ert"},
-			"internal/goprofile":                {"testrun/ert"},
-			"internal/gotest":                   {"testrun/ert"},
-			"internal/redundancy/gomeasure":     {"daemon/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/"},
-			"internal/redundancy/vitestmeasure": {"webapp", "testrun/vitest/"},
+			"gofunc":                            {"e2e/"},
+			"internal/redundancy/gomeasure":     {"daemon/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/", "tree-sitter-tldr/"},
+			"internal/redundancy/vitestmeasure": {"webapp"},
 		},
 		Never: map[string]string{
 			"internal/reuse":   "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
@@ -410,7 +408,8 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
 			Units: shimUnitInputs}},
-	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp", "webapp/app-layers.ts", "webapp/src/", "webapp/test/")},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh",
+		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included"},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
@@ -534,7 +533,7 @@ var webappUnitInputs = func() map[string][]string {
 		out[f] = append(out[f], "webapp/index.html")
 	}
 	// The vite config's check builds the app from the page's entry.
-	out["test/vite-config.test.ts"] = append(out["test/vite-config.test.ts"], "webapp/src/")
+	out["test/vite-config.test.ts"] = append(out["test/vite-config.test.ts"], "webapp/src/", "proto/gen/ts/", "proto/ts/", "agent-shim/logging/ts/")
 	out["test/failure/sink.test.ts"] = []string{"webapp/src/"}
 	out["test/webkit-stylesheets.test.ts"] = append(out["test/webkit-stylesheets.test.ts"], "webapp/test/")
 	return out
