@@ -82,6 +82,11 @@ type StartSessionCause =
       readonly cause: VendorStartCause;
       /** The API's refusal a REJECTED start was, when it was one. */
       readonly apiFailure?: conversationv1.ApiRequestFailed | undefined;
+      /**
+       * The failure was the compaction or summary the start was asked for
+       * (`StartSessionVendorStartFailed.compaction`).
+       */
+      readonly compaction?: boolean;
     }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
@@ -99,7 +104,7 @@ export function startSessionFailure(
       cause.kind === "cold"
         ? { case: "cold", value: cause.cold }
         : cause.kind === "vendorStartFailed"
-          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure) }
+          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure, cause.compaction ?? false) }
           : cause.kind === "unknownSession"
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
@@ -120,9 +125,22 @@ export function startSessionFailure(
  * neither arm is malformed and the daemon treats it as a rejection), and a
  * retryable one's cause ALWAYS set too. A rejection carries the API's refusal
  * when it was one (`StartSessionVendorStartRejected.api_failure`); a retryable
- * failure never does.
+ * failure never does. A failure that was the asked-for compaction or summary
+ * carries the `compaction` marker, whichever its retry label.
  */
 function vendorStartFailed(
+  retry: VendorStartRetry,
+  cause: VendorStartCause,
+  apiFailure: conversationv1.ApiRequestFailed | undefined,
+  compaction: boolean,
+): shimv1.StartSessionVendorStartFailed {
+  const failed = vendorStartFailedRetry(retry, cause, apiFailure);
+  if (compaction) failed.compaction = create(shimv1.StartSessionCompactionFailedSchema, {});
+  return failed;
+}
+
+/** The `vendor_start_failed` arm's retry label, as {@link vendorStartFailed} states it. */
+function vendorStartFailedRetry(
   retry: VendorStartRetry,
   cause: VendorStartCause,
   apiFailure: conversationv1.ApiRequestFailed | undefined,
@@ -181,14 +199,23 @@ export function startSessionRefused(
   });
 }
 
-/** The accepted answer, carrying the session's opening facts. */
+/**
+ * The accepted answer, carrying the session's opening facts, and the summary
+ * the resume carried when it asked for one.
+ */
 export function startSessionStarted(
   session: conversationv1.SessionStarted,
+  carriedSummary?: string,
 ): shimv1.StartSessionResponse {
   return create(shimv1.StartSessionResponseSchema, {
     result: {
       case: "success",
-      value: create(shimv1.StartSessionSuccessSchema, { session }),
+      value: create(shimv1.StartSessionSuccessSchema, {
+        session,
+        ...(carriedSummary === undefined
+          ? {}
+          : { carriedSummary: create(shimv1.StartSessionCarriedSummarySchema, { text: carriedSummary }) }),
+      }),
     },
   });
 }

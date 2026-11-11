@@ -84,6 +84,28 @@ describe("startSessionFailure", () => {
     expect(retry?.case === "rejected" ? retry.value.apiFailure : "not rejected").toBeUndefined();
   });
 
+  it.each(["retryable", "rejected"] as const)(
+    "marks a %s vendorStartFailed that was the asked-for compaction",
+    (retry) => {
+      // Arrange, Act.
+      const failure = failures.startSessionFailure(
+        { kind: "vendorStartFailed", retry, cause: "vendor", compaction: true },
+        "why",
+      );
+
+      // Assert.
+      expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.compaction : undefined).toBeDefined();
+    },
+  );
+
+  it("leaves the compaction marker off a vendorStartFailed that was not one", () => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable", cause: "vendor" }, "why");
+
+    // Assert.
+    expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.compaction : "not vendorStartFailed").toBeUndefined();
+  });
+
   it("carries the cold evidence verbatim so the daemon can offer a remediation", () => {
     // Arrange.
     const cold = create(conversationv1.SessionColdSchema, { contextTokens: 40_000n });
@@ -154,6 +176,27 @@ describe("startSessionStarted", () => {
       case: "success",
       value: containing({ session }),
     });
+  });
+  it("carries the summary the resume carried", () => {
+    // Arrange.
+    const session = create(conversationv1.SessionStartedSchema, { vendorSessionId: "v-1" });
+
+    // Act.
+    const response = failures.startSessionStarted(session, "the summary");
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.carriedSummary?.text : undefined).toBe("the summary");
+  });
+
+  it("carries no summary when the resume carried none", () => {
+    // Arrange.
+    const session = create(conversationv1.SessionStartedSchema, { vendorSessionId: "v-1" });
+
+    // Act.
+    const response = failures.startSessionStarted(session);
+
+    // Assert.
+    expect(response.result.case === "success" ? response.result.value.carriedSummary : "not a success").toBeUndefined();
   });
 });
 

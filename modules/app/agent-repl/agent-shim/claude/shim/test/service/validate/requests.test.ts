@@ -716,6 +716,77 @@ describe("validateStartSessionRequest cold remediation", () => {
   });
 });
 
+describe("validateStartSessionRequest carry_summary", () => {
+  /** A resume carrying CARRY. */
+  function carrying(carry: shimv1.StartSessionCarrySummary): shimv1.StartSessionRequest {
+    return create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
+      source: {
+        case: "resume",
+        value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "bypass-1", carrySummary: carry }),
+      },
+    });
+  }
+
+  /** A whole summarizer, edited by EDIT. */
+  function summarizer(edit: (value: conversationv1.SessionColdCompact) => void = () => {}): conversationv1.SessionColdCompact {
+    const value = create(conversationv1.SessionColdCompactSchema, {
+      model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      scope: conversationv1.SessionCompactScope.ALL,
+    });
+    edit(value);
+    return value;
+  }
+
+  const cases: { name: string; carry: shimv1.StartSessionCarrySummary; want: Code | undefined }[] = [
+    {
+      name: "accepts a carried summary naming a conversation and a whole summarizer",
+      carry: create(shimv1.StartSessionCarrySummarySchema, { vendorSessionId: "main-1", summarizer: summarizer() }),
+      want: undefined,
+    },
+    {
+      name: "refuses a carried summary naming no conversation",
+      carry: create(shimv1.StartSessionCarrySummarySchema, { vendorSessionId: "", summarizer: summarizer() }),
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a carried summary with no summarizer",
+      carry: create(shimv1.StartSessionCarrySummarySchema, { vendorSessionId: "main-1" }),
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a summarizer naming no model",
+      carry: create(shimv1.StartSessionCarrySummarySchema, {
+        vendorSessionId: "main-1",
+        summarizer: summarizer((value) => {
+          value.model = undefined;
+        }),
+      }),
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a summarizer whose scope is unspecified",
+      carry: create(shimv1.StartSessionCarrySummarySchema, {
+        vendorSessionId: "main-1",
+        summarizer: summarizer((value) => {
+          value.scope = conversationv1.SessionCompactScope.UNSPECIFIED;
+        }),
+      }),
+      want: Code.InvalidArgument,
+    },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      // Arrange
+      const request = carrying(tc.carry);
+
+      // Act, Assert
+      expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(tc.want);
+    });
+  }
+});
+
 describe("validateWatchAgentRequest known_through", () => {
   it("refuses a known_through pointer that is present but empty", () => {
     // Arrange.
@@ -880,6 +951,21 @@ describe("validateHoldParkedBridgeRequest", () => {
         if (request.start?.source.case === "resume") {
           request.start.source.value.coldRemediation = create(conversationv1.SessionColdRemediationSchema, {
             remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+          });
+        }
+      },
+      want: Code.InvalidArgument,
+    },
+    {
+      name: "refuses a resume carrying a summary",
+      edit: (request) => {
+        if (request.start?.source.case === "resume") {
+          request.start.source.value.carrySummary = create(shimv1.StartSessionCarrySummarySchema, {
+            vendorSessionId: "main-1",
+            summarizer: create(conversationv1.SessionColdCompactSchema, {
+              model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+              scope: conversationv1.SessionCompactScope.ALL,
+            }),
           });
         }
       },
