@@ -103,6 +103,10 @@ type QueueBypass struct {
 	Holds bool
 	// HeldBy names the sibling holding the mode, empty when none does.
 	HeldBy string
+	// BypassParked reports that the workspace, not holding the mode, has a
+	// parked bypass conversation to resume: the chip's menu then offers the
+	// two existing-context options too.
+	BypassParked bool
 }
 
 // DetachedUnmodeled is one live item of UNMODELED work running detached. It

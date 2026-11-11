@@ -26,7 +26,7 @@ const (
 // the rest of the naming as it is.
 func (r *resolver) SetQueueBypass(ws ids.WorkspaceID, chip QueueBypass) {
 	r.mutate(ws, "daemon.topbar.set_queue_bypass", "the topbar took the workspace's queue bypass standing",
-		dlog.Context{"offered": chip.Offered, "holds": chip.Holds, "held_by": chip.HeldBy},
+		dlog.Context{"offered": chip.Offered, "holds": chip.Holds, "held_by": chip.HeldBy, "bypass_parked": chip.BypassParked},
 		func(s *wsState) {
 			s.naming.QueueBypass = chip
 		})
@@ -52,7 +52,28 @@ func queueBypassChip(chip QueueBypass) *frontendv1.TopbarQueueBypass {
 		}
 	}
 	return &frontendv1.TopbarQueueBypass{
-		Mode:    &frontendv1.TopbarQueueBypass_Off{Off: &frontendv1.TopbarQueueBypassOff{}},
+		Mode:    &frontendv1.TopbarQueueBypass_Off{Off: &frontendv1.TopbarQueueBypassOff{Options: queueBypassOptions(chip.BypassParked)}},
 		Tooltip: &frontendv1.TopbarQueueBypassTooltip{Text: queueBypassOffTooltip},
 	}
+}
+
+// queueBypassOptions are the off chip's menu rows, in display order: the two
+// main-context options always, then the two existing-context options only
+// while a bypass conversation is parked (BYPASSPARKED).
+func queueBypassOptions(bypassParked bool) []*frontendv1.TopbarQueueBypassContextOption {
+	options := []*frontendv1.TopbarQueueBypassContextOption{
+		{DisplayName: "Full main context", Context: &frontendv1.TopbarQueueBypassContext{
+			Context: &frontendv1.TopbarQueueBypassContext_FullMain{FullMain: &frontendv1.TopbarQueueBypassContextFullMain{}}}},
+		{DisplayName: "Compacted main context", Context: &frontendv1.TopbarQueueBypassContext{
+			Context: &frontendv1.TopbarQueueBypassContext_CompactedMain{CompactedMain: &frontendv1.TopbarQueueBypassContextCompactedMain{}}}},
+	}
+	if !bypassParked {
+		return options
+	}
+	return append(options,
+		&frontendv1.TopbarQueueBypassContextOption{DisplayName: "Existing bypass context", Context: &frontendv1.TopbarQueueBypassContext{
+			Context: &frontendv1.TopbarQueueBypassContext_Existing{Existing: &frontendv1.TopbarQueueBypassContextExisting{}}}},
+		&frontendv1.TopbarQueueBypassContextOption{DisplayName: "Existing bypass plus compacted main", Context: &frontendv1.TopbarQueueBypassContext{
+			Context: &frontendv1.TopbarQueueBypassContext_ExistingPlusCompactedMain{ExistingPlusCompactedMain: &frontendv1.TopbarQueueBypassContextExistingPlusCompactedMain{}}}},
+	)
 }

@@ -305,3 +305,34 @@ func TestQueueBypassContextString(t *testing.T) {
 		})
 	}
 }
+
+func TestQueueBypassChipSaysWhetherABypassConversationIsParked(t *testing.T) {
+	cases := []struct {
+		name   string
+		bypass wsm.QueueBypass
+		want   bool
+	}{
+		{name: "nothing parked", bypass: wsm.QueueBypass{}, want: false},
+		{name: "the bypass conversation parked while the mode is free", bypass: wsm.QueueBypass{ParkedVendorSessionID: "vendor-bypass"}, want: true},
+		{name: "the queue conversation parked while the mode is held", bypass: wsm.QueueBypass{Holds: true, ParkedVendorSessionID: "vendor-queue"}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			record := f.workspace("w1", t.TempDir())
+			f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{"w1": tc.bypass}
+
+			// Act
+			chip, err := f.verbs.(*verbs).queueBypassChip(context.Background(), record)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("queueBypassChip: %v", err)
+			}
+			if !chip.Offered || chip.BypassParked != tc.want {
+				t.Fatalf("chip = %+v, want offered with bypass parked %v", chip, tc.want)
+			}
+		})
+	}
+}

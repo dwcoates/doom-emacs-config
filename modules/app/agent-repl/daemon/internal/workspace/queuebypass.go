@@ -361,7 +361,9 @@ func (v *verbs) queueBypassChip(ctx context.Context, record wsm.Workspace) (topb
 	if err != nil {
 		return topbar.QueueBypass{}, fmt.Errorf("read the queue bypass standing of %q: %w", record.ID, err)
 	}
-	chip := topbar.QueueBypass{Offered: true, Holds: standing.Holds}
+	// WHILE THE MODE IS NOT HELD, THE PARKED CONVERSATION IS THE BYPASS ONE:
+	// the queue conversation is the one bound.
+	chip := topbar.QueueBypass{Offered: true, Holds: standing.Holds, BypassParked: !standing.Holds && standing.ParkedVendorSessionID != ""}
 	if standing.HeldBy != "" {
 		holder, err := v.deps.DB.Workspace(ctx, standing.HeldBy)
 		if err != nil {
