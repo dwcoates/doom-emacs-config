@@ -1181,9 +1181,11 @@ type fakeFeed struct {
 	promptsRetired []ids.TurnID
 	// closed are the door's feed tells, in order.
 	closed []closedTell
-	// pullTarget is the pull request target PullTarget answers for every
-	// workspace, nil for none.
+	// pullTarget is the pull request target LinkPulls links every
+	// workspace's text into, nil for none.
 	pullTarget *pullrefs.Target
+	// linkedFor is the workspace of every LinkPulls call, in order.
+	linkedFor []ids.WorkspaceID
 	// answeredAt is when the fixture's root feed last drew agent output, as
 	// the real resolver records it (AnsweredSince); zero for never.
 	answeredAt time.Time
@@ -1200,8 +1202,16 @@ func (f *fakeFeed) AnsweredSince(_ ids.WorkspaceID, at time.Time) bool {
 // RecentCodeSpans answers no spans: the fixture draws plain prompts.
 func (f *fakeFeed) RecentCodeSpans(ids.WorkspaceID) []string { return nil }
 
-// PullTarget answers the fixture's pull request target.
-func (f *fakeFeed) PullTarget(ids.WorkspaceID) *pullrefs.Target { return f.pullTarget }
+// LinkPulls links PARSED's plain blocks into the fixture's pull request
+// target, recording which workspace asked.
+func (f *fakeFeed) LinkPulls(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse) {
+	f.linkedFor = append(f.linkedFor, ws)
+	for _, block := range parsed.GetBlocks() {
+		if plain := block.GetPlain(); plain != nil {
+			plain.Markdown, _ = pullrefs.Linkify(plain.GetMarkdown(), pullrefs.Links{Home: f.pullTarget}, false)
+		}
+	}
+}
 
 // closedTell is one OnTurnClosed the door made.
 type closedTell struct {

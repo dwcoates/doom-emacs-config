@@ -1,7 +1,10 @@
 // Package pullrefs turns a pull request reference written as `#<number>` or
 // `<repo>#<number>` into a link to that pull request on GitHub. A bare
-// reference links into the repository of the workspace whose text it is, and a
-// `<repo>#<number>` one into that repository under the same owner.
+// reference links to the pull request of that number the workspace's text last
+// named by its full address or by its repository (Known), and otherwise into
+// the repository of the workspace whose text it is. A `<repo>#<number>` one
+// links into that repository under the owner a known pull request of it names,
+// and otherwise under the workspace's owner.
 //
 // WHICH GITHUB OWNER a repository belongs to is decided by the account its
 // work is routed to (account.Resolver.ConfigDirFor): the work account's
@@ -83,9 +86,12 @@ func (t Target) PullURL(number string) string {
 	return "https://github.com/" + t.Owner + "/" + t.Repo + "/pull/" + number
 }
 
-// Linkify answers MARKDOWN with every `#<number>` written as a link to that
-// pull request in T, and every `<repo>#<number>` as a link to that pull
-// request in T's owner's repository REPO.
+// Linkify answers MARKDOWN with every `#<number>` and every
+// `<repo>#<number>` written as a link to the pull request LINKS resolves it to
+// (Links.bare, Links.inRepo); one LINKS resolves nowhere is left as written.
+// It also answers the pull requests its `<repo>#<number>` references named,
+// in order, which the caller learns (Known.Learn): a later bare reference to
+// the same number means the same pull request.
 //
 // A reference is linked only where it stands as a word of prose: never in a
 // fenced code block or a code span, never inside an existing link (its text or
@@ -93,8 +99,9 @@ func (t Target) PullURL(number string) string {
 // entity). A text still
 // ARRIVING leaves a reference at its very end alone, because the next push
 // may add digits to it.
-func Linkify(markdown string, t Target, arriving bool) string {
+func Linkify(markdown string, links Links, arriving bool) (string, []Ref) {
 	var out strings.Builder
+	var named []Ref
 	out.Grow(len(markdown))
 	var fence string
 	lines := strings.SplitAfter(markdown, "\n")
@@ -113,9 +120,9 @@ func Linkify(markdown string, t Target, arriving bool) string {
 			out.WriteString(line)
 			continue
 		}
-		linkifyLine(&out, line, t, arriving && start+len(line) == len(markdown))
+		named = linkifyLine(&out, line, links, arriving && start+len(line) == len(markdown), named)
 	}
-	return out.String()
+	return out.String(), named
 }
 
 // fenceMarker answers the backtick or tilde run LINE opens a fence with, or ""
@@ -146,14 +153,15 @@ func closesFence(line, marker string) bool {
 	return strings.Trim(trimmed, marker[:1]) == ""
 }
 
-// linkifyLine writes LINE to OUT with its references linked. ATEND says the
-// line ends a text still arriving.
+// linkifyLine writes LINE to OUT with its references linked, and answers
+// NAMED with the pull requests its `<repo>#<number>` references named
+// appended. ATEND says the line ends a text still arriving.
 //
 // The scan walks LINE once and copies three kinds of span verbatim before a
 // reference can be found in them: a code span, a link (its text and its
 // destination, see linkEnd), and any word that is not a reference. A reference
 // is linked only where the scan meets it at the start of a word.
-func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
+func linkifyLine(out *strings.Builder, line string, links Links, atEnd bool, named []Ref) []Ref {
 	i := 0
 	for i < len(line) {
 		c := line[i]
@@ -178,20 +186,24 @@ func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 			i = end
 		case c == '#' && startsWord(line, i):
 			number, end, ok := pullNumber(line, i, atEnd)
-			if !ok {
+			ref, linked := links.bare(number)
+			if !ok || !linked {
 				out.WriteByte(c)
 				i++
 				continue
 			}
-			writePullLink(out, "#"+number, t.PullURL(number))
+			writePullLink(out, "#"+number, ref.URL())
 			i = end
 		case isRepoByte(c) && startsWord(line, i):
 			name := repoName(line, i)
 			if hash := i + len(name); hash < len(line) && line[hash] == '#' && validRepoName(name) {
 				if number, end, ok := pullNumber(line, hash, atEnd); ok {
-					writePullLink(out, name+"#"+number, Target{Owner: t.Owner, Repo: name}.PullURL(number))
-					i = end
-					continue
+					if ref, linked := links.inRepo(name, number); linked {
+						writePullLink(out, name+"#"+number, ref.URL())
+						named = append(named, ref)
+						i = end
+						continue
+					}
 				}
 			}
 			out.WriteString(name)
@@ -201,6 +213,7 @@ func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 			i++
 		}
 	}
+	return named
 }
 
 // writePullLink writes the markdown link TEXT to URL.

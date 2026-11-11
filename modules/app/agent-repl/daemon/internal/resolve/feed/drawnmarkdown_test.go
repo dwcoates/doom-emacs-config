@@ -68,10 +68,12 @@ func TestMarkCodeSpansAndLinkPullsShareTheDrawnMarkdownWalk(t *testing.T) {
 	// Arrange: both rewrites visit the same plain and entry markdown, so a
 	// hand-rolled walk in either that diverges fails here.
 	parsed := prose.ParsePrompt(dlog.NewTestLogger(), "run foo() for #12\n\n1 - run foo() for #12")
+	h := newHarness(t)
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
 
 	// Act.
 	markCodeSpans(parsed, []string{"foo()"})
-	linkPulls(parsed, chessComTarget, false)
+	h.resolver.linkPulls(testWorkspace, parsed, false)
 
 	// Assert.
 	var got []string

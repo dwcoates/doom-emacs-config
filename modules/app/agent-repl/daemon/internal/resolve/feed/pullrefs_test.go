@@ -1,9 +1,13 @@
 package feed
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/prose"
 	"agent-repld/internal/pullrefs"
 
@@ -103,8 +107,8 @@ func TestAWithdrawnTargetLinksNothing(t *testing.T) {
 	if got := plainMarkdown(t, parsed); got != "landed in #12" {
 		t.Fatalf("drawn markdown = %q, want nothing linked", got)
 	}
-	if h.resolver.PullTarget(testWorkspace) != nil {
-		t.Fatal("PullTarget answers a target after it was withdrawn")
+	if h.resolver.pullTarget(testWorkspace) != nil {
+		t.Fatal("pullTarget answers a target after it was withdrawn")
 	}
 }
 
@@ -117,7 +121,7 @@ func TestAResetKeepsThePullTarget(t *testing.T) {
 	h.resolver.ResetWorkspace(testWorkspace, "test")
 
 	// Assert.
-	if got := h.resolver.PullTarget(testWorkspace); got == nil || *got != *chessComTarget {
+	if got := h.resolver.pullTarget(testWorkspace); got == nil || *got != *chessComTarget {
 		t.Fatalf("target after a reset = %v, want %v", got, chessComTarget)
 	}
 }
@@ -163,10 +167,12 @@ func TestLinkPullsLinksEveryDrawnMarkdown(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
+			h := newHarness(t)
+			h.resolver.SetPullTarget(testWorkspace, chessComTarget)
 			parsed := &frontendv1.ParsedProse{Blocks: []*frontendv1.ProseBlock{tc.block}}
 
 			// Act.
-			linkPulls(parsed, chessComTarget, false)
+			h.resolver.linkPulls(testWorkspace, parsed, false)
 
 			// Assert.
 			if got := tc.read(tc.block); got != "see "+linked12 {
@@ -178,12 +184,15 @@ func TestLinkPullsLinksEveryDrawnMarkdown(t *testing.T) {
 
 func TestDrawUserBlocksLinksAPromptsReferences(t *testing.T) {
 	// Arrange.
+	h := newHarness(t)
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
 	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
 		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "review #12"}}},
 	}}
+	link := func(parsed *frontendv1.ParsedProse) { h.resolver.LinkPulls(testWorkspace, parsed) }
 
 	// Act.
-	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, chessComTarget, nil, dlog.NewTestLogger())
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, link, nil, dlog.NewTestLogger())
 
 	// Assert.
 	parsed := blocks[0].GetText().GetProse()
@@ -214,7 +223,7 @@ func TestDrawUserBlocksMarksUpRecentCodeSpans(t *testing.T) {
 			}}
 
 			// Act.
-			blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, tc.spans, dlog.NewTestLogger())
+			blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, func(*frontendv1.ParsedProse) {}, tc.spans, dlog.NewTestLogger())
 
 			// Assert.
 			parsed := blocks[0].GetText().GetProse()
@@ -271,5 +280,261 @@ func TestRecentCodeSpansReadsOnlyTheLastFinalResponses(t *testing.T) {
 func TestRecentCodeSpansWithoutFinalResponsesIsEmpty(t *testing.T) {
 	if got := (&resolver{}).recentCodeSpans(&wsState{}); len(got) != 0 {
 		t.Fatalf("recentCodeSpans = %q, want none", got)
+	}
+}
+
+// gns613 is a pull request of a repository other than the workspace's own.
+var gns613 = pullrefs.Ref{Target: pullrefs.Target{Owner: "ChessCom", Repo: "gns-server"}, Number: "613"}
+
+const gns613URL = "https://github.com/ChessCom/gns-server/pull/613"
+
+const linkedGns613 = "[#613](" + gns613URL + ")"
+
+// fakePullReferences is an in-memory PullReferenceStore; two harnesses
+// sharing one are a daemon and its restarted successor.
+type fakePullReferences struct {
+	refs      map[ids.WorkspaceID][]pullrefs.Ref
+	at        []time.Time
+	loadErr   error
+	recordErr error
+	loads     int
+}
+
+func newFakePullReferences() *fakePullReferences {
+	return &fakePullReferences{refs: map[ids.WorkspaceID][]pullrefs.Ref{}}
+}
+
+func (f *fakePullReferences) RecordPullReference(_ context.Context, ws ids.WorkspaceID, ref pullrefs.Ref, at time.Time) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
+	f.refs[ws] = append(f.refs[ws], ref)
+	f.at = append(f.at, at)
+	return nil
+}
+
+func (f *fakePullReferences) PullReferences(_ context.Context, ws ids.WorkspaceID) ([]pullrefs.Ref, error) {
+	f.loads++
+	if f.loadErr != nil {
+		return nil, f.loadErr
+	}
+	return f.refs[ws], nil
+}
+
+// settleResponseAs draws one settled response bubble of UNIT saying MARKDOWN
+// and answers its drawn markdown: the newest response row's.
+func settleResponseAs(h *harness, unit, markdown string) string {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame(unit, &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: markdown},
+		}, nil), nil, nil)
+	rows := h.responseRows()
+	if len(rows) == 0 {
+		h.t.Fatalf("no response row of %s", unit)
+	}
+	return plainMarkdown(h.t, rows[len(rows)-1].GetActivity().GetResponse().GetSuccess().GetProse().GetProse())
+}
+
+func TestABareReferenceLinksToThePullRequestAnEarlierTextNamed(t *testing.T) {
+	cases := []struct {
+		name   string
+		target *pullrefs.Target
+		first  string
+		second string
+		want   string
+	}{
+		{name: "a full address named earlier", target: chessComTarget,
+			first: "opened " + gns613URL, second: "#613 merged", want: linkedGns613 + " merged"},
+		{name: "a markdown link named earlier", target: chessComTarget,
+			first: "opened [the fix](" + gns613URL + ")", second: "#613 merged", want: linkedGns613 + " merged"},
+		{name: "a repo reference named earlier", target: chessComTarget,
+			first: "opened gns-server#613", second: "#613 merged", want: linkedGns613 + " merged"},
+		{name: "an unnamed number links into the workspace's repository", target: chessComTarget,
+			first: "opened " + gns613URL, second: "#12 merged", want: linked12 + " merged"},
+		{name: "a workspace with no target links a named number", first: "opened " + gns613URL,
+			second: "#613 merged", want: linkedGns613 + " merged"},
+		{name: "a workspace with no target leaves an unnamed number", first: "opened " + gns613URL,
+			second: "#12 merged", want: "#12 merged"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.resolver.SetPullTarget(testWorkspace, tc.target)
+			settleResponseAs(h, "unit-1", tc.first)
+
+			// Act.
+			got := settleResponseAs(h, "unit-2", tc.second)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("drawn markdown = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestABareReferenceLinksToThePullRequestItsOwnTextNamedBefore(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
+
+	// Act.
+	got := settleResponseAs(h, "unit-1", "see #613\n\n"+gns613URL)
+
+	// Assert: the whole text's addresses are learned before any is linked.
+	if want := "see " + linkedGns613 + "\n\n" + gns613URL; got != want {
+		t.Fatalf("drawn markdown = %q, want %q", got, want)
+	}
+}
+
+func TestAnArrivingTextDoesNotLearnItsTrailingAddress(t *testing.T) {
+	// Arrange.
+	store := newFakePullReferences()
+	h := newDurableHarness(t, durableStores{pullReferences: store})
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
+
+	// Act: the address so far may still grow digits.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "opened https://github.com/ChessCom/gns-server/pull/61"}, nil), nil, nil)
+
+	// Assert.
+	if got := store.refs[testWorkspace]; len(got) != 0 {
+		t.Fatalf("recorded %+v, want nothing learned from a growing address", got)
+	}
+}
+
+func TestALearnedPullRequestIsRecordedOnce(t *testing.T) {
+	// Arrange.
+	store := newFakePullReferences()
+	h := newDurableHarness(t, durableStores{pullReferences: store})
+
+	// Act.
+	settleResponseAs(h, "unit-1", "opened "+gns613URL)
+	settleResponseAs(h, "unit-2", "again "+gns613URL)
+
+	// Assert.
+	if got := store.refs[testWorkspace]; len(got) != 1 || got[0] != gns613 {
+		t.Fatalf("recorded %+v, want %+v once", got, gns613)
+	}
+	if want := time.UnixMilli(h.nowMs); !store.at[0].Equal(want) {
+		t.Fatalf("recorded at %v, want %v", store.at[0], want)
+	}
+	if !h.hasRecordWith("debug", opPullReferences, "repo", "gns-server") {
+		t.Fatalf("records = %+v, want the learning recorded", h.records())
+	}
+}
+
+func TestARestartedDaemonLinksThePullRequestsTheOneBeforeLearned(t *testing.T) {
+	// Arrange: one daemon learns the pull request, its successor shares the
+	// store.
+	store := newFakePullReferences()
+	before := newDurableHarness(t, durableStores{pullReferences: store})
+	settleResponseAs(before, "unit-1", "opened "+gns613URL)
+	after := newDurableHarness(t, durableStores{pullReferences: store})
+	after.resolver.SetPullTarget(testWorkspace, chessComTarget)
+
+	// Act.
+	got := settleResponseAs(after, "unit-2", "#613 merged")
+
+	// Assert.
+	if want := linkedGns613 + " merged"; got != want {
+		t.Fatalf("drawn markdown = %q, want %q", got, want)
+	}
+	if !after.hasRecordWith("info", opPullReferencesRestore, "pull_requests", 1) {
+		t.Fatalf("records = %+v, want the load recorded", after.records())
+	}
+}
+
+func TestTheKnownPullRequestsAreLoadedOnce(t *testing.T) {
+	// Arrange.
+	store := newFakePullReferences()
+	h := newDurableHarness(t, durableStores{pullReferences: store})
+
+	// Act.
+	settleResponseAs(h, "unit-1", "#1")
+	settleResponseAs(h, "unit-2", "#2")
+
+	// Assert.
+	if store.loads != 1 {
+		t.Fatalf("loads = %d, want 1", store.loads)
+	}
+}
+
+func TestAResetKeepsTheKnownPullRequests(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
+	settleResponseAs(h, "unit-1", "opened "+gns613URL)
+
+	// Act.
+	h.resolver.ResetWorkspace(testWorkspace, "test")
+	h.resolver.OnMainAgent(testWorkspace, mainAgent())
+	got := settleResponseAs(h, "unit-2", "#613 merged")
+
+	// Assert.
+	if want := linkedGns613 + " merged"; got != want {
+		t.Fatalf("drawn markdown = %q, want %q", got, want)
+	}
+}
+
+func TestAKnownPullRequestsLoadFailureIsLoggedAndRaised(t *testing.T) {
+	// Arrange.
+	store := newFakePullReferences()
+	store.loadErr = errors.New("disk on fire")
+	h := newDurableHarness(t, durableStores{pullReferences: store})
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
+
+	// Act.
+	got := settleResponseAs(h, "unit-1", "#12 merged")
+
+	// Assert: the workspace links into its own repository, loudly.
+	if want := linked12 + " merged"; got != want {
+		t.Fatalf("drawn markdown = %q, want %q", got, want)
+	}
+	if !h.hasRecordWith("error", opPullReferencesRestore, "error", "disk on fire") {
+		t.Fatalf("records = %+v, want the failed load at error", h.records())
+	}
+	if keys := h.warnings.keys(); len(keys) != 1 || keys[0] != opPullReferencesRestore {
+		t.Fatalf("warnings = %v, want the failed load raised", keys)
+	}
+}
+
+func TestAKnownPullRequestsRecordFailureIsLoggedAndRaised(t *testing.T) {
+	// Arrange.
+	store := newFakePullReferences()
+	store.recordErr = errors.New("disk on fire")
+	h := newDurableHarness(t, durableStores{pullReferences: store})
+	h.resolver.SetPullTarget(testWorkspace, chessComTarget)
+	settleResponseAs(h, "unit-1", "opened "+gns613URL)
+
+	// Act.
+	got := settleResponseAs(h, "unit-2", "#613 merged")
+
+	// Assert: this process still knows it, and says it could not keep it.
+	if want := linkedGns613 + " merged"; got != want {
+		t.Fatalf("drawn markdown = %q, want %q", got, want)
+	}
+	if !h.hasRecordWith("error", opPullReferences, "error", "disk on fire") {
+		t.Fatalf("records = %+v, want the failed recording at error", h.records())
+	}
+	if keys := h.warnings.keys(); len(keys) != 1 || keys[0] != opPullReferences {
+		t.Fatalf("warnings = %v, want the failed recording raised once", keys)
+	}
+}
+
+func TestLinkPullsLinksAPromptMirroredOutsideTheResolver(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	settleResponseAs(h, "unit-1", "opened "+gns613URL)
+	parsed := prose.ParsePrompt(dlog.NewTestLogger(), "review #613")
+
+	// Act.
+	h.resolver.LinkPulls(testWorkspace, parsed)
+
+	// Assert.
+	if got := plainMarkdown(t, parsed); got != "review "+linkedGns613 {
+		t.Fatalf("drawn prompt = %q, want the known pull request linked", got)
 	}
 }

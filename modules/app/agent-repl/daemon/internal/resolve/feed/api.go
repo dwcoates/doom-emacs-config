@@ -156,9 +156,11 @@ type Resolver interface {
 	// verbs install it as they bind the workspace's views, before anything
 	// is drawn for it.
 	SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target)
-	// PullTarget answers a copy of the installed target, nil for none. The
-	// prompt queue's mirror of an accepted prompt links through it.
-	PullTarget(ws ids.WorkspaceID) *pullrefs.Target
+	// LinkPulls links a settled text's pull request references as the
+	// workspace's feed links its own: to the pull requests its text named
+	// before, else into its repository. The prompt queue's mirror of an
+	// accepted prompt links through it.
+	LinkPulls(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse)
 	// RecentCodeSpans answers the inline code spans of the workspace's last
 	// RecentFinalResponses final responses (codespans.go). The prompt queue's
 	// mirror of an accepted prompt marks them up through it.
@@ -600,6 +602,11 @@ type Deps struct {
 	// nothing, which is what a test that is not about surviving a restart
 	// wants.
 	Reconnected ReconnectedTurnStore
+	// PullReferences is the durable record of the pull requests each
+	// workspace's text named (wsm.DB), so a restarted daemon resolves a bare
+	// `#<number>` as the one before it did. nil records and loads nothing,
+	// which is what a test that is not about surviving a restart wants.
+	PullReferences PullReferenceStore
 	// History reads the store pages a reader's request needs (book.go). nil
 	// pages nothing: every feed serves exactly what it holds, which is what a
 	// test that is not about loading history wants. Production always wires

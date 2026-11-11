@@ -6,6 +6,8 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/pullrefs"
+
 	// The daemon's SQLite driver. Registered here because wsm is the sole
 	// owner of the database handle; nothing else opens it.
 	_ "modernc.org/sqlite"
@@ -755,6 +757,12 @@ type DB interface {
 	PageLoaded(ctx context.Context, id WorkspaceID) (loaded, known bool, err error)
 	// SetPageLoaded records whether Emacs holds a workspace's page.
 	SetPageLoaded(ctx context.Context, id WorkspaceID, loaded bool, at time.Time) error
+	// RecordPullReference records a pull request a workspace's text named,
+	// keeping the first instant of one recorded before (pullreferences.go).
+	RecordPullReference(ctx context.Context, id WorkspaceID, ref pullrefs.Ref, at time.Time) error
+	// PullReferences answers every pull request a workspace's text named, in
+	// the order each was first named.
+	PullReferences(ctx context.Context, id WorkspaceID) ([]pullrefs.Ref, error)
 	// WorkspaceContextUsage answers a workspace's last-known context fact,
 	// false when none was recorded (contextusage.go).
 	WorkspaceContextUsage(ctx context.Context, id WorkspaceID) (ContextUsageRecord, bool, error)
