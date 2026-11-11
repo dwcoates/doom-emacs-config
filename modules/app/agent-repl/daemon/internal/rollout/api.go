@@ -117,9 +117,12 @@ type Controller interface {
 	Restart(ctx context.Context, ask Ask) (HandoverAcceptance, error)
 	// BounceShim asks the bounce registry to replace one workspace's shim with
 	// a fresh one on the installed bundle: at once when nothing is in flight or
-	// force is set, else when the workspace's work ends. done, when set, is
-	// told how the bounce ended.
-	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, done func(error)) (bounce.Decision, error)
+	// force is set, else when the workspace's work ends. endWork, when set,
+	// ends the work the bounce cuts once the workspace is DRAINED, before the
+	// old shim is stood down, so nothing that work's end releases is
+	// dispatched to the shim being replaced. done, when set, is told how the
+	// bounce ended.
+	BounceShim(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error)
 	// ShimReported takes one live shim's build report — every shim reports it
 	// on the opening diagnostics of every watch — and bounces the shim through
 	// the registry when the build is not the installed bundle's. It never

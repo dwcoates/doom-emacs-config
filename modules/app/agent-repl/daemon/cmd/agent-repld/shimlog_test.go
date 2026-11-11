@@ -43,7 +43,7 @@ type shimLogRelaunchCall struct {
 	force     bool
 }
 
-func (f *fakeShimLogRelauncher) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+func (f *fakeShimLogRelauncher) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, shimLogRelaunchCall{workspace: ws, reason: reason, force: force})
 	f.mu.Unlock()

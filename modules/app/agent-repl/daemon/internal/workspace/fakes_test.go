@@ -2177,19 +2177,27 @@ type fakeRollout struct {
 	// completion for fireRegistered, the freeness edge, to call.
 	registered *bounce.Decision
 	pending    func(error)
+	// onBounceAsked, when set, runs as a bounce is asked for, before the
+	// fake runs it: what a test reads there is the state the ask found.
+	onBounceAsked func()
 }
 
 type rolloutCall struct {
 	WS     ids.WorkspaceID
 	Reason rollout.RelaunchReason
 	Force  bool
+	// EndsWork reports that the bounce was handed work to end once drained.
+	EndsWork bool
 }
 
 // BounceShim records the bounce and completes it on a goroutine of its own,
 // as the registry does: with relaunchErr as the bounce's outcome.
-func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, done func(error)) (bounce.Decision, error) {
+func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason, force bool, endWork func(context.Context), done func(error)) (bounce.Decision, error) {
 	r.mu.Lock()
-	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force})
+	r.relaunches = append(r.relaunches, rolloutCall{WS: ws, Reason: reason, Force: force, EndsWork: endWork != nil})
+	if r.onBounceAsked != nil {
+		r.onBounceAsked()
+	}
 	err, refused, hold, registered := r.relaunchErr, r.refuseErr, r.hold, r.registered
 	if registered != nil {
 		r.pending = done
@@ -2204,6 +2212,10 @@ func (r *fakeRollout) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason
 	go func() {
 		if hold != nil {
 			<-hold
+		}
+		// The registry runs the bounce drained: the cut work ends inside it.
+		if endWork != nil {
+			endWork(context.Background())
 		}
 		if done != nil {
 			done(err)

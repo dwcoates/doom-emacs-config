@@ -375,7 +375,7 @@ func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchR
 		s.log.Error("daemon.cmd.lifecycle", unbound, fields)
 		return
 	}
-	decision, err := controller.BounceShim(context.Background(), ws, reason, false, nil)
+	decision, err := controller.BounceShim(context.Background(), ws, reason, false, nil, nil)
 	if err != nil {
 		return
 	}

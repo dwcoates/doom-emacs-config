@@ -76,9 +76,13 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		return relaunchFailed(ws, "the workspace's merge did not reach a stopping point: "+err.Error())
 	}
 	defer v.resumeMerges(ctx, log, ws)
-	v.forceEndTurn(ctx, log, ws)
+	// THE TURN IS ENDED INSIDE THE BOUNCE, once the registry has drained the
+	// workspace (rollout.Controller.BounceShim's endWork): ended before it,
+	// the turn's end released a prompt deferred behind it onto the shim
+	// about to be stood down.
+	endTurn := func(ctx context.Context) { v.forceEndTurn(ctx, log, ws) }
 	outcome := make(chan error, 1)
-	if _, err := v.bounceShim(ctx, log, ws, true, func(err error) { outcome <- err }); err != nil {
+	if _, err := v.bounceShim(ctx, log, ws, true, endTurn, func(err error) { outcome <- err }); err != nil {
 		return err
 	}
 	// THE ANSWER IS THE OUTCOME (owner ruling, 2026-10-08: "i expect it to
@@ -143,7 +147,7 @@ func (v *verbs) RestartWhenIdle(ctx context.Context, ws ids.WorkspaceID) (IdleRe
 		return IdleRestart{}, v.startForRestart(ctx, log, ws)
 	}
 	outcome := make(chan error, 1)
-	decision, err := v.bounceShim(ctx, log, ws, false, func(err error) { outcome <- err })
+	decision, err := v.bounceShim(ctx, log, ws, false, nil, func(err error) { outcome <- err })
 	if err != nil {
 		return IdleRestart{}, err
 	}
@@ -214,13 +218,15 @@ func relaunchFailed(ws ids.WorkspaceID, detail string) *Refusal {
 // bounceShim asks the bounce registry for the restart's shim replacement and
 // hangs the webapp reload off its completion. force is false only for the
 // account switch (SelectAccount), which bounces at the workspace's freeness
-// rather than over its work. finished, when set, is told the bounce's outcome
-// after the completion's own record and reload.
-func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, finished func(error)) (bounce.Decision, error) {
+// rather than over its work. endWork, when set, ends the work the bounce cuts
+// once the workspace is drained (rollout.Controller.BounceShim). finished, when
+// set, is told the bounce's outcome after the completion's own record and
+// reload.
+func (v *verbs) bounceShim(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool, endWork func(context.Context), finished func(error)) (bounce.Decision, error) {
 	// THE BOUNCE RUNS ON A CONTEXT DETACHED FROM THE REQUEST: it outlives the
 	// rpc. Its completion is what the reload and the record below hang off.
 	detached := context.WithoutCancel(ctx)
-	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, func(err error) {
+	decision, err := v.deps.Rollout.BounceShim(detached, ws, rollout.ReasonRestartVerb, force, endWork, func(err error) {
 		v.finishRestart(detached, log, ws, force, err)
 		if finished != nil {
 			finished(err)
@@ -287,7 +293,8 @@ func (v *verbs) finishRestart(ctx context.Context, log dlog.Logger, ws ids.Works
 	log.Info(opRestart, "restarted the workspace", dlog.Context{"force": force})
 }
 
-// forceEndTurn ends whatever turn is running before the bounce, BOUNDED by
+// forceEndTurn ends whatever turn is running, inside the drained bounce before
+// its stand-down (Restart), BOUNDED by
 // restartStopBound. A workspace with no live session or no open turn has
 // nothing to end.
 //

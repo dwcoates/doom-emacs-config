@@ -72,7 +72,7 @@ func TestAStaleBuildBounceOverAMergesLeaseIsDeferred(t *testing.T) {
 			}
 
 			// Act.
-			err := h.c.shimBounce(reason, false)(context.Background(), ws)
+			err := h.c.shimBounce(reason, false, nil)(context.Background(), ws)
 
 			// Assert.
 			if !errors.Is(err, bounce.ErrDeferredBehindLease) {

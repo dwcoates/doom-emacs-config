@@ -50,6 +50,62 @@ func TestRestartForceEndsTheRunningTurnFirst(t *testing.T) {
 	}
 }
 
+// TestRestartEndsTheTurnInsideTheBounce pins that the restart's turn kill
+// runs inside the bounce, which the registry runs drained, never before the
+// bounce is asked for: a turn ended before the drain released a prompt
+// deferred behind it onto the shim about to be stood down.
+func TestRestartEndsTheTurnInsideTheBounce(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	killedAtAsk := -1
+	f.rollout.onBounceAsked = func() { killedAtAsk = len(f.shim.killedTurns) }
+
+	// Act.
+	if err := f.verbs.Restart(context.Background(), "w1"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+
+	// Assert.
+	if killedAtAsk != 0 {
+		t.Fatalf("turns killed when the bounce was asked = %d, want 0: the kill belongs inside the bounce", killedAtAsk)
+	}
+	if got := f.rollout.relaunchCalls(); len(got) != 1 || !got[0].EndsWork {
+		t.Fatalf("relaunches = %+v, want one bounce handed the turn to end", got)
+	}
+	if len(f.shim.killedTurns) != 1 {
+		t.Fatalf("killed turns = %+v, want the one kill the bounce ran", f.shim.killedTurns)
+	}
+}
+
+// TestARestartTheRegistryRefusesEndsNoTurn pins that a restart the registry
+// will not take leaves the running turn alone: nothing replaces the shim, so
+// nothing is owed the cut.
+func TestARestartTheRegistryRefusesEndsNoTurn(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	f.rollout.refuseErr = errors.New("refused")
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Restart = nil, want the registry's refusal")
+	}
+	if len(f.shim.killedTurns) != 0 {
+		t.Fatalf("killed turns = %+v, want none", f.shim.killedTurns)
+	}
+	if got := f.db.owedTurns("w1"); len(got) != 0 {
+		t.Fatalf("owed = %v, want nothing owed for a restart that never ran", got)
+	}
+}
+
 func TestRestartOwesTheTurnItCutsItsResumption(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
