@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/agentverbs"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/prioritywire"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/feed"
@@ -1471,17 +1472,11 @@ func queueBypassContextOf(text string) (*frontendv1.TopbarQueueBypassContext, er
 
 // priorityOf reads a -priority flag: a level, or none to clear it.
 func priorityOf(text string) (*agentreplv1.WorkspacePriority, error) {
-	switch text {
-	case "p05":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}}}, nil
-	case "p1":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}}}, nil
-	case "p2":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P2{P2: &agentreplv1.WorkspacePriorityP2{}}}, nil
-	case "p3":
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P3{P3: &agentreplv1.WorkspacePriorityP3{}}}, nil
-	case "none":
+	if text == "none" {
 		return nil, nil
+	}
+	if level, ok := prioritywire.Parse(text); ok {
+		return prioritywire.Proto(level), nil
 	}
 	return nil, fmt.Errorf("-priority is p05, p1, p2, p3 or none, not %q", text)
 }

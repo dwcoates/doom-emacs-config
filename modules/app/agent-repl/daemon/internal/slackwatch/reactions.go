@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/prioritywire"
 	"agent-repld/internal/wsm"
 )
 
@@ -255,7 +256,7 @@ func (w *Watcher) fire(ctx context.Context, settings wsm.SlackReactionSettings, 
 func ForkCommand(b wsm.SlackReactionBinding, link string) string {
 	cmd := "agent-repld workspace create -repository here -relationship peer -lands-into main -origin-master -context fork -fork here -name <NAME> -prompt <PRESCRIPTION>"
 	if b.Priority != nil {
-		cmd += " -priority " + PriorityFlag(*b.Priority)
+		cmd += " -priority " + prioritywire.Spelled(*b.Priority)
 	}
 	switch b.Thread {
 	case wsm.SlackReactionAnnounced:
@@ -269,21 +270,6 @@ func ForkCommand(b wsm.SlackReactionBinding, link string) string {
 		cmd += " -one-shot"
 	}
 	return cmd
-}
-
-// PriorityFlag spells P as `agent-repld`'s -priority flag does.
-func PriorityFlag(p wsm.Priority) string {
-	switch p {
-	case wsm.PriorityP05:
-		return "p05"
-	case wsm.PriorityP1:
-		return "p1"
-	case wsm.PriorityP2:
-		return "p2"
-	case wsm.PriorityP3:
-		return "p3"
-	}
-	panic(fmt.Sprintf("slackwatch: no priority %d", int(p)))
 }
 
 // intakePrompt composes B's intake prompt for the message at TS in CHANNEL.

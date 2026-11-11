@@ -8,6 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/prioritywire"
 	"agent-repld/internal/wsm"
 )
 
@@ -78,43 +79,19 @@ func SubscriptionProto(sub wsm.SlackThreadSubscription, dir string) *agentreplv1
 	return out
 }
 
-// PriorityOf reads a contract priority, nil for none.
-func PriorityOf(p *agentreplv1.WorkspacePriority) *wsm.Priority {
-	var level wsm.Priority
-	switch p.GetLevel().(type) {
-	case *agentreplv1.WorkspacePriority_P05:
-		level = wsm.PriorityP05
-	case *agentreplv1.WorkspacePriority_P1:
-		level = wsm.PriorityP1
-	case *agentreplv1.WorkspacePriority_P2:
-		level = wsm.PriorityP2
-	case *agentreplv1.WorkspacePriority_P3:
-		level = wsm.PriorityP3
-	default:
+// optionalPriority reads a contract priority, nil for none.
+func optionalPriority(p *agentreplv1.WorkspacePriority) *wsm.Priority {
+	level, ok := prioritywire.Of(p)
+	if !ok {
 		return nil
 	}
 	return &level
 }
 
-// priorityProto spells P.
-func priorityProto(p wsm.Priority) *agentreplv1.WorkspacePriority {
-	switch p {
-	case wsm.PriorityP05:
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}}}
-	case wsm.PriorityP1:
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}}}
-	case wsm.PriorityP2:
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P2{P2: &agentreplv1.WorkspacePriorityP2{}}}
-	case wsm.PriorityP3:
-		return &agentreplv1.WorkspacePriority{Level: &agentreplv1.WorkspacePriority_P3{P3: &agentreplv1.WorkspacePriorityP3{}}}
-	}
-	panic(fmt.Sprintf("slackwatch: no priority %d", int(p)))
-}
-
 // BindingOf reads a contract binding, false when its thread arm or its
 // subscription's mode is unset.
 func BindingOf(b *agentreplv1.SlackReactionBinding) (wsm.SlackReactionBinding, bool) {
-	out := wsm.SlackReactionBinding{Emoji: b.GetEmoji(), OneShot: b.GetAction().GetOneShot(), Priority: PriorityOf(b.GetAction().GetPriority())}
+	out := wsm.SlackReactionBinding{Emoji: b.GetEmoji(), OneShot: b.GetAction().GetOneShot(), Priority: optionalPriority(b.GetAction().GetPriority())}
 	switch arm := b.GetAction().GetThread().(type) {
 	case *agentreplv1.SlackReactionAction_Announced:
 		out.Thread = wsm.SlackReactionAnnounced
@@ -142,7 +119,7 @@ func BindingProto(b wsm.SlackReactionBinding) *agentreplv1.SlackReactionBinding 
 		panic(fmt.Sprintf("slackwatch: a binding of %q relates to its thread as %q", b.Emoji, b.Thread))
 	}
 	if b.Priority != nil {
-		action.Priority = priorityProto(*b.Priority)
+		action.Priority = prioritywire.Proto(*b.Priority)
 	}
 	return &agentreplv1.SlackReactionBinding{Emoji: b.Emoji, Action: action}
 }
@@ -190,4 +167,3 @@ func LoginProto(l Login) *agentreplv1.GetSlackStatusLogin {
 func MessageProto(m Message) *agentreplv1.SlackThreadMessage {
 	return &agentreplv1.SlackThreadMessage{Ts: m.TS, Author: m.Author, Text: m.Text, OwnPost: m.OwnPost}
 }
-
