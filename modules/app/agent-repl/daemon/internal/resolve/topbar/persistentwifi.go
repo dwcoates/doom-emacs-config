@@ -1,8 +1,6 @@
 package topbar
 
 import (
-	"fmt"
-	"math"
 	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -69,8 +67,7 @@ func persistentWifiChip(state *agentreplv1.PersistentWifiState) *frontendv1.Topb
 }
 
 // persistentWifiLid projects the lid onto the chip's lid arm and answers the
-// tooltip's lid sentence, with the lid-close dim in force; empty while the
-// lid is not yet heard and no dim stands. The arm paints nothing, so the
+// tooltip's lid sentence; empty while the lid is not yet heard. The arm paints nothing, so the
 // sentence is how the reader learns the lid.
 func persistentWifiLid(chip *frontendv1.TopbarPersistentWifi, state *agentreplv1.PersistentWifiState) string {
 	var sentences []string
@@ -86,10 +83,7 @@ func persistentWifiLid(chip *frontendv1.TopbarPersistentWifi, state *agentreplv1
 		sentences = append(sentences, "No lid.")
 	case state.GetLidUnwatched() != nil:
 		chip.Lid = &frontendv1.TopbarPersistentWifi_LidUnwatched{LidUnwatched: &frontendv1.TopbarPersistentWifiLidUnwatched{}}
-		sentences = append(sentences, "The lid is not being watched, so the display does not follow it: "+state.GetLidUnwatched().GetDetail()+".")
-	}
-	if dim := state.GetLidDim(); dim != nil {
-		sentences = append(sentences, fmt.Sprintf("Display dimmed for the closed lid; it returns to %d%%.", int(math.Round(dim.GetRestoreLevel()*100))))
+		sentences = append(sentences, "The lid is not being watched, so a closed lid does not quiet the machine: "+state.GetLidUnwatched().GetDetail()+".")
 	}
 	return strings.Join(sentences, " ")
 }

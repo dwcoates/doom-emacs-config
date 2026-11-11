@@ -146,9 +146,7 @@ func (r *resolver) emptyFeed(f *feedState) int {
 	for _, id := range f.order {
 		removal := Publication{Row: removalRow(id, f.rank[id].key, &frontendv1.FeedRowRemoved{})}
 		appendLog(f, removal)
-		for sub := range f.subs {
-			sub.Enqueue(removal)
-		}
+		r.enqueue(f, removal)
 	}
 	f.order = nil
 	f.rank = map[string]rowRank{}

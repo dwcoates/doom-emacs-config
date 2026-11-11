@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/wsm"
 )
 
@@ -644,6 +645,13 @@ type Deps struct {
 	// (internal/gather), through answersink.go. nil tells nobody, which is
 	// what a test that is about neither wants. Production always wires it.
 	Answers AnswerSink
+	// Quiet is the lid-closed quiet state's view gate: while it stands no
+	// publication reaches a tail (each feed holds its latest per row), and
+	// leaving it hands every tail the held rows once, at their current state,
+	// never the intermediate ones (viewquiet). The retained log is filed
+	// either way, so a tail opened from a token still replays every change.
+	// nil is a gate that is never quiet.
+	Quiet *viewquiet.Gate
 }
 
 // AnswerSink is told a turn's answer as the feed draws it: its prose while it

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_TICK_MS, createTicker, sameLocalDate } from "../src/clock.js";
+import { createQuiet } from "../src/quiet.js";
 import { mergedToday } from "../src/sidebar/row.js";
 
 beforeEach(() => {
@@ -7,6 +8,71 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("createTicker under the lid-closed quiet state", () => {
+  it("stops ticking while the quiet state stands", () => {
+    // Arrange
+    const quiet = createQuiet();
+    const ticker = createTicker(1000, quiet);
+    const fn = vi.fn();
+    ticker.subscribe(fn);
+
+    // Act
+    quiet.set(true);
+    vi.advanceTimersByTime(5000);
+
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("steps every subscriber once when the quiet state ends, then ticks again", () => {
+    // Arrange
+    const quiet = createQuiet();
+    const ticker = createTicker(1000, quiet);
+    const fn = vi.fn();
+    ticker.subscribe(fn);
+    quiet.set(true);
+    vi.advanceTimersByTime(5000);
+
+    // Act
+    quiet.set(false);
+    vi.advanceTimersByTime(1000);
+
+    // Assert: one step at once, one interval after; the missed ones never come.
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts no interval for a subscriber that arrives while quiet", () => {
+    // Arrange
+    const quiet = createQuiet();
+    quiet.set(true);
+    const ticker = createTicker(1000, quiet);
+    const fn = vi.fn();
+
+    // Act
+    ticker.subscribe(fn);
+    vi.advanceTimersByTime(3000);
+
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("steps nobody when the quiet state ends with no subscriber", () => {
+    // Arrange
+    const quiet = createQuiet();
+    const ticker = createTicker(1000, quiet);
+    const fn = vi.fn();
+    ticker.subscribe(fn)();
+    quiet.set(true);
+
+    // Act
+    quiet.set(false);
+    vi.advanceTimersByTime(3000);
+
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
 });
 
 describe("createTicker", () => {

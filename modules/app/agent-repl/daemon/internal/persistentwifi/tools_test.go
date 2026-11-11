@@ -1,7 +1,10 @@
 package persistentwifi
 
 import (
+	"reflect"
 	"testing"
+
+	"agent-repld/internal/appfreeze"
 )
 
 func TestConfigFromEnv(t *testing.T) {
@@ -14,7 +17,27 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "unset is the production layout and no hotspot",
 			env:  map[string]string{},
-			want: Config{Tools: DefaultTools()},
+			want: Config{Tools: DefaultTools(), FreezeApps: appfreeze.DefaultApps},
+		},
+		{
+			name: "the freeze list names the applications",
+			env:  map[string]string{appfreeze.EnvApps: "Slack, Discord"},
+			want: Config{Tools: DefaultTools(), FreezeApps: []string{"Slack", "Discord"}},
+		},
+		{
+			name:    "a freeze list naming a terminal is refused",
+			env:     map[string]string{appfreeze.EnvApps: "Slack,Terminal"},
+			wantErr: true,
+		},
+		{
+			name: "a fake host freezes nothing unless told to",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open"},
+		},
+		{
+			name: "a fake host freezes what it is told to",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", appfreeze.EnvApps: "Slack"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FreezeApps: []string{"Slack"}},
 		},
 		{
 			name: "a tools dir resolves every tool there by its base name, with its fake lid",
@@ -22,7 +45,7 @@ func TestConfigFromEnv(t *testing.T) {
 			want: Config{Tools: Tools{
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
-				Brightness: "/fake/bin/mac-brightness",
+				Caffeinate: "/fake/bin/caffeinate", Brightness: "/fake/bin/mac-brightness", Ps: "/fake/bin/ps",
 			}, FakeLid: "/fake/lid"},
 		},
 		{
@@ -48,7 +71,7 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "a hotspot override names the hotspot",
 			env:  map[string]string{EnvHotspot: "Other Phone"},
-			want: Config{Tools: DefaultTools(), Hotspot: "Other Phone"},
+			want: Config{Tools: DefaultTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
 		},
 		{
 			name:    "a relative tools dir is refused",
@@ -79,7 +102,7 @@ func TestConfigFromEnv(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ConfigFromEnv() error = %v", err)
 			}
-			if got != tc.want {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("ConfigFromEnv() = %+v, want %+v", got, tc.want)
 			}
 		})

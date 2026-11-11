@@ -580,6 +580,20 @@ forgotten and the residency is reported at once."
   (agent-repl-page-unload--report ws))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
+
+(defun agent-repl-page-unload-follow-quiet (quiet)
+  "Stop the pass while the lid-closed QUIET state stands; start it after.
+Nobody can use a page while the lid is closed, so nothing is unloaded for
+want of use until the lid opens.  Followed on
+`agent-repl-persistent-wifi-quiet-functions'."
+  (if quiet
+      (when (timerp agent-repl-page-unload--timer)
+        (cancel-timer agent-repl-page-unload--timer)
+        (setq agent-repl-page-unload--timer nil)
+        (agent-repl--log agent-repl--page-unload-central "elisp.page-unload.paused reason=lid-closed-quiet"))
+    (agent-repl-page-unload-start)))
+
+(add-hook 'agent-repl-persistent-wifi-quiet-functions #'agent-repl-page-unload-follow-quiet)
 (add-hook 'agent-repl-host-reattached-functions #'agent-repl-page-unload-on-reattached)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
 

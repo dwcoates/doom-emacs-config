@@ -18,6 +18,7 @@
  * leaving a timer running against a torn-down view.
  */
 import { createListeners } from "./listeners.js";
+import type { Quiet } from "./quiet.js";
 
 export interface Ticker {
   /** Call FN with the current instant, once per interval. Returns its unsubscriber. */
@@ -29,8 +30,15 @@ export interface Ticker {
 /** How often the shared clock steps. The finest unit anything renders is seconds. */
 export const DEFAULT_TICK_MS = 1000;
 
-/** Build a ticker. INTERVALMS is injected by tests running on fake timers. */
-export function createTicker(intervalMs: number = DEFAULT_TICK_MS): Ticker {
+/**
+ * Build a ticker. INTERVALMS is injected by tests running on fake timers.
+ *
+ * THE CLOCK STOPS WHILE QUIET STANDS (quiet.ts): nobody can see a count-up
+ * with the lid closed, so the interval is cleared, and when the quiet state
+ * ends every subscriber is stepped at once (the clocks jump to now, never
+ * replaying the seconds they missed) and the interval resumes.
+ */
+export function createTicker(intervalMs: number = DEFAULT_TICK_MS, quiet?: Quiet): Ticker {
   const subscribers = createListeners<[number]>();
   let handle: ReturnType<typeof setInterval> | null = null;
 
@@ -39,16 +47,33 @@ export function createTicker(intervalMs: number = DEFAULT_TICK_MS): Ticker {
     // A subscriber may unsubscribe (or add one) from inside its tick.
     subscribers.notify(nowMs);
   };
+  const stop = (): void => {
+    if (handle === null) return;
+    clearInterval(handle);
+    handle = null;
+  };
+  const start = (): void => {
+    if (quiet?.quiet() === true || subscribers.size === 0) return;
+    handle ??= setInterval(step, intervalMs);
+  };
+  quiet?.onChange((standing) => {
+    if (standing) {
+      stop();
+      return;
+    }
+    if (subscribers.size === 0) return;
+    step();
+    start();
+  });
 
   return {
     subscribe(fn: (nowMs: number) => void): () => void {
       const unsubscribe = subscribers.add(fn);
-      handle ??= setInterval(step, intervalMs);
+      start();
       return () => {
         if (!unsubscribe()) return;
-        if (subscribers.size > 0 || handle === null) return;
-        clearInterval(handle);
-        handle = null;
+        if (subscribers.size > 0) return;
+        stop();
       };
     },
     now(): number {

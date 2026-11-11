@@ -1551,5 +1551,38 @@ naming a dead buffer, and every switch back found its panels closed."
         (when (timerp agent-repl-page-unload--timer)
           (cancel-timer agent-repl-page-unload--timer))))))
 
+;;;; ---- The lid-closed quiet state ----
+
+(ert-deftest agent-repl-test-pu-the-quiet-state-stops-the-pass ()
+  "Entering the quiet state cancels the running pass's timer."
+  ;; Arrange
+  (let ((agent-repl-page-unload--timer (timer-create)))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      ;; Act
+      (agent-repl-page-unload-follow-quiet t))
+    ;; Assert
+    (should-not agent-repl-page-unload--timer)))
+
+(ert-deftest agent-repl-test-pu-leaving-the-quiet-state-starts-the-pass ()
+  "Leaving the quiet state starts the pass again."
+  ;; Arrange
+  (let ((started 0))
+    (cl-letf (((symbol-function 'agent-repl-page-unload-start) (lambda (&rest _) (cl-incf started))))
+      ;; Act
+      (agent-repl-page-unload-follow-quiet nil))
+    ;; Assert
+    (should (= started 1))))
+
+(ert-deftest agent-repl-test-pu-the-quiet-state-with-no-pass-running-is-nothing ()
+  "Entering the quiet state with no pass running leaves nothing to cancel."
+  (let ((agent-repl-page-unload--timer nil))
+    (agent-repl-page-unload-follow-quiet t)
+    (should-not agent-repl-page-unload--timer)))
+
+(ert-deftest agent-repl-test-pu-the-quiet-state-is-followed ()
+  "The pass follows the persistent-wifi quiet hook."
+  (should (memq #'agent-repl-page-unload-follow-quiet
+                (default-value 'agent-repl-persistent-wifi-quiet-functions))))
+
 (provide 'test-page-unload)
 ;;; test-page-unload.el ends here

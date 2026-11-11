@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/usersetup"
+	"agent-repld/internal/viewquiet"
 )
 
 // harness is one controller over a fake runner.
@@ -28,6 +29,11 @@ type harness struct {
 	exists  map[string]bool
 	dims    *fakeLidDims
 	lid     *fakeLidWatcher
+	freezer *fakeFreezer
+	views   *viewquiet.Gate
+	// viewMoves are the quiet gate's transitions, as a follower heard them.
+	viewMoves []bool
+	telemetry *fakeQuietTelemetry
 }
 
 // withLid stands the lid as heard, without a read: the state an Update then
@@ -56,12 +62,14 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		r: newFakeRunner(t), log: dlog.NewTestLogger(), clock: newFakeClock(),
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
 		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(),
+		freezer: &fakeFreezer{}, views: viewquiet.New(nil), telemetry: &fakeQuietTelemetry{},
 		published: make(chan *agentreplv1.PersistentWifiState, 256),
 		network:   newFakeNetwork(), power: newFakePower(),
 	}
 	c, err := New(Deps{
 		Config: Config{Tools: tools, Hotspot: configured},
-		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LidDims: h.dims,
+		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LegacyLidDims: h.dims,
+		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
 		Exists: func(p string) bool { return h.exists[p] },
 		OnChange: func(s *agentreplv1.PersistentWifiState) {
@@ -73,6 +81,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		t.Fatalf("New() error = %v", err)
 	}
 	h.c = c
+	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
 	h.r.on(argPreferred, answer{out: preferred(hotspot)})
 	return h
 }
@@ -104,7 +113,8 @@ func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
 func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
 		return Deps{Config: Config{Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
-			Lid: newFakeLidWatcher(), LidDims: &fakeLidDims{},
+			Lid: newFakeLidWatcher(), LegacyLidDims: &fakeLidDims{},
+			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil),
 			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}
 	}
 	cases := []struct {
@@ -115,7 +125,9 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no clock", break_: func(d *Deps) { d.Clock = nil }},
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
 		{name: "no lid watcher", break_: func(d *Deps) { d.Lid = nil }},
-		{name: "no store for the pre-close brightness", break_: func(d *Deps) { d.LidDims = nil }},
+		{name: "no store for an earlier build's lid dim", break_: func(d *Deps) { d.LegacyLidDims = nil }},
+		{name: "no application freezer", break_: func(d *Deps) { d.Freezer = nil }},
+		{name: "no view gate", break_: func(d *Deps) { d.Views = nil }},
 		{name: "no network change signal", break_: func(d *Deps) { d.NetworkChanged = nil }},
 		{name: "no power change signal", break_: func(d *Deps) { d.PowerChanges = nil }},
 	}
@@ -365,11 +377,10 @@ func TestRunRecordsAFailedPowerWatchAtErrorAndKeepsHearingTheNetwork(t *testing.
 	}
 }
 
-func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndDims(t *testing.T) {
+func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndSleepsTheDisplay(t *testing.T) {
 	// Arrange.
 	h := newHarness(t).withLid(lidClosed)
-	h.r.on(argBrightnessRead, answer{out: "0.81\n"})
-	h.r.on(argLidDim, answer{})
+	h.r.on(argDisplaySleep, answer{})
 	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
 	h.r.on(argPorts, answer{out: ports})
 	h.r.on(argSummary, answer{out: summary(true, "Home")}, answer{out: summary(true, hotspot)})
@@ -384,15 +395,15 @@ func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndDims(t *testing.
 	if s == nil {
 		t.Fatalf("Update() = %v, want success", resp)
 	}
-	if s.GetHotspot().GetJoined().GetNetworkName() != hotspot || s.GetDisplay().GetDimmed() == nil {
-		t.Fatalf("outcomes = (%v, %v), want (joined, dimmed)", s.GetHotspot(), s.GetDisplay())
+	if s.GetHotspot().GetJoined().GetNetworkName() != hotspot || s.GetDisplay().GetSlept() == nil {
+		t.Fatalf("outcomes = (%v, %v), want (joined, slept)", s.GetHotspot(), s.GetDisplay())
 	}
 	if modeArm(s.GetState()) != "on" || s.GetState().GetJoined().GetNetworkName() != hotspot {
 		t.Fatalf("state = %v, want on and joined to the hotspot", s.GetState())
 	}
 	calls := h.r.ran()
 	join, power, energy, dim := slices.Index(calls, argJoin), slices.Index(calls, argPower("disablesleep", "1")),
-		slices.Index(calls, argEnergy(true)), slices.Index(calls, argLidDim)
+		slices.Index(calls, argEnergy(true)), slices.Index(calls, argDisplaySleep)
 	if !(join < power && power < energy && energy < dim) {
 		t.Fatalf("step order = %v, want hotspot, power, energy mode, display", calls)
 	}
@@ -679,7 +690,7 @@ func TestUpdateAnswersARefusedPowerStepAsAnErrorAndSkipsTheDisplay(t *testing.T)
 	if refused == nil {
 		t.Fatalf("Update() = %v, want power_settings_refused", resp)
 	}
-	if h.r.count(argBrightnessRead)+h.r.count(argEnergy(true))+h.r.count(argPower("networkoversleep", "1")) != 0 {
+	if h.r.count(argDisplaySleep)+h.r.count(argEnergy(true))+h.r.count(argPower("networkoversleep", "1")) != 0 {
 		t.Fatalf("a step ran after the refusal: %v", h.r.ran())
 	}
 	errs := h.records("error", opUpdate)
@@ -735,47 +746,6 @@ func TestUpdateToggleRefusesAnUnreadableModeAndChangesNothing(t *testing.T) {
 	errs := h.records("error", opUpdate)
 	if len(errs) != 1 || errs[0].Context["action"] != "toggle" {
 		t.Fatalf("update ERROR records = %+v, want one for the toggle", errs)
-	}
-}
-
-func TestUpdateReportsTheDisplayStepWithoutFailingTheRequest(t *testing.T) {
-	cases := []struct {
-		name    string
-		present bool
-		read    answer
-		want    func(*agentreplv1.UpdatePersistentWifiModeDisplay) bool
-	}{
-		{name: "an absent tool is tool_missing", present: false,
-			want: func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool {
-				return d.GetToolMissing().GetToolPath() == tools.Brightness
-			}},
-		{name: "a failing read is failed", present: true, read: answer{out: "no display", code: 1},
-			want: func(d *agentreplv1.UpdatePersistentWifiModeDisplay) bool {
-				return strings.Contains(d.GetFailed().GetDetail(), "could not be read")
-			}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t).standing(pmsetOff, summary(true, hotspot)).withLid(lidClosed)
-			h.exists[tools.Brightness] = tc.present
-			scriptPower(h.r, "1")
-			h.r.on(argBrightnessRead, tc.read)
-
-			// Act.
-			resp := h.c.Update(context.Background(), update("on"))
-
-			// Assert.
-			if resp.GetSuccess() == nil || !tc.want(resp.GetSuccess().GetDisplay()) {
-				t.Fatalf("Update() = %v", resp)
-			}
-			if errs := h.records(dlog.LevelError, opDisplay); len(errs) != 1 || errs[0].Context["trigger"] != "update" {
-				t.Fatalf("display ERROR records = %+v, want one for the update", errs)
-			}
-			if h.r.count(argLidDim) != 0 || len(h.dims.puts) != 0 {
-				t.Fatalf("calls = %v, puts = %v, want no dim and no kept level", h.r.ran(), h.dims.puts)
-			}
-		})
 	}
 }
 

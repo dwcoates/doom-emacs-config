@@ -88,6 +88,12 @@ A cancelled timer is still a `timerp', so membership in `timer-list' /
              (memq timer timer-idle-list))
          t)))
 
+(defvar agent-repl--quiet-paused-timer-keys nil
+  "The keys of `agent-repl--required-timer-keys' the lid-closed quiet state
+has paused (persistent-wifi.el).  A paused key is not a strand:
+`agent-repl--assert-heartbeat-armed' reports it paused and leaves it, and
+leaving the quiet state re-arms it.")
+
 (defun agent-repl--register-timer (key timer)
   "Register TIMER under KEY, cancelling and replacing any timer already held.
 KEY is a keyword naming the job (see `agent-repl--required-timer-keys').
@@ -4539,16 +4545,20 @@ Returns a plist:
   :rearmed      keys that were stranded and are now armed again
   :failed       keys whose arm function ran but left the key un-armed
   :unavailable  keys whose owner file is not loaded
+  :paused       keys the lid-closed quiet state paused
+                (`agent-repl--quiet-paused-timer-keys'), left as they are
 
 Quiet when every key is armed: the only output in that case is a verbose
 log line."
-  (let ((armed nil) (rearmed nil) (failed nil) (unavailable nil))
+  (let ((armed nil) (rearmed nil) (failed nil) (unavailable nil) (paused nil))
     (dolist (entry agent-repl--required-timer-keys)
       (let ((key (car entry))
             (arm-fn (cdr entry)))
         (cond
          ((agent-repl--timer-armed-p key)
           (push key armed))
+         ((memq key agent-repl--quiet-paused-timer-keys)
+          (push key paused))
          ((not (fboundp arm-fn))
           (push key unavailable)
           (agent-repl--warn
@@ -4575,7 +4585,8 @@ log line."
     (let ((result (list :armed (nreverse armed)
                         :rearmed (nreverse rearmed)
                         :failed (nreverse failed)
-                        :unavailable (nreverse unavailable))))
+                        :unavailable (nreverse unavailable)
+                        :paused (nreverse paused))))
       (agent-repl--log-verbose
        '(:agent-repl-central "process-wide logging and utility state")
        "assert-heartbeat-armed: armed=%d rearmed=%d failed=%d unavailable=%d"

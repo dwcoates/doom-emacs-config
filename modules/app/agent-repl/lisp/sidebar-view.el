@@ -38,6 +38,7 @@
 
 (require 'cl-lib)
 
+(declare-function agent-repl-persistent-wifi-quiet-p "persistent-wifi" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
@@ -233,6 +234,8 @@ that reached the sidebar is a defect in the page, recorded at ERROR."
              (> (cdr agent-repl--webhost-log-level) (agent-repl--now-unix-ms)))
     (agent-repl--sidebar-view-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
                                    (cdr agent-repl--webhost-log-level)))
+  (when (agent-repl-persistent-wifi-quiet-p)
+    (agent-repl--sidebar-view-call "setQuiet" t))
   (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.replayed shown=%s daemon=%s"
                     agent-repl--sidebar-view-shown agent-repl--sidebar-view-daemon-origin))
 
@@ -309,6 +312,11 @@ elisp, an ERROR no reload heals."
   "Raise the sidebar to LEVEL until UNTIL-MS; info with nil closes the window.
 The window itself is kept by webhost.el (`agent-repl--webhost-log-level')."
   (agent-repl--sidebar-view-call "setLogLevel" (symbol-name level) until-ms))
+
+(defun agent-repl-sidebar-view-set-quiet (quiet)
+  "Tell the sidebar page whether the lid-closed QUIET state stands."
+  (when (agent-repl-sidebar-view-xwidget)
+    (agent-repl--sidebar-view-call "setQuiet" (if quiet t :json-false))))
 
 (defun agent-repl-sidebar-view-focus-moved ()
   "Tell the sidebar page that Emacs moved its focus."

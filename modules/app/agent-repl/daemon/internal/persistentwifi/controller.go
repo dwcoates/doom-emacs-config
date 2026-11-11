@@ -12,11 +12,13 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"agent-repld/internal/appfreeze"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/viewquiet"
 )
 
 // Operations every record of this package carries.
@@ -51,25 +53,36 @@ type Deps struct {
 	Log dlog.Logger
 	// Lid hears the built-in display's lid (WatchLid). REQUIRED.
 	Lid LidWatcher
-	// LidDims keeps the pre-close brightness durably. REQUIRED.
-	LidDims LidDims
+	// LegacyLidDims is a lid dim an earlier build kept, undone once at boot.
+	// REQUIRED.
+	LegacyLidDims LegacyLidDims
+	// Freezer freezes the configured applications for the quiet state.
+	// REQUIRED.
+	Freezer AppFreezer
+	// Views is the view gate the quiet state moves. REQUIRED.
+	Views *viewquiet.Gate
+	// Telemetry is the quiet state's gauge; nil records nothing.
+	Telemetry QuietTelemetry
 }
 
 // Controller reads, publishes and changes the persistent-wifi standing. One
 // lock serializes every read and every change, so a toggle reads the mode it
 // turns over under the same lock as the turn.
 type Controller struct {
-	cfg      Config
-	runner   Runner
-	clock    clock.Clock
-	network  func() <-chan struct{}
-	power    kernelevent.Source
-	exists   func(string) bool
-	onChange func(*agentreplv1.PersistentWifiState)
-	log      dlog.Logger
-	lidWatch LidWatcher
-	dims     LidDims
-	topic    publish.Topic[*agentreplv1.PersistentWifiState]
+	cfg       Config
+	runner    Runner
+	clock     clock.Clock
+	network   func() <-chan struct{}
+	power     kernelevent.Source
+	exists    func(string) bool
+	onChange  func(*agentreplv1.PersistentWifiState)
+	log       dlog.Logger
+	lidWatch  LidWatcher
+	legacy    LegacyLidDims
+	freezer   AppFreezer
+	views     *viewquiet.Gate
+	telemetry QuietTelemetry
+	topic     publish.Topic[*agentreplv1.PersistentWifiState]
 
 	mu sync.Mutex
 	// last is the standing last published; nil before the first read.
@@ -89,11 +102,13 @@ type Controller struct {
 	failover failoverSchedule
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
 	lid lidFact
-	// dim mirrors the kept pre-close brightness (LidDims): nil while no
-	// lid-close dim is in force. It is written only after the store took the
-	// same change, and read only once dimLoaded.
-	dim       *float64
-	dimLoaded bool
+	// quiet is whether the lid-closed quiet state stands (quiet.go); frozen
+	// is what its freeze left frozen, displayAsleep whether its display
+	// sleep took, and displayCause why the last sleep failed.
+	quiet         bool
+	frozen        []appfreeze.Frozen
+	displayAsleep bool
+	displayCause  string
 }
 
 // New builds the controller.
@@ -107,8 +122,12 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: a logger is required")
 	case d.Lid == nil:
 		return nil, fmt.Errorf("persistentwifi: a lid watcher is required")
-	case d.LidDims == nil:
-		return nil, fmt.Errorf("persistentwifi: a store for the pre-close brightness is required")
+	case d.LegacyLidDims == nil:
+		return nil, fmt.Errorf("persistentwifi: the store of an earlier build's lid dim is required")
+	case d.Freezer == nil:
+		return nil, fmt.Errorf("persistentwifi: an application freezer is required")
+	case d.Views == nil:
+		return nil, fmt.Errorf("persistentwifi: a view gate is required")
 	case d.NetworkChanged == nil:
 		return nil, fmt.Errorf("persistentwifi: the network's change signal is required")
 	case d.PowerChanges == nil:
@@ -122,7 +141,8 @@ func New(d Deps) (*Controller, error) {
 		cfg: d.Config, runner: d.Runner, clock: d.Clock,
 		network: d.NetworkChanged, power: d.PowerChanges,
 		exists: exists, onChange: d.OnChange, log: d.Log,
-		lidWatch: d.Lid, dims: d.LidDims,
+		lidWatch: d.Lid, legacy: d.LegacyLidDims, freezer: d.Freezer,
+		views: d.Views, telemetry: d.Telemetry,
 	}, nil
 }
 
@@ -138,13 +158,12 @@ func (c *Controller) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] { 
 // Refresh reads the standing once and publishes it. The composition root calls
 // it before anything is served, so no stream or topbar is ever drawn from a
 // standing nobody read. It only reads: the hotspot failover is Run's, so the
-// boot never waits on a Wi-Fi join. It also reads the kept pre-close
-// brightness, so a dim that outlived the previous daemon is in the standing
-// from the first push.
+// boot never waits on a Wi-Fi join. It also undoes a lid dim an earlier build
+// left in force (restoreLegacyDimLocked).
 func (c *Controller) Refresh(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.loadDimLocked(ctx, "boot")
+	c.restoreLegacyDimLocked(ctx)
 	c.readLocked(ctx)
 }
 
@@ -217,17 +236,14 @@ func (c *Controller) readLocked(ctx context.Context) reading {
 // and publishes it when it differs from the last. Caller holds mu.
 func (c *Controller) publishLocked(state *agentreplv1.PersistentWifiState, fields dlog.Context) {
 	c.lid.stamp(state)
-	state.LidDim = nil
-	if c.dim != nil {
-		state.LidDim = &agentreplv1.PersistentWifiLidDim{RestoreLevel: *c.dim}
-	}
+	c.stampQuiet(state)
 	if c.last != nil && proto.Equal(c.last, state) {
 		return
 	}
 	fields["wifi"] = wifiArm(state)
 	fields["mode"] = modeArm(state)
 	fields["lid"] = c.lid.name()
-	fields["lid_dim"] = state.LidDim != nil
+	fields["quiet"] = state.Quiet != nil
 	fields["network_name"] = state.GetJoined().GetNetworkName()
 	c.log.Info(opProbe, "the persistent-wifi standing changed", fields)
 	c.last = state
@@ -324,13 +340,13 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 			dlog.Context{"on": on, "cause": failed.GetDetail()})
 	}
 
-	// THE DISPLAY FOLLOWS THE LID: the step moves it only where this change
-	// does (moveDisplayLocked), and records its own failures.
+	// THE QUIET STATE FOLLOWS THE LID: the step moves it only where this
+	// change does (holdQuietLocked), and records its own failures.
 	mode := modeIsOff
 	if on {
 		mode = modeIsOn
 	}
-	display := c.moveDisplayLocked(ctx, mode, "update")
+	display := c.holdQuietLocked(ctx, mode, "update")
 
 	after := c.readLocked(ctx)
 	c.log.Info(opUpdate, "persistent wifi mode was changed", dlog.Context{
@@ -406,9 +422,12 @@ func (c *Controller) WatchLid(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.log.Error(opLid, "the lid is not heard; the display no longer follows it until the daemon restarts",
+	c.log.Error(opLid, "the lid is not heard; a closed lid no longer quiets the machine until the daemon restarts",
 		dlog.Context{"was": c.lid.name(), "cause": err.Error()})
 	c.lid = lidFact{kind: lidUnwatched, cause: err.Error()}
+	// A LID NOBODY HEARS IS NEVER CLOSED: a quiet state standing is left, so
+	// nothing stays frozen behind a watch that ended.
+	c.holdQuietLocked(ctx, modeOf(c.last), "lid_unwatched")
 	c.republishLocked()
 	return nil
 }
@@ -429,9 +448,7 @@ func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
 	if ctx.Err() != nil {
 		return
 	}
-	display := c.moveDisplayLocked(ctx, modeOf(rd.state), "lid_"+lid.name())
+	c.holdQuietLocked(ctx, modeOf(rd.state), "lid_"+lid.name())
 	c.reconcileEnergyLocked(ctx, rd, "lid_"+lid.name())
-	if display.GetUnchanged() == nil {
-		c.republishLocked()
-	}
+	c.republishLocked()
 }

@@ -51,20 +51,30 @@ written inside BODY after the act."
                    . "persistent wifi could not be read · Wi-Fi could not be read")))
     (should (equal (agent-repl-persistent-wifi-describe (car case)) (cdr case)))))
 
-(ert-deftest agent-repl-test-pwifi-describe-names-the-lid-and-the-dim ()
-  "The lid and a lid-close dim in force follow the mode and the Wi-Fi."
+(ert-deftest agent-repl-test-pwifi-describe-names-the-lid-and-the-quiet-state ()
+  "The lid and a lid-closed quiet state follow the mode and the Wi-Fi."
   (dolist (case '(((:arm :lid-open :value nil) nil . "lid open")
-                  ((:arm :lid-closed :value nil) (:restore-level 0.81)
-                   . "lid closed, display dimmed, returns to 81%")
+                  ((:arm :lid-closed :value nil)
+                   (:frozen-apps ((:name "Slack" :processes 4) (:name "Spotify" :processes 2))
+                    :display (:arm :display-asleep :value nil))
+                   . "lid closed, quiet: froze Slack, Spotify, display asleep")
+                  ((:arm :lid-closed :value nil)
+                   (:frozen-apps nil :display (:arm :display-awake :value (:detail "refused")))
+                   . "lid closed, quiet: froze nothing, display awake (refused)")
                   ((:arm :no-lid :value nil) nil . "no lid")
                   ((:arm :lid-unwatched :value (:detail "IOPMrootDomain was not found")) nil
-                   . "lid not watched (IOPMrootDomain was not found)")
-                  (nil (:restore-level 0.4) . "display dimmed, returns to 40%")))
+                   . "lid not watched (IOPMrootDomain was not found)")))
     (let ((state (append (agent-repl-test-pwifi--state :not-joined :on)
-                         (list :lid (nth 0 case) :lid-dim (nth 1 case)))))
+                         (list :lid (nth 0 case) :quiet (nth 1 case)))))
       (should (equal (agent-repl-persistent-wifi-describe state)
                      (concat "persistent wifi on: the lid can close · no Wi-Fi · "
                              (nthcdr 2 case)))))))
+
+(ert-deftest agent-repl-test-pwifi-describe-refuses-an-unknown-quiet-display-arm ()
+  "A quiet display arm the wording does not know fails hard."
+  (should-error (agent-repl-persistent-wifi-describe
+                 (append (agent-repl-test-pwifi--state :joined :on)
+                         '(:quiet (:frozen-apps nil :display (:arm :dimmed)))))))
 
 (ert-deftest agent-repl-test-pwifi-describe-refuses-an-unknown-lid-arm ()
   "A lid arm the wording does not know fails hard."
@@ -101,11 +111,9 @@ written inside BODY after the act."
 
 (ert-deftest agent-repl-test-pwifi-display-text-words-every-arm ()
   "Every display outcome arm has its own words."
-  (dolist (case '(((:arm :dimmed :value (:restore-level 0.81))
-                   . "display: dimmed for the closed lid, returns to 81%")
-                  ((:arm :restored :value (:level 0.5)) . "display: restored to 50%")
+  (dolist (case '(((:arm :slept :value nil) . "display: asleep for the closed lid")
+                  ((:arm :woke :value nil) . "display: woken")
                   ((:arm :unchanged :value nil) . "display: unchanged")
-                  ((:arm :tool-missing :value (:tool-path "/b/x")) . "display: /b/x is not installed")
                   ((:arm :failed :value (:detail "no panel")) . "display: failed (no panel)")))
     (should (equal (agent-repl-persistent-wifi--display-text (car case)) (cdr case)))))
 
@@ -142,6 +150,89 @@ written inside BODY after the act."
     ;; Assert
     (should (null (echoed)))
     (should (eq (car (car (last (logged)))) 'debug))))
+
+;;;; ---- The lid-closed quiet state ---------------------------------------
+
+(defconst agent-repl-test-pwifi--quiet
+  '(:frozen-apps ((:name "Slack" :processes 4)) :display (:arm :display-asleep :value nil))
+  "A decoded lid-closed quiet state.")
+
+(defmacro agent-repl-test-pwifi--following-quiet (&rest body)
+  "Run BODY with fake keyed timers and a recording quiet hook.
+Binds `cancelled', `armed' and `told' (oldest first) for BODY's assertions.
+Each of `agent-repl-persistent-wifi-quiet-timer-keys' is armed until
+cancelled, and re-arming one records it."
+  (declare (indent 0))
+  `(let ((agent-repl--quiet-paused-timer-keys nil)
+         (agent-repl--required-timer-keys
+          '((:state-poll . agent-repl-test-pwifi--arm-state-poll)
+            (:stall-sampler . agent-repl-test-pwifi--arm-stall)))
+         (agent-repl-persistent-wifi-quiet-functions nil)
+         (cancelled-rev nil) (armed-rev nil) (told-rev nil))
+     (add-hook 'agent-repl-persistent-wifi-quiet-functions (lambda (q) (push q told-rev)))
+     (cl-letf (((symbol-function 'agent-repl--cancel-timer-key)
+                (lambda (key) (push key cancelled-rev) t))
+               ((symbol-function 'agent-repl-test-pwifi--arm-state-poll)
+                (lambda () (push :state-poll armed-rev)))
+               ((symbol-function 'agent-repl-test-pwifi--arm-stall)
+                (lambda () (push :stall-sampler armed-rev))))
+       (cl-flet ((cancelled () (reverse cancelled-rev))
+                 (armed () (reverse armed-rev))
+                 (told () (reverse told-rev)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-pwifi-entering-the-quiet-state-pauses-the-timers-and-tells-the-hook ()
+  "A standing that begins the quiet state pauses the repaint and stall timers."
+  (agent-repl-test-pwifi--capturing
+    (agent-repl-test-pwifi--following-quiet
+      ;; Act
+      (agent-repl-persistent-wifi-handle
+       (append (agent-repl-test-pwifi--state :joined :on) (list :quiet agent-repl-test-pwifi--quiet)))
+      ;; Assert
+      (should (equal (cancelled) '(:state-poll :stall-sampler)))
+      (should (equal (sort (copy-sequence agent-repl--quiet-paused-timer-keys) #'string<)
+                     '(:stall-sampler :state-poll)))
+      (should (equal (told) '(t)))
+      (should (agent-repl-persistent-wifi-quiet-p)))))
+
+(ert-deftest agent-repl-test-pwifi-leaving-the-quiet-state-re-arms-what-it-paused ()
+  "A standing that ends the quiet state re-arms each paused timer once."
+  (agent-repl-test-pwifi--capturing
+    (agent-repl-test-pwifi--following-quiet
+      ;; Arrange
+      (agent-repl-persistent-wifi-handle
+       (append (agent-repl-test-pwifi--state :joined :on) (list :quiet agent-repl-test-pwifi--quiet)))
+      ;; Act
+      (agent-repl-persistent-wifi-handle (agent-repl-test-pwifi--state :joined :on))
+      ;; Assert
+      (should (equal (sort (armed) #'string<) '(:stall-sampler :state-poll)))
+      (should (null agent-repl--quiet-paused-timer-keys))
+      (should (equal (told) '(t nil)))
+      (should-not (agent-repl-persistent-wifi-quiet-p)))))
+
+(ert-deftest agent-repl-test-pwifi-a-standing-that-keeps-the-quiet-state-moves-nothing ()
+  "Two quiet standings in a row pause once and tell the hook once."
+  (agent-repl-test-pwifi--capturing
+    (agent-repl-test-pwifi--following-quiet
+      ;; Act
+      (dolist (name '("Home" "Office"))
+        (agent-repl-persistent-wifi-handle
+         (append (agent-repl-test-pwifi--state :joined :on name) (list :quiet agent-repl-test-pwifi--quiet))))
+      ;; Assert
+      (should (equal (cancelled) '(:state-poll :stall-sampler)))
+      (should (equal (told) '(t))))))
+
+(ert-deftest agent-repl-test-pwifi-the-quiet-state-is-recorded ()
+  "Entering the quiet state is an INFO record naming what was paused."
+  (agent-repl-test-pwifi--capturing
+    (agent-repl-test-pwifi--following-quiet
+      ;; Act
+      (agent-repl-persistent-wifi-handle
+       (append (agent-repl-test-pwifi--state :joined :on) (list :quiet agent-repl-test-pwifi--quiet)))
+      ;; Assert
+      (should (cl-some (lambda (r) (and (eq (car r) 'info)
+                                        (string-prefix-p "elisp.persistent-wifi.quiet quiet=entered" (cdr r))))
+                       (logged))))))
 
 ;;;; ---- The toggle ------------------------------------------------------
 
@@ -187,7 +278,7 @@ written inside BODY after the act."
      (list :state (agent-repl-test-pwifi--state :joined :on)
            :hotspot '(:arm :not-on-hotspot :value nil)
            :energy-mode '(:arm :low-power :value nil)
-           :display '(:arm :dimmed :value (:restore-level 0.5))))
+           :display '(:arm :slept :value nil)))
     ;; Act
     (agent-repl-persistent-wifi-handle (agent-repl-test-pwifi--state :joined :on))
     ;; Assert

@@ -3267,10 +3267,32 @@ NAME is nil when macOS withholds the network's name."
   "Decode PersistentWifiLidUnwatched from JSON into (:detail TEXT)."
   (agent-repl-wire-verbs--decode-scalar-fields "PersistentWifiLidUnwatched" json '((detail :detail))))
 
-(defun agent-repl-wire-decode-persistent-wifi-lid-dim (json)
-  "Decode PersistentWifiLidDim from JSON into (:restore-level LEVEL)."
-  (agent-repl-wire-verbs--decode-scalar-fields "PersistentWifiLidDim" json
-                                               '((restoreLevel :restore-level :double))))
+(defun agent-repl-wire-decode-persistent-wifi-frozen-app (json)
+  "Decode PersistentWifiFrozenApp from JSON into (:name NAME :processes N)."
+  (let* ((message "PersistentWifiFrozenApp")
+         (object (agent-repl-wire--object message json)))
+    (agent-repl-wire--check-keys message object '(name processes))
+    (list :name (agent-repl-wire-verbs--decode-string message 'name object)
+          :processes (agent-repl-wire--decode-uint32 message 'processes object))))
+
+(defun agent-repl-wire-decode-persistent-wifi-quiet (json)
+  "Decode PersistentWifiQuiet from JSON.
+Returns (:frozen-apps APPS :display ONEOF): APPS is a list of
+\(:name NAME :processes N), and ONEOF is (:arm :display-asleep :value nil)
+or (:arm :display-awake :value (:detail TEXT))."
+  (let* ((message "PersistentWifiQuiet")
+         (object (agent-repl-wire--object message json)))
+    (agent-repl-wire--check-keys message object '(frozenApps displayAsleep displayAwake))
+    (list :frozen-apps (agent-repl-wire--decode-repeated
+                        message 'frozenApps object #'agent-repl-wire-decode-persistent-wifi-frozen-app)
+          :display (agent-repl-wire--decode-oneof
+                    message 'display object
+                    '((displayAsleep :display-asleep
+                                     (lambda (v) (agent-repl-wire-verbs--decode-empty
+                                                  "PersistentWifiQuietDisplayAsleep" v)))
+                      (displayAwake :display-awake
+                                    (lambda (v) (agent-repl-wire-verbs--decode-scalar-fields
+                                                 "PersistentWifiQuietDisplayAwake" v '((detail :detail))))))))))
 
 (defconst agent-repl-wire-persistent-wifi-lid-arms
   '((lidOpen :lid-open nil)
@@ -3281,17 +3303,17 @@ NAME is nil when macOS withholds the network's name."
 
 (defun agent-repl-wire-decode-persistent-wifi-state (json)
   "Decode PersistentWifiState from JSON.
-Returns (:wifi ONEOF :mode ONEOF :lid ONEOF :lid-dim DIM).  Each ONEOF is
+Returns (:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET).  Each ONEOF is
 \(:arm ARM :value V), or nil when the daemon could not read that fact (for
 the lid: has not heard it yet) -- the facts are independent, and an
 unassigned one is the daemon saying it does not know, never a contract
-breach.  DIM is (:restore-level LEVEL) while a lid-close dim is in force,
-else nil.  Shared by the WatchDaemon push and UpdatePersistentWifiMode's
+breach.  QUIET is `agent-repl-wire-decode-persistent-wifi-quiet''s plist
+while the lid-closed quiet state stands, else nil.  Shared by the WatchDaemon push and UpdatePersistentWifiMode's
 success."
   (let ((message "PersistentWifiState")
         (object (agent-repl-wire--object "PersistentWifiState" json)))
     (agent-repl-wire--check-keys message object
-                                 (append '(joined notJoined on off lidDim)
+                                 (append '(joined notJoined on off quiet)
                                          (mapcar #'car agent-repl-wire-persistent-wifi-lid-arms)))
     (agent-repl-wire--decoded
      message
@@ -3314,8 +3336,8 @@ success."
                                     (format "%s.%s" message (nth 0 arm)) value (nth 2 arm)))))
                          agent-repl-wire-persistent-wifi-lid-arms)
                  t)
-           :lid-dim (agent-repl-wire--decode-optional-message
-                     message 'lidDim object #'agent-repl-wire-decode-persistent-wifi-lid-dim)))))
+           :quiet (agent-repl-wire--decode-optional-message
+                   message 'quiet object #'agent-repl-wire-decode-persistent-wifi-quiet)))))
 
 (defun agent-repl-wire-encode-update-persistent-wifi-mode-request (request)
   "Encode UpdatePersistentWifiModeRequest from plist REQUEST (:action ONEOF).
@@ -3339,9 +3361,8 @@ empty, so the arm is the whole action."
 Every arm's message is all strings, so FIELDS is its whole schema.")
 
 (defconst agent-repl-wire-persistent-wifi-display-arms
-  '((dimmed :dimmed ((restoreLevel :restore-level :double)))
-    (restored :restored ((level :level :double)))
-    (toolMissing :tool-missing ((toolPath :tool-path)))
+  '((slept :slept nil)
+    (woke :woke nil)
     (failed :failed ((detail :detail)))
     (unchanged :unchanged nil))
   "UpdatePersistentWifiModeDisplay's outcome arms: (WIRE KEYWORD FIELDS).")

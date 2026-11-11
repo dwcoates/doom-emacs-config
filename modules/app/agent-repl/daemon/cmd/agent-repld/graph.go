@@ -90,6 +90,7 @@ import (
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/turnlatch"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
 	"agent-repld/internal/workspace"
@@ -482,7 +483,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// status edge. The roster is built after the footer (it takes the footer
 	// as its status source), so the edge rides a forwarder bound once it is.
 	statusChanged := &statusChangedForwarder{log: log}
+	// THE LID-CLOSED QUIET STATE STOPS EVERY VIEW NOBODY CAN SEE (viewquiet):
+	// one gate, moved by the persistent-wifi controller, followed by the four
+	// view resolvers.
+	viewGate := viewquiet.New(p.Metrics)
 	footerOpts := []footer.Option{
+		footer.WithQuiet(viewGate),
 		footer.WithVendorServes(vendorServes.VendorServes),
 		footer.WithStatusChanged(statusChanged.StatusChanged),
 		footer.WithAccountUsages(usages),
@@ -504,7 +510,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// every row it cannot place, and before the fault hook, which raises the
 	// faults the topbar carries (a failed deploy) onto every strip.
 	// THE CONTROLS OUTLIVE THE SHIM: the topbar keeps them in wsm (layout 89).
-	topbarResolver, err := topbar.New(colors, p.Surfaces, topbar.WithSelectionStore(p.DB))
+	topbarResolver, err := topbar.New(colors, p.Surfaces, topbar.WithSelectionStore(p.DB), topbar.WithQuiet(viewGate))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the topbar resolver: %w", err)
 	}
@@ -529,7 +535,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// INSTANT ITS STATUS LAST CHANGED: a restart still ranks the row by it.
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
 		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())),
-		sidebar.WithStatusChangeSink(rosterStatusChanges(p.DB, p.Surfaces.Global())))
+		sidebar.WithStatusChangeSink(rosterStatusChanges(p.DB, p.Surfaces.Global())),
+		sidebar.WithQuiet(viewGate))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
 	}
@@ -654,7 +661,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	history := &historyForwarder{}
 	deliveries := &deliveryForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
-		Log: p.Surfaces,
+		Log:   p.Surfaces,
+		Quiet: viewGate,
 		// A ZETTEL CHAT THREAD LEARNS ITS ANSWERS from the feed, which folds
 		// them, and a WORKSPACE GATHER follows its prompts' folds and answers
 		// there (feed.AnswerSink).
@@ -1066,12 +1074,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	//
 	// Every host tool it runs goes through the one script runner, and every
 	// standing it reads reaches the topbar's chip on every strip. It hears
-	// the lid from the operating system (or the fake host's pipe) and keeps
-	// the pre-close brightness in the state database, so a lid-close dim
-	// outlives a restart.
+	// the lid from the operating system (or the fake host's pipe), and with
+	// the mode on a closed lid puts the machine in the lid-closed quiet state:
+	// the views stop, the configured applications freeze, the display sleeps.
 	wifiConfig, err := persistentwifi.ConfigFromEnv(os.Getenv)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve the persistent-wifi config: %w", err)
+	}
+	freezer, err := buildFreezer(wifiConfig, scripts, p.Layout.Dir(), selfExe, p.Metrics, log)
+	if err != nil {
+		return nil, err
 	}
 	wifi, err := persistentwifi.New(persistentwifi.Deps{
 		Config: wifiConfig,
@@ -1084,7 +1096,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		OnChange:       topbarResolver.SetPersistentWifi,
 		Log:            log,
 		Lid:            wifiConfig.Lid(),
-		LidDims:        p.DB,
+		LegacyLidDims:  p.DB,
+		Freezer:        freezer,
+		Views:          viewGate,
+		Telemetry:      p.Metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)

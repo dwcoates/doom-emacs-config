@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // A workspace page's side of the host protocol. See src/host/embed.ts.
+import { createQuiet, type QuietSource } from "../../src/quiet.js";
 import { createEditorIngressView, type EditorIngressView } from "../../src/held/editor-ingress.js";
 import { createEditorNotices, type EditorNotices } from "../../src/footer/editor-notice.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
@@ -21,6 +22,7 @@ let pageWin: Window;
 let pageDoc: Document;
 let hostWin: Window;
 let presence: PresenceSource;
+let quiet: QuietSource;
 let levelWindow: LevelWindow;
 let clock: number;
 let webhostFailures: WebhostFailureView;
@@ -82,7 +84,8 @@ beforeEach(() => {
   hostWin = hostWindow();
   pageWin = pageWindow(hostWin);
   pageDoc = document;
-  presence = createPresence(pageDoc, true);
+  quiet = createQuiet();
+  presence = createPresence(pageDoc, true, quiet);
   webhostFailures = createWebhostFailureView();
   editorIngress = createEditorIngressView();
   editorNotices = createEditorNotices();
@@ -97,7 +100,7 @@ beforeEach(() => {
   focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 });
 
 afterEach(() => {
@@ -115,7 +118,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    const none = connectToHost({ doc: document, win: window, presence: alone, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
 
     // Assert
@@ -306,7 +309,7 @@ describe("a bubble expanded over the webapp", () => {
     if (!open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
     link?.dispose();
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
     await delivered();
     received = [];
 
@@ -328,6 +331,19 @@ describe("Emacs moving its focus", () => {
 
     // Assert
     expect(leftFor).toEqual([FOCUS_LEFT_EMACS]);
+  });
+});
+
+describe("the lid-closed quiet state", () => {
+  it.each([true, false])("sets the page's quiet state to %s", (value) => {
+    // Arrange
+    if (!value) quiet.set(true);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "quiet", quiet: value });
+
+    // Assert
+    expect(quiet.quiet()).toBe(value);
   });
 });
 
@@ -431,7 +447,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns });
 
     // Assert
     await delivered();

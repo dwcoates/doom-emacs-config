@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/semver"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
@@ -63,6 +64,16 @@ type resolver struct {
 
 	// now is the clock a status change is stamped by (WithClock).
 	now func() time.Time
+
+	// quiet is the lid-closed quiet state's view gate (WithQuiet): while it
+	// stands, a change derives every row's facts but resolves and publishes
+	// no roster, and quietStale records that one was skipped, so leaving
+	// publishes the current roster once.
+	quiet      *viewquiet.Gate
+	quietStale bool
+	// factsOnly is set for the span of a renderFacts: row derives its facts
+	// and builds no row.
+	factsOnly bool
 }
 
 // resultChange is one workspace's changed last turn result.
@@ -191,8 +202,20 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 		return
 	}
 	ready := r.state.regSeen
+	// THE QUIET STATE STOPS THE ROSTER, NEVER ITS FACTS: the rows' facts are
+	// derived by a render that builds no row (renderFacts), so every status
+	// arm move and turn result still reaches its durable sink, and the roster
+	// is resolved and published once when the gate opens (resyncAfterQuiet).
+	// The gate is read under the lock the resync takes, so a change is either
+	// published now or left stale for the resync, never lost between them.
+	quiet := ready && r.quiet.Quiet()
+	if quiet {
+		r.renderFacts(log, operation)
+		r.quietStale = true
+		r.quiet.Skipped(QuietViewName)
+	}
 	var roster *frontendv1.WorkspaceRoster
-	if ready {
+	if ready && !quiet {
 		roster = r.render(log, operation)
 		// EVERY RESOLVED ROSTER TAKES THE NEXT REVISION, under the lock that
 		// rendered it, so the revision orders rosters exactly as they were
@@ -216,7 +239,7 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 	// newer one on the wire (2026-10-02: the roster walked submitting, ready,
 	// thinking for an accepted prompt). Topic.Publish only enqueues, so it
 	// never waits on a subscriber.
-	if ready {
+	if ready && !quiet {
 		r.topic.Publish(roster)
 	}
 	r.mu.Unlock()
@@ -234,7 +257,38 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 		log.Debug(operation, "the roster took a fact before any registry and published nothing", ctx)
 		return
 	}
+	if quiet {
+		log.Debug(operation, "the roster took a fact while the lid is closed and quiet; its facts are derived and the roster waits for the lid to open", ctx)
+		return
+	}
 	log.Debug(operation, message, ctx)
+}
+
+// QuietViewName names the roster in the quiet gate's records and counters.
+const QuietViewName = "sidebar"
+
+// renderFacts is render with no row built: the same walk, so exactly the
+// workspaces a roster would row have their status arm and turn result
+// derived (row), and the roster it answers is discarded. Caller holds mu.
+func (r *resolver) renderFacts(log dlog.Logger, cause string) {
+	r.factsOnly = true
+	defer func() { r.factsOnly = false }()
+	r.render(log, cause)
+}
+
+// followQuiet is the quiet gate's follower: leaving the quiet state publishes
+// the current roster once, when one was skipped. Entering needs nothing: the
+// next change is the first one held back.
+func (r *resolver) followQuiet(quiet bool) {
+	if quiet {
+		return
+	}
+	log := r.log.Global()
+	r.mutateIf("daemon.sidebar.quiet_resync", "the lid opened; the roster was resolved and published at its current state", nil, log, func() bool {
+		stale := r.quietStale
+		r.quietStale = false
+		return stale
+	})
 }
 
 // mutateWorkspace is mutate for a fact about ONE workspace, resolved onto that

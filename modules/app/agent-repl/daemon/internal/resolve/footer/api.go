@@ -25,6 +25,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/wsm"
 )
@@ -543,6 +544,9 @@ type Option func(*options)
 
 // options are the resolver's knobs.
 type options struct {
+	// quiet is the lid-closed quiet state's view gate; nil is a gate that is
+	// never quiet (WithQuiet).
+	quiet           *viewquiet.Gate
 	clock           Clock
 	dwell           time.Duration
 	vendorSilence   time.Duration
@@ -584,6 +588,14 @@ func WithAccountUsageSink(sink func(wsm.AccountUsage) error) Option {
 func WithStatusChanged(fn func(ws ids.WorkspaceID)) Option {
 	return func(o *options) { o.statusChanged = fn }
 }
+
+// WithQuiet installs the lid-closed quiet state's view gate. While it stands
+// each change still resolves the strip's status and turn clock, so Status,
+// TurnClock and MergeStartedAt answer what the strip would show and every
+// status move is still told (WithStatusChanged), but the rest of the view is
+// neither resolved nor published; leaving it publishes each workspace a fact
+// moved, once, at its current state (viewquiet).
+func WithQuiet(g *viewquiet.Gate) Option { return func(o *options) { o.quiet = g } }
 
 // WithClock injects the clock the dwell and every `at` stamp are taken from.
 func WithClock(c Clock) Option { return func(o *options) { o.clock = c } }

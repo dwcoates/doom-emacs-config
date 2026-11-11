@@ -41,6 +41,9 @@
 (require 'json)
 (require 'url-parse)
 
+(declare-function agent-repl-persistent-wifi-quiet-p "persistent-wifi" ())
+(declare-function agent-repl-sidebar-view-set-quiet "sidebar-view" (quiet))
+(defvar agent-repl-persistent-wifi-quiet-functions)
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
@@ -814,6 +817,18 @@ reloads while the window lasts.  Non-nil when the call was sent."
   (when-let ((id (agent-repl--webhost-id ws)))
     (agent-repl--webhost-call "dismissDigest" id)))
 
+(defun agent-repl-webhost-set-quiet (quiet)
+  "Tell the sidebar and every page whether the lid-closed QUIET state stands.
+While it stands each page stops its animation, clocks and polling, and
+leaving it lets each draw what the daemon resyncs.  Followed on
+`agent-repl-persistent-wifi-quiet-functions'; a host or sidebar that
+loads is told again by its replay."
+  (agent-repl-sidebar-view-set-quiet quiet)
+  (when (agent-repl-webhost-xwidget)
+    (agent-repl--webhost-call "setQuiet" (if quiet t :json-false))))
+
+(add-hook 'agent-repl-persistent-wifi-quiet-functions #'agent-repl-webhost-set-quiet)
+
 (defun agent-repl-webhost-focus-moved (&rest _)
   "Tell every page of the host that Emacs moved its focus.
 Run from `window-selection-change-functions' and `after-focus-change-function',
@@ -935,7 +950,9 @@ out (`agent-repl-host-adopting-p')."
   (when (and agent-repl--webhost-log-level
              (> (cdr agent-repl--webhost-log-level) (agent-repl--now-unix-ms)))
     (agent-repl--webhost-call "setLogLevel" (symbol-name (car agent-repl--webhost-log-level))
-                              (cdr agent-repl--webhost-log-level))))
+                              (cdr agent-repl--webhost-log-level)))
+  (when (agent-repl-persistent-wifi-quiet-p)
+    (agent-repl--webhost-call "setQuiet" t)))
 
 (defun agent-repl--webhost-reload-now ()
   "Reload the host: retire its pages, then navigate.

@@ -12,7 +12,8 @@
  *   - the DOCUMENT is visible: WebKit reports the whole web view hidden when
  *     Emacs is not on screen.
  *
- * A page is SEEN when both say yes. Everything that used to read
+ * A page is SEEN when both say yes, and persistent wifi's lid-closed quiet
+ * state (quiet.ts) does not stand: with the lid closed nobody sees any page. Everything that used to read
  * `document.visibilityState` to decide whether a reader can see the page
  * (the rail's unseen hold, the auto-collapse on leaving, the rail's wall-clock
  * phase) reads this instead, because inside the host every page's document is
@@ -20,9 +21,10 @@
  */
 import { createListeners } from "./listeners.js";
 import { perDocument } from "./per-document.js";
+import { pageQuiet, type Quiet } from "./quiet.js";
 
 /** What changed when a listener is told. */
-export type PresenceCause = "visibility" | "host";
+export type PresenceCause = "visibility" | "host" | "quiet";
 
 /** Told when the page's seen state may have changed. */
 type PresenceListener = (seen: boolean, cause: PresenceCause) => void;
@@ -65,21 +67,24 @@ export interface PresenceSource extends Presence {
 
 /**
  * The presence of the page in DOC. EMBEDDED is whether the page sits in a host:
- * an embedded page is not shown until the host says it is.
+ * an embedded page is not shown until the host says it is. QUIET is the
+ * lid-closed quiet state, which no page is seen through; none is a page that
+ * never quiets.
  */
-export function createPresence(doc: Document, embedded: boolean): PresenceSource {
+export function createPresence(doc: Document, embedded: boolean, quiet?: Quiet): PresenceSource {
   let hostShown = !embedded;
   let switchStartedAtMs: number | null = null;
   let reloadStartedAtMs: number | null = null;
   const listeners = createListeners<Parameters<PresenceListener>>();
   const visible = (): boolean => doc.visibilityState === "visible";
-  const seen = (): boolean => hostShown && visible();
+  const seen = (): boolean => hostShown && visible() && quiet?.quiet() !== true;
   const tell = (cause: PresenceCause): void => {
     const now = seen();
     listeners.notify(now, cause);
   };
   const onVisibility = (): void => tell("visibility");
   doc.addEventListener("visibilitychange", onVisibility);
+  const stopQuiet = quiet?.onChange(() => tell("quiet"));
   return {
     embedded,
     seen,
@@ -100,13 +105,14 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
     },
     dispose() {
       doc.removeEventListener("visibilitychange", onVisibility);
+      stopQuiet?.();
       listeners.clear();
     },
   };
 }
 
 /** The presence of each page, keyed by its document: one per page. */
-const presenceOf = perDocument((doc) => createPresence(doc, pageIsEmbedded(window)));
+const presenceOf = perDocument((doc) => createPresence(doc, pageIsEmbedded(window), pageQuiet(doc)));
 
 /** Whether this page runs inside another page's iframe (the host's). */
 export function pageIsEmbedded(win: Window): boolean {

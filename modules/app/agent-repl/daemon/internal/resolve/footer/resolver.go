@@ -83,7 +83,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		}
 		accounts[rec.ConfigDir] = usageFromRecord(rec)
 	}
-	return &resolver{
+	r := &resolver{
 		log:        log,
 		opts:       o,
 		states:     map[ids.WorkspaceID]*wsState{},
@@ -91,7 +91,33 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 		topics:     map[ids.WorkspaceID]*publish.Topic[*frontendv1.FooterView]{},
 		accounts:   accounts,
 		persisted:  map[string]uint64{},
-	}, nil
+	}
+	o.quiet.Follow(QuietViewName, r.followQuiet)
+	return r, nil
+}
+
+// QuietViewName names the strip in the quiet gate's records and counters.
+const QuietViewName = "footer"
+
+// followQuiet is the quiet gate's follower: leaving the quiet state resolves
+// and publishes every workspace's view a fact moved while it stood, once, at
+// its current state. Entering needs nothing.
+func (r *resolver) followQuiet(quiet bool) {
+	if quiet {
+		return
+	}
+	r.mu.Lock()
+	var stale []ids.WorkspaceID
+	for ws, s := range r.states {
+		if s.quietStale {
+			s.quietStale = false
+			stale = append(stale, ws)
+		}
+	}
+	r.mu.Unlock()
+	for _, ws := range stale {
+		r.mutate(ws, "daemon.footer.quiet_resync", "the lid opened; the strip was resolved and published at its current state", nil, func(*wsState) {})
+	}
 }
 
 // Prime publishes the workspace's current footer view at registration.
@@ -344,7 +370,20 @@ type publication struct {
 // publishLocked renders the workspace's view, notes what moved, and publishes
 // it. The caller holds the lock.
 func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
-	view := r.render(ws, s)
+	// THE QUIET STATE STOPS THE VIEW, NEVER ITS STATUS: the status and the
+	// turn clock are what agents and the roster read (Status, TurnClock), so
+	// they are resolved and observed exactly as a published view's are; the
+	// rest of the view waits for the gate to open (followQuiet). The gate is
+	// read under the lock the resync takes.
+	quiet := r.opts.quiet.Quiet()
+	var view *frontendv1.FooterView
+	if quiet {
+		view = r.renderFacts(ws, s)
+		s.quietStale = true
+		r.opts.quiet.Skipped(QuietViewName)
+	} else {
+		view = r.render(ws, s)
+	}
 	p := publication{ws: ws, logger: r.logOf(ws, s), jumps: s.drainJumpNotes()}
 	p.arm, p.armChanged, p.previousArm = s.observeArm(view)
 	p.sub, p.subChanged, p.previousSub = s.observeSubstatus(view)
@@ -352,7 +391,9 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	p.clockChanged = s.observeClock(view)
 	s.published = view.GetStrip().GetStatus()
 	p.mergeStartChanged = s.observeMergeStart(mergeStartedAt(s.published, s.merge))
-	r.topicLocked(ws).Publish(view)
+	if !quiet {
+		r.topicLocked(ws).Publish(view)
+	}
 	return p
 }
 
@@ -572,6 +613,18 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView
 		},
 		Expanded: r.expanded(ws, s),
 		Focus:    focusView(s.focus),
+	}
+}
+
+// renderFacts builds only the parts of the view an agent or the roster reads
+// (the status and the turn clock), for a change taken while the quiet gate
+// stands; it is never published.
+func (r *resolver) renderFacts(ws ids.WorkspaceID, s *wsState) *frontendv1.FooterView {
+	return &frontendv1.FooterView{
+		Strip: &frontendv1.FooterStrip{
+			Status: r.status(s, r.logOf(ws, s)),
+			Clock:  r.clockCell(s),
+		},
 	}
 }
 

@@ -7,10 +7,12 @@
 // disabled outright, so closing the lid neither sleeps the machine nor drops
 // its network, its sessions or a phone hotspot it is joined to. Turning the
 // mode on also joins the configured phone hotspot; turning it off leaves it.
-// While the mode is on the display follows the lid: closing it dims the
-// built-in display to 0, opening it restores the brightness it had before
-// (lid_dim). The daemon owns both the
-// reading and the change (it is the one process that outlives every client).
+// While the mode is on, a closed lid puts the machine in the LID-CLOSED QUIET
+// STATE (quiet): the display sleeps, the configured applications are frozen,
+// and agent-repl stops drawing views nobody can see, so the battery goes to
+// agent work. Opening the lid or turning the mode off ends it. The daemon owns
+// both the reading and the change (it is the one process that outlives every
+// client).
 //
 // It is a fact about the MACHINE, never about a workspace, so it rides the
 // daemon-level stream and no per-workspace one.
@@ -27,7 +29,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/persistent_wifi.proto.
  */
 export const file_agentrepl_v1_persistent_wifi: GenFile = /*@__PURE__*/
-  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEiuQQKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjcKCGxpZF9vcGVuGAUgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEjsKCmxpZF9jbG9zZWQYBiABKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhIzCgZub19saWQYByABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlOb0xpZEgCEkEKDWxpZF91bndhdGNoZWQYCCABKAsyKC5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAhI4CgdsaWRfZGltGAkgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkRGltSAOIAQFCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZEIKCghfbGlkX2RpbSJCChRQZXJzaXN0ZW50V2lmaUpvaW5lZBIZCgxuZXR3b3JrX25hbWUYASABKAlIAIgBAUIPCg1fbmV0d29ya19uYW1lIhkKF1BlcnNpc3RlbnRXaWZpTm90Sm9pbmVkIhYKFFBlcnNpc3RlbnRXaWZpTW9kZU9uIhcKFVBlcnNpc3RlbnRXaWZpTW9kZU9mZiIXChVQZXJzaXN0ZW50V2lmaUxpZE9wZW4iGQoXUGVyc2lzdGVudFdpZmlMaWRDbG9zZWQiFQoTUGVyc2lzdGVudFdpZmlOb0xpZCIsChpQZXJzaXN0ZW50V2lmaUxpZFVud2F0Y2hlZBIOCgZkZXRhaWwYASABKAkiLQoUUGVyc2lzdGVudFdpZmlMaWREaW0SFQoNcmVzdG9yZV9sZXZlbBgBIAEoAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CiJhZ2VudHJlcGwvdjEvcGVyc2lzdGVudF93aWZpLnByb3RvEgxhZ2VudHJlcGwudjEiwwQKE1BlcnNpc3RlbnRXaWZpU3RhdGUSNAoGam9pbmVkGAEgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpSm9pbmVkSAASOwoKbm90X2pvaW5lZBgCIAEoCzIlLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaU5vdEpvaW5lZEgAEjAKAm9uGAMgASgLMiIuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9uSAESMgoDb2ZmGAQgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTW9kZU9mZkgBEjcKCGxpZF9vcGVuGAUgASgLMiMuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpTGlkT3BlbkgCEjsKCmxpZF9jbG9zZWQYBiABKAsyJS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRDbG9zZWRIAhIzCgZub19saWQYByABKAsyIS5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlOb0xpZEgCEkEKDWxpZF91bndhdGNoZWQYCCABKAsyKC5hZ2VudHJlcGwudjEuUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWRIAhI1CgVxdWlldBgKIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVF1aWV0SAOIAQFCBgoEd2lmaUIGCgRtb2RlQgUKA2xpZEIICgZfcXVpZXRKBAgJEApSB2xpZF9kaW0iQgoUUGVyc2lzdGVudFdpZmlKb2luZWQSGQoMbmV0d29ya19uYW1lGAEgASgJSACIAQFCDwoNX25ldHdvcmtfbmFtZSIZChdQZXJzaXN0ZW50V2lmaU5vdEpvaW5lZCIWChRQZXJzaXN0ZW50V2lmaU1vZGVPbiIXChVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiFwoVUGVyc2lzdGVudFdpZmlMaWRPcGVuIhkKF1BlcnNpc3RlbnRXaWZpTGlkQ2xvc2VkIhUKE1BlcnNpc3RlbnRXaWZpTm9MaWQiLAoaUGVyc2lzdGVudFdpZmlMaWRVbndhdGNoZWQSDgoGZGV0YWlsGAEgASgJIu4BChNQZXJzaXN0ZW50V2lmaVF1aWV0EjoKC2Zyb3plbl9hcHBzGAEgAygLMiUuYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpRnJvemVuQXBwEkgKDmRpc3BsYXlfYXNsZWVwGAIgASgLMi4uYWdlbnRyZXBsLnYxLlBlcnNpc3RlbnRXaWZpUXVpZXREaXNwbGF5QXNsZWVwSAASRgoNZGlzcGxheV9hd2FrZRgDIAEoCzItLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUF3YWtlSABCCQoHZGlzcGxheSI6ChdQZXJzaXN0ZW50V2lmaUZyb3plbkFwcBIMCgRuYW1lGAEgASgJEhEKCXByb2Nlc3NlcxgCIAEoDSIiCiBQZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUFzbGVlcCIxCh9QZXJzaXN0ZW50V2lmaVF1aWV0RGlzcGxheUF3YWtlEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
 
 /**
  * The machine's persistent-wifi standing as the daemon last read it: whether
@@ -125,16 +127,17 @@ export type PersistentWifiState = Message<"agentrepl.v1.PersistentWifiState"> & 
   } | { case: undefined; value?: undefined };
 
   /**
-   * The lid-close dim in force: the display was dimmed to 0 when the lid
-   * closed with the mode on, and is restored to restore_level when the lid
-   * opens or the mode is turned off. UNSET: no lid dim is in force and the
-   * display is at the user's own brightness. It is independent of `lid`: a
-   * restore that failed leaves it set with the lid open, because the display
-   * is still dimmed. The daemon keeps it durably, so it survives a restart.
+   * The lid-closed quiet state in force: the lid is closed (heard) and the
+   * mode is on. UNSET while either is not so, and while the lid is not heard
+   * (unheard or unwatched), so a lid nobody hears never freezes anything.
+   * Readers that draw views (Emacs, the webapp pages) stop their animation,
+   * redraw and polling work while it is set, and draw current state at once
+   * when it clears; the daemon stops resolving the views those readers show
+   * for the same span. Session work is never part of it.
    *
-   * @generated from field: optional agentrepl.v1.PersistentWifiLidDim lid_dim = 9;
+   * @generated from field: optional agentrepl.v1.PersistentWifiQuiet quiet = 10;
    */
-  lidDim?: PersistentWifiLidDim | undefined;
+  quiet?: PersistentWifiQuiet | undefined;
 };
 
 /**
@@ -286,24 +289,113 @@ export const PersistentWifiLidUnwatchedSchema: GenMessage<PersistentWifiLidUnwat
   messageDesc(file_agentrepl_v1_persistent_wifi, 8);
 
 /**
- * A lid-close dim in force.
+ * The lid-closed quiet state, as the daemon holds it.
  *
- * @generated from message agentrepl.v1.PersistentWifiLidDim
+ * @generated from message agentrepl.v1.PersistentWifiQuiet
  */
-export type PersistentWifiLidDim = Message<"agentrepl.v1.PersistentWifiLidDim"> & {
+export type PersistentWifiQuiet = Message<"agentrepl.v1.PersistentWifiQuiet"> & {
   /**
-   * The brightness (0.0 to 1.0) the display had the moment before the lid
-   * closed: the ONE level every restore returns it to.
+   * Every configured application the quiet state froze (SIGSTOP), in the
+   * configured order: each keeps its memory and windows, uses no CPU, and is
+   * thawed (SIGCONT) when the state ends. An application that was not running
+   * when the lid closed is absent: one launched while the lid is closed is
+   * never chased. Empty when nothing configured was running.
    *
-   * @generated from field: double restore_level = 1;
+   * @generated from field: repeated agentrepl.v1.PersistentWifiFrozenApp frozen_apps = 1;
    */
-  restoreLevel: number;
+  frozenApps: PersistentWifiFrozenApp[];
+
+  /**
+   * Whether the built-in display was put to sleep for the closed lid.
+   *
+   * @generated from oneof agentrepl.v1.PersistentWifiQuiet.display
+   */
+  display: {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiQuietDisplayAsleep display_asleep = 2;
+     */
+    value: PersistentWifiQuietDisplayAsleep;
+    case: "displayAsleep";
+  } | {
+    /**
+     * @generated from field: agentrepl.v1.PersistentWifiQuietDisplayAwake display_awake = 3;
+     */
+    value: PersistentWifiQuietDisplayAwake;
+    case: "displayAwake";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message agentrepl.v1.PersistentWifiLidDim.
- * Use `create(PersistentWifiLidDimSchema)` to create a new message.
+ * Describes the message agentrepl.v1.PersistentWifiQuiet.
+ * Use `create(PersistentWifiQuietSchema)` to create a new message.
  */
-export const PersistentWifiLidDimSchema: GenMessage<PersistentWifiLidDim> = /*@__PURE__*/
+export const PersistentWifiQuietSchema: GenMessage<PersistentWifiQuiet> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_persistent_wifi, 9);
+
+/**
+ * One frozen application.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiFrozenApp
+ */
+export type PersistentWifiFrozenApp = Message<"agentrepl.v1.PersistentWifiFrozenApp"> & {
+  /**
+   * The application's name as configured (its bundle's name, such as
+   * "Google Chrome").
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * How many of its processes (the application and its helpers) are frozen.
+   *
+   * @generated from field: uint32 processes = 2;
+   */
+  processes: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiFrozenApp.
+ * Use `create(PersistentWifiFrozenAppSchema)` to create a new message.
+ */
+export const PersistentWifiFrozenAppSchema: GenMessage<PersistentWifiFrozenApp> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 10);
+
+/**
+ * The display was put to sleep when the quiet state began. It wakes at the
+ * brightness it had when the lid opens.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiQuietDisplayAsleep
+ */
+export type PersistentWifiQuietDisplayAsleep = Message<"agentrepl.v1.PersistentWifiQuietDisplayAsleep"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiQuietDisplayAsleep.
+ * Use `create(PersistentWifiQuietDisplayAsleepSchema)` to create a new message.
+ */
+export const PersistentWifiQuietDisplayAsleepSchema: GenMessage<PersistentWifiQuietDisplayAsleep> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 11);
+
+/**
+ * The display could not be put to sleep; the daemon logged why at ERROR and
+ * tries again on the next lid or mode change.
+ *
+ * @generated from message agentrepl.v1.PersistentWifiQuietDisplayAwake
+ */
+export type PersistentWifiQuietDisplayAwake = Message<"agentrepl.v1.PersistentWifiQuietDisplayAwake"> & {
+  /**
+   * Why the sleep failed, verbatim from the tool.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.PersistentWifiQuietDisplayAwake.
+ * Use `create(PersistentWifiQuietDisplayAwakeSchema)` to create a new message.
+ */
+export const PersistentWifiQuietDisplayAwakeSchema: GenMessage<PersistentWifiQuietDisplayAwake> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_persistent_wifi, 12);
 

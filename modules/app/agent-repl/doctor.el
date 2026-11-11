@@ -32,6 +32,7 @@
 ;;                     each fault's detail is printed verbatim.
 
 ;; The doctor runs inside Doom, where `warn!' (doom-lib) exists.
+(require 'cl-lib)
 (declare-function warn! "doom-lib")
 (declare-function error! "doom-lib")
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -148,6 +149,70 @@ healthy daemon is not one."
              (list (cons 'warn (format "agent-repl: no daemon answering at %s (stale daemon.addr)"
                                        address)))))))))))
 
+;;;; ---- Spotlight and the agent worktrees ----
+
+(defcustom agent-repl-spotlight-excluded-roots nil
+  "Worktree roots you have added to Spotlight's Search Privacy list.
+macOS keeps that list where only root can read it, so the doctor cannot see
+it: name each root here once you have added it, and its warning stops."
+  :type '(repeat directory)
+  :group 'agent-repl)
+
+(defun agent-repl--doctor-run-workspace-list ()
+  "Run `agent-repld workspace list' and answer (EXIT . OUTPUT).
+THE ONE PROCESS SEAM the Spotlight check's tests stub."
+  (with-temp-buffer
+    (let ((exit (call-process "agent-repld" nil t nil "workspace" "list")))
+      (cons exit (buffer-string)))))
+
+(defun agent-repl--doctor-worktree-roots (output)
+  "The worktree roots named by `agent-repld workspace list' OUTPUT, sorted.
+A root is the parent directory of every workspace that is not its
+repository's own checkout."
+  (let ((roots nil))
+    (dolist (line (split-string output "\n" t))
+      (let* ((row (json-parse-string line :object-type 'plist))
+             (dir (plist-get (plist-get row :workspace) :dir))
+             (repo (plist-get (plist-get row :repository) :dir)))
+        (when (and dir repo (not (equal (directory-file-name dir) (directory-file-name repo))))
+          (cl-pushnew (directory-file-name (file-name-directory (directory-file-name dir)))
+                      roots :test #'equal))))
+    (sort roots #'string<)))
+
+(defun agent-repl--doctor-spotlight-skips-p (root)
+  "Non-nil when Spotlight never indexes ROOT by its path alone.
+Spotlight skips every folder whose name starts with a dot or ends in
+`.noindex'; macOS no longer honors a `.metadata_never_index' file."
+  (cl-some (lambda (part) (or (string-prefix-p "." part) (string-suffix-p ".noindex" part)))
+           (split-string (expand-file-name root) "/" t)))
+
+(defun agent-repl--doctor-spotlight-issues ()
+  "Warn of every agent worktree root Spotlight indexes, naming the one step.
+Agent work rewrites thousands of files in the worktrees, and Spotlight
+re-indexes each one, which is CPU and battery taken from agent work.  No
+mechanism excludes a folder without sudo save its path and the Search
+Privacy list, so a root whose path Spotlight indexes is reported until it
+is named in `agent-repl-spotlight-excluded-roots'."
+  (let* ((result (agent-repl--doctor-run-workspace-list))
+         (exit (car result))
+         (output (cdr result)))
+    (if (not (eql exit 0))
+        (progn
+          (agent-repl--doctor-log "doctor: spotlight workspace-list exit=%S output=%S" exit output)
+          (list (cons 'warn (format "agent-repl: the Spotlight check could not list the workspaces (exit %S): %s"
+                                    exit (string-trim output)))))
+      (let ((indexed (cl-remove-if
+                      (lambda (root)
+                        (or (agent-repl--doctor-spotlight-skips-p root)
+                            (member root (mapcar (lambda (r) (directory-file-name (expand-file-name r)))
+                                                 agent-repl-spotlight-excluded-roots))))
+                      (agent-repl--doctor-worktree-roots output))))
+        (agent-repl--doctor-log "doctor: spotlight indexed-roots=%S" indexed)
+        (mapcar (lambda (root)
+                  (cons 'warn (format "agent-repl: Spotlight indexes the agent worktrees in %s. Add that folder in System Settings > Spotlight > Search Privacy, then add it to `agent-repl-spotlight-excluded-roots'."
+                                      root)))
+                indexed)))))
+
 ;;;; ---- The requirements ----
 
 (defconst agent-repl--doctor-requirements-script
@@ -235,6 +300,7 @@ probed the real host's tools from inside a unit test.")
                    nil))
                '(agent-repl--widget-doctor-issues
                  agent-repl--doctor-requirements-issues
+                 agent-repl--doctor-spotlight-issues
                  agent-repl--doctor-daemon-issues)))))
   (agent-repl--doctor-log
    "doctor: aggregation issue-count=%d issues=%S" (length issues) issues)

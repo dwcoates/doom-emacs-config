@@ -19,8 +19,8 @@ func TestOutcomeArmNamesTheSetArm(t *testing.T) {
 			Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_HighPower{HighPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeHighPower{}},
 		}), "high_power"},
 		{"a display outcome", displayArm(&agentreplv1.UpdatePersistentWifiModeDisplay{
-			Outcome: &agentreplv1.UpdatePersistentWifiModeDisplay_Dimmed{Dimmed: &agentreplv1.UpdatePersistentWifiModeDisplayDimmed{}},
-		}), "dimmed"},
+			Outcome: &agentreplv1.UpdatePersistentWifiModeDisplay_Slept{Slept: &agentreplv1.UpdatePersistentWifiModeDisplaySlept{}},
+		}), "slept"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

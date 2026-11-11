@@ -17,6 +17,7 @@ import { BUBBLE_OVERLAY_ATTRIBUTE, closeStandingBubbleOverlay } from "../bubble/
 import { closeStandingImageOverlay } from "../image-overlay/image-overlay.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
+import type { QuietSource } from "../quiet.js";
 import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../focus-left.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
@@ -60,6 +61,8 @@ export interface EmbedEnv {
   readonly doc: Document;
   readonly win: Window;
   readonly presence: PresenceSource;
+  /** The page's lid-closed quiet state, which the host's `quiet` sets. */
+  readonly quiet: QuietSource;
   /** Where the webhost's own failures are listed for this page's warning chip. */
   readonly webhostFailures: WebhostFailureView;
   /** The page's live log threshold, which the host raises (`logLevel`). */
@@ -90,7 +93,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns } = env;
+  const { doc, win, presence, quiet, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -125,6 +128,15 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "focusMoved":
         focusLeft.left(FOCUS_LEFT_EMACS);
+        return;
+      case "quiet":
+        if (message.quiet !== quiet.quiet()) {
+          log.info(message.quiet ? "the lid closed: the page went quiet" : "the lid opened: the page left the quiet state", {
+            operation: "page.quiet",
+            context: { quiet: message.quiet },
+          });
+        }
+        quiet.set(message.quiet);
         return;
       case "webhostPressed":
         webhostPresses.pressed();

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"agent-repld/internal/appfreeze"
 )
 
 // answer is one scripted run result.
@@ -159,10 +161,10 @@ const (
 	argDisconnect  = "/t/wifi-util disconnect"
 	argRadioOff    = "/t/networksetup -setairportpower en0 off"
 	argRadioOn     = "/t/networksetup -setairportpower en0 on"
-	// argBrightnessRead reads the display's level.
-	argBrightnessRead = "/t/mac-brightness"
-	// argLidDim sets the closed lid's level.
-	argLidDim = "/t/mac-brightness 0"
+	// argDisplaySleep puts the display to sleep for the quiet state.
+	argDisplaySleep = "/t/pmset displaysleepnow"
+	// argDisplayWake wakes it.
+	argDisplayWake = "/t/caffeinate -u -t 1"
 )
 
 // argBrightness is one `mac-brightness <level>` call.
@@ -200,14 +202,13 @@ func scriptPower(r *fakeRunner, value string) {
 	r.on(argEnergy(value == "1"), answer{})
 }
 
-// fakeLidDims is the durable pre-close brightness: a level, and an error for
-// each operation. Every put and clear is recorded.
+// fakeLidDims is an earlier build's kept lid dim: a level, and an error for
+// each operation. Every clear is recorded.
 type fakeLidDims struct {
-	mu                       sync.Mutex
-	level                    *float64
-	getErr, putErr, clearErr error
-	puts                     []float64
-	clears                   int
+	mu               sync.Mutex
+	level            *float64
+	getErr, clearErr error
+	clears           int
 }
 
 func (f *fakeLidDims) LidDimLevel(context.Context) (float64, bool, error) {
@@ -220,17 +221,6 @@ func (f *fakeLidDims) LidDimLevel(context.Context) (float64, bool, error) {
 		return 0, false, nil
 	}
 	return *f.level, true, nil
-}
-
-func (f *fakeLidDims) PutLidDimLevel(_ context.Context, level float64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.putErr != nil {
-		return f.putErr
-	}
-	f.puts = append(f.puts, level)
-	f.level = &level
-	return nil
 }
 
 func (f *fakeLidDims) ClearLidDimLevel(context.Context) error {
@@ -250,6 +240,38 @@ func (f *fakeLidDims) kept() *float64 {
 	defer f.mu.Unlock()
 	return f.level
 }
+
+// fakeFreezer records every freeze and thaw, in order, and answers each
+// freeze with frozen.
+type fakeFreezer struct {
+	frozen []appfreeze.Frozen
+	calls  []string
+}
+
+func (f *fakeFreezer) Freeze(_ context.Context, trigger string) []appfreeze.Frozen {
+	f.calls = append(f.calls, "freeze:"+trigger)
+	return f.frozen
+}
+
+func (f *fakeFreezer) Thaw(_ context.Context, trigger string) {
+	f.calls = append(f.calls, "thaw:"+trigger)
+}
+
+// count answers how many recorded calls start with prefix ("freeze", "thaw").
+func (f *fakeFreezer) count(prefix string) int {
+	n := 0
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, prefix+":") {
+			n++
+		}
+	}
+	return n
+}
+
+// fakeQuietTelemetry records every gauge setting.
+type fakeQuietTelemetry struct{ set []bool }
+
+func (f *fakeQuietTelemetry) SetLidQuiet(q bool) { f.set = append(f.set, q) }
 
 // fakeLidWatcher hands Watch's heard every lid sent on lids, then answers
 // end once lids is closed, or nil when ctx ends first.

@@ -68,7 +68,7 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 	if o.warningCap <= 0 {
 		return nil, fmt.Errorf("topbar warning cap must be positive, got %d", o.warningCap)
 	}
-	return &resolver{
+	r := &resolver{
 		colors:     colors,
 		log:        log,
 		opts:       o,
@@ -78,7 +78,9 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (
 
 		daemonRaised:   map[string]DaemonWarning{},
 		signInRequests: map[string]string{},
-	}, nil
+	}
+	o.quiet.Follow(QuietViewName, r.followQuiet)
+	return r, nil
 }
 
 // Topic is the workspace's topbar publication.
@@ -160,6 +162,21 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	r.mu.Lock()
 	s := r.stateLocked(ws)
 	apply(s)
+	// THE QUIET STATE STOPS THE STRIP, NEVER ITS FACTS: the fact is taken
+	// above, and the strip is resolved and published once when the gate opens
+	// (followQuiet). The gate is read under the lock the resync takes, so a
+	// change is either published now or left stale for the resync.
+	if r.opts.quiet.Quiet() {
+		s.quietStale = true
+		log := r.logOf(ws, s)
+		r.mu.Unlock()
+		r.opts.quiet.Skipped(QuietViewName)
+		if ctx == nil {
+			ctx = dlog.Context{}
+		}
+		log.Debug(operation, "the topbar took a fact while the lid is closed and quiet; the strip waits for the lid to open", ctx)
+		return
+	}
 	view, err := r.render(ws, s)
 	missing := s.missing()
 	// THE SESSION-LESS EDGE IS READ UNDER THE SAME LOCK that built the view,
@@ -216,6 +233,30 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		log.Info(operation, "the topbar's session facts arrived and the strip is whole", ctx)
 	default:
 		log.Debug(operation, "the topbar took a fact and republished", ctx)
+	}
+}
+
+// QuietViewName names the strip in the quiet gate's records and counters.
+const QuietViewName = "topbar"
+
+// followQuiet is the quiet gate's follower: leaving the quiet state resolves
+// and publishes every strip a fact moved while it stood, once, at its current
+// state. Entering needs nothing.
+func (r *resolver) followQuiet(quiet bool) {
+	if quiet {
+		return
+	}
+	r.mu.Lock()
+	var stale []ids.WorkspaceID
+	for ws, s := range r.states {
+		if s.quietStale {
+			s.quietStale = false
+			stale = append(stale, ws)
+		}
+	}
+	r.mu.Unlock()
+	for _, ws := range stale {
+		r.mutate(ws, "daemon.topbar.quiet_resync", "the lid opened; the strip was resolved and published at its current state", nil, func(*wsState) {})
 	}
 }
 

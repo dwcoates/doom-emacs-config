@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The sidebar page's start: the rail in a web view of its own, handed to Emacs
 // as `window.agentReplSidebar`. See src/host/sidebar-page.ts.
+import { pageQuiet } from "../../src/quiet.js";
 import { create } from "@bufbuild/protobuf";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -360,6 +361,34 @@ describe("setLogLevel", () => {
 
     // Assert
     expect(shape).toEqual({ applies: true, handRolls: false });
+  });
+});
+
+describe("setQuiet", () => {
+  it.each([
+    [true, "quiet"],
+    [false, "unquiet"],
+  ])("sets the page's quiet state to %s", (value, want) => {
+    // Arrange
+    const page = start();
+
+    // Act
+    const answer = page.setQuiet(value);
+
+    // Assert
+    expect([outcome(answer), pageQuiet(document).quiet()]).toEqual([want, value]);
+    pageQuiet(document).set(false);
+  });
+
+  it("refuses a quiet state that is not a boolean", () => {
+    // Arrange
+    const page = start();
+
+    // Act
+    const answer = page.setQuiet(1);
+
+    // Assert
+    expect([outcome(answer), pageQuiet(document).quiet()]).toEqual(["refused", false]);
   });
 });
 

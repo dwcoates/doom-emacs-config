@@ -4959,6 +4959,24 @@ survives into the rest of the batch run."
           (should (equal 1 agent-repl-test--fake-heartbeat-arm-count))
           (should (agent-repl--timer-armed-p :test-heartbeat)))))))
 
+
+(ert-deftest agent-repl-test-assert-heartbeat-leaves-a-key-the-quiet-state-paused ()
+  "A key the lid-closed quiet state paused is reported paused, not re-armed."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl--quiet-paused-timer-keys '(:test-heartbeat))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--info) (lambda (&rest _) nil)))
+        ;; Act
+        (let ((result (agent-repl--assert-heartbeat-armed)))
+          ;; Assert
+          (should (equal '(:test-heartbeat) (plist-get result :paused)))
+          (should (null (plist-get result :rearmed)))
+          (should (equal 0 agent-repl-test--fake-heartbeat-arm-count)))))))
+
 (ert-deftest agent-repl-test-assert-heartbeat-records-the-stranded-key-at-info ()
   "The strand is still recorded naming the key, at info rather than warn."
   ;; Arrange
