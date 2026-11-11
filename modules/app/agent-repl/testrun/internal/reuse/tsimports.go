@@ -101,7 +101,11 @@ func (g *ImportGraph) Closure(entries []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		queue = append(queue, next...)
+		decl, err := g.declarations(f)
+		if err != nil {
+			return nil, err
+		}
+		queue = append(append(queue, next...), decl...)
 	}
 	out := make([]string, 0, len(seen))
 	for f := range seen {
@@ -186,6 +190,27 @@ func (g *ImportGraph) resolve(dir, spec string) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+// declarationTwins are the type declarations the TypeScript compiler reads
+// beside a JavaScript module it is pointed at.
+var declarationTwins = map[string][]string{".js": {".d.ts"}, ".mjs": {".d.mts"}, ".cjs": {".d.cts"}}
+
+// declarations is every declaration file beside the JavaScript module f.
+func (g *ImportGraph) declarations(f string) ([]string, error) {
+	ext := path.Ext(f)
+	var out []string
+	for _, twin := range declarationTwins[ext] {
+		d := strings.TrimSuffix(f, ext) + twin
+		ok, err := g.isFile(d)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 // isFile reports whether p is a regular file (or a link to one) of the

@@ -172,3 +172,23 @@ func TestAMissingSetupFileIsAnError(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestClosurePlacesAJavaScriptModulesDeclarations(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{
+		"p/a.test.ts":   `import { g } from "./guard.mjs";`,
+		"p/guard.mjs":   "export const g = 1",
+		"p/guard.d.mts": "export const g: number",
+	})
+
+	// Act
+	got, err := NewImportGraph(root).Closure([]string{"p/a.test.ts"})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"p/a.test.ts", "p/guard.d.mts", "p/guard.mjs"}; !slices.Equal(got, want) {
+		t.Fatalf("Closure = %q, want %q", got, want)
+	}
+}

@@ -245,7 +245,8 @@ func (h hasher) entry(p string, info fs.FileInfo) error {
 // A GENERATED ENTRY IS NOT LISTED: the run itself creates and deletes those
 // trees (an install, a build, a tool's cache), so whether one exists says
 // nothing about the suite's inputs, and listing it would move the key the
-// moment a run first creates it.
+// moment a run first creates it. Nor is vite's transient bundle of a config
+// (isConfigBundle), for the same reason.
 func (h hasher) listing(p string) error {
 	entries, err := os.ReadDir(h.abs(p))
 	if err != nil {
@@ -253,7 +254,7 @@ func (h hasher) listing(p string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if h.isGenerated(path.Join(p, e.Name())) {
+		if h.isGenerated(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
 			continue
 		}
 		kind := "f"

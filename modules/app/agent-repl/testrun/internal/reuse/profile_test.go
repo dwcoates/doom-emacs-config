@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -130,4 +131,60 @@ func catOf(p string) func(string) []string {
 
 func lsOf(p string) func(string) []string {
 	return func(root string) []string { return []string{"/bin/ls", filepath.Join(root, filepath.FromSlash(p))} }
+}
+
+func TestAPlacedViteConfigMayReadItsOwnBundlesOnly(t *testing.T) {
+	tests := []struct {
+		file string
+		want bool
+	}{
+		{"p/vitest.config.ts", true},
+		{"p/vitest.integration.config.ts", true},
+		{"p/vite.config.mts", true},
+		{"p/src/config.ts", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			// Arrange
+			set := NewInputSet()
+			if err := set.AddFile(tt.file); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			profile, err := Profile("/r", []string{"/r"}, set)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			has := strings.Contains(profile, regexp.QuoteMeta("/r/"+tt.file)+`\.timestamp-[0-9]+-[0-9a-f]+\.mjs$`)
+			if has != tt.want {
+				t.Fatalf("bundle allowance = %v, want %v:\n%s", has, tt.want, profile)
+			}
+		})
+	}
+}
+
+func TestIsConfigBundle(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"vitest.config.ts.timestamp-1794416560305-e10a16afab32.mjs", true},
+		{"vite.config.mts.timestamp-1-abc.mjs", true},
+		{"vitest.config.ts", false},
+		{"notes.timestamp-1-abc.txt", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := isConfigBundle(tt.name)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("isConfigBundle = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

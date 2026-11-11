@@ -373,10 +373,11 @@ var Suites = []Suite{
 	{Name: "shim", Kind: Vitest, Path: "agent-shim/claude/shim", IntegrationConfig: "vitest.integration.config.ts",
 		IntegrationBuild: []string{"npm", "run", "pretest:integration"},
 		Reuse: &Reuse{Inputs: []string{
-			// The vocabulary, the lock helper its integration build compiles,
+			// The vocabulary, the lock helper its integration build compiles
+			// with the logging module it imports,
 			// the metaprompt its suite reads back, and the scripts its npm
 			// hooks run. What it imports is each file's import graph.
-			"proto/vocab/", "agent-shim/shim-lock/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
+			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",

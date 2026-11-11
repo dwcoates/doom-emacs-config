@@ -349,3 +349,25 @@ func TestAKeysManifestIsCompactAndStillSaysWhatChanged(t *testing.T) {
 		t.Fatalf("Changed = %v, want d/b.txt", got)
 	}
 }
+
+func TestAListingDoesNotHashAConfigsTransientBundle(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"p/vitest.config.ts": "export default {}"})
+	set := NewInputSet()
+	if err := set.AddDir("p"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := ComputeKey(root, set, Facts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "p/vitest.config.ts.timestamp-1794416560305-e10a16afab32.mjs", "bundled")
+
+	// Act
+	after, err := ComputeKey(root, set, Facts{})
+
+	// Assert
+	if err != nil || after.Digest != before.Digest {
+		t.Fatalf("keys %s %s (%v), want a bundle appearing to move nothing", before.Short(), after.Short(), err)
+	}
+}

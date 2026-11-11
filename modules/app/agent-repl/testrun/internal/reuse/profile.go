@@ -49,6 +49,13 @@ func Profile(repo string, denyRoots []string, set *InputSet) (string, error) {
 	}
 	for _, p := range set.Files() {
 		fmt.Fprintf(&b, "(allow file-read* (literal %s))\n", quote(abs(p)))
+		if isBundledConfig(path.Base(p)) {
+			bundles, err := configBundlePattern(abs(p))
+			if err != nil {
+				return "", err
+			}
+			fmt.Fprintf(&b, "(allow file-read* (regex %s))\n", bundles)
+		}
 		note(p)
 	}
 	// A flat directory is ONE pattern for every entry in it, not one literal
@@ -105,6 +112,34 @@ func Profile(repo string, denyRoots []string, set *InputSet) (string, error) {
 		}
 	}
 	return b.String(), nil
+}
+
+// A VITE CONFIG IS READ THROUGH A BUNDLE OF ITSELF. Vite 5 compiles a vite
+// or vitest config with esbuild into "<config>.timestamp-<ms>-<hash>.mjs"
+// beside it, imports that, and deletes it. The bundle is a function of the
+// config (and what the config imports, all placed), so a unit reading a
+// placed config may read its bundles, and no listing hashes their names:
+// several units bundling one config at once would otherwise move each
+// other's keys.
+var (
+	bundledConfigName = regexp.MustCompile(`^vite(st)?\.([^/]*\.)?config\.[cm]?[jt]s$`)
+	configBundleName  = regexp.MustCompile(`\.[cm]?[jt]s\.timestamp-[0-9]+-[0-9a-f]+\.mjs$`)
+)
+
+// isBundledConfig reports whether a file name is a config vite bundles.
+func isBundledConfig(name string) bool { return bundledConfigName.MatchString(name) }
+
+// isConfigBundle reports whether a file name is vite's transient bundle of a
+// config.
+func isConfigBundle(name string) bool { return configBundleName.MatchString(name) }
+
+// configBundlePattern is the profile regex matching the bundles of the
+// config at abs.
+func configBundlePattern(abs string) (string, error) {
+	if strings.ContainsRune(abs, '"') {
+		return "", fmt.Errorf("reuse: %q has a double quote, which a profile pattern cannot spell", abs)
+	}
+	return `#"^` + regexp.QuoteMeta(abs) + `\.timestamp-[0-9]+-[0-9a-f]+\.mjs$"`, nil
 }
 
 // unsandboxedTools are the setuid programs a confined test may still run. The
