@@ -524,6 +524,103 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
     (should-error (agent-repl-attach-clipboard-image) :type 'user-error)
     (should (null (agent-repl-test-image--images)))))
 
+;;;; ---- The shared paste decisions ----
+
+(ert-deftest agent-repl-image-ensure-dir-creates-the-directory ()
+  "The directory is made, parents included, and answered."
+  (agent-repl-test-image--with
+    (let ((dir (expand-file-name "a/b/" agent-repl-test-image--dir)))
+      (should (equal (agent-repl--image-ensure-dir "ws-one" dir) dir))
+      (should (file-directory-p dir)))))
+
+(ert-deftest agent-repl-image-capture-into-keeps-the-image-where-dir-fn-says ()
+  "The image is kept in the directory DIR-FN answers, under its digest."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((dir (file-name-as-directory (expand-file-name "elsewhere" agent-repl-test-image--dir))))
+      (make-directory dir)
+      (should (equal (agent-repl--image-capture-into
+                      "scope" (lambda () dir) (assq 'image/png agent-repl--image-clipboard-types))
+                     (cons (expand-file-name (agent-repl-test-image--kept-name "PNG" "png") dir)
+                           "image/png"))))))
+
+(ert-deftest agent-repl-image-capture-into-refuses-no-bytes-without-making-a-directory ()
+  "A clipboard with no bytes is refused at error, and DIR-FN is never called."
+  (agent-repl-test-image--with
+    (let ((asked nil))
+      (should-error (agent-repl--image-capture-into
+                     "scope" (lambda () (setq asked t)) (assq 'image/png agent-repl--image-clipboard-types))
+                    :type 'user-error)
+      (should-not asked)
+      (should (equal agent-repl-test-image--errors
+                     '("clipboard-image: clipboard answered no image bytes target=image/png"))))))
+
+(ert-deftest agent-repl-image-yank-runs-attach-on-an-image-only-clipboard ()
+  "The shared yank hands the clipboard's image entry to ATTACH."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((attached nil))
+      (agent-repl--image-yank "scope" (lambda (entry) (setq attached entry)))
+      (should (equal (car attached) 'image/png)))))
+
+(ert-deftest agent-repl-image-yank-yanks-text-without-attaching ()
+  "With text on the clipboard the shared yank yanks, and ATTACH is not run."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((attached nil) (yanked nil))
+      (cl-letf (((symbol-function 'yank) (lambda (&optional _) (interactive) (setq yanked t))))
+        (agent-repl--image-yank "scope" (lambda (entry) (setq attached entry))))
+      (should yanked)
+      (should-not attached))))
+
+(ert-deftest agent-repl-image-attach-forced-runs-attach-beside-text ()
+  "The forced attach takes the image even with text beside it."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "icon.png" 'image/png "PNG")
+    (let ((attached nil))
+      (agent-repl--image-attach-forced "scope" (lambda (entry) (setq attached entry)))
+      (should (equal (car attached) 'image/png)))))
+
+(ert-deftest agent-repl-image-attach-forced-refuses-no-image ()
+  "The forced attach with no image is refused, and ATTACH is not run."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((attached nil))
+      (should-error (agent-repl--image-attach-forced "scope" (lambda (entry) (setq attached entry)))
+                    :type 'user-error)
+      (should-not attached))))
+
+(ert-deftest agent-repl-image-evil-paste-runs-attach-after-the-cursor ()
+  "The shared evil paste steps past the cursor's character, then runs ATTACH."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "ab")
+    (goto-char 1)
+    (let ((evil-this-register nil) (at nil))
+      (agent-repl--image-evil-paste #'ignore t "scope" (lambda (_entry) (setq at (point))))
+      (should (equal at 2)))))
+
+(ert-deftest agent-repl-image-composer-paste-commands-share-the-decisions ()
+  "Every composer paste command runs its shared decision with the composer's ATTACH."
+  (agent-repl-test-image--with
+    (let ((calls nil))
+      (cl-letf (((symbol-function 'agent-repl--image-composer-attach) (lambda () 'composer))
+                ((symbol-function 'agent-repl--image-yank)
+                 (lambda (scope attach) (push (list 'yank scope attach) calls)))
+                ((symbol-function 'agent-repl--image-attach-forced)
+                 (lambda (scope attach) (push (list 'forced scope attach) calls)))
+                ((symbol-function 'agent-repl--image-evil-paste)
+                 (lambda (command after scope attach) (push (list command after scope attach) calls))))
+        (agent-repl-input-yank)
+        (agent-repl-attach-clipboard-image)
+        (agent-repl-input-evil-paste-after)
+        (agent-repl-input-evil-paste-before))
+      (should (equal (nreverse calls)
+                     '((yank "ws-one" composer)
+                       (forced "ws-one" composer)
+                       (evil-paste-after t "ws-one" composer)
+                       (evil-paste-before nil "ws-one" composer)))))))
+
 (ert-deftest agent-repl-image-paste-commands-are-remapped-in-the-composer ()
   "Every paste command the composer has runs the image-aware paste."
   (should (equal (list (lookup-key agent-repl-input-mode-map [remap yank])

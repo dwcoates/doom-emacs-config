@@ -165,15 +165,19 @@ the paste is then the ordinary one."
 
 ;;;; ---- Capture --------------------------------------------------------------
 
-(defun agent-repl--image-dir (ws)
-  "Return (creating) the pasted-image directory for workspace WS."
-  (let* ((dir (expand-file-name agent-repl--image-subdir (agent-repl--ws-dir ws)))
-         (already-exists (file-directory-p dir)))
-    (agent-repl--log ws
+(defun agent-repl--image-ensure-dir (scope dir)
+  "Return DIR, creating it, recording the step under log SCOPE."
+  (let ((already-exists (file-directory-p dir)))
+    (agent-repl--log scope
                      "clipboard-image: ensure image directory path=%s already-exists=%s"
                      dir already-exists)
     (make-directory dir t)
     dir))
+
+(defun agent-repl--image-dir (ws)
+  "Return (creating) the pasted-image directory for workspace WS."
+  (agent-repl--image-ensure-dir
+   ws (expand-file-name agent-repl--image-subdir (agent-repl--ws-dir ws))))
 
 (defun agent-repl--image-path (dir data extension)
   "Return the path under DIR that image bytes DATA are kept at.
@@ -219,18 +223,26 @@ the refusal is recorded at error and signalled as a `user-error'."
 
 (defun agent-repl--image-capture (ws entry)
   "Keep the clipboard's ENTRY image for WS; return (PATH . MEDIA-TYPE).
-ENTRY is one of `agent-repl--image-clipboard-types'.  A clipboard that
-answers no bytes for it is recorded at error and signalled as a
+The image is kept in WS\='s own image directory
+\=(`agent-repl--image-capture-into')."
+  (agent-repl--image-capture-into ws (lambda () (agent-repl--image-dir ws)) entry))
+
+(defun agent-repl--image-capture-into (scope dir-fn entry)
+  "Keep the clipboard's ENTRY image in the directory DIR-FN answers.
+Return (PATH . MEDIA-TYPE).  SCOPE is the log scope every step records
+under.  ENTRY is one of `agent-repl--image-clipboard-types'.  A clipboard
+that answers no bytes for it is recorded at error and signalled as a
 `user-error' -- an empty attachment would be a silent no-op the user
-could not tell from a successful one."
+could not tell from a successful one.  DIR-FN is called only once the
+bytes are in hand, so a refused paste makes no directory."
   (pcase-let* ((`(,target ,extension ,media-type) entry)
                (data (agent-repl--image-clipboard-selection target)))
     (unless (and (stringp data) (> (length data) 0))
-      (agent-repl--error ws "clipboard-image: clipboard answered no image bytes target=%s" target)
+      (agent-repl--error scope "clipboard-image: clipboard answered no image bytes target=%s" target)
       (user-error "agent-repl: no image found on the clipboard"))
-    (let* ((path (agent-repl--image-path (agent-repl--image-dir ws) data extension)))
-      (agent-repl--image-write path data ws)
-      (cons (if (eq target 'image/tiff) (agent-repl--image-convert-tiff path ws) path)
+    (let* ((path (agent-repl--image-path (funcall dir-fn) data extension)))
+      (agent-repl--image-write path data scope)
+      (cons (if (eq target 'image/tiff) (agent-repl--image-convert-tiff path scope) path)
             media-type))))
 
 ;;;; ---- The image in the composer ------------------------------------------
@@ -371,55 +383,76 @@ signalled as a `user-error'; nothing is asked of the daemon."
                       ws path media-type)
     path))
 
+;; THE PASTE DECISIONS ARE SHARED by every place an image is pasted into
+;; -- the composer and a creation prompt's minibuffer -- and each takes
+;; ATTACH, the one function that keeps the clipboard's ENTRY image and puts
+;; it at point THERE, so the two places differ only in what they insert.
+
+(defun agent-repl--image-attach-forced (scope attach)
+  "Run ATTACH on the clipboard's image, even when text rides beside it.
+SCOPE is the log scope.  Signals a `user-error' when the clipboard holds
+no image."
+  (let ((entry (agent-repl--image-clipboard-image-type (agent-repl--image-clipboard-targets scope))))
+    (unless entry
+      (agent-repl--log scope "clipboard-image: attach refused, no image on the clipboard")
+      (user-error "agent-repl: no image found on the clipboard"))
+    (funcall attach entry)))
+
+(defun agent-repl--image-yank (scope attach)
+  "Run ATTACH on the clipboard's image, or `yank' as usual.
+The image is pasted when the clipboard holds one and no text, and no
+prefix argument asks for an older kill.  SCOPE is the log scope."
+  (let ((entry (and (null current-prefix-arg) (agent-repl--image-clipboard-paste-type scope))))
+    (if entry
+        (funcall attach entry)
+      (setq this-command 'yank)
+      (call-interactively #'yank))))
+
+(defun agent-repl--image-evil-paste (command after scope attach)
+  "Run ATTACH on the clipboard's image for evil's COMMAND, or run COMMAND.
+AFTER says the image goes after the cursor's character, as `p' pastes.
+The image is pasted only for the unnamed or a clipboard register: a named
+register holds what the user put in it.  SCOPE is the log scope."
+  (let* ((register (bound-and-true-p evil-this-register))
+         (entry (and (memq register '(nil ?+ ?*))
+                     (agent-repl--image-clipboard-paste-type scope))))
+    (if (null entry)
+        (progn
+          (setq this-command command)
+          (call-interactively command))
+      (when (and after (not (eolp))) (forward-char))
+      (funcall attach entry))))
+
+(defun agent-repl--image-composer-attach ()
+  "Return the composer's ATTACH: keep an entry's image for the current workspace."
+  (let ((ws (agent-repl--ws-current-name)))
+    (lambda (entry) (agent-repl--image-attach-clipboard ws entry))))
+
 ;;;###autoload
 (defun agent-repl-attach-clipboard-image ()
   "Attach the clipboard's image at point, even when text rides beside it.
 Signals a `user-error' when the clipboard holds no image."
   (interactive)
-  (let* ((ws (agent-repl--ws-current-name))
-         (entry (agent-repl--image-clipboard-image-type (agent-repl--image-clipboard-targets ws))))
-    (unless entry
-      (agent-repl--log ws "clipboard-image: attach refused, no image on the clipboard")
-      (user-error "agent-repl: no image found on the clipboard"))
-    (agent-repl--image-attach-clipboard ws entry)))
+  (agent-repl--image-attach-forced (agent-repl--ws-current-name) (agent-repl--image-composer-attach)))
 
 (defun agent-repl-input-yank ()
   "Paste the clipboard's image at point, or `yank' as usual.
 The image is pasted when the clipboard holds one and no text, and no
 prefix argument asks for an older kill."
   (interactive "*")
-  (let* ((ws (agent-repl--ws-current-name))
-         (entry (and (null current-prefix-arg) (agent-repl--image-clipboard-paste-type ws))))
-    (if entry
-        (agent-repl--image-attach-clipboard ws entry)
-      (setq this-command 'yank)
-      (call-interactively #'yank))))
-
-(defun agent-repl--image-evil-paste (command after)
-  "Paste the clipboard's image for evil's COMMAND, or run COMMAND as usual.
-AFTER says the image goes after the cursor's character, as `p' pastes.
-The image is pasted only for the unnamed or a clipboard register: a named
-register holds what the user put in it."
-  (let* ((ws (agent-repl--ws-current-name))
-         (register (bound-and-true-p evil-this-register))
-         (entry (and (memq register '(nil ?+ ?*))
-                     (agent-repl--image-clipboard-paste-type ws))))
-    (if (null entry)
-        (progn
-          (setq this-command command)
-          (call-interactively command))
-      (when (and after (not (eolp))) (forward-char))
-      (agent-repl--image-attach-clipboard ws entry))))
+  (agent-repl--image-yank (agent-repl--ws-current-name) (agent-repl--image-composer-attach)))
 
 (defun agent-repl-input-evil-paste-after ()
   "Evil's `p' in the composer: the clipboard's image, or `evil-paste-after'."
   (interactive "*")
-  (agent-repl--image-evil-paste #'evil-paste-after t))
+  (agent-repl--image-evil-paste #'evil-paste-after t (agent-repl--ws-current-name)
+                                (agent-repl--image-composer-attach)))
 
 (defun agent-repl-input-evil-paste-before ()
   "Evil's `P' in the composer: the clipboard's image, or `evil-paste-before'."
   (interactive "*")
-  (agent-repl--image-evil-paste #'evil-paste-before nil))
+  (agent-repl--image-evil-paste #'evil-paste-before nil (agent-repl--ws-current-name)
+                                (agent-repl--image-composer-attach)))
 
 ;;;; ---- Keybinding -----------------------------------------------------------
 
