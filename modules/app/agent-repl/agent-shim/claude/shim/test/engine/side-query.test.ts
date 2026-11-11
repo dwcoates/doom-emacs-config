@@ -157,9 +157,24 @@ describe("the side query's call sites", () => {
     const source = readFileSync(path.join(import.meta.dirname, "../../src/engine/session.ts"), "utf8");
     // Act
     const built = source.split("deps.createQuery(").length - 1;
-    // A revision's query is built for reviseResponse, which asks it as a side query.
-    const asked = source.split("askSideQuery(").length - 1 + (source.split("reviseResponse(").length - 1);
+    // A revision's query is built for reviseResponse, and a parked
+    // conversation's keep-alive query for beatParkedConversation; each asks
+    // it as a side query (engine/revise-response.ts, engine/parked-keepalive.ts).
+    const asked =
+      source.split("askSideQuery(").length - 1 +
+      (source.split("reviseResponse(").length - 1) +
+      (source.split("beatParkedConversation(").length - 1);
     // Assert: the live session builds ONE query of its own; every other is a side query's.
     expect(built).toBe(asked + 1);
+  });
+
+  // The count above credits these delegates with a side query; each must ask one.
+  it.each(["revise-response.ts", "parked-keepalive.ts"])("asks the query %s is built for as a side query", (file) => {
+    // Arrange
+    const source = readFileSync(path.join(import.meta.dirname, "../../src/engine", file), "utf8");
+    // Act
+    const asked = source.split("askSideQuery(").length - 1;
+    // Assert
+    expect(asked).toBe(1);
   });
 });
