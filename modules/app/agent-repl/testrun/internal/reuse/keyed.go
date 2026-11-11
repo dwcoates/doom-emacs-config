@@ -108,3 +108,10 @@ func (r *recorder) record(name, label string, set *InputSet, facts Facts, key Ke
 	}
 	return true, nil
 }
+
+// confinedRefusal says how a read the subject's declaration (field, the
+// roster field: Reuse or PackageReuse) omits shows in a confined failure:
+// the kernel's refusal, or a directory listing it emptied silently.
+func confinedRefusal(field string) string {
+	return `a failure reading a checkout file with "operation not permitted", or a listing of a checkout directory that comes back empty (filepath.Glob drops the refusal), is a read its ` + field + ` does not declare`
+}

@@ -303,7 +303,7 @@ func RecordPackagePasses(d Deps, mode Mode, verdicts []PackageVerdict, results [
 		g := v.Group()
 		if !v.Keyed || v.Reused != nil || ran[g] == 0 || failed[g] {
 			if v.Keyed && v.Reused == nil && failed[g] {
-				d.Log.Infof("%s ran confined to its own inputs: a failure reading a checkout file with \"operation not permitted\", or a listing of a checkout directory that comes back empty (filepath.Glob drops the refusal), is a read its PackageReuse does not declare (testrun/roster; the /agent-repl-tests skill, \"A unit's reuse inputs come from the tool's dependency listing\")", g)
+				d.Log.Infof("%s ran confined to its own inputs: %s (testrun/roster; the /agent-repl-tests skill, \"A unit's reuse inputs come from the tool's dependency listing\")", g, confinedRefusal("PackageReuse"))
 			}
 			continue
 		}

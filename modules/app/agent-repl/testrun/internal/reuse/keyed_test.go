@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
 
@@ -251,5 +252,76 @@ func TestSuitesAndPackagesAreDecidedAndRecordedAlike(t *testing.T) {
 	p, _, _ := f.d.Store.Newest(pv[2].Name())
 	if s.Branch != p.Branch || s.Commit != p.Commit || s.Checkout != p.Checkout || !s.PassedAt.Equal(p.PassedAt) {
 		t.Fatalf("records %+v and %+v name different runs", s, p)
+	}
+}
+
+func TestConfinedRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "a suite's declaration", field: "Reuse"},
+		{name: "a package's declaration", field: "PackageReuse"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := confinedRefusal(tt.field)
+
+			// Assert
+			for _, want := range []string{
+				`"operation not permitted"`,
+				"a listing of a checkout directory that comes back empty",
+				"is a read its " + tt.field + " does not declare",
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("confinedRefusal(%q) = %q, want it to say %q", tt.field, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestSuitesAndPackagesTellAConfinedFailureAlike pins that a failed keyed
+// suite and a failed keyed package are both told through confinedRefusal, so
+// a hand-rolled hint at either site fails here.
+func TestSuitesAndPackagesTellAConfinedFailureAlike(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		fail  func(t *testing.T) []string
+	}{
+		{name: "a suite", field: "Reuse", fail: func(t *testing.T) []string {
+			f := newFixture(t)
+			v := f.decide(t, Reusing, lockSuite)
+			if err := RecordPasses(f.d, Reusing, v, []run.SuiteResult{{Name: "lock", Outcome: run.Failed}}, nil); err != nil {
+				t.Fatal(err)
+			}
+			return f.log.info
+		}},
+		{name: "a package", field: "PackageReuse", fail: func(t *testing.T) []string {
+			f := newPkgFixture(t)
+			pv := f.decidePackages(t, Reusing)
+			var r run.Result
+			r.Spec.ID, r.Outcome = "daemon:b#00", run.Failed
+			if err := RecordPackagePasses(f.d, Reusing, pv, []run.Result{r}); err != nil {
+				t.Fatal(err)
+			}
+			return f.log.info
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			want := confinedRefusal(tt.field)
+
+			// Act
+			info := tt.fail(t)
+
+			// Assert
+			if !slices.ContainsFunc(info, func(l string) bool { return strings.Contains(l, want) }) {
+				t.Fatalf("info = %q, want a line carrying %q", info, want)
+			}
+		})
 	}
 }
