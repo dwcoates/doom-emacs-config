@@ -1300,6 +1300,62 @@ func (s *requestLoggingServer) ListGithubWorkflowRunSubscriptions(
 	return serveUnary(s, ctx, "ListGithubWorkflowRunSubscriptions", req, s.server.ListGithubWorkflowRunSubscriptions)
 }
 
+func (s *requestLoggingServer) SubscribeSlackThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SubscribeSlackThreadRequest],
+) (*connect.Response[agentreplv1.SubscribeSlackThreadResponse], error) {
+	return serveUnary(s, ctx, "SubscribeSlackThread", req, s.server.SubscribeSlackThread)
+}
+
+func (s *requestLoggingServer) UnsubscribeSlackThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UnsubscribeSlackThreadRequest],
+) (*connect.Response[agentreplv1.UnsubscribeSlackThreadResponse], error) {
+	return serveUnary(s, ctx, "UnsubscribeSlackThread", req, s.server.UnsubscribeSlackThread)
+}
+
+func (s *requestLoggingServer) SetSlackThreadMode(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetSlackThreadModeRequest],
+) (*connect.Response[agentreplv1.SetSlackThreadModeResponse], error) {
+	return serveUnary(s, ctx, "SetSlackThreadMode", req, s.server.SetSlackThreadMode)
+}
+
+func (s *requestLoggingServer) ListSlackThreadSubscriptions(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListSlackThreadSubscriptionsRequest],
+) (*connect.Response[agentreplv1.ListSlackThreadSubscriptionsResponse], error) {
+	return serveUnary(s, ctx, "ListSlackThreadSubscriptions", req, s.server.ListSlackThreadSubscriptions)
+}
+
+func (s *requestLoggingServer) ReadSlackThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReadSlackThreadRequest],
+) (*connect.Response[agentreplv1.ReadSlackThreadResponse], error) {
+	return serveUnary(s, ctx, "ReadSlackThread", req, s.server.ReadSlackThread)
+}
+
+func (s *requestLoggingServer) PostToSlackThread(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.PostToSlackThreadRequest],
+) (*connect.Response[agentreplv1.PostToSlackThreadResponse], error) {
+	return serveUnary(s, ctx, "PostToSlackThread", req, s.server.PostToSlackThread)
+}
+
+func (s *requestLoggingServer) GetSlackStatus(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetSlackStatusRequest],
+) (*connect.Response[agentreplv1.GetSlackStatusResponse], error) {
+	return serveUnary(s, ctx, "GetSlackStatus", req, s.server.GetSlackStatus)
+}
+
+func (s *requestLoggingServer) UpdateSlackReactionSettings(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateSlackReactionSettingsRequest],
+) (*connect.Response[agentreplv1.UpdateSlackReactionSettingsResponse], error) {
+	return serveUnary(s, ctx, "UpdateSlackReactionSettings", req, s.server.UpdateSlackReactionSettings)
+}
+
 func (s *requestLoggingServer) NotifyWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.NotifyWorkspaceRequest],

@@ -95,6 +95,8 @@ type Deps struct {
 	// PullRequests backs the pull-request subscription and comment rpcs
 	// (prwatch.Watcher).
 	PullRequests PullRequests
+	// Slack backs the Slack-thread and Slack status rpcs (slackwatch.Watcher).
+	Slack SlackThreads
 	// Remotes reads a workspace's `origin`, so `#<number>` names a pull
 	// request in its repository.
 	Remotes prwatch.RemoteReader
@@ -616,6 +618,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the workspace verbs")
 	case deps.Retarget == nil:
 		return nil, missing("the retarget operation")
+	case deps.Slack == nil:
+		return nil, missing("the Slack watcher")
 	case deps.Tests == nil:
 		return nil, missing("a test runner")
 	case deps.DeployConfig == nil:
