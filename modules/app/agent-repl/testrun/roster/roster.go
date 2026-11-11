@@ -263,7 +263,8 @@ var Suites = []Suite{
 	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true, Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true,
 		Reuse: harness("bin/", "daemon/internal/checkout/checkout.go")},
-	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true, Reuse: harness("bin/", ".", "lisp/", "e2e/sandbox/bin/entrypoint.sh", "/.githooks/pre-commit")},
+	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true,
+		NeverReused: "it walks the whole module for every script and test that must run at background priority"},
 	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: harness("bin/")},
@@ -279,11 +280,11 @@ var Suites = []Suite{
 	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: harness("bin/", "proto/vocab/latencies.json")},
-	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: harness("skills/agent-repl-metrics/", "bin/")},
+	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: harness("bin/", "proto/vocab/")},
+	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: harness("skills/agent-repl-metrics/", "bin/", "proto/vocab/latencies.json")},
 	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: harness("skills/gns-auth-renew/", "bin/")},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
-	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, Reuse: harness("bin/", "agent-shim/claude/shim/scripts/capture/")},
+	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: harness("bin/", "e2e/realtest/")},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: harness("scripts/", "bin/")},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: harness("scripts/", "bin/")},
@@ -295,29 +296,40 @@ var Suites = []Suite{
 	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: harness(fakeGitFixture...)},
 	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: harness(fakeGitFixture...)},
 	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Inputs: []string{
+	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Units: map[string][]string{
+		// What a test file reads from the suite's directory as data.
+		"test-threads.el":      {"lisp/open-chats.agent-repl-chats"},
+		"test-spell.el":        {"lisp/requirements.json"},
+		"test-test-helpers.el": {"lisp/test-agent-repl.el"},
+	}, Inputs: []string{
 		// The Doom module files and the data the Emacs layer reads.
 		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
 		"logging-contract.md", "metaprompt.md",
 	}}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun", Reuse: &Reuse{
 		// The canonical timing history, which the runner's own test parses.
+		// Its tests find the module's root and the runner's own directories
+		// by listing them.
+		Inputs: []string{".", "testrun", "testrun/internal", "testrun/ert"},
 		Units: map[string][]string{
-			"internal/cli": {"test_time.csv"},
+			"internal/cli":   {"test_time.csv"},
+			"caselist":       {"daemon/cmd/agent-repld/testredundancycli.go"},
+			"internal/cover": {"e2e/coverage_test.go"},
+			"reap":           {"daemon/integration/harness/runroot.go"},
 			// Their tests list the runner's ERT driver directory, the
 			// daemon's and the webapp's trees, and the module's root.
 			"gofunc":                            {"testrun/ert"},
 			"internal/goprofile":                {"testrun/ert"},
 			"internal/gotest":                   {"testrun/ert"},
-			"internal/redundancy/gomeasure":     {"daemon"},
-			"internal/redundancy/vitestmeasure": {"webapp"},
-			"internal/run":                      {"."},
-			"internal/testdir":                  {"."},
+			"internal/redundancy/gomeasure":     {"daemon/"},
+			"internal/redundancy/vitestmeasure": {"webapp", "testrun/vitest/"},
 		},
 		Never: map[string]string{
-			"internal/reuse":  "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
-			"roster":          "its scans walk the whole repository for test scripts and every path the roster names",
-			"internal/suites": "its tests plan every roster suite against the real tree, running the go command and Emacs over it",
+			"internal/reuse":   "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
+			"roster":           "its scans walk the whole repository for test scripts and every path the roster names",
+			"internal/suites":  "its tests plan every roster suite against the real tree, running the go command and Emacs over it",
+			"internal/run":     "its test walks the whole module for every Go test file",
+			"internal/testdir": "its test walks the whole module for every Go test file",
 		}}},
 	// THE INTEGRATION SUITES RIDE THEIR SYSTEM'S SUITE, so a full run and
 	// `--suites daemon` (or webapp, shim) run unit and integration together,
@@ -337,8 +349,8 @@ var Suites = []Suite{
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
 		Reuse: &Reuse{Units: map[string][]string{
-			// The root package's scan lists the integration package's files.
-			".": {"agent-shim/claude/shim-sidecar/integration"},
+			// The root package's scans walk the sidecar's own tree.
+			".": {"agent-shim/claude/shim-sidecar/"},
 		}, Inputs: []string{
 			"proto/vocab/agent-repl-tools.json", "testdata/corpus/", "testdata/projects/", "logging-contract.md",
 			// The mocked vendor's scenarios, as the shim's suite generates and
@@ -398,7 +410,7 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
 			Units: shimUnitInputs}},
-	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp/src/", "webapp/test/")},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp", "webapp/src/", "webapp/test/")},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
@@ -516,8 +528,13 @@ var webappUnitInputs = func() map[string][]string {
 	} {
 		out[f] = []string{"webapp/index.html"}
 	}
-	// The vite config's own check builds from the page.
-	out["test/vite-config.test.ts"] = []string{"webapp/index.html"}
+	// The vite config's own check builds from the page, as do the control
+	// test's and the integration harness's self check.
+	for _, f := range []string{"test/vite-config.test.ts", "test/control.test.ts", "test/integration/harness.self.test.ts"} {
+		out[f] = append(out[f], "webapp/index.html")
+	}
+	out["test/failure/sink.test.ts"] = []string{"webapp/src/"}
+	out["test/webkit-stylesheets.test.ts"] = append(out["test/webkit-stylesheets.test.ts"], "webapp/test/")
 	return out
 }()
 
@@ -531,7 +548,7 @@ var shimUnitInputs = func() map[string][]string {
 	out := map[string][]string{
 		"scripts/capture/capture.test.mjs":             {shim + "scripts/capture/prompts.json"},
 		"test/build-options.test.ts":                   {shim + "build.mjs", shim + "test/fakes/build-store-server.mjs"},
-		"test/convert/place.test.ts":                   {src + "convert/attachments.ts"},
+		"test/convert/place.test.ts":                   {src + "convert/"},
 		"test/integration-support/detach-gate.test.ts": {shim + "test/integration/"},
 		"test/store/stub-client.test.ts":               {shim + "test/store/"},
 		// It bundles the fake store's process entry, with the shim's bundle
@@ -608,7 +625,7 @@ var daemonUnitInputs = map[string][]string{
 	// The scans pinning named call sites in other packages.
 	"internal/atomicfile": {"daemon/internal/classifierupdate/update.go", "daemon/internal/daemonaddr/claim.go",
 		"daemon/internal/rollout/carry.go", "daemon/internal/rollout/manifest.go", "daemon/internal/rollout/spawn.go"},
-	"internal/briefprompt": {"daemon/internal/mainsync/mainsync.go", "daemon/internal/mergenotice/mergenotice.go",
+	"internal/briefprompt": {"daemon/internal/gather/gather.go", "daemon/internal/mainsync/mainsync.go", "daemon/internal/mergenotice/mergenotice.go",
 		"daemon/internal/prwatch/poller.go", "daemon/internal/workspacenotice/workspacenotice.go",
 		"daemon/internal/workspacesubs/workspacesubs.go"},
 	"internal/standdown": {"daemon/internal/desktopnotify/notifier.go", "daemon/internal/desktopnotify/summary.go",
@@ -618,6 +635,8 @@ var daemonUnitInputs = map[string][]string{
 	"internal/workspacesubs": {"daemon/internal/mergenotice/mergenotice.go"},
 	// The briefs, read as data.
 	"internal/classifierupdate": {"prompts/"},
+	"internal/gather":           {"prompts/"},
+	"internal/prompthandler":    {"prompts/"},
 	"internal/desktopnotify":    {"prompts/"},
 	"internal/merge":            {"prompts/"},
 	"internal/mergenotice":      {"prompts/"},
