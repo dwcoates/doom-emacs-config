@@ -7073,6 +7073,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     releaseTurn,
     joinRunningTurn,
     askOpen: () => gate.askOpen,
+    promptRecorded: (turnId) => transcriptIndexOf(requireIdentity().vendorSessionId).holds(promptUuid(turnId)),
     noteStopCommand: (turn, command) => {
       stopCommand = { turn, command };
       LOGGER.debug(

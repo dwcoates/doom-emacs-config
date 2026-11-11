@@ -80,6 +80,12 @@ var (
 	// sender's typed refusal answers errors.Is against it, and the prompt stays
 	// held for the running turn's end.
 	ErrAskOpen = errors.New("promptqueue: an ask blocks the vendor")
+	// ErrPromptRecorded is the SHIM's own refusal of a delivery whose prompt
+	// the vendor's transcript already records (StartTurnFailure.prompt_recorded):
+	// pushed again, the vendor would drop it and its turn would never end. The
+	// prompt was delivered and answered when it was first sent, so the entry is
+	// retired as delivered and its turn closed; nothing is started.
+	ErrPromptRecorded = errors.New("promptqueue: the vendor already recorded the turn's prompt")
 	// ErrShimDied is a delivery that failed because the shim DIED under it:
 	// the session read live when the prompt arrived, and the shim was gone
 	// by the time StartTurn reached it. The sender's error answers errors.Is

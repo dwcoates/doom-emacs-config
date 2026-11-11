@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"os"
 	"strings"
 	"testing"
 
@@ -1250,5 +1251,100 @@ func TestEveryMirroredRowRetractionGoesThroughRetractAccepted(t *testing.T) {
 	// Assert
 	if len(sites) != 0 {
 		t.Fatalf("mirrored rows retracted outside retractAccepted: %v", sites)
+	}
+}
+
+// --- a prompt the vendor already recorded -----------------------------------
+
+// recordedBehindRunning stands RUNNING with t1 and t2 held behind it, t1's
+// prompt one the vendor already records, and ends RUNNING.
+func recordedBehindRunning(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.sender.recorded = map[ids.TurnID]bool{"t1": true}
+	running(t, h, "running-turn", "the running work")
+	for _, turn := range []ids.TurnID{"t1", "t2"} {
+		if _, err := h.q.Submit(context.Background(), submission(turn, "hello "+string(turn))); err != nil {
+			t.Fatalf("Submit %s: %v", turn, err)
+		}
+	}
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	return h
+}
+
+func TestARecordedPromptIsNeverStartedAndTheEntryBehindItIsDelivered(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if got := h.sender.started(); len(got) != 1 || got[0] != "t2" {
+		t.Fatalf("started turns = %v, want only t2: the recorded t1 runs nothing and t2 goes in its place", got)
+	}
+}
+
+func TestARecordedPromptsHoldIsRetiredAsDelivered(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if retired := h.db.retired("t1"); retired == nil || retired.Kind != tombstoneDelivered {
+		t.Fatalf("t1's tombstone = %+v, want it retired as delivered", retired)
+	}
+}
+
+func TestARecordedPromptsTurnRowClosesAsWithdrawn(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	if how, ok := h.db.closedTurn("t1"); !ok || how != wsm.CloseWithdrawn {
+		t.Fatalf("t1's close = (%v, %v), want withdrawn: it never ran", how, ok)
+	}
+}
+
+func TestARecordedPromptIsRecordedAtErrorNamingItsTurn(t *testing.T) {
+	// Arrange, Act
+	h := recordedBehindRunning(t)
+
+	// Assert
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opDeliver})
+	if !ok || record.Context["turn"] != "t1" {
+		t.Fatalf("records = %+v, want the lost delivery recorded at ERROR naming t1", h.log.Records())
+	}
+}
+
+func TestCloseRecordedClosesTheTurnAsWithdrawnAndRecordsTheLostDeliveryAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	log := h.log.Global()
+
+	// Act
+	h.q.closeRecorded(context.Background(), theWorkspace, "t1", ErrPromptRecorded, opJoin, "lost", log)
+
+	// Assert
+	how, closed := h.db.closedTurn("t1")
+	record, logged := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opJoin, Message: "lost"})
+	if !closed || how != wsm.CloseWithdrawn || !logged || record.Context["turn"] != "t1" ||
+		record.Context["invariant_violation"] != "a delivered prompt's hold is retired with its delivery" {
+		t.Fatalf("close = (%v, %v), record = (%+v, %v); want withdrawn and the lost delivery at ERROR", how, closed, record, logged)
+	}
+}
+
+// Every refusal of a recorded prompt goes through closeRecorded: a site that
+// hand-rolled its own close and record would drift from the rest.
+func TestEveryRecordedRefusalGoesThroughCloseRecorded(t *testing.T) {
+	// Arrange
+	files := []string{"deliver.go", "join.go"}
+
+	// Act, Assert
+	for _, name := range files {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", name, err)
+		}
+		if strings.Contains(string(source), "ErrPromptRecorded") && !strings.Contains(string(source), "q.closeRecorded(") {
+			t.Fatalf("%s handles ErrPromptRecorded without closeRecorded", name)
+		}
 	}
 }

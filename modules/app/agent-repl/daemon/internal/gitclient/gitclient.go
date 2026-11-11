@@ -329,7 +329,72 @@ func (c *client) removeWorktree(ctx context.Context, operation, repoDir, worktre
 		})
 		return fmt.Errorf("gitclient: detach the log sinks of %s: %w", worktreeDir, err)
 	}
+	if !force {
+		return c.removeAt(ctx, operation, repoDir, worktreeDir, false)
+	}
+	// A FORCED REMOVAL MOVES THE TREE OFF ITS PATH FIRST, then removes it
+	// under a name nothing writes to. Detaching the daemon's own sinks is not
+	// enough: the EDITOR is another process, and its file sink re-creates
+	// `<worktree>/.claude/emacs` with its canonical link whenever it logs for
+	// the workspace, so a recursive delete racing it ended "Directory not
+	// empty" with the tree half gone (doom, 2026-11-11: a failed create's
+	// undo). `git worktree move` is one rename: once it returns the path is
+	// empty, and a writer of the old path finds no parent to create into.
+	aside, err := c.moveAside(ctx, operation, repoDir, worktreeDir)
+	if err != nil {
+		return err
+	}
+	return c.removeAt(ctx, operation, repoDir, aside, true)
+}
 
+// asideDir is where a forced removal moves WORKTREEDIR before removing it: a
+// hidden sibling, so the move is one rename on the same filesystem, and a
+// fixed name, so a removal that failed after its move is finished by the next.
+func asideDir(worktreeDir string) string {
+	clean := filepath.Clean(worktreeDir)
+	return filepath.Join(filepath.Dir(clean), "."+filepath.Base(clean)+".removing")
+}
+
+// moveAside moves WORKTREEDIR, when it is present, to its asideDir with `git
+// worktree move`, and answers the aside path. An aside copy an earlier removal
+// left is removed first, so the move has somewhere to go. A move git refuses
+// leaves the tree whole at its path, and is answered as the failure, recorded
+// at ERROR.
+func (c *client) moveAside(ctx context.Context, operation, repoDir, worktreeDir string) (string, error) {
+	aside := asideDir(worktreeDir)
+	present, err := pathPresent(worktreeDir)
+	if err != nil || !present {
+		return aside, err
+	}
+	stale, err := pathPresent(aside)
+	if err != nil {
+		return "", err
+	}
+	if stale {
+		c.log.Global().Info(operation, "an earlier removal left this tree's aside copy; it is removed before the tree is moved aside", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "aside": aside,
+		})
+		if err := c.removeAt(ctx, operation, repoDir, aside, true); err != nil {
+			return "", err
+		}
+	}
+	in, err := c.runRaw(ctx, operation, repoDir, "worktree", "move", worktreeDir, aside)
+	if err != nil {
+		return "", err
+	}
+	if in.exitCode != 0 {
+		failure := in.fail()
+		c.log.Global().Error(operation, "git would not move the worktree aside; it stays whole at its path", dlog.Context{
+			"dir": repoDir, "worktree_dir": worktreeDir, "aside": aside, "cause": failure.Error(),
+		})
+		return "", failure
+	}
+	return aside, nil
+}
+
+// removeAt removes the worktree at WORKTREEDIR with `git worktree remove`
+// (--force when FORCE), then prunes; THE POSTCONDITION decides success.
+func (c *client) removeAt(ctx context.Context, operation, repoDir, worktreeDir string, force bool) error {
 	present, err := pathPresent(worktreeDir)
 	if err != nil {
 		return err

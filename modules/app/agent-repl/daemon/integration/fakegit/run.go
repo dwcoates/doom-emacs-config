@@ -599,6 +599,26 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		repo.RemoveWorktree(dir)
 		return Result{}
 
+	case len(subject) >= 4 && subject[1] == "move":
+		from, to := subject[len(subject)-2], subject[len(subject)-1]
+		target := repo.Worktree(from)
+		if target == nil {
+			return Result{Stderr: fmt.Sprintf("fatal: '%s' is not a working tree\n", from), Exit: 128}
+		}
+		// Git refuses to move a LOCKED tree unless it is forced twice, and
+		// never moves onto a path that exists.
+		if target.Locked && forceCount(subject) < 2 {
+			return Result{Stderr: "fatal: cannot move a locked working tree;\nuse 'move -f -f' to override or unlock first\n", Exit: 128}
+		}
+		if _, err := os.Lstat(to); err == nil {
+			return Result{Stderr: fmt.Sprintf("fatal: '%s' already exists\n", to), Exit: 128}
+		}
+		if err := os.Rename(from, to); err != nil {
+			return Result{Stderr: err.Error() + "\n", Exit: 128}
+		}
+		target.Dir = to
+		return Result{}
+
 	case len(subject) >= 2 && subject[1] == "list":
 		// git lists the MAIN worktree first, and the daemon reads exactly
 		// that order, so the fixture keeps it: Worktrees[0] is the main one.

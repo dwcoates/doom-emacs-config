@@ -946,3 +946,77 @@ describe("what a read keeps of each record", () => {
     expect(got.kind === "ok" ? got.transcript.byUuid.get("a0")?.message?.content : got.kind).toEqual(want);
   });
 });
+
+describe("createTranscriptIndex holds", () => {
+  it("answers recorded for a record the file holds", () => {
+    // Arrange.
+    const index = createTranscriptIndex(transcript([user("p0", null), assistant("a0", "p0")]));
+
+    // Act.
+    const held = index.holds("p0");
+
+    // Assert.
+    expect(held).toEqual({ kind: "recorded" });
+  });
+
+  it("answers absent for a uuid the file does not hold", () => {
+    // Arrange.
+    const index = createTranscriptIndex(transcript([user("p0", null)]));
+
+    // Act.
+    const held = index.holds("p9");
+
+    // Assert.
+    expect(held).toEqual({ kind: "absent" });
+  });
+
+  it("answers absent when there is no transcript yet", () => {
+    // Arrange.
+    const index = createTranscriptIndex(path.join(mkdtempSync(path.join(os.tmpdir(), "shim-rollback-")), "none.jsonl"));
+
+    // Act.
+    const held = index.holds("p0");
+
+    // Assert.
+    expect(held).toEqual({ kind: "absent" });
+  });
+
+  it("answers recorded for a record in the file's unterminated tail", () => {
+    // Arrange.
+    const file = transcript([user("p0", null)]);
+    appendFileSync(file, JSON.stringify(user("p1", "p0")));
+    const index = createTranscriptIndex(file);
+
+    // Act.
+    const held = index.holds("p1");
+
+    // Assert.
+    expect(held).toEqual({ kind: "recorded" });
+  });
+
+  it("answers recorded for a record appended after an earlier lookup", () => {
+    // Arrange.
+    const file = transcript([user("p0", null)]);
+    const index = createTranscriptIndex(file);
+    index.holds("p0");
+    appendFileSync(file, `${JSON.stringify(user("p1", "p0"))}\n`);
+
+    // Act.
+    const held = index.holds("p1");
+
+    // Assert.
+    expect(held).toEqual({ kind: "recorded" });
+  });
+
+  it("answers unreadable, never absent, when the file cannot be opened", () => {
+    // Arrange.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-rollback-"));
+    const index = createTranscriptIndex(dir);
+
+    // Act.
+    const held = index.holds("p0");
+
+    // Assert.
+    expect(held.kind).toBe("unreadable");
+  });
+});

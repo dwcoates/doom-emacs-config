@@ -797,7 +797,7 @@ func TestRemoveWorktreeDetachesTheDirectoryBeforeGitRuns(t *testing.T) {
 	// Arrange: a sink opened mid-removal must not re-create the directory.
 	git, surfaces := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
-	newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+	newFakeGit(t, movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir)}, ok("", "worktree", "prune"))
 
 	// Act.
 	if err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir); err != nil {
@@ -836,7 +836,7 @@ func TestRemoveWorktreeForcesTheRemovalThenPrunes(t *testing.T) {
 	// git's administrative record from outliving the directory.
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
-	fake := newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir}, ok("", "worktree", "prune"))
+	fake := newFakeGit(t, movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir)}, ok("", "worktree", "prune"))
 
 	// Act.
 	if err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir); err != nil {
@@ -844,8 +844,108 @@ func TestRemoveWorktreeForcesTheRemovalThenPrunes(t *testing.T) {
 	}
 
 	// Assert.
-	fake.assertSubject(0, "worktree", "remove", "--force", worktreeDir)
-	fake.assertSubject(1, "worktree", "prune")
+	fake.assertSubject(0, "worktree", "move", worktreeDir, asideDir(worktreeDir))
+	fake.assertSubject(1, "worktree", "remove", "--force", asideDir(worktreeDir))
+	fake.assertSubject(2, "worktree", "prune")
+}
+
+func TestRemoveWorktreeRemovesNothingAtThePathAnEditorStillWritesTo(t *testing.T) {
+	// Arrange: the editor's file sink re-creates `<worktree>/.claude/emacs`
+	// whenever it logs for the workspace (doom, 2026-11-11), so the removal
+	// must never delete under that path: it is empty when git is asked to
+	// remove anything.
+	git, _ := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	if err := os.MkdirAll(filepath.Join(worktreeDir, ".claude", "emacs"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	newFakeGit(t,
+		movedAside(worktreeDir),
+		gitFixture{Match: []string{"worktree", "remove"}, Absent: worktreeDir, RemovePath: asideDir(worktreeDir)},
+		ok("", "worktree", "prune"),
+	)
+
+	// Act.
+	err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RemoveWorktree = %v, want the tree removed with its own path already empty", err)
+	}
+}
+
+func TestRemoveWorktreeRefusedMoveLeavesTheTreeWholeAndRemovesNothing(t *testing.T) {
+	// Arrange: git will not move the tree aside, so nothing of it is removed.
+	git, surfaces := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	fake := newFakeGit(t, fails(128, "fatal: 'wt' is a main working tree\n", "worktree", "move"), ok("", "worktree", "prune"))
+
+	// Act.
+	err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir)
+
+	// Assert.
+	present, _ := pathPresent(worktreeDir)
+	var failure *Error
+	if !errors.As(err, &failure) || !present {
+		t.Fatalf("RemoveWorktree = %v, tree present = %v; want git's refusal and the tree whole at its path", err, present)
+	}
+	fake.assertNever("worktree", "remove")
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.remove_worktree"); !found {
+		t.Fatal("the refused move was not recorded at ERROR")
+	}
+}
+
+func TestRemoveWorktreeRemovesAStaleAsideCopyBeforeMovingTheTreeAside(t *testing.T) {
+	// Arrange: an earlier removal moved a tree aside and failed to remove it.
+	git, _ := newTestClient(t)
+	worktreeDir := existingDir(t, "wt")
+	aside := asideDir(worktreeDir)
+	if err := os.Mkdir(aside, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	fake := newFakeGit(t,
+		movedAside(worktreeDir),
+		gitFixture{Match: []string{"worktree", "remove"}, RemovePath: aside},
+		ok("", "worktree", "prune"),
+	)
+
+	// Act.
+	if err := git.RemoveWorktree(context.Background(), "/repo", worktreeDir); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "worktree", "remove", "--force", aside)
+	fake.assertSubject(2, "worktree", "move", worktreeDir, aside)
+}
+
+func TestRemoveWorktreeFinishesAnAsideCopyWhoseTreeIsAlreadyGone(t *testing.T) {
+	// Arrange: the tree left its path, and its aside copy is still there.
+	git, _ := newTestClient(t)
+	gone := filepath.Join(t.TempDir(), "wt")
+	aside := asideDir(gone)
+	if err := os.Mkdir(aside, 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	newFakeGit(t, gitFixture{Match: []string{"worktree", "remove"}, RemovePath: aside}, ok("", "worktree", "prune"))
+
+	// Act.
+	err := git.RemoveWorktree(context.Background(), "/repo", gone)
+
+	// Assert.
+	if present, _ := pathPresent(aside); err != nil || present {
+		t.Fatalf("RemoveWorktree = %v, aside present = %v; want the aside copy removed", err, present)
+	}
+}
+
+func TestAsideDirIsAHiddenSiblingOfTheTree(t *testing.T) {
+	// Arrange, Act.
+	got := asideDir("/w/trees/feature/")
+
+	// Assert.
+	if got != "/w/trees/.feature.removing" {
+		t.Fatalf("asideDir = %q, want the hidden sibling /w/trees/.feature.removing", got)
+	}
 }
 
 func TestRemoveWorktreeIsANoOpForADirectoryAlreadyGone(t *testing.T) {
@@ -905,7 +1005,7 @@ func TestRemoveWorktreeAcceptsARefusalWhoseTreeIsGoneAnyway(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	newFakeGit(t,
-		gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir, Stderr: "fatal: is not a working tree\n", Exit: 128},
+		movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir), Stderr: "fatal: is not a working tree\n", Exit: 128},
 		ok("", "worktree", "prune"),
 	)
 
@@ -924,6 +1024,7 @@ func TestRemoveWorktreeFailsWhenTheTreeSurvives(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	newFakeGit(t,
+		movedAside(worktreeDir),
 		fails(128, "fatal: contains modified or untracked files\n", "worktree", "remove"),
 		ok("", "worktree", "prune"),
 	)
@@ -944,7 +1045,7 @@ func TestRemoveWorktreePruneFailurePropagates(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	newFakeGit(t,
-		gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir},
+		movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir)},
 		fails(1, "fatal: could not prune\n", "worktree", "prune"),
 	)
 
@@ -964,7 +1065,7 @@ func TestNukeRemovesTheTreeBeforeDeletingTheBranch(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	fake := newFakeGit(t,
-		gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir},
+		movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir)},
 		ok("", "worktree", "prune"),
 		ok("", "show-ref"),
 		ok("", "branch", "-D"),
@@ -976,8 +1077,8 @@ func TestNukeRemovesTheTreeBeforeDeletingTheBranch(t *testing.T) {
 	}
 
 	// Assert.
-	fake.assertSubject(0, "worktree", "remove", "--force", worktreeDir)
-	fake.assertSubject(3, "branch", "-D", "feature/one")
+	fake.assertSubject(1, "worktree", "remove", "--force", asideDir(worktreeDir))
+	fake.assertSubject(4, "branch", "-D", "feature/one")
 }
 
 func TestNukeForcesTheBranchDelete(t *testing.T) {
@@ -986,7 +1087,7 @@ func TestNukeForcesTheBranchDelete(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	fake := newFakeGit(t,
-		gitFixture{Match: []string{"worktree", "remove"}, RemovePath: worktreeDir},
+		movedAside(worktreeDir), gitFixture{Match: []string{"worktree", "remove"}, RemovePath: asideDir(worktreeDir)},
 		ok("", "worktree", "prune"),
 		ok("", "show-ref"),
 		ok("", "branch"),
@@ -1033,6 +1134,7 @@ func TestNukeStopsWhenTheWorktreeRemovalFails(t *testing.T) {
 	git, _ := newTestClient(t)
 	worktreeDir := existingDir(t, "wt")
 	fake := newFakeGit(t,
+		movedAside(worktreeDir),
 		fails(128, "fatal: contains modified or untracked files\n", "worktree", "remove"),
 		ok("", "worktree", "prune"),
 	)

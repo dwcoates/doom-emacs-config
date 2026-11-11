@@ -419,6 +419,9 @@ export class SendLedger {
         if (absorbed.some((turn) => turn.kind === "send" && turn.send.uuid === uuid)) continue;
         absorbed.push({ kind: "send", send: consumed });
       }
+      if (next.kind === "send" && !next.retired && this.running.kind === "unstated") {
+        for (const skipped of this.skippedBy(next.send, stamps.all)) absorbed.push({ kind: "send", send: skipped });
+      }
       for (const turn of absorbed) {
         if (turn.kind !== "send") continue;
         this.open.delete(turn.send.uuid);
@@ -589,6 +592,40 @@ export class SendLedger {
     if (open !== undefined) return { kind: "send", send: open, retired: false };
     const retired = this.retired.get(chosen) as Send;
     return { kind: "send", send: retired, retired: true };
+  }
+
+  /**
+   * The open sends the vendor SKIPPED to answer `answered`: each pushed
+   * before it, never replied to, and not among the sends the answering turn
+   * names. The vendor runs its queued prompts in the order they were pushed,
+   * so a send older than the one a new turn answers either ran before it or
+   * was consumed by it; one that did neither was dropped, and no reply will
+   * ever end its turn. Each is recorded at ERROR and reported absorbed, so
+   * its turn ends here, and a join waiting on it runs as its own turn (doom,
+   * 2026-11-11: a re-delivered prompt the vendor dropped left the turn it
+   * stood for open under every prompt sent to join it). A peer send is never
+   * judged skipped: the vendor admits a peer message on its own schedule.
+   */
+  private skippedBy(answered: Send, named: readonly string[]): Send[] {
+    const skipped: Send[] = [];
+    for (const send of this.open.values()) {
+      if (send.uuid === answered.uuid) break;
+      if (send.peer === true || send.keepalive || named.includes(send.uuid)) continue;
+      if (!this.awaitingFirstReply.has(send.uuid)) continue;
+      skipped.push(send);
+    }
+    for (const send of skipped) {
+      LOGGER.error(
+        {
+          turn_id: send.turnId,
+          client_uuid: send.uuid,
+          answered_turn_id: answered.turnId,
+          invariant_violation: "the vendor answers its queued prompts in the order they were pushed",
+        },
+        "the vendor answered a later send while an earlier one never had a reply; the earlier send was dropped and its turn is concluded",
+      );
+    }
+    return skipped;
   }
 
   /** The first top-level reply to `send` arrived: it is timed, once. */

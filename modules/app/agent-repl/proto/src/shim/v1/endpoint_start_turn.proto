@@ -204,8 +204,21 @@ message StartTurnFailure {
     // waiting to join when an ask opens is taken back instead
     // (conversation.v1.SessionJoinWithdrawn).
     StartTurnAskOpen ask_open = 6;
+    // THE VENDOR ALREADY RECORDED THIS TURN'S PROMPT, so it is never pushed
+    // again. A prompt is sent under a vendor uuid derived from its turn id
+    // (convert/ids.ts promptVendorUuid), and the vendor silently drops a
+    // message whose uuid its transcript already holds: pushed, it would open
+    // a turn the vendor never runs and that no reply ever ends (doom,
+    // 2026-11-11: a held merge notice delivered at 13:51 stood again after
+    // the state database was put back to an earlier copy, was delivered
+    // again at 18:34, and its turn stayed in flight until a restart). The
+    // turn already ran when its prompt was first delivered, so the daemon
+    // retires the entry as delivered and starts nothing. Refused for an
+    // ordinary start and a `join_running_turn` start alike.
+    StartTurnPromptRecorded prompt_recorded = 7;
   }
 }
+message StartTurnPromptRecorded {}
 message StartTurnTurnAlreadyOpen {
   // Tag 1 and the name `keepalive` are RETIRED and must not be revived: the
   // keep-alive collision they marked no longer reaches the daemon (see the

@@ -848,3 +848,69 @@ func TestAWithdrawnPromptThatHadStoodAsItsOwnTurnIsDeliveredAgain(t *testing.T) 
 		}
 	}
 }
+
+// A prompt sent to join whose prompt the vendor already records joins nothing:
+// its hold retires as delivered and its turn row closes as withdrawn.
+func TestARecordedPromptSentToJoinJoinsNothingAndRetiresAsDelivered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.sender.recorded = map[ids.TurnID]bool{"t1": true}
+
+	// Act
+	sentToJoin(t, h)
+
+	// Assert
+	how, closed := h.db.closedTurn("t1")
+	retired := h.db.retired("t1")
+	_, joining := h.q.joining(theWorkspace)
+	if !closed || how != wsm.CloseWithdrawn || retired == nil || retired.Kind != tombstoneDelivered || joining {
+		t.Fatalf("t1 close = (%v, %v), tombstone = %+v, joining = %v; want withdrawn, retired as delivered, and nothing joining",
+			how, closed, retired, joining)
+	}
+}
+
+// joinEndsUnderItsTurn sends t1 to join the running turn, then ends t1 while
+// the turn it joined still stands in flight: the 2026-11-11 phantom.
+func joinEndsUnderItsTurn(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.q.OnTurnEnded(theWorkspace, "t1", wsm.CloseCompleted)
+	return h
+}
+
+func TestAJoinEndingUnderTheTurnItJoinedIsRecordedAtError(t *testing.T) {
+	// Arrange, Act
+	h := joinEndsUnderItsTurn(t)
+
+	// Assert
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opJoin})
+	if !ok || record.Context["joining_turn"] != "t1" || record.Context["joined_turn"] != "running-turn" {
+		t.Fatalf("records = %+v, want an ERROR naming t1 and the turn it joined", h.log.Records())
+	}
+}
+
+func TestAJoinEndingUnderTheTurnItJoinedNoLongerStandsJoining(t *testing.T) {
+	// Arrange, Act
+	h := joinEndsUnderItsTurn(t)
+
+	// Assert
+	if joined, joining := h.q.joining(theWorkspace); joining {
+		t.Fatalf("joining = %+v, want the ended join cleared so no later prompt waits behind it", joined)
+	}
+}
+
+func TestAJoinStandingInItsTurnsPlaceIsNotRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sentToJoin(t, h)
+	h.watcher.running("t1")
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opJoin}); ok {
+		t.Fatalf("record = %+v, want no ERROR for the healthy join", record)
+	}
+}

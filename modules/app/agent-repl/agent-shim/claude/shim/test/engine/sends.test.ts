@@ -798,3 +798,93 @@ describe("the send ledger's remote prompts", () => {
     expect(ledger.current().kind).toBe("unstated");
   });
 });
+
+describe("the send ledger's skipped sends", () => {
+  it("absorbs an earlier send with no reply when the vendor answers a later one", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect({ turn: turnOf(verdict), absorbed: verdict.absorbed }).toEqual({
+      turn: "send:turn-2",
+      absorbed: [{ kind: "send", send: FIRST }],
+    });
+  });
+
+  it("retires the skipped send, so it no longer stands open", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+
+    // Act
+    ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(ledger.openSendOf(FIRST.turnId)).toBeUndefined();
+  });
+
+  it("records the skipped send at ERROR naming both turns", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    const mark = logSinkMark();
+
+    // Act
+    ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(logRecordsSince(mark).find((record) => record.message.startsWith("the vendor answered a later send"))).toMatchObject({
+      level: "error",
+      context: { turn_id: FIRST.turnId, answered_turn_id: SECOND.turnId },
+    });
+  });
+
+  it("skips nothing when the earlier send already had its reply", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+    ledger.attribute(result(stamp(FIRST.uuid)));
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(verdict.absorbed).toEqual([]);
+  });
+
+  it("skips nothing that is answered later than the send a turn answers", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(FIRST.uuid)));
+
+    // Assert
+    expect({ absorbed: verdict.absorbed, second: ledger.openSendOf(SECOND.turnId) }).toEqual({ absorbed: [], second: SECOND });
+  });
+
+  it("never judges a peer send skipped", () => {
+    // Arrange
+    const peer: Send = { ...FIRST, peer: true };
+    const ledger = ledgerWith(peer, SECOND);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(verdict.absorbed).toEqual([]);
+  });
+
+  it("judges nothing skipped while a turn of the vendor's own runs", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST, SECOND);
+    ledger.attribute(reply());
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(SECOND.uuid)));
+
+    // Assert
+    expect(verdict.absorbed).toEqual([{ kind: "vendor" }]);
+  });
+});

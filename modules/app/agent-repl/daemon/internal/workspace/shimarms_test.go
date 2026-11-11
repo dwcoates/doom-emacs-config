@@ -367,6 +367,29 @@ func TestAStartTurnAskOpenRefusalMatchesTheQueuesAskSentinel(t *testing.T) {
 	}
 }
 
+func TestAStartTurnPromptRecordedRefusalMatchesTheQueuesRecordedSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *ShimRefusal
+		want    bool
+	}{
+		{"StartTurn prompt_recorded", &ShimRefusal{Verb: "StartTurn", Arm: ArmShimPromptRecorded}, true},
+		{"StartTurn ask_open", &ShimRefusal{Verb: "StartTurn", Arm: ArmShimAskOpen}, false},
+		{"UpdateAgent prompt_recorded", &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimPromptRecorded}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := errors.Is(fmt.Errorf("start: %w", tt.refusal), promptqueue.ErrPromptRecorded)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("errors.Is(..., ErrPromptRecorded) = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAStartTurnAskOpenRefusalIsNotTheReconnectSentinel(t *testing.T) {
 	// Arrange
 	refusal := &ShimRefusal{Verb: "StartTurn", Arm: ArmShimAskOpen}

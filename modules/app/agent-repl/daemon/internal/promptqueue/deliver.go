@@ -105,12 +105,50 @@ func (q *queue) deliver(ctx context.Context, d *delivery, sub Submission, sender
 		if errors.Is(err, ErrShimHasNoSession) || errors.Is(err, ErrShimDied) || errors.Is(err, ErrSessionNotWatched) {
 			return q.holdForReconnect(ctx, sub, err, log)
 		}
+		if errors.Is(err, ErrPromptRecorded) {
+			return q.alreadyRecorded(ctx, d, sub.WS, sub.Turn, err, log), nil
+		}
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 
 	q.acceptOpenedTurn(ctx, sub, success, watcher, log)
 	return Disposition{Delivered: true}, nil
+}
+
+// alreadyRecorded answers a delivery the shim refused because the vendor's
+// transcript already records its prompt (ErrPromptRecorded): the prompt was
+// delivered, and answered, when it was first sent, and this delivery is a
+// second one only because the record of the first was lost (doom, 2026-11-11:
+// the state database put back to an earlier copy restored two delivered
+// merge notices as standing holds). Nothing runs for it, so the turn row
+// recorded for this delivery closes as withdrawn, the entry is answered
+// delivered (its hold retires as delivered), and once the delivery lock is
+// released the next held entry is popped, since no turn's end will pop it.
+// Recorded at ERROR: a delivery repeated is a lost record, never a race. The
+// caller holds the delivery lock (d) and has already retired the opening.
+func (q *queue) alreadyRecorded(ctx context.Context, d *delivery, ws ids.WorkspaceID, turn ids.TurnID, cause error, log dlog.Logger) Disposition {
+	q.closeRecorded(ctx, ws, turn, cause, opDeliver,
+		"the vendor already recorded the prompt, so its delivery was lost from the daemon's records; the entry is retired as delivered and nothing is started", log)
+	d.afterUnlock(func() {
+		next := q.lockDelivery(ws)
+		defer next.unlock()
+		q.popIfIdle(ctx, next, log)
+	})
+	return Disposition{Delivered: true}
+}
+
+// closeRecorded is what every refusal of a prompt the vendor already
+// recorded (ErrPromptRecorded) owes, whichever path delivered it: the lost
+// delivery recorded at ERROR under OP with MESSAGE, and the turn row recorded
+// for this delivery closed as withdrawn, since nothing runs for it.
+func (q *queue) closeRecorded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, cause error, op, message string, log dlog.Logger) {
+	log.Error(op, message, dlog.Context{
+		"turn":                string(turn),
+		"cause":               cause.Error(),
+		"invariant_violation": "a delivered prompt's hold is retired with its delivery",
+	})
+	_ = q.closeTurn(ctx, ws, turn, wsm.CloseWithdrawn, log)
 }
 
 // acceptOpenedTurn is the handover a successful StartTurn owes: the

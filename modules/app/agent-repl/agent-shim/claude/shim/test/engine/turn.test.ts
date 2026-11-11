@@ -36,6 +36,7 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
+import type { TranscriptHolds } from "../../src/engine/rollback.js";
 
 const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
 /** A turn other than {@link TURN}: a second start that is NOT a repeat. */
@@ -62,6 +63,8 @@ interface Harness {
   joinAdmissionRejects: Error | undefined;
   /** What the session answers for askOpen(): whether an ask blocks the vendor. */
   askOpen: boolean;
+  /** What the vendor transcript holds of each turn's prompt; absent unless set. */
+  readonly recorded: Map<string, TranscriptHolds>;
   /** The sender every join was pushed with, in order. */
   readonly joinSentBys: (shimv1.StartTurnSentBy | undefined)[];
   /** What this session's `knowsAgent` answers. */
@@ -135,6 +138,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     joinAdmissionRejects: undefined,
     joinSentBys: [],
     askOpen: false,
+    recorded: new Map<string, TranscriptHolds>(),
     knows: true,
     queryDead: false,
     keepaliveEnd: undefined,
@@ -188,6 +192,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
       return state.joinAdmissionRejects === undefined ? Promise.resolve() : Promise.reject(state.joinAdmissionRejects);
     },
     askOpen: () => state.askOpen,
+    promptRecorded: (turnId) => state.recorded.get(turnId) ?? { kind: "absent" },
     releaseTurn: (turn) => {
       if (state.open === turn) state.open = undefined;
       if (state.adopted === turn) state.adopted = undefined;
@@ -1064,6 +1069,93 @@ describe("a reply's quote", () => {
 
     // Assert
     expect(saidContent(h.submitted[0]?.said ?? textSaid(""))).toBe("the quote\nmy words");
+  });
+});
+
+describe("StartTurn for a prompt the vendor already recorded", () => {
+  it("refuses the start as prompt_recorded", async () => {
+    // Arrange
+    const h = await harness();
+    h.recorded.set(TURN.value, { kind: "recorded" });
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.kind.case : "accepted").toBe("promptRecorded");
+  });
+
+  it("pushes nothing and opens no turn for a start refused as prompt_recorded", async () => {
+    // Arrange
+    const h = await harness();
+    h.recorded.set(TURN.value, { kind: "recorded" });
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect({ submitted: h.submitted.length, open: h.open, rows: h.persistence.durable.length + h.persistence.buffered.length }).toEqual({
+      submitted: 0,
+      open: undefined,
+      rows: 0,
+    });
+  });
+
+  it("logs the refused start at ERROR naming the turn", async () => {
+    // Arrange
+    const h = await harness();
+    h.recorded.set(TURN.value, { kind: "recorded" });
+    const mark = logSinkMark();
+
+    // Act
+    await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect(
+      logRecordsSince(mark).find((entry) => entry.message.startsWith("refused a StartTurn whose prompt the vendor already recorded")),
+    ).toMatchObject({ level: "error", context: { turn_id: TURN.value, join_running_turn: false } });
+  });
+
+  it("refuses a join as prompt_recorded and pushes nothing", async () => {
+    // Arrange
+    const h = await harness();
+    openDaemonTurn(h);
+    h.recorded.set(OTHER_TURN.value, { kind: "recorded" });
+
+    // Act
+    const response = await h.turns.startTurn(joinTurn());
+
+    // Assert
+    expect({
+      kind: response.result.case === "failure" ? response.result.value.kind.case : "accepted",
+      joins: h.joins.length,
+    }).toEqual({ kind: "promptRecorded", joins: 0 });
+  });
+
+  it("refuses the start as vendor_refused when the transcript cannot be read", async () => {
+    // Arrange
+    const h = await harness();
+    h.recorded.set(TURN.value, { kind: "unreadable", detail: "EACCES" });
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect({
+      kind: response.result.case === "failure" ? response.result.value.kind.case : "accepted",
+      submitted: h.submitted.length,
+    }).toEqual({ kind: "vendorRefused", submitted: 0 });
+  });
+
+  it("delivers a start whose prompt the transcript does not hold", async () => {
+    // Arrange
+    const h = await harness();
+
+    // Act
+    const response = await h.turns.startTurn(startTurn());
+
+    // Assert
+    expect({ result: response.result.case, submitted: h.submitted.length }).toEqual({ result: "success", submitted: 1 });
   });
 });
 

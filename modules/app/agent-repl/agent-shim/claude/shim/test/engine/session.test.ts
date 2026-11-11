@@ -2664,6 +2664,40 @@ describe("a prompt joining the running turn", () => {
     ]);
   });
 
+  it("ends the turn the vendor dropped when its join's turn answers, and runs the join as its own turn", async () => {
+    // Arrange: the vendor drops turn-1's prompt (doom, 2026-11-11), so the first
+    // reply it sends answers the prompt sent to join turn-1.
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const second = await join(h, "turn-2");
+
+    // Act
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-2-reply"), second, [second]));
+
+    // Assert
+    expect({
+      concluded: h.fold.absorbed.map((entry) => entry.turn),
+      rows: rowsAfterStart(h).slice(-1),
+      charged: h.fold.contexts.at(-1)?.turnId?.value,
+    }).toEqual({ concluded: ["turn-1"], rows: ["prompt:turn-2"], charged: "turn-2" });
+  });
+
+  it("frees the slot when the join's turn ends after the vendor dropped the turn it joined", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const second = await join(h, "turn-2");
+    await h.engine.onSdkMessage(consumed(assistantMessage("turn-2-reply"), second, [second]));
+
+    // Act
+    await h.engine.onSdkMessage(consumed(resultMessage("turn-2-result"), second, [second]));
+
+    // Assert
+    expect((await startDuring(h, "turn-3")).result.case).toBe("success");
+  });
+
   it("ends every waiting prompt's turn when the query dies, in the order they were sent", async () => {
     // Arrange
     const h = harness();
