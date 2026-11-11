@@ -28,6 +28,13 @@ const (
 	// ArmSwitchFailed is a switch between the workspace's two conversations
 	// that did not complete. It carries the failing step as `detail`.
 	ArmSwitchFailed = "switch_failed"
+	// ArmNoBypassConversation refuses an existing-context option while no
+	// bypass conversation is parked. Nothing was changed.
+	ArmNoBypassConversation = "no_bypass_conversation"
+	// ArmCompactionFailed is a switch whose start failed on the compaction or
+	// summary it owed. The swap stands and the next start asks again. It
+	// carries the shim's account as `detail`.
+	ArmCompactionFailed = "compaction_failed"
 )
 
 // QueueBypassChange is what UpdateQueueBypassMode asks of the mode.
@@ -43,8 +50,58 @@ const (
 	QueueBypassToggle
 )
 
+// QueueBypassContext is how the bypass session gets its context when the
+// mode is taken (frontend.v1.TopbarQueueBypassContext).
+type QueueBypassContext int
+
+const (
+	// QueueBypassContextDefault names none: the behavior from before the
+	// menu, which resumes the parked bypass conversation when one is parked
+	// and forks the queue conversation otherwise.
+	QueueBypassContextDefault QueueBypassContext = iota
+	// QueueBypassContextFullMain forks the queue conversation as it stands,
+	// replacing any parked bypass conversation.
+	QueueBypassContextFullMain
+	// QueueBypassContextCompactedMain forks the queue conversation and
+	// compacts the fork at its first start, replacing any parked bypass
+	// conversation.
+	QueueBypassContextCompactedMain
+	// QueueBypassContextExisting resumes the parked bypass conversation as
+	// it was left.
+	QueueBypassContextExisting
+	// QueueBypassContextExistingPlusCompactedMain resumes the parked bypass
+	// conversation carrying a summary of the queue conversation, which opens
+	// the workspace's next prompt.
+	QueueBypassContextExistingPlusCompactedMain
+)
+
+// String names the context in records.
+func (c QueueBypassContext) String() string {
+	switch c {
+	case QueueBypassContextDefault:
+		return "default"
+	case QueueBypassContextFullMain:
+		return "full_main"
+	case QueueBypassContextCompactedMain:
+		return "compacted_main"
+	case QueueBypassContextExisting:
+		return "existing"
+	case QueueBypassContextExistingPlusCompactedMain:
+		return "existing_plus_compacted_main"
+	}
+	return fmt.Sprintf("QueueBypassContext(%d)", int(c))
+}
+
+// resumesExisting reports whether the context resumes the parked bypass
+// conversation, and so needs one parked.
+func (c QueueBypassContext) resumesExisting() bool {
+	return c == QueueBypassContextExisting || c == QueueBypassContextExistingPlusCompactedMain
+}
+
 // UpdateQueueBypassMode takes or releases workspace WS's queue bypass mode and
-// answers whether the workspace holds it afterwards.
+// answers whether the workspace holds it afterwards. BYPASSCONTEXT is how the
+// bypass session gets its context, named only with QueueBypassOn; any other
+// change names QueueBypassContextDefault.
 //
 // TAKING IT, IN ORDER: the hold is recorded (the store's key refuses a second
 // holder of the repository, whatever two callers race), the repository's
@@ -65,10 +122,18 @@ const (
 // (owner request, 2026-11-10), so the bypass session continues the
 // conversation under its own system prompt. Later switches resume the two
 // parked conversations as they stand, so neither picks up the other's turns.
-func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange) (bool, error) {
+// A named context overrides that choice (switchConversation); an existing
+// option with nothing parked is refused before anything changes.
+func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange, bypassContext QueueBypassContext) (bool, error) {
 	const rpc = "UpdateQueueBypassMode"
 	record, log, err := v.owned(ctx, rpc, ws)
 	if err != nil {
+		return false, err
+	}
+	if change != QueueBypassOn && bypassContext != QueueBypassContextDefault {
+		err := fmt.Errorf("queue bypass for %q: a context (%s) is named only when the mode is taken (change %d)", ws, bypassContext, int(change))
+		log.Error(opQueueBypass, "a context was named with a change that does not take the mode", dlog.Context{
+			"invariant_violation": "the server names a context only with UpdateQueueBypassModeOn", "context": bypassContext.String(), "change": int(change)})
 		return false, err
 	}
 	standing, err := v.deps.DB.QueueBypass(ctx, ws)
@@ -77,7 +142,7 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 		return false, fmt.Errorf("queue bypass for %q: read the standing: %w", ws, err)
 	}
 	want := change == QueueBypassOn || (change == QueueBypassToggle && !standing.Holds)
-	log = log.With(dlog.Context{"change": int(change), "holds": standing.Holds, "want": want})
+	log = log.With(dlog.Context{"change": int(change), "context": bypassContext.String(), "holds": standing.Holds, "want": want})
 	if want == standing.Holds {
 		log.Info(opQueueBypass, "the workspace already stands where the change asks; nothing was changed", nil)
 		return want, nil
@@ -94,6 +159,10 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 			return false, refuseWith(log, rpc, ArmWorkAccount,
 				"a work account's workspace never bypasses its repository's merge queue", false,
 				map[string]any{"config_dir": configDir})
+		}
+		if bypassContext.resumesExisting() && standing.ParkedVendorSessionID == "" {
+			return false, refuse(log, rpc, ArmNoBypassConversation,
+				"the workspace has no bypass conversation to resume; nothing was changed", false)
 		}
 	}
 	if running, live := v.deps.Freeness(ws); live && running.Turn != nil {
@@ -127,7 +196,7 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 			return true, fmt.Errorf("queue bypass for %q: release the hold: %w", ws, err)
 		}
 	}
-	if err := v.switchConversation(swap, log, rpc, ws, standing.ParkedVendorSessionID, want); err != nil {
+	if err := v.switchConversation(swap, log, rpc, ws, standing.ParkedVendorSessionID, want, bypassContext); err != nil {
 		v.restateQueueBypass(swap, log, standing.RepoID)
 		return want, err
 	}
@@ -146,32 +215,54 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 }
 
 // switchConversation parks the conversation workspace WS runs and binds
-// PARKED in its place. With PARKED empty, a switch INTO the mode (TAKING)
-// binds a fork of the conversation parked, and any other switch, or one from a
-// workspace that ran no conversation, starts fresh.
-func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc string, ws ids.WorkspaceID, parked string, taking bool) error {
+// another in its place. A release (TAKING false) resumes PARKED, or starts
+// fresh with nothing parked. A switch INTO the mode binds what BYPASSCONTEXT
+// asks (bypassBinding): a fork of the conversation stepped out of, compacted
+// or not, which REPLACES any parked bypass conversation, or PARKED resumed,
+// with or without a summary of the conversation stepped out of.
+func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc string, ws ids.WorkspaceID, parked string, taking bool, bypassContext QueueBypassContext) error {
 	current, err := v.boundConversation(ctx, ws)
 	if err != nil {
 		log.Error(opQueueBypass, "could not read the conversation the workspace runs", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("queue bypass for %q: %w", ws, err)
 	}
+	to := conversationBinding{vendorSessionID: parked}
+	if taking {
+		if to, err = bypassBinding(current, parked, bypassContext); err != nil {
+			log.Error(opQueueBypass, "the switch's context cannot be carried out", dlog.Context{
+				"invariant_violation": "an existing-context option is refused before the switch while nothing is parked",
+				"context":             bypassContext.String(), "cause": err.Error()})
+			return fmt.Errorf("queue bypass for %q: %w", ws, err)
+		}
+	}
+	// A FORK REPLACES THE PARKED BYPASS CONVERSATION: its binding is dropped,
+	// and its transcript stays on disk, listed among the workspace's
+	// conversations like any other.
+	replaces := parked != "" && to.vendorSessionID != parked
+	if replaces {
+		log.Info(opQueueBypass, "the switch drops the parked bypass conversation's binding; its transcript stays on disk", dlog.Context{
+			"dropped": parked, "context": bypassContext.String()})
+	}
 	// THE CONVERSATION STEPPED OUT OF IS PARKED BEFORE THE SWAP STOPS IT: the
 	// record names it until the swap rewrites the binding.
 	if current != "" {
-		if err := v.deps.DB.SwapParkedConversation(ctx, ws, current, v.now(), true); err != nil {
+		if err := v.deps.DB.SwapParkedConversation(ctx, ws, current, v.now(), !replaces); err != nil {
 			return refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the conversation stepped out of could not be kept: %s", err.Error()), false,
 				map[string]any{"detail": "the conversation stepped out of could not be kept: " + err.Error()})
 		}
-	}
-	to := conversationBinding{vendorSessionID: parked}
-	if parked == "" && taking {
-		to.ownForkOf = current
 	}
 	// AN OWN FORK STARTS AS A REBIND, so the shim adopts the fork's own id as
 	// the workspace's book rather than keeping the parked conversation's.
 	if err := v.swapConversation(ctx, log, ws, to, to.vendorSessionID != "" || to.ownForkOf != "", nil,
 		"the workspace switched between its queue and bypass conversations",
 		func(step swapStep, err error) error {
+			// A START THAT FAILED ON THE COMPACTION OR SUMMARY IT OWED leaves
+			// the swap standing: the binding still owes the work, and the next
+			// start asks for it again.
+			if detail, ok := compactionFailure(err); step == swapStarting && ok {
+				return refuseWith(log, rpc, ArmCompactionFailed, fmt.Sprintf("the bypass conversation's compaction or summary did not complete: %s", detail), false,
+					map[string]any{"detail": detail})
+			}
 			what := "the other conversation's session would not come up"
 			if step == swapStopping {
 				what = "the current session would not end"
@@ -184,8 +275,43 @@ func (v *verbs) switchConversation(ctx context.Context, log dlog.Logger, rpc str
 	// BOTH CONVERSATIONS ARE KEPT WARM IN TANDEM (owner request, 2026-11-10):
 	// the keeper times each one's beat from its own clock, swapped above.
 	v.deps.CacheLapses.ConversationSwitched(ws)
-	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{"parked": current, "bound": parked, "own_fork_of": to.ownForkOf})
+	log.Info(opQueueBypass, "switched the workspace's conversation", dlog.Context{
+		"parked": current, "bound": to.vendorSessionID, "own_fork_of": to.ownForkOf, "owed": wsm.OwedField(to.owed)})
 	return nil
+}
+
+// bypassBinding is the binding a switch INTO the mode makes from CURRENT, the
+// conversation stepped out of, and PARKED, the parked bypass conversation
+// (empty: none), for BYPASSCONTEXT. A fork of a workspace that ran no
+// conversation starts fresh, and so owes no compaction; nor does a resume
+// owe a summary of no conversation. An existing option with nothing parked
+// is refused: UpdateQueueBypassMode refuses it before anything changes.
+func bypassBinding(current, parked string, bypassContext QueueBypassContext) (conversationBinding, error) {
+	if bypassContext == QueueBypassContextDefault {
+		bypassContext = QueueBypassContextFullMain
+		if parked != "" {
+			bypassContext = QueueBypassContextExisting
+		}
+	}
+	switch bypassContext {
+	case QueueBypassContextFullMain:
+		return conversationBinding{ownForkOf: current}, nil
+	case QueueBypassContextCompactedMain:
+		if current == "" {
+			return conversationBinding{}, nil
+		}
+		return conversationBinding{ownForkOf: current, owed: &wsm.OwedStartWork{Compact: true}}, nil
+	case QueueBypassContextExisting, QueueBypassContextExistingPlusCompactedMain:
+		if parked == "" {
+			return conversationBinding{}, fmt.Errorf("the %s context names the parked bypass conversation, and none is parked", bypassContext)
+		}
+		to := conversationBinding{vendorSessionID: parked}
+		if bypassContext == QueueBypassContextExistingPlusCompactedMain && current != "" {
+			to.owed = &wsm.OwedStartWork{SummaryOf: current}
+		}
+		return to, nil
+	}
+	return conversationBinding{}, fmt.Errorf("the queue-bypass context %s is not one this build defines", bypassContext)
 }
 
 // refuseHeldElsewhere refuses the mode while HOLDER holds it.

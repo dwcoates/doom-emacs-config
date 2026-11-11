@@ -631,7 +631,7 @@ type Verbs interface {
 	// mode and answers whether it holds the mode afterwards: the repository's
 	// merge queue hard-stopped while it does, and the workspace switched to
 	// the conversation that lands the way the mode says (queuebypass.go).
-	UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange) (bool, error)
+	UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange, bypassContext QueueBypassContext) (bool, error)
 	// SetDefaultModel makes a model the topbar's selector served the default
 	// of the LOGIN the workspace's session spends as: every new session on
 	// that account root starts under it. No running session changes.

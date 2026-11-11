@@ -28,7 +28,7 @@ func (s *server) UpdateQueueBypassMode(
 	if done {
 		return answer(resp, cerr)
 	}
-	on, err := s.deps.Verbs.UpdateQueueBypassMode(ctx, subject.Record.ID, queueBypassChange(req.Msg))
+	on, err := s.deps.Verbs.UpdateQueueBypassMode(ctx, subject.Record.ID, queueBypassChange(req.Msg), workspace.QueueBypassContextDefault)
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
