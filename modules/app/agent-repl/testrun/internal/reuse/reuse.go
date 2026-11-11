@@ -3,6 +3,7 @@ package reuse
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -305,6 +306,11 @@ func placeRosterPath(d Deps, set *InputSet, p string, listDir bool) error {
 	}
 	if tree {
 		return set.AddTree(rel)
+	}
+	// A directory named without the "/" of a subtree is its listing alone:
+	// a scan that lists it, or looks up what is in it, reads nothing more.
+	if info, err := os.Stat(filepath.Join(d.Repo, filepath.FromSlash(rel))); err == nil && info.IsDir() {
+		return set.AddDir(rel)
 	}
 	if listDir {
 		return errors.Join(set.AddFile(rel), set.AddDir(path.Dir(rel)))

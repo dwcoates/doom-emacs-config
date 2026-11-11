@@ -108,10 +108,13 @@ func TestAddPatternWalkPlacesWhatDotDotDotWalks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The nested module's own directory is listed (the go command looks in
-	// it for its go.mod) and nothing beneath it.
-	if got, want := set.Dirs(), []string{"mod", "mod/internal", "mod/internal/a", "mod/nested"}; !slices.Equal(got, want) {
+	if got, want := set.Dirs(), []string{"mod", "mod/internal", "mod/internal/a"}; !slices.Equal(got, want) {
 		t.Fatalf("Dirs = %v, want %v", got, want)
+	}
+	// The nested module's own directory is placed flat (the go command reads
+	// its go.mod and its files' build constraints) and nothing beneath it.
+	if got, want := set.FlatDirs(), []string{"mod/nested"}; !slices.Equal(got, want) {
+		t.Fatalf("FlatDirs = %v, want %v", got, want)
 	}
 }
 

@@ -542,6 +542,11 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 		if err := set.AddFlatDir(driver); err != nil {
 			return nil, nil, err
 		}
+		// Emacs starts in the suite's directory and reads it as its
+		// default directory.
+		if err := set.AddDir(lispRel); err != nil {
+			return nil, nil, err
+		}
 		if err := AddGoPackages(set, d.Repo, fake); err != nil {
 			return nil, nil, err
 		}

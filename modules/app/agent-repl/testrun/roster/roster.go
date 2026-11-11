@@ -259,19 +259,19 @@ func LookupProgram(name string) (Program, bool) {
 // Suites is the roster. Order is report order only; the scheduler decides run
 // order.
 var Suites = []Suite{
-	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true, Reuse: harness("bin/", "lisp/test-agent-repl.el", "test_time.csv", "testrun/", "/.claude/safe-test-run.sh")},
-	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true, Reuse: harness(append(fakeGitFixture, "lisp/test-agent-repl.el", "test_time.csv", "testrun/")...)},
+	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true, Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true,
 		Reuse: harness("bin/", "daemon/internal/checkout/checkout.go")},
-	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true, Reuse: harness("bin/", "lisp/test-helpers.el", "e2e/sandbox/bin/entrypoint.sh", "/.githooks/pre-commit")},
+	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true, Reuse: harness("bin/", ".", "lisp/", "e2e/sandbox/bin/entrypoint.sh", "/.githooks/pre-commit")},
 	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true, NeverReused: "it walks the whole module for every requirements.json, so no input set short of the checkout covers it"},
-	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
 	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: harness("bin/", "scripts/")},
-	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: harness("bin/", "scripts/", "/.githooks/")},
+	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
+	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
 	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true, Reuse: harness("bin/")},
 	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true, Reuse: harness("bin/", "lisp/elisp-build.el")},
 	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true, Reuse: harness("bin/")},
@@ -282,19 +282,19 @@ var Suites = []Suite{
 	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: harness("bin/", "proto/vocab/latencies.json")},
 	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: harness("skills/agent-repl-metrics/", "bin/")},
 	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: harness("skills/gns-auth-renew/", "bin/")},
-	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
+	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, Reuse: harness("bin/", "agent-shim/claude/shim/scripts/capture/")},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: harness("bin/", "e2e/realtest/")},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: harness("scripts/", "bin/")},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: harness("scripts/", "bin/")},
 	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: harness("scripts/", "bin/")},
-	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh", Reuse: harness("/.githooks/", "/.claude/", "bin/")},
-	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh", Reuse: harness("/.claude/", "bin/", "lisp/test-agent-repl.el")},
-	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh", Reuse: harness("/.githooks/", "bin/")},
-	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh", Reuse: harness("/.githooks/", "bin/")},
-	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: harness("/.claude/", "/.githooks/", "bin/")},
-	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: harness("/bin/", "bin/")},
-	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: harness("/bin/", "bin/")},
+	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh", Reuse: harness(append(fakeGitFixture, "lisp/test-agent-repl.el")...)},
+	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: harness(fakeGitFixture...)},
 	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Inputs: []string{
 		// The Doom module files and the data the Emacs layer reads.
 		"config.el", "doctor.el", "packages.el", "proto/vocab/", "images/", "skills/", "hooks/",
@@ -302,7 +302,18 @@ var Suites = []Suite{
 	}}},
 	{Name: "testrun", Kind: GoModule, Path: "testrun", Reuse: &Reuse{
 		// The canonical timing history, which the runner's own test parses.
-		Units: map[string][]string{"internal/cli": {"test_time.csv"}},
+		Units: map[string][]string{
+			"internal/cli": {"test_time.csv"},
+			// Their tests list the runner's ERT driver directory, the
+			// daemon's and the webapp's trees, and the module's root.
+			"gofunc":                            {"testrun/ert"},
+			"internal/goprofile":                {"testrun/ert"},
+			"internal/gotest":                   {"testrun/ert"},
+			"internal/redundancy/gomeasure":     {"daemon"},
+			"internal/redundancy/vitestmeasure": {"webapp"},
+			"internal/run":                      {"."},
+			"internal/testdir":                  {"."},
+		},
 		Never: map[string]string{
 			"internal/reuse":  "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
 			"roster":          "its scans walk the whole repository for test scripts and every path the roster names",
@@ -325,7 +336,10 @@ var Suites = []Suite{
 		Reuse: &Reuse{Units: daemonUnitInputs}},
 	{Name: "sidecar", Kind: GoModule, Path: "agent-shim/claude/shim-sidecar", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
 		Programs: map[string][]string{"integration": {"shim-claude-sidecar"}},
-		Reuse: &Reuse{Inputs: []string{
+		Reuse: &Reuse{Units: map[string][]string{
+			// The root package's scan lists the integration package's files.
+			".": {"agent-shim/claude/shim-sidecar/integration"},
+		}, Inputs: []string{
 			"proto/vocab/agent-repl-tools.json", "testdata/corpus/", "testdata/projects/", "logging-contract.md",
 			// The mocked vendor's scenarios, as the shim's suite generates and
 			// keeps them fresh: this suite reads their files and never boots
@@ -384,7 +398,7 @@ var Suites = []Suite{
 			"bin/fake-git.sh", "bin/fake-git.go",
 		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
 			Units: shimUnitInputs}},
-	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/")},
+	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh", Reuse: harness("proto/", "bin/", "daemon/", "webapp/src/", "webapp/test/")},
 	// The istanbul honesty probes (bin/coverage-honesty.mjs): whether each
 	// package's per-file coverage numbers are still a measurement. They run
 	// only in a coverage run, the one place those numbers are produced.
@@ -400,9 +414,7 @@ var Suites = []Suite{
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh",
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
 	// The density report scans every system's logging calls.
-	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness("bin/", "daemon/",
-		"agent-shim/claude/shim-sidecar/", "agent-shim/shim-store/", "agent-shim/logging/go/", "agent-shim/claude/shim/src/",
-		"webapp/src/", "lisp/")},
+	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		NeverReused: "its sandbox staging walks the whole module, every untracked build output in it included, so no input set short of the checkout covers it"},
@@ -425,6 +437,17 @@ var Suites = []Suite{
 // harness is a script suite's declaration: its one unit, the whole suite,
 // reads its script and paths.
 func harness(paths ...string) *Reuse { return &Reuse{Inputs: paths} }
+
+// fakeGitFixture is what a harness built on bin/lib-fake-git-fixture.sh or
+// bin/lib-worktrees.sh reads: the module's scripts, the repository's own
+// checked-in hooks it installs into each fixture, and its .claude and bin
+// scripts it runs there.
+var fakeGitFixture = []string{"bin/", "scripts/", "/.githooks/", "/.claude/", "/bin/"}
+
+// loggingDensityInputs are the trees the logging-density report scans: every
+// system's logging calls.
+var loggingDensityInputs = []string{"daemon/", "agent-shim/claude/shim-sidecar/", "agent-shim/shim-store/", "agent-shim/logging/go/",
+	"agent-shim/claude/shim/src/", "webapp/src/", "lisp/"}
 
 // The reasons shared by several suites that are never reused.
 const (
@@ -493,6 +516,8 @@ var webappUnitInputs = func() map[string][]string {
 	} {
 		out[f] = []string{"webapp/index.html"}
 	}
+	// The vite config's own check builds from the page.
+	out["test/vite-config.test.ts"] = []string{"webapp/index.html"}
 	return out
 }()
 

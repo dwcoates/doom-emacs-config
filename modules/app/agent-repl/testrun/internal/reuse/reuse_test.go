@@ -933,3 +933,24 @@ func TestTheEnvelopesProfileIsNotAWholeSuiteUnitsProfile(t *testing.T) {
 		t.Fatalf("envelope %s, unit %s, want two files", v.EnvelopeProfile, v.Units[0].Profile)
 	}
 }
+
+func TestADeclaredDirectoryWithoutItsSlashIsItsListingAlone(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := harnessSuite
+	s.Reuse = &roster.Reuse{Inputs: []string{"prompts", "vocab/"}}
+
+	// Act
+	set, err := SuiteInputs(f.d, s)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(set.Dirs(), fixtureModule+"/prompts") || set.Contains(fixtureModule+"/prompts/p.md") {
+		t.Fatalf("Dirs %v, want prompts listed and none of its files readable", set.Dirs())
+	}
+	if !set.Contains(fixtureModule + "/vocab/words.json") {
+		t.Fatal("a declared subtree is not placed whole")
+	}
+}

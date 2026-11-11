@@ -403,6 +403,9 @@ func TestDeriveERTKeysEachFileOnWhatItLoads(t *testing.T) {
 			t.Errorf("test-a.el's set does not place %s", p)
 		}
 	}
+	if !slices.Contains(a.Dirs(), fixtureModule+"/lisp") {
+		t.Error("test-a.el's set does not list the suite's directory, Emacs's default directory")
+	}
 	if b.Contains(fixtureModule+"/lisp/test-a.el") || b.Contains(fixtureModule+"/lisp/a-fixtures.el") {
 		t.Error("test-b.el's set places what only test-a.el loads")
 	}
