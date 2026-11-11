@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/gnsauth"
+	"agent-repld/internal/gnsclient"
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/handover"
 	"agent-repld/internal/headless"
@@ -94,6 +95,7 @@ import (
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/signin"
 	"agent-repld/internal/slackchannels"
+	"agent-repld/internal/slackwatch"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
@@ -1729,6 +1731,30 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the pull-request watcher: %w", err)
 	}
 
+	// THE SLACK WATCHER follows every subscribed Slack thread and tells each
+	// subscriber one digest after a quiet period, and runs the reaction
+	// initiator, through the user's own gns. Only the serving daemon streams
+	// and polls.
+	slackGNS, err := gnsclient.New(gnsclient.Config{Log: log})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the Slack leaf: %w", err)
+	}
+	slackThreads, err := slackwatch.New(slackwatch.Deps{
+		Store:    p.DB,
+		GNS:      slackGNS,
+		Holds:    queue,
+		Briefs:   merge.BriefsFrom(paths.PromptsDir),
+		MintKey:  prompthandler.MintKey,
+		NewNonce: slackNonce,
+		Serves:   rolloutController.ServesIntake,
+		Intakes:  slackIntakes{create: verbsRef.createVia, repositories: p.DB.ListRepositories},
+		Clock:    clock.System{},
+		Log:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the Slack watcher: %w", err)
+	}
+
 	verbs, err := workspace.New(workspace.Deps{
 		Lifecycle: deployConfig,
 		Instance:  p.Instance,
@@ -1768,6 +1794,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		HookRunner:        scripts,
 		StateDir:          p.Layout.Dir(),
 		PullRequests:      pullRequests,
+		SlackThreads:      slackThreads,
 		PromptsDir:        paths.PromptsDir,
 		CheckoutRoot:      paths.Checkout,
 		HomeDir:           paths.Home,
@@ -2108,6 +2135,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			HeldRollback:     queue,
 			Verbs:            verbs,
 			PullRequests:     pullRequests,
+			Slack:            slackThreads,
 			Remotes:          git,
 			Retarget:         retargeter,
 			Merge:            mergeOrchestrator,
@@ -2262,6 +2290,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { followNotices.Run(ctx, handler) },
 				func(ctx context.Context) { gathers.Run(ctx, handler) },
 				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
+				func(ctx context.Context) { slackThreads.Run(ctx, handler) },
 				func(ctx context.Context) { mainSync.Run(ctx, handler) },
 				selfCloses.Run,
 				bypassTurnEnds.Run)
