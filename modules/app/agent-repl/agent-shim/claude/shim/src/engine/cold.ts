@@ -320,8 +320,8 @@ export type ColdReason = "lapsed" | "model_switch";
  *
  * Owner ruling, 2026-09-13, raised 2026-10-14 ("Owner ruling: the cold gate
  * has a floor" in `docs/REALTEST-JUDGEMENT-CALLS.md`): no cold gate unless the
- * context a cold read would re-read is MORE than 120,000 tokens — at or under
- * it the session continues automatically. Above 120,000 the gate asks. The ruling covers
+ * context a cold read would re-read is MORE than 150,000 tokens — at or under
+ * it the session continues automatically. Above 150,000 the gate asks. The ruling covers
  * every lapse (hibernation revival, daemon restart, resume after the TTL) AND
  * a model change, whose cache is per model and so re-reads everything
  * regardless.
@@ -331,7 +331,7 @@ export type ColdReason = "lapsed" | "model_switch";
  * rather than a default — and inventing one would put the owner's ruling
  * behind a setting nothing sets.
  */
-export const COLD_GATE_FLOOR_TOKENS = 120_000;
+export const COLD_GATE_FLOOR_TOKENS = 150_000;
 
 /** Whether a cold read of this many context tokens is above the floor, so the gate asks. */
 export function coldGateAsks(contextTokens: number): boolean {
