@@ -8459,6 +8459,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-model-option,
 .topbar-effort-option,
 .topbar-mode-option,
+.topbar-queue-bypass-option,
 .topbar-warning-row,
 .topbar-title-link-option {
   display: flex;
@@ -8478,6 +8479,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-model-option:hover,
 .topbar-effort-option:hover,
 .topbar-mode-option:hover,
+.topbar-queue-bypass-option:hover,
 .topbar-warning-row:hover,
 .topbar-title-link-option:hover {
   background: var(--border);
