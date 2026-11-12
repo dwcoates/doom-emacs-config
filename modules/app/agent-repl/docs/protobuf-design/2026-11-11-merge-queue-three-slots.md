@@ -120,3 +120,23 @@ Default sequence applied: the endpoint inventory is unchanged; walked
 
 Package-wide reference graph read after the landings: no remaining reference
 to the deleted messages in `proto/src`. Nothing else found.
+
+## Retired after the rebase onto master (2026-11-12)
+
+Master landed a second design for a merge back from a repair out of line
+(`frontend.v1.RosterMergeQueueWaiting.placement`, its
+`frontend.v1.RosterMergeQueueWaitingPlacement` oneof of `front` and
+`returned`, and the `frontend.v1.FeedMergeTabHeld` state of the repair's
+tabs). Under three slots a merge back from a repair is a plain waiting merge
+drawn by its slot, so all of it is retired:
+
+- `frontend.v1.RosterMergeQueueWaiting`: tag 5 (`placement`) is reserved with
+  tags 3 and 4.
+- `frontend.v1.RosterMergeQueueWaitingPlacement`,
+  `frontend.v1.RosterMergeQueueWaitingFront` and
+  `frontend.v1.RosterMergeQueueWaitingReturned` are deleted.
+- `frontend.v1.FeedMergeTabHeld` is deleted, and the `held` arm of each tab
+  state oneof is reserved by number and name in `frontend.v1.FeedMergeTabRebasing`,
+  `FeedMergeTabRebaseCommit`, `FeedMergeTabResolvingConflicts`,
+  `FeedMergeTabConflictResolution`, `FeedMergeTabTests`,
+  `FeedMergeTabFixingTests` and `FeedMergeTabTestsRunFixing`.

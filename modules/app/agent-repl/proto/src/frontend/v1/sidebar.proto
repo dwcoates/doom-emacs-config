@@ -1288,35 +1288,13 @@ message RosterMergeQueueWaiting {
   RosterMergeQueueSubject subject = 1;
   // When it was put in line, epoch ms. Its row's clock ticks from it.
   int64 queued_at_ms = 2;
-  // HOW THE MERGE CAME TO STAND WHERE IT DOES, drawn as the label after its
-  // name. UNSET for a merge put in line in the ordinary way, at the back.
-  optional RosterMergeQueueWaitingPlacement placement = 5;
-  // Tag 3 (`placed_at_front`, drawn as a "front" label) and tag 4
-  // (`racing`, a merge worked on behind the head) are RETIRED (2026-11-11):
-  // the sidebar draws no "front", and the queue races no more.
-  reserved 3, 4;
-  reserved "placed_at_front", "racing";
+  // Tag 3 (`placed_at_front`, drawn as a "front" label), tag 4 (`racing`, a
+  // merge worked on behind the head) and tag 5 (`placement`, front or
+  // returned) are RETIRED (2026-11-11): the sidebar draws no "front" and no
+  // "returned", and the queue races no more.
+  reserved 3, 4, 5;
+  reserved "placed_at_front", "racing", "placement";
 }
-
-// Why a waiting merge stands ahead of the merges queued before it.
-message RosterMergeQueueWaitingPlacement {
-  // THE ARM IS THE PLACEMENT. A set field with no arm is a placement this
-  // build does not name, and draws no label.
-  oneof placement {
-    // The merge came back from repairing out of line (fixing its tests or
-    // resolving its conflicts) and waits at the first waiting place, to be
-    // taken up again. Drawn `returned`.
-    RosterMergeQueueWaitingReturned returned = 2;
-  }
-  // Arm 1 (`front`, the user put the merge at the front) is RETIRED
-  // (2026-11-11): the sidebar draws no "front".
-  reserved 1;
-  reserved "front";
-}
-
-// The merge is back in line from a repair out of line, and nothing has taken
-// it up again yet.
-message RosterMergeQueueWaitingReturned {}
 
 // One entry of a repository section's body: a top-level row in no
 // subsection, or a subsection with its own rows below its header.
