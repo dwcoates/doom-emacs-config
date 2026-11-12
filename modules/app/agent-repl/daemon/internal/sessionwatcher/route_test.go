@@ -3805,6 +3805,81 @@ func TestARemoteControlAdoptionCarriesItsOriginAndWords(t *testing.T) {
 	}
 }
 
+// A REMOTE PROMPT FOLDED INTO THE RUNNING TURN (2026-11-12): a prompt typed
+// on claude.ai while a turn runs is written folded into that turn, and opens
+// no turn of its own. Adopting it stood a turn in flight that no terminal
+// ever ended, so every later prompt waited behind it.
+
+// remoteControlFolded is TURN's remote-control prompt row, folded into INTO.
+func remoteControlFolded(turn, into, agent string) *shimv1.WatchAgentResponse {
+	resp := remoteControlPrompt(turn, agent, "and also this")
+	resp.GetEntry().GetEntry().GetUserPrompt().FoldedInto = &conversationv1.TurnId{Value: into}
+	resp.GetEntry().At = &conversationv1.HistoryPointer{Value: "ptr-folded-" + turn}
+	return resp
+}
+
+// foldedRemoteHarness stands remote-control turn-r in flight and routes a
+// remote prompt, turn-f, folded into it.
+func foldedRemoteHarness(t *testing.T) (*harness, []event) {
+	t.Helper()
+	h := adoptionHarness(t)
+	h.route(h.main, remoteControlPrompt("turn-r", "main-1", "fix the build"))
+	return h, h.route(h.main, remoteControlFolded("turn-f", "turn-r", "main-1"))
+}
+
+func TestARemoteControlPromptFoldedIntoTheRunningTurnLeavesThatTurnInFlight(t *testing.T) {
+	// Arrange, Act.
+	h, _ := foldedRemoteHarness(t)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-r" {
+		t.Fatalf("turn in flight = %v, want turn-r", turn)
+	}
+}
+
+func TestARemoteControlPromptFoldedIntoTheRunningTurnAdoptsNoTurn(t *testing.T) {
+	// Arrange, Act.
+	_, got := foldedRemoteHarness(t)
+
+	// Assert.
+	for _, name := range []string{"lifecycle.OnTurnAdopted", "footer.OnTurnOpened", "feed.OnTurnOpened", "lifecycle.OnTurnEnded"} {
+		if hasEvent(got, name) {
+			t.Fatalf("events = %+v, want no %s for a folded prompt", got, name)
+		}
+	}
+}
+
+func TestARemoteControlPromptFoldedIntoTheRunningTurnIsStillDrawn(t *testing.T) {
+	// Arrange, Act.
+	_, got := foldedRemoteHarness(t)
+
+	// Assert.
+	requireEvent(t, got, "feed.OnPrompt")
+}
+
+func TestTheTurnARemoteControlPromptFoldedIntoEndsWithNothingLeftInFlight(t *testing.T) {
+	// Arrange.
+	h, _ := foldedRemoteHarness(t)
+
+	// Act.
+	h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-r-end", "turn-r"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none once turn-r ended", *turn)
+	}
+}
+
+func TestARemoteControlPromptFoldedIntoTheRunningTurnIsRecorded(t *testing.T) {
+	// Arrange, Act.
+	h, _ := foldedRemoteHarness(t)
+
+	// Assert.
+	if !h.hasRecord("debug", "daemon.sessionwatcher.adopted_prompt_folded") {
+		t.Fatal("the folded remote prompt has no debug record")
+	}
+}
+
 func TestAVendorStartedAdoptionCarriesItsOrigin(t *testing.T) {
 	// Arrange.
 	h := adoptionHarness(t)
