@@ -185,6 +185,9 @@ export const MERGE_QUEUE_HEAD_CLASS = "sb-mq-head";
 /** The class of a waiting merge's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_WAITING_CLASS = "sb-mq-waiting";
 
+/** The class of the numeral a waiting merge's line opens with: its position among the waiting. */
+export const MERGE_QUEUE_POSITION_CLASS = "sb-mq-position";
+
 /** The class of a GitHub merge queue standing's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_GITHUB_CLASS = "sb-mq-github";
 
@@ -212,7 +215,7 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
   const refs = new Map<HTMLElement, WorkspaceRef>();
   u.waiting.forEach((waiting, index) => {
     const waitingPath = `${path}.waiting[${index}]`;
-    const line = drawRosterMergeQueueWaiting(waiting, sc, waitingPath);
+    const line = drawRosterMergeQueueWaiting(waiting, index + 1, sc, waitingPath);
     refs.set(line, requireMessage(requireMessage(waiting.subject, `${waitingPath}.subject`).workspace, `${waitingPath}.subject.workspace`));
     body.appendChild(line);
   });
@@ -451,17 +454,23 @@ export function placementLabel(
  * One merge waiting behind the head, indented under the head's name, with no
  * bullet (owner request, 2026-11-06): the credited workspace's name, its placement label (placementLabel), and how
  * long it has waited -- or, for a merge racing the head, how long it has
- * raced. Its place is the line's order; it is not numbered (owner
- * request, 2026-10-27).
+ * raced. IT OPENS WITH ITS POSITION AMONG THE WAITING MERGES (owner
+ * request, 2026-11-11): POSITION is 1-based, counts only the merges in
+ * `RosterRepoMergeQueue.waiting` (never the head or a remediating merge), and
+ * is the line's order, not the workspace's number, so a reorder renumbers.
  */
 export function drawRosterMergeQueueWaiting(
   u: RosterMergeQueueWaiting,
+  position: number,
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_WAITING_CLASS, `${path}.subject`);
-  line.append(drawSubjectName(subject, `${path}.subject`));
+  const numeral = document.createElement("span");
+  numeral.className = MERGE_QUEUE_POSITION_CLASS;
+  numeral.textContent = `${position}`;
+  line.append(numeral, drawSubjectName(subject, `${path}.subject`));
   const placement = placementLabel(u.placement);
   if (placement !== null) {
     line.appendChild(drawQueueLabel(placement.text, placement.kind, placement.title));
