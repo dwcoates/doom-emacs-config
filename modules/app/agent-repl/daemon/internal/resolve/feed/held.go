@@ -197,7 +197,7 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 	draw := func(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
 		return &frontendv1.FeedUserPromptBody{Blocks: r.drawUserBlocks(s, content)}
 	}
-	for _, card := range holds.Prompts(h.prompts, h.editing, holds.StartOf(h.loading, h.relaunching), draw, log) {
+	for _, card := range holds.Prompts(h.prompts, h.editing, holds.StartOf(h.loading, h.relaunching), draw, func(p wsm.HeldPrompt) *frontendv1.FeedAgentPromptAddress { return r.heldPromptHeader(s, p) }, log) {
 		id, drawn := r.promptRowDrawn(s, card.Turn)
 		if drawn {
 			log.Debug(opHeld, "a standing hold's prompt row is drawn; it has settled out of the section", dlog.Context{

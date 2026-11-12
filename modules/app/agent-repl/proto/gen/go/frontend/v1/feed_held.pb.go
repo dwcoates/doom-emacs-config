@@ -334,7 +334,15 @@ type HeldPrompt struct {
 	// going at once, and it goes the moment that clears, ahead of every other
 	// held prompt but an interjection under way. Absent otherwise. It claims
 	// the card's badge after the edit and before the hold (HeldPrompt.badge).
-	SentNow       *HeldPromptSentNow `protobuf:"bytes,28,opt,name=sent_now,json=sentNow,proto3" json:"sent_now,omitempty"`
+	SentNow *HeldPromptSentNow `protobuf:"bytes,28,opt,name=sent_now,json=sentNow,proto3" json:"sent_now,omitempty"`
+	// PRESENT WHEN ANOTHER WORKSPACE'S AGENT SENT THIS PROMPT
+	// (conversation.v1.PromptOrigin PROMPT_ORIGIN_AGENT_SENT), absent for every
+	// other origin. The header the prompt's feed row will carry once it settles
+	// (FeedAgentPrompt.address), so the held card is headed exactly as its row:
+	// a left arrow, then the sending workspace's name, drawn above the card's
+	// status strip. DAEMON-RESOLVED: the card draws it verbatim and derives
+	// nothing from the prompt's text.
+	Sender        *FeedAgentPromptAddress `protobuf:"bytes,29,opt,name=sender,proto3,oneof" json:"sender,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -591,6 +599,13 @@ func (x *HeldPrompt) GetFoldAbove() *HeldPromptFoldAbove {
 func (x *HeldPrompt) GetSentNow() *HeldPromptSentNow {
 	if x != nil {
 		return x.SentNow
+	}
+	return nil
+}
+
+func (x *HeldPrompt) GetSender() *FeedAgentPromptAddress {
+	if x != nil {
+		return x.Sender
 	}
 	return nil
 }
@@ -3396,7 +3411,7 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x02id\x121\n" +
 	"\x06prompt\x18\x03 \x01(\v2\x17.frontend.v1.HeldPromptH\x00R\x06prompt\x12:\n" +
 	"\aingress\x18\x05 \x01(\v2\x1e.frontend.v1.HeldIngressPromptH\x00R\aingressB\x06\n" +
-	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\xbd\x0e\n" +
+	"\x04itemJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x05mergeR\x05offer\"\x8a\x0f\n" +
 	"\n" +
 	"HeldPrompt\x12+\n" +
 	"\x04turn\x18\x01 \x01(\v2\x17.conversation.v1.TurnIdR\x04turn\x12-\n" +
@@ -3426,10 +3441,12 @@ const file_frontend_v1_feed_held_proto_rawDesc = "" +
 	"\x03act\x18\x10 \x01(\v2\x1b.frontend.v1.HeldSessionActR\x03act\x12D\n" +
 	"\n" +
 	"fold_above\x18\x12 \x01(\v2 .frontend.v1.HeldPromptFoldAboveH\x02R\tfoldAbove\x88\x01\x01\x129\n" +
-	"\bsent_now\x18\x1c \x01(\v2\x1e.frontend.v1.HeldPromptSentNowR\asentNowB\x10\n" +
+	"\bsent_now\x18\x1c \x01(\v2\x1e.frontend.v1.HeldPromptSentNowR\asentNow\x12@\n" +
+	"\x06sender\x18\x1d \x01(\v2#.frontend.v1.FeedAgentPromptAddressH\x03R\x06sender\x88\x01\x01B\x10\n" +
 	"\x0eclassificationB\x06\n" +
 	"\x04holdB\r\n" +
-	"\v_fold_aboveJ\x04\b\n" +
+	"\v_fold_aboveB\t\n" +
+	"\a_senderJ\x04\b\n" +
 	"\x10\vJ\x04\b\x0e\x10\x0fR\n" +
 	"keep_aliveR\x06badges\"0\n" +
 	"\x11HeldPromptSentNow\x12\x1b\n" +
@@ -3611,7 +3628,8 @@ var file_frontend_v1_feed_held_proto_goTypes = []any{
 	(*v1.TurnId)(nil),                            // 54: conversation.v1.TurnId
 	(*v1.UserSaid)(nil),                          // 55: conversation.v1.UserSaid
 	(*FeedUserPromptBody)(nil),                   // 56: frontend.v1.FeedUserPromptBody
-	(v1.SessionCommand)(0),                       // 57: conversation.v1.SessionCommand
+	(*FeedAgentPromptAddress)(nil),               // 57: frontend.v1.FeedAgentPromptAddress
+	(v1.SessionCommand)(0),                       // 58: conversation.v1.SessionCommand
 }
 var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.FeedHeld.items:type_name -> frontend.v1.FeedHeldItem
@@ -3644,41 +3662,42 @@ var file_frontend_v1_feed_held_proto_depIdxs = []int32{
 	6,  // 27: frontend.v1.HeldPrompt.act:type_name -> frontend.v1.HeldSessionAct
 	4,  // 28: frontend.v1.HeldPrompt.fold_above:type_name -> frontend.v1.HeldPromptFoldAbove
 	3,  // 29: frontend.v1.HeldPrompt.sent_now:type_name -> frontend.v1.HeldPromptSentNow
-	54, // 30: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
-	7,  // 31: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
-	8,  // 32: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
-	10, // 33: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
-	11, // 34: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
-	12, // 35: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
-	13, // 36: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
-	14, // 37: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
-	15, // 38: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
-	16, // 39: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
-	17, // 40: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
-	18, // 41: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
-	19, // 42: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
-	20, // 43: frontend.v1.HeldPromptBadge.loading:type_name -> frontend.v1.HeldPromptBadgeLoading
-	21, // 44: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
-	22, // 45: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
-	23, // 46: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
-	24, // 47: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
-	25, // 48: frontend.v1.HeldPromptBadge.sent_now:type_name -> frontend.v1.HeldPromptBadgeSentNow
-	57, // 49: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
-	55, // 50: frontend.v1.HeldIngressPrompt.said:type_name -> conversation.v1.UserSaid
-	56, // 51: frontend.v1.HeldIngressPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
-	45, // 52: frontend.v1.HeldIngressPrompt.queued_at:type_name -> frontend.v1.HeldIngressPromptQueuedAt
-	46, // 53: frontend.v1.HeldIngressPrompt.badge:type_name -> frontend.v1.HeldIngressPromptBadge
-	47, // 54: frontend.v1.HeldIngressPromptBadge.awaiting_intake:type_name -> frontend.v1.HeldIngressPromptBadgeAwaitingIntake
-	48, // 55: frontend.v1.HeldIngressPromptBadge.no_session:type_name -> frontend.v1.HeldIngressPromptBadgeNoSession
-	49, // 56: frontend.v1.HeldIngressPromptBadge.merge:type_name -> frontend.v1.HeldIngressPromptBadgeMerge
-	50, // 57: frontend.v1.HeldIngressPromptBadge.cold_gate:type_name -> frontend.v1.HeldIngressPromptBadgeColdGate
-	51, // 58: frontend.v1.HeldIngressPromptBadge.moved_away:type_name -> frontend.v1.HeldIngressPromptBadgeMovedAway
-	52, // 59: frontend.v1.HeldIngressPromptBadge.refused:type_name -> frontend.v1.HeldIngressPromptBadgeRefused
-	60, // [60:60] is the sub-list for method output_type
-	60, // [60:60] is the sub-list for method input_type
-	60, // [60:60] is the sub-list for extension type_name
-	60, // [60:60] is the sub-list for extension extendee
-	0,  // [0:60] is the sub-list for field type_name
+	57, // 30: frontend.v1.HeldPrompt.sender:type_name -> frontend.v1.FeedAgentPromptAddress
+	54, // 31: frontend.v1.HeldPromptFoldAbove.above:type_name -> conversation.v1.TurnId
+	7,  // 32: frontend.v1.HeldSessionAct.model:type_name -> frontend.v1.HeldSessionActModel
+	8,  // 33: frontend.v1.HeldSessionAct.permission_mode:type_name -> frontend.v1.HeldSessionActPermissionMode
+	10, // 34: frontend.v1.HeldPromptBadge.classifying:type_name -> frontend.v1.HeldPromptBadgeClassifying
+	11, // 35: frontend.v1.HeldPromptBadge.interject:type_name -> frontend.v1.HeldPromptBadgeInterject
+	12, // 36: frontend.v1.HeldPromptBadge.after_tool_call:type_name -> frontend.v1.HeldPromptBadgeAfterToolCall
+	13, // 37: frontend.v1.HeldPromptBadge.hold_for_turn_end:type_name -> frontend.v1.HeldPromptBadgeHoldForTurnEnd
+	14, // 38: frontend.v1.HeldPromptBadge.uninterruptible_turn:type_name -> frontend.v1.HeldPromptBadgeUninterruptibleTurn
+	15, // 39: frontend.v1.HeldPromptBadge.classification_error:type_name -> frontend.v1.HeldPromptBadgeClassificationError
+	16, // 40: frontend.v1.HeldPromptBadge.editing:type_name -> frontend.v1.HeldPromptBadgeEditing
+	17, // 41: frontend.v1.HeldPromptBadge.shutdown:type_name -> frontend.v1.HeldPromptBadgeShutdown
+	18, // 42: frontend.v1.HeldPromptBadge.build_refresh:type_name -> frontend.v1.HeldPromptBadgeBuildRefresh
+	19, // 43: frontend.v1.HeldPromptBadge.reconnect:type_name -> frontend.v1.HeldPromptBadgeReconnect
+	20, // 44: frontend.v1.HeldPromptBadge.loading:type_name -> frontend.v1.HeldPromptBadgeLoading
+	21, // 45: frontend.v1.HeldPromptBadge.merge:type_name -> frontend.v1.HeldPromptBadgeMerge
+	22, // 46: frontend.v1.HeldPromptBadge.cold_gate:type_name -> frontend.v1.HeldPromptBadgeColdGate
+	23, // 47: frontend.v1.HeldPromptBadge.awaiting_delivery:type_name -> frontend.v1.HeldPromptBadgeAwaitingDelivery
+	24, // 48: frontend.v1.HeldPromptBadge.cold_gate_answered:type_name -> frontend.v1.HeldPromptBadgeColdGateAnswered
+	25, // 49: frontend.v1.HeldPromptBadge.sent_now:type_name -> frontend.v1.HeldPromptBadgeSentNow
+	58, // 50: frontend.v1.HeldPromptUninterruptibleTurn.command:type_name -> conversation.v1.SessionCommand
+	55, // 51: frontend.v1.HeldIngressPrompt.said:type_name -> conversation.v1.UserSaid
+	56, // 52: frontend.v1.HeldIngressPrompt.body:type_name -> frontend.v1.FeedUserPromptBody
+	45, // 53: frontend.v1.HeldIngressPrompt.queued_at:type_name -> frontend.v1.HeldIngressPromptQueuedAt
+	46, // 54: frontend.v1.HeldIngressPrompt.badge:type_name -> frontend.v1.HeldIngressPromptBadge
+	47, // 55: frontend.v1.HeldIngressPromptBadge.awaiting_intake:type_name -> frontend.v1.HeldIngressPromptBadgeAwaitingIntake
+	48, // 56: frontend.v1.HeldIngressPromptBadge.no_session:type_name -> frontend.v1.HeldIngressPromptBadgeNoSession
+	49, // 57: frontend.v1.HeldIngressPromptBadge.merge:type_name -> frontend.v1.HeldIngressPromptBadgeMerge
+	50, // 58: frontend.v1.HeldIngressPromptBadge.cold_gate:type_name -> frontend.v1.HeldIngressPromptBadgeColdGate
+	51, // 59: frontend.v1.HeldIngressPromptBadge.moved_away:type_name -> frontend.v1.HeldIngressPromptBadgeMovedAway
+	52, // 60: frontend.v1.HeldIngressPromptBadge.refused:type_name -> frontend.v1.HeldIngressPromptBadgeRefused
+	61, // [61:61] is the sub-list for method output_type
+	61, // [61:61] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_feed_held_proto_init() }

@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // A PROMPT ANOTHER WORKSPACE'S AGENT SENT (PROMPT_ORIGIN_AGENT_SENT, through
@@ -67,12 +68,34 @@ func (r *resolver) promptHeader(s *wsState, turn ids.TurnID, origin conversation
 	}
 	sender, known := s.turnSenders[turn]
 	if !known {
+		return r.senderHeader(s, turn, nil)
+	}
+	return r.senderHeader(s, turn, &sender)
+}
+
+// heldPromptHeader answers the header a HELD prompt's card is drawn under: the
+// one its row will carry once it settles (promptHeader), read off the sender
+// the hold itself records (wsm.HeldPrompt.SentBy), since a hold's turn has no
+// turn record in the feed yet. Nil for a prompt no agent sent. The caller
+// holds r.mu.
+func (r *resolver) heldPromptHeader(s *wsState, h wsm.HeldPrompt) *frontendv1.FeedAgentPromptAddress {
+	if h.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT.String() {
+		return nil
+	}
+	return r.senderHeader(s, h.Turn, h.SentBy)
+}
+
+// senderHeader is the header of TURN's prompt, sent by workspace SENDER: its
+// name, or the unnamed arm when the daemon cannot name it. A nil SENDER is
+// recorded at ERROR, since every agent-sent prompt is recorded with its sender.
+func (r *resolver) senderHeader(s *wsState, turn ids.TurnID, sender *ids.WorkspaceID) *frontendv1.FeedAgentPromptAddress {
+	if sender == nil {
 		r.logger(s.id).Error("daemon.feed.turn_sender_missing",
 			"an agent-sent prompt has no recorded sender in the feed; it is headed by a workspace the daemon cannot name",
 			dlog.Context{"turn": string(turn)})
 		return receivedFromWorkspace(unnamedWorkspaceSender, false)
 	}
-	name, named := r.workspaceName(sender, s.id)
+	name, named := r.workspaceName(*sender, s.id)
 	if !named {
 		return receivedFromWorkspace(unnamedWorkspaceSender, false)
 	}

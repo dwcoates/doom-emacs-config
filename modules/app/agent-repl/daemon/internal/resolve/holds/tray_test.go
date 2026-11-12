@@ -1087,3 +1087,30 @@ func TestTrayAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
 	}
 }
+
+func TestTrayCardCarriesTheSenderHeaderItsResolverNames(t *testing.T) {
+	// Arrange.
+	header := &frontendv1.FeedAgentPromptAddress{Name: &frontendv1.FeedAgentPromptAddressName{Text: "parser-fix"}}
+	held := []wsm.HeldPrompt{hold("t1", "look at this")}
+
+	// Act.
+	cards := holds.Prompts(held, "", holds.ShimStartNone, textBody, func(wsm.HeldPrompt) *frontendv1.FeedAgentPromptAddress { return header }, dlog.NewTestSurfaces().Global())
+
+	// Assert.
+	if len(cards) != 1 || cards[0].Prompt.GetSender() != header {
+		t.Fatalf("cards = %v, want the one card carrying the resolver's header", cards)
+	}
+}
+
+func TestTrayCardOfAPromptNoAgentSentHasNoSender(t *testing.T) {
+	// Arrange.
+	r, _ := newRenderer(t)
+
+	// Act.
+	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "look at this")})
+
+	// Assert.
+	if got := onlyPrompt(t, latest(t, r)).GetSender(); got != nil {
+		t.Fatalf("sender = %v, want none", got)
+	}
+}

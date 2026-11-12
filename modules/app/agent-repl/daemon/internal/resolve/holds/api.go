@@ -94,20 +94,26 @@ func (s ShimStart) String() string {
 // resolution the drawing needs.
 type DrawBody func(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody
 
+// SenderHeader answers the header a held prompt's card is drawn under when
+// another workspace's agent sent it (the one its settled row carries), nil for
+// a prompt no agent sent. The feed resolver supplies it, because it owns the
+// workspace names.
+type SenderHeader func(h wsm.HeldPrompt) *frontendv1.FeedAgentPromptAddress
+
 // Prompts renders the standing holds as the held section's prompt cards, in
 // delivery order: oldest first, a retired hold skipped, each card's "fold
 // above" button naming the standing card drawn just before it. EDITING names
 // the hold an EditHeldPrompt claim stands on, empty when none does.
 // START is the workspace's shim start under way (StartOf). DRAW
-// resolves each card's body.
+// resolves each card's body, and SENDER each agent-sent card's header.
 //
 // The answer pairs each card with the hold it was drawn from, because the
 // section's caller keys each item by the hold's turn.
-func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, start ShimStart, draw DrawBody, log dlog.Logger) []Card {
+func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, start ShimStart, draw DrawBody, sender SenderHeader, log dlog.Logger) []Card {
 	cards := make([]Card, 0, len(held))
 	ordered := orderedHolds(held)
 	for _, h := range ordered {
-		prompt := heldPrompt(h, editing != "" && h.Turn == editing, start, draw, log)
+		prompt := heldPrompt(h, editing != "" && h.Turn == editing, start, draw, sender, log)
 		if prompt == nil {
 			continue
 		}
