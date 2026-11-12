@@ -26,6 +26,7 @@ func TestTurns(t *testing.T) {
 		testAWorkspaceOpenReplaysItsFirstPageOnce,
 		testPlanModeCoalescesOntoOneBubble,
 		testPlanModeSettlesPlanned,
+		testRateLimitSevenDayWindowFeedsTheWeeklyAllowance,
 		testSkillInvocation,
 		testAChatThreadLivesItsWholeLife,
 		testClearRotatesIdentity,
@@ -42,6 +43,7 @@ func TestFaults(t *testing.T) {
 		testResidueAttachmentsDrawNoRow,
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
+		testApiRateLimitedCarriesTheVendorWait,
 		testPermissionAskAnsweredArms,
 	)
 }
