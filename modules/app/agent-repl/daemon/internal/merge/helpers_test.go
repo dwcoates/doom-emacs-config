@@ -56,6 +56,15 @@ type fakeDB struct {
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
+	// asyncRequests are the async requests not yet handed off, in the order
+	// they were asked for; asyncRequestErr fails their next record.
+	asyncRequests   []wsm.AsyncMergeRequest
+	asyncRequestErr error
+	// asyncReadErr fails every read of the async requests, and asyncDropErr
+	// every drop of one.
+	asyncReadErr error
+	asyncDropErr error
+
 	wsm.DB
 
 	// workspaceErr, when set, is what every Workspace read answers.
@@ -739,6 +748,11 @@ func (f *fakeDB) settleWaitsOnLocked(repo wsm.RepoKey, id ids.WorkspaceID, cause
 	for i, entry := range f.queues[repo] {
 		if entry.WaitsOn == id && entry.WaitsOnLeft == "" {
 			f.queues[repo][i].WaitsOnLeft = cause
+		}
+	}
+	for i, req := range f.asyncRequests {
+		if req.Repo == repo && req.WaitsOn == id && req.WaitsOnLeft == "" {
+			f.asyncRequests[i].WaitsOnLeft = cause
 		}
 	}
 }
@@ -3552,17 +3566,25 @@ func (h *harness) oneShot() bool {
 	return h.db.jobs[theWorkspace].OneShot
 }
 
-// runWait runs the harness workspace's standing request wait to its end, as
-// its goroutine would: the requesting turn's end, then its place in line.
+// runWait runs the harness workspace's standing request waits to their end,
+// as their goroutines would: its async requests' wait (each request's turn's
+// end, then its hand-off), then its own request's (the requesting turn's end,
+// then its place in line).
 func (h *harness) runWait(t *testing.T) {
 	t.Helper()
 	h.o.mu.Lock()
 	wait := h.o.requested[theWorkspace]
+	async := h.o.asyncWaits[theWorkspace]
 	h.o.mu.Unlock()
-	if wait == nil {
+	if wait == nil && async == nil {
 		t.Fatal("no request wait stands for the harness workspace")
 	}
-	h.o.waitThenQueue(wait)
+	if async != nil {
+		h.o.runAsyncWait(async)
+	}
+	if wait != nil {
+		h.o.waitThenQueue(wait)
+	}
 }
 
 // entryState answers the harness workspace's queue entry's state, and false
@@ -3797,4 +3819,84 @@ func causedRun(t *testing.T, h *harness) (*run, func() error) {
 	t.Cleanup(func() { cancel(nil) })
 	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
 	return r, func() error { return context.Cause(ctx) }
+}
+
+// RequestAsyncMerge stands for the store's async request record: one row per
+// request, behind every request recorded before it.
+func (f *fakeDB) RequestAsyncMerge(_ context.Context, repo wsm.RepoKey, requester ids.WorkspaceID, turn ids.TurnID, source wsm.MergeSource, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.asyncRequestErr; err != nil {
+		f.asyncRequestErr = nil
+		return err
+	}
+	f.asyncRequests = append(f.asyncRequests, wsm.AsyncMergeRequest{
+		Repo: repo, Requester: requester, Turn: turn, RequestedAt: at, Source: source,
+		WaitsOn: source.Behind, WaitsOnName: source.BehindName,
+	})
+	return nil
+}
+
+// AsyncMergeRequestsOf answers REQUESTER's requests, oldest first.
+func (f *fakeDB) AsyncMergeRequestsOf(_ context.Context, requester ids.WorkspaceID) ([]wsm.AsyncMergeRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.asyncReadErr != nil {
+		return nil, f.asyncReadErr
+	}
+	var out []wsm.AsyncMergeRequest
+	for _, req := range f.asyncRequests {
+		if req.Requester == requester {
+			out = append(out, req)
+		}
+	}
+	return out, nil
+}
+
+// AllAsyncMergeRequests answers every request, oldest first.
+func (f *fakeDB) AllAsyncMergeRequests(context.Context) ([]wsm.AsyncMergeRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.asyncReadErr != nil {
+		return nil, f.asyncReadErr
+	}
+	return append([]wsm.AsyncMergeRequest(nil), f.asyncRequests...), nil
+}
+
+// DropAsyncMergeRequest stands for the store's drop: the request goes, and
+// every merge placed behind it is settled with CAUSE.
+func (f *fakeDB) DropAsyncMergeRequest(_ context.Context, repo wsm.RepoKey, request wsm.DetachedMergeID, cause string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.asyncDropErr != nil {
+		return f.asyncDropErr
+	}
+	i := f.asyncRequestIndexLocked(request)
+	if i < 0 {
+		return fmt.Errorf("no async request %s: %w", request, wsm.ErrNotFound)
+	}
+	f.asyncRequests = append(f.asyncRequests[:i], f.asyncRequests[i+1:]...)
+	f.settleWaitsOnLocked(repo, ids.WorkspaceID(request), cause)
+	return nil
+}
+
+// asyncRequestIndexLocked answers REQUEST's index among the async requests,
+// -1 when none stands, with f.mu held.
+func (f *fakeDB) asyncRequestIndexLocked(request wsm.DetachedMergeID) int {
+	for i, req := range f.asyncRequests {
+		if req.Source.Detach == request {
+			return i
+		}
+	}
+	return -1
+}
+
+// asyncRequestOf answers WS's oldest async request not yet handed off, and
+// false when it has none.
+func (h *harness) asyncRequestOf(ws ids.WorkspaceID) (wsm.AsyncMergeRequest, bool) {
+	requests, _ := h.db.AsyncMergeRequestsOf(context.Background(), ws)
+	if len(requests) == 0 {
+		return wsm.AsyncMergeRequest{}, false
+	}
+	return requests[0], true
 }

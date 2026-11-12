@@ -540,8 +540,21 @@ type DB interface {
 	// MergeWorkspaceFor loads the merge workspace forked for one detached
 	// request; false when none is registered for it yet.
 	MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) (Workspace, bool, error)
-	// HandOffDetachedMerge moves a detached request from the requester's queue
-	// row onto the merge workspace forked for it, in one transaction.
+	// RequestAsyncMerge records one async merge request of the requester,
+	// asked for in TURN (empty when none was in flight), behind every request
+	// recorded before it (async_merge_requests). A requester holds any number.
+	RequestAsyncMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, turn TurnID, source MergeSource, at time.Time) error
+	// AsyncMergeRequestsOf answers a requester's async requests not yet
+	// handed off, in the order they were asked for.
+	AsyncMergeRequestsOf(ctx context.Context, requester WorkspaceID) ([]AsyncMergeRequest, error)
+	// AllAsyncMergeRequests answers every async request not yet handed off, in
+	// the order they were asked for.
+	AllAsyncMergeRequests(ctx context.Context) ([]AsyncMergeRequest, error)
+	// DropAsyncMergeRequest removes an async request that will never be handed
+	// off, settling every merge placed behind it with CAUSE.
+	DropAsyncMergeRequest(ctx context.Context, repo RepoKey, request DetachedMergeID, cause string) error
+	// HandOffDetachedMerge moves an async request onto the merge workspace
+	// forked for it, in one transaction.
 	HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error
 	// ReservedMergeNames answers every merge workspace name a standing async
 	// request has reserved, mapped to the workspace that reserved it.

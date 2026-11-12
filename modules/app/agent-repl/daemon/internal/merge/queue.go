@@ -665,9 +665,12 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 // never run, and left on the queue it would block the repository's queue
 // forever on a workspace that is not there; abandoning it records WHY in the
 // bubble instead. Nothing is dropped when the merge has already been admitted:
-// a run in flight ends on its own terminal, not on this one.
+// a run in flight ends on its own terminal, not on this one. The workspace's
+// async requests not yet handed off are dropped with it: their fork would hold
+// a conversation that has ended for good.
 func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.merge.workspace_closed"
+	o.dropAsyncRequestsOf(ctx, ws)
 	if _, running := o.runFor(ws); running {
 		// A RUNNING MERGE ENDS WITH ITS WORKSPACE TOO. Left alone, a merge
 		// running on a workspace that is gone would hold its lease for ever.

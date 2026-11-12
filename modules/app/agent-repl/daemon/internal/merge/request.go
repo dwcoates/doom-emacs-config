@@ -217,6 +217,12 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			return Enqueued{}, fmt.Errorf("merge: flushing the held prompts of %s before its in-place merge: %w", ws, err)
 		}
 	}
+	if req.Detached != nil {
+		// requestAsync lets go of the claim itself, once its record is written.
+		release := releaseName
+		releaseName = func() {}
+		return enqueued, o.requestAsync(ctx, log, ws, repo, req.By, source, fields, release)
+	}
 	requestMerge := o.deps.DB.RequestMerge
 	if req.OneShot {
 		requestMerge = o.deps.DB.RequestOneShotMerge
@@ -246,9 +252,8 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	o.mu.Lock()
 	o.repoOf[ws] = repo
-	// ONLY THE USER'S OWN ASK MAY DISPLACE THE TURN IN FLIGHT (see Requester),
-	// and an ASYNC merge displaces nothing: it never runs in the requester.
-	if req.By == RequestedByUser && req.Detached == nil {
+	// ONLY THE USER'S OWN ASK MAY DISPLACE THE TURN IN FLIGHT (see Requester).
+	if req.By == RequestedByUser {
 		o.displaces[ws] = true
 	} else {
 		delete(o.displaces, ws)
@@ -269,6 +274,48 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	o.awaitRequestingTurn(ws, repo)
 	return enqueued, nil
+}
+
+// requestAsync records an async request on its own (wsm.RequestAsyncMerge)
+// with the requester's turn in flight, lets go of the name claim once it is
+// written or refused, and makes sure a wait stands to hand it off once that
+// turn ends. A requester may hold any number: asking never touches its own
+// queue row, so no async request is refused for another the requester made.
+//
+// THE USER'S OWN ASK HAS NO REQUESTING TURN: it is recorded with none and
+// handed off at once, as the user's in-place ask is put in line at once.
+func (o *orchestrator) requestAsync(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, repo wsm.RepoKey, by Requester, source wsm.MergeSource, fields dlog.Context, releaseName func()) error {
+	const op = "daemon.merge.enqueue"
+	turn, inFlight := o.deps.TurnInFlight(ws)
+	if !inFlight || by == RequestedByUser {
+		turn, inFlight = "", false
+	}
+	err := o.deps.DB.RequestAsyncMerge(ctx, repo, ws, turn, source, o.deps.Now())
+	releaseName()
+	if err != nil {
+		if wsm.IsFamilyRefusal(err) {
+			logRefusal(log, op, "refused a merge that would close a workspace with open children", fields, err)
+			return err
+		}
+		log.Error(op, "could not record the async merge request", withField(fields, "error", err.Error()))
+		return err
+	}
+	// THE TURN THAT ASKED RAISES NO DESKTOP BANNER: the merge queue's banners
+	// announce the merge (TakeRequestingTurn).
+	o.mu.Lock()
+	if inFlight {
+		o.requestingTurns[ws] = turn
+	}
+	o.mu.Unlock()
+	log.Info(op, "recorded a merge request", dlog.Merge(fields, dlog.Context{"repo": string(repo), "turn": string(turn)}))
+	if by == RequestedByUser {
+		lock := o.handOffLock(ws)
+		lock.Lock()
+		defer lock.Unlock()
+		return o.handOffDetached(ctx, ws, repo, source)
+	}
+	o.awaitAsyncRequests(ws)
+	return nil
 }
 
 // checkAsker refuses an in-place merge of WS asked by a workspace that may not
@@ -489,6 +536,7 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 	ctx, ws := wait.ctx, wait.ws
 	defer o.forgetWait(wait)
 	log := o.log(ctx, ws)
+	ended := map[ids.TurnID]bool{}
 	if turn, inFlight := o.deps.TurnInFlight(ws); inFlight {
 		log.Info(op, "the merge request waits for the turn that asked for it to end; nothing about it is reported before then",
 			dlog.Context{"workspace": string(ws), "turn": string(turn)})
@@ -502,6 +550,7 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 				dlog.Context{"workspace": string(ws), "turn": string(turn), "error": err.Error()})
 			return
 		}
+		ended[turn] = true
 	}
 	// THE FINISH STAGE RUNS HERE, between the requesting turn's end and the
 	// deploy's place in line (finish.go).
@@ -516,6 +565,12 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 	}
 	if failure != "" {
 		o.withdrawFinished(ctx, ws, wait.repo, failure)
+		return
+	}
+	// THE ASYNC REQUESTS OF THE SAME TURN GO FIRST, in the order they were
+	// asked for, so this merge may be placed behind one of them.
+	if err := o.handOffReady(ctx, ws, ended); err != nil {
+		log.Error(op, "could not hand the async merge requests of the turn to their merge workspaces; the merge request stays recorded for the next boot", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return
 	}
 	if err := o.queueRequest(ctx, ws, wait.repo); err != nil {
@@ -568,9 +623,6 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 			dlog.Context{"workspace": string(ws)})
 		return nil
 	}
-	// A DETACHED REQUEST IS HANDED TO ITS MERGE WORKSPACE HERE, at the moment
-	// it would have been put in line: the requesting turn has ended, so the
-	// fork holds that whole turn.
 	entry, found, err := o.requestOf(ctx, repo, ws)
 	if err != nil {
 		return err
@@ -580,9 +632,6 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 		o.log(ctx, ws).Error(op, "a merge to put in line has no recorded request", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "error": err.Error()})
 		return err
-	}
-	if entry.Source.Detach != "" {
-		return o.handOffDetached(ctx, ws, repo, entry.Source)
 	}
 	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
 	// minted as the merge takes its place, and written on its row with that
@@ -622,9 +671,10 @@ func (o *orchestrator) requestOf(ctx context.Context, repo wsm.RepoKey, ws ids.W
 	return wsm.MergeQueueEntry{}, false, nil
 }
 
-// handOffDetached runs a detached request: it forks the merge workspace (or
-// finds the one a restart left forked) under the name the request reserved,
-// moves the request onto it durably, and then either begins its pick or puts
+// handOffDetached runs an async request once its requesting turn has ended
+// (handOffReady), so the fork holds that whole turn: it forks the merge
+// workspace (or finds the one a restart left forked) under the name the
+// request reserved, moves the request onto it durably, and then either begins its pick or puts
 // its own in-place merge in line. From there the merge is an ordinary merge
 // of the merge workspace, whose bubble is drawn in the requester's feed
 // (bubbleOf).
@@ -680,7 +730,6 @@ func (o *orchestrator) handOffDetached(ctx context.Context, requester ids.Worksp
 		return err
 	}
 	o.mu.Lock()
-	delete(o.repoOf, requester)
 	o.repoOf[forked.ID] = repo
 	o.mu.Unlock()
 	log.Info(op, "handed a detached merge to its merge workspace", fields)
@@ -717,18 +766,16 @@ func (o *orchestrator) detachedLanding(ctx context.Context, requester wsm.Worksp
 	return main, primary, nil
 }
 
-// dropDetached ends a detached request that could not be handed off: it leaves
-// the requester's queue, and the requester is told it did not run.
+// dropDetached ends a detached request that could not be handed off: its
+// record goes, the merges placed behind it are settled, and the requester is
+// told it did not run.
 func (o *orchestrator) dropDetached(ctx context.Context, requester ids.WorkspaceID, repo wsm.RepoKey, source wsm.MergeSource, summary string) error {
 	const op = "daemon.merge.detached"
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, requester, causeDetachedForkFailed, nil); err != nil {
+	if err := o.deps.DB.DropAsyncMergeRequest(ctx, repo, source.Detach, causeDetachedForkFailed); err != nil {
 		o.log(ctx, requester).Error(op, "could not drop the detached request that could not be handed off", dlog.Context{
-			"workspace": string(requester), "repo": string(repo), "error": err.Error()})
+			"workspace": string(requester), "repo": string(repo), "request": string(source.Detach), "error": err.Error()})
 		return err
 	}
-	o.mu.Lock()
-	delete(o.repoOf, requester)
-	o.mu.Unlock()
 	// A MERGE NEVER FORKED HAS ENDED WITHOUT LANDING: there is no merge
 	// workspace whose terminal would raise its resolved banner (ended), so it
 	// is raised here, after the requester is told (tellThenRaise).
@@ -756,7 +803,8 @@ func (o *orchestrator) publishOneShot(ctx context.Context, log dlog.Logger, ws i
 
 // placeBehind resolves the merge REQ is placed behind, by the name the queue
 // lists it under, to its queue workspace. It must stand in the requester's
-// queue, waiting or running.
+// queue, waiting or running, or be an async request the requester made and
+// has not handed off yet, which resolves to the request's identity.
 func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, req Request) (wsm.WorkspaceID, error) {
 	repo, err := o.repoKeyFor(ctx, record.Dir)
 	if err != nil {
@@ -772,6 +820,20 @@ func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, re
 			return member.Workspace, nil
 		}
 		names = append(names, member.Name)
+	}
+	// A REQUEST OF THE SAME REQUESTER NOT YET HANDED OFF is a place too: it
+	// is handed off first (handOffReady, then waitThenQueue), so it stands in
+	// line when this merge is placed, and the hand-off points the wait at its
+	// merge workspace (wsm.HandOffDetachedMerge).
+	pending, err := o.deps.DB.AsyncMergeRequestsOf(ctx, req.Workspace)
+	if err != nil {
+		return "", err
+	}
+	for _, request := range pending {
+		if request.Repo == repo && request.Source.DetachName == req.PlaceBehind {
+			return wsm.WorkspaceID(request.Source.Detach), nil
+		}
+		names = append(names, request.Source.DetachName)
 	}
 	refusal := refuse(ArmPlacementBehindNotInLine, req.Workspace, "no merge named %q stands in the queue to be placed behind (in line: %s)", req.PlaceBehind, strings.Join(names, ", "))
 	refusal.Fields = map[string]any{"behind": req.PlaceBehind}

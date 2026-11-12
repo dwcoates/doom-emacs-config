@@ -213,17 +213,17 @@ func refuseOpenChildren(ctx context.Context, q familyQuerier, id WorkspaceID) er
 }
 
 // closingSQL is the SQL spelling of MergeSource.Closes over every merge in
-// the queue, in any state: whether one of them closes the workspace once it
+// the queue, in any state, and every async request not yet handed off
+// (async_merge_requests): whether one of them closes the workspace once it
 // lands. Its placeholders are, in order: the workspace, the own-branch kind,
 // the merged-upstream kind, the workspace kind, the workspace, the own-branch
 // kind, the workspace, the workspace (closingArgs).
 // TestClosingSQLAgreesWithMergeSourceCloses holds the two spellings together.
 const closingSQL = `SELECT EXISTS (SELECT 1 FROM merge_queue q LEFT JOIN workspaces r ON r.id = q.workspace_id WHERE
-	(q.source_detach_id IS NULL AND (
 		(q.workspace_id = ? AND q.source_kind = ? AND q.source_keep_open = 0)
 		OR (q.source_kind = ? AND q.source_workspace = ?)
-		OR (q.source_kind = ? AND r.merge_close_on_landing = ?)))
-	OR (q.source_detach_id IS NOT NULL AND q.source_close_on_landing = ?))`
+		OR (q.source_kind = ? AND r.merge_close_on_landing = ?))
+	OR EXISTS (SELECT 1 FROM async_merge_requests a WHERE a.close_on_landing = ?)`
 
 // closingArgs binds closingSQL for workspace ID.
 func closingArgs(id WorkspaceID) []any {

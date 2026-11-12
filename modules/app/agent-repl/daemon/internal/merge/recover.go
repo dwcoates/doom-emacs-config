@@ -78,6 +78,15 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 			}
 		}
 	}
+	// THE ASYNC REQUESTS STILL WAITING FOR THEIR TURN'S END are re-armed:
+	// each requester's are handed off once its turn in flight -- if one
+	// survived the restart -- has ended, oldest first.
+	requests, err := o.deps.DB.AllAsyncMergeRequests(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the async merge requests to re-arm", dlog.Context{"error": err.Error()})
+		return err
+	}
+	o.rearmAsyncRequests(requests, nil)
 	for _, repo := range repos {
 		if err := o.republishQueue(ctx, repo); err != nil {
 			return err

@@ -120,7 +120,7 @@ func TestAnAsyncRequestIsAdmittedWhoeverOwnsItsBranch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Enqueue = %v, want the request admitted", err)
 			}
-			entry, ok := h.entryOf(theWorkspace)
+			entry, ok := h.asyncRequestOf(theWorkspace)
 			if !ok {
 				t.Fatal("the admitted async request was not recorded")
 			}
@@ -150,7 +150,7 @@ func TestAnAsyncRequestFromAWorkspaceTheDaemonNeverCreatedIsAccepted(t *testing.
 	if err != nil {
 		t.Fatalf("Enqueue = %v, want the async request accepted", err)
 	}
-	if _, ok := h.entryOf(theWorkspace); !ok {
+	if _, ok := h.asyncRequestOf(theWorkspace); !ok {
 		t.Fatal("the async request was not recorded")
 	}
 }
@@ -172,7 +172,7 @@ func TestAnAsyncRequestRecordsItsLandingEffects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	entry, ok := h.entryOf(theWorkspace)
+	entry, ok := h.asyncRequestOf(theWorkspace)
 	if !ok {
 		t.Fatal("the async request was not recorded")
 	}

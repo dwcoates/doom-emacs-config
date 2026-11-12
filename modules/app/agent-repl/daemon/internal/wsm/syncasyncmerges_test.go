@@ -65,18 +65,15 @@ func TestTheMigrationNamesAnAsyncRequestAnEarlierBuildRecorded(t *testing.T) {
 		t.Fatalf("re-Open: %v", err)
 	}
 	defer handle.Close()
-	queues, err := handle.AllMergeQueues(context.Background())
-	var queue []MergeQueueEntry
-	for _, entries := range queues {
-		queue = append(queue, entries...)
-	}
+	requests, err := handle.AllAsyncMergeRequests(context.Background())
 
-	// Assert
-	if err != nil || len(queue) != 1 {
-		t.Fatalf("AllMergeQueues = %+v, %v", queues, err)
+	// Assert: the request, moved off its requester's queue row by layout 128,
+	// carries the name the earlier build forked under.
+	if err != nil || len(requests) != 1 {
+		t.Fatalf("AllAsyncMergeRequests = %+v, %v", requests, err)
 	}
-	if queue[0].Source.DetachName != "feature-merge" {
-		t.Fatalf("DetachName = %q, want the name the earlier build forked under", queue[0].Source.DetachName)
+	if requests[0].Source.DetachName != "feature-merge" {
+		t.Fatalf("DetachName = %q, want the name the earlier build forked under", requests[0].Source.DetachName)
 	}
 }
 

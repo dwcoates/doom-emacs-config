@@ -85,6 +85,13 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		s.log.Error(op, "refused a merge request whose source contradicts itself", withError(fields, err))
 		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
 	}
+	// AN ASYNC REQUEST IS NEVER A QUEUE ROW: it is recorded on its own
+	// (RequestAsyncMerge), so every merge_queue row is a workspace's own merge.
+	if source.Detach != "" {
+		err := fmt.Errorf("an async merge request (detach %q) is recorded by RequestAsyncMerge, never on the requester's queue row", source.Detach)
+		s.log.Error(op, "refused to record an async merge request on the requester's queue row", withError(fields, err))
+		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
+	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		var (
 			seq   int64
@@ -900,11 +907,25 @@ func settleWaitsOn(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 	if cause == "" {
 		return 0, fmt.Errorf("wsm: the merge of workspace %s in repo %q left its queue with no cause to settle the merges behind it by", id, key)
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`, cause, key, id)
-	if err != nil {
-		return 0, err
+	// A REQUEST NOT YET HANDED OFF waits too (async_merge_requests): it is
+	// settled in the same write, and carries the settlement onto its merge
+	// workspace at the hand-off.
+	var settled int64
+	for _, stmt := range []string{
+		`UPDATE merge_queue SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`,
+		`UPDATE async_merge_requests SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`,
+	} {
+		res, err := tx.ExecContext(ctx, stmt, cause, key, id)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		settled += n
 	}
-	return res.RowsAffected()
+	return settled, nil
 }
 
 // logSettledWaits records the waits a committed removal settled, if any.

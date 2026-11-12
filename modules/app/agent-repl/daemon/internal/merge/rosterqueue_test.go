@@ -521,13 +521,6 @@ func TestTheRosterLineCreditsAndNamesEachMergeAsTheRosterDoes(t *testing.T) {
 			wantAsync:     true,
 			wantAsyncName: "land-requester",
 		},
-		{
-			name:          "a detached request not yet handed off is credited to its own workspace and named by its reserved name",
-			entry:         wsm.MergeQueueEntry{Workspace: "ws-own", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Detach: "req-1", DetachName: "land-own"}},
-			wantCredited:  "ws-own",
-			wantAsync:     true,
-			wantAsyncName: "land-own",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

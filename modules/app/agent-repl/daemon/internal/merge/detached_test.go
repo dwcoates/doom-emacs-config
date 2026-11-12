@@ -40,6 +40,9 @@ type fakeDetached struct {
 	// claimsAtFork is how many name claims still stood, unreleased, when
 	// each fork ran.
 	claimsAtFork []int
+	// byName forks each merge workspace under an identity of its own,
+	// "ws-merge-<name>", rather than the harness's one theMergeWorkspace.
+	byName bool
 }
 
 // handback is one HandBack the fake was handed.
@@ -58,12 +61,20 @@ func (d *fakeDetached) Fork(_ context.Context, requester wsm.Workspace, origin w
 	d.forks = append(d.forks, fmt.Sprintf("%s:%s:%s", requester.ID, name, base))
 	d.origins = append(d.origins, origin)
 	err := d.forkErr
+	byName := d.byName
 	d.mu.Unlock()
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
+	if byName {
+		return d.h.registerMergeWorkspaceAs(origin, base, mergeWorkspaceNamed(name), name), nil
+	}
 	return d.h.registerMergeWorkspaceFor(origin, base), nil
 }
+
+// mergeWorkspaceNamed is the identity a byName fork gives the merge workspace
+// named NAME.
+func mergeWorkspaceNamed(name string) ids.WorkspaceID { return ids.WorkspaceID("ws-merge-" + name) }
 
 func (d *fakeDetached) Reveal(_ context.Context, mergeWS ids.WorkspaceID) (bool, error) {
 	d.mu.Lock()
@@ -116,54 +127,72 @@ func (h *harness) registerMergeWorkspace(requester ids.WorkspaceID, request wsm.
 // registerMergeWorkspaceFor registers the merge workspace forked for origin,
 // cut from branch, in the harness's one repository.
 func (h *harness) registerMergeWorkspaceFor(origin wsm.MergeOrigin, branch string) wsm.Workspace {
+	return h.registerMergeWorkspaceAs(origin, branch, theMergeWorkspace, "feature-merge")
+}
+
+// registerMergeWorkspaceAs registers the merge workspace ID named NAME,
+// forked for origin and cut from branch, in the harness's one repository.
+func (h *harness) registerMergeWorkspaceAs(origin wsm.MergeOrigin, branch string, id ids.WorkspaceID, name string) wsm.Workspace {
 	dir := h.t.TempDir()
 	requester := origin.Requester
 	// THE REAL FORK RECORDS THE COMMIT IT CUT the merge workspace at.
 	if origin.ForkHead == "" {
 		origin.ForkHead = "f0rkhead"
 	}
-	ws := wsm.Workspace{ID: theMergeWorkspace, Name: "feature-merge", Dir: dir, Branch: "feature-merge", Repo: theRepository,
+	ws := wsm.Workspace{ID: id, Name: name, Dir: dir, Branch: name, Repo: theRepository,
 		Parent: &requester, MergeOf: &origin}
 	h.db.mu.Lock()
 	h.db.workspaces[ws.ID] = ws
 	h.db.jobs[ws.ID] = wsm.CreationJob{Workspace: ws.ID, BaseRef: branch, Layout: wsm.MergeLayout{
-		SourceBranch: "feature-merge", SourceDir: dir, TargetDir: h.targetD, Origin: "create"}}
+		SourceBranch: name, SourceDir: dir, TargetDir: h.targetD, Origin: "create"}}
 	h.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
 	h.db.mu.Unlock()
 	h.git.mu.Lock()
-	h.git.branches[dir] = "feature-merge"
+	h.git.branches[dir] = name
 	h.git.commonDirs[dir] = string(h.repoKey())
 	h.git.mu.Unlock()
 	return ws
 }
 
-// HandOffDetachedMerge stands for the durable hand-off: the requester's
-// detached request is replaced by the merge workspace's own, still requested.
+// HandOffDetachedMerge stands for the durable hand-off: the async request is
+// replaced by the merge workspace's own request, still requested, and every
+// merge or request placed behind the request now waits on the merge workspace.
 func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, requester ids.WorkspaceID, request wsm.DetachedMergeID, mergeWS ids.WorkspaceID, branch, pick string, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for i, entry := range f.queues[repo] {
-		if entry.Workspace != requester {
-			continue
-		}
-		if entry.State != wsm.MergeRequested || entry.Source.Detach != request {
-			return fmt.Errorf("the merge of %s is not the requested detached merge %s", requester, request)
-		}
-		f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
-		f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
-			Repo: repo, Workspace: mergeWS, State: wsm.MergeRequested,
-			Source:  wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch, Pick: pick, Behind: entry.Source.Behind}, EnqueuedAt: at,
-			WaitsOn: entry.WaitsOn, WaitsOnName: entry.WaitsOnName, WaitsOnLeft: entry.WaitsOnLeft,
-		})
-		for j, waiting := range f.queues[repo] {
-			if waiting.WaitsOn == requester {
-				f.queues[repo][j].WaitsOn = mergeWS
-			}
-		}
-		f.renumber(repo)
-		return nil
+	i := f.asyncRequestIndexLocked(request)
+	if i < 0 {
+		return fmt.Errorf("no async request %s: %w", request, wsm.ErrNotFound)
 	}
-	return fmt.Errorf("no queue entry for %s: %w", requester, wsm.ErrNotFound)
+	req := f.asyncRequests[i]
+	if req.Requester != requester {
+		return fmt.Errorf("the async request %s is %s's, not %s's", request, req.Requester, requester)
+	}
+	f.asyncRequests = append(f.asyncRequests[:i], f.asyncRequests[i+1:]...)
+	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
+		Repo: repo, Workspace: mergeWS, State: wsm.MergeRequested,
+		Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch, Pick: pick, Front: req.Source.Front, Behind: req.Source.Behind, BehindName: req.Source.BehindName, Version: req.Source.Version}, EnqueuedAt: at,
+		WaitsOn: req.WaitsOn, WaitsOnName: req.WaitsOnName, WaitsOnLeft: req.WaitsOnLeft,
+	})
+	was := ids.WorkspaceID(request)
+	for j, waiting := range f.queues[repo] {
+		if waiting.WaitsOn == was {
+			f.queues[repo][j].WaitsOn = mergeWS
+		}
+		if waiting.Source.Behind == was {
+			f.queues[repo][j].Source.Behind = mergeWS
+		}
+	}
+	for j, waiting := range f.asyncRequests {
+		if waiting.WaitsOn == was {
+			f.asyncRequests[j].WaitsOn = mergeWS
+		}
+		if waiting.Source.Behind == was {
+			f.asyncRequests[j].Source.Behind = mergeWS
+		}
+	}
+	f.renumber(repo)
+	return nil
 }
 
 // requestDetached asks for the harness workspace's own branch to be merged
@@ -225,9 +254,9 @@ func TestAnAsyncRequestMintsItsOwnIdentityAndCarriesItsName(t *testing.T) {
 	}
 
 	// Assert
-	entry, ok := h.entryOf(theWorkspace)
-	if !ok || entry.Source.Detach == "" || entry.Source.DetachName != "reconnect-fix" || entry.State != wsm.MergeRequested {
-		t.Fatalf("entry = %+v, %v; want a requested async request with its identity and its name", entry, ok)
+	entry, ok := h.asyncRequestOf(theWorkspace)
+	if !ok || entry.Source.Detach == "" || entry.Source.DetachName != "reconnect-fix" || entry.Turn != "turn-asking" {
+		t.Fatalf("request = %+v, %v; want an async request with its identity, its name and the turn that asked", entry, ok)
 	}
 }
 
@@ -395,7 +424,7 @@ func TestAnAsyncRequestThatCompactsAfterRecordsTheAskOnItsEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	entry, ok := h.entryOf(theWorkspace)
+	entry, ok := h.asyncRequestOf(theWorkspace)
 	if !ok || !entry.Source.CompactAfter || entry.Source.Detach == "" {
 		t.Fatalf("entry = %+v, %v; want a detached request that compacts after it lands", entry, ok)
 	}
@@ -1123,7 +1152,7 @@ func TestAnAsyncRequestRecordsItsDeployHooksOnItsEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	if entry, ok := h.entryOf(theWorkspace); !ok || !entry.Source.Hooks.Equal(actions) {
+	if entry, ok := h.asyncRequestOf(theWorkspace); !ok || !entry.Source.Hooks.Equal(actions) {
 		t.Fatalf("entry = %+v, %v; want the request's hooks recorded", entry, ok)
 	}
 }
@@ -1139,7 +1168,7 @@ func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(
 	if err := requestDetached(t, h, RequestedByAgent); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	entry, ok := h.entryOf(theWorkspace)
+	entry, ok := h.asyncRequestOf(theWorkspace)
 	if !ok {
 		t.Fatal("the request was not recorded")
 	}
@@ -1155,8 +1184,8 @@ func TestAHandOffWhoseLandingCannotBeDecidedDropsTheRequestAndTellsTheRequester(
 	if len(h.detached.forks) != 0 {
 		t.Fatalf("forks = %v, want none", h.detached.forks)
 	}
-	if _, ok := h.entryOf(theWorkspace); ok {
-		t.Fatal("a request whose landing could not be decided still stands in the queue")
+	if _, ok := h.asyncRequestOf(theWorkspace); ok {
+		t.Fatal("a request whose landing could not be decided still stands")
 	}
 	if sent := h.detached.sent(); len(sent) != 1 || sent[0].outcome.Kind != DetachedAbandoned {
 		t.Fatalf("handbacks = %+v, want one abandoned handback", sent)

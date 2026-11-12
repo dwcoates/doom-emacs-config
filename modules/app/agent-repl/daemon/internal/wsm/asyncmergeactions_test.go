@@ -33,7 +33,7 @@ func detachedSource(hooks DeployHooks) MergeSource {
 	return MergeSource{Kind: MergeSourceBranch, Branch: "feature", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "sample-merge", Hooks: hooks}
 }
 
-func TestAnAsyncRequestKeepsItsDeployHooksInTheQueue(t *testing.T) {
+func TestAnAsyncRequestKeepsItsDeployHooks(t *testing.T) {
 	tests := []struct {
 		name  string
 		hooks DeployHooks
@@ -51,12 +51,12 @@ func TestAnAsyncRequestKeepsItsDeployHooksInTheQueue(t *testing.T) {
 			repo := RepoKey(t.TempDir())
 
 			// Act
-			err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(tt.hooks), time.Unix(100, 0))
-			queue, readErr := s.MergeQueue(context.Background(), repo)
+			err := s.RequestAsyncMerge(context.Background(), repo, ws.ID, "", detachedSource(tt.hooks), time.Unix(100, 0))
+			queue, readErr := s.AsyncMergeRequestsOf(context.Background(), ws.ID)
 
 			// Assert
 			if err != nil || readErr != nil || len(queue) != 1 {
-				t.Fatalf("RequestMerge = %v, MergeQueue = %+v, %v; want one request", err, queue, readErr)
+				t.Fatalf("RequestAsyncMerge = %v, AsyncMergeRequestsOf = %+v, %v; want one request", err, queue, readErr)
 			}
 			if got := queue[0].Source.Hooks; !got.Equal(tt.hooks) {
 				t.Fatalf("Hooks = %+v, want %+v", got, tt.hooks)
@@ -74,8 +74,8 @@ func TestAnAsyncRequestsDeployHooksSurviveARestartBeforeItsHandOff(t *testing.T)
 	}
 	ws := testWorkspace(t, first.(*store))
 	repo := RepoKey(t.TempDir())
-	if err := first.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someHooks), time.Unix(100, 0)); err != nil {
-		t.Fatalf("RequestMerge: %v", err)
+	if err := first.RequestAsyncMerge(context.Background(), repo, ws.ID, "", detachedSource(someHooks), time.Unix(100, 0)); err != nil {
+		t.Fatalf("RequestAsyncMerge: %v", err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -87,11 +87,11 @@ func TestAnAsyncRequestsDeployHooksSurviveARestartBeforeItsHandOff(t *testing.T)
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { second.Close() })
-	queue, err := second.MergeQueue(context.Background(), repo)
+	queue, err := second.AsyncMergeRequestsOf(context.Background(), ws.ID)
 
 	// Assert
 	if err != nil || len(queue) != 1 {
-		t.Fatalf("MergeQueue = %+v, %v; want the one request", queue, err)
+		t.Fatalf("AsyncMergeRequestsOf = %+v, %v; want the one request", queue, err)
 	}
 	if got := queue[0].Source.Hooks; !got.Equal(someHooks) {
 		t.Fatalf("Hooks after the restart = %+v, want %+v", got, someHooks)
@@ -123,8 +123,8 @@ func TestAStoredDeployHookListThatIsNotAListIsRefused(t *testing.T) {
 		name   string
 		column string
 	}{
-		{name: "the pre-deploy hooks", column: "source_pre_deploy_hooks"},
-		{name: "the post-deploy hooks", column: "source_post_deploy_hooks"},
+		{name: "the pre-deploy hooks", column: "pre_deploy_hooks"},
+		{name: "the post-deploy hooks", column: "post_deploy_hooks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,18 +132,18 @@ func TestAStoredDeployHookListThatIsNotAListIsRefused(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			repo := RepoKey(t.TempDir())
-			if err := s.RequestMerge(context.Background(), repo, ws.ID, detachedSource(someHooks), time.Unix(100, 0)); err != nil {
-				t.Fatalf("RequestMerge: %v", err)
+			if err := s.RequestAsyncMerge(context.Background(), repo, ws.ID, "", detachedSource(someHooks), time.Unix(100, 0)); err != nil {
+				t.Fatalf("RequestAsyncMerge: %v", err)
 			}
-			corrupt(t, s, `UPDATE merge_queue SET `+tt.column+` = 'not json' WHERE workspace_id = ?`, ws.ID)
+			corrupt(t, s, `UPDATE async_merge_requests SET `+tt.column+` = 'not json' WHERE requester_id = ?`, ws.ID)
 
 			// Act
-			_, err := s.MergeQueue(context.Background(), repo)
+			_, err := s.AsyncMergeRequestsOf(context.Background(), ws.ID)
 
 			// Assert
 			var decode *DecodeError
-			if !errors.As(err, &decode) || decode.Table != "merge_queue" || decode.Field != tt.column {
-				t.Fatalf("MergeQueue = %v, want a %s decode error", err, tt.column)
+			if !errors.As(err, &decode) || decode.Table != "async_merge_requests" || decode.Field != tt.column {
+				t.Fatalf("AsyncMergeRequestsOf = %v, want a %s decode error", err, tt.column)
 			}
 		})
 	}
@@ -155,9 +155,7 @@ func TestHandOffDetachedMergeLeavesTheMergeWorkspacesRequestWithoutHooks(t *test
 	requester := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
 	source := detachedSource(someHooks)
-	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
-		t.Fatalf("RequestMerge: %v", err)
-	}
+	asyncRequest(t, s, repo, requester.ID, source)
 	forked := registerMergeWorkspace(t, s, requester.ID, source.Detach)
 
 	// Act

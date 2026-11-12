@@ -287,11 +287,19 @@ func TestAUsersFinishWithFinishHooksWaitsForThem(t *testing.T) {
 }
 
 func TestAnAsyncMergeRunsNoFinishStage(t *testing.T) {
-	// Arrange: the requester's kind has finish hooks, which its async merge
-	// never runs.
+	// Arrange: the repository's kind has finish hooks, which an async merge --
+	// its merge workspace's own merge -- never runs.
 	h := newHarness(t)
 	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
-	ft, err := h.o.finishTargetOf(t.Context(), theWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceBranch, Branch: asyncBranch, Detach: "detach-1"})
+	h.register(theMergeWorkspace, "reconnect-fix")
+	h.db.mu.Lock()
+	merge := h.db.workspaces[theMergeWorkspace]
+	merge.MergeOf = &wsm.MergeOrigin{Requester: theWorkspace}
+	h.db.workspaces[theMergeWorkspace] = merge
+	h.db.mu.Unlock()
+
+	// Act
+	ft, err := h.o.finishTargetOf(t.Context(), theMergeWorkspace, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch})
 
 	// Assert
 	if err != nil || len(ft.hooks) != 0 {

@@ -145,6 +145,12 @@ type orchestrator struct {
 	runsByWorkspace map[ids.WorkspaceID]*run
 	// requested are the requests waiting for their requesting turn to end.
 	requested map[ids.WorkspaceID]*requestWait
+	// asyncWaits are the requesters' waits to hand off their async requests
+	// (asyncrequests.go), one per requester.
+	asyncWaits map[ids.WorkspaceID]*asyncWait
+	// handOffLocks serialize each requester's hand-offs, so its async
+	// requests join the line in the order they were asked for.
+	handOffLocks map[ids.WorkspaceID]*sync.Mutex
 	// requestingTurns is the turn in flight when each workspace's merge was
 	// asked for, until TakeRequestingTurn is asked about it.
 	requestingTurns map[ids.WorkspaceID]ids.TurnID
@@ -328,6 +334,8 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
+		asyncWaits:         map[ids.WorkspaceID]*asyncWait{},
+		handOffLocks:       map[ids.WorkspaceID]*sync.Mutex{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
 		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),

@@ -540,22 +540,18 @@ func memberOf(entry wsm.MergeQueueEntry, record wsm.Workspace) QueueMember {
 		Started:   entry.State != wsm.MergeQueued,
 		Front:     entry.Source.Front,
 	}
-	switch {
-	case record.MergeOf != nil:
+	if record.MergeOf != nil {
 		member.Requester = record.MergeOf.Requester
-	case entry.Source.Detach != "":
-		member.Requester = entry.Workspace
 	}
 	return member
 }
 
 // modeOf names how a merge in line was asked for: async when it runs in a
-// merge workspace (or is a detached request still on its requester), a
-// one-shot when it lands the workspace's own branch and closes it, and in
-// place otherwise.
+// merge workspace, a one-shot when it lands the workspace's own branch and
+// closes it, and in place otherwise.
 func modeOf(source wsm.MergeSource, record wsm.Workspace) MergeMode {
 	switch {
-	case record.MergeOf != nil || source.Detach != "":
+	case record.MergeOf != nil:
 		return MergeModeAsync
 	case source.Kind.ClosesRequester() && !source.KeepOpen:
 		return MergeModeOneShot

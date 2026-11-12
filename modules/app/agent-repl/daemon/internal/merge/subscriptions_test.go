@@ -525,7 +525,6 @@ func TestModeOfNamesHowAMergeWasAskedFor(t *testing.T) {
 	}{
 		{name: "a merge workspace's merge is async", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
 			record: wsm.Workspace{MergeOf: &wsm.MergeOrigin{}}, want: MergeModeAsync},
-		{name: "a detached request is async", source: wsm.MergeSource{Kind: wsm.MergeSourceBranch, Detach: "request-1"}, want: MergeModeAsync},
 		{name: "an own branch closing its workspace is a one-shot", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, want: MergeModeOneShot},
 		{name: "an own branch kept open is in place", source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, want: MergeModeInPlace},
 		{name: "another workspace's branch is in place", source: wsm.MergeSource{Kind: wsm.MergeSourceWorkspace}, want: MergeModeInPlace},

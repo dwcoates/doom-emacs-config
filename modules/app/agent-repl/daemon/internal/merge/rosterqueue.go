@@ -26,11 +26,11 @@ import (
 // beside its merge indicator (owner ruling, 2026-10-14).
 //
 // THE MERGE QUEUE IS THE ONE TRUTH. An async merge is in flight exactly while
-// a row of its repository's queue carries it: the requester's own row from the
-// moment the request is recorded (its source is detached), then the merge
-// workspace's row once the request is handed off to it (the workspace's
-// MergeOf names the requester), until that row leaves the queue -- landed,
-// failed, dropped or taken off. The queue is read whole and replaces the
+// its repository's queue carries it: as an async request from the moment the
+// request is recorded (wsm.AsyncMergeRequest), then as the merge workspace's
+// row once the request is handed off to it (the workspace's MergeOf names the
+// requester), until that row leaves the queue -- landed, failed, dropped or
+// taken off. The queue is read whole and replaces the
 // roster's whole, so no merge or pause can linger in it after the queue
 // stopped saying so.
 //
@@ -61,6 +61,18 @@ func (d rosterQueueDB) RequestMerge(ctx context.Context, repo wsm.RepoKey, id ws
 // repository's queue.
 func (d rosterQueueDB) RequestOneShotMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, source wsm.MergeSource, at time.Time) error {
 	return d.republished(ctx, repo, d.DB.RequestOneShotMerge(ctx, repo, id, source, at))
+}
+
+// RequestAsyncMerge records an async request and republishes its
+// repository's queue.
+func (d rosterQueueDB) RequestAsyncMerge(ctx context.Context, repo wsm.RepoKey, requester wsm.WorkspaceID, turn wsm.TurnID, source wsm.MergeSource, at time.Time) error {
+	return d.republished(ctx, repo, d.DB.RequestAsyncMerge(ctx, repo, requester, turn, source, at))
+}
+
+// DropAsyncMergeRequest drops an async request and republishes its
+// repository's queue.
+func (d rosterQueueDB) DropAsyncMergeRequest(ctx context.Context, repo wsm.RepoKey, request wsm.DetachedMergeID, cause string) error {
+	return d.republished(ctx, repo, d.DB.DropAsyncMergeRequest(ctx, repo, request, cause))
 }
 
 // HandOffDetachedMerge moves a detached request onto its merge workspace and
@@ -164,7 +176,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	requesters, err := o.asyncRequesters(ctx, entries)
+	requesters, err := o.asyncRequesters(ctx, repo, entries)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not resolve the requester of a merge workspace on the queue, so the roster is not told the queue",
 			"the requesters' read ended when its context was cancelled; the roster is not told the queue",
@@ -196,10 +208,11 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 }
 
-// asyncRequesters answers, in queue order, the workspace whose own branch each
-// async merge on ENTRIES merges: a detached request's own workspace, and a
-// merge workspace's requester.
-func (o *orchestrator) asyncRequesters(ctx context.Context, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
+// asyncRequesters answers the workspace whose own branch each async merge on
+// REPO's queue merges: a merge workspace's requester for each of ENTRIES, in
+// queue order, then each async request's requester not yet handed off, in the
+// order they were asked for.
+func (o *orchestrator) asyncRequesters(ctx context.Context, repo wsm.RepoKey, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
 	var out []ids.WorkspaceID
 	for _, entry := range entries {
 		c, err := o.creditOf(ctx, entry)
@@ -208,6 +221,15 @@ func (o *orchestrator) asyncRequesters(ctx context.Context, entries []wsm.MergeQ
 		}
 		if c.async {
 			out = append(out, c.workspace)
+		}
+	}
+	requests, err := o.deps.DB.AllAsyncMergeRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, req := range requests {
+		if req.Repo == repo {
+			out = append(out, req.Requester)
 		}
 	}
 	return out, nil
@@ -225,16 +247,12 @@ type credit struct {
 }
 
 // creditOf answers how the roster credits the merge ENTRY stands for: a
-// detached request is credited to its own workspace and named by the name it
-// reserved for its merge workspace, a merge workspace is credited to its
-// requester and named by its own name, and every other merge is credited to
-// the workspace it runs in, under that workspace's name. It is the one place
+// merge workspace is credited to its requester and named by its own name, and
+// every other merge is credited to the workspace it runs in, under that
+// workspace's name. It is the one place
 // the roster's credit is decided, so the async-merging marker and the merge
 // queue view never disagree on who a merge is drawn as.
 func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) (credit, error) {
-	if entry.Source.Detach != "" {
-		return credit{workspace: entry.Workspace, async: true, asyncName: entry.Source.DetachName}, nil
-	}
 	record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
 	if err != nil {
 		return credit{}, err
