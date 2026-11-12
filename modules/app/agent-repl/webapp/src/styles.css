@@ -1073,7 +1073,8 @@ body {
    row's when-column. */
 #ws-sidebar .sb-mq-head,
 #ws-sidebar .sb-mq-waiting,
-#ws-sidebar .sb-mq-github {
+#ws-sidebar .sb-mq-github,
+#ws-sidebar .sb-mq-off-queue {
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
   cursor: pointer;
   min-width: 0;
@@ -1081,7 +1082,8 @@ body {
 #ws-sidebar .sb-mq-head { display: flex; flex-direction: column; gap: 0.15rem; }
 #ws-sidebar .sb-mq-head-line,
 #ws-sidebar .sb-mq-waiting,
-#ws-sidebar .sb-mq-github { display: flex; align-items: center; gap: 0.45rem; }
+#ws-sidebar .sb-mq-github,
+#ws-sidebar .sb-mq-off-queue { display: flex; align-items: center; gap: 0.45rem; }
 /* THE MERGE GLYPH'S WIDTH IS PINNED, so the names after it stand at one
    indent the queue's head name shares:
    the glyph's own width in the rail's font, measured in WebKit. */
@@ -1107,13 +1109,15 @@ body {
    waiting merge's name is the head's size (owner request, 2026-10-27). */
 #ws-sidebar .sb-mq-head .sb-mq-name,
 #ws-sidebar .sb-mq-waiting .sb-mq-name,
-#ws-sidebar .sb-mq-github .sb-mq-name { font-size: var(--mq-name-font-size); }
+#ws-sidebar .sb-mq-github .sb-mq-name,
+#ws-sidebar .sb-mq-off-queue .sb-mq-name { font-size: var(--mq-name-font-size); }
 /* A WAITING MERGE'S LINE AND A RECENTLY MERGED ROW START AT ONE INDENT
    (owner request, 2026-11-01): a merged row's name stands where a waiting
    merge's bullet does, so the two sections' lists read alike. */
 #ws-sidebar { --mq-list-indent: calc(0.9rem + var(--ws-mark-width) + 0.45rem); }
 #ws-sidebar .sb-mq-waiting,
-#ws-sidebar .sb-mq-github {
+#ws-sidebar .sb-mq-github,
+#ws-sidebar .sb-mq-off-queue {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
   line-height: var(--merged-row-line-h);
@@ -1595,7 +1599,21 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .sb-mq-head { --mq-below-text: 4.25px; }
 #ws-sidebar .sb-mq-head:has(> .sb-mq-head-line:last-child) { --mq-below-text: 7.75px; }
 #ws-sidebar .sb-mq-waiting,
-#ws-sidebar .sb-mq-github { --mq-below-text: 4.25px; }
+#ws-sidebar .sb-mq-github,
+#ws-sidebar .sb-mq-off-queue { --mq-below-text: 4.25px; }
+/* A MERGE OFF ITS QUEUE carries its two controls at the line's end: they
+   take the row's ink and brighten on hover, as no other queue line has
+   controls of its own. */
+#ws-sidebar .sb-mq-off-queue-control {
+  background: none;
+  border: none;
+  padding: 0 0.15rem;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#ws-sidebar .sb-mq-off-queue-control:first-of-type { margin-left: auto; }
+#ws-sidebar .sb-mq-off-queue-control:hover { color: var(--fg); }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));
 }
