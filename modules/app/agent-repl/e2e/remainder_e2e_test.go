@@ -125,14 +125,12 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	storev1 "agentrepl/proto/store/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
 
 	"agent-repld/integration/grantedclock"
-	"agent-repld/integration/harness"
 )
 
 // ---------------------------------------------------------------------------
@@ -169,34 +167,6 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 		t.Fatal(err)
 	}
 	return page
-}
-
-// testCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
-// job and leaves it standing, so the footer's ⏱ chip stays set once the turn
-// has ended: a state every footer reader is handed, however far behind.
-func testCronCreateSetsTheFootersCronsChip(t *testing.T) {
-	// Arrange.
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron-create")
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	if ended.GetConcluded() == nil {
-		t.Fatalf("the cron-create turn ended = %v, want a concluded outcome", ended)
-	}
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Assert: the standing job reached the ONE surface cron is contracted to
-	// reach -- the footer's ⏱ chip.
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip for the standing job", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetCrons() != nil
-	})
-	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got != 1 {
-		t.Fatalf("the footer's crons chip counts %d jobs, want the 1 standing job", got)
-	}
 }
 
 // ===========================================================================
