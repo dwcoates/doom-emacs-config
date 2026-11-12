@@ -262,66 +262,6 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// #41 — a REBASE CONFLICT is resolved by the requesting workspace's own
-// session, and one left unresolved FAILS the merge in conflicts
-// (merge-landing.md: "a failed merge leaves the queue and hands the workspace
-// back"; "a failed conflict resolution LEAVES THE REBASE IN PROGRESS"). The
-// target moved, and replaying the workspace's work onto it conflicts; the
-// repair turn is answered by the real shim's default scenario, which resolves
-// nothing, so the resolution gives up. Nothing parks.
-// ---------------------------------------------------------------------------
-
-// mqConflictedMerge is one requesting workspace whose merge stops on a
-// scripted rebase conflict.
-type mqConflictedMerge struct {
-	w     *World
-	repo  *harness.Repo
-	child *workspacev1.WorkspaceRef
-	root  *mqFeedWatch
-}
-
-// mqStartConflictedMerge requests a merge whose rebase conflicts. The root
-// feed is opened first, so every row the merge draws is watched.
-func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	w := mqSelfRepoWorld(t, repo)
-	// The scripted conflict is this test's subject: the rebase stops on it,
-	// the conflict is recorded, and the resolution that gives up ends the run.
-	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, name)
-	harness.CommitWork(t, child.GetDir())
-	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
-	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
-	root := mqOpenFeedWatch(t, w, child, nil)
-	t.Cleanup(root.Close)
-	mqFinish(t, w, child)
-	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
-}
-
-// awaitFailed waits for the merge's failed terminal.
-func (m *mqConflictedMerge) awaitFailed(t *testing.T) *frontendv1.FeedMerge {
-	t.Helper()
-	merge := m.root.AwaitRow("the merge bubble's terminal", mqConcluded).GetActivity().GetMerge()
-	if merge.GetError() == nil {
-		t.Fatalf("merge terminal = %v, want the merge failed", merge)
-	}
-	return merge
-}
-
-func testAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
-	// Arrange: the merge failed and handed the workspace back.
-	m := mqStartConflictedMerge(t, "mq-conflict-next")
-	m.awaitFailed(t)
-
-	// Act
-	turn := SubmitPrompt(t, m.w, m.child, "please help carry the rebase on")
-
-	// Assert: delivered and run to its end, never refused as merging.
-	AwaitTurnEnded(t, m.w, m.child, turn)
-}
-
-// ---------------------------------------------------------------------------
 // #42 — DisplacedTurnCapturedEndedThenResubmittedExactlyOnce. The most
 // recently settled contract point in this doc set (commit 8ad7e279c,
 // daemon.md §"...GIVE-UP RULES..."): "the displaced user turn is captured

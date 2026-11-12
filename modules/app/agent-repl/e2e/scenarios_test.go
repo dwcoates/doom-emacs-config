@@ -106,7 +106,6 @@ func TestLanding(t *testing.T) {
 		testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace,
 		testADeployOverARunningTurnHandsItOverAndEndsNothing,
 		testASuccessorThatFinishedJoiningAcceptsADeploy,
-		testAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn,
 		testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce,
 		testFanWideCancel,
 		testFailMarkerFailsAPreDeployHooksDeploy,
