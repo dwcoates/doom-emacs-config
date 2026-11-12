@@ -213,8 +213,9 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 }
 
 // fold adds t to a suite's targets. A vitest or ERT file selected twice is
-// one target, because one file is one split group (suites.fileSplits): all of
-// it when either selection asks for all, otherwise every name either names.
+// one target, because a file is one item of its batch's split group
+// (suites.BatchFiles): all of it when either selection asks for all, otherwise
+// every name either names.
 func fold(targets []target, t target) []target {
 	if t.kind != kindVitest && t.kind != kindERT {
 		return append(targets, t)
@@ -536,8 +537,10 @@ func narrowItems(u suites.Units, t target) ([]suites.Split, error) {
 		if sp.Named == nil {
 			return nil, fmt.Errorf("%s: its suite cannot run single tests", t.what)
 		}
-		// ONE FILE IS ONE SPLIT (suites.fileSplits), so the split's own group
-		// already names the file; the reuse step reads the file off it.
+		// A FILE IS ONE ITEM OF ITS BATCH'S SPLIT (suites.BatchFiles): the
+		// split narrows to it under the batch's group, and two files of one
+		// batch fold into one group (mergeGroups). A narrowed run is Targeted,
+		// so it neither reuses nor records the batch.
 		return []suites.Split{withItems(sp, sp.Group, []string{t.where}, t.names)}, nil
 	}
 	return nil, fmt.Errorf("%s: its suite does not run it", t.what)

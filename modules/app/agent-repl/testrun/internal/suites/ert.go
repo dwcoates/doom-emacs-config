@@ -70,7 +70,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	splits := fileSplits(s.Name, s.Name, files, chunk, named)
+	splits := batchSplits(s.Name, s.Name, BatchFiles(files, ERTArea, neverReused(s), PooledArea), chunk, named)
 	for i := range splits {
 		splits[i].Deps = []string{build.ID}
 	}

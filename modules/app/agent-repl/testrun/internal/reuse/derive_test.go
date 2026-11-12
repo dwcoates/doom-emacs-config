@@ -260,12 +260,49 @@ func webFixture(t *testing.T, f fixture) roster.Suite {
 }
 
 func webUnits() suites.Units {
-	split := func(g string) suites.Split {
-		return suites.Split{Group: g, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
+	// Each file is a batch of its own, named by the file (suites.BatchFiles
+	// for files the roster never reuses), so each unit is one file's.
+	split := func(g, file string) suites.Split {
+		return suites.Split{Group: g, Items: []string{file}, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
 	}
 	return suites.Units{
 		Atomic: []run.Spec{spec("web:typecheck"), spec("web:integration-build")},
-		Splits: []suites.Split{split("web/test/a.test.ts"), split("web/test/b.test.ts"), split("web[integration]/test/integration/i.test.ts")},
+		Splits: []suites.Split{split("web/test/a.test.ts", "test/a.test.ts"), split("web/test/b.test.ts", "test/b.test.ts"),
+			split("web[integration]/test/integration/i.test.ts", "test/integration/i.test.ts")},
+	}
+}
+
+// webBatchUnits is webUnits with test/a.test.ts and test/b.test.ts in one
+// batch, "both".
+func webBatchUnits() suites.Units {
+	u := webUnits()
+	u.Splits = append([]suites.Split{{Group: "web/both", Items: []string{"test/a.test.ts", "test/b.test.ts"}, Chunk: u.Splits[0].Chunk}}, u.Splits[2:]...)
+	return u
+}
+
+func TestDeriveVitestKeysABatchOnEveryMembersGraph(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := webFixture(t, f)
+
+	// Act
+	su, err := Derive(f.d, s, webBatchUnits(), true)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	both, ok := unitsByName(su)["both"]
+	if !ok || !slices.Equal(both.Members, []string{"test/a.test.ts", "test/b.test.ts"}) {
+		t.Fatalf("units = %+v, want the batch both holding both files", su.Units)
+	}
+	for _, p := range []string{"test/a.test.ts", "src/a.ts", "test/b.test.ts", "src/b.ts", "vitest.config.ts"} {
+		if !both.Set.Contains(fixtureModule + "/web/" + p) {
+			t.Errorf("the batch's set does not place %s", p)
+		}
+	}
+	if !strings.Contains(both.Desc, `members=["test/a.test.ts" "test/b.test.ts"]`) {
+		t.Errorf("the batch's facts %q do not name its members", both.Desc)
 	}
 }
 
@@ -330,10 +367,13 @@ func TestDeriveVitestFailures(t *testing.T) {
 		want    string
 	}{
 		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("web:mystery")) }, "is no file's, typecheck's or build's"},
-		{"a group of no file", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "web" }, "is no file group of web"},
-		{"one file under two configs", func(_ fixture, u *suites.Units) {
-			u.Splits = append(u.Splits, suites.Split{Group: "web[integration]/test/a.test.ts"})
-		}, "runs test/a.test.ts under two configs"},
+		{"a group of no batch", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "web" }, "is no batch group of web"},
+		{"one file in two batches", func(_ fixture, u *suites.Units) {
+			u.Splits = append(u.Splits, suites.Split{Group: "web[integration]/again", Items: []string{"test/a.test.ts"}})
+		}, "runs test/a.test.ts in two batches"},
+		{"two splits cut into one batch", func(_ fixture, u *suites.Units) {
+			u.Splits = append(u.Splits, suites.Split{Group: "web[integration]/test/a.test.ts", Items: []string{"test/c.test.ts"}})
+		}, "cuts two splits into the batch test/a.test.ts"},
 		{"a setup file that is not there", func(f fixture, _ *suites.Units) {
 			write(t, f.d.Repo, fixtureModule+"/web/vitest.config.ts", `export default { test: { setupFiles: ["./test/gone.ts"] } }`)
 		}, "names the setup file"},
@@ -378,10 +418,36 @@ func lispFixture(t *testing.T, f fixture) roster.Suite {
 }
 
 func lispUnits() suites.Units {
-	split := func(g string) suites.Split {
-		return suites.Split{Group: g, Deps: []string{"ert:fakedaemon"}, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
+	// Each file is a batch of its own, named by the file.
+	split := func(g, file string) suites.Split {
+		return suites.Split{Group: g, Items: []string{file}, Deps: []string{"ert:fakedaemon"}, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
 	}
-	return suites.Units{Atomic: []run.Spec{spec("ert:fakedaemon")}, Splits: []suites.Split{split("ert/test-a.el"), split("ert/test-b.el")}}
+	return suites.Units{Atomic: []run.Spec{spec("ert:fakedaemon")}, Splits: []suites.Split{split("ert/test-a.el", "test-a.el"), split("ert/test-b.el", "test-b.el")}}
+}
+
+func TestDeriveERTKeysABatchOnWhatEveryMemberLoads(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := lispFixture(t, f)
+	u := lispUnits()
+	u.Splits = []suites.Split{{Group: "ert/pooled", Items: []string{"test-a.el", "test-b.el"}, Deps: []string{"ert:fakedaemon"}, Chunk: u.Splits[0].Chunk}}
+
+	// Act
+	su, err := Derive(f.d, s, u, true)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	pooled, ok := unitsByName(su)["pooled"]
+	if !ok || !slices.Equal(pooled.Members, []string{"test-a.el", "test-b.el"}) {
+		t.Fatalf("units = %+v, want the batch pooled holding both files", su.Units)
+	}
+	for _, p := range []string{"/lisp/test-a.el", "/lisp/a-fixtures.el", "/lisp/test-b.el"} {
+		if !pooled.Set.Contains(fixtureModule + p) {
+			t.Errorf("the batch's set does not place %s", p)
+		}
+	}
 }
 
 func TestDeriveERTKeysEachFileOnWhatItLoads(t *testing.T) {
@@ -421,7 +487,7 @@ func TestDeriveERTFailures(t *testing.T) {
 		want    string
 	}{
 		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("ert:mystery")) }, "is no file's or the fake daemon's build"},
-		{"a group of no file", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "ert" }, "is no file group of ert"},
+		{"a group of no batch", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "ert" }, "is no batch group of ert"},
 		{"a module config.el loads that is not there", func(f fixture, _ *suites.Units) {
 			write(t, f.d.Repo, fixtureModule+"/config.el", `(agent-repl--load-module "gone")`)
 		}, "loads the module gone"},
@@ -459,5 +525,32 @@ func TestTheEnvelopeHoldsEveryUnitsInputs(t *testing.T) {
 	}
 	if !su.Envelope.Contains(fixtureModule + "/config.el") {
 		t.Fatal("the envelope does not hold a unit's input")
+	}
+}
+
+func TestCheckDeclaredUnitsTakesAFileInsideABatchForAUnitOfTheSuite(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared string
+		wantErr  bool
+	}{
+		{name: "a member of a batch", declared: "test/a.test.ts"},
+		{name: "the batch itself", declared: "both"},
+		{name: "a file no batch holds", declared: "test/gone.test.ts", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := roster.Suite{Name: "web", Reuse: &roster.Reuse{Units: map[string][]string{tt.declared: {"x"}}}}
+			units := []Unit{{Suite: "web", Name: "both", Members: []string{"test/a.test.ts", "test/b.test.ts"}}}
+
+			// Act
+			err := checkDeclaredUnits(s, units)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkDeclaredUnits = %v, want an error %v", err, tt.wantErr)
+			}
+		})
 	}
 }
