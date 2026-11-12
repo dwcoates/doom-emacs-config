@@ -110,10 +110,11 @@ func (o *orchestrator) extendChain(ctx context.Context, repo wsm.RepoKey) {
 }
 
 // chainable reports whether ENTRY may start its concurrent stages behind its
-// queue's head: it waits in line, and is no merge workspace whose pick has yet
-// to succeed -- that pick runs at the head (admitFront).
+// queue's head: it waits in line, is no merge workspace whose pick has yet to
+// succeed -- that pick runs at the head (admitFront) -- and waits on no merge
+// ahead that still stands or left without landing (nextInLine).
 func chainable(entry wsm.MergeQueueEntry) bool {
-	return entry.State == wsm.MergeQueued && entry.Source.Pick == ""
+	return entry.State == wsm.MergeQueued && entry.Source.Pick == "" && !entry.HeldBehind() && !entry.AheadFailed()
 }
 
 // extendOnce makes at most one chain start, and reports whether it started a

@@ -101,8 +101,12 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 			behind  sql.NullString
 			verPart sql.NullInt64
 			verLine sql.NullString
+			// The request's wait, carried onto the merge workspace's row.
+			waitsOn   sql.NullString
+			waitsName sql.NullString
+			waitsLeft sql.NullString
 		)
-		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_behind, source_version_part, source_changelog_line FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &behind, &verPart, &verLine)
+		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_behind, source_version_part, source_changelog_line, waits_on, waits_on_name, waits_on_left FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &behind, &verPart, &verLine, &waitsOn, &waitsName, &waitsLeft)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s has no merge request: %w", request, requester, ErrNotFound)
@@ -127,7 +131,18 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE AND ITS
 		// VERSION INCREMENT: a detached merge asked for the front still goes
 		// to the front, and the version it asked for is applied where it lands.
-		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Behind: WorkspaceID(behind.String), Pick: pick, Version: version}, at)
+		if err := insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Behind: WorkspaceID(behind.String), Pick: pick, Version: version}, at); err != nil {
+			return err
+		}
+		// THE WAIT MOVES WITH THE REQUEST: the merge workspace waits on what
+		// the request waited on, settled or not, and every merge that waited
+		// on the request now waits on the merge workspace that carries it.
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on = ?, waits_on_name = ?, waits_on_left = ? WHERE repo_key = ? AND workspace_id = ?`,
+			waitsOn, waitsName, waitsLeft, key, mergeWS); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on = ? WHERE repo_key = ? AND waits_on = ?`, mergeWS, key, requester)
+		return err
 	})
 }
 

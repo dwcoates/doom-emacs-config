@@ -2569,3 +2569,202 @@ func TestAWaitingMergeCannotStepAsideForTheHeadsRepairs(t *testing.T) {
 		t.Fatalf("the refused merge = %s, want it still waiting", got)
 	}
 }
+
+// behindRequested requests a merge placed behind AHEAD by the name "ahead",
+// as the merge package records a behind placement.
+func behindRequested(t *testing.T, s *store, repo RepoKey, id, ahead WorkspaceID) {
+	t.Helper()
+	if err := s.RequestMerge(context.Background(), repo, id, MergeSource{Kind: MergeSourceOwnBranch, Behind: ahead, BehindName: "ahead"}, instant.Add(time.Minute)); err != nil {
+		t.Fatalf("RequestMerge(behind): %v", err)
+	}
+}
+
+// entryNamed answers ID's entry in REPO's queue.
+func entryNamed(t *testing.T, s *store, repo RepoKey, id WorkspaceID) MergeQueueEntry {
+	t.Helper()
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Workspace == id {
+			return entry
+		}
+	}
+	t.Fatalf("no entry for %s in %+v", id, entries)
+	return MergeQueueEntry{}
+}
+
+func TestARequestPlacedBehindAMergeWaitsOnItFromTheRequestOn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, ahead.ID, instant)
+
+	// Act
+	behindRequested(t, s, repo, ws.ID, ahead.ID)
+	requested := entryNamed(t, s, repo, ws.ID)
+	if _, err := s.QueueMerge(context.Background(), repo, ws.ID, NewLeaseID()); err != nil {
+		t.Fatalf("QueueMerge: %v", err)
+	}
+	placed := entryNamed(t, s, repo, ws.ID)
+
+	// Assert
+	for _, entry := range []MergeQueueEntry{requested, placed} {
+		if entry.WaitsOn != ahead.ID || entry.WaitsOnName != "ahead" || entry.WaitsOnLeft != "" || !entry.HeldBehind() {
+			t.Fatalf("entry = %+v, want it held behind %s", entry, ahead.ID)
+		}
+	}
+}
+
+func TestRemovingTheMergeAheadSettlesTheMergesWaitingOnIt(t *testing.T) {
+	tests := []struct {
+		name       string
+		cause      string
+		wantLeft   string
+		wantHeld   bool
+		wantFailed bool
+		wantLog    bool
+	}{
+		{name: "the merge ahead landed", cause: MergeLeftLanded, wantLeft: MergeLeftLanded, wantLog: true},
+		{name: "the merge ahead failed", cause: "failed", wantLeft: "failed", wantFailed: true, wantLog: true},
+		{name: "the merge ahead was evicted", cause: "evicted", wantLeft: "evicted", wantFailed: true, wantLog: true},
+		{name: "the merge ahead is put straight back", cause: MergeLeftToReturn, wantHeld: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, logs := testStore(t)
+			repo := RepoKey(t.TempDir())
+			ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+			queued(t, s, repo, ahead.ID, instant)
+			behindRequested(t, s, repo, ws.ID, ahead.ID)
+
+			// Act
+			err := s.RemoveMergeQueueEntry(context.Background(), repo, ahead.ID, tt.cause, nil)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RemoveMergeQueueEntry: %v", err)
+			}
+			entry := entryNamed(t, s, repo, ws.ID)
+			if entry.WaitsOnLeft != tt.wantLeft || entry.HeldBehind() != tt.wantHeld || entry.AheadFailed() != tt.wantFailed {
+				t.Fatalf("entry = %+v; want left %q, held %v, failed %v", entry, tt.wantLeft, tt.wantHeld, tt.wantFailed)
+			}
+			record, logged := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Operation: "daemon.wsm.remove_merge_queue_entry",
+				Message: "the merge left its queue; the merges placed behind it are settled by the cause it left for"})
+			if logged != tt.wantLog || (logged && record.Context["settled"] != int64(1)) {
+				t.Fatalf("settle record = %+v, %v; want logged %v with one merge settled", record, logged, tt.wantLog)
+			}
+		})
+	}
+}
+
+func TestDroppingAnAdmittedMergeAheadSettlesTheMergesWaitingOnIt(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+	lease := admittedWithLease(t, s, repo, ahead.ID)
+	behindRequested(t, s, repo, ws.ID, ahead.ID)
+
+	// Act
+	err := s.DropAdmittedMerge(context.Background(), repo, ahead.ID, lease.ID, "failed", nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DropAdmittedMerge: %v", err)
+	}
+	if entry := entryNamed(t, s, repo, ws.ID); !entry.AheadFailed() || entry.WaitsOnLeft != "failed" {
+		t.Fatalf("entry = %+v, want its merge ahead recorded as failed", entry)
+	}
+}
+
+func TestRemovingAMergeWithNoCauseIsRefusedAndChangesNothing(t *testing.T) {
+	// Arrange
+	s, logs := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, ahead.ID, instant)
+	behindRequested(t, s, repo, ws.ID, ahead.ID)
+
+	// Act
+	err := s.RemoveMergeQueueEntry(context.Background(), repo, ahead.ID, "", nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("RemoveMergeQueueEntry with no cause succeeded")
+	}
+	if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 2 || !entryNamed(t, s, repo, ws.ID).HeldBehind() {
+		t.Fatalf("entries = %+v, want both merges standing and the wait unsettled", entries)
+	}
+	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.remove_merge_queue_entry"}); !ok {
+		t.Fatalf("records = %+v, want the refused removal at ERROR", logs.Records())
+	}
+}
+
+func TestAWaitOnTheMergeAheadOutlivesTheStoreHandle(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "wsm.db")
+	log := dlog.NewTestLogger()
+	s := openStoreAt(t, path, log)
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, ahead.ID, instant)
+	behindRequested(t, s, repo, ws.ID, ahead.ID)
+	if err := s.RemoveMergeQueueEntry(context.Background(), repo, ahead.ID, "failed", nil); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	reopened := openStoreAt(t, path, log)
+	t.Cleanup(func() { reopened.Close() })
+	entry := entryNamed(t, reopened, repo, ws.ID)
+
+	// Assert
+	if entry.WaitsOn != ahead.ID || entry.WaitsOnName != "ahead" || entry.WaitsOnLeft != "failed" {
+		t.Fatalf("entry after the reopen = %+v, want the settled wait read back", entry)
+	}
+}
+
+func TestAMergeQueueRowThatRecordsALeavingWithoutAWaitDoesNotDecode(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	queued(t, s, repo, ws.ID, instant)
+	if _, err := s.db().Exec(`UPDATE merge_queue SET waits_on_left = 'failed' WHERE workspace_id = ?`, ws.ID); err != nil {
+		t.Fatalf("corrupting the row: %v", err)
+	}
+
+	// Act
+	_, err := s.MergeQueue(context.Background(), repo)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "waits_on_left" {
+		t.Fatalf("MergeQueue = %v, want a decode error on waits_on_left", err)
+	}
+}
+
+func TestRequestMergeRefusesANameForAMergePlacedBehindNone(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.RequestMerge(context.Background(), repo, ws.ID, MergeSource{Kind: MergeSourceOwnBranch, BehindName: "ahead"}, instant)
+
+	// Assert
+	if err == nil {
+		t.Fatal("RequestMerge accepted a behind name with no merge behind")
+	}
+	if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 0 {
+		t.Fatalf("entries = %+v, want nothing recorded", entries)
+	}
+}

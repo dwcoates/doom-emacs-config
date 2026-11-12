@@ -1,5 +1,5 @@
-<!-- used by: daemon internal/merge/pick.go (runPick); placeholders: {{pick_instruction}}, {{fork_head}}, {{target_branch}}, {{worktree_dir}} -->
-You are running an async merge in a merge workspace of your own, forked from the workspace that asked for it. Its worktree, {{worktree_dir}}, is checked out on a fresh branch cut at commit {{fork_head}}, the tip of the branch this merge lands on {{target_branch}}.
+<!-- used by: daemon internal/merge/pick.go (runPick); placeholders: {{pick_instruction}}, {{fork_head}}, {{target_branch}}, {{worktree_dir}}, {{ahead_landed}} -->
+You are running an async merge in a merge workspace of your own, forked from the workspace that asked for it. Its worktree, {{worktree_dir}}, is checked out on a fresh branch cut at commit {{fork_head}}, the tip of the branch this merge lands on {{target_branch}}.{{ahead_landed}}
 
 Before the merge joins the queue, the workspace that asked wants that branch prepared as follows:
 

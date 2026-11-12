@@ -233,6 +233,7 @@ var migrations = []migration{
 	{To: 125, Name: "merge_queue_returned", Kind: MigrationAdditive, DDL: mergeQueueReturnedDDL},
 	// IT IS BREAKING: see mergeQueueThreeSlotsDDL.
 	{To: 126, Name: "merge_queue_three_slots", Kind: MigrationBreaking, DDL: mergeQueueThreeSlotsDDL},
+	{To: 127, Name: "merge_queue_waits_on", Kind: MigrationAdditive, DDL: mergeQueueWaitsOnDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
@@ -253,6 +254,17 @@ CREATE INDEX workspaces_by_merge_of ON workspaces(merge_of) WHERE merge_of IS NO
 // back or the front, which is all that build could ask for.
 const mergeQueueBehindDDL = `
 ALTER TABLE merge_queue ADD COLUMN source_behind TEXT;
+`
+
+// mergeQueueWaitsOnDDL records the merge each entry was placed behind and
+// waits on (MergeQueueEntry.WaitsOn), the name it was placed behind by, and
+// the cause that merge left the queue for. IT IS ADDITIVE: the previous
+// build's INSERT names none of the columns, so a row it writes takes NULL --
+// a merge that waits on nothing, which is all that build placed.
+const mergeQueueWaitsOnDDL = `
+ALTER TABLE merge_queue ADD COLUMN waits_on TEXT;
+ALTER TABLE merge_queue ADD COLUMN waits_on_name TEXT;
+ALTER TABLE merge_queue ADD COLUMN waits_on_left TEXT;
 `
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its

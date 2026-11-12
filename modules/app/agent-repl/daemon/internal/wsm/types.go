@@ -1368,7 +1368,14 @@ type MergeSource struct {
 	// that merge's mark. A merge that has left the line by then left its
 	// place at the head of the waiting line, which is where this merge goes.
 	// Only a REQUEST carries it: the ask is spent once the merge is placed.
+	// The wait it asks for is not: the request records it as the entry's
+	// WaitsOn, which stands until the merge ahead leaves the queue.
 	Behind WorkspaceID
+	// BehindName is the name the request placed the merge behind, as the
+	// queue listed it then (merge.Request.PlaceBehind): the name a held or
+	// failed merge's records and sentences give its anchor. Set exactly when
+	// Behind is, and only on a request.
+	BehindName string
 	// Version is how the merge moves agent-repl's version once it lands
 	// (agentrepl.v1.MergeWorkspaceRequest.version_increment), nil when it
 	// moves none. A detached request's hand-off carries it onto the merge
@@ -1473,4 +1480,42 @@ type MergeQueueEntry struct {
 	// the repair slot it holds or awaits; MergeAsideNone for every other
 	// entry.
 	Aside MergeAside
+	// WaitsOn is the merge this one was placed behind (MergeSource.Behind),
+	// recorded with the request and kept for the entry's life, and
+	// WaitsOnName the name it was placed behind by. "" for a merge placed by
+	// the front mark or at the back.
+	WaitsOn     WorkspaceID
+	WaitsOnName string
+	// WaitsOnLeft is the cause WaitsOn's merge left the queue for, written in
+	// the transaction that removed it (settleWaitsOn): "" while it still
+	// stands, MergeLeftLanded once it landed, and any other cause when it
+	// left without landing.
+	WaitsOnLeft string
+}
+
+// MergeLeftLanded is the removal cause of a merge that landed, the one cause
+// that releases the merges placed behind it rather than failing them.
+const MergeLeftLanded = "merged"
+
+// MergeLeftToReturn is the removal cause of a merge a restart takes out of
+// line only to put straight back in it under the same workspace: no
+// departure, so the merges placed behind it keep waiting on it.
+const MergeLeftToReturn = "restart_resume"
+
+// HeldBehind reports whether the entry waits on a merge ahead of it that
+// still stands in the queue: such an entry is neither admitted, nor picked,
+// nor chained until that merge leaves (merge.nextInLine).
+func (e MergeQueueEntry) HeldBehind() bool {
+	return e.WaitsOn != "" && e.WaitsOnLeft == ""
+}
+
+// AheadFailed reports whether the merge this entry waits on left the queue
+// without landing, so this entry fails too.
+func (e MergeQueueEntry) AheadFailed() bool {
+	return e.WaitsOnLeft != "" && e.WaitsOnLeft != MergeLeftLanded
+}
+
+// AheadLanded reports whether the merge this entry waits on has landed.
+func (e MergeQueueEntry) AheadLanded() bool {
+	return e.WaitsOnLeft == MergeLeftLanded
 }

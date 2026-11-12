@@ -723,9 +723,24 @@ func (f *fakeDB) requestMergeLocked(repo wsm.RepoKey, id ids.WorkspaceID, source
 	f.seq++
 	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
 		Repo: repo, Workspace: id, State: wsm.MergeRequested, Source: source, EnqueuedAt: at,
+		WaitsOn: source.Behind, WaitsOnName: source.BehindName,
 	})
 	f.renumber(repo)
 	return nil
+}
+
+// settleWaitsOnLocked stands for wsm.settleWaitsOn, in the removal of ID's
+// entry: every entry still waiting on ID records the cause it left for, and a
+// merge taken out only to be put straight back settles nothing.
+func (f *fakeDB) settleWaitsOnLocked(repo wsm.RepoKey, id ids.WorkspaceID, cause string) {
+	if cause == wsm.MergeLeftToReturn {
+		return
+	}
+	for i, entry := range f.queues[repo] {
+		if entry.WaitsOn == id && entry.WaitsOnLeft == "" {
+			f.queues[repo][i].WaitsOnLeft = cause
+		}
+	}
 }
 
 // QueueMerge moves a requested entry to the back of the line, exactly as the
@@ -1045,6 +1060,7 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 		if entry.Workspace == id {
 			f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
 			f.renumber(repo)
+			f.settleWaitsOnLocked(repo, id, cause)
 			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
 			f.closeOnExitLocked(id, closes)
 			return f.restampRepairsLocked(repo)
@@ -1107,6 +1123,7 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 	}
 	f.queues[repo] = append(f.queues[repo][:at], f.queues[repo][at+1:]...)
 	f.renumber(repo)
+	f.settleWaitsOnLocked(repo, id, cause)
 	if err := f.restampRepairsLocked(repo); err != nil {
 		return err
 	}

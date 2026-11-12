@@ -123,7 +123,10 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 	})
 }
 
-// insertRequest writes one REQUESTED merge row at the back of KEY's queue. It
+// insertRequest writes one REQUESTED merge row at the back of KEY's queue. A
+// request placed behind another records the wait (MergeQueueEntry.WaitsOn)
+// with the row, so the wait stands from the request on, before the merge is
+// even in line, and a restart reads it back. It
 // is the one shape a request row is written in, for a request the user or an
 // agent made (RequestMerge) and for the merge workspace a detached request
 // hands off to (HandOffDetachedMerge).
@@ -141,13 +144,14 @@ func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, waits_on, waits_on_name)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key, id, next, int(MergeRequested), nanos(at),
 		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)), source.Front,
 		nullableText(source.DetachName), nullableText(source.Pick), nullNanos(source.PickStartedAt), nullableText(string(source.PickTurn)), source.CompactAfter,
 		nullableText(string(source.CloseOnLanding)), source.CleanupWorktree, nullableText(source.CleanupDir), versionPart(source.Version), versionLine(source.Version),
-		before, after, nullableText(string(source.DetachMaker)), source.DetachTargetMaker, nullableText(string(source.Behind)))
+		before, after, nullableText(string(source.DetachMaker)), source.DetachTargetMaker, nullableText(string(source.Behind)),
+		nullableText(string(source.Behind)), nullableText(source.BehindName))
 	return err
 }
 
@@ -854,7 +858,10 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 	if err := s.refuseUndeclaredExitClose(op, fields, closes); err != nil {
 		return err
 	}
-	var effects closeEffects
+	var (
+		effects closeEffects
+		settled int64
+	)
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id)
 		if err != nil {
@@ -863,14 +870,50 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 		if err := requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key)); err != nil {
 			return err
 		}
+		if settled, err = settleWaitsOn(ctx, tx, key, id, cause); err != nil {
+			return err
+		}
 		effects, err = closeOnExitInTx(ctx, tx, id, closes)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	s.logSettledWaits(op, fields, settled)
 	s.logExitClose(op, fields, id, closes, effects)
 	return nil
+}
+
+// settleWaitsOn records, in the transaction that removes ID's entry, the cause
+// it left for on every entry of KEY's queue still waiting on it, and answers
+// how many it settled: MergeLeftLanded releases them, any other cause fails
+// them (MergeQueueEntry.AheadFailed). A merge taken out only to be put
+// straight back (MergeLeftToReturn) has not left, and settles nothing.
+//
+// THE WAIT IS SETTLED WHERE THE MERGE AHEAD LEAVES, in one write, so no reader
+// ever sees the merge ahead gone while a merge behind it still waits on it,
+// and a restart reads back exactly what the removal decided.
+func settleWaitsOn(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, cause string) (int64, error) {
+	if cause == MergeLeftToReturn {
+		return 0, nil
+	}
+	if cause == "" {
+		return 0, fmt.Errorf("wsm: the merge of workspace %s in repo %q left its queue with no cause to settle the merges behind it by", id, key)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on_left = ? WHERE repo_key = ? AND waits_on = ? AND waits_on_left IS NULL`, cause, key, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// logSettledWaits records the waits a committed removal settled, if any.
+func (s *store) logSettledWaits(op string, fields dlog.Context, settled int64) {
+	if settled == 0 {
+		return
+	}
+	s.log.Info(op, "the merge left its queue; the merges placed behind it are settled by the cause it left for",
+		dlog.Merge(fields, dlog.Context{"settled": settled}))
 }
 
 // refuseUndeclaredExitClose refuses a queue exit whose close names no
@@ -926,7 +969,10 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 	if err := s.refuseUndeclaredExitClose(op, fields, closes); err != nil {
 		return err
 	}
-	var effects closeEffects
+	var (
+		effects closeEffects
+		settled int64
+	)
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		// A REMEDIATING MERGE IS ADMITTED WORK OUT OF LINE: it holds its lease
 		// and its progress record just as an admitted one does, and ends the
@@ -949,6 +995,9 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 		if _, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease); err != nil {
 			return err
 		}
+		if settled, err = settleWaitsOn(ctx, tx, key, id, cause); err != nil {
+			return err
+		}
 		effects, err = closeOnExitInTx(ctx, tx, id, closes)
 		return err
 	})
@@ -956,6 +1005,7 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 		return err
 	}
 	s.disown(lease)
+	s.logSettledWaits(op, fields, settled)
 	s.logExitClose(op, fields, id, closes, effects)
 	return nil
 }
@@ -1004,7 +1054,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, slot, slot_since, aside`
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left`
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1047,8 +1097,11 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			slot      int64
 			slotSince int64
 			aside     int64
+			waitsOn   sql.NullString
+			waitsName sql.NullString
+			waitsLeft sql.NullString
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind, &slot, &slotSince, &aside); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1087,6 +1140,10 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		entry.Aside = MergeAside(aside)
 		if !entry.Aside.valid() {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "aside", Err: fmt.Errorf("unknown merge aside %d", aside)}
+		}
+		entry.WaitsOn, entry.WaitsOnName, entry.WaitsOnLeft = WorkspaceID(waitsOn.String), waitsName.String, waitsLeft.String
+		if entry.WaitsOnLeft != "" && entry.WaitsOn == "" {
+			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "waits_on_left", Err: fmt.Errorf("records the cause %q a merge ahead left for, but waits on no merge", entry.WaitsOnLeft)}
 		}
 		entry.Position = len(loaded[entry.Repo]) + 1
 		loaded[entry.Repo] = append(loaded[entry.Repo], entry)

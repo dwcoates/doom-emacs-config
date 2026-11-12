@@ -376,3 +376,35 @@ func TestHandOffDetachedMergeCarriesABehindRequestToTheMergeWorkspace(t *testing
 		t.Fatalf("MergeQueue = %+v, %v; want the merge workspace's entry carrying Behind", queue, err)
 	}
 }
+
+func TestHandOffDetachedMergeMovesTheRequestsWaitOntoTheMergeWorkspace(t *testing.T) {
+	// Arrange: the detached request waits on a merge ahead, and another
+	// request waits on the detached request.
+	s, _ := testStore(t)
+	requester, ahead, later := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queued(t, s, repo, ahead.ID, time.Unix(50, 0))
+	request := NewDetachedMergeID()
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample-merge", Behind: ahead.ID, BehindName: "ahead"}
+	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	if err := s.RequestMerge(context.Background(), repo, later.ID, MergeSource{Kind: MergeSourceOwnBranch, Behind: requester.ID, BehindName: "sample-merge"}, time.Unix(150, 0)); err != nil {
+		t.Fatalf("RequestMerge(later): %v", err)
+	}
+	forked := registerMergeWorkspace(t, s, requester.ID, request)
+
+	// Act
+	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HandOffDetachedMerge: %v", err)
+	}
+	if entry := entryNamed(t, s, repo, forked.ID); entry.WaitsOn != ahead.ID || entry.WaitsOnName != "ahead" || !entry.HeldBehind() {
+		t.Fatalf("merge workspace's entry = %+v, want it waiting on %s", entry, ahead.ID)
+	}
+	if entry := entryNamed(t, s, repo, later.ID); entry.WaitsOn != forked.ID || !entry.HeldBehind() {
+		t.Fatalf("later entry = %+v, want it waiting on the merge workspace %s", entry, forked.ID)
+	}
+}

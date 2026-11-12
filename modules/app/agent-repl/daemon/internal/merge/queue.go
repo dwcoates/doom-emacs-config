@@ -382,6 +382,10 @@ const (
 	// queue is durable, so this is only reached at the RESTORE, for a merge the
 	// restart could not put back on its queue.
 	CauseDaemonShutdown AbandonCause = "daemon_shutdown"
+	// CauseAheadDidNotLand is the merge this one was placed behind leaving the
+	// queue without landing (wsm.MergeQueueEntry.AheadFailed): a merge placed
+	// behind another depends on it, so it never runs without it.
+	CauseAheadDidNotLand AbandonCause = "ahead_did_not_land"
 )
 
 // The causes a queue entry leaves its queue for that are NOT abandonments:
@@ -392,7 +396,7 @@ const (
 // a queue's changes) cannot disagree with the writer.
 const (
 	// causeMerged is a merge that landed.
-	causeMerged = "merged"
+	causeMerged = wsm.MergeLeftLanded
 	// causeFailed is a merge that ran and gave up.
 	causeFailed = "failed"
 	// causeRestartFailed is a merge a restart left unfinished that could not
@@ -400,7 +404,7 @@ const (
 	causeRestartFailed = "restart_failed"
 	// causeRestartResume is a merge a restart left unfinished, taken out of
 	// line only to be put straight back in it, at the back, to run again.
-	causeRestartResume = "restart_resume"
+	causeRestartResume = wsm.MergeLeftToReturn
 	// causePickFailed is an async merge whose preparing pick failed.
 	causePickFailed = "pick_failed"
 	// causeDetachedForkFailed is an async request that could not be handed
@@ -418,6 +422,7 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseUserDequeue:     "the user released this merge's queue slot",
 	CauseWorkspaceClosed: "the workspace was closed while this merge was waiting in the queue",
 	CauseDaemonShutdown:  "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
+	CauseAheadDidNotLand: "the merge this one was placed behind left the queue without landing",
 }
 
 // runningSummaries are the resolved sentences of a merge abandoned AFTER it
@@ -745,13 +750,23 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	} else {
 		log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
 	}
-	o.publishAbandoned(ctx, ws, ledger, entry, cause)
+	o.publishAbandonedWith(ctx, ws, ledger, entry, cause, o.queuedSentence(ws, cause, entry))
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
 	o.kick(repo)
 	return nil
+}
+
+// queuedSentence is the abandoned terminal's sentence of a merge that left
+// its queue before it ran: the cause's own sentence, naming the merge ahead
+// and how it left when the merge ahead's leaving is the cause.
+func (o *orchestrator) queuedSentence(ws ids.WorkspaceID, cause AbandonCause, entry wsm.MergeQueueEntry) string {
+	if cause == CauseAheadDidNotLand {
+		return fmt.Sprintf("the merge %s this one was placed behind left the queue without landing (%s)", entry.WaitsOnName, entry.WaitsOnLeft)
+	}
+	return o.abandonedSentence(ws, cause, false)
 }
 
 // queueOf resolves the queue a workspace's merge is waiting on, refusing when
@@ -1361,6 +1376,14 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 			return "", nil, false, nil
 		}
 	}
+	// A MERGE WHOSE MERGE AHEAD LEFT WITHOUT LANDING FAILS before anything is
+	// admitted: it was placed behind that merge because it needs it. Its drop
+	// kicks the pump, which comes back here.
+	if failed, found := aheadFailed(entries); found {
+		o.failBehind(ctx, repo, failed)
+		return "", nil, false, nil
+	}
+	o.logHeldBehind(repo, entries)
 	front, found := nextInLine(entries)
 	if !found {
 		return "", nil, false, nil
@@ -1567,11 +1590,50 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 // requested merge is in nobody's line, and an admitted one is already running.
 func nextInLine(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
 	for _, entry := range entries {
-		if entry.State == wsm.MergeQueued {
+		if entry.State == wsm.MergeQueued && !entry.HeldBehind() && !entry.AheadFailed() {
 			return entry, true
 		}
 	}
 	return wsm.MergeQueueEntry{}, false
+}
+
+// aheadFailed answers the first merge waiting in line whose merge ahead left
+// the queue without landing (wsm.MergeQueueEntry.AheadFailed).
+func aheadFailed(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
+	for _, entry := range entries {
+		if entry.State == wsm.MergeQueued && entry.AheadFailed() {
+			return entry, true
+		}
+	}
+	return wsm.MergeQueueEntry{}, false
+}
+
+// logHeldBehind records each merge waiting in line that the admission passes
+// over because the merge it was placed behind still stands in the queue: it
+// is neither admitted nor, for a merge workspace, picked until that merge
+// leaves (nextInLine). The merges behind it are admitted past it.
+func (o *orchestrator) logHeldBehind(repo wsm.RepoKey, entries []wsm.MergeQueueEntry) {
+	for _, entry := range entries {
+		if entry.State == wsm.MergeQueued && entry.HeldBehind() {
+			o.deps.Log.Global().Debug("daemon.merge.behind", "a merge waits for the merge it was placed behind to leave the queue; it is not admitted or picked before then",
+				dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "behind": string(entry.WaitsOn), "behind_name": entry.WaitsOnName})
+		}
+	}
+}
+
+// failBehind ends a merge waiting in line whose merge ahead left the queue
+// without landing, as a merge that never ran (dropQueued), naming the merge
+// ahead and the cause it left for.
+func (o *orchestrator) failBehind(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) {
+	const op = "daemon.merge.behind"
+	fields := dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "behind": string(entry.WaitsOn), "behind_name": entry.WaitsOnName, "behind_left": entry.WaitsOnLeft}
+	o.log(ctx, entry.Workspace).Info(op, "the merge this one was placed behind left the queue without landing; this merge fails", fields)
+	o.mu.Lock()
+	o.repoOf[entry.Workspace] = repo
+	o.mu.Unlock()
+	if err := o.dropQueued(ctx, entry.Workspace, CauseAheadDidNotLand); err != nil {
+		o.log(ctx, entry.Workspace).Error(op, "could not fail a merge whose merge ahead left the queue without landing", withField(fields, "error", err.Error()))
+	}
 }
 
 // stillQueued reports whether a workspace's entry is still on its repository's

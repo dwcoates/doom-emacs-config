@@ -21,7 +21,7 @@ import (
 func pickHarness(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
-	h.briefs[BriefPick] = []string{"pick_instruction", "fork_head", "target_branch", "worktree_dir"}
+	h.briefs[BriefPick] = []string{"pick_instruction", "fork_head", "target_branch", "worktree_dir", "ahead_landed"}
 	h.git.mu.Lock()
 	h.git.clean = true
 	h.git.ahead = 1
@@ -463,6 +463,9 @@ func TestAMergeWorkspaceWhosePickIsPendingNeverJoinsAChain(t *testing.T) {
 		{name: "an ordinary merge in line", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}, want: true},
 		{name: "a merge workspace whose pick is pending", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Pick: "rebase it"}}},
 		{name: "a merge only requested", entry: wsm.MergeQueueEntry{State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}},
+		{name: "a merge held behind a merge still in the queue", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, WaitsOn: "ws-ahead"}},
+		{name: "a merge whose merge ahead left without landing", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, WaitsOn: "ws-ahead", WaitsOnLeft: causeFailed}},
+		{name: "a merge whose merge ahead landed", entry: wsm.MergeQueueEntry{State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, WaitsOn: "ws-ahead", WaitsOnLeft: causeMerged}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -499,5 +502,43 @@ func TestARestartTakesBackAPickItCutShortAtTheHead(t *testing.T) {
 	h.o.mu.Unlock()
 	if !picking || p.turn != entry.Source.PickTurn {
 		t.Fatalf("pick = %+v, %v; want the begun pick taken back on its own turn %s", p, picking, entry.Source.PickTurn)
+	}
+}
+
+func TestThePickBriefSaysToRebaseOnlyWhenTheMergeAheadHasLanded(t *testing.T) {
+	tests := []struct {
+		name string
+		held bool
+		want string
+	}{
+		{name: "a pick placed behind no merge", want: ""},
+		{name: "a pick held behind a merge that landed", held: true,
+			want: " This merge was placed behind ahead-merge, which has landed on master since that branch was cut, so first rebase this branch onto master's tip, then prepare it."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := pickHarness(t)
+			if tt.held {
+				requestHeldPick(t, h)
+				aheadLeaves(t, h, causeMerged)
+				if err := h.admit(context.Background()); err != nil {
+					t.Fatalf("admit: %v", err)
+				}
+			} else {
+				requestPick(t, h)
+			}
+
+			// Act
+			runThePick(t, h, context.Background(), false)
+
+			// Assert
+			h.mu.Lock()
+			values := h.briefValues[len(h.briefValues)-1]
+			h.mu.Unlock()
+			if got := values["ahead_landed"]; got != tt.want {
+				t.Fatalf("ahead_landed = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
