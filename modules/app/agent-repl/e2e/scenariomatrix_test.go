@@ -1241,40 +1241,25 @@ func fileExists(t *testing.T, path string) bool {
 	return false
 }
 
-// seamLine is a wiring test's `Seam: <family>` doc-comment line.
-var seamLine = regexp.MustCompile(`(?m)^Seam: ([a-z0-9-]+)$`)
-
 // deriveSeamWiring reads every Go e2e test's doc comment for the seam
-// families it wires: family -> the tests that say they wire it, sorted.
+// families it wires (seamClaims): family -> the tests that say they wire it,
+// sorted.
 func deriveSeamWiring(t *testing.T) map[string][]string {
 	t.Helper()
-	fset := token.NewFileSet()
-	files, err := filepath.Glob(filepath.Join(repo.e2eDir, "*_e2e_test.go"))
-	if err != nil {
-		t.Fatalf("glob the e2e tests: %v", err)
-	}
 	pkg := parseE2EPackage(t)
 	wiring := map[string][]string{}
-	for _, path := range files {
-		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+	for name, doc := range pkg.docs {
+		// A wiring test is a step of a scenario, named by its path; a
+		// top-level test, by its name.
+		if path, isStep := pkg.stepPath(name); isStep {
+			name = path
+		} else if _, isTest := pkg.tests[name]; !isTest {
+			continue
 		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Doc == nil {
-				continue
-			}
-			// A wiring test is a step of a scenario, named by its path; a
-			// top-level test, by its name.
-			name := fn.Name.Name
-			if path, isStep := pkg.stepPath(name); isStep {
-				name = path
-			} else if !strings.HasPrefix(name, "Test") {
-				continue
-			}
-			for _, m := range seamLine.FindAllStringSubmatch(fn.Doc.Text(), -1) {
-				wiring[m[1]] = append(wiring[m[1]], name)
+		claims, _ := seamClaims(doc)
+		for _, c := range claims {
+			if c.family != "" {
+				wiring[c.family] = append(wiring[c.family], name)
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -97,6 +98,8 @@ type e2ePackage struct {
 	scenarios map[string][]string
 	// refs are the package-level names each func's body names.
 	refs map[string][]string
+	// docs are each package-level func's doc comment, by name.
+	docs map[string]string
 }
 
 func parseE2EPackage(t *testing.T) e2ePackage {
@@ -105,7 +108,7 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 	if err != nil {
 		t.Fatalf("read the e2e package: %v", err)
 	}
-	pkg := e2ePackage{tests: map[string]string{}, steps: map[string]string{}, scenarios: map[string][]string{}, refs: map[string][]string{}}
+	pkg := e2ePackage{tests: map[string]string{}, steps: map[string]string{}, scenarios: map[string][]string{}, refs: map[string][]string{}, docs: map[string]string{}}
 	fset := token.NewFileSet()
 	for _, e := range entries {
 		name := e.Name()
@@ -117,7 +120,7 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 		} else if !ok {
 			continue
 		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
+		f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
@@ -130,6 +133,9 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 			pkg.refs[fname] = append(pkg.refs[fname], namesIn(fn.Body)...)
 			if fn.Recv != nil {
 				continue
+			}
+			if fn.Doc != nil {
+				pkg.docs[fname] = fn.Doc.Text()
 			}
 			switch {
 			case gofunc.IsTestFunc(fn, "Test", "T"):
@@ -221,4 +227,53 @@ func (p e2ePackage) stepPath(step string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// THE SEAM A TEST PROVES, as its doc comment names it (AGENTS.md, "An e2e
+// test proves a seam between real systems, and nothing else"): a line of its
+// own, in one of two forms.
+//
+//   - `Seam: <family>`: the family whose halves the scenario goldens pin
+//     (testdata/scenario-goldens/*/meta.json), and whose wiring test this is
+//     (the scenario matrix, scenariomatrix_test.go).
+//   - `Seam: <producer> -> <consumer>, <what crosses>`: any other seam.
+//
+// seamClaims is the one reader of those lines: the matrix takes the families
+// from it, and the seam lint (TestEveryScenarioAndStepNamesItsSeam) that
+// every scenario and step has a well-formed one.
+
+// seamClaim is one `Seam:` line of a doc comment.
+type seamClaim struct {
+	// line is the text after `Seam: `.
+	line string
+	// family is the family the line names, "" for the crossing form.
+	family string
+}
+
+var (
+	// seamLine is any `Seam:` line, well formed or not.
+	seamLine = regexp.MustCompile(`(?m)^Seam:(.*)$`)
+	// seamFamily is the family form's text.
+	seamFamily = regexp.MustCompile(`^[a-z0-9-]+$`)
+	// seamCrossing is the crossing form's text.
+	seamCrossing = regexp.MustCompile(`^\S.*? -> \S.*?, \S.*$`)
+)
+
+// seamClaims reads DOC's `Seam:` lines: the well-formed ones as claims, and
+// the text of every line in neither form as malformed.
+func seamClaims(doc string) (claims []seamClaim, malformed []string) {
+	for _, m := range seamLine.FindAllStringSubmatch(doc, -1) {
+		text, spaced := strings.CutPrefix(m[1], " ")
+		switch {
+		case !spaced:
+			malformed = append(malformed, m[0])
+		case seamFamily.MatchString(text):
+			claims = append(claims, seamClaim{line: text, family: text})
+		case seamCrossing.MatchString(text):
+			claims = append(claims, seamClaim{line: text})
+		default:
+			malformed = append(malformed, m[0])
+		}
+	}
+	return claims, malformed
 }
