@@ -531,9 +531,9 @@ func feedPage(page *conversationv1.HistoryPage) *conversationv1.HistoryPage {
 // OLDEST FIRST — the order they were written in — and gives each the one
 // treatment its kind and the page's origin call for.
 //
-// A TERMINAL is recorded as served, so a later re-serving of it on the live
-// stream is a replay, and routePageTerminalLocked decides whether it closes a
-// turn this watcher still holds open.
+// A TERMINAL goes to routePageTerminalLocked, which records it as served
+// (bar StartTurn's page, whose rows the live stream serves) and decides
+// whether it closes a turn this watcher still holds open.
 //
 // A CUT is routed by routePageCutLocked, because a cut the views never took
 // leaves them standing in the act it ended: a watch re-opened after the
@@ -549,9 +549,7 @@ func (w *watcher) routePageClosingsLocked(a *agentWatch, page *conversationv1.Hi
 		case frame == nil:
 			continue
 		case isTerminalFrame(frame):
-			if !w.closingReplayedLocked(a, frame, at.GetAt()) {
-				w.routePageTerminalLocked(a, frame, at, origin)
-			}
+			w.routePageTerminalLocked(a, frame, at, origin)
 		case frame.GetUpdate().GetContextCut() != nil:
 			w.routePageCutLocked(a, frame, at.GetAt(), PlaceOf(at), origin)
 		}
@@ -573,8 +571,13 @@ func (w *watcher) routePageClosingsLocked(a *agentWatch, page *conversationv1.Hi
 // close was on this page, the page called every terminal history, and the
 // merge waited on the turn for nineteen hours.
 //
-//   - On StartTurn's page it is left alone: the main watch standing beside
-//     that page serves the turn's own frames live.
+//   - On StartTurn's page it is left alone, and NOT counted served: the main
+//     watch standing beside that page serves the same row live, and counting
+//     it here made the live row read as a replay. A prompt joining a turn
+//     whose terminal was in flight got a page carrying that terminal, and the
+//     turn it closed stood in flight for good, holding every later prompt
+//     (2026-11-12, merge-queue-stall-triage, c9e1f6aa958e4afe).
+//   - A terminal this watch was already served is a REPLAY, dropped whole.
 //   - On any other agent's page it is that agent's history.
 //   - Unstamped, it names no turn, and charging it to the turn open now is
 //     how a store restart once ended a live turn with the previous turn's
@@ -593,6 +596,8 @@ func (w *watcher) routePageTerminalLocked(a *agentWatch, frame *conversationv1.A
 	switch {
 	case origin == pageTurnAccepted:
 		w.log.Debug("daemon.sessionwatcher.page_terminal_history", "a terminal on StartTurn's page is left to the main watch, which serves the turn's frames live", ctx)
+		return
+	case w.closingReplayedLocked(a, frame, at.GetAt()):
 		return
 	case a.id != nil:
 		w.log.Debug("daemon.sessionwatcher.page_terminal_history", "a terminal on another agent's opening page is that agent's history; it closes no turn", ctx)

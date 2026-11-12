@@ -2084,6 +2084,79 @@ func TestACutOnAStartTurnPageIsLeftToTheMainWatch(t *testing.T) {
 	}
 }
 
+// A TERMINAL ON STARTTURN'S PAGE IS NOT COUNTED SERVED (2026-11-12): a
+// prompt joining turn-1 just as turn-1 ended got a StartTurn page carrying
+// turn-1's terminal. Counting that row served made the live serving of it read
+// as a replay, so turn-1 stood in flight for good and held every later prompt.
+
+// joinedPageCarryingTurn1sEnd stands turn-1 accepted with turn-2 joining it,
+// then hands turn-2's StartTurn answer a page carrying turn-1's terminal.
+func joinedPageCarryingTurn1sEnd(t *testing.T) *harness {
+	t.Helper()
+	h, _ := joiningHarness(t)
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id: &conversationv1.TurnId{Value: "turn-2"}, Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{Entries: []*conversationv1.HistoryEntryAt{
+		stampedPageEntryAt("ptr-1-end", "turn-1", frameSuccess("main-1", completed())),
+	}})
+	h.drainNow()
+	return h
+}
+
+func TestATerminalOnAJoiningTurnsPageEndsNothingByItself(t *testing.T) {
+	// Arrange, Act.
+	h := joinedPageCarryingTurn1sEnd(t)
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-1" {
+		t.Fatalf("turn in flight = %v, want turn-1 until the live stream serves its end", turn)
+	}
+}
+
+func TestTheLiveTerminalAfterAJoiningTurnsPageEndsTheTurnItNames(t *testing.T) {
+	// Arrange.
+	h := joinedPageCarryingTurn1sEnd(t)
+
+	// Act.
+	got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1-end", "turn-1"))
+
+	// Assert.
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != "turn-1" {
+		t.Fatalf("turn ended = %v, want turn-1", ended.turn)
+	}
+	if h.hasRecord("info", "daemon.sessionwatcher.terminal_replayed") {
+		t.Fatal("the live terminal was dropped as a replay")
+	}
+}
+
+func TestTheJoiningTurnStandsInFlightOnceTheTurnItJoinedEnds(t *testing.T) {
+	// Arrange.
+	h := joinedPageCarryingTurn1sEnd(t)
+
+	// Act.
+	h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1-end", "turn-1"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn == nil || *turn != "turn-2" {
+		t.Fatalf("turn in flight = %v, want turn-2", turn)
+	}
+}
+
+func TestATerminalServedLiveTwiceAfterAJoiningTurnsPageIsAReplay(t *testing.T) {
+	// Arrange.
+	h := joinedPageCarryingTurn1sEnd(t)
+	h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1-end", "turn-1"))
+
+	// Act.
+	got := h.route(h.main, stampedFrameAt(frameSuccess("main-1", completed()), "ptr-1-end", "turn-1"))
+
+	// Assert.
+	if hasEvent(got, "lifecycle.OnTurnEnded") || !h.hasRecord("info", "daemon.sessionwatcher.terminal_replayed") {
+		t.Fatalf("events = %+v, want the second serving dropped as a replay", got)
+	}
+}
+
 // TestAClosingRowWithNoPointerIsRoutedAndRecorded covers a producer defect: a
 // row closing an act that carries no pointer has no identity, so it can never
 // be recognized as a replay. It is routed rather than lost, and the missing
