@@ -20,12 +20,15 @@ import (
 // back, the merge behind resumed as the head, and the real head stood
 // stranded with its "tests" step and no run behind it; evicting the stranded
 // merge then left its merge lease over no queue entry, and every prompt to
-// its workspace was refused.
+// its workspace was refused. The first half (a merge behind the head resuming
+// ahead of it) cannot occur any more: only the head is ever admitted, so a
+// merge behind it is taken back waiting and resumes nothing; the eviction
+// half and the head's own resume stay covered here.
 
 func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackIsEvictedWithItsLease(t *testing.T) {
 	t.Parallel()
-	// Arrange: A, the head, inside its gate; B, behind it, in line for the
-	// test turn.
+	// Arrange: A, the head, inside its gate; B, behind it, waiting in
+	// line.
 	repo := harness.NewRepo(t)
 	gate := newTurnGate(t)
 	repo.DeploysAsAgentRepl()
@@ -44,7 +47,7 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
 	d.AwaitLogRecord(harness.WorkspaceLogPath(b.ws.GetDir(), "daemon"), "beta in line", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, "joined the line")
+		return r.Operation == "daemon.merge.request" && strings.Contains(r.Message, "put a merge in line")
 	})
 	daemonStream := d.WatchDaemonStream()
 
@@ -61,19 +64,13 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 		t.Fatalf("adopting beta: host %v, web %v", o.hostErr, o.webErr)
 	}
 
-	// Assert (Bug 1): nothing resumes ahead of A while its handover is pending.
-	d.AwaitRunLogRecordFromAnyProcess("the successor waiting for the head", func(r harness.LogRecord) bool {
-		return r.PID != d.PID() && r.Operation == "daemon.merge.resume" && strings.Contains(r.Message, "not taken back yet") &&
-			r.Context["head"] == a.ws.GetId()
-	})
-
-	// Act (Bug 2): B, taken back but not resumed, is evicted on the successor.
+	// Act (the eviction): B, taken back and waiting, is evicted on the successor.
 	resp, err := successor.UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: b.ws}},
 	}))
 	requireRPCSuccess(t, "UpdateMergeQueue(evict beta)", resp, err)
 
-	// Assert (Bug 2): B's merge lease went with its entry, and B takes a prompt.
+	// Assert (the eviction): B's merge lease went with its entry, and B takes a prompt.
 	d.WithDB(func(db *sql.DB) {
 		var leases int
 		if err := db.QueryRow("SELECT COUNT(*) FROM leases WHERE workspace_id = ? AND holder = 0", b.ws.GetId()).Scan(&leases); err != nil {
@@ -95,14 +92,14 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 		t.Fatalf("SubmitPrompt(beta) after the evict = %v; want the prompt accepted", prompt.Msg)
 	}
 
-	// Act (Bug 1): A is taken back, resumes as the head, and lands.
+	// Act (the head): A is taken back, resumes as the head, and lands.
 	if o := adoptBothParticipants(d, successor, a.ws); o.hostErr != nil || o.webErr != nil {
 		t.Fatalf("adopting alpha: host %v, web %v", o.hostErr, o.webErr)
 	}
 	gate.awaitStart(d, a.ws.GetDir())
 	gate.release(0)
 
-	// Assert (Bug 1): A landed.
+	// Assert (the head): A landed.
 	d.AwaitRunLogRecordFromAnyProcess("alpha's landing on the successor", func(r harness.LogRecord) bool {
 		return r.PID != d.PID() && harness.IsLandingDeployed(r)
 	})

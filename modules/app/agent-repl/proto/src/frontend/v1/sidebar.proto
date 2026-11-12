@@ -1009,27 +1009,46 @@ message RosterRepoMergeQueue {
   // the queue is drawn as its head and its waiting merges.
   reserved 1;
   reserved "rows";
-  // The merge at the head: the merge at the front of the line. A queue is
-  // listed while its line holds a merge or a merge remediates out of line,
-  // so a listed queue carries its head unless its line is empty and
-  // `remediating` is not; an unset head anywhere else is malformed. (A failed
+  // The merge at the head: the merge at the front of the line, the one
+  // merge running the queue's test gate (its testing slot). A queue is
+  // listed while its line holds a merge or a merge stands out of line, so a
+  // listed queue carries its head unless its line is empty and a merge
+  // stands out of line; an unset head anywhere else is malformed. (A failed
   // merge no longer stands at the head of an empty line, owner request
   // 2026-10-27: a repository leaves the section as soon as its line empties
-  // and nothing remediates.) A queue listed only for its `github` entries,
-  // with an empty line, carries no head either.
+  // and nothing stands out of line.) A queue listed only for its `github`
+  // entries, with an empty line, carries no head either.
   optional RosterMergeQueueHead head = 2;
   // Every merge waiting behind the head, in the order it will run.
   repeated RosterMergeQueueWaiting waiting = 3;
   // PRESENT while the queue is paused: merges still join it, but nothing
   // runs until it is resumed.
   optional RosterMergeQueuePaused paused = 4;
-  // THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): every merge
-  // that stepped aside from the head (or from the race behind it) to repair
-  // itself out of line -- its failing tests, or its rebase's conflicts --
-  // oldest first. It is in no place in line until its repairing turn ends,
-  // when it returns next after the merge being worked on. Drawn under the
-  // head, less prominent than it and more than the merges waiting.
-  repeated RosterMergeQueueRemediating remediating = 5;
+  // Tag 5 (`remediating`, every merge out of line as one list with no cap)
+  // is RETIRED (2026-11-11): a queue holds at most one merge fixing tests and
+  // at most one resolving conflicts, and the slots below say so.
+  reserved 5;
+  reserved "remediating";
+  // THE FIXING-TESTS SLOT (owner ruling, 2026-11-11): the one merge whose
+  // whole suite failed at the head and that fixes its tests out of line.
+  // UNSET while nobody holds the slot. It is in no place in line until its
+  // fixing turn ends, when it returns next after the merge being worked on.
+  // Drawn under the head, reading "fixing tests".
+  optional RosterMergeQueueFixingTests fixing_tests = 7;
+  // THE RESOLVING-CONFLICTS SLOT (owner ruling, 2026-11-11): the one merge
+  // whose rebase conflicted -- at the head, or in the background while it
+  // waited -- and whose session resolves the conflicts out of line. UNSET
+  // while nobody holds the slot. Drawn under the head, reading "resolving
+  // conflicts".
+  optional RosterMergeQueueResolvingConflicts resolving_conflicts = 8;
+  // Every merge out of line WAITING FOR THE FIXING-TESTS SLOT, in the order
+  // it will be granted it: the holder's return grants the slot to the first.
+  // Nothing is handed their sessions while they wait. Empty while the slot is
+  // free (a merge stepping aside to a free slot takes it at once).
+  repeated RosterMergeQueueAwaitingFixingTests awaiting_fixing_tests = 9;
+  // Every merge out of line WAITING FOR THE RESOLVING-CONFLICTS SLOT, in the
+  // order it will be granted it. Empty while the slot is free.
+  repeated RosterMergeQueueAwaitingResolvingConflicts awaiting_resolving_conflicts = 10;
   // THE GITHUB MERGE QUEUE'S SHARE: every workspace of this repository whose
   // owned pull request stands in a GitHub merge queue, in the order GitHub
   // will merge them. The daemon follows each owned pull request's queue and
@@ -1058,36 +1077,39 @@ message RosterMergeQueueGithubPlace {
   uint32 total = 2;
 }
 
-// One merge remediating out of line.
-message RosterMergeQueueRemediating {
+// The merge holding the fixing-tests slot.
+message RosterMergeQueueFixingTests {
   RosterMergeQueueSubject subject = 1;
-  // WHEN THE MERGE TOOK ITS REMEDIATING SLOT, epoch ms: the moment its queue
-  // entry stepped aside, written durably in the same store write that moved
-  // it there, so a restart or a handover reads the same moment. Its clock
-  // ticks from here, starting at zero as it steps aside however long it
-  // headed the queue before. Never zero.
+  // WHEN THE MERGE TOOK THE SLOT, epoch ms: the queue entry's durable slot
+  // moment, written in the store write that granted it (its step aside, or
+  // the release of the merge that held the slot before), so a restart or a
+  // handover reads the same moment. Its clock ticks from here. Never zero.
   int64 since_ms = 2;
-  // What it repairs, drawn as a grey parenthetical on its name's own line
-  // ("fixing tests", "resolving conflicts"). Always set by the daemon; a set
-  // reason whose arm this schema revision does not name draws no
-  // parenthetical.
-  RosterMergeQueueRemediatingReason reason = 3;
 }
 
-// WHAT A REMEDIATING MERGE'S CARD SAYS IT REPAIRS. THE ARM IS THE REASON.
-message RosterMergeQueueRemediatingReason {
-  // Which repair its turn out of line makes.
-  oneof reason {
-    // Its whole test suite finished with failures; its session fixes them.
-    RosterMergeQueueRemediatingTests tests = 1;
-    // Its rebase met conflicts; its session resolves them.
-    RosterMergeQueueRemediatingConflicts conflicts = 2;
-  }
+// The merge holding the resolving-conflicts slot.
+message RosterMergeQueueResolvingConflicts {
+  RosterMergeQueueSubject subject = 1;
+  // WHEN THE MERGE TOOK THE SLOT, epoch ms, as RosterMergeQueueFixingTests
+  // .since_ms is. Never zero.
+  int64 since_ms = 2;
 }
-// Fixing its failing tests. No fields.
-message RosterMergeQueueRemediatingTests {}
-// Resolving its rebase's conflicts. No fields.
-message RosterMergeQueueRemediatingConflicts {}
+
+// One merge out of line waiting for the fixing-tests slot.
+message RosterMergeQueueAwaitingFixingTests {
+  RosterMergeQueueSubject subject = 1;
+  // When it stepped aside to wait for the slot, epoch ms: its durable slot
+  // moment. Its clock ticks from here. Never zero.
+  int64 since_ms = 2;
+}
+
+// One merge out of line waiting for the resolving-conflicts slot.
+message RosterMergeQueueAwaitingResolvingConflicts {
+  RosterMergeQueueSubject subject = 1;
+  // When it stepped aside to wait for the slot, epoch ms: its durable slot
+  // moment. Its clock ticks from here. Never zero.
+  int64 since_ms = 2;
+}
 
 // The queue is paused: when, by whom, and whether the pause was a hard stop.
 // The sidebar draws the repository's label in the error red and the queue's
@@ -1197,8 +1219,7 @@ message RosterMergeQueueHead {
   // head slot (owner ruling, 2026-10-30). It is the queue entry's durable
   // slot moment, written in the same store write that made the merge the
   // front of its line, so a restart or a handover reads the same moment, and
-  // a merge that left the head (to remediate, or overtaken by a race's
-  // winner) and takes it again starts again from zero. Never zero.
+  // a merge that left the head (to repair out of line) and takes it again starts again from zero. Never zero.
   int64 head_since_ms = 6;
 }
 
@@ -1265,55 +1286,14 @@ message RosterMergeQueueStageFailed {
 // ONE MERGE WAITING behind the head.
 message RosterMergeQueueWaiting {
   RosterMergeQueueSubject subject = 1;
-  // When it was put in line, epoch ms.
+  // When it was put in line, epoch ms. Its row's clock ticks from it.
   int64 queued_at_ms = 2;
-  // HOW THE MERGE CAME TO STAND WHERE IT DOES, drawn as the label after its
-  // name. UNSET for a merge put in line in the ordinary way, at the back.
-  optional RosterMergeQueueWaitingPlacement placement = 5;
-  // PRESENT while the merge is being worked on behind the head (racing it
-  // to land): it then holds an active slot, and the row's clock ticks from
-  // the moment it took that slot rather than from `queued_at_ms`. UNSET
-  // while it only waits its turn.
-  optional RosterMergeQueueWaitingRacing racing = 4;
-  // Tag 3 (`placed_at_front`) is RETIRED: a merge's front placement is the
-  // `front` arm of `placement`, beside the `returned` arm it is exclusive
-  // with.
-  reserved 3;
-  reserved "placed_at_front";
-}
-
-// Why a waiting merge stands ahead of the merges queued before it. The arms
-// are exclusive: a merge the user put at the front that later stepped aside
-// and came back is drawn `returned`, the latest of the two facts and the one
-// that placed it where it now stands.
-message RosterMergeQueueWaitingPlacement {
-  // THE ARM IS THE PLACEMENT. A set field with no arm is a placement this
-  // build does not name, and draws no label.
-  oneof placement {
-    // The user put the merge in line at the front
-    // (agentrepl.v1.MergeQueuePlacementFront), or moved it there. Drawn
-    // `front`.
-    RosterMergeQueueWaitingFront front = 1;
-    // The merge came back from repairing out of line (fixing its tests or
-    // resolving its conflicts) and waits at the first waiting place, behind
-    // every merge being worked on, to be taken up again. Drawn `returned`.
-    RosterMergeQueueWaitingReturned returned = 2;
-  }
-}
-
-// The user placed the merge at the front of the waiting line.
-message RosterMergeQueueWaitingFront {}
-
-// The merge is back in line from a repair out of line, and nothing has taken
-// it up again yet.
-message RosterMergeQueueWaitingReturned {}
-
-// A merge behind the head is being worked on, racing the head to land.
-message RosterMergeQueueWaitingRacing {
-  // WHEN THE MERGE TOOK ITS RACING SLOT, epoch ms: the queue entry's durable
-  // slot moment, written in the same store write that admitted it behind the
-  // head, so a restart or a handover reads the same moment. Never zero.
-  int64 since_ms = 1;
+  // Tag 3 (`placed_at_front`, drawn as a "front" label), tag 4 (`racing`, a
+  // merge worked on behind the head) and tag 5 (`placement`, front or
+  // returned) are RETIRED (2026-11-11): the sidebar draws no "front" and no
+  // "returned", and the queue races no more.
+  reserved 3, 4, 5;
+  reserved "placed_at_front", "racing", "placement";
 }
 
 // One entry of a repository section's body: a top-level row in no
@@ -1672,8 +1652,8 @@ message RosterMergeQueueRepoGroup {
   // The group's header box: the repository's label, drawn as a Recently
   // Merged group's is.
   RosterMergedRepoGroupHeader header = 2;
-  // The repository's queue: its head, its remediating merges, the merges
-  // waiting, and its pause. Always set.
+  // The repository's queue: its head, its repair slots and the merges
+  // awaiting them, the merges waiting, and its pause. Always set.
   RosterRepoMergeQueue queue = 3;
 }
 

@@ -2,15 +2,17 @@ package merge
 
 import (
 	"context"
+	"fmt"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
-// This file is a repository's SLOT and its KERNEL LOCK.
+// This file is a repository's TESTING SLOT and its KERNEL LOCK.
 //
-// The slot is the one right to move the target: the HEAD holds it. THE PUMP IS
-// THE ONLY GRANTOR. A queue front is admitted into the slot, or a speculative
+// The testing slot is the one right to run the test gate and move the target:
+// the HEAD holds it (owner ruling, 2026-11-11: only one merge of a queue runs
+// its test gate at a time). THE PUMP IS THE ONLY GRANTOR. A queue front is admitted into the slot, or a speculative
 // run promoted into it, by the pump, and nothing else takes it, so two
 // candidates never race for it.
 //
@@ -63,9 +65,6 @@ func (o *orchestrator) releaseRepoLockIfIdle(ctx context.Context, repo wsm.RepoK
 // kicks the pump so the next merge is admitted or promoted. It is the ONE
 // place a run leaves its chain, and it acts once.
 func (o *orchestrator) releaseSlot(ctx context.Context, r *run) {
-	// A RUN LEAVING ITS CHAIN GIVES BACK ITS TEST TURN, or its place in line
-	// for it (testturn.go), here with everything else it holds.
-	o.releaseTestTurn(ctx, r, "left its chain")
 	o.mu.Lock()
 	if !r.joined {
 		o.mu.Unlock()
@@ -93,4 +92,24 @@ func (o *orchestrator) releaseSlot(ctx context.Context, r *run) {
 	o.mu.Unlock()
 	o.releaseRepoLockIfIdle(ctx, r.repo)
 	o.kick(r.repo)
+}
+
+// requireTestingSlot is the testing slot's assertion at the gate: R, about to
+// run the gate of ROUND, holds its repository's slot. Nothing but the head
+// reaches a gate, so a run that does is a defect, recorded at ERROR and
+// failed hard.
+func (o *orchestrator) requireTestingSlot(ctx context.Context, r *run, round tabRound) {
+	o.mu.Lock()
+	holder := o.running[r.repo]
+	o.mu.Unlock()
+	if holder == r {
+		return
+	}
+	held := ""
+	if holder != nil {
+		held = string(holder.ws)
+	}
+	o.log(ctx, r.ws).Error("daemon.merge.slot", "a merge that does not hold its queue's testing slot reached the test gate", dlog.Context{
+		"workspace": string(r.ws), "repo": string(r.repo), "round": round.n, "holder": held})
+	panic(fmt.Sprintf("merge: %s reached the test gate of %s while %q holds its testing slot", r.ws, r.repo, held))
 }

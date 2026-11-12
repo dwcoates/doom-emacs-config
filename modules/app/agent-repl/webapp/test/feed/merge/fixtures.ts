@@ -45,12 +45,9 @@ export interface TabSpec {
   /**
    * `waitingOnUser` only for the kinds that carry it (resolving, rebasing, a
    * commit, resolving conflicts, a conflict resolution, tests, fixing tests,
-   * a fixing attempt); `pending` only for a commit;
-   * `waitingForTurn` only for a test run.
+   * a fixing attempt); `pending` only for a commit.
    */
-  state: "live" | "settled" | "waitingOnUser" | "pending" | "waitingForTurn" | "held";
-  /** For `waitingForTurn`, the merge holding the turn; "alpha" unless stated. */
-  holder?: string;
+  state: "live" | "settled" | "waitingOnUser" | "pending";
   /** For `settled`. */
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
@@ -116,11 +113,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
       ? { case: "live" as const, value: { startedAtMs } }
       : spec.state === "waitingOnUser"
         ? { case: "waitingOnUser" as const, value: { startedAtMs } }
-        : spec.state === "waitingForTurn"
-          ? { case: "waitingForTurn" as const, value: { startedAtMs, holder: { workspaceName: spec.holder ?? "alpha" } } }
-          : spec.state === "held"
-            ? { case: "held" as const, value: { startedAtMs } }
-          : {
+        : {
           case: "settled" as const,
           value: {
             startedAtMs,

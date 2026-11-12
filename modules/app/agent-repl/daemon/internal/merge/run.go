@@ -75,19 +75,17 @@ type run struct {
 	// leaves the run out on both sides whichever side of that write the read
 	// fell. Guarded by o.mu.
 	leftLine bool
-	// landing reports the run began committing: nothing overtakes it from
-	// here (race.go). Guarded by o.mu.
-	landing bool
 	// conflictCommit is the commit the run's conflict attempts count on, and
 	// conflictAttempts how many it has had in a row (process.go conflict).
 	conflictCommit   string
 	conflictAttempts int
 	// background reports a waiting member's rebase (rebasewaiting.go): it
-	// records no progress and settles back into its place in line.
+	// records no progress and settles back into its place in line. Its git
+	// runs alone (a conflict it meets steps it aside for the resolving slot)
+	// unless resolving: the rebase the resolving-conflicts slot's holder runs
+	// for a waiting merge's conflict, whose session resolves it in place.
 	background bool
-	// claimedOn is the base the run last claimed the race to land on, so it
-	// claims once per base (race.go).
-	claimedOn string
+	resolving  bool
 	// chainBase is the commit the branch's OWN commits stand on: the tip its
 	// last rebase replayed them onto, empty before its first. A rebase replays
 	// exactly chainBase..branch, so a merge never carries the commits of a
@@ -297,12 +295,6 @@ func (t tabRound) key() string { return roundKey(t.kind, t.n) }
 
 // live is the round's live badge.
 func (t tabRound) live() tabState { return tabState{startedMS: t.started.UnixMilli()} }
-
-// waitingForTurn is a run round's badge while it waits in line for its
-// repository's test turn, which the merge named HOLDER holds.
-func (t tabRound) waitingForTurn(holder string) tabState {
-	return tabState{startedMS: t.started.UnixMilli(), turnHolder: holder}
-}
 
 // settled is the round's settled badge: ended at endedMS, failed with the
 // one-line account when failure is set, succeeded otherwise.
@@ -614,16 +606,11 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 // take, so no run publishes a merge counted from the epoch (checkQueuedAt): a
 // waiting member's rebase once built its run without one.
 func (o *orchestrator) newRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
-	r := o.buildRun(ctx, cancel, repo, ws, queuedMS)
-	if o.onRunStart != nil {
-		o.onRunStart(r)
-	}
-	return r
+	return o.buildRun(ctx, cancel, repo, ws, queuedMS)
 }
 
 // newBackgroundRun builds a waiting member's rebase (rebasewaiting.go): a
-// run that never tests, so onRunStart, which names the runs that may ask
-// for a test turn, is not told of it.
+// run that never tests.
 func (o *orchestrator) newBackgroundRun(ctx context.Context, cancel context.CancelCauseFunc, repo wsm.RepoKey, ws ids.WorkspaceID, queuedMS int64) *run {
 	r := o.buildRun(ctx, cancel, repo, ws, queuedMS)
 	r.background = true
@@ -857,11 +844,6 @@ func (r *run) execute(ctx context.Context) error {
 	outcome, err := r.method(ctx)
 	if err != nil {
 		r.end(ctx, err)
-		// A HEAD THAT LOST THE RACE TO LAND did not fail: it waits behind the
-		// winner to start over (race.go).
-		if _, lost := raceLostOf(ctx); lost {
-			return nil
-		}
 		return err
 	}
 	// THE TERMINAL IS NOT THE STEP'S TO CANCEL. An abandon arriving once the

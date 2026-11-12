@@ -24,13 +24,12 @@ import {
   RosterMergeQueueSectionSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueHeadSchema,
-  RosterMergeQueueRemediatingConflictsSchema,
-  RosterMergeQueueRemediatingReasonSchema,
-  RosterMergeQueueRemediatingSchema,
-  RosterMergeQueueRemediatingTestsSchema,
   RosterMergeQueueSubjectSchema,
   RosterMergeQueueWaitingSchema,
-  RosterMergeQueueWaitingPlacementSchema,
+  RosterMergeQueueFixingTestsSchema,
+  RosterMergeQueueResolvingConflictsSchema,
+  RosterMergeQueueAwaitingFixingTestsSchema,
+  RosterMergeQueueAwaitingResolvingConflictsSchema,
   RosterRepoMergeQueueSchema,
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
@@ -39,7 +38,6 @@ import {
   type RosterMergeQueueHead,
   type RosterMergeQueueSubject,
   type RosterMergeQueueWaiting,
-  type RosterMergeQueueWaitingPlacement,
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
@@ -566,51 +564,33 @@ export function mergingHead(
   });
 }
 
-/** A merge remediating out of line, stepped aside at SINCE for REASON (its tests by default). */
-export function remediatingMerge(ws: string, since: number, reason = testsReason()) {
-  return create(RosterMergeQueueRemediatingSchema, { subject: queueSubject(ws), sinceMs: BigInt(since), reason });
+/** The merge holding the fixing-tests slot, since SINCE. */
+export function fixingTestsMerge(ws: string, since: number) {
+  return create(RosterMergeQueueFixingTestsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
 }
 
-/** The reason of a merge fixing its failing tests. */
-export function testsReason() {
-  return create(RosterMergeQueueRemediatingReasonSchema, {
-    reason: { case: "tests", value: create(RosterMergeQueueRemediatingTestsSchema, {}) },
-  });
+/** The merge holding the resolving-conflicts slot, since SINCE. */
+export function resolvingConflictsMerge(ws: string, since: number) {
+  return create(RosterMergeQueueResolvingConflictsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
 }
 
-/** The reason of a merge resolving its rebase's conflicts. */
-export function conflictsReason() {
-  return create(RosterMergeQueueRemediatingReasonSchema, {
-    reason: { case: "conflicts", value: create(RosterMergeQueueRemediatingConflictsSchema, {}) },
-  });
+/** A merge awaiting the fixing-tests slot, since SINCE. */
+export function awaitingFixingTestsMerge(ws: string, since: number) {
+  return create(RosterMergeQueueAwaitingFixingTestsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
 }
 
-/** The placement a waiting merge's INIT names: returned over front, as the daemon resolves it. */
-function placementOf(init: { front?: boolean; returned?: boolean }): RosterMergeQueueWaitingPlacement | undefined {
-  if (init.returned === true) {
-    return create(RosterMergeQueueWaitingPlacementSchema, { placement: { case: "returned", value: {} } });
-  }
-  if (init.front === true) {
-    return create(RosterMergeQueueWaitingPlacementSchema, { placement: { case: "front", value: {} } });
-  }
-  return undefined;
+/** A merge awaiting the resolving-conflicts slot, since SINCE. */
+export function awaitingResolvingConflictsMerge(ws: string, since: number) {
+  return create(RosterMergeQueueAwaitingResolvingConflictsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
 }
 
 /** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */
 export function waitingMerge(
   id: string,
-  init: {
-    queuedAtMs?: bigint;
-    front?: boolean;
-    returned?: boolean;
-    subject?: RosterMergeQueueSubject;
-    racingSinceMs?: bigint;
-  } = {},
+  init: { queuedAtMs?: bigint; subject?: RosterMergeQueueSubject } = {},
 ): RosterMergeQueueWaiting {
   return create(RosterMergeQueueWaitingSchema, {
     subject: init.subject ?? queueSubject(id),
     queuedAtMs: init.queuedAtMs ?? 0n,
-    placement: placementOf(init),
-    racing: init.racingSinceMs === undefined ? undefined : { sinceMs: init.racingSinceMs },
   });
 }

@@ -1,4 +1,4 @@
-package cpugov
+package hostpower
 
 import (
 	"errors"
@@ -21,7 +21,7 @@ func powerFromSysfs(root string) (Power, error) {
 		return PowerAC, nil
 	}
 	if err != nil {
-		return PowerUnknown, fmt.Errorf("cpugov: reading %s: %w", root, err)
+		return PowerUnknown, fmt.Errorf("hostpower: reading %s: %w", root, err)
 	}
 	mains, online, discharging := false, false, false
 	for _, entry := range entries {
@@ -59,7 +59,7 @@ func powerFromSysfs(root string) (Power, error) {
 func readSysfs(dir, name string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
-		return "", fmt.Errorf("cpugov: reading %s: %w", filepath.Join(dir, name), err)
+		return "", fmt.Errorf("hostpower: reading %s: %w", filepath.Join(dir, name), err)
 	}
 	return strings.TrimSpace(string(raw)), nil
 }

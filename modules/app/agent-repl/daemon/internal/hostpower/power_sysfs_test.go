@@ -1,4 +1,4 @@
-package cpugov
+package hostpower
 
 import (
 	"os"

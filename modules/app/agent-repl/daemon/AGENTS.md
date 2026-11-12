@@ -1389,111 +1389,53 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   (`harness.CommitWork`); a rebase conflict is scripted per commit
   (`harness.ScriptRebaseConflict`) and stands until `harness.ResolveConflicts`.
 
-## The queue's window rebases in a chain and tests ahead of its turn
+## A queue holds three slots: the head, fixing tests, resolving conflicts
 
-Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
+Owner rulings, 2026-11-11 (`internal/merge/slot.go`, `internal/merge/remediate.go`,
+`internal/merge/rebasewaiting.go`, `internal/wsm/mergeslot.go`). The queue races
+no more: the window, the race to land, the test turn, speculative gates and the
+gate governor are gone.
 
-- **THE WINDOW** is decided by the host's POWER SOURCE (owner ruling,
-  2026-10-14; `cpugov.Governor.Window`, `internal/merge/power.go`): on AC the
-  head and the merge behind it (`cpugov.QueueWindow`, 2), which race and take
-  turns at the tests; on battery, and while the source is unread, the head
-  alone (`cpugov.BatteryWindow`, 1) -- no race and no turns. An entry beyond
-  the window waits untouched until a merge ahead lands or drops out, or the
-  window grows. PLUGGING IN extends every chain at once; UNPLUGGING suspends
-  every member beyond the window at its step (`suspendFor`, then
-  `AdoptWorkspace`), to resume there once it heads its queue or the host is
-  plugged in again.
-- **THE RACE TO LAND** (`internal/merge/race.go`, owner rulings 2026-10-12
-  and 2026-10-13). Every member rebases ITS OWN commits onto the TARGET's tip,
-  conflicts resolved by its OWN session through the same prompts, and the
-  merge behind the head joins the chain (lease, admission, bubble -- the same
-  run a head gets) the moment the window has room: it waits on none of the
-  head's steps (the head's admission extends the chain right after it
-  registers). A chain member is `wsm.MergeAdmitted` while it is behind the
-  head; only the pump promotes it into the slot, once its entry stands first
-  in line, or once its gate passed first and it took the head's place
-  (`YieldMergeHead`).
-- **THE LOSER IS SUSPENDED, NEVER TORN DOWN** (owner ruling, 2026-10-13). A
-  head the merge behind it overtook is brought to a stopping point exactly as
-  a pause brings a merge (`suspendFor`), keeps its lease and its progress
-  record, and is taken straight back (`AdoptWorkspace`), still admitted right
-  behind the winner. An agent turn it was on lives on in the session. It
-  resumes only once it heads the queue (`resumeIn` never jumps a chain member;
-  `extendOnce` never resumes a non-speculative record behind the head),
-  finishes the step it was on -- reattaching to that turn -- and only then
-  rebases onto the target's new tip (`goOnAfterResumedStep`). A merge's
-  prompt hand-off to the prompt queue is never cut by its run's cancellation.
-- **RESTACKS.** A target that moves (`noteTargetTip`) closes the repository's
-  chain signal; the merge behind rebases onto the new tip. Every queue rebase
-  runs with rerere on (`gitclient`), and a stop rerere resolved
-  (`RebaseStep.Resolved`) is continued with no prompt.
-- **A MERGE ONLY CARRIES ITS OWN COMMITS.** A rebase replays exactly
-  `chainBase..branch` (`run.chainBase`, recorded in the progress document), so
-  a merge ahead that does not land leaves nothing behind; at the head, a
-  branch standing on a chain base that is not on the target is rebased, never
-  read as already on the tip. Landing order is strictly head-first.
-- **ONE TEST GATE PER REPOSITORY AT A TIME** (owner ruling, 2026-10-14;
-  `internal/merge/testturn.go`). Every gate that runs anything first takes
-  its repository's TEST TURN, owned by the orchestrator under `o.mu` and
-  never by a timer, retry or poll. A merge ready to run its gate (freshly
-  rebased, or done with a fixing attempt) joins the back of the LINE; the
-  turn passes to the front of the line the moment the holder's run ends
-  (passed, failed, cut by a moved target, stopped, the daemon leaving), so
-  while one merge fixes, the other tests, and the two alternate. `gate`
-  gives the turn back on every way out; `releaseSlot` gives back a turn or
-  a place in line a run leaving its chain still holds.
-  - The turn is taken BEFORE the governor's permit, so a run in line holds
-    no share of the machine's gates. A merge behind the head that holds the
-    turn while the governor has not admitted its gate gives it to its head
-    the moment the head stands in line (`errTurnToHead`), so the head is
-    never held by machine load through the turn.
-  - A run in line stands at a step boundary (`run.idling`): a restart's
-    boundary stop takes it at once, and it resumes at its tests step.
-  - The wait is visible: the run's subtab draws
-    `frontend.v1.FeedMergeTabTestsRunWaitingForTurn` naming the holder, and
-    `daemon.merge.test_turn` records at INFO the join, the grant (with
-    `waited_seconds`), the give-back (with how the run `ended` and the
-    `next` holder), and a stopped run leaving the line.
-  - Tests order two merges' gates through the TEST-ONLY seams
-    `onTestTurnAsk` (hold a gate before it asks) and `onTestTurnLine`.
-  - A park holds ONE RUN, never a workspace: `onRunStart` names each run
-    that may test as it is built, and `chain.parkTurn` binds its park to
-    the first such run of the workspace. A run stopped before it asked
-    takes the park with it, so its resumed run can never wait on a park
-    whose release comes only at the test's end.
-- **SPECULATIVE GATES.** A member whose rebase settled runs its gate (and its
-  fixing attempts, under the merge's one `MaxFixAttempts` bound) against its
-  chained base once it holds the test turn and the governor admits it,
-  niced (`SpeculativeNice`). A base
-  that moves under it cuts it (`errBaseMoved`) and it runs again. Its pass
-  (`testedDoc`) is valid only for the tree it tested: at the head a rebased
-  tree equal to it lands without testing again (INFO
-  `daemon.merge.speculative`), any other is tested again and the invalidation
-  is recorded.
-- **THE GOVERNOR** (`cpugov`) reads the host's power source every 5s
-  (IOKit's providing power source on macOS, `/sys/class/power_supply` on
-  Linux), answers the window, and tells the orchestrator every change
-  (`OnPowerChange`); a source it cannot read is an ERROR
-  `daemon.cpugov.power` once per cause and reads as battery. It also counts
-  the gates: the head's runs at once and is never governed, and a gate
-  behind its head is admitted while fewer than `MaxGates` run, closest to the
-  head first (INFO `daemon.cpugov.admit`). There is no load band (owner
-  ruling, 2026-10-14): the power source alone decides how much the queue
-  runs. `AGENT_REPL_FIXED_POWER` (`ac` or `battery`;
-  `cpugov.HostPowerSource`) pins the source it reads, recorded at boot (INFO
-  `daemon.boot.gate_governor`); any other value refuses the boot. The
-  integration harness pins `ac` for every daemon (`HostNeutralPowerEnv`).
-- **A RESTART MID-CHAIN** resumes every member at its recorded step: the head
-  through the pump, the members behind it through `extendChain` from its
-  resume, a speculative step (`progressDoc.Speculative`) finished as such
-  whatever the merge's place now is.
-  - THE HEAD IS THE FIRST ADMITTED ENTRY IN QUEUE ORDER (`resumeIn`, fixed
-    2026-10-14), never whichever recovery path took a merge back first. A
-    handover can take the merge behind back (boot or an early adoption)
-    before the head's own adoption; until the head is taken back nothing of
-    the repository resumes, recorded at INFO `daemon.merge.resume` ("not
-    taken back yet", with `head` and `waiting`), and the head's adoption kick
-    then resumes it with the others behind it.
+- **THE TESTING SLOT IS THE HEAD.** Only the merge at the front of its line runs
+  the test gate and lands; the pump is the only grantor (`o.running`). The gate
+  asserts it (`requireTestingSlot`): a run that does not hold the slot reaching
+  the gate is recorded at ERROR `daemon.merge.slot` and panics.
+- **THE TWO REPAIR SLOTS ARE THE STORE'S.** `merge_queue.aside` names why a
+  remediating entry is out of line (`wsm.MergeAside`: tests, conflicts, or a
+  waiting merge's conflict), and the one slot derivation (`mergeSlotsOf`,
+  `wsm.SlotsOf` for fakes) gives the earliest remediating entry of each repair
+  its slot (`MergeSlotFixingTests`, `MergeSlotResolvingConflicts`) and every
+  later one the place awaiting it. A merge steps aside to the back of the
+  sequence and nothing moves a remediating entry, so the grant is FIFO by
+  construction, and a release (return, drop, removal) grants the next merge in
+  the same write. The partial unique index `merge_queue_one_slot_holder`
+  refuses a second holder of the head or either repair slot; `restampMergeSlots`
+  clears every changed row before setting any, so only a true second holder
+  trips it.
+- **A HEAD THAT STEPS ASIDE HANDS ITS SESSION NOTHING** (`handOff`). Its brief
+  and turn are recorded (`progressDoc.Brief`, `Turn`), `wsm.StepAsideMerge`
+  answers the slot it took, and the run is cut and taken back
+  (`recoverRemediating`). `armRepairs` -- run after every write that can grant
+  a slot, and at the top of every pump pass -- starts the holder's work: the
+  wait that delivers the brief through `reattachTurn` and returns the merge to
+  the line (`waitThenReturn`), or a waiting merge's resolving rebase
+  (`resolveWaiting`). An arming that finds another merge still armed for the
+  same slot is recorded at ERROR and panics. A step aside the store refuses is
+  recorded at ERROR and the merge repairs in place.
+- **A WAITING MERGE'S BACKGROUND REBASE RUNS GIT ONLY.** Every merge behind the
+  head is rebased after a landing; a conflict aborts the rebase and steps the
+  merge aside for the resolving-conflicts slot with no lease and no record
+  (`stepAsideWaiting`). Its holder runs the same rebase with prompts
+  (`run.resolving`) and returns to the line, waiting, at the first waiting place.
+- **A MERGE BACK IN LINE IS DRAWN WAITING** (`drawBackInLine`). Its return
+  settles its repairing tab, records it `BackInLine` (cleared by the next live
+  checkpoint), and `republishQueue` and `recoverResumable` draw it as a merge
+  waiting until its run resumes at the head (2026-11-11: an admitted merge with
+  no run kept a live "fixing tests" tab).
+- **THE CHAIN** survives only for deploys running concurrent stages
+  (`concurrent.go`): a head whose config has none works alone.
+- **A RESTART** takes every remediating entry back at its stamped slot: holders
+  are re-armed, merges awaiting a slot wait for the grant.
   - A MERGE TAKEN BACK BUT NOT RESUMED is dropped as an admitted merge
     (`dequeue` -> `dropPendingResume`): its entry, its merge lease and its
     progress record go in ONE transaction (`wsm.DropAdmittedMerge`, the owner
@@ -1544,15 +1486,12 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
   with an optional `-repository-dir DIR` (merge_pause, merge_resume),
   `-hold-rollouts` / `-release-rollouts` (merge_hold_rollouts,
   merge_release_rollouts: daemon-wide, durable; while held a landing in the
-  daemon's own checkout does not tell the deploy), `-disable-racing` /
-  `-enable-racing` (merge_disable_racing, merge_enable_racing: daemon-wide,
-  durable; while disabled every queue works its head alone, whatever the
-  power source), `-subscribe DETAIL` / `-unsubscribe` with an optional
+  daemon's own checkout does not tell the deploy), `-subscribe DETAIL` / `-unsubscribe` with an optional
   `-repository-dir DIR` (merge_subscribe, merge_unsubscribe). A control is answered at
   once, so `-wait` is refused with one; the verb waits
   at most `-answer-timeout` (15s) for the file's fate and prints the answer
   the ingress keyed by the file's path in the run log (or its `.1`
-  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released|racing_disabled|racing_enabled|subscribed|resubscribed|unsubscribed|not_subscribed>`
+  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released|subscribed|resubscribed|unsubscribed|not_subscribed>`
   when applied, the refusal's `cause` when quarantined. An answer the run log
   does not carry is printed `unread` on stderr; the fate still decides the
   exit.
@@ -1563,15 +1502,15 @@ Owner rulings, 2026-10-11 (`internal/merge/chain.go`, `internal/cpugov`).
 ## An agent controls the merge queue through command files
 
 `merge_evict`, `merge_pause`, `merge_resume`, `merge_hold_rollouts`,
-`merge_release_rollouts`, `merge_disable_racing`, `merge_enable_racing`, `merge_subscribe`
+`merge_release_rollouts`, `merge_subscribe`
 and `merge_unsubscribe` entries (`internal/commandfile`, ARCHITECTURE.md "The
 merge queue's controls") are `UpdateMergeQueue`'s evict, pause, resume,
-hold_rollouts, release_rollouts, disable_racing, enable_racing, subscribe and
+hold_rollouts, release_rollouts, subscribe and
 unsubscribe for an agent: the same
 orchestrator calls, the requester named by `project_dir`. The answer is the
 file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
 INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
-`paused`, `resumed`, `held`, `released`, `racing_disabled`, `racing_enabled`, `subscribed`, `resubscribed`,
+`paused`, `resumed`, `held`, `released`, `subscribed`, `resubscribed`,
 `unsubscribed`, `not_subscribed`) or WARN `daemon.commandfile.entry` (the refusal in
 `cause`). Evicting what is not queued is `not_queued`, never a refusal.
 

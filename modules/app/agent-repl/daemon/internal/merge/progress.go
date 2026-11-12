@@ -77,6 +77,14 @@ type progressDoc struct {
 	// conflict resolution, a fixing attempt) submitted.
 	PromptIndex int    `json:"prompt_index"`
 	Turn        string `json:"turn,omitempty"`
+	// Brief is the repairing brief a merge that stepped aside out of line
+	// hands its session as Turn once it holds its repair slot (handOff,
+	// waitThenReturn); empty for every other record.
+	Brief string `json:"brief,omitempty"`
+	// BackInLine marks a merge whose out-of-line repair ended and that waits
+	// in line again for the head, its repairing tab settled (drawBackInLine);
+	// the run that resumes it at the head takes the repair's end up.
+	BackInLine bool `json:"back_in_line,omitempty"`
 	// StoppedTurn is the turn a HARD STOP of the queue interrupted (HardStop),
 	// written onto the suspended merge's record before the interrupt. Read
 	// back on the resume, that turn's kill was the queue's, not the user's,
@@ -372,6 +380,9 @@ func (r *run) checkpoint(ctx context.Context, step string, mutate func(*progress
 		doc.Tested = nil
 	}
 	doc.Speculative = speculative
+	// A LIVE RUN'S RECORD IS NEVER BACK IN LINE, and carries a brief only
+	// while it steps aside (handOff writes it through MUTATE).
+	doc.Brief, doc.BackInLine = "", false
 	doc.Rebasing, doc.Testing = r.rebasing.clone(), r.testing.clone()
 	doc.Conflicts, doc.Fixing = r.conflicts.clone(), r.fixing.clone()
 	if mutate != nil {

@@ -1,6 +1,6 @@
 //go:build darwin
 
-package cpugov
+package hostpower
 
 import "testing"
 

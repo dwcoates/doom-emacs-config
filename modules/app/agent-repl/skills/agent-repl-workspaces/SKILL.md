@@ -827,9 +827,9 @@ creating workspaces there with `-repository DIR`.
 - `local_merge:` is the built-in local landing: `tests:` names the test
   runner (`agent_repl_suites: {script_path: ...}`), and `version_tag: {}`
   makes every agent's deploy onto main carry a version increment and tag the
-  landing. Only a repository with a local merge races its queue; a
-  repository with `concurrent:` runs its concurrent stages ahead of its turn
-  instead.
+  landing. A local merge's steps run only at the head (waiting merges
+  are only rebased in the background, git alone); a repository with
+  `concurrent:` runs its concurrent stages ahead of its turn.
 - **A failed hook fails what its stage belongs to** (the create, the finish
   or the deploy): a script that exits non-zero, runs past its timeout or
   cannot start, or a prompt whose turn does not complete. A failed deploy
@@ -899,7 +899,7 @@ queue_drained:
 
 | configured per repository | fixed in the daemon |
 |---|---|
-| every creation, finish, pre-deploy, deploy and post-deploy hook, per kind of workspace, and each one's scope | the queue: its order, placement, pause, eviction and racing window |
+| every creation, finish, pre-deploy, deploy and post-deploy hook, per kind of workspace, and each one's scope | the queue: its order, placement, pause, eviction and three slots (the head, fixing tests, resolving conflicts) |
 | which leading stages run concurrently (`concurrent`) | that the rest are entered one deploy at a time, in queue order |
 | whether a local merge runs, and its test runner | the local merge's own steps: rebase with conflict resolution, the test gate with fixing attempts, the non-fast-forward merge commit |
 | whether the repository is versioned (`version_tag`) | the version arithmetic and the tag's form |

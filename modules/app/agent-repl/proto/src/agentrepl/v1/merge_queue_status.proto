@@ -15,14 +15,20 @@ import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
-// One repository's merge queue.
+// One repository's merge queue. A queue has THREE ACTIVE SLOTS, each held by
+// at most one merge: the head (the one merge running its test gate and
+// landing), fixing tests, and resolving conflicts (both out of line). So at
+// most one entry is running, at most one is fixing_tests and at most one is
+// resolving_conflicts; every other merge out of line awaits its repair's slot.
 message MergeQueueStatus {
   // The repository whose queue this is.
   workspace.v1.RepositoryRef repository = 1;
   // Whether the queue advances.
   MergeQueueStatusAdvance advance = 2;
-  // Every merge in line, front first: the running merge (when one runs) is
-  // first, then every waiting merge in the order it will run.
+  // Every merge of the queue: those in line, front first -- the running
+  // merge (when one runs), then every waiting merge in the order it will run
+  // -- then every merge out of line: the holder of each repair slot, then the
+  // merges awaiting each slot, in the order each will be granted it.
   repeated MergeQueueStatusEntry entries = 3;
 }
 
@@ -88,40 +94,48 @@ message MergeQueueStatusEntryStage {
     MergeQueueStatusEntryStageWaiting waiting = 1;
     // Running.
     MergeQueueStatusEntryStageRunning running = 2;
-    // Out of line: it stepped aside from the head (or from the race behind
-    // it) while an agent turn of its own repairs it -- the failures its test
-    // suite finished with, or the conflicts its rebase met -- and returns to
-    // the line once that turn ends, at the first waiting place. Listed after
-    // every entry in line.
-    MergeQueueStatusEntryStageRemediating remediating = 3;
+    // Out of line, holding the queue's FIXING-TESTS slot: its whole test
+    // suite finished with failures at the head, its session fixes them, and
+    // it returns to the line at the first waiting place once that turn ends,
+    // running its suite again (one of its fixing attempts).
+    MergeQueueStatusEntryStageFixingTests fixing_tests = 4;
+    // Out of line, holding the queue's RESOLVING-CONFLICTS slot: its rebase
+    // met conflicts -- at the head, or in the background while it waited --
+    // and its session resolves them; it returns to the line at the first
+    // waiting place once the resolution ends. Spends no fixing attempt.
+    MergeQueueStatusEntryStageResolvingConflicts resolving_conflicts = 5;
+    // Out of line, waiting for a repair slot another merge holds. Nothing is
+    // handed its session until it is granted the slot, which the holder's
+    // return to the line grants to the first merge awaiting it.
+    MergeQueueStatusEntryStageAwaitingRepair awaiting_repair = 6;
+  }
+  // Tag 3 (`remediating`, every merge out of line with no slot) is RETIRED
+  // (2026-11-11): a merge out of line holds a repair slot or awaits one.
+  reserved 3;
+  reserved "remediating";
+}
+// Holding the fixing-tests slot. No fields: the arm is the fact.
+message MergeQueueStatusEntryStageFixingTests {}
+// Holding the resolving-conflicts slot. No fields: the arm is the fact.
+message MergeQueueStatusEntryStageResolvingConflicts {}
+// Awaiting a repair slot, and where in its line for it.
+message MergeQueueStatusEntryStageAwaitingRepair {
+  // The slot it waits for.
+  MergeQueueStatusEntryStageAwaitingRepairSlot slot = 1;
+  // Its 1-based place among the merges awaiting that slot: 1 is granted the
+  // slot next.
+  uint32 place = 2;
+}
+// WHICH REPAIR SLOT A MERGE AWAITS. THE ARM IS THE SLOT.
+message MergeQueueStatusEntryStageAwaitingRepairSlot {
+  // The fixing-tests slot, or the resolving-conflicts slot.
+  oneof slot {
+    // Its whole suite failed at the head; it fixes its tests once granted.
+    MergeQueueStatusEntryStageFixingTests fixing_tests = 1;
+    // Its rebase conflicted; it resolves the conflicts once granted.
+    MergeQueueStatusEntryStageResolvingConflicts resolving_conflicts = 2;
   }
 }
-// Remediating out of line, and why.
-message MergeQueueStatusEntryStageRemediating {
-  // What the merge's turn out of line repairs. Always set by the daemon; a
-  // set reason whose arm this schema revision does not name is a reason a
-  // newer daemon added.
-  MergeQueueStatusEntryStageRemediatingReason reason = 1;
-}
-// WHY A MERGE STEPPED ASIDE. THE ARM IS THE REASON: each is a step that waits
-// on an agent turn, and the merge returns to the line once that turn ends.
-message MergeQueueStatusEntryStageRemediatingReason {
-  // Which repair the turn out of line makes.
-  oneof reason {
-    // Its whole test suite finished with failures; its fixing turn repairs
-    // them, and on its return it runs its suite again, spending one of its
-    // fixing attempts.
-    MergeQueueStatusEntryStageRemediatingTests tests = 1;
-    // Its rebase onto the target's tip met conflicts; its session resolves
-    // them, and on its return it rebases onto the tip again. Spends no
-    // fixing attempt, and may step aside again if it conflicts again.
-    MergeQueueStatusEntryStageRemediatingConflicts conflicts = 2;
-  }
-}
-// Remediating its failing tests. No fields.
-message MergeQueueStatusEntryStageRemediatingTests {}
-// Resolving its rebase's conflicts. No fields.
-message MergeQueueStatusEntryStageRemediatingConflicts {}
 // Waiting. No fields.
 message MergeQueueStatusEntryStageWaiting {}
 // Running, at a step.

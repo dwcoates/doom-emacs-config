@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -11,10 +12,10 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// waitingWorld is a chain of the head, the merge behind it (ws-b) and one more
-// inside the working window (ws-in), with the waiting members named queued
-// beyond the window; the members' rebases and the passes' ends are reported
-// on channels.
+// waitingWorld is a queue of the head, the merge behind it (ws-b), which
+// heads the line once the head lands, and the waiting members named queued
+// behind ws-b; the members' rebases and the passes' ends are reported on
+// channels. The head is held inside its gate until land.
 type waitingWorld struct {
 	*chain
 	rebased     chan ids.WorkspaceID
@@ -31,12 +32,35 @@ func newWaitingWorld(t *testing.T, waiting ...ids.WorkspaceID) *waitingWorld {
 	c.h.o.onWaitingPass = func(repo wsm.RepoKey) { w.passes <- repo }
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
-	c.queue(t, "ws-in", "in1")
 	for i, ws := range waiting {
 		c.queue(t, ws, "w"+string(rune('1'+i)))
 	}
-	w.releaseHead, w.done = c.headHoldsTheTurn(t, "ws-b")
+	headGate, release := c.runner.hold(c.dirs[theWorkspace])
+	w.releaseHead, w.done = release, admitAsync(c.h, context.Background())
+	<-headGate
 	return w
+}
+
+// entryOf reads WS's queue entry.
+func (w *waitingWorld) entryOf(t *testing.T, ws ids.WorkspaceID) wsm.MergeQueueEntry {
+	t.Helper()
+	stored, err := w.h.db.MergeQueue(context.Background(), w.h.repoKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range stored {
+		if entry.Workspace == ws {
+			return entry
+		}
+	}
+	t.Fatalf("%s has no queue entry", ws)
+	return wsm.MergeQueueEntry{}
+}
+
+// waitGone waits, bounded, for every run the orchestrator started to end.
+func waitGone(t *testing.T, o *orchestrator) {
+	t.Helper()
+	receiveWithin(t, liveGone(o), "the exiting orchestrator's runs ending")
 }
 
 // land lets the head's gate pass, while the merge behind it still waits in
@@ -154,7 +178,7 @@ func TestAWaitingMergeRunsNoTests(t *testing.T) {
 	w.finish(t)
 }
 
-func TestAWaitingMergesConflictIsResolvedByItsOwnSession(t *testing.T) {
+func TestAWaitingMergesConflictStepsItAsideForTheResolvingSlot(t *testing.T) {
 	// Arrange: C's commit conflicts with what the head lands.
 	w := newWaitingWorld(t, "ws-c")
 	w.git.conflict("w1", "a1", "x.go")
@@ -164,10 +188,129 @@ func TestAWaitingMergesConflictIsResolvedByItsOwnSession(t *testing.T) {
 	w.awaitPass(t)
 
 	// Assert
-	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
-		t.Fatalf("C's session got %d conflict prompts while it waited in line, want 1", got)
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("C's session got %d conflict prompts from its git-only rebase, want none", got)
 	}
-	w.finish(t)
+	entry := w.entryOf(t, "ws-c")
+	if entry.State != wsm.MergeRemediating || entry.Aside != wsm.MergeAsideWaitingConflicts || entry.Slot != wsm.MergeSlotResolvingConflicts {
+		t.Fatalf("C's entry = %+v, want it out of line holding the resolving-conflicts slot", entry)
+	}
+	if standing, _ := w.git.RebaseInProgress(context.Background(), w.dirs["ws-c"]); standing {
+		t.Fatal("the conflicted rebase still stands in C's worktree")
+	}
+	if got := w.git.tree("b-ws-c"); got != "base+w1" {
+		t.Fatalf("C holds %s, want its base kept (base+w1)", got)
+	}
+	w.h.db.mu.Lock()
+	_, held := w.h.db.leases["ws-c"]
+	w.h.db.mu.Unlock()
+	if held {
+		t.Fatal("C's lease outlived its git-only rebase")
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "the merge holds the resolving-conflicts slot") {
+		t.Fatal("the step aside was not recorded")
+	}
+}
+
+func TestASecondWaitingConflictWaitsForTheResolvingSlot(t *testing.T) {
+	// Arrange: C's and D's commits both conflict with what the head lands.
+	w := newWaitingWorld(t, "ws-c", "ws-d")
+	w.git.conflict("w1", "a1", "x.go")
+	w.git.conflict("w2", "a1", "y.go")
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	if got := w.entryOf(t, "ws-c").Slot; got != wsm.MergeSlotResolvingConflicts {
+		t.Fatalf("C = %s, want it holding the resolving-conflicts slot", got)
+	}
+	if got := w.entryOf(t, "ws-d").Slot; got != wsm.MergeSlotAwaitingResolvingConflicts {
+		t.Fatalf("D = %s, want it awaiting the resolving-conflicts slot", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "waits out of line for the resolving-conflicts slot") {
+		t.Fatal("the wait for the slot was not recorded")
+	}
+}
+
+func TestTheResolvingSlotsHolderResolvesInItsSessionAndReturnsToTheLine(t *testing.T) {
+	// Arrange: C stepped aside for the resolving-conflicts slot.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+
+	// Act
+	w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+
+	// Assert
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("C's session got %d conflict prompts in the slot, want 1", got)
+	}
+	stored, err := w.h.db.MergeQueue(context.Background(), w.h.repoKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := inLine(stored)
+	if len(line) != 2 || line[0].Workspace != "ws-c" || line[0].State != wsm.MergeQueued || line[0].Aside != wsm.MergeAsideNone {
+		t.Fatalf("queue = %+v, want C back in line waiting, at the first waiting place", stored)
+	}
+	if w.h.o.isRemediatingLocked("ws-c") {
+		t.Fatal("C is still registered as remediating out of line")
+	}
+	w.h.db.mu.Lock()
+	_, held := w.h.db.leases["ws-c"]
+	w.h.db.mu.Unlock()
+	if held {
+		t.Fatal("C's lease outlived its resolving rebase")
+	}
+}
+
+func TestABusyResolvingSlotHolderReturnsToTheLineAndSaysSo(t *testing.T) {
+	// Arrange: C holds the resolving-conflicts slot; its workspace is busy.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+	w.h.freeness.mu.Lock()
+	w.h.freeness.busyWS = map[ids.WorkspaceID]bool{"ws-c": true}
+	w.h.freeness.mu.Unlock()
+
+	// Act
+	w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+
+	// Assert
+	if got := w.entryOf(t, "ws-c"); got.State != wsm.MergeQueued || got.Aside != wsm.MergeAsideNone {
+		t.Fatalf("C = %+v, want it back in line waiting", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "has a busy workspace; it returns to the line") {
+		t.Fatal("the return was not recorded")
+	}
+}
+
+func TestAConflictedWaitingMergeWhoseStepAsideFailsKeepsItsPlaceAndSaysSo(t *testing.T) {
+	// Arrange: C's commit conflicts; the store refuses its step aside.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.h.db.mu.Lock()
+	w.h.db.stepAsideErr = errors.New("the store is unwell")
+	w.h.db.mu.Unlock()
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	if got := w.entryOf(t, "ws-c"); got.State != wsm.MergeQueued {
+		t.Fatalf("C = %+v, want it still waiting in its place", got)
+	}
+	if !w.recorded("error", "daemon.merge.rebase_waiting", "could not step the conflicted waiting merge aside") {
+		t.Fatal("the failed step aside was not recorded at ERROR")
+	}
+	if standing, _ := w.git.RebaseInProgress(context.Background(), w.dirs["ws-c"]); standing {
+		t.Fatal("the conflicted rebase still stands in C's worktree")
+	}
 }
 
 func TestABusyWaitingMergeIsSkippedAndSaysSo(t *testing.T) {
@@ -236,17 +379,19 @@ func TestAWaitingMergesRebaseKeepsItsPlaceInLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	line := inLine(stored)
-	if len(line) != 3 || line[2].Workspace != "ws-c" || line[2].State != wsm.MergeQueued {
-		t.Fatalf("queue after the rebase = %+v, want ws-c still waiting third", line)
+	if len(line) != 2 || line[1].Workspace != "ws-c" || line[1].State != wsm.MergeQueued {
+		t.Fatalf("queue after the rebase = %+v, want ws-c still waiting second", line)
 	}
 	w.finish(t)
 }
 
-func TestTheDaemonsExitAbortsAWaitingMergesRebaseAndKeepsItsBase(t *testing.T) {
-	// Arrange: C's commit conflicts with what the head lands, and its
-	// session's conflict turn is still running when the daemon exits.
+func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
+	// Arrange: C holds the resolving-conflicts slot, and its session's
+	// conflict turn is still running when the daemon exits.
 	w := newWaitingWorld(t, "ws-c")
 	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
 	prompted := make(chan struct{})
 	w.h.queue.mu.Lock()
 	w.h.queue.onSubmit = func(sub promptqueue.Submission) {
@@ -259,12 +404,16 @@ func TestTheDaemonsExitAbortsAWaitingMergesRebaseAndKeepsItsBase(t *testing.T) {
 		close(prompted)
 	}
 	w.h.queue.mu.Unlock()
-	w.land(t)
+	resolved := make(chan struct{})
+	go func() {
+		defer close(resolved)
+		w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+	}()
 	<-prompted
 
 	// Act
 	w.h.o.Drain(context.Background())
-	waitGone(t, w.h.o)
+	receiveWithin(t, resolved, "the resolving rebase ending at the exit")
 
 	// Assert
 	if !w.recorded("info", "daemon.merge.rebase_waiting", "the daemon's exit cut a waiting merge's rebase") {
@@ -275,6 +424,9 @@ func TestTheDaemonsExitAbortsAWaitingMergesRebaseAndKeepsItsBase(t *testing.T) {
 	}
 	if got := w.git.tree("b-ws-c"); got != "base+w1" {
 		t.Fatalf("C holds %s after the exit, want its base kept (base+w1)", got)
+	}
+	if got := w.entryOf(t, "ws-c").Slot; got != wsm.MergeSlotResolvingConflicts {
+		t.Fatalf("C = %s after the exit, want it still holding the slot for the next boot", got)
 	}
 	w.h.db.mu.Lock()
 	_, held := w.h.db.leases["ws-c"]

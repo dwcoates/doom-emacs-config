@@ -45,9 +45,6 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recoverDisplaced(ctx); err != nil {
 		return err
 	}
-	if err := o.recordInherited(ctx, o.racingSwitch()); err != nil {
-		return err
-	}
 	registered, err := o.registeredQueues(ctx, op)
 	if err != nil {
 		return err
@@ -283,7 +280,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		return err
 	}
 	if recorded {
-		return o.recoverResumable(ctx, repo, lease, doc, 0, entry.Returned)
+		return o.recoverResumable(ctx, repo, lease, doc, 0)
 	}
 	target, jobErr := o.targetDirOf(ctx, ws, entry.Source)
 	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
@@ -401,11 +398,8 @@ func (o *orchestrator) loadProgress(ctx context.Context, ws ids.WorkspaceID, lea
 // adopted by this process, its bubble and its footer drawn as they stood, and
 // the run itself handed to the admission pump, which resumes it first. ASIDE
 // is why a merge remediating out of line stepped aside, zero for every other
-// merge. RETURNED is a merge back in line from such a repair that nothing has
-// taken up again (wsm.MergeQueueEntry.Returned): it waits, so its open tabs
-// are drawn held (holdRepairTabs) and its head and footer are left to the
-// queue's drawing (republishQueue), which draws it waiting.
-func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc, aside AsideReason, returned bool) error {
+// merge.
+func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc, aside AsideReason) error {
 	const op = "daemon.merge.recover"
 	ws := lease.Workspace
 	// A PAUSED QUEUE RESUMES NOTHING (pumpOnce), so the record below says the
@@ -436,10 +430,14 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
-	if returned {
-		o.holdRepairTabs(ws, lease.ID, doc)
+	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+	if doc.BackInLine {
+		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
+		// repair its record last stood on (drawBackInLine); the queue's redraw
+		// gives it its place.
+		o.publishHead(ws, lease.ID, label, doc.QueuedMS, headWaiting, headRecover)
+		o.publish(repo, ws, MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(doc.QueuedMS), Step: footer.StepEnqueued})
 	} else {
-		label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
 		o.publishHead(ws, lease.ID, label, doc.StartedMS, headMerging, headRecover)
 		o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
 	}
@@ -449,11 +447,11 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 		"round": doc.Active.N, "turn": doc.Turn, "paused": paused}
 	message := "a merge a restart interrupted resumes at the step it recorded"
 	switch {
+	case doc.BackInLine:
+		message = "a merge back in line from its repair is taken back waiting; it resumes at the step it recorded once it heads the queue"
 	case aside != 0:
 		message = "a merge remediating out of line is taken back; it returns to the line once its repairing turn ends"
 		fields["reason"] = aside.String()
-	case returned:
-		message = "a merge back in line from its repair is taken back; it waits, its repair's tabs held, until it is taken up again"
 	case paused:
 		message = "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"
 	}
@@ -462,13 +460,31 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	return nil
 }
 
-// recoverRemediating takes back a merge remediating out of line (remediate.go):
-// its record is taken as any resume's is, held out of the resumes until it
-// returns to the line, and the wait on its fixing turn is armed again. A
-// remediating merge with no progress record under its lease is a defect and
-// refuses the take-back, loudly.
+// recoverRemediating takes back a merge remediating out of line (remediate.go)
+// at the slot the store gives it: a holder has its slot's work started again,
+// and a merge awaiting a slot waits for its grant (armRepairs). A merge that
+// stepped aside from the head has its record taken as any resume's is, held
+// out of the resumes until it returns to the line; a remediating merge with
+// no progress record under its lease, or one whose record and entry disagree
+// on its repair, is a defect and refuses the take-back, loudly. A waiting
+// merge's conflict has no record and no lease to take.
 func (o *orchestrator) recoverRemediating(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
 	ws := entry.Workspace
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "slot": entry.Slot.String(), "aside": entry.Aside.String()}
+	if entry.Aside == wsm.MergeAsideWaitingConflicts {
+		o.mu.Lock()
+		o.repoOf[ws] = repo
+		o.mu.Unlock()
+		o.registerRemediation(ws, &remediation{repo: repo, waiting: true})
+		o.log(ctx, ws).Info(opRemediate, "a waiting merge whose background rebase conflicted is taken back at its repair slot", fields)
+		o.armRepairs(ctx, repo)
+		return nil
+	}
+	stored, err := asideReasonFromStore(entry.Aside)
+	if err != nil {
+		o.log(ctx, ws).Error(opRemediate, "a merge remediating out of line names no repair on its entry; it is not taken back", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: take back the remediating merge of %q: %w", ws, err)
+	}
 	lease, held, err := o.deps.DB.Lease(ctx, ws)
 	if err != nil {
 		return err
@@ -479,27 +495,32 @@ func (o *orchestrator) recoverRemediating(ctx context.Context, repo wsm.RepoKey,
 	}
 	if !recorded {
 		o.log(ctx, ws).Error(opRemediate, "a merge remediating out of line has no progress record under its lease; it is not taken back",
-			dlog.Context{"workspace": string(ws), "repo": string(repo), "lease_held": held})
+			withField(fields, "lease_held", held))
 		return fmt.Errorf("merge: the remediating merge of %q has no progress record", ws)
 	}
-	// A REMEDIATING MERGE'S RECORD WAITS ON ITS REPAIRING TURN: one at any
-	// other step is a defect, and refuses the take-back loudly.
+	// A REMEDIATING MERGE'S RECORD WAITS ON ITS REPAIRING TURN, the one its
+	// entry names: a record at any other step, or another repair, is a
+	// defect, and refuses the take-back loudly.
 	aside, err := asideReasonOf(doc)
+	if err == nil && aside != stored {
+		err = fmt.Errorf("merge: the entry steps aside for %s while its record waits at the %q step", stored, doc.Step)
+	}
 	if err != nil {
-		o.log(ctx, ws).Error(opRemediate, "a merge remediating out of line has a progress record that waits on no repairing turn; it is not taken back",
-			dlog.Context{"workspace": string(ws), "repo": string(repo), "step": doc.Step, "error": err.Error()})
+		o.log(ctx, ws).Error(opRemediate, "a merge remediating out of line has a progress record that waits on no repairing turn of its repair; it is not taken back",
+			withField(withField(fields, "step", doc.Step), "error", err.Error()))
 		return fmt.Errorf("merge: take back the remediating merge of %q: %w", ws, err)
 	}
-	o.mu.Lock()
-	o.remediating[ws] = &remediation{repo: repo, cancel: func() {}}
-	o.mu.Unlock()
-	if err := o.recoverResumable(ctx, repo, lease, doc, aside, false); err != nil {
+	o.registerRemediation(ws, &remediation{repo: repo, doc: doc})
+	if err := o.recoverResumable(ctx, repo, lease, doc, aside); err != nil {
 		o.mu.Lock()
 		delete(o.remediating, ws)
 		o.mu.Unlock()
 		return err
 	}
-	o.awaitRemediation(ws, repo, ids.TurnID(doc.Turn))
+	if entry.Slot.Awaiting() {
+		o.log(ctx, ws).Info(opRemediate, "the merge waits out of line for its repair slot, which another merge holds; it is granted the slot when that merge's repair ends", fields)
+	}
+	o.armRepairs(ctx, repo)
 	return nil
 }
 

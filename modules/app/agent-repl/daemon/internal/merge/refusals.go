@@ -57,12 +57,6 @@ const (
 	// ArmDeploysNotHeld refuses a release of a repository that is not held
 	// (UpdateDeployHoldError.not_held).
 	ArmDeploysNotHeld = "not_held"
-	// ArmRacingAlreadyDisabled refuses a disable of racing that is already
-	// disabled (UpdateMergeQueueError.racing_already_disabled).
-	ArmRacingAlreadyDisabled = "racing_already_disabled"
-	// ArmRacingNotDisabled refuses an enable of racing that is not disabled
-	// (UpdateMergeQueueError.racing_not_disabled).
-	ArmRacingNotDisabled = "racing_not_disabled"
 	// ArmNotSubscribed refuses an unsubscribe naming a workspace and scope
 	// with no merge queue subscription (UpdateMergeQueueError.not_subscribed).
 	ArmNotSubscribed = "not_subscribed"

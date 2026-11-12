@@ -19,7 +19,6 @@ import {
   drawFeedMergeTab,
   drawFeedMergeTabLabel,
   drawTabDuration,
-  isUnderWay,
   mergeTabIdsOf,
   readMergeTab,
   roundSuffix,
@@ -101,7 +100,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
   });
 
   it.each(FeedMergeTabSchema.oneofs.find((o) => o.name === "kind")?.fields.map((f) => [f.localName, f]) ?? [])(
-    "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, a tab a repair out of line leaves open can be held, and a commit can be pending",
+    "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
       const waits = [
@@ -113,19 +112,12 @@ describe("readMergeTab: the arms are read from the contract", () => {
         "fixingTests",
         "testsRunFixing",
       ].includes(kind);
-      // EVERY TAB A REPAIR OUT OF LINE LEAVES OPEN can be held while its
-      // merge waits in line again (frontend.v1.FeedMergeTabHeld).
-      const holds = kind !== "resolving" && waits;
       const want =
         kind === "rebaseCommit"
-          ? ["held", "live", "pending", "settled", "waitingOnUser"]
-          : kind === "testsRun"
-            ? ["live", "settled", "waitingForTurn"]
-            : holds
-              ? ["held", "live", "settled", "waitingOnUser"]
-              : waits
-                ? ["live", "settled", "waitingOnUser"]
-                : ["live", "settled"];
+          ? ["live", "pending", "settled", "waitingOnUser"]
+          : waits
+              ? ["live", "settled", "waitingOnUser"]
+              : ["live", "settled"];
       expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );
@@ -271,7 +263,6 @@ describe("the badge's paint", () => {
 
   it.each([
     ["live", { kind: "tests", state: "live" }],
-    ["in line for its turn", { kind: "testsRun", state: "waitingForTurn" }],
   ] as const)("draws a %s tab's dot at 70%% of the badge's size", (_name, spec) => {
     const { el, teardown } = painted(spec);
     try {
@@ -446,69 +437,6 @@ describe("a tab waiting on the user", () => {
   });
 });
 
-describe("a test run waiting for its repository's test turn", () => {
-  it("draws a hollow dot", () => {
-    const [tab] = childTabsOf([tabRow("r1", { kind: "testsRun", state: "waitingForTurn" })], undefined);
-    const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
-    expect([glyph?.textContent, glyph?.classList.contains("is-waiting-for-turn")]).toEqual(["○", true]);
-  });
-
-  it("ticks from when its round began", () => {
-    const [tab] = childTabsOf([tabRow("r1", { kind: "testsRun", state: "waitingForTurn" })], undefined);
-    expect(drawTabDuration(tab, TICKER).textContent).toBe("4s");
-  });
-
-  it("is where the merge is when the reader has chosen nothing", () => {
-    const tabs = childTabsOf([
-      tabRow("r1", { kind: "testsRun", state: "waitingForTurn" }),
-      tabRow("r0", { kind: "testsRun", state: "settled", outcome: "failed" }),
-    ], undefined);
-    expect(autoSelectedTab(tabs)?.id).toBe("r1");
-  });
-});
-
-// A MERGE BACK IN LINE AFTER A REPAIR OUT OF LINE: the tabs its repair left
-// open are held while it waits to be taken up again.
-describe("a tab held while its merge waits in line again", () => {
-  it.each(["rebasing", "rebaseCommit", "resolvingConflicts", "conflictResolution", "tests", "fixingTests", "testsRunFixing"] as const)(
-    "draws the %s tab's glyph as a still pause mark",
-    (kind) => {
-      const [tab] = childTabsOf([tabRow("t1", { kind, state: "held" })], undefined);
-      const glyph = drawFeedMergeTab(tab, { active: false, ticker: TICKER }).querySelector(".merge-tab-glyph");
-      expect([glyph?.textContent, glyph?.classList.contains("is-held")]).toEqual(["‖", true]);
-    },
-  );
-
-  it("draws no clock, and none starts as time passes", () => {
-    const [tab] = childTabsOf([tabRow("t1", { kind: "resolvingConflicts", state: "held" })], undefined);
-    const el = drawTabDuration(tab, TICKER);
-    vi.advanceTimersByTime(5_000);
-    expect(el.textContent).toBe("");
-  });
-
-  it("is not under way", () => {
-    const [tab] = childTabsOf([tabRow("t1", { kind: "resolvingConflicts", state: "held" })], undefined);
-    expect(isUnderWay(tab)).toBe(false);
-  });
-
-  it("leaves the strip showing no tab when the reader has chosen nothing", () => {
-    const tabs = childTabsOf([
-      tabRow("q", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("rb", { kind: "rebasing", state: "held" }),
-      tabRow("rc", { kind: "resolvingConflicts", state: "held" }),
-    ], undefined);
-    expect(autoSelectedTab(tabs)).toBeUndefined();
-  });
-
-  it("shows the tab again once the resumed merge draws it live", () => {
-    const tabs = childTabsOf([
-      tabRow("q", { kind: "queue", state: "settled", outcome: "succeeded" }),
-      tabRow("rc", { kind: "resolvingConflicts", state: "live" }),
-    ], undefined);
-    expect(autoSelectedTab(tabs)?.id).toBe("rc");
-  });
-});
-
 describe("a commit the replay has not reached", () => {
   it("draws no clock", () => {
     const [tab] = childTabsOf([tabRow("c1", { kind: "rebaseCommit", state: "pending" })], undefined);
@@ -602,14 +530,6 @@ describe("autoSelectedTab: the tab whose state changed last", () => {
       tabRow("r", { kind: "rebasing", state: "settled", outcome: "succeeded", startedAtMs: 2_500n, endedAtMs: 3_000n }),
     ], undefined);
     expect(autoSelectedTab(tabs)?.id).toBe("t");
-  });
-
-  it("hands a conclusion to a run waiting for its test turn", () => {
-    const tabs = childTabsOf([
-      tabRow("r1", { kind: "testsRun", state: "waitingForTurn", startedAtMs: 1_000n }),
-      tabRow("r0", { kind: "testsRun", state: "settled", outcome: "failed", startedAtMs: 500n, endedAtMs: 3_000n }),
-    ], undefined);
-    expect(autoSelectedTab(tabs)?.id).toBe("r1");
   });
 
   it("keeps the concluded tab shown when nothing is running", () => {

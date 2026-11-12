@@ -28,7 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -156,15 +155,6 @@ type Orchestrator interface {
 	// answered false. A ledger naming no running deploy is refused
 	// (unknown_deploy).
 	RollOutLanding(ctx context.Context, ledger ids.LeaseID) (bool, error)
-	// DisableRacing disables the queue's racing, daemon-wide and durably:
-	// every queue works its head alone whatever the host's power source, and
-	// a merge racing behind its head is suspended at the step it stands on.
-	// A disable of disabled racing is refused (racing_already_disabled).
-	DisableRacing(ctx context.Context) error
-	// EnableRacing enables racing again: on AC power the merge behind each
-	// head starts racing it at once. An enable of racing that is not disabled
-	// is refused (racing_not_disabled).
-	EnableRacing(ctx context.Context) error
 	// Evict removes a workspace's merge from the queue. A merge that is
 	// already RUNNING is ABANDONED: it is ended through the one release path,
 	// which gives back its lease, its queue entry, its ledger interval and its
@@ -640,10 +630,6 @@ type Deps struct {
 	// a scripted script rather than the repository's real suite: GIT IS NEVER
 	// CALLED DURING TESTING and neither is the real roster.
 	TestRunner ScriptRunner
-	// Governor counts the test gates -- the head's at once, one behind the
-	// head while the bound has room -- and decides the queue's window by the
-	// host's power source, telling every change (cpugov, power.go).
-	Governor *cpugov.Governor
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter

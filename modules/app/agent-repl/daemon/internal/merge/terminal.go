@@ -460,12 +460,16 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	} else {
 		r.o.closedOnExit(ctx, r.ws, out.abandoned, closes)
 	}
+	defer r.o.armRepairs(ctx, r.repo)
 	r.o.mu.Lock()
 	if r.o.running[r.repo] == r {
 		delete(r.o.running, r.repo)
 	}
 	delete(r.o.runsByWorkspace, r.ws)
 	delete(r.o.repoOf, r.ws)
+	// A MERGE THAT ENDED OUT OF LINE -- a resolving rebase that gave up --
+	// leaves its repair slot with its entry, and the slot passes on.
+	r.o.forgetRemediationLocked(r.ws)
 	// The bubble's ledger identity retires with the merge it addressed; a
 	// later merge of the same workspace gets a bubble of its own.
 	delete(r.o.ledgerOf, r.ws)

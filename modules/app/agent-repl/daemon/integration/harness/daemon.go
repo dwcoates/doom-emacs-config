@@ -30,7 +30,6 @@ import (
 	"agent-repld/integration/grantedclock"
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/chessboard"
-	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/externalbrowser"
 	"agent-repld/internal/newsdigest"
@@ -246,16 +245,6 @@ func HostNeutralCheckoutEnv() []string {
 // ExtraEnv, which StartDaemon appends after this.
 func HostNeutralSlackEnv() []string {
 	return statedEmpty(externalbrowser.EnvSlackTeams)
-}
-
-// HostNeutralPowerEnv pins the power source a test daemon's gate governor
-// reads to AC (cpugov.FixedPowerEnv). The power source decides how many merges
-// at the front of a queue are worked on -- the top two on AC, the head alone
-// on battery -- and a suite must not inherit whether its machine happens to
-// be plugged in. A test of the battery window sets it through ExtraEnv, which
-// StartDaemon appends after this.
-func HostNeutralPowerEnv() []string {
-	return []string{cpugov.FixedPowerEnv + "=" + cpugov.PowerAC.String()}
 }
 
 // NeutralNewsDigestStartDelay is the news digest's start delay every test
@@ -928,7 +917,6 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, NoHomeRepositoryEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
-	env = append(env, HostNeutralPowerEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)
 	env = append(env, HostNeutralSlackEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)

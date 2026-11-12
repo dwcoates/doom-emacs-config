@@ -108,12 +108,6 @@ func (d rosterQueueDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id
 	return moved, d.republishedIf(ctx, repo, moved, err)
 }
 
-// YieldMergeHead gives the head's place to the race's winner and republishes
-// its repository's queue.
-func (d rosterQueueDB) YieldMergeHead(ctx context.Context, repo wsm.RepoKey, loser, winner wsm.WorkspaceID) error {
-	return d.republished(ctx, repo, d.DB.YieldMergeHead(ctx, repo, loser, winner))
-}
-
 // SetMergeQueuePaused pauses or resumes a queue and republishes it, so the
 // roster's merge indicators follow the pause at once.
 func (d rosterQueueDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, pause *wsm.MergeQueuePause) error {
@@ -196,17 +190,6 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	for i := range remediating {
-		ws := remediating[i].Workspace
-		why, err := asideReasonFor(ctx, o.deps.DB, ws)
-		if err != nil {
-			recordFailed(o.deps.Log.Global(), op, "could not read why a merge remediating out of line stepped aside, so the roster is not told the queue",
-				"the remediating merge's reason read ended when its context was cancelled; the roster is not told the queue",
-				dlog.Context{"repo": string(repo), "workspace": string(ws)}, err)
-			return
-		}
-		remediating[i].RemediatingFor = why.roster()
-	}
 	queue.Remediating = remediating
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
@@ -276,15 +259,14 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			return nil, err
 		}
 		drawn := sidebar.QueueEntry{
-			Workspace:     entry.Workspace,
-			Credited:      c.workspace,
-			Async:         c.async,
-			AsyncName:     c.asyncName,
-			QueuedAt:      entry.EnqueuedAt,
-			PlacedAtFront: entry.Source.Front,
-			Returned:      entry.Returned,
-			Admitted:      entry.WorkedOn(),
-			SlotSince:     entry.SlotSince,
+			Workspace: entry.Workspace,
+			Credited:  c.workspace,
+			Async:     c.async,
+			AsyncName: c.asyncName,
+			QueuedAt:  entry.EnqueuedAt,
+			Admitted:  entry.State != wsm.MergeQueued,
+			SlotSince: entry.SlotSince,
+			Repair:    rosterRepair(entry.Slot),
 		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			drawn.Reveal = o.bubbleHeadID(entry.Workspace, lease)
@@ -299,6 +281,22 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 		out = append(out, drawn)
 	}
 	return out, nil
+}
+
+// rosterRepair is the repair slot the roster draws a merge at, from its
+// queue entry's stamped slot: RepairNone for every slot in line.
+func rosterRepair(slot wsm.MergeSlot) sidebar.QueueRepair {
+	switch slot {
+	case wsm.MergeSlotFixingTests:
+		return sidebar.RepairFixingTests
+	case wsm.MergeSlotResolvingConflicts:
+		return sidebar.RepairResolvingConflicts
+	case wsm.MergeSlotAwaitingFixingTests:
+		return sidebar.RepairAwaitingFixingTests
+	case wsm.MergeSlotAwaitingResolvingConflicts:
+		return sidebar.RepairAwaitingResolvingConflicts
+	}
+	return sidebar.RepairNone
 }
 
 // bubbleHeadID is the row id of the head of the merge bubble the merge

@@ -704,7 +704,7 @@ func TestFixesExhaustedFailsTheMergeRecordsItAndSettlesTheTestsTab(t *testing.T)
 	}
 }
 
-// Both gates give up through fixesExhausted; a hand-rolled copy of its
+// The head's gate gives up through fixesExhausted; a hand-rolled copy of its
 // summary anywhere else would drift from it.
 func TestEveryExhaustedGateGivesUpThroughFixesExhausted(t *testing.T) {
 	// Arrange
@@ -721,9 +721,9 @@ func TestEveryExhaustedGateGivesUpThroughFixesExhausted(t *testing.T) {
 		copies += strings.Count(string(body), "fixing attempts; the whole run is archived")
 	}
 
-	// Assert: two callers, and the summary spelled once, in the helper.
-	if calls != 2 || copies != 1 {
-		t.Fatalf("fixesExhausted calls = %d, summary spellings = %d; want 2 and 1", calls, copies)
+	// Assert: one caller, and the summary spelled once, in the helper.
+	if calls != 1 || copies != 1 {
+		t.Fatalf("fixesExhausted calls = %d, summary spellings = %d; want 1 and 1", calls, copies)
 	}
 }
 
@@ -813,97 +813,14 @@ func TestNoNarrationIsDrawnAsNoLines(t *testing.T) {
 	}
 }
 
-func TestHeldTabsOf(t *testing.T) {
-	conflicted := progressDoc{
-		Step: TabConflicts,
-		Rebasing: &rebaseView{Span: span{StartedMS: 10}, Replay: 1, Commits: []commitView{
-			{SHA: "aaaaaaa1", Subject: "first", Span: span{StartedMS: 10, EndedMS: 11}},
-			{SHA: "aaaaaaa2", Subject: "second", Span: span{StartedMS: 11}, Conflict: &conflictView{Span: span{StartedMS: 12}, Files: []string{"x.go"}}},
-		}},
-		Conflicts: &parentView{Span: span{StartedMS: 12}},
-		Testing:   &parentView{Span: span{StartedMS: 5, EndedMS: 6}},
-	}
-	fixing := progressDoc{
-		Step:       TabFixes,
-		Rounds:     map[string]int{TabTests: 2},
-		Active:     roundDoc{Kind: TabFixes, N: 1, StartedMS: 30},
-		FixAttempt: 1,
-		Rebasing:   &rebaseView{Span: span{StartedMS: 10, EndedMS: 20}},
-		Testing:    &parentView{Span: span{StartedMS: 21}},
-		Fixing:     &parentView{Span: span{StartedMS: 30}},
-	}
-	tests := []struct {
-		name string
-		doc  progressDoc
-		want []tabKey
-	}{
-		{name: "a conflict resolution holds the rebasing tab, its open commit, the resolving-conflicts tab and the resolution",
-			doc: conflicted, want: []tabKey{rebasingKey(), commitKey(1, 1), conflictsKey(), resolutionKey(1, 1)}},
-		{name: "a fixing attempt holds the tests tab, the fixing-tests tab and the attempt",
-			doc: fixing, want: []tabKey{testsKey(), fixingTestsKey(), fixingKey(2)}},
-		{name: "a record with every tab settled holds nothing", doc: progressDoc{Step: TabConflicts,
-			Conflicts: &parentView{Span: span{StartedMS: 1, EndedMS: 2}}}, want: nil},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: tc.doc.
-
-			// Act
-			got := heldTabsOf(tc.doc)
-
-			// Assert
-			keys := make([]tabKey, 0, len(got))
-			for _, row := range got {
-				keys = append(keys, row.key)
-				if !heldTabIsHeld(row.tab) {
-					t.Fatalf("tab %+v = %v, want it held", row.key, row.tab)
-				}
-			}
-			if len(keys) != len(tc.want) {
-				t.Fatalf("held keys = %+v, want %+v", keys, tc.want)
-			}
-			for i := range keys {
-				if keys[i].id != tc.want[i].id || keys[i].sub != tc.want[i].sub {
-					t.Fatalf("held keys = %+v, want %+v", keys, tc.want)
-				}
-			}
-		})
-	}
-}
-
-// heldTabIsHeld reports whether TAB's kind stands in its held state, with the
-// round's own start.
-func heldTabIsHeld(tab *frontendv1.FeedMergeTab) bool {
-	var held *frontendv1.FeedMergeTabHeld
-	switch kind := tab.GetKind().(type) {
-	case *frontendv1.FeedMergeTab_Rebasing:
-		held = kind.Rebasing.GetHeld()
-	case *frontendv1.FeedMergeTab_RebaseCommit:
-		held = kind.RebaseCommit.GetHeld()
-	case *frontendv1.FeedMergeTab_ResolvingConflicts:
-		held = kind.ResolvingConflicts.GetHeld()
-	case *frontendv1.FeedMergeTab_ConflictResolution:
-		held = kind.ConflictResolution.GetHeld()
-	case *frontendv1.FeedMergeTab_Tests:
-		held = kind.Tests.GetHeld()
-	case *frontendv1.FeedMergeTab_FixingTests:
-		held = kind.FixingTests.GetHeld()
-	case *frontendv1.FeedMergeTab_TestsRunFixing:
-		held = kind.TestsRunFixing.GetHeld()
-	}
-	return held != nil && held.GetStartedAtMs() != 0
-}
-
 func TestTabModeOfASpanDrawsItsOpenState(t *testing.T) {
 	tests := []struct {
 		name        string
 		mode        tabMode
 		wantWaiting bool
-		wantHeld    bool
 	}{
 		{name: "running is live", mode: modeRunning},
 		{name: "an open ask is waiting on the user", mode: modeWaitingOnUser, wantWaiting: true},
-		{name: "a merge back in line is held", mode: modeHeld, wantHeld: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -914,25 +831,12 @@ func TestTabModeOfASpanDrawsItsOpenState(t *testing.T) {
 			st := open.state(tc.mode)
 
 			// Assert
-			if (st.waitingOnUser() != nil) != tc.wantWaiting || (st.heldBadge() != nil) != tc.wantHeld {
-				t.Fatalf("state(%d) = %+v, want waiting %v held %v", tc.mode, st, tc.wantWaiting, tc.wantHeld)
+			if (st.waitingOnUser() != nil) != tc.wantWaiting {
+				t.Fatalf("state(%d) = %+v, want waiting %v", tc.mode, st, tc.wantWaiting)
 			}
 			if live, _ := st.badge(); live == nil {
 				t.Fatalf("state(%d) is settled, want it open", tc.mode)
 			}
 		})
-	}
-}
-
-func TestASettledSpanIsNeverHeld(t *testing.T) {
-	// Arrange
-	done := span{StartedMS: 7, EndedMS: 9}
-
-	// Act
-	st := done.state(modeHeld)
-
-	// Assert
-	if st.heldBadge() != nil {
-		t.Fatalf("a settled span drawn held = %+v, want it settled", st)
 	}
 }

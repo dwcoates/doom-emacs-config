@@ -47,18 +47,6 @@ import (
 // process runs the Emacs-repo method, starting over for as long as the target
 // moves under it.
 func (r *run) process(ctx context.Context) (outcome, error) {
-	// A MERGE BEHIND ITS HEAD TAKES ITS STEPS AHEAD OF ITS TURN (chain.go)
-	// until the pump promotes it; a speculative step a restart interrupted is
-	// finished first, whatever the merge's place is now.
-	if r.isSpeculative() || (r.resume != nil && r.resume.Speculative) {
-		gaveUp, err := r.speculate(ctx)
-		if err != nil {
-			return outcome{}, err
-		}
-		if gaveUp != nil {
-			return *gaveUp, nil
-		}
-	}
 	for {
 		out, again, err := r.attempt(ctx)
 		if err != nil || !again {
@@ -94,7 +82,6 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 	if err != nil {
 		return outcome{}, false, fmt.Errorf("merge: resolving %s's tip: %w", target, err)
 	}
-	r.o.noteTargetTip(r.repo, tip)
 	// A BRANCH ALREADY ON THE TARGET HAS LANDED: there is nothing to rebase,
 	// gate or commit.
 	contained, err := r.git.IsAncestor(ctx, r.subject.dir, r.subject.branch, tip)
@@ -122,7 +109,6 @@ func (r *run) targetTip(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("merge: resolving %s's tip: %w", target, err)
 	}
-	r.o.noteTargetTip(r.repo, now)
 	return now, nil
 }
 
@@ -586,6 +572,13 @@ func (r *run) conflict(ctx context.Context, p *replay, files []string, targetBra
 	const op = "daemon.merge.conflicts"
 	i := p.commitAt()
 	commit := p.commits[i]
+	// A WAITING MERGE'S BACKGROUND REBASE RUNS GIT ONLY (rebasewaiting.go):
+	// its conflict is no prompt, but the step aside for the resolving slot
+	// its caller makes (settleBackground).
+	if r.background && !r.resolving {
+		r.settleRebasing(ctx, p, "the rebase conflicted; the merge resolves it in the resolving-conflicts slot")
+		return nil, &waitingConflict{commit: commit.SHA, files: files}
+	}
 	// THE ATTEMPTS COUNT PER COMMIT (owner ruling, 2026-10-12): a conflict on
 	// a commit the rebase has not met before starts its count afresh, so a
 	// rebase that advanced is never failed for the attempts an earlier commit
@@ -617,20 +610,13 @@ func (r *run) promptConflict(ctx context.Context, p *replay, commit gitclient.Co
 	if err != nil {
 		return nil, err
 	}
-	if err := r.ensureSession(ctx); err != nil {
-		return nil, fmt.Errorf("merge: starting a session for the conflict resolution: %w", err)
-	}
 	turn := wsm.NewTurnID()
-	if err := r.checkpoint(ctx, TabConflicts, func(d *progressDoc) {
+	// A HEAD WITH A MERGE IN LINE BEHIND IT steps aside to resolve out of
+	// line, for the resolving-conflicts slot, so that merge takes its place
+	// (remediate.go); otherwise it resolves in place.
+	close, err := r.handOff(ctx, AsideForConflicts, turn, text, func(d *progressDoc) {
 		d.Replayed, d.ConflictFiles, d.Turn = p.done, files, string(turn)
-	}); err != nil {
-		return nil, err
-	}
-	// A HEAD WITH A MERGE IN LINE BEHIND IT, or a member racing behind the
-	// head with one waiting behind it, steps aside to resolve out of line, so
-	// that merge takes its place (remediate.go); otherwise it resolves in
-	// place.
-	close, err := r.o.submitThen(ctx, r.ws, turn, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, r.asideOn(ctx, AsideForConflicts))
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -871,7 +857,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		}); err != nil {
 			return "", nil, err
 		}
-		verdict, err := r.gate(ctx, round, tip, head, nil)
+		verdict, err := r.gate(ctx, round, tip, head)
 		if err == nil {
 			err = stillWanted(ctx)
 		}
@@ -901,9 +887,9 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			return "", &out, nil
 		}
 		// THE WHOLE SUITE RAN AND FAILED: a head with a merge in line behind it
-		// steps aside to fix out of line, so that merge takes the head
-		// (remediate.go); otherwise it fixes in place.
-		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, r.asideOn(ctx, AsideForTests)); err != nil || gaveUp != nil {
+		// steps aside to fix out of line, for the fixing-tests slot, so that
+		// merge takes the head (remediate.go); otherwise it fixes in place.
+		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, true); err != nil || gaveUp != nil {
 			return "", gaveUp, err
 		}
 		r.fixesUsed = attempt + 1
@@ -928,24 +914,24 @@ func (r *run) fixesExhausted(ctx context.Context, archive string, extra dlog.Con
 // branch in its worktree: fixing attempt x of MaxFixAttempts. It answers the
 // failed outcome when the agent escalated or changed the merge machinery.
 func (r *run) fix(ctx context.Context, attempt int, failing GateResult, targetBranch string) (*outcome, error) {
-	return r.fixThen(ctx, attempt, failing, targetBranch, nil)
+	return r.fixThen(ctx, attempt, failing, targetBranch, false)
 }
 
-// fixThen is fix, calling SUBMITTED (when not nil) once the fixing prompt is
-// handed off to the session: the moment a head steps aside (remediate.go).
-func (r *run) fixThen(ctx context.Context, attempt int, failing GateResult, targetBranch string, submitted func()) (*outcome, error) {
-	return r.promptFixThen(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch, submitted)
+// fixThen is fix, stepping the merge aside for the fixing-tests slot when
+// MAYSTEPASIDE and it has a merge in line behind it (handOff).
+func (r *run) fixThen(ctx context.Context, attempt int, failing GateResult, targetBranch string, mayStepAside bool) (*outcome, error) {
+	return r.promptFixThen(ctx, attempt, failedSuites(failing.Suites), failing.ArchivePath, failing.Tail, targetBranch, mayStepAside)
 }
 
 // promptFix submits fixing attempt x's brief in a new fixes round, drawn as
-// the sub-subtab of the run it follows, and reads its end.
+// the sub-subtab of the run it follows, and reads its end, in place.
 func (r *run) promptFix(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string) (*outcome, error) {
-	return r.promptFixThen(ctx, attempt, suites, archive, tail, targetBranch, nil)
+	return r.promptFixThen(ctx, attempt, suites, archive, tail, targetBranch, false)
 }
 
-// promptFixThen is promptFix, calling SUBMITTED (when not nil) once the brief
-// is handed off to the session.
-func (r *run) promptFixThen(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string, submitted func()) (*outcome, error) {
+// promptFixThen is promptFix, stepping the merge aside for the fixing-tests
+// slot when MAYSTEPASIDE and it has a merge in line behind it (handOff).
+func (r *run) promptFixThen(ctx context.Context, attempt int, suites []string, archive, tail, targetBranch string, mayStepAside bool) (*outcome, error) {
 	n := r.testsRound()
 	round := r.openTab(ctx, TabFixes)
 	r.drawFixing(ctx, round, n, attempt, suites)
@@ -963,17 +949,17 @@ func (r *run) promptFixThen(ctx context.Context, attempt int, suites []string, a
 	if err != nil {
 		return nil, err
 	}
-	if err := r.ensureSession(ctx); err != nil {
-		return nil, fmt.Errorf("merge: starting a session for the fixing attempt: %w", err)
-	}
 	turn := wsm.NewTurnID()
-	if err := r.checkpoint(ctx, TabFixes, func(d *progressDoc) {
+	record := func(d *progressDoc) {
 		d.FixAttempt, d.Turn, d.FailingSuites = attempt, string(turn), suites
 		d.FailingArchive, d.FailingTail = archive, tail
-	}); err != nil {
-		return nil, err
 	}
-	close, err := r.o.submitThen(ctx, r.ws, turn, text, fixOrigin, submitted)
+	var close wsm.TurnClose
+	if mayStepAside {
+		close, err = r.handOff(ctx, AsideForTests, turn, text, record)
+	} else {
+		close, err = r.handOffInPlace(ctx, AsideForTests, turn, text, record)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1147,16 +1133,6 @@ func failedSuites(suites []*frontendv1.FeedMergeTestSuite) []string {
 // began, which starts the process over on its new tip.
 func (r *run) commit(ctx context.Context, tip, head, targetBranch string) (outcome, bool, error) {
 	const op = "daemon.merge.commit"
-	// A HEAD THE MERGE BEHIND IT IS OVERTAKING NEVER COMMITS (race.go): it
-	// waits for its stop, or goes on if the overtaking could not be recorded.
-	if ok, overtaken := r.o.beginLanding(r); !ok {
-		select {
-		case <-overtaken:
-			return outcome{}, true, nil
-		case <-ctx.Done():
-			return outcome{}, false, context.Cause(ctx)
-		}
-	}
 	target := r.subject.targetDir
 	now, err := r.git.ResolveRef(ctx, target, "HEAD")
 	if err != nil {
@@ -1250,7 +1226,6 @@ func (r *run) commitIn(ctx context.Context, round tabRound, tip, head, targetBra
 // It answers an error only for the daemon's exit while tagging, which stops
 // the step before its landing is recorded (tagVersion).
 func (r *run) landed(ctx context.Context, commit, base, targetBranch string) (outcome, error) {
-	r.o.noteTargetTip(r.repo, commit)
 	version, err := r.tagVersion(ctx, commit, base)
 	if err != nil {
 		return outcome{}, err

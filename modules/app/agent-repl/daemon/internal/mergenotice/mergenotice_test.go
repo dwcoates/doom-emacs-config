@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -599,6 +600,11 @@ func TestChangesFailsHardOnNoChange(t *testing.T) {
 
 func TestQueueStateStatesTheQueueInAFewWords(t *testing.T) {
 	fixing := member("ws-aside", "aside", true, "")
+	fixing.Repair = sidebar.RepairFixingTests
+	resolving := member("ws-conflict", "conflict", true, "")
+	resolving.Repair = sidebar.RepairResolvingConflicts
+	awaiting := member("ws-later", "later", true, "")
+	awaiting.Repair = sidebar.RepairAwaitingFixingTests
 	tests := []struct {
 		name  string
 		queue merge.QueueSnapshot
@@ -612,8 +618,11 @@ func TestQueueStateStatesTheQueueInAFewWords(t *testing.T) {
 			member("ws-fix", "fix", true, "")}}, want: "1 in line; `fix` started."},
 		{name: "a front merge not yet started", queue: merge.QueueSnapshot{Repo: repoDoom, Members: []merge.QueueMember{
 			member("ws-fix", "fix", false, "")}}, want: "1 in line; `fix` next."},
-		{name: "merges fixing out of line", queue: merge.QueueSnapshot{Repo: repoDoom, Members: []merge.QueueMember{
-			member("ws-fix", "fix", true, footer.StepTesting)}, Remediating: []merge.QueueMember{fixing}}, want: "1 in line; `fix` testing; 1 fixing out of line."},
+		{name: "a merge fixing tests out of line", queue: merge.QueueSnapshot{Repo: repoDoom, Members: []merge.QueueMember{
+			member("ws-fix", "fix", true, footer.StepTesting)}, Remediating: []merge.QueueMember{fixing}}, want: "1 in line; `fix` testing; `aside` fixing tests."},
+		{name: "both repair slots held and a merge awaiting one", queue: merge.QueueSnapshot{Repo: repoDoom, Members: []merge.QueueMember{
+			member("ws-fix", "fix", true, footer.StepTesting)}, Remediating: []merge.QueueMember{fixing, resolving, awaiting}},
+			want: "1 in line; `fix` testing; `aside` fixing tests; `conflict` resolving conflicts; 1 awaiting a repair slot."},
 		{name: "a paused queue", queue: merge.QueueSnapshot{Repo: repoDoom, Paused: true, Members: []merge.QueueMember{
 			member("ws-fix", "fix", false, "")}}, want: "1 in line; `fix` next; paused."},
 	}

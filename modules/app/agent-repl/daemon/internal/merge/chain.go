@@ -2,48 +2,21 @@ package merge
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
-// This file is a repository's CHAIN: the merges at the front of its queue,
-// rebased one onto the next and tested ahead of their turn (owner rulings,
-// 2026-10-11).
-//
-// THE WINDOW. The chain is the head and the merges right behind it, at most
-// the window in all, which the host's power source decides (power.go): the
-// head and the merge behind it on AC power, the head alone on battery. An
-// entry beyond the window waits untouched until a merge ahead of it lands or
-// drops out, or the window grows, and it moves in.
-//
-// EVERY MEMBER STANDS ON THE TARGET (race.go). The head and the merges behind
-// it each rebase onto the target's tip, their conflicts resolved by their OWN
-// sessions through the same prompts, and none waits on the progress of the
-// merge ahead of it: an entry joins the chain the moment the window has room
-// for it. A target that moves rebases every member onto its new tip. Every
-// queue rebase reuses recorded resolutions (gitclient's rerere), so a rebase
-// whose conflicts were resolved before prompts nothing.
-//
-// A MERGE ONLY EVER CARRIES ITS OWN COMMITS. A rebase replays exactly the
-// commits between the branch's chain base -- the tip its last rebase replayed
-// it onto -- and its head, so the commits of a merge ahead of it never travel
-// with it unless that merge landed: when it lands at the head, it is rebased
-// onto the target's tip as it stands after the merge ahead landed, and lands
-// as exactly that tip plus its own commits.
-//
-// SPECULATIVE GATES. A merge whose rebase settled runs its test gate (and its
-// fixing attempts) ahead of its turn against its base, when the processor
-// governor admits it (cpugov), niced below the head. The pass
-// is valid only for the tree it tested: at the head, a branch whose rebased
-// tree is that tree lands without testing again; any other tree is tested
-// again, and the invalidation is recorded.
+// This file is a repository's CHAIN: the deploys waiting in its queue that
+// run their CONCURRENT STAGES ahead of their turn behind the head
+// (concurrent.go). A queue whose head's deploy config runs no stage
+// concurrently has no chain beyond its head: its merges never run anything
+// ahead of their turn (the queue races no more, owner ruling, 2026-11-11), so
+// the head alone holds the testing slot.
 //
 // ORDER IS STRUCTURAL. The chain is read and changed only under the
 // orchestrator's mutex, and every change closes the repository's chain signal
@@ -51,15 +24,6 @@ import (
 // signal it read never misses a change. Only the pump promotes, and it
 // promotes only the chain's first run once that run's entry stands first in
 // line.
-
-// errBaseMoved is the cause a speculative gate is cut with when the merge
-// ahead of it published a new tip (or left the chain): its result could not
-// stand for the new base.
-var errBaseMoved = errors.New("merge: the merge ahead moved; this merge's speculative gate runs again on its new tip")
-
-// errPromoted is the cause a speculative gate's wait for admission is cut
-// with when its merge reached the head: the head's gate runs ungoverned.
-var errPromoted = errors.New("merge: the merge reached its queue's head; its gate runs as the head's")
 
 // isSpeculative reports whether the run stands behind its chain's head.
 func (r *run) isSpeculative() bool {
@@ -94,9 +58,6 @@ type chainPlace struct {
 	head bool
 	// rank is its distance from the chain's front; -1 when it is no member.
 	rank int
-	// base is the tip of the run ahead of it, empty while that one has not
-	// settled (or when the run is the chain's front, waiting to be promoted).
-	base string
 	// ahead names the workspace of the run ahead of it.
 	ahead ids.WorkspaceID
 	// changed closes at the chain's next change.
@@ -117,14 +78,6 @@ func (o *orchestrator) chainPosition(r *run) chainPlace {
 			continue
 		}
 		place.rank = i
-		// EVERY SPECULATIVE MEMBER STANDS ON THE TARGET, not on the merge
-		// ahead (race.go): its base is the target's tip as last read, first in
-		// its chain too. A member first because the merge ahead LEFT (a head
-		// that stepped aside, was dequeued or lost a race) waits for its
-		// promotion on that same tip, so its gate is not cut for a base that
-		// never moved (2026-10-31: every step aside cut the next merge's
-		// running tests and ran them again from the start).
-		place.base = o.targetTipLocked(r.repo)
 		if i > 0 {
 			place.ahead = o.chains[r.repo][i-1].ws
 		}
@@ -146,50 +99,33 @@ func (o *orchestrator) extendChainAsync(repo wsm.RepoKey) {
 	})
 }
 
-// extendChain starts the next merge of the repository's chain, as ONE
+// extendChain starts the next deploy of the repository's chain, as ONE
 // admission step the shutdown drain waits for: the entry right behind the
-// chain's last run, when the window has room and the entry is waiting in line
-// -- or an entry the boot recovery handed back to resume there. It repeats
-// while it starts resumed runs.
+// chain's last run, when the head runs concurrent stages and the entry is
+// waiting in line -- or an entry the boot recovery handed back to resume
+// there. It repeats while it starts resumed runs.
 func (o *orchestrator) extendChain(ctx context.Context, repo wsm.RepoKey) {
 	for o.extendOnce(ctx, repo) {
 	}
 }
 
-// racable reports whether ENTRY may start racing behind its queue's head: it
-// waits in line, and is no merge workspace whose pick has yet to succeed --
-// that pick runs at the head (admitFront).
-func racable(entry wsm.MergeQueueEntry) bool {
+// chainable reports whether ENTRY may start its concurrent stages behind its
+// queue's head: it waits in line, and is no merge workspace whose pick has yet
+// to succeed -- that pick runs at the head (admitFront).
+func chainable(entry wsm.MergeQueueEntry) bool {
 	return entry.State == wsm.MergeQueued && entry.Source.Pick == ""
-}
-
-// racesIn reports whether the deploy config HEAD runs by has a local merge,
-// the one deploy whose queue races. It is the config the head read when it
-// took its session, so the queue races by the very deploy at its front; a head
-// that has not read it yet does not race, and extends the chain itself once it
-// has (run.admit).
-func (o *orchestrator) racesIn(repo wsm.RepoKey, head *run) bool {
-	head.mu.Lock()
-	resolved, local := head.target.cfg != nil, head.target.localMerge() != nil
-	head.mu.Unlock()
-	if !resolved {
-		o.deps.Log.Global().Debug("daemon.merge.chain", "the queue's head has not read its deploy config yet; the queue does not race until it has", dlog.Context{
-			"repo": string(repo), "head": string(head.ws)})
-	}
-	return local
 }
 
 // extendOnce makes at most one chain start, and reports whether it started a
 // resumed run (after which the chain may grow again at once). It never waits
-// on the progress of the run ahead (race.go): every member stands on the
-// target, not on the merge ahead of it.
+// on the progress of the run ahead: a member runs its concurrent stages on
+// its own, and waits for its turn only at its first one-at-a-time stage.
 func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	const op = "daemon.merge.chain"
 	o.mu.Lock()
 	members, current := len(o.chains[repo]), o.running[repo]
 	o.mu.Unlock()
-	window := o.windowFor(current)
-	room := members > 0 && members < window
+	room := members > 0 && current != nil && current.concurrentStages()
 	if !room || !o.enterAdmission() {
 		return false
 	}
@@ -210,18 +146,14 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	o.mu.Lock()
 	head := o.running[repo]
 	o.mu.Unlock()
-	// A CHAIN FORMS BEHIND A HEAD THAT RACES OR RUNS CONCURRENT STAGES: a
-	// speculative run rebases and tests ahead of its turn, which is the local
-	// merge's work, or runs its concurrent stages (concurrent.go).
-	if head == nil || !o.chainsIn(repo, head) {
+	// A CHAIN FORMS ONLY BEHIND A HEAD THAT RUNS CONCURRENT STAGES
+	// (concurrent.go): every other queue works its head alone.
+	if head == nil || !head.concurrentStages() {
 		return false
-	}
-	if head != current {
-		window = o.windowFor(head)
 	}
 	o.mu.Lock()
 	chain := o.chains[repo]
-	if len(chain) == 0 || len(chain) >= window || o.draining {
+	if len(chain) == 0 || o.draining {
 		o.mu.Unlock()
 		return false
 	}
@@ -258,15 +190,14 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 	doc, resuming := o.resumes[next.Workspace]
 	switch {
 	case resuming && !doc.Speculative:
-		// A MERGE SUSPENDED AS THE HEAD -- the loser of a race to land
-		// (race.go) -- resumes only at the head, once the winner is done.
+		// A MERGE SUSPENDED AS THE HEAD resumes only at the head.
 		o.mu.Unlock()
 		return false
 	case resuming:
 	case o.runsByWorkspace[next.Workspace] != nil, o.isTakenAwayLocked(next.Workspace), o.inChainLocked(repo, next.Workspace):
 		o.mu.Unlock()
 		return false
-	case paused || !racable(next):
+	case paused || !chainable(next):
 		o.mu.Unlock()
 		return false
 	}
@@ -495,72 +426,9 @@ func (r *run) leaseAndBase() (ids.LeaseID, string) {
 }
 
 // briefTarget is what a step's brief names as the branch the merge lands on:
-// the target itself at the head, and for a step behind the head the target as
-// it will stand once the merge ahead lands.
+// the target itself, which only the head's steps ever brief.
 func (r *run) briefTarget(targetBranch string) string {
-	// EVERY MERGE STANDS ON THE TARGET ITSELF (race.go), behind the head or
-	// not, so its briefs name the target as it is.
 	return targetBranch
-}
-
-// speculate runs the merge's steps ahead of its turn, for as long as it
-// stands behind its chain's head: its chained rebase, its restacks, its
-// speculative gate and fixing attempts. It answers nil once the pump promoted
-// it, or the failed outcome when its conflicts or its tests gave up.
-func (r *run) speculate(ctx context.Context) (*outcome, error) {
-	const op = "daemon.merge.speculative"
-	target := r.subject.targetDir
-	targetBranch, err := r.git.CurrentBranch(ctx, target)
-	if err != nil {
-		return nil, fmt.Errorf("merge: reading the branch checked out in %s: %w", target, err)
-	}
-	if targetBranch == "" {
-		return nil, fmt.Errorf("merge: the merge target %s has no branch checked out to land on", target)
-	}
-	if res, ok := r.resumingAt(TabRebasing, TabConflicts, TabTests, TabFixes); ok && res.Speculative {
-		r.doneResuming()
-		if gaveUp, err := r.resumeSpeculative(ctx, res, targetBranch); err != nil || gaveUp != nil {
-			return gaveUp, err
-		}
-	}
-	r.doneResumingAt(TabPreDeploy)
-	for {
-		if err := stillWanted(ctx); err != nil {
-			return nil, err
-		}
-		place := r.o.chainPosition(r)
-		switch {
-		case place.head:
-			return nil, nil
-		case place.rank < 0:
-			err := errors.New("merge: a speculative run is no member of its chain")
-			r.o.log(ctx, r.ws).Error(op, "a merge behind the head stands in no chain; it cannot go on", dlog.Context{
-				"workspace": string(r.ws), "repo": string(r.repo)})
-			return nil, err
-		case place.base == "":
-			// No run has read the target's tip yet, or this merge stands
-			// first and waits for the pump to promote it.
-		case place.base != r.chainBase:
-			if gaveUp, err := r.chainRebase(ctx, place, targetBranch); err != nil || gaveUp != nil {
-				return gaveUp, err
-			}
-			continue
-		case r.tested == nil || r.tested.Base != place.base:
-			if gaveUp, err := r.speculativeGate(ctx, place, targetBranch); err != nil || gaveUp != nil {
-				return gaveUp, err
-			}
-			continue
-		case place.rank == 1 && r.claimedOn != place.base:
-			// ITS GATE PASSED ON THE TARGET'S TIP while the head still runs:
-			// it claims the race to land, once per base (race.go).
-			r.claimedOn = place.base
-			r.o.claimRace(ctx, r, place.base)
-			continue
-		}
-		if err := r.idle(ctx, place.changed); err != nil {
-			return nil, err
-		}
-	}
 }
 
 // idle waits, at a step boundary, for the chain to change. A restart asking
@@ -587,21 +455,6 @@ func (r *run) idle(ctx context.Context, changed <-chan struct{}) error {
 	}
 }
 
-// chainRebase rebases the branch's own commits onto the target's tip behind
-// the head: its first rebase, or a restack when the target moved.
-func (r *run) chainRebase(ctx context.Context, place chainPlace, targetBranch string) (*outcome, error) {
-	r.o.log(ctx, r.ws).Info("daemon.merge.chain", "the merge behind the head rebases its own commits onto the target's tip", dlog.Context{
-		"workspace": string(r.ws), "ahead": string(place.ahead), "onto": place.base, "chain_base": r.chainBase, "rank": place.rank,
-		"restack": r.chainBase != ""})
-	r.briefAhead = place.ahead
-	gaveUp, err := r.rebase(ctx, place.base, targetBranch)
-	if err != nil || gaveUp != nil {
-		return gaveUp, err
-	}
-	r.settledOn(place.base)
-	return nil, nil
-}
-
 // settledOn records the branch's own commits as standing on onto, once a
 // rebase onto it settled.
 func (r *run) settledOn(onto string) {
@@ -620,175 +473,9 @@ func (r *run) ownBase(tip string) string {
 	return tip
 }
 
-// speculativeGate runs the gate ahead of the merge's turn against its chained
-// base, once the governor admits it, and the fixing attempt a failure takes.
-// A base that moves under it cuts it: it runs again on the new base.
-func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranch string) (*outcome, error) {
-	const op = "daemon.merge.speculative"
-	gctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-	// THE WAIT FOR ADMISSION ENDS AT A PROMOTION: the head's gate is never
-	// governed, so a merge promoted before the governor admitted it runs its
-	// gate as the head, from the head's own steps (admitGate answers
-	// errPromoted). A gate already running is not cut by a promotion: its
-	// pass stands for the tree it tested.
-	actx, admitted := context.WithCancelCause(gctx)
-	defer admitted(nil)
-	stop := r.watchBase(gctx, place.base, cancel, admitted)
-	defer stop()
-	head, err := r.git.ResolveRef(ctx, r.subject.dir, r.subject.branch)
-	if err != nil {
-		return nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
-	}
-	round := r.openTab(ctx, TabTests)
-	if err := r.checkpoint(ctx, TabTests, func(d *progressDoc) {
-		d.TargetBranch, d.Tip = targetBranch, place.base
-		d.FixAttempt, d.Turn, d.FailingSuites, d.FailingArchive, d.FailingTail = r.fixesUsed, "", nil, "", ""
-	}); err != nil {
-		return nil, err
-	}
-	verdict, err := r.gate(gctx, round, place.base, head, &gateAdmission{ctx: actx, rank: place.rank})
-	if errors.Is(err, errPromoted) {
-		return nil, nil
-	}
-	if errors.Is(context.Cause(gctx), errBaseMoved) {
-		r.o.log(ctx, r.ws).Info(op, "the merge ahead moved under the speculative gate; it runs again on the new tip", dlog.Context{
-			"workspace": string(r.ws), "base": place.base, "round": round.n})
-		return nil, nil
-	}
-	if err == nil {
-		err = stillWanted(ctx)
-	}
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case verdict.broken != "":
-		out := failedIn(footer.FailedOther, verdict.broken)
-		return &out, nil
-	case verdict.result.Passed:
-		tree, err := r.git.TreeOf(ctx, r.subject.dir, head)
-		if err != nil {
-			return nil, fmt.Errorf("merge: reading the tree the speculative gate passed: %w", err)
-		}
-		r.tested = &testedDoc{Base: place.base, Head: head, Tree: tree}
-		// A PASSING GATE ENDS THE RUN OF FAILURES, ahead of its turn too.
-		r.fixesUsed = 0
-		r.o.log(ctx, r.ws).Info(op, "the merge passed its tests ahead of its turn; the pass stands for exactly this tree", dlog.Context{
-			"workspace": string(r.ws), "base": place.base, "head": head, "tree": tree, "rank": place.rank})
-		return nil, r.checkpoint(ctx, TabTests, nil)
-	case r.fixesUsed >= MaxFixAttempts:
-		out := r.fixesExhausted(ctx, verdict.result.ArchivePath, dlog.Context{"speculative": true})
-		return &out, nil
-	}
-	attempt := r.fixesUsed + 1
-	r.briefAhead = place.ahead
-	// A RUN PROMOTED WHILE ITS GATE RAN IS THE HEAD NOW: its whole suite
-	// failed at the head, so it steps aside as a head does (remediate.go).
-	if gaveUp, err := r.fixThen(ctx, attempt, verdict.result, targetBranch, r.asideOn(ctx, AsideForTests)); err != nil || gaveUp != nil {
-		return gaveUp, err
-	}
-	r.fixesUsed = attempt
-	return nil, nil
-}
-
-// watchBase cuts ctx with errBaseMoved the moment the run, still behind its
-// head, finds the tip ahead of it is no longer base, and cuts its wait for
-// admission with errPromoted the moment it heads its chain. It answers its
-// stop, which waits for the watch to end.
-func (r *run) watchBase(ctx context.Context, base string, cancel, promoted context.CancelCauseFunc) func() {
-	return r.o.watch(ctx, cancel, func() (bool, <-chan struct{}) {
-		place := r.o.chainPosition(r)
-		if place.head {
-			promoted(errPromoted)
-			// A GATE ON A TIP THE TARGET LEFT IS CUT AT THE HEAD TOO
-			// (race.go): every merge stands on the target, so a pass on the
-			// old tip could only be run again.
-			if tip := r.o.targetTip(r.repo); tip != "" && tip != base {
-				cancel(errBaseMoved)
-				return true, nil
-			}
-		} else if place.base != base {
-			cancel(errBaseMoved)
-			return true, nil
-		}
-		return false, place.changed
-	})
-}
-
-// watch runs LOOK on its own goroutine each time the signal it last answered
-// closes, until it reports done or ctx is done: a watch over orchestrator
-// state read under its lock, which cuts work through CANCEL. It answers its
-// stop, which cancels ctx through CANCEL and waits for the watch to end.
-func (o *orchestrator) watch(ctx context.Context, cancel context.CancelCauseFunc, look func() (done bool, changed <-chan struct{})) func() {
-	ended := make(chan struct{})
-	o.live.Add(1)
-	inflight.Standing(func() {
-		defer o.live.Done()
-		defer close(ended)
-		for {
-			done, changed := look()
-			if done {
-				return
-			}
-			select {
-			case <-changed:
-			case <-ctx.Done():
-				return
-			}
-		}
-	})
-	return func() {
-		cancel(nil)
-		<-ended
-	}
-}
-
-// resumeSpeculative goes on with a speculative step a restart interrupted,
-// from the step its record names; the speculate loop then takes the merge on
-// from wherever its chain now stands.
-func (r *run) resumeSpeculative(ctx context.Context, res *progressDoc, targetBranch string) (*outcome, error) {
-	const op = "daemon.merge.resume"
-	if res.Tip == "" {
-		return r.contradiction(ctx, fmt.Sprintf("the record of its speculative %s step names no base", res.Step)), nil
-	}
-	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed}
-	switch res.Step {
-	case TabRebasing:
-		if gaveUp, err := r.resumeRebase(ctx, p, res.Tip, targetBranch, res.BranchHead); err != nil || gaveUp != nil {
-			return gaveUp, err
-		}
-		r.settledOn(res.Tip)
-		return nil, nil
-	case TabConflicts:
-		if gaveUp, err := r.resumeConflict(ctx, p, res.Tip, targetBranch, res); err != nil || gaveUp != nil {
-			return gaveUp, err
-		}
-		r.settledOn(res.Tip)
-		return nil, nil
-	case TabTests:
-		// THE GATE THE RESTART CUT runs again, in a round of its own, once the
-		// governor admits it: its round is settled as cut.
-		round := r.activeRound()
-		r.o.log(ctx, r.ws).Info(op, "the speculative gate the restart cut runs again once admitted", dlog.Context{
-			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": round.n})
-		if res.Tested == nil {
-			const cut = "the daemon restarted under this run; the tests run again"
-			r.endRun(ctx, round, cut, nil, nil, "restarted")
-		}
-		return nil, nil
-	default:
-		if gaveUp, err := r.resumeFix(ctx, res, targetBranch); err != nil || gaveUp != nil {
-			return gaveUp, err
-		}
-		r.fixesUsed = res.FixAttempt
-		return nil, nil
-	}
-}
-
-// reuseTested decides, at the head, whether the speculative pass stands for
-// the branch as it is about to land: it does when the rebased head's tree is
-// the very tree the speculative gate passed. Either way the decision is
+// reuseTested decides, at the head, whether the gate's earlier pass stands
+// for the branch as it is about to land: it does when the rebased head's tree
+// is the very tree that gate passed. Either way the decision is
 // recorded, and the pass is spent.
 func (r *run) reuseTested(ctx context.Context, tip, head string) (bool, error) {
 	const op = "daemon.merge.speculative"
@@ -804,78 +491,46 @@ func (r *run) reuseTested(ctx context.Context, tip, head string) (bool, error) {
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "tip": tip, "head": head, "tree": tree,
 		"tested_base": tested.Base, "tested_head": tested.Head, "tested_tree": tested.Tree}
 	if tree == tested.Tree {
-		if tested.Own {
-			r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to the very tree its gate passed; the pass stands and the tests are not run again", fields)
-			return true, nil
-		}
-		r.o.log(ctx, r.ws).Info(op, "the merge ahead landed exactly as tested; the speculative pass stands and the tests are not run again", fields)
+		r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to the very tree its gate passed; the pass stands and the tests are not run again", fields)
 		return true, nil
 	}
-	if tested.Own {
-		r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to a tree its gate never passed; the tests run again", fields)
-		return false, nil
-	}
-	r.o.log(ctx, r.ws).Info(op, "the branch about to land is not the tree the speculative gate passed; the pass is invalidated and the tests run again", fields)
+	r.o.log(ctx, r.ws).Info("daemon.merge.tests", "the branch rebased to a tree its gate never passed; the tests run again", fields)
 	return false, nil
 }
 
-// THE HEAD'S GATE HAS THE PROCESSOR FIRST (owner ruling, 2026-10-14). Every
-// test run is demoted by bin/background.sh to the niceness
-// AGENT_REPL_TEST_NICENESS names, 19 by default; a gate names a better one, so
-// under contention the queue's head yields only to the owner's live runtime,
-// the merge behind it yields to the head as well (owner ruling, 2026-10-11),
-// and every ad-hoc run yields to both. No processor is reserved and no run
-// waits for another: priority only orders who runs first when the processors
-// are contended.
+// THE GATE HAS THE PROCESSOR AHEAD OF AD-HOC RUNS. Every test run is demoted
+// by bin/background.sh to the niceness AGENT_REPL_TEST_NICENESS names, 19 by
+// default; the gate names a better one, so under contention the queue's head
+// yields only to the owner's live runtime and every ad-hoc run yields to it.
+// No processor is reserved and no run waits for another: priority only
+// orders who runs first when the processors are contended.
 
 // testNicenessEnv names the niceness bin/background.sh demotes a test run to.
 const testNicenessEnv = "AGENT_REPL_TEST_NICENESS"
 
-// HeadNice is the niceness the head's gate runs at: ahead of every other test
-// run, behind the owner's processes.
+// HeadNice is the niceness the gate runs at: ahead of every other test run,
+// behind the owner's processes.
 const HeadNice = 10
-
-// SpeculativeNice is the niceness a speculative gate (one behind the head)
-// runs at: behind the head's, ahead of an ad-hoc run's 19.
-const SpeculativeNice = 15
 
 // testMetricsRootEnv and testMetricsTriggerEnv tell agent-repl's test runner
 // (testrun) where to push every test's time when its run ends, and what ran
-// it: the merge queue's head gate or a speculative one behind it. A gate whose
-// daemon records no metrics names neither, and the runner pushes nothing.
+// it: the merge queue's gate. A gate whose daemon records no metrics names
+// neither, and the runner pushes nothing.
 const (
 	testMetricsRootEnv    = "AGENT_REPL_TEST_METRICS_ROOT"
 	testMetricsTriggerEnv = "AGENT_REPL_TEST_METRICS_TRIGGER"
 )
 
-// The triggers a gate names (testMetricsTriggerEnv).
-const (
-	TriggerMergeQueue            = "merge_queue"
-	TriggerMergeQueueSpeculative = "merge_queue_speculative"
-)
+// TriggerMergeQueue is the trigger the gate names (testMetricsTriggerEnv).
+const TriggerMergeQueue = "merge_queue"
 
-// gateArgv is every gate's command line: the script, told the niceness its
-// whole tree runs at (HeadNice, or SpeculativeNice behind the head) and,
-// when the daemon records metrics under metricsRoot, where its test runner
-// pushes every test's time.
-func gateArgv(argv []string, speculative bool, metricsRoot string) []string {
-	nice, trigger := HeadNice, TriggerMergeQueue
-	if speculative {
-		nice, trigger = SpeculativeNice, TriggerMergeQueueSpeculative
-	}
-	env := []string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, nice)}
+// gateArgv is the gate's command line: the script, told the niceness its
+// whole tree runs at (HeadNice) and, when the daemon records metrics under
+// metricsRoot, where its test runner pushes every test's time.
+func gateArgv(argv []string, metricsRoot string) []string {
+	env := []string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, HeadNice)}
 	if metricsRoot != "" {
-		env = append(env, testMetricsRootEnv+"="+metricsRoot, testMetricsTriggerEnv+"="+trigger)
+		env = append(env, testMetricsRootEnv+"="+metricsRoot, testMetricsTriggerEnv+"="+TriggerMergeQueue)
 	}
 	return append(env, argv...)
-}
-
-// queueWindow is the window in force: the test override when one is set, else
-// the governor's, which the host's power source and the racing switch decide
-// (power.go).
-func (o *orchestrator) queueWindow() int {
-	if o.window > 0 {
-		return o.window
-	}
-	return o.deps.Governor.Window()
 }

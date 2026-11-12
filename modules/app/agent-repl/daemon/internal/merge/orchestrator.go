@@ -110,17 +110,6 @@ type orchestrator struct {
 	// publishes a new tip, so a waiter that read the chain under mu and then
 	// waits on the channel it read misses no change.
 	chainSignals map[wsm.RepoKey]chan struct{}
-	// targetTips is each repository's target tip as a run last read it: the
-	// base the merge behind the head rebases onto (race.go). Guarded by mu.
-	targetTips map[wsm.RepoKey]string
-	// overtakings are the races to land being won by the merge behind the
-	// head, by repository (race.go). Guarded by mu.
-	overtakings map[wsm.RepoKey]*overtaking
-	// testTurns are each repository's test turn and the line for it
-	// (testturn.go): only one merge of a repository runs its test gate at a
-	// time. A repository is here only while some run holds its turn. Guarded
-	// by mu.
-	testTurns map[wsm.RepoKey]*turnLine
 	// waitingPass marks the repositories whose waiting members are being
 	// rebased now, and waitingAgain those whose landing asked for one more
 	// pass (rebasewaiting.go). Guarded by mu.
@@ -255,24 +244,10 @@ type orchestrator struct {
 	drainBound time.Duration
 	// gitBound overrides MergeGitStopBound, TEST-ONLY as drainBound is.
 	gitBound time.Duration
-	// window overrides the governor's window, TEST-ONLY as drainBound is: the
-	// package's tests of one merge at a time run with a window of one, so no
-	// merge behind the head starts; zero means the production window.
-	window int
 	// onChainIdle, when set, is called each time a merge behind its head goes
 	// idle between steps, waiting for its chain to change. Nil in production;
 	// a test reads where the chain stands from it.
 	onChainIdle func(ws ids.WorkspaceID)
-	// onRunStart, when set, is called with each run that may ask for its
-	// repository's test turn, as it is built and before any of its steps;
-	// onTestTurnAsk, when set, each time a gate of run r is about to ask for
-	// that turn, and may hold it there until ctx is done; onTestTurnLine,
-	// when set, each time a gate joined the line for it. Nil in production; a
-	// test orders the gates of two merges through them, holding one run's
-	// ask and never a later run's of the same workspace.
-	onRunStart     func(r *run)
-	onTestTurnAsk  func(ctx context.Context, r *run)
-	onTestTurnLine func(ws ids.WorkspaceID)
 	// onKick, when set, is called by every kick of a synchronous (test)
 	// orchestrator, whose kick starts no pump: a test that pumps by hand
 	// wakes on it, so an edge that would have pumped production's queue
@@ -283,9 +258,6 @@ type orchestrator struct {
 	// suspended run's git gate, immediately before it waits for the commands
 	// in flight: a test releases a held command from inside that wait.
 	onGitStopWait func()
-	// onRaceClaimed, when set, is called with the head once the merge behind
-	// it claimed the race to land, before the race is recorded (race.go).
-	onRaceClaimed func(head ids.WorkspaceID)
 	// onStepAside, when set, is called with the workspace as the step aside's
 	// take-back goroutine begins (takeBackSteppedAside, remediate.go): THE TEST
 	// SEAM, NIL IN PRODUCTION, that holds it to show the run was cut before it.
@@ -347,9 +319,6 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		running:            map[wsm.RepoKey]*run{},
 		chains:             map[wsm.RepoKey][]*run{},
 		chainSignals:       map[wsm.RepoKey]chan struct{}{},
-		targetTips:         map[wsm.RepoKey]string{},
-		overtakings:        map[wsm.RepoKey]*overtaking{},
-		testTurns:          map[wsm.RepoKey]*turnLine{},
 		waitingPass:        map[wsm.RepoKey]bool{},
 		waitingAgain:       map[wsm.RepoKey]bool{},
 		repoLocks:          map[wsm.RepoKey]*repoLock{},
@@ -385,7 +354,6 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 	// outside it.
 	o.deps.DB = rosterQueueDB{DB: queueEventsDB{DB: deps.DB, o: o}, o: o}
 	deps.Asks.bind(o.askChanged)
-	deps.Governor.OnModeChange(o.modeChanged)
 	return o, nil
 }
 
@@ -439,7 +407,6 @@ func (d Deps) validate() error {
 	check(d.SelfAddress != "", "SelfAddress")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")
-	check(d.Governor != nil, "Governor")
 	check(d.AwaitTurnEnd != nil, "AwaitTurnEnd")
 	check(d.Occupy != nil, "Occupy")
 	check(d.StartSession != nil, "StartSession")

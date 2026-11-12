@@ -21,10 +21,14 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/merge_queue_status.proto.
  */
 export const file_agentrepl_v1_merge_queue_status: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvbWVyZ2VfcXVldWVfc3RhdHVzLnByb3RvEgxhZ2VudHJlcGwudjEisQEKEE1lcmdlUXVldWVTdGF0dXMSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEjYKB2FkdmFuY2UYAiABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2USNAoHZW50cmllcxgDIAMoCzIjLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnkiogEKF01lcmdlUXVldWVTdGF0dXNBZHZhbmNlEj8KB3J1bm5pbmcYASABKAsyLC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nSAASPQoGcGF1c2VkGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkSABCBwoFc3RhdGUiIAoeTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nIh8KHU1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkIu0BChVNZXJnZVF1ZXVlU3RhdHVzRW50cnkSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI1CgRraW5kGAQgASgLMicuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmQSNwoFc3RhZ2UYBSABKAsyKC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2USFwoPcGxhY2VkX2F0X2Zyb250GAYgASgIIrUBChlNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kEkYKCm93bl9icmFuY2gYASABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5S2luZE93bkJyYW5jaEgAEkgKC2FzeW5jX21lcmdlGAIgASgLMjEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlSABCBgoEa2luZCIkCiJNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kT3duQnJhbmNoIlQKI01lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlEi0KCXJlcXVlc3RlchgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYi+QEKGk1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlEkIKB3dhaXRpbmcYASABKAsyLy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VXYWl0aW5nSAASQgoHcnVubmluZxgCIAEoCzIvLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJ1bm5pbmdIABJKCgtyZW1lZGlhdGluZxgDIAEoCzIzLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJlbWVkaWF0aW5nSABCBwoFc3RhZ2UicgolTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZxJJCgZyZWFzb24YASABKAsyOS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZ1JlYXNvbiLVAQorTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZ1JlYXNvbhJJCgV0ZXN0cxgBIAEoCzI4LmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJlbWVkaWF0aW5nVGVzdHNIABJRCgljb25mbGljdHMYAiABKAsyPC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZ0NvbmZsaWN0c0gAQggKBnJlYXNvbiIsCipNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJlbWVkaWF0aW5nVGVzdHMiMAouTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZ0NvbmZsaWN0cyIjCiFNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVdhaXRpbmciPQohTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSdW5uaW5nEhgKEHN0ZXBfZGVzY3JpcHRpb24YASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvbWVyZ2VfcXVldWVfc3RhdHVzLnByb3RvEgxhZ2VudHJlcGwudjEisQEKEE1lcmdlUXVldWVTdGF0dXMSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEjYKB2FkdmFuY2UYAiABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2USNAoHZW50cmllcxgDIAMoCzIjLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnkiogEKF01lcmdlUXVldWVTdGF0dXNBZHZhbmNlEj8KB3J1bm5pbmcYASABKAsyLC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nSAASPQoGcGF1c2VkGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkSABCBwoFc3RhdGUiIAoeTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nIh8KHU1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkIu0BChVNZXJnZVF1ZXVlU3RhdHVzRW50cnkSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI1CgRraW5kGAQgASgLMicuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmQSNwoFc3RhZ2UYBSABKAsyKC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2USFwoPcGxhY2VkX2F0X2Zyb250GAYgASgIIrUBChlNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kEkYKCm93bl9icmFuY2gYASABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5S2luZE93bkJyYW5jaEgAEkgKC2FzeW5jX21lcmdlGAIgASgLMjEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlSABCBgoEa2luZCIkCiJNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kT3duQnJhbmNoIlQKI01lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlEi0KCXJlcXVlc3RlchgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiuwMKGk1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlEkIKB3dhaXRpbmcYASABKAsyLy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VXYWl0aW5nSAASQgoHcnVubmluZxgCIAEoCzIvLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJ1bm5pbmdIABJLCgxmaXhpbmdfdGVzdHMYBCABKAsyMy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VGaXhpbmdUZXN0c0gAElkKE3Jlc29sdmluZ19jb25mbGljdHMYBSABKAsyOi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZXNvbHZpbmdDb25mbGljdHNIABJRCg9hd2FpdGluZ19yZXBhaXIYBiABKAsyNi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VBd2FpdGluZ1JlcGFpckgAQgcKBXN0YWdlSgQIAxAEUgtyZW1lZGlhdGluZyInCiVNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZUZpeGluZ1Rlc3RzIi4KLE1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlUmVzb2x2aW5nQ29uZmxpY3RzIoMBCihNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZUF3YWl0aW5nUmVwYWlyEkgKBHNsb3QYASABKAsyOi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VBd2FpdGluZ1JlcGFpclNsb3QSDQoFcGxhY2UYAiABKA0i3gEKLE1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlQXdhaXRpbmdSZXBhaXJTbG90EksKDGZpeGluZ190ZXN0cxgBIAEoCzIzLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZUZpeGluZ1Rlc3RzSAASWQoTcmVzb2x2aW5nX2NvbmZsaWN0cxgCIAEoCzI6LmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJlc29sdmluZ0NvbmZsaWN0c0gAQgYKBHNsb3QiIwohTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VXYWl0aW5nIj0KIU1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlUnVubmluZxIYChBzdGVwX2Rlc2NyaXB0aW9uGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
- * One repository's merge queue.
+ * One repository's merge queue. A queue has THREE ACTIVE SLOTS, each held by
+ * at most one merge: the head (the one merge running its test gate and
+ * landing), fixing tests, and resolving conflicts (both out of line). So at
+ * most one entry is running, at most one is fixing_tests and at most one is
+ * resolving_conflicts; every other merge out of line awaits its repair's slot.
  *
  * @generated from message agentrepl.v1.MergeQueueStatus
  */
@@ -44,8 +48,10 @@ export type MergeQueueStatus = Message<"agentrepl.v1.MergeQueueStatus"> & {
   advance?: MergeQueueStatusAdvance | undefined;
 
   /**
-   * Every merge in line, front first: the running merge (when one runs) is
-   * first, then every waiting merge in the order it will run.
+   * Every merge of the queue: those in line, front first -- the running
+   * merge (when one runs), then every waiting merge in the order it will run
+   * -- then every merge out of line: the holder of each repair slot, then the
+   * merges awaiting each slot, in the order each will be granted it.
    *
    * @generated from field: repeated agentrepl.v1.MergeQueueStatusEntry entries = 3;
    */
@@ -289,16 +295,36 @@ export type MergeQueueStatusEntryStage = Message<"agentrepl.v1.MergeQueueStatusE
     case: "running";
   } | {
     /**
-     * Out of line: it stepped aside from the head (or from the race behind
-     * it) while an agent turn of its own repairs it -- the failures its test
-     * suite finished with, or the conflicts its rebase met -- and returns to
-     * the line once that turn ends, at the first waiting place. Listed after
-     * every entry in line.
+     * Out of line, holding the queue's FIXING-TESTS slot: its whole test
+     * suite finished with failures at the head, its session fixes them, and
+     * it returns to the line at the first waiting place once that turn ends,
+     * running its suite again (one of its fixing attempts).
      *
-     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediating remediating = 3;
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageFixingTests fixing_tests = 4;
      */
-    value: MergeQueueStatusEntryStageRemediating;
-    case: "remediating";
+    value: MergeQueueStatusEntryStageFixingTests;
+    case: "fixingTests";
+  } | {
+    /**
+     * Out of line, holding the queue's RESOLVING-CONFLICTS slot: its rebase
+     * met conflicts -- at the head, or in the background while it waited --
+     * and its session resolves them; it returns to the line at the first
+     * waiting place once the resolution ends. Spends no fixing attempt.
+     *
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts resolving_conflicts = 5;
+     */
+    value: MergeQueueStatusEntryStageResolvingConflicts;
+    case: "resolvingConflicts";
+  } | {
+    /**
+     * Out of line, waiting for a repair slot another merge holds. Nothing is
+     * handed its session until it is granted the slot, which the holder's
+     * return to the line grants to the first merge awaiting it.
+     *
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair awaiting_repair = 6;
+     */
+    value: MergeQueueStatusEntryStageAwaitingRepair;
+    case: "awaitingRepair";
   } | { case: undefined; value?: undefined };
 };
 
@@ -310,98 +336,99 @@ export const MergeQueueStatusEntryStageSchema: GenMessage<MergeQueueStatusEntryS
   messageDesc(file_agentrepl_v1_merge_queue_status, 8);
 
 /**
- * Remediating out of line, and why.
+ * Holding the fixing-tests slot. No fields: the arm is the fact.
  *
- * @generated from message agentrepl.v1.MergeQueueStatusEntryStageRemediating
+ * @generated from message agentrepl.v1.MergeQueueStatusEntryStageFixingTests
  */
-export type MergeQueueStatusEntryStageRemediating = Message<"agentrepl.v1.MergeQueueStatusEntryStageRemediating"> & {
-  /**
-   * What the merge's turn out of line repairs. Always set by the daemon; a
-   * set reason whose arm this schema revision does not name is a reason a
-   * newer daemon added.
-   *
-   * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason reason = 1;
-   */
-  reason?: MergeQueueStatusEntryStageRemediatingReason | undefined;
+export type MergeQueueStatusEntryStageFixingTests = Message<"agentrepl.v1.MergeQueueStatusEntryStageFixingTests"> & {
 };
 
 /**
- * Describes the message agentrepl.v1.MergeQueueStatusEntryStageRemediating.
- * Use `create(MergeQueueStatusEntryStageRemediatingSchema)` to create a new message.
+ * Describes the message agentrepl.v1.MergeQueueStatusEntryStageFixingTests.
+ * Use `create(MergeQueueStatusEntryStageFixingTestsSchema)` to create a new message.
  */
-export const MergeQueueStatusEntryStageRemediatingSchema: GenMessage<MergeQueueStatusEntryStageRemediating> = /*@__PURE__*/
+export const MergeQueueStatusEntryStageFixingTestsSchema: GenMessage<MergeQueueStatusEntryStageFixingTests> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_merge_queue_status, 9);
 
 /**
- * WHY A MERGE STEPPED ASIDE. THE ARM IS THE REASON: each is a step that waits
- * on an agent turn, and the merge returns to the line once that turn ends.
+ * Holding the resolving-conflicts slot. No fields: the arm is the fact.
  *
- * @generated from message agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason
+ * @generated from message agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
  */
-export type MergeQueueStatusEntryStageRemediatingReason = Message<"agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason"> & {
+export type MergeQueueStatusEntryStageResolvingConflicts = Message<"agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts.
+ * Use `create(MergeQueueStatusEntryStageResolvingConflictsSchema)` to create a new message.
+ */
+export const MergeQueueStatusEntryStageResolvingConflictsSchema: GenMessage<MergeQueueStatusEntryStageResolvingConflicts> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_merge_queue_status, 10);
+
+/**
+ * Awaiting a repair slot, and where in its line for it.
+ *
+ * @generated from message agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
+ */
+export type MergeQueueStatusEntryStageAwaitingRepair = Message<"agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair"> & {
   /**
-   * Which repair the turn out of line makes.
+   * The slot it waits for.
    *
-   * @generated from oneof agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.reason
+   * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot slot = 1;
    */
-  reason: {
+  slot?: MergeQueueStatusEntryStageAwaitingRepairSlot | undefined;
+
+  /**
+   * Its 1-based place among the merges awaiting that slot: 1 is granted the
+   * slot next.
+   *
+   * @generated from field: uint32 place = 2;
+   */
+  place: number;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair.
+ * Use `create(MergeQueueStatusEntryStageAwaitingRepairSchema)` to create a new message.
+ */
+export const MergeQueueStatusEntryStageAwaitingRepairSchema: GenMessage<MergeQueueStatusEntryStageAwaitingRepair> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_merge_queue_status, 11);
+
+/**
+ * WHICH REPAIR SLOT A MERGE AWAITS. THE ARM IS THE SLOT.
+ *
+ * @generated from message agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
+ */
+export type MergeQueueStatusEntryStageAwaitingRepairSlot = Message<"agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot"> & {
+  /**
+   * The fixing-tests slot, or the resolving-conflicts slot.
+   *
+   * @generated from oneof agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.slot
+   */
+  slot: {
     /**
-     * Its whole test suite finished with failures; its fixing turn repairs
-     * them, and on its return it runs its suite again, spending one of its
-     * fixing attempts.
+     * Its whole suite failed at the head; it fixes its tests once granted.
      *
-     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests tests = 1;
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageFixingTests fixing_tests = 1;
      */
-    value: MergeQueueStatusEntryStageRemediatingTests;
-    case: "tests";
+    value: MergeQueueStatusEntryStageFixingTests;
+    case: "fixingTests";
   } | {
     /**
-     * Its rebase onto the target's tip met conflicts; its session resolves
-     * them, and on its return it rebases onto the tip again. Spends no
-     * fixing attempt, and may step aside again if it conflicts again.
+     * Its rebase conflicted; it resolves the conflicts once granted.
      *
-     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts conflicts = 2;
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts resolving_conflicts = 2;
      */
-    value: MergeQueueStatusEntryStageRemediatingConflicts;
-    case: "conflicts";
+    value: MergeQueueStatusEntryStageResolvingConflicts;
+    case: "resolvingConflicts";
   } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message agentrepl.v1.MergeQueueStatusEntryStageRemediatingReason.
- * Use `create(MergeQueueStatusEntryStageRemediatingReasonSchema)` to create a new message.
+ * Describes the message agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.
+ * Use `create(MergeQueueStatusEntryStageAwaitingRepairSlotSchema)` to create a new message.
  */
-export const MergeQueueStatusEntryStageRemediatingReasonSchema: GenMessage<MergeQueueStatusEntryStageRemediatingReason> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_merge_queue_status, 10);
-
-/**
- * Remediating its failing tests. No fields.
- *
- * @generated from message agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests
- */
-export type MergeQueueStatusEntryStageRemediatingTests = Message<"agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.MergeQueueStatusEntryStageRemediatingTests.
- * Use `create(MergeQueueStatusEntryStageRemediatingTestsSchema)` to create a new message.
- */
-export const MergeQueueStatusEntryStageRemediatingTestsSchema: GenMessage<MergeQueueStatusEntryStageRemediatingTests> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_merge_queue_status, 11);
-
-/**
- * Resolving its rebase's conflicts. No fields.
- *
- * @generated from message agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts
- */
-export type MergeQueueStatusEntryStageRemediatingConflicts = Message<"agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.MergeQueueStatusEntryStageRemediatingConflicts.
- * Use `create(MergeQueueStatusEntryStageRemediatingConflictsSchema)` to create a new message.
- */
-export const MergeQueueStatusEntryStageRemediatingConflictsSchema: GenMessage<MergeQueueStatusEntryStageRemediatingConflicts> = /*@__PURE__*/
+export const MergeQueueStatusEntryStageAwaitingRepairSlotSchema: GenMessage<MergeQueueStatusEntryStageAwaitingRepairSlot> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_merge_queue_status, 12);
 
 /**

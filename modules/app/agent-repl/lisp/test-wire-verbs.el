@@ -1873,20 +1873,6 @@ never sent as an empty ref, because unset is what means every queue."
                    '(:requester (:arm :user) :action (:arm :move-down :value nil)))
                   :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-disable-racing ()
-  "A disable of racing is daemon-wide, so its message is empty."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:requester (:arm :user) :action (:arm :disable-racing :value nil))))
-                   "{\"requester\":{\"user\":{}},\"disableRacing\":{}}"))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-enable-racing ()
-  "An enable of racing is daemon-wide, so its message is empty."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:requester (:arm :user) :action (:arm :enable-racing :value nil))))
-                   "{\"requester\":{\"user\":{}},\"enableRacing\":{}}"))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-move-to-encodes-each-side ()
   "A move to a place names the merge to move and the merge it goes beside."
   (agent-repl-test-wire-verbs--with-common
@@ -2220,7 +2206,7 @@ here."
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("disableRacing" "enableRacing" "evict" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
+                 '("evict" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -3592,22 +3578,6 @@ it carries."
                     (agent-repl-test-wire-verbs--parse "{\"noSuchQueuedMerge\":{}}"))
                    '(:cause (:arm :no-such-queued-merge :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-racing-already-disabled-arm ()
-  "UpdateMergeQueueError's `racing_already_disabled' arm decodes with
-everything it carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"racingAlreadyDisabled\":{}}"))
-                   '(:cause (:arm :racing-already-disabled :value nil))))))
-
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-racing-not-disabled-arm ()
-  "UpdateMergeQueueError's `racing_not_disabled' arm decodes with everything
-it carries."
-  (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"racingNotDisabled\":{}}"))
-                   '(:cause (:arm :racing-not-disabled :value nil))))))
-
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unset-cause-is-a-breach ()
   "UpdateMergeQueueError with no arm set says nothing actionable, so it is a
 breach."
@@ -3628,7 +3598,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "racingAlreadyDisabled" "racingNotDisabled")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()

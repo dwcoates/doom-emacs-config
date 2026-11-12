@@ -44,7 +44,7 @@ import (
 //	                         compact | status | list | subscribe | unsubscribe | gate
 //	                         subsections | place
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
-//	                         disable-racing | enable-racing | subscribe | unsubscribe
+//	                         subscribe | unsubscribe
 //	agent-repld repository   register
 //	agent-repld editor       eval
 //	agent-repld runtime      deploy-hold | roll-out-landing | health | prune-storage
@@ -181,16 +181,14 @@ var cliNouns = map[string]map[string]cliCommand{
 		"place":                  {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
 	mergeQueueNoun: {
-		"status":         {usage: "status [-repository here|DIR]", run: queueStatus},
-		"dequeue":        {usage: "dequeue MERGE|here", run: queueDequeue},
-		"move-up":        {usage: "move-up MERGE|here", run: queueMove(true)},
-		"move-down":      {usage: "move-down MERGE|here", run: queueMove(false)},
-		"pause":          {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
-		"resume":         {usage: "resume [-repository here|DIR]", run: queuePause(false)},
-		"disable-racing": {usage: "disable-racing", run: queueRacing(false)},
-		"enable-racing":  {usage: "enable-racing", run: queueRacing(true)},
-		"subscribe":      {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
-		"unsubscribe":    {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
+		"status":      {usage: "status [-repository here|DIR]", run: queueStatus},
+		"dequeue":     {usage: "dequeue MERGE|here", run: queueDequeue},
+		"move-up":     {usage: "move-up MERGE|here", run: queueMove(true)},
+		"move-down":   {usage: "move-down MERGE|here", run: queueMove(false)},
+		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
+		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
+		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
+		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
 		"register": {usage: "register here|PATH", run: repositoryRegister},
@@ -2168,20 +2166,6 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		req := &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: scope}}}
 		if pause {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope, Hard: hard}}
-		}
-		return c.updateMergeQueue(req)
-	}
-}
-
-func queueRacing(enable bool) func(c *cliCall, args []string) int {
-	return func(c *cliCall, args []string) int {
-		fs, stateDir := c.flags()
-		if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
-			return exitFailure
-		}
-		req := &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_DisableRacing{DisableRacing: &agentreplv1.UpdateMergeQueueDisableRacing{}}}
-		if enable {
-			req.Action = &agentreplv1.UpdateMergeQueueRequest_EnableRacing{EnableRacing: &agentreplv1.UpdateMergeQueueEnableRacing{}}
 		}
 		return c.updateMergeQueue(req)
 	}

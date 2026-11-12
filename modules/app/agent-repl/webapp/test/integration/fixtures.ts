@@ -1348,30 +1348,9 @@ export const MERGE_TAB_WAITING_KINDS = [
   "fixingTests",
   "testsRunFixing",
 ] as const;
-/**
- * The kinds that can also be held: a repair's tabs, kept while its merge is
- * back in line from repairing out of line and not yet taken up again. The
- * pick (`resolving`) is no repair step and is never held.
- */
-export const MERGE_TAB_HELD_KINDS = [
-  "rebasing",
-  "rebaseCommit",
-  "resolvingConflicts",
-  "conflictResolution",
-  "tests",
-  "fixingTests",
-  "testsRunFixing",
-] as const;
 /** The kinds that can also be pending: a commit the replay has not reached. */
 export const MERGE_TAB_PENDING_KINDS = ["rebaseCommit"] as const;
-/** The kinds that can also wait for their repository's test turn: a test run. */
-export const MERGE_TAB_TURN_KINDS = ["testsRun"] as const;
-export type MergeTabState =
-  | (typeof MERGE_TAB_STATES)[number]
-  | "waitingOnUser"
-  | "pending"
-  | "waitingForTurn"
-  | "held";
+export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser" | "pending";
 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
@@ -1389,8 +1368,6 @@ const settledState = () => ({
 const plainState = (state: MergeTabState) => {
   if (state === "waitingOnUser") throw new Error("only the MERGE_TAB_WAITING_KINDS wait on the user");
   if (state === "pending") throw new Error("only the MERGE_TAB_PENDING_KINDS are pending");
-  if (state === "waitingForTurn") throw new Error("only the MERGE_TAB_TURN_KINDS wait for a test turn");
-  if (state === "held") throw new Error("only the MERGE_TAB_HELD_KINDS are held");
   return state === "settled" ? settledState() : liveState();
 };
 
@@ -1399,12 +1376,6 @@ const agenticState = (state: MergeTabState) =>
   state === "waitingOnUser"
     ? { case: "waitingOnUser" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
     : plainState(state);
-
-/** The state arm of a repair's tab, which can also wait on the user or be held. */
-const repairState = (state: MergeTabState) =>
-  state === "held"
-    ? { case: "held" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } }
-    : agenticState(state);
 
 /** The token and label the tests tab's log link is served with. */
 export const MERGE_TEST_LOG = { token: "merge-log-7f3a", label: "~/.claude-emacs/merge-logs/ws-1-tests-2.log" };
@@ -1461,7 +1432,7 @@ const mergeTabKindValue = (
       return {
         case: "rebasing",
         value: {
-          state: repairState(state),
+          state: agenticState(state),
           progress: { replayed: 3, total: 7 },
           lines: [
             {
@@ -1498,34 +1469,28 @@ const mergeTabKindValue = (
       return {
         case: "rebaseCommit",
         value: {
-          state: state === "pending" ? { case: "pending" as const, value: {} } : repairState(state),
+          state: state === "pending" ? { case: "pending" as const, value: {} } : agenticState(state),
           lines: [{ line: { case: "text", value: "conflicted in 2 file(s)" } }],
         },
       };
     case "resolvingConflicts":
-      return { case: "resolvingConflicts", value: { state: repairState(state) } };
+      return { case: "resolvingConflicts", value: { state: agenticState(state) } };
     case "conflictResolution":
       return {
         case: "conflictResolution",
-        value: { state: repairState(state), files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }] },
+        value: { state: agenticState(state), files: [{ path: "daemon/x.go" }, { path: "webapp/y.ts" }] },
       };
     case "fixingTests":
-      return { case: "fixingTests", value: { state: repairState(state) } };
+      return { case: "fixingTests", value: { state: agenticState(state) } };
     case "resolving":
       return { case: "resolving", value: { state: agenticState(state) } };
     case "tests":
-      return { case: "tests", value: { state: repairState(state) } };
+      return { case: "tests", value: { state: agenticState(state) } };
     case "testsRun":
       return {
         case: "testsRun",
         value: {
-          state:
-            state === "waitingForTurn"
-              ? {
-                  case: "waitingForTurn" as const,
-                  value: { startedAtMs: MERGE_TAB_STARTED_AT_MS, holder: { workspaceName: "ws-ahead" } },
-                }
-              : plainState(state),
+          state: plainState(state),
           output: {
             suites: [
               {
@@ -1552,7 +1517,7 @@ const mergeTabKindValue = (
     case "testsRunFixing":
       return {
         case: "testsRunFixing",
-        value: { state: repairState(state), attempt: { attempt: 2, maxAttempts: 3 } },
+        value: { state: agenticState(state), attempt: { attempt: 2, maxAttempts: 3 } },
       };
     case "hookPrompt":
       return { case: "hookPrompt", value: { state: plainState(state) } };

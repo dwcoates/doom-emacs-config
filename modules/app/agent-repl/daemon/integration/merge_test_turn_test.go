@@ -18,9 +18,9 @@ import (
 	"connectrpc.com/connect"
 )
 
-// merge_test_turn_test.go covers a repository's TEST TURN
-// (internal/merge/testturn.go): only one merge of a repository runs its test
-// gate at a time, and two merges alternate the turn while each fixes.
+// merge_test_turn_test.go covers a repository's one TESTING slot: only the
+// head of a repository's queue runs its test gate, and two merges alternate
+// the head while each fixes out of line.
 
 // turnGate is a test gate whose every run says where it started and holds
 // until the test releases it with an exit status, through two named pipes, so
@@ -150,10 +150,10 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	harness.CommitWork(t, a.ws.GetDir())
 	harness.CommitWork(t, b.ws.GetDir())
 	aRoot, bRoot := a.watchRootFeed(), b.watchRootFeed()
-	turnLog := func(f *fixture, text string) {
+	inLine := func(f *fixture) {
 		t.Helper()
-		d.AwaitLogRecord(harness.WorkspaceLogPath(f.ws.GetDir(), "daemon"), text, func(r harness.LogRecord) bool {
-			return r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, text)
+		d.AwaitLogRecord(harness.WorkspaceLogPath(f.ws.GetDir(), "daemon"), "put in line", func(r harness.LogRecord) bool {
+			return r.Operation == "daemon.merge.request" && strings.Contains(r.Message, "put a merge in line")
 		})
 	}
 	remediateLog := func(f *fixture, text string) {
@@ -174,7 +174,7 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(b.ws))); err != nil {
 		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
-	turnLog(b, "joined the line")
+	inLine(b)
 	// A fails: it steps aside to fix, and B takes the head and tests.
 	gate.release(1)
 	a.shim.ExpectStartTurn()

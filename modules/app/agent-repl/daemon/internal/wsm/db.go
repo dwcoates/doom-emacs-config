@@ -563,19 +563,15 @@ type DB interface {
 	// bubble's ledger identity, and returns its one-based place among the
 	// entries in line.
 	QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) (int, error)
-	// YieldMergeHead records a race to land the head lost: winner takes the
-	// head's place at the front and loser waits right behind it.
-	YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner WorkspaceID) error
-	// StepAsideMerge takes the admitted merge out of its line to fix its
-	// failing tests (MergeRemediating).
-	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
-	// ReturnRemediatedMerge puts a remediating merge back in line, admitted
-	// and marked returned, at the first waiting place: behind every merge the
-	// caller names as being worked on, waiting in line or not.
+	// StepAsideMerge takes a merge out of its line for ASIDE's repair
+	// (MergeRemediating), answering the slot it took: the repair's slot, or
+	// the place awaiting it.
+	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID, aside MergeAside) (MergeSlot, error)
+	// ReturnRemediatedMerge puts a remediating merge back in line at the
+	// first waiting place, behind every merge the caller names as being
+	// worked on, waiting in line or not, releasing its repair slot to the
+	// next merge awaiting it.
 	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) error
-	// TakeUpReturnedMerge clears a returned merge's mark as the orchestrator
-	// takes it up again (MergeQueueEntry.Returned).
-	TakeUpReturnedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)
@@ -626,11 +622,6 @@ type DB interface {
 	// ClearQueueDrainOwed records that one repository's queue_drained
 	// scripts have all succeeded.
 	ClearQueueDrainOwed(ctx context.Context, repo RepoKey) error
-	// SetMergeRacingDisabled disables the merge queue's racing daemon-wide
-	// from at, or (disabled false) enables it again.
-	SetMergeRacingDisabled(ctx context.Context, disabled bool, at time.Time) error
-	// MergeRacing reports the daemon-wide racing switch.
-	MergeRacing(ctx context.Context) (RacingSwitch, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers
 	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.

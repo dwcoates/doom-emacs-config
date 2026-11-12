@@ -35,9 +35,6 @@ import type {
   RosterMergeQueuePaused,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
-  RosterMergeQueueRemediating,
-  RosterMergeQueueRemediatingReason,
-  RosterMergeQueueWaitingPlacement,
   RosterMergeQueueWaiting,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -75,7 +72,8 @@ export const MERGE_QUEUE_CLASS = "sb-merge-queue";
 
 /**
  * A queued group's line as its fold reads it (`deploys-fold.ts`): the
- * workspaces at its head, remediating and waiting, in order. A change to it
+ * workspaces at its head, at or awaiting its repair slots, and waiting, in
+ * order. A change to it
  * is a change to the queue, which drops a fold chosen by hand.
  */
 export function queueLine(u: RosterRepoMergeQueue): string {
@@ -87,13 +85,13 @@ export function queueLine(u: RosterRepoMergeQueue): string {
 function queueSubjects(u: RosterRepoMergeQueue) {
   return [
     ...(u.head === undefined ? [] : [u.head.subject]),
-    ...u.remediating.map((r) => r.subject),
+    ...repairsOf(u).map((r) => r.subject),
     ...u.waiting.map((w) => w.subject),
     ...u.github.map((g) => g.subject),
   ];
 }
 
-/** How many merges a queue holds: the one at its head, those remediating, those waiting and those in a GitHub merge queue. */
+/** How many merges a queue holds: the one at its head, those at or awaiting its repair slots, those waiting and those in a GitHub merge queue. */
 export function queueCount(u: RosterRepoMergeQueue): number {
   return queueSubjects(u).length;
 }
@@ -191,27 +189,29 @@ export const MERGE_QUEUE_POSITION_CLASS = "sb-mq-position";
 /** The class of a GitHub merge queue standing's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_GITHUB_CLASS = "sb-mq-github";
 
-/** The class of a remediating merge's card, the queue's second spot. Each is one line of the band fit. */
+/** The class of a merge out of line's line: at or awaiting a repair slot. Each is one line of the band fit. */
 export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
 
 /**
- * A queue group's body: the head's card, then each merge remediating out of
- * line (the second spot), then each waiting merge, front first. A listed
- * queue has its head unless its line is empty and a merge remediates. A
- * press on a waiting merge drags it among the waiting (`queueDrag`).
+ * A queue group's body: the head's card, then the merge holding each repair
+ * slot and the merges awaiting each (repairsOf), then each waiting merge in
+ * the order it will run. A listed queue has its head unless its line is empty
+ * and a merge stands out of line. A press on a waiting merge drags it among
+ * the waiting (`queueDrag`).
  */
 export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext, path: string): HTMLElement {
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
-  // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE REMEDIATES OR
-  // A WORKSPACE STANDS IN A GITHUB MERGE QUEUE
+  // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE STANDS OUT OF
+  // LINE OR A WORKSPACE STANDS IN A GITHUB MERGE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
-  if (u.head !== undefined || (u.remediating.length === 0 && u.github.length === 0)) {
+  const repairs = repairsOf(u, path);
+  if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0)) {
     body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
   }
-  u.remediating.forEach((remediating, index) => {
-    body.appendChild(drawRosterMergeQueueRemediating(remediating, sc, `${path}.remediating[${index}]`));
-  });
+  for (const repair of repairs) {
+    body.appendChild(drawRosterMergeQueueRepair(repair, sc));
+  }
   const refs = new Map<HTMLElement, WorkspaceRef>();
   u.waiting.forEach((waiting, index) => {
     const waitingPath = `${path}.waiting[${index}]`;
@@ -373,37 +373,73 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   return el;
 }
 
-/** The class of a remediating merge's label: what it repairs, after its name. */
+/** The class of a merge out of line's label: the repair it makes or awaits, after its name. */
 export const MERGE_QUEUE_REASON_CLASS = "sb-mq-reason";
 
 /**
- * THE SECOND SPOT (owner rulings, 2026-10-31 and 2026-11-03): one merge that
- * stepped aside to repair out of line -- its failing tests, or its rebase's
- * conflicts. It stands above the merges waiting and is DRAWN AS ONE OF THEM
- * (owner request, 2026-11-10): its name, what it repairs as a queue label
- * (drawQueueLabel, the peer of a waiting merge's `front`), and how long it
- * has remediated. A click reveals its merge bubble, as the head's does.
+ * One merge out of line as its line draws it: the repair slot it holds or
+ * awaits, in the label's words.
  */
-export function drawRosterMergeQueueRemediating(u: RosterMergeQueueRemediating, sc: SidebarContext, path: string): HTMLElement {
-  const subject = requireMessage(u.subject, `${path}.subject`);
-  const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`, `${path}.subject`);
-  line.append(drawSubjectName(subject, `${path}.subject`));
-  const words = remediatingWords(requireMessage(u.reason, `${path}.reason`));
-  if (words !== null) {
-    line.appendChild(drawQueueLabel(words, MERGE_QUEUE_REASON_CLASS, "repairing out of line"));
+export interface QueueRepair {
+  subject: RosterMergeQueueSubject | undefined;
+  sinceMs: bigint;
+  words: string;
+  title: string;
+  path: string;
+}
+
+/**
+ * The queue's merges out of line, in the order they are drawn (owner ruling,
+ * 2026-11-11): the merge holding the fixing-tests slot, the one holding the
+ * resolving-conflicts slot, then the merges awaiting each slot, each line in
+ * the order it is granted it. A queue holds at most one merge per slot, which
+ * its shape already says (frontend.v1.RosterRepoMergeQueue.fixing_tests).
+ */
+export function repairsOf(u: RosterRepoMergeQueue, path = "queue"): QueueRepair[] {
+  const out: QueueRepair[] = [];
+  if (u.fixingTests !== undefined) {
+    out.push({ subject: u.fixingTests.subject, sinceMs: u.fixingTests.sinceMs, words: "fixing tests",
+      title: "fixing its tests out of line", path: `${path}.fixing_tests` });
   }
-  line.appendChild(drawClock(sc, msOf(u.sinceMs, `${path}.since_ms`)));
+  if (u.resolvingConflicts !== undefined) {
+    out.push({ subject: u.resolvingConflicts.subject, sinceMs: u.resolvingConflicts.sinceMs, words: "resolving conflicts",
+      title: "resolving its conflicts out of line", path: `${path}.resolving_conflicts` });
+  }
+  u.awaitingFixingTests.forEach((a, index) => {
+    out.push({ subject: a.subject, sinceMs: a.sinceMs, words: "waiting to fix tests",
+      title: "waiting out of line for the fixing-tests slot", path: `${path}.awaiting_fixing_tests[${index}]` });
+  });
+  u.awaitingResolvingConflicts.forEach((a, index) => {
+    out.push({ subject: a.subject, sinceMs: a.sinceMs, words: "waiting to resolve conflicts",
+      title: "waiting out of line for the resolving-conflicts slot", path: `${path}.awaiting_resolving_conflicts[${index}]` });
+  });
+  return out;
+}
+
+/**
+ * ONE MERGE OUT OF LINE (owner rulings, 2026-10-31, 2026-11-03 and
+ * 2026-11-11), at a repair slot or awaiting one. It stands above the merges
+ * waiting and is DRAWN AS ONE OF THEM (owner request, 2026-11-10): its name,
+ * the repair as a queue label (drawQueueLabel), and how long it has held or
+ * awaited its slot. A click reveals its merge bubble, as the head's does.
+ */
+export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): HTMLElement {
+  const subject = requireMessage(u.subject, `${u.path}.subject`);
+  const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`, `${u.path}.subject`);
+  line.append(drawSubjectName(subject, `${u.path}.subject`));
+  line.appendChild(drawQueueLabel(u.words, MERGE_QUEUE_REASON_CLASS, u.title));
+  line.appendChild(drawClock(sc, msOf(u.sinceMs, `${u.path}.since_ms`)));
   return line;
 }
 
-/** The class every queue label wears: `front`, `returned`, what a remediating merge repairs, a GitHub place. */
+/** The class every queue label wears: the repair a merge out of line makes or awaits, a GitHub place. */
 export const MERGE_QUEUE_LABEL_CLASS = "sb-mq-label";
 
 /**
- * One queue label after a merge's name (owner request, 2026-11-10): `front`,
- * `returned`, `fixing tests`, `resolving conflicts` and a GitHub place are peers, drawn
- * alike in the queue's purple. KIND is the label's own class beside
- * MERGE_QUEUE_LABEL_CLASS; TITLE is its hover.
+ * One queue label after a merge's name (owner request, 2026-11-10): `fixing
+ * tests`, `resolving conflicts`, a wait for either, and a GitHub place are
+ * peers, drawn alike in the queue's purple. KIND is the label's own class
+ * beside MERGE_QUEUE_LABEL_CLASS; TITLE is its hover.
  */
 function drawQueueLabel(text: string, kind: string, title: string): HTMLElement {
   const label = document.createElement("span");
@@ -414,50 +450,13 @@ function drawQueueLabel(text: string, kind: string, title: string): HTMLElement 
 }
 
 /**
- * What a remediating merge's turn out of line repairs, in the words its
- * parenthetical draws (owner request, 2026-11-09). A reason this build does
- * not name draws no parenthetical (null), per
- * frontend.v1.RosterMergeQueueRemediating.reason.
- */
-export function remediatingWords(reason: RosterMergeQueueRemediatingReason): string | null {
-  switch (reason.reason.case) {
-    case "tests":
-      return "fixing tests";
-    case "conflicts":
-      return "resolving conflicts";
-    default:
-      return null;
-  }
-}
-
-/**
- * The queue label a waiting merge's PLACEMENT draws after its name, per
- * frontend.v1.RosterMergeQueueWaiting.placement: `front` for the user's front
- * placement, `returned` for a merge back from repairing out of line, and none
- * (null) for a merge put in line at the back or a placement this build does not
- * name.
- */
-export function placementLabel(
-  placement: RosterMergeQueueWaitingPlacement | undefined,
-): { text: string; kind: string; title: string } | null {
-  switch (placement?.placement.case) {
-    case "front":
-      return { text: "front", kind: "sb-mq-front", title: "put in line at the front" };
-    case "returned":
-      return { text: "returned", kind: "sb-mq-returned", title: "back in line from repairing out of line" };
-    default:
-      return null;
-  }
-}
-
-/**
  * One merge waiting behind the head, indented under the head's name, with no
- * bullet (owner request, 2026-11-06): the credited workspace's name, its placement label (placementLabel), and how
- * long it has waited -- or, for a merge racing the head, how long it has
- * raced. IT OPENS WITH ITS POSITION AMONG THE WAITING MERGES (owner
- * request, 2026-11-11): POSITION is 1-based, counts only the merges in
+ * bullet (owner request, 2026-11-06): the credited workspace's name and how
+ * long it has waited. IT OPENS WITH ITS POSITION AMONG THE WAITING MERGES
+ * (owner request, 2026-11-11): POSITION is 1-based, counts only the merges in
  * `RosterRepoMergeQueue.waiting` (never the head or a remediating merge), and
- * is the line's order, not the workspace's number, so a reorder renumbers.
+ * is the line's order, not the workspace's number, so a reorder renumbers. No
+ * "front" is drawn (owner ruling, 2026-11-11).
  */
 export function drawRosterMergeQueueWaiting(
   u: RosterMergeQueueWaiting,
@@ -471,17 +470,7 @@ export function drawRosterMergeQueueWaiting(
   numeral.className = MERGE_QUEUE_POSITION_CLASS;
   numeral.textContent = `${position}`;
   line.append(numeral, drawSubjectName(subject, `${path}.subject`));
-  const placement = placementLabel(u.placement);
-  if (placement !== null) {
-    line.appendChild(drawQueueLabel(placement.text, placement.kind, placement.title));
-  }
-  // A MERGE RACING THE HEAD HOLDS AN ACTIVE SLOT: its clock reads how long it
-  // has held that slot, never how long ago it was put in line.
-  const startedMs =
-    u.racing === undefined
-      ? msOf(u.queuedAtMs, `${path}.queued_at_ms`)
-      : msOf(u.racing.sinceMs, `${path}.racing.since_ms`);
-  line.appendChild(drawClock(sc, startedMs));
+  line.appendChild(drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
   return line;
 }
 

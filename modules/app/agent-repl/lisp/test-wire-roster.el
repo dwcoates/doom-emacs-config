@@ -1955,7 +1955,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                        #'agent-repl-wire-decode-roster-merge-queue-section
                        (concat
                         "{\"header\":{\"label\":{\"text\":\"Merge Queue\"}},\"expanded\":{}"
-                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placement\":{\"front\":{}}}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
+                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\"}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
                                 agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)
                         "}"))
                       :groups)))
@@ -1970,69 +1970,28 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                          (plist-get (plist-get (car (plist-get head :stages)) :state) :value)
                          (plist-get head :standing)
                          (plist-get (car (plist-get queue :waiting)) :queued-at-ms)
-                         (plist-get (plist-get (car (plist-get queue :waiting)) :placement) :arm)
                          (plist-get queue :paused))
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
-                     (:arm :merging :value (:suspended t)) 9 :front
+                     (:arm :merging :value (:suspended t)) 9
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
 
-(defun agent-repl-test-wire-roster--waiting-placement (placement)
-  "Decode a waiting merge carrying PLACEMENT, a JSON member or \"\", and return its placement."
-  (plist-get (agent-repl-test-wire-roster--decode
-              #'agent-repl-wire-decode-roster-merge-queue-waiting
-              (format "{\"subject\":%s,\"queuedAtMs\":\"9\"%s}"
-                      agent-repl-test-wire-roster--subject placement))
-             :placement))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-a-front-placement ()
-  "A merge the user put at the front decodes its placement as the front arm."
-  (should (equal (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{\"front\":{}}")
-                 '(:arm :front :value nil))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-a-returned-placement ()
-  "A merge back from a repair decodes its placement as the returned arm."
-  (should (equal (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{\"returned\":{}}")
-                 '(:arm :returned :value nil))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-no-placement-as-nil ()
-  "A merge put in line the ordinary way carries no placement."
-  (should (null (agent-repl-test-wire-roster--waiting-placement ""))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-an-empty-placement-as-nil ()
-  "A set placement with no arm this build names decodes to nil and draws no label."
-  (should (null (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{}"))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-both-placement-arms ()
-  "A placement with both arms set breaks its oneof and is refused."
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-racing-field ()
+  "Tag 4, a merge racing behind the head, is retired: a waiting merge
+carrying it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-waiting-placement
-                  "{\"front\":{},\"returned\":{}}")
-                 '("RosterMergeQueueWaitingPlacement" placement "oneof has more than one arm set"))))
+                  #'agent-repl-wire-decode-roster-merge-queue-waiting
+                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"racing\":{\"sinceMs\":\"12\"}}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueWaiting" racing "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-front-flag ()
-  "The retired placedAtFront field is an unknown field and is refused."
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-front-mark ()
+  "Tag 3, the waiting merge's front mark, is retired: the sidebar draws no
+\"front\", so a waiting merge carrying it is an unknown field."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-waiting
                   (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}"
                           agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueWaiting" placedAtFront "unknown field"))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-its-racing-slot ()
-  "A merge racing behind the head carries when it took its racing slot."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-merge-queue-waiting
-                             (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"racing\":{\"sinceMs\":\"12\"}}"
-                                     agent-repl-test-wire-roster--subject))
-                            :racing)
-                 '(:since-ms 12))))
-
-(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-without-racing-decodes-nil ()
-  "A merge only waiting its turn carries no racing slot."
-  (should-not (plist-get (agent-repl-test-wire-roster--decode
-                          #'agent-repl-wire-decode-roster-merge-queue-waiting
-                          (format "{\"subject\":%s,\"queuedAtMs\":\"9\"}"
-                                  agent-repl-test-wire-roster--subject))
-                         :racing)))
 
 (ert-deftest agent-repl-test-wire-roster-merged-section-with-the-retired-merged-label-is-a-breach ()
   "Tag 7, the merged groups' heading, is retired: a section carrying it is an unknown field."
@@ -2086,10 +2045,12 @@ A hand-rolled list decoder would skip the shared helper and fail here."
 
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
   "A queue with no head and nothing waiting decodes to no head, none waiting,
-not paused, nothing remediating, nothing in a GitHub merge queue."
+not paused, no repair slot held or awaited, nothing in a GitHub merge
+queue."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
-                 '(:head nil :waiting nil :paused nil :remediating nil :github nil))))
+                 '(:head nil :waiting nil :paused nil :fixing-tests nil :resolving-conflicts nil
+                         :awaiting-fixing-tests nil :awaiting-resolving-conflicts nil :github nil))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-failed-arm ()
   "The failed head is retired; its arm is refused as an unknown field."
@@ -2119,17 +2080,38 @@ not paused, nothing remediating, nothing in a GitHub merge queue."
                   :head-since-ms)
                  7)))
 
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-remediating-merges ()
-  "A queue carries the merges remediating out of line, each with when it
-stepped aside."
-  (should (equal (mapcar (lambda (m) (plist-get m :since-ms))
-                         (plist-get
-                          (agent-repl-test-wire-roster--decode
-                           #'agent-repl-wire-decode-roster-repo-merge-queue
-                           (format "{\"remediating\":[{\"subject\":%s,\"sinceMs\":\"9\",\"reason\":{\"tests\":{}}}]}"
-                                   agent-repl-test-wire-roster--subject))
-                          :remediating))
-                 '(9))))
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-each-repair-slot-and-its-line ()
+  "A queue carries the one merge holding each repair slot and the merges
+awaiting each, each with when it took its slot or began awaiting it."
+  (let ((queue (agent-repl-test-wire-roster--decode
+                #'agent-repl-wire-decode-roster-repo-merge-queue
+                (format (concat "{\"fixingTests\":{\"subject\":%s,\"sinceMs\":\"1\"},"
+                                "\"resolvingConflicts\":{\"subject\":%s,\"sinceMs\":\"2\"},"
+                                "\"awaitingFixingTests\":[{\"subject\":%s,\"sinceMs\":\"3\"}],"
+                                "\"awaitingResolvingConflicts\":[{\"subject\":%s,\"sinceMs\":\"4\"},{\"subject\":%s,\"sinceMs\":\"5\"}]}")
+                        agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject
+                        agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject
+                        agent-repl-test-wire-roster--subject))))
+    (should (equal (list (plist-get (plist-get queue :fixing-tests) :since-ms)
+                         (plist-get (plist-get queue :resolving-conflicts) :since-ms)
+                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-fixing-tests))
+                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-resolving-conflicts)))
+                   '(1 2 (3) (4 5))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-refuses-the-retired-remediating-list ()
+  "Tag 5, the uncapped list of merges out of line, is retired: a queue
+carrying it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-merge-queue "{\"remediating\":[]}")
+                 '("RosterRepoMergeQueue" remediating "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-repair-slot-holder-names-its-message-in-a-breach ()
+  "A repair-slot holder with an unknown field is refused under its own
+message name."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueFixingTests" v))
+                  (format "{\"subject\":%s,\"sinceMs\":\"1\",\"reason\":{}}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueFixingTests" reason "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-its-github-standings ()
   "A queue carries the workspaces standing in a GitHub merge queue, each at
@@ -2151,30 +2133,6 @@ its place and since it joined."
                   #'agent-repl-wire-decode-roster-merge-queue-github-entry
                   (format "{\"subject\":%s,\"queuedAtMs\":\"9\"}" agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueGithubEntry" place "required message field is absent"))))
-
-(ert-deftest agent-repl-test-wire-roster-a-remediating-merge-decodes-what-it-repairs ()
-  "A remediating merge's reason decodes as the arm it names: its tests or
-its conflicts."
-  (should (equal (mapcar (lambda (reason)
-                           (plist-get (agent-repl-test-wire-roster--decode
-                                       #'agent-repl-wire-decode-roster-merge-queue-remediating
-                                       (format "{\"subject\":%s,\"sinceMs\":\"9\",\"reason\":%s}"
-                                               agent-repl-test-wire-roster--subject reason))
-                                      :reason))
-                         '("{\"tests\":{}}" "{\"conflicts\":{}}"))
-                 '(:tests :conflicts))))
-
-(ert-deftest agent-repl-test-wire-roster-a-remediating-reason-naming-no-arm-decodes-nil ()
-  "A reason set with no arm this build names is no breach: it decodes nil."
-  (should (null (agent-repl-test-wire-roster--decode
-                 #'agent-repl-wire-decode-roster-merge-queue-remediating-reason "{}"))))
-
-(ert-deftest agent-repl-test-wire-roster-a-remediating-merge-without-reason-is-a-breach ()
-  "What a remediating merge repairs is a required message."
-  (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-remediating
-                  (format "{\"subject\":%s,\"sinceMs\":\"9\"}" agent-repl-test-wire-roster--subject))
-                 '("RosterMergeQueueRemediating" reason "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-every-merge-queue-stage-state-decodes ()
   "A stage decodes each of its three states with its span."

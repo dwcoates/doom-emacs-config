@@ -66,8 +66,7 @@ func (s *server) UpdateShutdownSchedule(
 
 // UpdateMergeQueue is the operator's control of the merge queue: pause or
 // resume (daemon-wide when the repository ref is UNSET), evict one
-// workspace's queued merge, move one a place up or down its queue, or flip
-// the daemon-wide racing switch.
+// workspace's queued merge, or move one in its queue.
 func (s *server) UpdateMergeQueue(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UpdateMergeQueueRequest],
@@ -102,18 +101,6 @@ func (s *server) UpdateMergeQueue(
 			_, err := s.deps.Merge.MoveTo(ctx, ws, anchor.Record.ID, side)
 			return err
 		})
-	}
-
-	if action, apply, ok := s.daemonWideMergeAction(req.Msg); ok {
-		if err := apply(ctx); err != nil {
-			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
-		}
-		s.log.Info("daemon.server.update_merge_queue", "applied the merge-queue action",
-			dlog.Context{"action": action})
-		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{
-			Success: &agentreplv1.UpdateMergeQueueSuccess{},
-		}
-		return connect.NewResponse(resp), nil
 	}
 
 	var scope *merge.RepositoryScope
@@ -166,22 +153,9 @@ func (s *server) actOnQueuedMerge(
 	return connect.NewResponse(resp), nil
 }
 
-// daemonWideMergeAction reads a daemon-wide operator switch's arm -- the
-// racing switch -- as its action name and the
-// orchestrator verb that applies it; ok is false for every other arm.
-func (s *server) daemonWideMergeAction(req *agentreplv1.UpdateMergeQueueRequest) (string, func(context.Context) error, bool) {
-	switch req.GetAction().(type) {
-	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
-		return "disable_racing", s.deps.Merge.DisableRacing, true
-	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
-		return "enable_racing", s.deps.Merge.EnableRacing, true
-	}
-	return "", nil, false
-}
-
 // recordMergeQueueAsk records WHO asked for a merge-queue action, and what,
 // before it is acted on: the one record that names the asker of every
-// eviction, move, pause and racing switch. A merge that leaves the queue is
+// eviction, move and pause. A merge that leaves the queue is
 // never unaccounted for: an eviction the store records only as "the operator"
 // could not be told from a loss (2026-10-24).
 func (s *server) recordMergeQueueAsk(req *agentreplv1.UpdateMergeQueueRequest) {
@@ -211,16 +185,12 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "move_down"
 	case *agentreplv1.UpdateMergeQueueRequest_MoveTo:
 		return "move_to"
-	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
-		return "disable_racing"
-	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
-		return "enable_racing"
 	}
 	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
 }
 
 // mergeQueueTarget is the workspace whose merge an arm acts on, nil for a
-// queue-wide or daemon-wide arm.
+// queue-wide arm.
 func mergeQueueTarget(req *agentreplv1.UpdateMergeQueueRequest) *workspacev1.WorkspaceRef {
 	if evict := req.GetEvict(); evict != nil {
 		return evict.GetWorkspace()

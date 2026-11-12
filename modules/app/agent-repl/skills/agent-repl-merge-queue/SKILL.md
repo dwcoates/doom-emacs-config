@@ -1,7 +1,7 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, disables or enables racing, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
-argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | move-up | move-down | pause [-hard] | resume | disable-racing | enable-racing | subscribe | unsubscribe"
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | move-up | move-down | pause [-hard] | resume | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
 
@@ -146,27 +146,36 @@ Either kind:
   is left to finish. A queue already paused is not refused. On resume, each
   interrupted step is prompted again without spending an attempt.
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
-- `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
-  top two merges race at the tests; disabled, every queue works its head alone.
+- Each queue holds at most three active merges, one per slot: the HEAD (the
+  one merge running the test gate and landing), FIXING TESTS (one merge fixing
+  its failing tests out of line) and RESOLVING CONFLICTS (one merge resolving
+  its rebase's conflicts out of line).
 - A merge whose next step waits on an agent turn of its own STEPS ASIDE, for
   one of two reasons: its WHOLE test suite finished with any failure (its
   session fixes them), or its rebase onto the target's tip hit conflicts (its
   session resolves them).
-  - The head steps aside for either reason. With racing on, a member racing
-    behind the head steps aside for conflicts too, and the next merge in line
-    takes its place in the race.
-  - The repairing prompt is delivered first. The next merge in line takes the
-    head (or the racing spot) at once while the repair runs out of line.
-  - `merge-queue status` lists it `remediating` with its reason (`tests` or
-    `conflicts`). The sidebar draws it under the head with "remediating
-    tests" or "resolving conflicts".
+  - The head steps aside for either reason; no other member steps aside.
+  - It takes the repair's slot, or waits for it out of line, in order, when
+    another merge holds it; the next merge in line takes the head at once.
+  - Its repairing brief is delivered once it holds the slot, not before
+    stepping aside; nothing is handed its session until the holder's return
+    grants it the slot.
+  - `merge-queue status` lists it at stage `fixing_tests`,
+    `resolving_conflicts` or `awaiting_repair` (with the slot awaited and its
+    1-based place). The sidebar draws the holders "fixing tests" and
+    "resolving conflicts", and the waiters "waiting to fix tests" and
+    "waiting to resolve conflicts", under the head.
+  - A waiting merge's background rebase runs git only: a conflict aborts the
+    rebase and steps the merge aside for the resolving-conflicts slot
+    (holding it or waiting for it); the slot's holder then runs the resolving
+    rebase in its session and returns to the line.
   - Once its turn ends it goes back in line at the first waiting place, next
     after the merge being worked on, never evicting it. It then rebases onto
     the tip and reruns its whole suite when it heads the queue.
   - A test step aside spends one of its fixing attempts: a failing suite
-    after its last one fails it out. A conflict step aside spends no fixing attempt, and if its rebase
-    on return conflicts again it steps aside again.
-  - A merge with nobody in line behind it repairs in place.
+    after its last one fails it out. A conflict step aside spends no fixing
+    attempt, and if its rebase on return conflicts again it steps aside again.
+  - A merge with nobody in line behind it repairs in place, holding the head.
   - It survives a daemon restart.
 - `merge-queue subscribe [-repository here|DIR]` has this workspace told as
   the queue changes (to land after it drains, to report a landing) instead of
