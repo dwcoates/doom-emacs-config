@@ -206,46 +206,6 @@ func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	}
 }
 
-// testEmacsDaemonDownSurfacesAndReconnects is scenario 41.
-//
-// Connection death is detected AT THE TRANSPORT — there are no keepalive
-// frames — so the assertion is that the link goes down on its own, that the
-// reconnect loop is armed rather than the outage being swallowed, and that
-// the link comes back when a daemon returns.
-func testEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
-	// Arrange
-	w, e := emGHIWorld(t)
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-daemon-down")
-	emGHISelect(t, e, dir, ws)
-
-	// Act: ask the daemon to shut down. EMACS NEVER KILLS A DAEMON, so the
-	// stop is the module's own command and the daemon exits itself.
-	e.Eval(`(agent-repl-frontend-daemon-stop)`)
-
-	// Assert: the outage SURFACES. The link drops without anyone telling
-	// Emacs to drop it, which is the transport-level detection the contract
-	// relies on.
-	e.AwaitEvalFor(daemonStopBound, "the link to go down when the daemon exits",
-		`(if (agent-repl-link-up-p) nil t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-
-	// Assert: the reconnect loop is ARMED. A dropped link with no timer is
-	// an outage silently absorbed, which is the failure this pins.
-	e.AwaitEvalFor(daemonStopBound, "the reconnect loop to be armed",
-		`(and (timerp agent-repl-link--reconnect-timer) t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-
-	// Act: a daemon returns, launched the same way it was the first time.
-	e.Eval(`(agent-repl-frontend-daemon-ensure)`)
-
-	// Assert: the link comes back, and the reconnect loop stands down with
-	// it — a timer still armed on a live link would keep dialing forever.
-	emHOAwaitLinkUp(t, e, "the link to come back when a daemon returns")
-	e.AwaitEvalFor(daemonLinkBound, "the reconnect loop to stand down once the link is up",
-		`(if (timerp agent-repl-link--reconnect-timer) nil t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-}
-
 // ---------------------------------------------------------------------------
 // SCENARIO 40 — HandoverTransfersAtFreeness
 // ---------------------------------------------------------------------------

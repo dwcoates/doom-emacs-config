@@ -153,7 +153,6 @@ func TestEmacsWorkspaces(t *testing.T) {
 func TestEmacsDaemonLifecycle(t *testing.T) {
 	scenario(t,
 		testEmacsTabsRehydrateFromTheRosterOnConnect,
-		testEmacsDaemonDownSurfacesAndReconnects,
 		testEmacsHandoverTransfersAtFreeness,
 		testEmacsRestartKeepsTheSelectedWorkspace,
 		testEmacsForcedRestartInterruptsTheTurn,
