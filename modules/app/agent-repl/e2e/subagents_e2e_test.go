@@ -358,6 +358,8 @@ func testSubagentDetached(t *testing.T) {
 // facts, keyed by the spawning call's tool_use_id its `.meta.json` names.
 // The test asserts that figure, that the ordinary turn is undisturbed, and
 // that the daemon fabricates NO subagent bubble for the agent.
+//
+// Seam: vendor transcript -> sidecar -> daemon, a nested subagent's file-plane-only historical usage
 func testNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
@@ -456,6 +458,8 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 // TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed and then bounces the
 // daemon exactly as #47 does (adColdBoot, adoption_e2e_test.go), so the only
 // thing under test is what the replay alone can draw.
+//
+// Seam: store -> cold-booted daemon, a replayed subagent's settled spawn naming its created agent
 func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
@@ -502,6 +506,8 @@ func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 // only against a live agent, and the bubble then settles `cancelled`, the arm
 // a hand stop draws. An interrupt that had taken the agent down with the turn
 // would have settled it already, and the stop would be refused.
+//
+// Seam: daemon -> shim, an interjection that interrupts the turn and leaves its detached agent live
 func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	// Arrange: the held turn, with its detached agent live beneath it.
 	w := SharedWorld(t)
@@ -562,6 +568,8 @@ func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // turn draws exactly ONE thinking unit and exactly ONE answer, each whole and
 // the answer marked final; the subagent's own two responses reach its bubble's
 // sub-feed and never the root feed; and the bubble settles succeeded.
+//
+// Seam: shim -> daemon, a detached agent's responses interleaved with the main agent's blocks, each on its own feed
 func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
@@ -642,6 +650,8 @@ func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 // `!subagent-detached-utterance` never completes; the daemon is crashed and
 // its shim killed, so the successor's bring-up resumes the conversation in a
 // NEW vendor process that runs no such agent.
+//
+// Seam: store -> cold-booted daemon -> new shim, a detached subagent whose process died, not revived as live work
 func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	// Arrange.
 	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})

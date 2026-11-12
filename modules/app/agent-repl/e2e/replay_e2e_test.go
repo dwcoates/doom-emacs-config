@@ -23,6 +23,8 @@ import (
 // testAWorkspaceOpenReplaysItsFirstPageOnce covers the other half of the
 // rule: the workspace's opening is a replay, it is the only one, and the turns
 // that follow start no watcher of their own.
+//
+// Seam: store -> daemon, a workspace open's one replay, and no watcher for the turns after it
 func testAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})

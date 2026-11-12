@@ -102,6 +102,8 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 // against the real quartet: after a stop and a relaunch, the announcement
 // Emacs sends is what brings the conversation back, and the page the new
 // daemon serves still draws the pre-stop turn.
+//
+// Seam: store and shim -> relaunched daemon, the conversation a stopped daemon stood down
 func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.

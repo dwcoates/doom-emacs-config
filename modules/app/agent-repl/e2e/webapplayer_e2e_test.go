@@ -379,6 +379,8 @@ const wlClientLogOperation = "webapp-layer.client-log-round-trip"
 // promoted) are the half a browser can see. What only this side can see is
 // that those identities are the SAME strings the other runtimes wrote for the
 // same session — which is what makes one incident readable across five logs.
+//
+// Seam: webapp -> daemon, a browser record joined to the daemon's and the shim's records for its session
 func testWebappLayerClientLog(t *testing.T) {
 	w, ws := wlDriveAreaWorld(t, "client-log.layer.test.ts")
 
@@ -451,6 +453,8 @@ func wlRequireJoin(t *testing.T, whose string, records []harness.LogRecord, fiel
 }
 
 // testWebappLayerCards is section F4: permission and question cards.
+//
+// Seam: webapp -> daemon, the permission and question cards' answers from the real page
 func testWebappLayerCards(t *testing.T) {
 	wlDriveArea(t, "cards.layer.test.ts")
 }
@@ -500,6 +504,8 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 // THE DECLARED WARNING is this test's own subject, as in the adoption area:
 // the standing unlanded-arm refusal record is the evidence of the refusal a
 // handover deliberately provokes.
+//
+// Seam: successor daemon -> webapp, the mounted page carried across a daemon handover
 func testWebappLayerRestartHandover(t *testing.T) {
 	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)

@@ -316,6 +316,8 @@ func testResidueAttachmentsDrawNoRow(t *testing.T) {
 // Two negatives, then: no extra feed row, and no footer salient line minted
 // from the tip (no footer line warns that the context is nearly full, owner
 // ruling 2026-10-06).
+//
+// Seam: shim -> daemon, a context-tip attachment reaching no feed row and no footer line
 func testContextTipDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -347,6 +349,8 @@ func testContextTipDrawsNoRow(t *testing.T) {
 // capture holds ... IT IS NOT the context-budget warning either". Arms line:
 // "residue `attachment/total_tokens_reminder` — recorded as itself,
 // unconverted, and reaching no arm".
+//
+// Seam: shim -> daemon, a tokens-reminder attachment reaching no feed row and no footer line
 func testTokensReminderDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})

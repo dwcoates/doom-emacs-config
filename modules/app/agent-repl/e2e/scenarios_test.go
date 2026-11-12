@@ -18,6 +18,8 @@ import "testing"
 // scenario"). TestEveryWorldBuildingTestIsAScenario holds the line.
 
 // TestTurns is a turn from prompt to end, and every feed row, footer chip and fact it draws.
+//
+// Seam: daemon -> shim -> store and sidecar, a turn from its prompt to its terminal and every row it draws
 func TestTurns(t *testing.T) {
 	scenario(t,
 		testTurnStartToCompletion,
@@ -35,6 +37,8 @@ func TestTurns(t *testing.T) {
 }
 
 // TestFaults is what the vendor, the producer and the hooks get wrong, and the refusals and failure arms they end in.
+//
+// Seam: shim -> daemon, the vendor's and the producer's faults and the arms they end in
 func TestFaults(t *testing.T) {
 	scenario(t,
 		testQueryEofEndsTheTurnAsQueryDied,
@@ -48,6 +52,8 @@ func TestFaults(t *testing.T) {
 }
 
 // TestSubagents is subagents, their feeds, and detached work that outlives its turn.
+//
+// Seam: shim and sidecar -> daemon, subagents' frames and detached work across the stream and file planes
 func TestSubagents(t *testing.T) {
 	scenario(t,
 		testSubagentSyncNestedActivity,
@@ -65,6 +71,8 @@ func TestSubagents(t *testing.T) {
 }
 
 // TestKeepAlive is keep-alive turns, hibernation and revival.
+//
+// Seam: shim -> vendor -> store and sidecar, keep-alive turns, hibernation and the rewinds past them
 func TestKeepAlive(t *testing.T) {
 	scenario(t,
 		testKeepAliveAnswerAfterVendorTurnNeverServed,
@@ -79,6 +87,8 @@ func TestKeepAlive(t *testing.T) {
 }
 
 // TestDaemonLifecycle is the daemon's stops, cold boots, relaunches, cold gate and store outages.
+//
+// Seam: daemon -> store, shim and sidecar, the whole process tree across stops, relaunches, cold boots and store outages
 func TestDaemonLifecycle(t *testing.T) {
 	scenario(t,
 		testHostRequestedStopLeavesNoProcessBehind,
@@ -94,6 +104,8 @@ func TestDaemonLifecycle(t *testing.T) {
 }
 
 // TestLanding is deploys and the merge queue.
+//
+// Seam: incumbent daemon -> successor daemon, deploys and merge-queue handovers
 func TestLanding(t *testing.T) {
 	scenario(t,
 		testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace,
@@ -106,6 +118,8 @@ func TestLanding(t *testing.T) {
 }
 
 // TestWebappLayer is the real webapp's vitest areas driven against a real daemon.
+//
+// Seam: webapp -> daemon, the real page's rpcs, streams and client log against a real daemon
 func TestWebappLayer(t *testing.T) {
 	scenario(t,
 		testWebappLayerCards,
@@ -126,6 +140,8 @@ func TestHarness(t *testing.T) {
 }
 
 // TestEmacsWorkspaces is Emacs's workspaces, tabs, roster arms, banners and chat threads.
+//
+// Seam: Emacs -> daemon -> shim -> page, a workspace from Emacs's command to its drawn reply
 func TestEmacsWorkspaces(t *testing.T) {
 	scenario(t,
 		testEmacsProofOfLife,
@@ -134,6 +150,8 @@ func TestEmacsWorkspaces(t *testing.T) {
 }
 
 // TestEmacsDaemonLifecycle is Emacs's daemon: cold start, restarts, handovers, reconnects and a daemon that is not there.
+//
+// Seam: daemon -> Emacs, the link across a real daemon restart or handover
 func TestEmacsDaemonLifecycle(t *testing.T) {
 	scenario(t,
 		testEmacsTabsRehydrateFromTheRosterOnConnect,

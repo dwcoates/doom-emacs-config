@@ -186,6 +186,8 @@ func shimRecords(t *testing.T, path string) []harness.LogRecord {
 // testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone — a real prompt that
 // arrives while a keep-alive is in flight waits it out, then rewinds past
 // exactly that keep-alive to the last real turn.
+//
+// Seam: daemon -> shim -> vendor, a prompt's rewind past exactly the keep-alive in flight
 func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -216,6 +218,8 @@ func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 // the mock's `!stop-on-rewind` lever, every rewind must resume at the same
 // real anchor, discard the stop's answer with the keep-alive, trip no
 // refusal, and store and serve nothing of it.
+//
+// Seam: vendor -> shim -> store, a stop answered on every rewind, discarded and never looping
 func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -307,6 +311,8 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 // testRestartedShimCarriesItsKeepAlivesUntilARealReply — a restarted shim is
 // a new process with no anchor: its keep-alives are carried (never rewound,
 // never refused) until its own first real reply anchors the next rewind.
+//
+// Seam: daemon -> restarted shim -> vendor, keep-alives carried until the new process's first real reply
 func testRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)

@@ -379,6 +379,8 @@ func resolveOrFail(t *testing.T, dir string) string {
 // module, spawns the daemon through its own launcher, drives ordinary
 // commands, and hands state back as data — so the remaining 43 scenarios are
 // a matter of writing scenarios rather than of building machinery.
+//
+// Seam: Emacs -> daemon -> shim -> page, a prompt from the composer to the drawn reply
 func testEmacsProofOfLife(t *testing.T) {
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)

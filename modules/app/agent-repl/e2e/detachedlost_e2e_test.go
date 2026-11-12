@@ -304,6 +304,8 @@ func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harnes
 // ONLY THE SHELL-SILENCE WINDOW IS SHORTENED. The grace and the agent and
 // workflow silences stay at the sidecar's production defaults, so no OTHER
 // arm can reach a conclusion first and steal the subject.
+//
+// Seam: sidecar -> daemon, a silent detached shell's spool concluding went_silent
 func testDetachedLostWentSilent(t *testing.T) {
 	// Arrange.
 	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{ShellSilence: dlSilenceWindow})

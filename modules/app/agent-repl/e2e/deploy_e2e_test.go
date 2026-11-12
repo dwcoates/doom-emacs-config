@@ -82,6 +82,11 @@ func dpAwaitAnnounced(t *testing.T, w *World, stream *harness.Stream[*agentreplv
 	}).GetShutdownAnnounced()
 }
 
+// testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace proves a deploy
+// that finds the daemon stale hands a free workspace over to the successor,
+// waiting on nobody.
+//
+// Seam: incumbent daemon -> successor daemon, a free workspace handed over by an unforced deploy
 func testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	// Arrange: a HEADLESS workspace, which is free and has no rendezvous.
 	w := dpStaleDaemonWorld(t)
@@ -127,6 +132,10 @@ func testADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace(t *testing.T) {
 	}
 }
 
+// testADeployOverARunningTurnHandsItOverAndEndsNothing proves a deploy over a
+// running turn hands the turn over to the successor and ends nothing.
+//
+// Seam: incumbent daemon -> successor daemon, a running turn and its shim carried across a deploy
 func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	// Arrange: a workspace whose turn is parked on a foreground shell that
 	// concludes on nothing but an interrupt — a turn that is RUNNING for as
@@ -209,6 +218,10 @@ func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	}
 }
 
+// testASuccessorThatFinishedJoiningAcceptsADeploy proves a daemon that booted
+// as a successor and finished joining accepts the next deploy.
+//
+// Seam: incumbent daemon -> successor daemon, a second deploy accepted by a daemon that booted as a successor
 func testASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	// Arrange: one completed handover, so the daemon now serving BOOTED AS A
 	// SUCCESSOR — which is every daemon a second deploy ever talks to. Found

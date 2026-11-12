@@ -289,6 +289,11 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // reaches git at all, so no conflict is scripted.
 // ---------------------------------------------------------------------------
 
+// testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce proves a turn a
+// merge displaces is captured and ended, and resubmitted exactly once by the
+// daemon that boots after the crash.
+//
+// Seam: daemon -> shim -> successor daemon, a turn displaced by a merge, captured, ended and resubmitted once
 func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
@@ -671,6 +676,10 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	}})
 }
 
+// testFailMarkerFailsAPreDeployHooksDeploy proves a pre-deploy hook whose turn
+// the vendor fails fails the deploy.
+//
+// Seam: shim -> daemon, a configured pre-deploy hook's failed turn failing the deploy
 func testFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 	// A typo in the marker would leave both arms driving PLAIN PROSE, whose
 	// turns conclude — so the before arm would fail with a confusing terminal

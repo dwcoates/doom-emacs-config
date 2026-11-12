@@ -225,6 +225,8 @@ func testPlanModeCoalescesOntoOneBubble(t *testing.T) {
 // of the turn arrives after the shim's, its `EnterPlanMode` last, and a bubble
 // that took that enter would go back to its PLANNING treatment with the plan
 // already presented. #85's wait passes either way.
+//
+// Seam: shim and sidecar -> daemon, the plan episode's two planes settling one bubble planned
 func testPlanModeSettlesPlanned(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)

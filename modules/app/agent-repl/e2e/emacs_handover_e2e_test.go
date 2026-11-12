@@ -136,6 +136,8 @@ func emHOAwaitNewDaemon(t *testing.T, e *Emacs, before int) {
 // and a new one is launched under Emacs, the tabs are not remembered
 // locally and rebuilt from a cache — they are rebuilt FROM THE ROSTER the
 // new daemon pushes, and the tab bar follows that order strictly.
+//
+// Seam: daemon -> Emacs, the roster a new daemon pushes, from which the tabs are rebuilt
 func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	// Arrange: two registered workspaces, so the assertion is about an
 	// ORDER and not merely about a single row surviving.
@@ -334,6 +336,8 @@ func emHO40AddedName(t *testing.T, before, after []string) string {
 // rollout is attached, and at freeness it is PROMOTED to
 // `agent-repl-link--primary` with the old connection released — not a
 // reconnect that happened to find a new address, and not Emacs's own dial.
+//
+// Seam: successor daemon -> Emacs, the announced successor promoted to Emacs's primary link at freeness
 func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// Arrange: a repository that deploys as agent-repl's own does, and a
 	// world whose Emacs — and therefore whose daemon — is given a merge gate
@@ -487,6 +491,8 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 // workspace that re-registers LAST, read off the link-up walk itself: a user
 // standing on the one offered first is stamped `current` by accident and
 // passes this scenario against the defect.
+//
+// Seam: daemon -> Emacs, the re-registration walk after a restart, which keeps the selected workspace
 func testEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	// Arrange: two registered workspaces, and THE USER STANDS ON THE ONE THAT
 	// RE-REGISTERS LAST. That is the whole adversarial shape of the defect:
