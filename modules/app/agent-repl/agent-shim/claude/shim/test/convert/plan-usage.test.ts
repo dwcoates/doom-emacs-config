@@ -14,7 +14,7 @@ type Limits = NonNullable<PlanUsageLike["rate_limits"]>;
 
 /** A max account's answer whose rate limits are `limits`. */
 function answer(limits: Partial<Limits>): PlanUsageLike {
-  return { subscription_type: "max", rate_limits_available: true, rate_limits: limits as Limits };
+  return { subscription_type: "max", rate_limits_available: true, rate_limits: limits };
 }
 
 const RESET_ISO = "2026-11-13T08:00:00.055542+00:00";
