@@ -6,7 +6,6 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -468,7 +467,7 @@ func (o *orchestrator) refuseNameOffQueue(ctx context.Context, requester wsm.Wor
 			continue
 		}
 		refusal := refuse(ArmNameOffQueue, requester.ID, "the merge %q left its queue without landing and its request stands; requeue it with `agent-repld merge-queue requeue %s`", name, name)
-		refusal.Fields = map[string]any{"name": name, "workspace": &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir}, "cause": OffQueueCause(rec.Cause)}
+		refusal.Fields = map[string]any{"name": name, "workspace": ws.Ref(), "cause": OffQueueCause(rec.Cause)}
 		return refusal
 	}
 	return nil

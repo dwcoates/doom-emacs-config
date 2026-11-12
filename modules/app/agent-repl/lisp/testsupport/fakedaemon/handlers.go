@@ -253,6 +253,14 @@ func (s *fakeServer) UpdateMergeQueue(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse](ctx, s, "UpdateMergeQueue", req.Msg)
 }
 
+func (s *fakeServer) RequeueMerge(ctx context.Context, req *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error) {
+	return handleUnary[v1.RequeueMergeRequest, v1.RequeueMergeResponse](ctx, s, "RequeueMerge", req.Msg)
+}
+
+func (s *fakeServer) DiscardMerge(ctx context.Context, req *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error) {
+	return handleUnary[v1.DiscardMergeRequest, v1.DiscardMergeResponse](ctx, s, "DiscardMerge", req.Msg)
+}
+
 func (s *fakeServer) DaemonHealth(ctx context.Context, req *connect.Request[v1.DaemonHealthRequest]) (*connect.Response[v1.DaemonHealthResponse], error) {
 	return handleUnary[v1.DaemonHealthRequest, v1.DaemonHealthResponse](ctx, s, "DaemonHealth", req.Msg)
 }

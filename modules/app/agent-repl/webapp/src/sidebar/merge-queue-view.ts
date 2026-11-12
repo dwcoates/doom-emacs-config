@@ -57,6 +57,7 @@ import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
+import { labelledControl } from "../control.js";
 import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
 import { fireVerb, runSelectVerb } from "./verbs.js";
@@ -569,20 +570,21 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
 
 /** One requeue or discard control: GLYPH, hovering TITLE, whose click runs ACT and never selects the line. */
 function drawOffQueueControl(glyph: string, verb: string, title: string, act: (control: HTMLElement) => Promise<boolean>): HTMLElement {
-  const control = document.createElement("button");
-  control.type = "button";
-  control.className = MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS;
-  control.setAttribute("data-verb", verb);
-  control.textContent = glyph;
-  control.title = title;
-  control.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    log.info(`${verb === "requeue" ? "requeueing" : "discarding"} a merge off its queue from the sidebar`, {
-      operation: `sidebar.merge-queue.${verb}`,
-    });
-    void act(control);
+  const control = labelledControl({
+    className: MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS,
+    hook: ["data-verb", verb],
+    label: glyph,
+    onClick: (control) => {
+      log.info(`${verb === "requeue" ? "requeueing" : "discarding"} a merge off its queue from the sidebar`, {
+        operation: `sidebar.merge-queue.${verb}`,
+      });
+      void act(control);
+    },
   });
+  control.title = title;
+  // THE LINE'S OWN CLICK SELECTS ITS WORKSPACE (drawSubjectControl); a
+  // control's click is the control's alone.
+  control.addEventListener("click", (event) => event.stopPropagation());
   return control;
 }
 

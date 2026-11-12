@@ -193,3 +193,17 @@ Drawing, under the repository's Merge Queue group, below the queue:
   draws each row after the queue's own lines: name, cause label, `↺`
   (RequeueMerge at the back, as the user) and `✕` (DiscardMerge, as the user).
   Refusal words live in `webapp/src/rpc/merge-queue-refusal.ts`.
+
+### Correction: a closed workspace's exit ends its request (2026-11-12)
+
+The first landing kept a request for every cause but a landing unless the
+workspace already read closed. A running merge abandoned because its
+workspace closed (`merge.CauseWorkspaceClosed`) is torn down before the close
+is recorded, so it was kept under `workspace_closed`, a cause with no off-queue
+words, and the roster publish panicked in `merge.OffQueueWords`. Root cause:
+the fate of each exit cause was implied by "not landed" rather than declared.
+Now `wsm.EndsRequest` names the causes that end a request (a landing,
+`wsm.MergeLeftWorkspaceClosed`, `wsm.MergeLeftToReturn`), and
+`merge.TestEveryExitCauseKeepsOrEndsItsRequest` reads every cause constant of
+the package and requires exactly one fate for each: ends, kept under a declared
+arm and words, or no queue exit.

@@ -3,15 +3,14 @@ package wsm
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
+	"slices"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/semver"
+	"agent-repld/internal/sourcescan"
 )
 
 // fullRequest is a request carrying every value a merge is asked for with,
@@ -186,31 +185,12 @@ func TestARefusedExitKeepsNoRequest(t *testing.T) {
 // a request it did not land. The one other delete is the layout-128 move of
 // async requests into their own table, which deletes only what it copied.
 func TestNoQueueRowIsDeletedOutsideTheOneTransition(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-
 	// Act
-	deletes := map[string]int{}
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-		if n := strings.Count(string(src), "DELETE FROM merge_queue "); n > 0 {
-			deletes[file] = n
-		}
-	}
+	sites := sourcescan.Sites(t, "DELETE FROM merge_queue ")
 
 	// Assert
-	want := map[string]int{"offqueue.go": 1, "asyncrequests.go": 1}
-	if !reflect.DeepEqual(deletes, want) {
-		t.Fatalf("merge_queue rows are deleted in %v, want only the one transition and the layout-128 move (%v)", deletes, want)
+	if want := []string{"asyncrequests.go", "offqueue.go"}; !slices.Equal(sites, want) {
+		t.Fatalf("merge_queue rows are deleted in %v, want only the layout-128 move and the one transition (%v)", sites, want)
 	}
 }
 

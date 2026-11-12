@@ -113,8 +113,9 @@ type OffQueueMerge struct {
 }
 
 // leaveQueueInTx is THE ONE TRANSITION a queue row leaves its queue through,
-// in the exit's own transaction: a landing (MergeLeftLanded) deletes the row
-// and its request; every other cause moves the request off the queue first,
+// in the exit's own transaction: a cause that ends the request (EndsRequest:
+// a landing, the workspace's close) deletes the row and its request; every
+// other cause moves the request off the queue first,
 // with CAUSE and AT, unless the workspace is closed (a closed workspace holds
 // no request). WHERE narrows the row (the caller's state guard) and must match
 // exactly one row, or nothing changes. It settles the merges waiting on it
@@ -124,7 +125,7 @@ func leaveQueueInTx(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID
 	if cause == "" {
 		return 0, false, fmt.Errorf("wsm: the merge of workspace %s in repo %q left its queue with no cause", id, key)
 	}
-	keeps := cause != MergeLeftLanded
+	keeps := !EndsRequest(cause)
 	if keeps {
 		var closed bool
 		if err := scanWorkspaceRow(ctx, tx, id, "closed", &closed); err != nil {
@@ -398,11 +399,11 @@ func (s *store) DiscardOffQueueMerge(ctx context.Context, id WorkspaceID) error 
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
+		touched, err := touchedRow(res)
 		if err != nil {
 			return err
 		}
-		if n == 0 {
+		if !touched {
 			return fmt.Errorf("wsm: discard of workspace %s: no request stands off its queue: %w", id, ErrNotFound)
 		}
 		return nil
@@ -421,6 +422,5 @@ func dropOffQueueInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, er
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+	return touchedRow(res)
 }

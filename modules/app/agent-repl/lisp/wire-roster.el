@@ -1464,7 +1464,8 @@ them), and t for a hard stop."
   "Decode VALUE as `RosterRepoMergeQueue'.
 A plist `(:head HEAD :waiting WAITING :paused PAUSED :fixing-tests FIXING
 :resolving-conflicts RESOLVING :awaiting-fixing-tests AWAITING-FIXING
-:awaiting-resolving-conflicts AWAITING-RESOLVING :github GITHUB)': the
+:awaiting-resolving-conflicts AWAITING-RESOLVING :github GITHUB
+:off-queue OFF-QUEUE)': the
 merge at the head (nil only while the line is empty and a merge stands out
 of line or a workspace stands in a GitHub merge queue), the merges waiting
 behind it, the queue's pause
@@ -1473,11 +1474,13 @@ the one merge holding each repair slot (nil while it is free), the merges
 awaiting each slot in the order each is granted it
 \(`agent-repl-wire-decode-roster-merge-queue-repair'), and the workspaces
 standing in a GitHub merge queue
-\(`agent-repl-wire-decode-roster-merge-queue-github-entry')."
+\(`agent-repl-wire-decode-roster-merge-queue-github-entry'), and the merges
+that left the queue without landing
+\(`agent-repl-wire-decode-roster-merge-queue-off-queue')."
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
     (agent-repl-wire--check-keys "RosterRepoMergeQueue" object
                                  '(head waiting paused fixingTests resolvingConflicts
-                                        awaitingFixingTests awaitingResolvingConflicts github))
+                                        awaitingFixingTests awaitingResolvingConflicts github offQueue))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1501,7 +1504,52 @@ standing in a GitHub merge queue
                                           (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingResolvingConflicts" v)))
            :github (agent-repl-wire--decode-repeated
                     "RosterRepoMergeQueue" 'github object
-                    #'agent-repl-wire-decode-roster-merge-queue-github-entry)))))
+                    #'agent-repl-wire-decode-roster-merge-queue-github-entry)
+           :off-queue (agent-repl-wire--decode-repeated
+                       "RosterRepoMergeQueue" 'offQueue object
+                       #'agent-repl-wire-decode-roster-merge-queue-off-queue)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-off-queue (value)
+  "Decode VALUE as `RosterMergeQueueOffQueue'.
+A plist `(:subject SUBJECT :cause CAUSE :requeue REF :discard REF)': a
+merge that left its queue without landing, why (the sidebar's words), and
+the merge's own workspace its requeue and discard controls name."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueOffQueue" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueOffQueue" object '(subject cause requeue discard))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueOffQueue"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueOffQueue" 'subject object
+                     #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :cause (agent-repl-wire--decode-message
+                   "RosterMergeQueueOffQueue" 'cause object
+                   #'agent-repl-wire-decode-roster-merge-queue-off-queue-cause)
+           :requeue (agent-repl-wire--decode-message
+                     "RosterMergeQueueOffQueue" 'requeue object
+                     (lambda (v) (agent-repl-wire-decode-roster-merge-queue-off-queue-control "RosterMergeQueueOffQueueRequeue" v)))
+           :discard (agent-repl-wire--decode-message
+                     "RosterMergeQueueOffQueue" 'discard object
+                     (lambda (v) (agent-repl-wire-decode-roster-merge-queue-off-queue-control "RosterMergeQueueOffQueueDiscard" v)))))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-off-queue-cause (value)
+  "Decode VALUE as `RosterMergeQueueOffQueueCause': a plist `(:text TEXT)'."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueOffQueueCause" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueOffQueueCause" object '(text))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueOffQueueCause"
+     (list :text (agent-repl-wire--decode-string "RosterMergeQueueOffQueueCause" 'text object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-off-queue-control (message value)
+  "Decode VALUE as MESSAGE, a requeue or discard control.
+MESSAGE is `RosterMergeQueueOffQueueRequeue' or
+`RosterMergeQueueOffQueueDiscard'.  A plist `(:merge REF)': the merge's own
+workspace (`agent-repl-wire-decode-workspace-ref')."
+  (let ((object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(merge))
+    (agent-repl-wire--decoded
+     message
+     (list :merge (agent-repl-wire--decode-message
+                   message 'merge object #'agent-repl-wire-decode-workspace-ref)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-github-entry (value)
   "Decode VALUE as `RosterMergeQueueGithubEntry'.

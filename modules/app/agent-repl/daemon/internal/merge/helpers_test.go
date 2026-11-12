@@ -1090,7 +1090,7 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 // (wsm.leaveQueueInTx): every cause but a landing keeps ENTRY's request off
 // its queue, unless its workspace is closed.
 func (f *fakeDB) keepOffQueueLocked(entry wsm.MergeQueueEntry, cause string) {
-	if cause == wsm.MergeLeftLanded || f.closed[entry.Workspace] {
+	if wsm.EndsRequest(cause) || f.closed[entry.Workspace] {
 		return
 	}
 	source := entry.Source
