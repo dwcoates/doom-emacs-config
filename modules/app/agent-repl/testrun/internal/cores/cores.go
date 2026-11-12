@@ -73,6 +73,46 @@ func Rank(getenv func(string) string) (int, error) {
 	return n, nil
 }
 
+// UngovernedEnv is the marker the daemon sets on a test run that a workspace
+// holding its repository's queue bypass mode asked for (the daemon's
+// merge.TestUngovernedEnv, the same name): "1" gives the run every core of
+// the host from a pool of its own, with no CPU governor (owner ruling,
+// 2026-11-12: a bypass workspace tests undeterred). Any other value is
+// refused, never read as unset.
+const UngovernedEnv = "AGENT_REPL_TEST_UNGOVERNED"
+
+// Plan is how one run holds the host's cores: how many seats it plans on,
+// the directory its seat pool lives in, and whether a CPU governor holds its
+// units back.
+type Plan struct {
+	Budget   int
+	Dir      string
+	Governed bool
+}
+
+// PlanFor answers the run's Plan. A governed run shares SHAREDDIR's pool of
+// Budget(numCPU) seats with every other run on the host, held back by the
+// governor. An ungoverned one (UngovernedEnv) holds all numCPU seats from
+// OWNDIR, a pool no other run shares, so neither another run's seats nor
+// the governor's withheld ones can wait it.
+func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (Plan, error) {
+	switch v := getenv(UngovernedEnv); v {
+	case "":
+		budget, err := Budget(numCPU)
+		if err != nil {
+			return Plan{}, err
+		}
+		return Plan{Budget: budget, Dir: sharedDir, Governed: true}, nil
+	case "1":
+		if numCPU < 1 {
+			return Plan{}, fmt.Errorf("this host reports %d cores; an ungoverned run holds every one, which is none", numCPU)
+		}
+		return Plan{Budget: numCPU, Dir: ownDir}, nil
+	default:
+		return Plan{}, fmt.Errorf("%s=%q is not the \"1\" the daemon sets on a queue bypass holder's run", UngovernedEnv, v)
+	}
+}
+
 // Logger is what Host says on.
 type Logger interface {
 	Infof(format string, args ...any)
