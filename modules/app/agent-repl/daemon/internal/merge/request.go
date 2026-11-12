@@ -135,6 +135,18 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		// its durable reservation, so between the two nothing else can take
 		// it; the claim is let go the moment the record has been written or
 		// refused, and before anything forks under the name.
+		// A NAME A MERGE OFF ITS QUEUE HOLDS IS THAT MERGE'S: it is requeued
+		// as itself, never asked for again (offqueue.go). Asked before the
+		// claim, which the merge workspace standing under the name would
+		// refuse as merely taken.
+		if err := o.refuseNameOffQueue(ctx, record, req.Detached.Name); err != nil {
+			if _, refused := Refused(err); refused {
+				logRefusal(log, op, "refused an async merge whose name a merge off its queue holds", fields, err)
+			} else {
+				log.Error(op, "could not read whether a merge off its queue holds the async merge's name", withField(fields, "error", err.Error()))
+			}
+			return Enqueued{}, err
+		}
 		branch, release, taken, err := o.deps.Names.ClaimMergeName(ctx, record.Dir, req.Detached.Name)
 		if err != nil {
 			log.Error(op, "could not check an async merge's name", withField(fields, "error", err.Error()))
@@ -617,21 +629,29 @@ func (o *orchestrator) withdrawRequest(ws ids.WorkspaceID) bool {
 // about the merge is reported. It mints the bubble's ledger identity,
 // publishes the queue, and kicks the pump.
 func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
+	_, _, err := o.queueRequestAt(ctx, ws, repo)
+	return err
+}
+
+// queueRequestAt is queueRequest answering the merge's one-based place in
+// line, and false for the place when the daemon is draining: the request then
+// stays recorded, and joins the line at the next boot.
+func (o *orchestrator) queueRequestAt(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) (int, bool, error) {
 	const op = "daemon.merge.request"
 	if o.isDraining() {
 		o.log(ctx, ws).Info(op, "the daemon is draining; the merge request stays recorded for the next boot",
 			dlog.Context{"workspace": string(ws)})
-		return nil
+		return 0, false, nil
 	}
 	entry, found, err := o.requestOf(ctx, repo, ws)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if !found {
 		err := fmt.Errorf("merge: %s has no recorded request to put in line", ws)
 		o.log(ctx, ws).Error(op, "a merge to put in line has no recorded request", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "error": err.Error()})
-		return err
+		return 0, false, err
 	}
 	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
 	// minted as the merge takes its place, and written on its row with that
@@ -643,7 +663,7 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 		o.mu.Lock()
 		delete(o.ledgerOf, ws)
 		o.mu.Unlock()
-		return err
+		return 0, false, err
 	}
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
@@ -651,10 +671,10 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 	// resolution (ended); nothing between raises one.
 	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry))
 	if err := o.republishQueue(ctx, repo); err != nil {
-		return err
+		return 0, false, err
 	}
 	o.kick(repo)
-	return nil
+	return position, true, nil
 }
 
 // requestOf answers WS's row in REPO's queue, false when it has none.

@@ -112,6 +112,12 @@ type Resolver interface {
 	// (frontend.v1.RosterRepoMergeQueue.github). The merge orchestrator is
 	// the one caller (merge.GithubDeployment).
 	SetGithubQueue(entries []GithubQueueEntry)
+	// SetOffQueue installs, WHOLE, every merge that left its queue without
+	// landing and whose request still stands, oldest departure first: each is
+	// drawn in its workspace's repository's Merge Queue group, with its
+	// requeue and discard controls (frontend.v1.RosterRepoMergeQueue
+	// .off_queue). The merge orchestrator is the one caller.
+	SetOffQueue(entries []OffQueueEntry)
 	// SetColdGate installs WS's shown cold gate as the webhost's dock draws
 	// it (WorkspaceRoster.cold_gates): its feed row id and standing card, or
 	// nil for both when none is shown. The fleet is the one caller, on every
@@ -287,6 +293,23 @@ type GithubQueueEntry struct {
 	Place, Total int
 	// QueuedAt is when the pull request joined the queue.
 	QueuedAt time.Time
+}
+
+// OffQueueEntry is one merge off its queue, as its repository's Merge Queue
+// group draws it.
+type OffQueueEntry struct {
+	// Workspace is the merge's own workspace (an async merge's merge
+	// workspace): what its requeue and discard controls name, and the
+	// workspace whose repository places it.
+	Workspace ids.WorkspaceID
+	// Credited is the workspace a click on its name selects: Workspace for a
+	// workspace's own merge, the requester for an async merge.
+	Credited ids.WorkspaceID
+	// Async reports an async merge, drawn under Workspace's own name.
+	Async bool
+	// Cause is the sidebar's words for why it left
+	// (frontend.v1.RosterMergeQueueOffQueueCause).
+	Cause string
 }
 
 // QueueEntry is one merge in line, as a repository section showing its merge

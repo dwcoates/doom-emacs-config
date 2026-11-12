@@ -43,7 +43,7 @@ import (
 //	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
 //	                         subsections | place
-//	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
+//	agent-repld merge-queue  status | dequeue | move-up | move-down | requeue | discard | pause | resume
 //	                         subscribe | unsubscribe
 //	agent-repld repository   register
 //	agent-repld editor       eval
@@ -185,6 +185,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"dequeue":     {usage: "dequeue MERGE|here", run: queueDequeue},
 		"move-up":     {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":   {usage: "move-down MERGE|here", run: queueMove(false)},
+		"requeue":     {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
+		"discard":     {usage: "discard MERGE|here", run: queueDiscard},
 		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
 		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
@@ -2076,6 +2078,39 @@ func queueStatus(c *cliCall, args []string) int {
 // `merge-queue move-down pt3-sentences` answered "the daemon's roster holds no
 // workspace named" while the queue listed it waiting).
 func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+	return c.mergeArg(fs, stateDir, args, "in any queue", "in the queues", func(queue *agentreplv1.MergeQueueStatus) []namedMerge {
+		var out []namedMerge
+		for _, entry := range queue.GetEntries() {
+			out = append(out, namedMerge{name: entry.GetName(), ref: entry.GetWorkspace()})
+		}
+		return out
+	})
+}
+
+// offQueueArg answers the merge off its queue a requeue or discard names:
+// `here`, or a merge's NAME as the queues list it off the queue
+// (agentrepl.v1.MergeQueueStatus.off_queue), which must name exactly one.
+func (c *cliCall) offQueueArg(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, []string, bool) {
+	return c.mergeArg(fs, stateDir, args, "off any queue", "off the queues", func(queue *agentreplv1.MergeQueueStatus) []namedMerge {
+		var out []namedMerge
+		for _, off := range queue.GetOffQueue() {
+			out = append(out, namedMerge{name: off.GetName(), ref: off.GetWorkspace()})
+		}
+		return out
+	})
+}
+
+// namedMerge is one merge a queue's status lists, by its name.
+type namedMerge struct {
+	name string
+	ref  *workspacev1.WorkspaceRef
+}
+
+// mergeArg is the one reading of a merge verb's MERGE argument: `here`, the
+// calling workspace's own merge, or a NAME, matched against the merges LIST
+// reads off every queue's status, which must name exactly one. NONE and MANY
+// say in the failure where no merge, or more than one, was found.
+func (c *cliCall) mergeArg(fs *flag.FlagSet, stateDir *string, args []string, none, many string, list func(*agentreplv1.MergeQueueStatus) []namedMerge) (*workspacev1.WorkspaceRef, []string, bool) {
 	positionals, ok := c.targetArgs(fs, stateDir, args, "merge")
 	if !ok {
 		return nil, nil, false
@@ -2095,19 +2130,71 @@ func (c *cliCall) queuedArg(fs *flag.FlagSet, stateDir *string, args []string) (
 	}
 	var found []*workspacev1.WorkspaceRef
 	for _, queue := range success.GetQueues() {
-		for _, entry := range queue.GetEntries() {
-			if entry.GetName() == name {
-				found = append(found, entry.GetWorkspace())
+		for _, merge := range list(queue) {
+			if merge.name == name {
+				found = append(found, merge.ref)
 			}
 		}
 	}
 	switch len(found) {
 	case 0:
-		return nil, nil, c.failed("no merge in any queue is named %q", name)
+		return nil, nil, c.failed("no merge %s is named %q", none, name)
 	case 1:
 		return found[0], positionals[1:], true
 	}
-	return nil, nil, c.failed("%d merges in the queues are named %q", len(found), name)
+	return nil, nil, c.failed("%d merges %s are named %q", len(found), many, name)
+}
+
+// queueRequeue puts a merge that left its queue without landing back in line
+// as itself. Its placement defaults to the back; the version increment is
+// only for a merge whose request recorded none (an adopted one).
+func queueRequeue(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	place := fs.String("placement", "back", "back, front or behind=MERGE")
+	part := fs.String("version-part", "", "minor or patch, only for a merge whose request recorded no version increment")
+	line := fs.String("changelog-line", "", "the version tag's changelog line, with -version-part")
+	model := fs.String("model", "", "the model the merge's session resumes under, from its login's catalog")
+	ref, rest, ok := c.offQueueArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("nothing but the merge is positional")
+	}
+	where, err := placement(*place)
+	if err != nil {
+		return c.usageFailed("%v", err)
+	}
+	version, err := versionIncrement(*part, *line)
+	if err != nil {
+		return c.usageFailed("%v", err)
+	}
+	requester, ok := c.requester(false)
+	if !ok {
+		return exitFailure
+	}
+	req := &agentreplv1.RequeueMergeRequest{Workspace: ref, Placement: where, Version: version, Requester: requester}
+	if *model != "" {
+		req.Model = &conversationv1.AgentModel{Name: *model}
+	}
+	resp, err := c.client.RequeueMerge(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// queueDiscard ends a merge's request standing off its queue; an async
+// merge's merge workspace closes with it.
+func queueDiscard(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	ref, rest, ok := c.offQueueArg(fs, stateDir, args)
+	if !ok || len(rest) != 0 {
+		return exitFailure
+	}
+	requester, ok := c.requester(false)
+	if !ok {
+		return exitFailure
+	}
+	resp, err := c.client.DiscardMerge(c.ctx, connect.NewRequest(&agentreplv1.DiscardMergeRequest{Workspace: ref, Requester: requester}))
+	return answer(c, resp, err)
 }
 
 func queueDequeue(c *cliCall, args []string) int {

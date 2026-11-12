@@ -1,7 +1,7 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
-argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | move-up | move-down | pause [-hard] | resume | subscribe | unsubscribe"
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, puts a merge that left the queue without landing back in line as itself (requeue), discards one, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, a merge that failed or was evicted must go back in line or be discarded, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | requeue | discard | move-up | move-down | pause [-hard] | resume | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
 
@@ -118,9 +118,10 @@ Either kind:
   NEVER end the turn while a handed-over case still fails.
 - c. A report of how a merge ended (landed, failed or evicted): report it in
   one line, then go to step 3e for a round of an instrumentation loop;
-  otherwise STOP. An evicted merge's merge workspace is closed and its branch
-  kept: queue it again with `agent-repld workspace async-merge -branch <the
-  merge workspace's branch>`. A report of a landing
+  otherwise STOP. A merge that left without landing stays off the queue with
+  its request: requeue it with `merge-queue requeue NAME` (NEVER re-request it,
+  NEVER make a new workspace), or end it with `merge-queue discard NAME`. A
+  report of a landing
   on agent-repl's master arrives once the build carrying it runs; a report that
   the repository's deploy stage is held or the rollout failed means the
   running build does NOT carry it.
@@ -142,11 +143,40 @@ Either kind:
 
 ## 4. Controlling the queue
 
-- `merge-queue status [-repository here|DIR]` reads every queue, or one.
+- `merge-queue status [-repository here|DIR]` reads every queue, or one. Each
+  queue's `offQueue` lists the merges that left it without landing, with name,
+  branch, kind and cause.
 - `merge-queue dequeue MERGE`, `merge-queue move-up MERGE` and
   `merge-queue move-down MERGE` take a merge off the queue or move it one
   place. MERGE is the name `merge-queue status` lists it under (an async
   merge's `-name`), or `here` for this workspace's own merge.
+- A merge's request lives until it lands or is discarded. Any exit short of a
+  landing (dequeue, failure, a restart that could not resume it, hidden at its
+  cold gate, the merge ahead not landing) keeps it OFF THE QUEUE with its
+  cause, keeping its branch, version part, changelog line, hooks and cleanup
+  flags; an async merge's hidden merge workspace stays open under its name.
+- `merge-queue requeue MERGE|here [-placement back|front|behind=MERGE]
+  [-version-part minor|patch -changelog-line TEXT] [-model M]` puts the SAME
+  request back in line as itself (same workspace or merge workspace, same
+  branch and values). Placement defaults to back.
+  - `-version-part` and `-changelog-line` are ONLY for a merge whose cause is
+    `adopted` (a merge workspace left open before requests were kept, which
+    recorded no values); a versioned main-branch landing of an adopted merge
+    asked by an agent is refused `version_increment_required` without them,
+    and giving them for any other merge is refused `version_already_recorded`.
+  - `-model M` makes the merge's session resume on model M in the same step,
+    so a cold conversation is read once on it, with no separate SetModel; M
+    not in the login's catalog is refused `not_in_catalog`.
+  - Refusals: `unknown_merge`, `still_queued`, `branch_gone`,
+    `already_landed`, `workspace_closed`, `placement_behind_not_in_line`,
+    `not_in_catalog`.
+- `merge-queue discard MERGE|here` ends a request off the queue. An async
+  merge's merge workspace is closed and the worktree its request asked to
+  clean up is removed when clean; a workspace's own merge loses only its
+  request. No branch is ever deleted. A merge still in line is refused
+  `still_queued` (dequeue first).
+- `workspace async-merge` under a name an off-queue merge holds is refused
+  `async_merge_name_off_queue`, naming that merge: requeue it instead.
 - `merge-queue pause` and `merge-queue resume [-repository here|DIR]` suspend
   or resume a queue.
 - `merge-queue pause -hard [-repository here|DIR]` is a HARD STOP: it pauses
@@ -209,26 +239,16 @@ it; it discards the running merge's test progress.
    `-placement front`; a waiting one is moved with `merge-queue move-up MERGE`
    until it sits directly behind the running merge (`move-up` never passes the
    running merge).
-2. `merge-queue status` and note the running merge's name and kind. Before
-   dequeuing it, record what re-requesting it needs: a workspace's own merge
-   (`kind: ownBranch`) needs its `-version-part` and `-changelog-line` from the
-   request in that workspace's conversation; an async merge needs its full
-   async-merge request.
+2. `merge-queue status` and note the running merge's name. Its request is
+   kept when it is dequeued; nothing needs recording.
 3. `merge-queue dequeue RUNNING`. The commandeering merge starts.
-4. Once `merge-queue status` shows the commandeering merge running, put the
-   displaced merge back at the FRONT so it runs right after:
-   - a workspace's own merge is re-requested only by that workspace (the
-     daemon refuses another workspace's `workspace finished WS` with
-     `requesterMayNotLand`): `workspace prompt WS TEXT` that workspace, saying
-     it was displaced by an owner instruction, nothing wrong with its branch,
-     and giving the exact command: `workspace finished here -placement front`
-     with its original `-version-part` and `-changelog-line`.
-   - an async merge is re-requested by its requester with `-placement front`
-     and the same arguments as before.
-5. Report which merge was displaced and that it was re-queued (or that its
-   workspace was prompted to).
+4. Once `merge-queue status` shows the commandeering merge running,
+   `merge-queue requeue RUNNING -placement front` puts the displaced merge
+   back at the FRONT so it runs right after. Anyone may run it: NEVER prompt
+   the workspace, and NEVER re-request an async merge.
+5. Report which merge was displaced and that it was requeued.
 
-- **CRITICAL: between the dequeue (step 3) and the re-request (step 4), a
+- **CRITICAL: between the dequeue (step 3) and the requeue (step 4), a
   different front placement can slip ahead of the displaced merge.** Nothing
   closes this gap short of a daemon verb that does all of it atomically.
 

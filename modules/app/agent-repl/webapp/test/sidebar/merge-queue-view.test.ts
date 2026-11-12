@@ -13,8 +13,11 @@ import {
   UpdateMergeQueueResponseSchema,
   type UpdateMergeQueueRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import { RequeueMergeResponseSchema, type RequeueMergeRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_requeue_merge_pb";
+import { DiscardMergeResponseSchema, type DiscardMergeRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_discard_merge_pb";
 import {
   RosterMergeQueueGithubEntrySchema,
+  RosterMergeQueueOffQueueSchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
   RosterMergeQueueFixingTestsSchema,
@@ -39,6 +42,7 @@ import {
   githubPlaceText,
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
+  MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
@@ -763,5 +767,77 @@ describe("drawCardLine", () => {
     const shared = drawCardLine(queueSubject("w1"), "subject");
     const drawn = card().firstElementChild as HTMLElement;
     expect([...drawn.children].slice(0, 2).map((el) => el.outerHTML)).toEqual([...shared.children].map((el) => el.outerHTML));
+  });
+});
+
+/** A merge of workspace ID off its queue for CAUSE, its controls naming MERGE. */
+function offQueue(id: string, cause: string, merge = id) {
+  return create(RosterMergeQueueOffQueueSchema, {
+    subject: queueSubject(id),
+    cause: { text: cause },
+    requeue: { merge: { id: merge, dir: `/wt/${merge}` } },
+    discard: { merge: { id: merge, dir: `/wt/${merge}` } },
+  });
+}
+
+/** A context recording every RequeueMerge and DiscardMerge ask, answering each with success. */
+function offQueueDaemon() {
+  const requeued: RequeueMergeRequest[] = [];
+  const discarded: DiscardMergeRequest[] = [];
+  const selected: SelectWorkspaceRequest[] = [];
+  const sc = sidebarContext(
+    appContext({
+      requeueMerge: (request: RequeueMergeRequest) => {
+        requeued.push(request);
+        return create(RequeueMergeResponseSchema, { result: { case: "success", value: {} } });
+      },
+      discardMerge: (request: DiscardMergeRequest) => {
+        discarded.push(request);
+        return create(DiscardMergeResponseSchema, { result: { case: "success", value: { discarded: { case: "ownBranch", value: {} } } } });
+      },
+      selectWorkspace: (request: SelectWorkspaceRequest) => {
+        selected.push(request);
+        return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    } as never),
+  );
+  return { sc, requeued, discarded, selected };
+}
+
+describe("drawRosterMergeQueueOffQueue", () => {
+  it("draws a queue holding only merges off it, with no head, after everything in line", () => {
+    const { sc } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), sc, "queue");
+    expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`).length]).toEqual([null, 1]);
+    const full = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), offQueue: [offQueue("w2", "failed")] }), sc, "queue");
+    expect([...full.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_OFF_QUEUE_CLASS]);
+  });
+
+  it("draws the merge's name and why it left", () => {
+    const { sc } = offQueueDaemon();
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "restart failed")] }), sc, "queue").querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
+    expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "restart failed"]);
+  });
+
+  it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {
+    const { sc, requeued, selected } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), sc, "queue");
+    (body.querySelector('[data-verb="requeue"]') as HTMLElement).click();
+    await settled();
+    expect([requeued.map((r) => [r.workspace?.id, r.placement?.place.case, r.requester?.asker.case]), selected.length]).toEqual([[["w-merge", "back", "user"]], 0]);
+  });
+
+  it("discards the merge's own workspace's request, as the user", async () => {
+    const { sc, discarded } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), sc, "queue");
+    (body.querySelector('[data-verb="discard"]') as HTMLElement).click();
+    await settled();
+    expect(discarded.map((r) => [r.workspace?.id, r.requester?.asker.case])).toEqual([["w-merge", "user"]]);
+  });
+
+  it("refuses a merge off its queue with no requeue control as a malformed view", () => {
+    const { sc } = offQueueDaemon();
+    const broken = create(RosterMergeQueueOffQueueSchema, { subject: queueSubject("w2"), cause: { text: "evicted" }, discard: { merge: { id: "w2" } } });
+    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [broken] }), sc, "queue")).toThrow(MalformedView);
   });
 });

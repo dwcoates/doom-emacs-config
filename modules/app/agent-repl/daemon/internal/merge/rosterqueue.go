@@ -82,8 +82,8 @@ func (d rosterQueueDB) HandOffDetachedMerge(ctx context.Context, repo wsm.RepoKe
 }
 
 // RemoveMergeQueueEntry drops a row and republishes its repository's queue.
-func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
-	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes))
+func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string) error {
+	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause))
 }
 
 // QueueMerge puts a requested merge in line and republishes its repository's
@@ -95,8 +95,8 @@ func (d rosterQueueDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 
 // DropAdmittedMerge drops an admitted merge and republishes its repository's
 // queue.
-func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
-	return d.republished(ctx, repo, d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes))
+func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string) error {
+	return d.republished(ctx, repo, d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause))
 }
 
 // MoveMerge moves a waiting merge and republishes its repository's queue when
@@ -206,6 +206,46 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
+	// EVERY QUEUE WRITE MAY MOVE A MERGE OFF ITS QUEUE OR BACK (an exit, a
+	// requeue), so the merges off their queues are republished with it.
+	o.publishOffQueueLocked(ctx)
+}
+
+// publishOffQueue tells the roster every merge standing off its queue, whole.
+func (o *orchestrator) publishOffQueue(ctx context.Context) {
+	o.rosterQueue.mu.Lock()
+	defer o.rosterQueue.mu.Unlock()
+	o.publishOffQueueLocked(ctx)
+}
+
+// publishOffQueueLocked is publishOffQueue under the roster publisher's lock,
+// so it is serialized with every queue's publication. A read that fails is
+// recorded and nothing is published: the roster keeps the last set it was
+// told until the next change republishes it.
+func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
+	const op = "daemon.merge.roster_off_queue"
+	records, err := o.deps.DB.OffQueueMerges(ctx)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read the merges off their queues, so the roster is not told them",
+			"the read of the merges off their queues ended when its context was cancelled; the roster is not told them", dlog.Context{}, err)
+		return
+	}
+	entries := make([]sidebar.OffQueueEntry, 0, len(records))
+	for _, record := range records {
+		ws, err := o.deps.DB.Workspace(ctx, record.Workspace)
+		if err != nil {
+			recordFailed(o.deps.Log.Global(), op, "could not read the workspace of a merge off its queue, so the roster is not told them",
+				"the workspace read ended when its context was cancelled; the roster is not told the merges off their queues",
+				dlog.Context{"workspace": string(record.Workspace)}, err)
+			return
+		}
+		entry := sidebar.OffQueueEntry{Workspace: ws.ID, Credited: ws.ID, Cause: OffQueueWords(record.Cause)}
+		if ws.MergeOf != nil {
+			entry.Credited, entry.Async = ws.MergeOf.Requester, true
+		}
+		entries = append(entries, entry)
+	}
+	o.deps.Sidebar.SetOffQueue(entries)
 }
 
 // asyncRequesters answers the workspace whose own branch each async merge on

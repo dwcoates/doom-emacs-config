@@ -411,12 +411,19 @@ func (s *store) SetSessionModel(ctx context.Context, id WorkspaceID, model strin
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE sessions SET model = ? WHERE workspace_id = ?`, model, id)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+		return setSessionModelInTx(ctx, tx, id, model)
 	})
+}
+
+// setSessionModelInTx is THE ONE WRITE of a session's recorded model, for
+// SetSessionModel and a requeue that resumes the session on a model
+// (RequeueOffQueueMerge). A workspace with no session row is refused.
+func setSessionModelInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, model string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE sessions SET model = ? WHERE workspace_id = ?`, model, id)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
 }
 
 // TouchEngagement records last engagement — the idle sweep's input.

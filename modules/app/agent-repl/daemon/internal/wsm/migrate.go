@@ -238,6 +238,13 @@ var migrations = []migration{
 	// requester's merge_queue row into async_merge_requests, where the build
 	// before it would never look for one, so that build would lose them.
 	{To: 128, Name: "async_merge_requests", Kind: MigrationBreaking, DDL: asyncMergeRequestsDDL + moveAsyncMergeRequestsDML},
+	// IT IS BREAKING: the build before it deletes a request on every queue
+	// exit, closes an evicted async merge's merge workspace, and closes a
+	// workspace without ending its record, so a handover across it would
+	// leave requests lost and records standing for closed workspaces, which
+	// this build holds impossible (offqueue.go). The step also adopts every
+	// merge workspace left open with no request standing.
+	{To: 129, Name: "off_queue_merges", Kind: MigrationBreaking, DDL: offQueueMergesDDL + adoptOffQueueMergesDML},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

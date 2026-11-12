@@ -718,12 +718,14 @@ type closeEffects struct {
 	released      sql.NullString
 	subscriptions int64
 	followings    int64
+	// offQueue reports that the close ended the workspace's merge request
+	// standing off its queue (offqueue.go).
+	offQueue bool
 }
 
-// markClosedInTx is THE ONE CLOSE WRITE, run inside the caller's transaction:
-// MarkClosed's own, and a queue exit that closes the merge workspace it took
-// off the queue (RemoveMergeQueueEntry, DropAdmittedMerge), so a close is the
-// same statement wherever it is made. The cause is validated by the caller.
+// markClosedInTx is THE ONE CLOSE WRITE, run inside the caller's transaction,
+// so a close is the same statement wherever it is made. The cause is
+// validated by the caller.
 func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Closure) (closeEffects, error) {
 	var (
 		effects closeEffects
@@ -764,6 +766,11 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	if effects.followings, err = endWorkspaceSubscriptionsInTx(ctx, tx, id); err != nil {
 		return closeEffects{}, err
 	}
+	// A REQUEST NEVER OUTLIVES ITS WORKSPACE: the close is the explicit end
+	// of a merge request standing off its queue, in the same transaction.
+	if effects.offQueue, err = dropOffQueueInTx(ctx, tx, id); err != nil {
+		return closeEffects{}, err
+	}
 	return effects, nil
 }
 
@@ -780,6 +787,10 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 	if effects.followings > 0 {
 		s.log.Info(op, "the close ended the workspace's subscriptions to other workspaces",
 			dlog.Context{"workspace": string(id), "subscriptions": effects.followings})
+	}
+	if effects.offQueue {
+		s.log.Info(op, "the close ended the workspace's merge request standing off its queue",
+			dlog.Context{"workspace": string(id)})
 	}
 }
 

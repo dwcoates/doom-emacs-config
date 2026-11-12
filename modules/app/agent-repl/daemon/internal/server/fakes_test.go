@@ -371,6 +371,10 @@ func (v *fakeVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer 
 
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
+	// catalogChecked records every model RequireCatalogModel checked, and
+	// catalogErr refuses it.
+	catalogChecked []string
+	catalogErr     error
 	workspace.Verbs
 	// api answers the agent API's verbs.
 	api agentAPI
@@ -723,6 +727,11 @@ func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conver
 func (f *fakeVerbs) RetryVendorError(_ context.Context, _ ids.WorkspaceID) (*shimv1.RetryVendorErrorNowResponse, error) {
 	f.retries++
 	return f.retryResponse, f.retryErr
+}
+
+func (f *fakeVerbs) RequireCatalogModel(_ context.Context, _ ids.WorkspaceID, model string) error {
+	f.catalogChecked = append(f.catalogChecked, model)
+	return f.catalogErr
 }
 
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {
@@ -1224,6 +1233,15 @@ type fakeMerge struct {
 	moveErr           error
 	// evicted records every workspace Evict was asked to take off the queue.
 	evicted []ids.WorkspaceID
+	// requeues records every Requeue, answered requeued and requeueErr;
+	// discards every Discard, answered discarded and discardErr, each running
+	// the close it was handed when discarded is async.
+	requeues   []merge.Requeue
+	requeued   merge.Requeued
+	requeueErr error
+	discards   []ids.WorkspaceID
+	discarded  merge.Discarded
+	discardErr error
 	// moves records every move Move was asked for.
 	moves []fakeMove
 	// enqueuedBy records who each enqueue said asked for the merge, and
@@ -1336,6 +1354,24 @@ func (f *fakeMerge) TestLogPath(_ context.Context, _ ids.WorkspaceID, token stri
 func (f *fakeMerge) AnswerQueueOffer(_ context.Context, ws ids.WorkspaceID, answer merge.QueueOfferAnswer) error {
 	f.queueOfferAnswers = append(f.queueOfferAnswers, answer)
 	return f.answerQueueOfferErr
+}
+
+func (f *fakeMerge) Requeue(_ context.Context, req merge.Requeue) (merge.Requeued, error) {
+	f.requeues = append(f.requeues, req)
+	return f.requeued, f.requeueErr
+}
+
+func (f *fakeMerge) Discard(ctx context.Context, ws ids.WorkspaceID, close func(context.Context) error) (merge.Discarded, error) {
+	f.discards = append(f.discards, ws)
+	if f.discardErr != nil {
+		return merge.Discarded{}, f.discardErr
+	}
+	if f.discarded.Async {
+		if err := close(ctx); err != nil {
+			return merge.Discarded{}, err
+		}
+	}
+	return f.discarded, nil
 }
 
 func (f *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {

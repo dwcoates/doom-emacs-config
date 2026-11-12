@@ -2536,16 +2536,14 @@ func TestALandingClosesTheWorkspaceOnlyWhenItsOwnedPullRequestsHaveMerged(t *tes
 	}
 }
 
-func TestAReleasedRunningMergeClosesItsMergeWorkspaceAsItLeaves(t *testing.T) {
+func TestAReleasedRunningMergeKeepsItsRequestOffTheQueueAndItsWorkspaceOpen(t *testing.T) {
 	tests := []struct {
 		name       string
 		resolution resolution
 		merge      bool
-		wantClosed bool
 	}{
-		{name: "an evicted merge workspace", resolution: resolutions[0], merge: true, wantClosed: true},
-		{name: "a dequeued merge workspace", resolution: resolutions[1], merge: true, wantClosed: true},
-		{name: "a merge workspace closed under its merge", resolution: resolutions[2], merge: true},
+		{name: "an evicted merge workspace", resolution: resolutions[0], merge: true},
+		{name: "a dequeued merge workspace", resolution: resolutions[1], merge: true},
 		{name: "an evicted merge of a workspace's own branch", resolution: resolutions[0]},
 	}
 	for _, tt := range tests {
@@ -2557,13 +2555,18 @@ func TestAReleasedRunningMergeClosesItsMergeWorkspaceAsItLeaves(t *testing.T) {
 				}
 			})
 
-			// Assert.
-			closes, closed := h.db.exitCloseOf(theWorkspace)
-			if closed != tt.wantClosed || (closed && closes.By != wsm.CloseByDaemon) {
-				t.Fatalf("the teardown's close = %+v (made %v), want made %v", closes, closed, tt.wantClosed)
-			}
+			// Assert: off the queue, its request kept, nothing closed.
 			if _, ok := h.entryOf(theWorkspace); ok {
 				t.Fatal("the ended merge is still queued")
+			}
+			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept {
+				t.Fatal("the released merge's request was not kept off the queue")
+			}
+			h.db.mu.Lock()
+			closed := h.db.closed[theWorkspace]
+			h.db.mu.Unlock()
+			if closed {
+				t.Fatal("the release closed the merge's workspace")
 			}
 		})
 	}
@@ -2596,25 +2599,3 @@ func TestALandingWhoseOwnedPullRequestsCannotBeReadLeavesTheWorkspaceOpen(t *tes
 	}
 }
 
-func TestAReleasedRunningMergeWhoseRecordCannotBeReadIsLeftOpenAndStillTornDown(t *testing.T) {
-	// Arrange and Act: the registry stops reading once the merge runs.
-	unreadable := resolution{name: "evicted over an unreadable registry", resolve: func(t *testing.T, h *harness, ctx context.Context) {
-		h.db.mu.Lock()
-		h.db.workspaceErr = errors.New("the state database is unreadable")
-		h.db.mu.Unlock()
-		resolutions[0].resolve(t, h, ctx)
-	}}
-	h := ended(t, phaseRunning, unreadable)
-
-	// Assert: torn down, nothing closed, and the gap recorded at ERROR.
-	if _, ok := h.entryOf(theWorkspace); ok {
-		t.Fatal("the abandoned merge is still queued")
-	}
-	if _, closed := h.db.exitCloseOf(theWorkspace); closed {
-		t.Fatal("a merge whose record could not be read was closed")
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.teardown",
-		Message: "could not tell whether the abandoned merge closes its merge workspace; it is left open"}); !ok {
-		t.Fatalf("no ERROR record of the unread close: %v", h.logs.Records())
-	}
-}

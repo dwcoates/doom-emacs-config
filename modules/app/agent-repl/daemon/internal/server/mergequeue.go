@@ -133,6 +133,7 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 	out := &agentreplv1.MergeQueueStatus{
 		Repository: &workspacev1.RepositoryRef{Id: string(status.Repository.ID), Dir: status.Repository.Dir},
 		Advance:    advance,
+		OffQueue:   offQueueStatusOf(status.OffQueue),
 	}
 	// EVERY MERGE OUT OF LINE IS LISTED AFTER THE LINE: each repair slot's
 	// holder, then the merges awaiting each slot in the order each will be

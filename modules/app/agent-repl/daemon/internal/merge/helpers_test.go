@@ -160,9 +160,10 @@ type fakeDB struct {
 	landedCommits map[ids.WorkspaceID]uint32
 	closed        map[ids.WorkspaceID]bool
 	closures      map[ids.WorkspaceID]wsm.Closure
-	// exitCloses is every close a queue exit made in its own write, by the
-	// workspace it closed.
-	exitCloses     map[ids.WorkspaceID]wsm.Closure
+	// offQueue are the requests standing off their queues, by workspace
+	// (wsm/offqueue.go), and offQueueErr fails their reads.
+	offQueue       map[ids.WorkspaceID]wsm.OffQueueMerge
+	offQueueErr    error
 	releasedLeases []wsm.LeaseID
 	policies       map[wsm.LeaseID]wsm.LeasePolicy
 	dropped        []string
@@ -298,7 +299,7 @@ func newFakeDB() *fakeDB {
 		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
 		closures:      map[ids.WorkspaceID]wsm.Closure{},
-		exitCloses:    map[ids.WorkspaceID]wsm.Closure{},
+		offQueue:      map[ids.WorkspaceID]wsm.OffQueueMerge{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
@@ -556,6 +557,8 @@ func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	}
 	f.closed[id] = true
 	f.closures[id] = closure
+	// A CLOSE ENDS THE WORKSPACE'S REQUEST OFF ITS QUEUE (wsm.markClosedInTx).
+	delete(f.offQueue, id)
 	return nil
 }
 
@@ -1061,7 +1064,7 @@ func (f *fakeDB) ClearMergePick(_ context.Context, repo wsm.RepoKey, id ids.Work
 	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
-func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string, closes *wsm.Closure) error {
+func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {
@@ -1076,30 +1079,91 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			f.renumber(repo)
 			f.settleWaitsOnLocked(repo, id, cause)
 			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
-			f.closeOnExitLocked(id, closes)
+			f.keepOffQueueLocked(entry, cause)
 			return f.restampRepairsLocked(repo)
 		}
 	}
 	return fmt.Errorf("no queue entry for %s", id)
 }
 
-// closeOnExitLocked stands for the close a queue exit makes in its own
-// transaction (wsm.markClosedInTx).
-func (f *fakeDB) closeOnExitLocked(id ids.WorkspaceID, closes *wsm.Closure) {
-	if closes == nil {
+// keepOffQueueLocked stands for the store's one queue-exit transition
+// (wsm.leaveQueueInTx): every cause but a landing keeps ENTRY's request off
+// its queue, unless its workspace is closed.
+func (f *fakeDB) keepOffQueueLocked(entry wsm.MergeQueueEntry, cause string) {
+	if cause == wsm.MergeLeftLanded || f.closed[entry.Workspace] {
 		return
 	}
-	f.closed[id] = true
-	f.closures[id] = *closes
-	f.exitCloses[id] = *closes
+	source := entry.Source
+	source.Front, source.Behind, source.BehindName, source.PickStartedAt, source.PickTurn = false, "", "", nil, ""
+	f.offQueue[entry.Workspace] = wsm.OffQueueMerge{Workspace: entry.Workspace, Cause: cause, LeftAt: f.clockNow(), RequestedAt: entry.EnqueuedAt, Source: source}
 }
 
-// exitCloseOf answers the close a queue exit made for ID, if any.
-func (f *fakeDB) exitCloseOf(id ids.WorkspaceID) (wsm.Closure, bool) {
+// clockNow is the fake store's instant for what it writes.
+func (f *fakeDB) clockNow() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
+
+func (f *fakeDB) OffQueueMerges(context.Context) ([]wsm.OffQueueMerge, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	c, ok := f.exitCloses[id]
-	return c, ok
+	if f.offQueueErr != nil {
+		return nil, f.offQueueErr
+	}
+	out := make([]wsm.OffQueueMerge, 0, len(f.offQueue))
+	for _, rec := range f.offQueue {
+		out = append(out, rec)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Workspace < out[j].Workspace })
+	return out, nil
+}
+
+func (f *fakeDB) OffQueueMergeOf(_ context.Context, id ids.WorkspaceID) (wsm.OffQueueMerge, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.offQueueErr != nil {
+		return wsm.OffQueueMerge{}, false, f.offQueueErr
+	}
+	rec, ok := f.offQueue[id]
+	return rec, ok, nil
+}
+
+// RequeueOffQueueMerge stands for the store's one transaction: the record
+// goes and the request is written back, requested, at the back.
+func (f *fakeDB) RequeueOffQueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, place wsm.RequeuePlacement, version *wsm.VersionIncrement, model string, _ time.Time) (wsm.MergeSource, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, ok := f.offQueue[id]
+	if !ok {
+		return wsm.MergeSource{}, fmt.Errorf("requeue of %s: %w", id, wsm.ErrNotFound)
+	}
+	if version != nil && !rec.Adopted {
+		return wsm.MergeSource{}, wsm.ErrOffQueueVersionRecorded
+	}
+	source := rec.Source
+	if version != nil {
+		source.Version = version
+	}
+	source.Front, source.Behind, source.BehindName = place.Front, place.Behind, place.BehindName
+	if model != "" {
+		session, ok := f.sessions[id]
+		if !ok {
+			return wsm.MergeSource{}, fmt.Errorf("requeue of %s: no session to record the model on: %w", id, wsm.ErrNotFound)
+		}
+		session.Model = model
+		f.sessions[id] = session
+	}
+	delete(f.offQueue, id)
+	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{Repo: repo, Workspace: id, State: wsm.MergeRequested, Source: source, EnqueuedAt: rec.RequestedAt})
+	f.renumber(repo)
+	return source, nil
+}
+
+func (f *fakeDB) DiscardOffQueueMerge(_ context.Context, id ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.offQueue[id]; !ok {
+		return fmt.Errorf("discard of %s: %w", id, wsm.ErrNotFound)
+	}
+	delete(f.offQueue, id)
+	return nil
 }
 
 // ReturnAdmittedMerge puts an admitted entry back in line where it stands.
@@ -1120,7 +1184,7 @@ func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids
 
 // DropAdmittedMerge stands for the store's one transaction: the admitted
 // entry, the merge lease and its progress record go together, or nothing does.
-func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
+func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.dropAdmittedErr != nil {
@@ -1135,6 +1199,7 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 	if held, ok := f.leases[id]; at < 0 || !ok || held.ID != lease || held.Holder != wsm.HolderMerge {
 		return fmt.Errorf("drop admitted merge of %s: %w", id, wsm.ErrNotFound)
 	}
+	dropped := f.queues[repo][at]
 	f.queues[repo] = append(f.queues[repo][:at], f.queues[repo][at+1:]...)
 	f.renumber(repo)
 	f.settleWaitsOnLocked(repo, id, cause)
@@ -1149,7 +1214,7 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 		}
 	}
 	f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
-	f.closeOnExitLocked(id, closes)
+	f.keepOffQueueLocked(dropped, cause)
 	return nil
 }
 
@@ -2476,6 +2541,26 @@ type fakeSidebar struct {
 	told   []sidebar.MergeQueue
 	// github is every GitHub share told (SetGithubQueue), in order.
 	github [][]sidebar.GithubQueueEntry
+	// offQueue is every set of merges off their queues told (SetOffQueue),
+	// in order.
+	offQueue [][]sidebar.OffQueueEntry
+}
+
+func (s *fakeSidebar) SetOffQueue(entries []sidebar.OffQueueEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.offQueue = append(s.offQueue, entries)
+}
+
+// offQueueTold answers the last set of merges off their queues told, nil
+// when none was.
+func (s *fakeSidebar) offQueueTold() []sidebar.OffQueueEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.offQueue) == 0 {
+		return nil
+	}
+	return slices.Clone(s.offQueue[len(s.offQueue)-1])
 }
 
 func (s *fakeSidebar) SetGithubQueue(entries []sidebar.GithubQueueEntry) {

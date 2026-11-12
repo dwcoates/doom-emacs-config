@@ -1347,6 +1347,31 @@ func validateUnsubscribeMergeQueueRequest(req *agentreplv1.UnsubscribeMergeQueue
 	return nil
 }
 
+// validateRequeueMergeRequest is RequeueMergeRequest's base function.
+func validateRequeueMergeRequest(req *agentreplv1.RequeueMergeRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if err := validateMergeQueuePlacement("placement", req.GetPlacement()); err != nil {
+		return err
+	}
+	if err := validateMergeWorkspaceVersionIncrement("version", req.GetVersion()); err != nil {
+		return err
+	}
+	if req.Model != nil && strings.TrimSpace(req.GetModel().GetName()) == "" {
+		return invalid("model.name", "a model named for the requeue has a name")
+	}
+	return validateWorkspaceRequester("requester", req.GetRequester())
+}
+
+// validateDiscardMergeRequest is DiscardMergeRequest's base function.
+func validateDiscardMergeRequest(req *agentreplv1.DiscardMergeRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	return validateWorkspaceRequester("requester", req.GetRequester())
+}
+
 // validateSubscribeWorkspaceRequest is SubscribeWorkspaceRequest's base
 // function.
 func validateSubscribeWorkspaceRequest(req *agentreplv1.SubscribeWorkspaceRequest) *connect.Error {

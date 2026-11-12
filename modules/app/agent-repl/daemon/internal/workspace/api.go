@@ -620,6 +620,11 @@ type Verbs interface {
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error
+	// RequireCatalogModel refuses MODEL as not_in_catalog unless the catalog
+	// the session's login last served offers it: the check a model a session
+	// will START under passes, which needs no live selector (a hidden merge
+	// workspace serves none).
+	RequireCatalogModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// SetEffort switches the session's reasoning effort to a level the
 	// topbar's selector served. It does NOT ride the queue's session-act path:
 	// an effort change never puts a row in front of the reader, and the shim

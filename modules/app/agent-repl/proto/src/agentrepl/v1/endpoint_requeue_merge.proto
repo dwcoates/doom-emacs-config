@@ -1,0 +1,135 @@
+// endpoint_requeue_merge.proto — RequeueMerge: put a merge that left its
+// queue without landing back in line AS ITSELF. AGENT API section.
+//
+// A MERGE'S REQUEST LIVES UNTIL IT LANDS OR IS DISCARDED. Every exit from a
+// queue short of a landing -- an evict, a dequeue, a failure, a restart that
+// could not resume it, a hide at its cold gate -- leaves the merge's request
+// standing OFF ITS QUEUE with the cause it left for: its branch, its version
+// increment and changelog line, its deploy hooks and its cleanup flags all
+// kept, and an async merge's merge workspace kept open under its name.
+// RequeueMerge puts that same request back in line: the same workspace (for
+// an async merge, the same merge workspace), the same branch, the same
+// values, at the placement this request names. Nothing is asked for again and
+// no workspace is created. Ending a request without landing it is
+// DiscardMerge.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/merge_version_increment.proto";
+import "agentrepl/v1/workspace_topology.proto";
+import "conversation/v1/api.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RequeueMergeRequest {
+  // The workspace whose merge off its queue goes back in line: the workspace
+  // landing its own branch, or an async merge's merge workspace. The command
+  // line resolves the name `merge-queue status` lists the merge under
+  // (agentrepl.v1.MergeQueueStatusOffQueue.name) to this ref.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Where the merge joins its queue. REQUIRED: no placement is implied, as
+  // for every merge put in line.
+  MergeQueuePlacement placement = 2;
+  // The version increment and changelog line of a merge whose request
+  // records none BECAUSE ITS VALUES WERE LOST: a request adopted from a merge
+  // workspace left open before requests were kept
+  // (agentrepl.v1.MergeQueueStatusOffQueueCause.adopted). Such a request
+  // landing on a versioned repository's main branch is refused as
+  // `version_increment_required` without one. A request that recorded its
+  // own values keeps them: supplying one for it is refused as
+  // `version_already_recorded`, so a requeue never silently changes what a
+  // merge was asked to land as. UNSET for every other requeue.
+  optional MergeWorkspaceVersionIncrement version = 3;
+  // WHO ASKED. REQUIRED: the user (the sidebar) or a workspace's agent
+  // (`agent-repld merge-queue requeue`).
+  WorkspaceRequester requester = 4;
+  // The model the merge's session resumes under. It is recorded as the
+  // session's model in the same store write that puts the merge back in line,
+  // and every start of the session names the recorded model, so a session
+  // parked cold reads its conversation once, on this model, when the merge
+  // resumes it: no separate model switch is needed, which a cold conversation
+  // refuses (SetModelError.cold_gate). It must be in the model catalog the
+  // session's login last served (conversation.v1.ModelCatalog), or the
+  // requeue is refused as `not_in_catalog` with nothing changed. UNSET keeps
+  // the session's model as it stands.
+  optional conversation.v1.AgentModel model = 5;
+}
+
+// THE ARM IS THE OUTCOME.
+message RequeueMergeResponse {
+  oneof result {
+    RequeueMergeSuccess success = 1;
+    RequeueMergeError error = 2;
+  }
+}
+// The merge stands in line again; the queue's status, its subscribers and the
+// sidebar show it there.
+message RequeueMergeSuccess {
+  // Its one-based place among the merges in line once it was put there.
+  // UNSET when the daemon is draining: the request stands on its queue,
+  // recorded, and joins the line at the next boot.
+  optional uint32 position = 1;
+}
+// Why the merge was not put back in line. Nothing was changed.
+message RequeueMergeError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    RequeueMergeUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    RequeueMergeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // The workspace holds no merge request at all: none off its queue, none in
+    // line, and it never landed one.
+    RequeueMergeUnknownMerge unknown_merge = 3;
+    // The workspace's merge stands in line already (waiting, running, or
+    // repairing in one of its repair slots): there is nothing to put back.
+    RequeueMergeStillQueued still_queued = 4;
+    // The branch the request lands no longer exists in the repository, so
+    // the merge could never run. The request stays off its queue; discard it.
+    RequeueMergeBranchGone branch_gone = 5;
+    // The workspace's merge already landed: its request ended with the
+    // landing, and its workspace was closed by it.
+    RequeueMergeAlreadyLanded already_landed = 6;
+    // The request lost its values (it was adopted) and lands on a versioned
+    // repository's main branch, so it needs `version`.
+    MergeWorkspaceVersionIncrementRequired version_increment_required = 7;
+    // `version` was given where the request lands on no versioned main
+    // branch.
+    MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 8;
+    // `version` was given for a request that recorded its own.
+    RequeueMergeVersionAlreadyRecorded version_already_recorded = 9;
+    // `placement` asked to go behind a merge not in the queue.
+    MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 10;
+    // The merge's workspace is closed (a request never outlives its
+    // workspace's close, so this is a workspace closed since it was named).
+    RequeueMergeWorkspaceClosed workspace_closed = 11;
+    // `model` is not in the catalog the session's login last served, or the
+    // login has served none.
+    RequeueMergeNotInCatalog not_in_catalog = 12;
+  }
+}
+message RequeueMergeUnknownWorkspace {}
+message RequeueMergeWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// No request of this workspace's merge stands, in line or out of it.
+message RequeueMergeUnknownMerge {}
+// The merge stands in line. No fields: `merge-queue status` says where.
+message RequeueMergeStillQueued {}
+// The request's branch is gone.
+message RequeueMergeBranchGone {
+  // The branch the request lands, as it recorded it.
+  string branch = 1;
+}
+// The merge landed. No fields: the arm is the fact.
+message RequeueMergeAlreadyLanded {}
+// The request recorded its own version increment.
+message RequeueMergeVersionAlreadyRecorded {}
+// The workspace is closed. No fields: the arm is the fact.
+message RequeueMergeWorkspaceClosed {}
+// The model is not in the login's catalog. No fields: the catalog is the
+// model selector's to show.
+message RequeueMergeNotInCatalog {}

@@ -28,8 +28,11 @@ import {
   UpdateMergeQueueResponseSchema,
   type UpdateMergeQueueMoveTo,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import { RequeueMergeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_requeue_merge_pb";
+import { DiscardMergeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_discard_merge_pb";
 import type {
   RosterMergeQueueGithubEntry,
+  RosterMergeQueueOffQueue,
   RosterMergeQueueGithubPlace,
   RosterMergeQueueHead,
   RosterMergeQueuePaused,
@@ -48,7 +51,7 @@ import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
 import { log } from "../log.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
+import { discardMergeRefusal, requeueMergeRefusal, updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
 import { userRequester } from "../rpc/requester.js";
 import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -203,10 +206,11 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
   // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE STANDS OUT OF
-  // LINE OR A WORKSPACE STANDS IN A GITHUB MERGE QUEUE
+  // LINE, A WORKSPACE STANDS IN A GITHUB MERGE QUEUE, OR A MERGE STANDS OFF
+  // THE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
   const repairs = repairsOf(u, path);
-  if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0)) {
+  if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0)) {
     body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
   }
   for (const repair of repairs) {
@@ -221,6 +225,9 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
   });
   u.github.forEach((github, index) => {
     body.appendChild(drawRosterMergeQueueGithub(github, sc, `${path}.github[${index}]`));
+  });
+  u.offQueue.forEach((off, index) => {
+    body.appendChild(drawRosterMergeQueueOffQueue(off, sc, `${path}.off_queue[${index}]`));
   });
   body.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !event.isPrimary) return;
@@ -505,6 +512,78 @@ export function drawRosterMergeQueueGithub(u: RosterMergeQueueGithubEntry, sc: S
   const mark = drawQueueLabel(githubPlaceText(place), "sb-mq-github-place", "its pull request's place in the GitHub merge queue");
   line.append(drawSubjectName(subject, `${path}.subject`), mark, drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
   return line;
+}
+
+/** The class of a merge off its queue's line. Each is one line of the band fit. */
+export const MERGE_QUEUE_OFF_QUEUE_CLASS = "sb-mq-off-queue";
+
+/** The class of an off-queue merge's requeue and discard controls. */
+export const MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS = "sb-mq-off-queue-control";
+
+/**
+ * One merge that left its queue without landing and whose request still
+ * stands, drawn after everything in the queue: its name, why it left, and two
+ * controls, one putting it back in line as itself at the back
+ * (`RequeueMerge`), the other ending its request (`DiscardMerge`, which
+ * closes an async merge's merge workspace). A click on the line itself
+ * selects as a waiting merge's does; it is no grip.
+ */
+export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: SidebarContext, path: string): HTMLElement {
+  const subject = requireMessage(u.subject, `${path}.subject`);
+  const cause = requireMessage(u.cause, `${path}.cause`);
+  const requeue = requireMessage(requireMessage(u.requeue, `${path}.requeue`).merge, `${path}.requeue.merge`);
+  const discard = requireMessage(requireMessage(u.discard, `${path}.discard`).merge, `${path}.discard.merge`);
+  const line = drawSubjectControl(subject, sc, MERGE_QUEUE_OFF_QUEUE_CLASS, `${path}.subject`);
+  const label = drawQueueLabel(cause.text, "sb-mq-off-queue-cause", "why this merge left the queue");
+  line.append(drawSubjectName(subject, `${path}.subject`), label);
+  line.appendChild(
+    drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", (control) =>
+      fireVerb(control, {
+        sc,
+        rpc: "RequeueMerge",
+        // The webapp acts on the queue for the user alone, and says so.
+        call: (client) =>
+          client.requeueMerge({
+            workspace: requeue,
+            placement: { place: { case: "back", value: {} } },
+            requester: userRequester(),
+          }),
+        schema: RequeueMergeResponseSchema,
+        refusalText: requeueMergeRefusal,
+      }),
+    ),
+  );
+  line.appendChild(
+    drawOffQueueControl("✕", "discard", "discard this merge's request", (control) =>
+      fireVerb(control, {
+        sc,
+        rpc: "DiscardMerge",
+        call: (client) => client.discardMerge({ workspace: discard, requester: userRequester() }),
+        schema: DiscardMergeResponseSchema,
+        refusalText: discardMergeRefusal,
+      }),
+    ),
+  );
+  return line;
+}
+
+/** One requeue or discard control: GLYPH, hovering TITLE, whose click runs ACT and never selects the line. */
+function drawOffQueueControl(glyph: string, verb: string, title: string, act: (control: HTMLElement) => Promise<boolean>): HTMLElement {
+  const control = document.createElement("button");
+  control.type = "button";
+  control.className = MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS;
+  control.setAttribute("data-verb", verb);
+  control.textContent = glyph;
+  control.title = title;
+  control.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    log.info(`${verb === "requeue" ? "requeueing" : "discarding"} a merge off its queue from the sidebar`, {
+      operation: `sidebar.merge-queue.${verb}`,
+    });
+    void act(control);
+  });
+  return control;
 }
 
 /** A GitHub merge queue place as drawn: "#3 of 5". */
