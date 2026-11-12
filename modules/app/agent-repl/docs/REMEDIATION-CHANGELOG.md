@@ -1421,3 +1421,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A workspace in queue bypass mode now runs its tests on every core, at the best test priority, without the CPU governor.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Test runs are fast again: vitest and ERT files run in batches of files that read the same code, instead of one process per file, and a bypass workspace's run no longer oversubscribes the CPU.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): The merge queue's gate now records each test run's total time and how many units each suite ran or reused, labeled with the batch sizes in force, so batch sizes can be compared over time.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Integration tests pass again: the fake git answers git cherry, which the merge queue's off-queue check now reads.
