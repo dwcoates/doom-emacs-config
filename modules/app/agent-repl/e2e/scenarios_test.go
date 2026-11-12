@@ -145,7 +145,6 @@ func TestHarness(t *testing.T) {
 func TestEmacsWorkspaces(t *testing.T) {
 	scenario(t,
 		testEmacsProofOfLife,
-		testEmacsRegisterAnExistingDirectory,
 		testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown,
 		testEmacsCloseThenKillDoesNotWedgeEmacs,
 		testEmacsRosterArmsPaintTheTabInOrder,

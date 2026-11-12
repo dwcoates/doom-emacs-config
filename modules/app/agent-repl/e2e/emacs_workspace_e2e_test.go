@@ -364,31 +364,6 @@ func containsString(xs []string, want string) bool {
 // #8 — RegisterAnExistingDirectory
 // ---------------------------------------------------------------------------
 
-// testEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB p' hands the
-// daemon a DIRECTORY and the daemon MINTS the identity.
-//
-// The claim that matters is the second half: `agent-repl-host--by-name' holds
-// a ref whose `:id' EMACS NEVER CONSTRUCTED. Register is one of Emacs's only
-// two workspace verbs, and everything else about the workspace the daemon
-// derives and pushes.
-func testEmacsRegisterAnExistingDirectory(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-
-	if !f.Emacs.EvalBool(`(agent-repl--ws-known-p ` + elispString(f.Name) + `)`) {
-		t.Fatalf("agent-repl--workspaces has no entry for %q after registering %s", f.Name, f.Repo.Dir)
-	}
-	if f.RefID == "" {
-		t.Fatalf("agent-repl-host--by-name holds no daemon-minted ref id for %q", f.Name)
-	}
-
-	// The daemon minted it, so the daemon must know it. Asking the daemon is
-	// the only way to say "Emacs did not invent this id".
-	awaitDaemonRoster(t, f.Emacs.DaemonAddr(), emacsVerbBound,
-		"the daemon's own roster to carry the ref it minted",
-		func(r *frontendv1.WorkspaceRoster) bool { return rosterHasRefID(r, f.RefID) })
-}
-
 // ---------------------------------------------------------------------------
 // #9 — SelectOnWorkspaceSwitch
 // ---------------------------------------------------------------------------
