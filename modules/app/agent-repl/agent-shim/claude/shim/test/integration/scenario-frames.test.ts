@@ -207,3 +207,71 @@ describe("the vendor's diagnostics report after a Write", () => {
     });
   });
 });
+
+/** The settled arms of every AgentHook activity, with the activity id each rode on. */
+function hookArms(
+  frames: readonly conversationv1.AgentFrame[],
+): Array<{ id: string | undefined; hook: conversationv1.AgentHook }> {
+  return activitiesOf(frames).flatMap((activity) =>
+    activity.item.case === "hook" ? [{ id: activity.activityId?.value, hook: activity.item.value }] : [],
+  );
+}
+
+describe("a blocking PostToolUse hook around an Edit", () => {
+  test("announces its firing and then states the refusal on the same activity", async () => {
+    const { frames } = await driveTurn("!hook-blocked");
+
+    const hooks = hookArms(frames);
+    const [start, outcome] = hooks;
+    expect({
+      arms: hooks.map((entry) => entry.hook.result.case),
+      oneActivity: new Set(hooks.map((entry) => entry.id)).size,
+      name: start?.hook.result.case === "start" ? start.hook.result.value.hookName : undefined,
+      event: start?.hook.result.case === "start" ? start.hook.result.value.event : undefined,
+      blockingText:
+        outcome?.hook.result.case === "blockingError" ? outcome.hook.result.value.blockingText : undefined,
+    }).toEqual({
+      arms: ["start", "blockingError"],
+      oneActivity: 1,
+      name: "PostToolUse:Edit",
+      event: conversationv1.AgentHookEvent.POST_TOOL_USE,
+      blockingText: "the suite failed after the edit",
+    });
+  });
+
+  test("settles the gated Edit as a failure while the turn still concludes", async () => {
+    const { frames } = await driveTurn("!hook-blocked");
+
+    const edit = activitiesOf(frames)
+      .filter((activity) => activity.item.case === "edit")
+      .map((activity) => (activity.item.case === "edit" ? activity.item.value.result.case : undefined));
+    expect({ edit, terminal: terminalArm(frames) }).toEqual({
+      edit: ["start", "failure"],
+      terminal: "success.completed",
+    });
+  });
+});
+
+describe("a failing SessionStart hook", () => {
+  test("states a non-blocking error carrying its exit code and its stderr", async () => {
+    const { frames } = await driveTurn("!hook-failed");
+
+    const hooks = hookArms(frames);
+    const outcome = hooks.find((entry) => entry.hook.result.case === "nonBlockingError")?.hook.result;
+    expect({
+      arms: hooks.map((entry) => entry.hook.result.case),
+      exitCode: outcome?.case === "nonBlockingError" ? outcome.value.exitCode : undefined,
+      stderr: outcome?.case === "nonBlockingError" ? outcome.value.output?.stderr : undefined,
+    }).toEqual({
+      arms: ["start", "nonBlockingError"],
+      exitCode: 1,
+      stderr: "Failed to run: no interpreter on PATH.",
+    });
+  });
+
+  test("blocks nothing: the turn concludes", async () => {
+    const { frames } = await driveTurn("!hook-failed");
+
+    expect(terminalArm(frames)).toBe("success.completed");
+  });
+});

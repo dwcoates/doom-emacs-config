@@ -45,8 +45,6 @@ func TestFaults(t *testing.T) {
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
 		testPermissionAskAnsweredArms,
-		testHookBlocked,
-		testHookFailed,
 	)
 }
 
