@@ -130,3 +130,42 @@ describe("a withheld-unnamed slash-command record", () => {
     expect(JSON.stringify(record)).not.toContain("<command-name>");
   });
 });
+
+/** Every activity of the `item` arm, in the order its frames arrived. */
+function activitiesNamed(
+  activities: readonly conversationv1.AgentActivity[],
+  item: string,
+): conversationv1.AgentActivity[] {
+  return activities.filter((activity) => activity.item.case === item);
+}
+
+describe("an MCP server's tool call", () => {
+  test("is an AgentMcpToolCall that starts and settles with the tool's name and its returned text", async () => {
+    const { frames } = await driveTurn("!mcp-tool");
+
+    const calls = activitiesNamed(activitiesOf(frames), "mcpToolCall").map((activity) =>
+      activity.item.case === "mcpToolCall" ? activity.item.value.result : undefined,
+    );
+    const settled = calls.find((result) => result?.case === "success");
+    expect({
+      arms: calls.map((result) => result?.case),
+      tool: settled?.case === "success" ? settled.value.tool?.name : undefined,
+      text:
+        settled?.case === "success"
+          ? settled.value.content?.blocks.map((block) =>
+              block.block.case === "text" ? block.block.value.text : undefined,
+            )
+          : undefined,
+    }).toEqual({
+      arms: ["start", "success"],
+      tool: "mcp__echo__echo",
+      text: ["hello from the offline session"],
+    });
+  });
+
+  test("is never an unmodeled activity", async () => {
+    const { frames } = await driveTurn("!mcp-tool");
+
+    expect(activitiesNamed(activitiesOf(frames), "unmodeled")).toEqual([]);
+  });
+});

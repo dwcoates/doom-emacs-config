@@ -29,7 +29,6 @@ func TestTurns(t *testing.T) {
 		testPlanModeSettlesPlanned,
 		testSkillInvocation,
 		testAChatThreadLivesItsWholeLife,
-		testMcpToolCall,
 		testIdeDiagnosticsAfterWrite,
 		testRateLimitSevenDayWindowFeedsTheWeeklyAllowance,
 		testClearRotatesIdentity,
