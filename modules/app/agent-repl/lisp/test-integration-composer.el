@@ -1116,6 +1116,51 @@ Emacs's memory: the entry waits on disk for the daemon to ingest it."
       (should (equal (length (agent-repl-itest-composer--held-entries
                               agent-repl-itest-composer--ws))
                      1)))))
+(ert-deftest agent-repl-itest-composer-a-send-with-no-daemon-keeps-the-words-in-the-history-ring ()
+  "A from-buffer send with the daemon gone leaves the words recallable from history.
+The composer clears optimistically at dispatch, so the ring is where the user
+finds them again."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "the prompt that must survive the outage")))
+        (unwind-protect
+            (progn
+              (agent-repl-itest--stop-daemon daemon t)
+              ;; Act.
+              (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                         (lambda () agent-repl-itest-composer--ws)))
+                (with-current-buffer buf (agent-repl-send)))
+              ;; Assert.
+              (should (equal (car (buffer-local-value 'agent-repl--input-history buf))
+                             "the prompt that must survive the outage")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-a-from-buffer-send-with-no-daemon-holds-the-prompt-on-disk ()
+  "A from-buffer send with the daemon gone is held in the ingress, not dropped."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "the prompt that must survive the outage")))
+        (unwind-protect
+            (progn
+              (agent-repl-itest--stop-daemon daemon t)
+              ;; Act.
+              (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                         (lambda () agent-repl-itest-composer--ws)))
+                (with-current-buffer buf (agent-repl-send)))
+              ;; Assert.
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-itest-composer--held-entries agent-repl-itest-composer--ws))
+               nil "the prompt to reach the held-prompt ingress")
+              (should (= 1 (length (agent-repl-itest-composer--held-entries
+                                    agent-repl-itest-composer--ws)))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 ;;;; ---- Finding 91 (partial): the submit log names its origin ----
 
 (ert-deftest agent-repl-itest-composer-submit-log-carries-the-origin ()
@@ -1716,6 +1761,30 @@ daemon, not Emacs, holds it until the running turn ends (owner ruling,
                 (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
+(declare-function agent-repl-held-ingress-waiting "held-ingress")
+
+(ert-deftest agent-repl-itest-composer-an-accepted-deferral-leaves-nothing-in-the-held-ingress ()
+  "The daemon took the deferral, so Emacs's only holding place stays empty."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "the deferred prompt")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              ;; Act.
+              (agent-repl-queue-deferred-prompt)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the daemon's acceptance to clear the composer")
+              ;; Assert.
+              (should (zerop (agent-repl-held-ingress-waiting
+                              agent-repl-itest-composer--ws))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 ;; audit-3 #47
 (ert-deftest agent-repl-itest-composer-an-ordinary-send-asks-for-no-delivery ()
   "An ordinary send spells no `delivery': its absence is the ordinary one,
@@ -1991,6 +2060,62 @@ RED until the parallel fix lands."
               (agent-repl-itest-composer--await-log daemon "elisp.input.accepted" nil)
               ;; Assert: the unrelated draft SURVIVES the accepted send.
               (should (equal (with-current-buffer buf (buffer-string)) "my draft")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(declare-function agent-repl-discard-input "input")
+(declare-function agent-repl--history-prev "history")
+
+(ert-deftest agent-repl-itest-composer-discard-empties-the-composer ()
+  "`agent-repl-discard-input' leaves the composer empty."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "this draft is going nowhere")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (call-interactively #'agent-repl-discard-input))
+              ;; Assert.
+              (should (equal (with-current-buffer buf (buffer-string)) "")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-discard-submits-nothing ()
+  "A discard sends no SubmitPrompt to the daemon."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "this draft is going nowhere")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (call-interactively #'agent-repl-discard-input))
+              ;; Assert.
+              (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-history-recall-restores-the-last-submitted-prompt ()
+  "After an accepted send empties the composer, history recall puts the prompt back."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "remember this one for the history")))
+        (unwind-protect
+            (progn
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the daemon's acceptance to clear the composer")
+              ;; Act.
+              (with-current-buffer buf (agent-repl--history-prev))
+              ;; Assert.
+              (should (equal (with-current-buffer buf (buffer-string))
+                             "remember this one for the history")))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (provide 'test-integration-composer)

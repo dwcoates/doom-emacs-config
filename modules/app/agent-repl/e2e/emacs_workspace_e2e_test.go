@@ -351,66 +351,6 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // #7 — CreateWorkspaceAppearsOnTheRoster
 // ---------------------------------------------------------------------------
 
-// testEmacsCreateWorkspaceAppearsOnTheRoster is scenario 7: the DAEMON minted
-// the identity and Emacs only reacted — a new row in
-// `agent-repl-roster--rows-by-id', and the name in BOTH
-// `agent-repl-roster--tab-order' and `agent-repl--ws-tabline-names'.
-//
-// `SPC TAB n' prompts three times (repository, initial prompt, name, base
-// ref), so the binding is asserted as a LOOKUP and the command is then run
-// with its readers bound for the duration of the one call — the standard ERT
-// way, which keeps the command's own argument-collection code path.
-func testEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	// `SPC TAB C-n' is the creation that picks its repository (`SPC TAB n'
-	// is fixed to agent-repl's own repository, which no sandbox repository
-	// is).
-	if want, got := "agent-repl-create-workspace-in-repository", e.LeaderBinding("TAB C-n"); got != want {
-		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
-	}
-
-	before := len(f.rosterTabOrder())
-
-	// The readers answer out of what the COMMAND offers them: the repository
-	// picker takes the first candidate the command composed from the roster's
-	// own sections, and every free-text reader answers blank except the
-	// initial prompt — blank name and blank base ref are the documented
-	// "daemon mints one" and "default branch" cases.
-	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (prompt candidates &rest _)
-                          (if (string-prefix-p "Model" prompt) "" (car (append candidates nil)))))
-                       ((symbol-function 'read-string)
-                        (lambda (prompt &rest _)
-                          (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
-               (call-interactively #'agent-repl-create-workspace-in-repository)
-               t)`)
-
-	e.AwaitEvalFor(emacsVerbBound, "the created workspace's row to reach the roster table",
-		`(hash-table-count agent-repl-roster--rows-by-id)`,
-		func(raw json.RawMessage) bool {
-			var n int
-			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n > before
-		})
-
-	// The created workspace's tab joins the order once the daemon answers its
-	// open (open-tabs.el), which follows its row.
-	order := decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, "the created workspace's tab to be answered open",
-		emacsTabOrderForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before }))
-
-	// The tab bar follows the roster's order strictly, so every name the
-	// roster walk produced must have a tab.
-	tabs := f.tabNames()
-	for _, name := range order {
-		if !containsString(tabs, name) {
-			t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab for the roster-ordered workspace %q", tabs, name)
-		}
-	}
-}
-
 func containsString(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
@@ -424,31 +364,6 @@ func containsString(xs []string, want string) bool {
 // #8 — RegisterAnExistingDirectory
 // ---------------------------------------------------------------------------
 
-// testEmacsRegisterAnExistingDirectory is scenario 8: `SPC TAB p' hands the
-// daemon a DIRECTORY and the daemon MINTS the identity.
-//
-// The claim that matters is the second half: `agent-repl-host--by-name' holds
-// a ref whose `:id' EMACS NEVER CONSTRUCTED. Register is one of Emacs's only
-// two workspace verbs, and everything else about the workspace the daemon
-// derives and pushes.
-func testEmacsRegisterAnExistingDirectory(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-
-	if !f.Emacs.EvalBool(`(agent-repl--ws-known-p ` + elispString(f.Name) + `)`) {
-		t.Fatalf("agent-repl--workspaces has no entry for %q after registering %s", f.Name, f.Repo.Dir)
-	}
-	if f.RefID == "" {
-		t.Fatalf("agent-repl-host--by-name holds no daemon-minted ref id for %q", f.Name)
-	}
-
-	// The daemon minted it, so the daemon must know it. Asking the daemon is
-	// the only way to say "Emacs did not invent this id".
-	awaitDaemonRoster(t, f.Emacs.DaemonAddr(), emacsVerbBound,
-		"the daemon's own roster to carry the ref it minted",
-		func(r *frontendv1.WorkspaceRoster) bool { return rosterHasRefID(r, f.RefID) })
-}
-
 // ---------------------------------------------------------------------------
 // #9 — SelectOnWorkspaceSwitch
 // ---------------------------------------------------------------------------
@@ -461,78 +376,6 @@ func testEmacsRegisterAnExistingDirectory(t *testing.T) {
 // #11 — CloseWithAHeldPromptDoesNotTearTheTabDown
 // ---------------------------------------------------------------------------
 
-// testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown is scenario 11.
-//
-// What Emacs OWES here is precisely to NOT ACT. Per elisp.md the refusal
-// manifests in the WEBAPP FOOTER, not in an Emacs dialog, so the assertion is
-// negative: the tab is still there.
-//
-// The held prompt is the DAEMON's (owner ruling 2026-09-28: Emacs holds no
-// prompt in memory). `SPC j RET` submits the deferral AT ONCE with
-// `:delivery :deferred` and the daemon holds it in its tray. So the half of
-// this scenario that says undelivered intent is never silently discarded is
-// read at the edges Emacs can see: the deferral reached the RPC boundary
-// deferred, the daemon answered it `:success` (took it) before the close was
-// asked for, and nothing waits in the on-disk ingress — the one place Emacs
-// itself would hold a prompt the daemon did not take. The daemon's tray is
-// not read: this fixture exposes no daemon client.
-//
-// The turn is parked with the fake SDK's `!hold' scenario so the close is
-// genuinely refused rather than merely slow: the deferral is held against a
-// turn that is actually in flight.
-func testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-	t.Cleanup(f.releaseHeldWork)
-
-	// ARRANGE: a parked turn, then the deferral through its own ordinary
-	// command. The observers are armed after the parked turn's send, so they
-	// see only the deferral.
-	f.parkAHeldTurn()
-	armSubmissionObserver(t, e)
-	armSubmissionAnswerObserver(t, e)
-
-	const deferred = "the deferred prompt"
-	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(f.Name) + `)
-               (erase-buffer)
-               (insert ` + elispString(deferred) + `)
-               t)`)
-	e.Eval(`(agent-repl-queue-deferred-prompt)`)
-
-	// Check it landed with the daemon BEFORE asking for the close: a
-	// deferral the daemon never took would make the close's refusal say
-	// nothing about held work.
-	sent := awaitSubmissions(t, e, 1, "the deferral to reach the RPC boundary")[0]
-	if sent.Text != deferred || sent.Delivery != ":deferred" {
-		t.Fatalf("the deferral was submitted as text %q delivery %q, want %q delivered :deferred",
-			sent.Text, sent.Delivery, deferred)
-	}
-	if arm := awaitSubmissionAnswer(t, e, deferred, "the daemon to answer the deferral"); arm != ":success" {
-		t.Fatalf("the daemon answered the deferral %s, want :success: the daemon holds it", arm)
-	}
-
-	// ACT
-	e.Leader("j d")
-
-	// ASSERT: the tab SURVIVES. Waiting for the close's own round trip to
-	// land first is what makes this a real assertion rather than a race with
-	// it: the refusal is echoed to the echo area, so the message is the edge.
-	e.AwaitEvalFor(emacsVerbBound, "the blocked close to be answered",
-		`(with-current-buffer "*Messages*"
-                   (and (string-match-p "close blocked" (buffer-string)) t))`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-
-	if tabs := f.tabNames(); !containsString(tabs, f.Name) {
-		t.Fatalf("agent-repl--ws-tabline-names = %v, want %q still present: a blocked close draws no dialog and leaves the tab in place", tabs, f.Name)
-	}
-	// ASSERT: nothing waits on disk. The daemon took the deferral, so the
-	// ingress — Emacs's only holding place — is empty.
-	if n := e.EvalInt(`(agent-repl-held-ingress-waiting ` + elispString(f.Name) + `)`); n != 0 {
-		t.Fatalf("%d of %q's prompts wait in the held-prompt ingress, want none: the daemon took the deferral", n, f.Name)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // #12 — KillWorkspaceNeverBlocks
 // ---------------------------------------------------------------------------
@@ -540,60 +383,6 @@ func testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 // ---------------------------------------------------------------------------
 // #13 — CloseThenKillDoesNotWedgeEmacs
 // ---------------------------------------------------------------------------
-
-// testEmacsCloseThenKillDoesNotWedgeEmacs is scenario 13, and THE HEARTBEAT
-// IS THE ASSERTION.
-//
-// This pins the sentinel/kill-buffer recursion named in EMACS-LAYER-SPEC.md's
-// opening: closing a workspace re-entered a process sentinel that killed a
-// buffer that ran the sentinel again. There is no frame for it — it manifests
-// only as an Emacs that stops answering — so the two verbs are run back to
-// back on a workspace with a LIVE PANEL, which is the configuration the
-// recursion needed, and the test then asks Emacs a question it must answer.
-//
-// The heartbeat goroutine fails this test immediately on a missed probe, with
-// the last form sent plus *Messages* and a backtrace in the artifacts
-// directory; the explicit probe below is the same claim asked once more after
-// the verbs have settled, so the test cannot pass by finishing before the
-// heartbeat noticed.
-//
-// THE KILL NAMES ITS WORKSPACE INSTEAD OF BEING PICKED FOR. `SPC j x' with no
-// argument resolves its target through `agent-repl-verbs--target-ws', which
-// reads the LIVE registry — and the close that just ran tombstones this name
-// the moment the daemon's roster push lands with the row `closed'. Which side
-// of that push the kill falls on is the daemon's schedule, not this
-// scenario's subject: measured on 2026-09-04 the picker was still holding the
-// name when the layer ran one scenario at a time, and had already lost it
-// when five ran at once, so the keystroke form made the verb refuse with "No
-// agent-repl workspaces registered" instead of running. Naming the target
-// makes BOTH verbs run on every schedule, which is what "both commands back
-// to back" (EMACS-LAYER-SPEC.md scenario 13) asks for; that `SPC j x' is this
-// command is scenario 12's assertion, made again here so the keystroke path
-// is not lost.
-func testEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	if want, got := "agent-repl-kill-workspace", e.LeaderBinding("j x"); got != want {
-		t.Fatalf("SPC j x resolves to %q, want %q", got, want)
-	}
-
-	f.openPanel()
-
-	e.Leader("j d")
-	e.Eval(killWorkspaceForm(f.Name))
-
-	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after close-then-kill",
-		`(emacs-pid)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-
-	// The SAME Emacs answered — not a replacement that came up behind a
-	// process that died and restarted.
-	if pid := e.EvalInt(`(emacs-pid)`); pid != e.Doom.PID {
-		t.Fatalf("emacs-pid = %d, want the pid the readiness stamp carried (%d)", pid, e.Doom.PID)
-	}
-}
 
 // ---------------------------------------------------------------------------
 // #14 — NavigationFollowsTheDrawnTabBar

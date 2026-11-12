@@ -49,6 +49,12 @@
 (declare-function agent-repl-roster-refresh-magit "roster" (ws))
 (declare-function agent-repl--input-said "input" (parts))
 (defvar agent-repl-roster-view)
+(defvar agent-repl-roster--rows-by-id)
+(defvar persp-names-cache)
+(defvar agent-repl-wire-roster-row-status-keywords)
+(defvar agent-repl-status-color-table)
+(defvar agent-repl--color-by-name)
+(declare-function agent-repl--ws-tabline-names "workspace")
 (defvar agent-repl-roster-update-functions)
 (defvar agent-repl-roster-finish-functions)
 (defvar agent-repl-host-last-selected-id)
@@ -488,6 +494,29 @@ notification would be a spurious re-alert."
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert.
           (should (equal (length blinked) 1)))))))
+
+(ert-deftest agent-repl-itest-roster-a-permission-ask-on-an-unselected-workspace-draws-the-marker ()
+  "A `permission' row carrying `attention' draws the steady marker on its tab.
+EMACS ANSWERS NOTHING: the notification policy is its whole reaction to an ask,
+and the workspace under the ask is not the selected one."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
+        (agent-repl--ws-put "itest-perm" :project-dir (agent-repl-itest--fixture-dir "itest-perm"))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "itest-other")))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-perm" "itest-perm" 'permission
+                          '(attention . ())))))
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-status-attention-visible-p "itest-perm"))
+           nil "the permission ask's marker to show")
+          (should (agent-repl-status-attention-visible-p "itest-perm")))))))
 
 (ert-deftest agent-repl-itest-roster-attention-clears-when-removed-from-the-row ()
   "A row that stops carrying `attention' clears the steady marker.
@@ -2047,6 +2076,133 @@ since deprioritized."
                              "itest-badge-clear"
                              (agent-repl-status-tab-state "itest-badge-clear"))
                             ""))))))
+
+;;;; ---- A created workspace reaches the roster, the tab order and the tab bar ----
+
+(defun agent-repl-itest-roster--push-created (daemon)
+  "Push a roster holding one standing row, then the same plus a created one.
+Returns after the created row's tab has opened, as the daemon's roster does
+once its CreateWorkspace has minted the workspace."
+  (agent-repl-itest-roster--push
+   daemon (agent-repl-itest-roster--roster
+           (list (agent-repl-itest-roster--row "ws-standing" "ws-standing" 'ready))))
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl--ws-by-ref-id "ws-standing")) nil "the standing tab")
+  (agent-repl-itest-roster--push
+   daemon (agent-repl-itest-roster--roster
+           (list (agent-repl-itest-roster--row "ws-standing" "ws-standing" 'ready)
+                 (agent-repl-itest-roster--row "ws-created" "ws-created" 'ready))))
+  (agent-repl-itest--wait-until
+   (lambda () (member "ws-created" (agent-repl-roster-tab-order)))
+   nil "the created workspace's name in the tab order"))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspaces-row-reaches-the-row-table ()
+  "The daemon-minted row arrives in the roster's row table."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert.
+      (should (gethash "ws-created" agent-repl-roster--rows-by-id)))))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspaces-name-joins-the-tab-order ()
+  "The created workspace's name joins the roster-ordered tab order."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert.
+      (should (equal (agent-repl-roster-tab-order) '("ws-standing" "ws-created"))))))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspace-has-a-tab-in-the-bar ()
+  "Every name in the roster's order has a tab in `agent-repl--ws-tabline-names'."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert: the perspective layer has caught up with both names.
+      (let ((persp-names-cache '("ws-standing" "ws-created")))
+        (dolist (name (agent-repl-roster-tab-order))
+          (should (member name (agent-repl--ws-tabline-names))))))))
+
+;;;; ---- A turn walks a running arm to a settled one ----
+
+(defvar agent-repl-roster-running-statuses)
+(defvar agent-repl-roster-settled-statuses)
+(declare-function agent-repl-roster-row-status "roster")
+
+(defun agent-repl-itest-roster--arm-walk (daemon id arms)
+  "Push ARMS for workspace ID on DAEMON in order; return the arms Emacs saw.
+The arms are collected on `agent-repl-roster-update-functions', the per-push
+hook, so a transient running arm cannot be missed."
+  (let ((seen nil))
+    (agent-repl--ws-put id :project-dir (agent-repl-itest--fixture-dir id))
+    (let ((agent-repl-roster-update-functions
+           (list (lambda (_roster)
+                   (let ((row (gethash id agent-repl-roster--rows-by-id)))
+                     (when row (push (agent-repl-roster-row-status row) seen)))))))
+      (dolist (arm arms)
+        (let ((before (length seen)))
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row id id arm))))
+          (agent-repl-itest--wait-until
+           (lambda () (> (length seen) before)) nil
+           (format "the %s push to reach the update hook" arm)))))
+    (nreverse seen)))
+
+(ert-deftest agent-repl-itest-roster-a-turns-pushes-are-seen-in-the-order-they-were-pushed ()
+  "The update hook sees each pushed arm once, in push order."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (equal seen '(:ready :submitting :thinking :ready)))))))
+
+(ert-deftest agent-repl-itest-roster-a-turn-passes-through-a-running-arm ()
+  "Between the opening and the settled arm the walk holds a running arm."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-run" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (seq-some (lambda (arm) (memq arm agent-repl-roster-running-statuses))
+                          seen))))))
+
+(ert-deftest agent-repl-itest-roster-a-turn-ends-on-a-settled-arm ()
+  "The walk's last arm is one the roster counts as settled."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-end" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (memq (car (last seen)) agent-repl-roster-settled-statuses))))))
+
+(ert-deftest agent-repl-itest-roster-every-arm-a-turn-walks-is-declared-and-painted ()
+  "Each arm a turn walks is a declared arm with a colour the renderer can draw."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-paint" '(ready submitting thinking ready))))
+        ;; Assert.
+        (dolist (arm seen)
+          (should (memq arm agent-repl-wire-roster-row-status-keywords))
+          (let ((color (cdr (assq arm agent-repl-status-color-table))))
+            (should color)
+            (should (or (equal color "none")
+                        (assoc color agent-repl--color-by-name)))))))))
 
 (provide 'test-integration-roster)
 

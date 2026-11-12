@@ -2646,6 +2646,125 @@ adopts onto a daemon that has not proven it is listening."
           (ignore-errors
             (agent-repl-itest--release-gate successor "WatchDaemon")))))))
 
+;;;; ---- Registering an existing directory (`SPC TAB p') ----
+
+(declare-function agent-repl-add-project-workspace "commands")
+(declare-function agent-repl-verbs-select-minted "verbs")
+
+(defmacro agent-repl-itest-host--with-registered-directory (daemon dir minted &rest body)
+  "Run `agent-repl-add-project-workspace' on a fresh DIR against DAEMON, then BODY.
+MINTED is bound to the ref the command handed to `agent-repl-verbs-select-minted'.
+The landing and the projectile registration are Doom boundaries: the landing
+is recorded, never performed."
+  (declare (indent 3) (debug (form symbolp symbolp body)))
+  `(let* ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon)))
+          (,dir (agent-repl-itest--fixture-dir "itest-host-added"))
+          (,minted nil))
+     (make-directory ,dir t)
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () conn))
+                   ((symbol-function 'agent-repl-verbs-select-minted)
+                    (lambda (ref _dispatched-at &optional _lander) (setq ,minted ref))))
+           (agent-repl-add-project-workspace ,dir)
+           (agent-repl-itest--wait-until (lambda () ,minted) nil
+                                         "RegisterWorkspace's ref to reach the landing")
+           ,@body)
+       (agent-repl-connect-close conn))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-sends-the-daemon-that-directory ()
+  "`SPC TAB p' hands the daemon the directory it was given."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore minted)
+      ;; Assert.
+      (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
+        (should (equal (file-name-as-directory (agent-repl-itest--body-field body 'dir))
+                       (file-name-as-directory dir)))))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-sends-no-identity ()
+  "The register request carries a directory and no identity: the daemon mints it."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore dir minted)
+      ;; Assert.
+      (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
+        (should (null (agent-repl-itest--body-field body 'id)))))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-lands-on-the-daemons-minted-ref ()
+  "The workspace Emacs stands on is the ref the daemon answered with."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore dir)
+      ;; Assert.
+      (should (stringp (plist-get minted :id)))
+      (should-not (string-empty-p (plist-get minted :id))))))
+
+;;;; ---- The gui frontend's durable session id, off the host stream ----
+
+(declare-function agent-repl--gui-durable-session-id "frontend")
+(declare-function agent-repl-host-vendor-session-id "host")
+
+(defun agent-repl-itest-host--await-vendor-id (daemon ref)
+  "Push a live host state on DAEMON for REF and wait for its vendor id to land."
+  (agent-repl-itest-host--push-host daemon (plist-get ref :id)
+                                    (agent-repl-itest-host--live 'open))
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl-host-vendor-session-id agent-repl-itest-host--ws))
+   nil "the live arm's vendor session id"))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-is-the-vendor-conversation ()
+  "The gui capability answers the vendor id the daemon's host push published."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                     "vendor-1")))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-has-exactly-one-source ()
+  "The capability and the host stream's accessor answer the same id."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                     (agent-repl-host-vendor-session-id agent-repl-itest-host--ws))))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-is-not-the-ref-id ()
+  "The vendor conversation's uuid is not the daemon-minted echo token."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should-not (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                         (plist-get ref :id))))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-holds-while-a-turn-runs ()
+  "A later host push in the same conversation does not move the id."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      (let ((before (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)))
+        ;; Act.
+        (agent-repl-itest-host--push-host daemon (plist-get ref :id)
+                                          (agent-repl-itest-host--live 'merging))
+        (agent-repl-itest--wait-until
+         (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :merging))
+         nil "the second push to land")
+        ;; Assert.
+        (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                       before))))))
+
 (provide 'test-integration-host)
 
 ;;; test-integration-host.el ends here

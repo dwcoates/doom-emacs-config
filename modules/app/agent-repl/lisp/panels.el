@@ -1864,8 +1864,14 @@ placeholder is part of the mount: the frame under it is the frame the
 panels are covering."
   (delq nil (list (agent-repl-window--panel-buffer :view ws)
                   (agent-repl-window--panel-buffer :input ws)
-                  (and (fboundp 'agent-repl--open-progress-placeholder)
-                       (agent-repl--open-progress-placeholder ws)))))
+                  (agent-repl--panels-open-placeholder ws))))
+
+(defun agent-repl--panels-open-placeholder (ws)
+  "Return WS's open placeholder buffer while an open is in flight, else nil.
+THE ONE PLACE panels.el asks open-progress.el for it; the lookup is
+guarded because a batch suite may load panels.el without open-progress.el."
+  (and (fboundp 'agent-repl--open-progress-placeholder)
+       (agent-repl--open-progress-placeholder ws)))
 
 (defun agent-repl--save-pre-panel-layout (ws site)
   "Record the layout WS's panels are about to cover as its `:fullscreen-config'.
@@ -1882,10 +1888,20 @@ took the main area before the view saved, so the saved layout WAS the
 placeholder, the close restored it after the placeholder was killed,
 and Emacs filled the window with the webview -- which the layout
 reconciler then remounted the composer beside, so a close undid itself."
-  (if (agent-repl--panels-cover-frame-p ws)
-      (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site)
+  (cond
+   ((agent-repl--panels-cover-frame-p ws)
+    (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site))
+   ;; The placeholder takes ONE window, so the user's other windows still
+   ;; stand beside it and the frame is not "covered" -- but the layout the
+   ;; placeholder saved is exactly the frame under it.  Saving again here
+   ;; recorded the placeholder's own window as the layout to restore.
+   ((let ((placeholder (agent-repl--panels-open-placeholder ws)))
+      (and placeholder (get-buffer-window placeholder)
+           (window-configuration-p (agent-repl--ws-get ws :fullscreen-config))))
+    (agent-repl--log ws "%s: kept-fullscreen-layout reason=placeholder-saved-it" site))
+   (t
     (agent-repl--ws-put ws :fullscreen-config (agent-repl-window--save-configuration))
-    (agent-repl--log ws "%s: saved-fullscreen-layout" site)))
+    (agent-repl--log ws "%s: saved-fullscreen-layout" site))))
 
 (defun agent-repl--panels-cover-frame-p (ws)
   "Return non-nil when WS's own panels are all this frame's main area holds.

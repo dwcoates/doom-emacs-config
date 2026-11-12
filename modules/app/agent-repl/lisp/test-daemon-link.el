@@ -1190,6 +1190,20 @@ as if it were understood."
         ;; Assert
         (should (string-prefix-p (format "drain %s" expected) segment))))))
 
+(ert-deftest agent-repl-test-link-the-drain-segment-is-on-the-mode-line ()
+  "The drain segment is in `global-mode-string': a segment nothing draws is a banner nobody sees."
+  ;; Act / Assert
+  (should (memq 'agent-repl-link-drain-segment (default-value 'global-mode-string))))
+
+(ert-deftest agent-repl-test-link-installing-the-indicator-twice-draws-it-once ()
+  "A second install leaves exactly one copy of the segment."
+  ;; Arrange
+  (let ((global-mode-string (list 'agent-repl-link-drain-segment)))
+    ;; Act
+    (agent-repl-link-install-indicator)
+    ;; Assert
+    (should (= 1 (cl-count 'agent-repl-link-drain-segment global-mode-string)))))
+
 (ert-deftest agent-repl-test-link-blank-operator-note-is-a-contract-breach ()
   "The note is REQUIRED non-blank at the request; a blank one is loud."
   (agent-repl-test-link--with-harness

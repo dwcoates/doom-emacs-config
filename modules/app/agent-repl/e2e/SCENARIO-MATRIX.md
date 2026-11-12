@@ -96,7 +96,7 @@ Two further limits, stated rather than hidden:
 | `!ask-multi` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionMultiSelect/TestQuestionMultipleInOneBatch assert multi_select arm, exact 2-item Chosen slice, header/answer keyed by text. Web: cards.layer asserts [data-question-mode]. | covered |
 | `!ask-single` | grounded | questions_e2e_test.go | cards.layer.test.ts, perf.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionSingleSelect asserts exact chosen-label round-trip, OtherText unset. Web: cards.layer asserts [data-question-option]/[data-ask-hint], and that one option click delivers the one-question batch (answered [data-state]). | covered |
 | `!ask-unanswered` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionUnanswered asserts settled state is specifically FeedQuestionExpired (not Answered). Web: cards.layer asserts [data-state] present. | covered |
-| `!away-summary` | ungrounded | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestTurns/PlanModeCoalescesOntoOneBubble, TestFaults/ResidueAttachmentsDrawNoRow. | covered |
+| `!away-summary` | ungrounded | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestFaults/ResidueAttachmentsDrawNoRow, TestTurns/PlanModeCoalescesOntoOneBubble. | covered |
 | `!bash` | grounded | detachedbash_e2e_test.go | — | — | ✓ | ✓ | stream-tool-card | Go: TestSubagents/BashForegroundCompleted asserts Succeeded verdict, exact stdout text, and absence of a detached_shell row. | covered |
 | `!bash-detach` | grounded | detachedbash_e2e_test.go | — | — | ✓ | ✓ | shell-spool | Go: TestSubagents/BashDetachedStartAndComplete asserts Exit.Code==0, live growth, spool text. | covered |
 | `!bash-detach-fail` | ungrounded | — | — | — | ✓ | ✓ | shell-spool | Both halves are pinned by its goldens (frames.json, feed.json); the `shell-spool` seam is wired by TestSubagents/BashDetachedStartAndComplete. | covered |
@@ -162,7 +162,7 @@ Two further limits, stated rather than hidden:
 | `!mcp-healthy` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestTurns/RateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!mcp-tool` | grounded | mcpmonitors_e2e_test.go | — | — | — | — | — | Go: TestTurns/McpToolCall asserts the turn's settled FeedSimpleToolCall headed mcp__echo__echo carries the tool's text, and no TopbarWarning.UnmodeledTool names it. | covered |
 | `!md` | ungrounded | — | — | — | ✓ | ✓ | prompt-round-trip | Both halves are pinned by its goldens (frames.json, feed.json); the `prompt-round-trip` seam is wired by TestTurns/TurnStartToCompletion. | covered |
-| `!memory` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestTurns/PlanModeCoalescesOntoOneBubble, TestFaults/ResidueAttachmentsDrawNoRow. | covered |
+| `!memory` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestFaults/ResidueAttachmentsDrawNoRow, TestTurns/PlanModeCoalescesOntoOneBubble. | covered |
 | `!model-fallback` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestTurns/RateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!monitor-deadline` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!monitor-persistent` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
@@ -173,7 +173,7 @@ Two further limits, stated rather than hidden:
 | `!perm-answered-remotely` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!perm-deny-policy` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestPermissionDeniedByPolicy asserts DeniedByPolicy()!=nil, sawOpen false. Web: cards.layer asserts a new tool-call row and zero refusalArms. | covered |
 | `!perm-deny-user` | grounded | — | — | — | ✓ | ✓ | answer-path | Both halves are pinned by its goldens (frames.json, feed.json); the `answer-path` seam is wired by TestFaults/PermissionAskAnsweredArms. | covered |
-| `!perm-hold` | grounded | daemonstop_e2e_test.go | cards.layer.test.ts | emacs_roster_e2e_test.go | — | — | — | Go: TestPermissionUndecidableParked asserts ask stays Open, no push while parked, then Interrupted. Web: cards.layer asserts [data-permission] buttons/.perm-waiting. Emacs: TestEmacsWorkspaces/EmacsPermissionAskFiresTheAttentionMarker pins exact blink-schedule sequence. | covered |
+| `!perm-hold` | grounded | daemonstop_e2e_test.go | cards.layer.test.ts | — | — | — | — | Go: TestPermissionUndecidableParked asserts ask stays Open, no push while parked, then Interrupted. Web: cards.layer asserts [data-permission] buttons/.perm-waiting. Emacs: the attention marker and its blink schedule are pinned in ERT (test-integration-roster.el, test-status.el). | covered |
 | `!perm-no-standing` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!perm-remote-interrupt` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!perm-undecidable` | ungrounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Both halves pinned, seam answer-path wired. | covered |
@@ -205,7 +205,7 @@ Two further limits, stated rather than hidden:
 | `!send-message-resumed` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!skill` | grounded | skills_e2e_test.go | — | — | ✓ | ✓ | skill | Go: TestTurns/SkillInvocation/TestSkillNamedAndArgsParameterized assert exact byte-for-byte Document.Markdown match. | covered |
 | `!skill-fail` | ungrounded | — | — | — | ✓ | ✓ | skill | Both halves are pinned by its goldens (frames.json, feed.json); the `skill` seam is wired by TestTurns/SkillInvocation. | covered |
-| `!skills-injected` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestTurns/PlanModeCoalescesOntoOneBubble, TestFaults/ResidueAttachmentsDrawNoRow. | covered |
+| `!skills-injected` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestFaults/ResidueAttachmentsDrawNoRow, TestTurns/PlanModeCoalescesOntoOneBubble. | covered |
 | `!slash` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!slash-shape-a` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!slash-shape-a-unnamed` | ungrounded | slashcommands_e2e_test.go | — | — | — | — | — | Go: TestTurns/SlashShapeAUnnamed asserts exact transcript content string, absence of command-name, exact conclusion text. | covered |
@@ -255,7 +255,7 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 By layer, scenarios with at least one hit:
 - Go e2e (non-emacs): 44 scenarios referenced across 27 files
 - Webapp layer: 9 scenarios referenced across 2 files
-- Emacs e2e: 3 scenarios referenced across 3 files
+- Emacs e2e: 2 scenarios referenced across 2 files
 
 ## (c) Uncovered and weak scenarios
 

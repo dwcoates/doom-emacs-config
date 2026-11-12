@@ -1826,6 +1826,25 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   "{\"epoch\":1}")
                  '("WatchWorkspaceRosterResponse" epoch "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-a-row-with-an-undeclared-status-arm-is-a-wire-error ()
+  "A status arm the schema does not declare is refused loudly, never defaulted to a dot."
+  ;; Arrange / Act.
+  (let ((breach (agent-repl-test-wire-roster--breach
+                 #'agent-repl-wire-decode-roster-row
+                 "{\"workspace\":null,\"quantumFlux\":null}")))
+    ;; Assert.
+    (should (equal (cdr (cdr breach)) '("unknown field")))
+    (should (eq (car (cdr breach)) 'quantumFlux))))
+
+(ert-deftest agent-repl-test-wire-roster-the-refusal-of-an-undeclared-arm-names-the-message ()
+  "The refusal names the message the undeclared arm arrived on."
+  ;; Arrange / Act.
+  (let ((breach (agent-repl-test-wire-roster--breach
+                 #'agent-repl-wire-decode-roster-row
+                 "{\"workspace\":null,\"quantumFlux\":null}")))
+    ;; Assert.
+    (should (equal (car breach) "RosterRow"))))
+
 (provide 'test-wire-roster)
 
 

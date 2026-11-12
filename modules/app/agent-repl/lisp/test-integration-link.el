@@ -1418,6 +1418,105 @@ acceptance is told here, once a stream stands to own it."
       (should (equal (alist-get 'focus (car (agent-repl-itest--call-bodies daemon "ReportEditorFocus")))
                      '((unfocused)))))))
 
+(declare-function agent-repl--focus-report "notifications")
+
+(ert-deftest agent-repl-itest-link-an-unfocused-report-reaches-the-daemon-as-unfocused ()
+  "`agent-repl--focus-report' tells the live daemon Emacs is unfocused.
+The daemon decides every desktop banner on this report; Emacs posts none."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-real-hooks daemon
+      (agent-repl-itest--await-call daemon "ReportEditorFocus")
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil)))
+        ;; Act.
+        (agent-repl--focus-report)
+        (agent-repl-itest--await-call daemon "ReportEditorFocus" 2)
+        ;; Assert.
+        (should (equal (alist-get 'focus (car (last (agent-repl-itest--call-bodies
+                                                     daemon "ReportEditorFocus"))))
+                       '((unfocused))))))))
+
+(ert-deftest agent-repl-itest-link-a-focused-report-reaches-the-daemon-as-focused ()
+  "`agent-repl--focus-report' tells the live daemon Emacs is focused once it is."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-real-hooks daemon
+      (agent-repl-itest--await-call daemon "ReportEditorFocus")
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) t)))
+        ;; Act.
+        (agent-repl--focus-report)
+        (agent-repl-itest--await-call daemon "ReportEditorFocus" 2)
+        ;; Assert.
+        (should (equal (alist-get 'focus (car (last (agent-repl-itest--call-bodies
+                                                     daemon "ReportEditorFocus"))))
+                       '((focused))))))))
+
+(defvar agent-repl-link--reconnect-timer)
+
+(ert-deftest agent-repl-itest-link-a-daemon-that-goes-away-takes-the-link-down ()
+  "The daemon exiting drops the link at the transport, with nobody telling Emacs to."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      ;; Act.
+      (agent-repl-itest--stop-daemon primary t)
+      ;; Assert.
+      (agent-repl-itest--wait-until (lambda () (not (agent-repl-link-up-p)))
+                                    nil "the link to go down when the daemon exits")
+      (should-not (agent-repl-link-up-p)))))
+
+(ert-deftest agent-repl-itest-link-a-dropped-link-arms-the-reconnect-loop ()
+  "An outage is not absorbed: a dropped link leaves the reconnect timer armed."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      ;; Act.
+      (agent-repl-itest--stop-daemon primary t)
+      ;; Assert.
+      (agent-repl-itest--wait-until (lambda () (timerp agent-repl-link--reconnect-timer))
+                                    nil "the reconnect loop to be armed")
+      (should (timerp agent-repl-link--reconnect-timer)))))
+
+(ert-deftest agent-repl-itest-link-the-link-returns-when-a-daemon-returns ()
+  "A daemon back on the same state dir brings the link back up."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((state-dir (agent-repl-itest-daemon-state-dir primary)))
+        (agent-repl-itest--stop-daemon primary t)
+        (agent-repl-itest--wait-until (lambda () (not (agent-repl-link-up-p)))
+                                      nil "the link to go down")
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                ;; Act.
+                (agent-repl-itest--wait-until #'agent-repl-link-up-p
+                                              nil "the link to come back")
+                ;; Assert.
+                (should (agent-repl-link-up-p)))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-link-the-reconnect-loop-stands-down-once-the-link-is-up ()
+  "A timer still armed on a live link would keep dialing forever."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((state-dir (agent-repl-itest-daemon-state-dir primary)))
+        (agent-repl-itest--stop-daemon primary t)
+        (agent-repl-itest--wait-until (lambda () (timerp agent-repl-link--reconnect-timer))
+                                      nil "the reconnect loop to be armed")
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                ;; Act.
+                (agent-repl-itest--wait-until #'agent-repl-link-up-p
+                                              nil "the link to come back")
+                ;; Assert.
+                (agent-repl-itest--wait-until (lambda () (null agent-repl-link--reconnect-timer))
+                                              nil "the reconnect loop to stand down")
+                (should (null agent-repl-link--reconnect-timer)))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
 (ert-deftest agent-repl-itest-link-reload-elisp-for-another-root-is-refused ()
   "A reload naming another checkout is refused at ERROR; the link stays up."
   ;; Arrange.

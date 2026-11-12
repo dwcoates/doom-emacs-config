@@ -305,29 +305,6 @@ func composerText(e *Emacs, buffer string) string {
 // 23. DiscardInputClearsTheComposer
 // ---------------------------------------------------------------------------
 
-// testEmacsDiscardInputClearsTheComposer is scenario 23: the composer empties
-// and NOTHING was submitted.
-//
-// The negative half needs no probe window: `agent-repl-discard-input' is
-// synchronous and returns before the readback, so a submission it made would
-// already be in the observer. The observer is proved live by every other
-// scenario in this file.
-func testEmacsDiscardInputClearsTheComposer(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-	armSubmissionObserver(t, e)
-	typeIntoComposer(e, s.Input, "this draft is going nowhere")
-
-	runInComposer(e, s.Input, "agent-repl-discard-input")
-
-	if got := composerText(e, s.Input); got != "" {
-		t.Errorf("the composer still holds %q after a discard, want it empty", got)
-	}
-	if got := observedSubmissionCount(e); got != 0 {
-		t.Errorf("a discard submitted %d prompts, want none", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 24. DeferredPromptIsSubmittedDeferredAtOnce
 // ---------------------------------------------------------------------------
@@ -335,31 +312,6 @@ func testEmacsDiscardInputClearsTheComposer(t *testing.T) {
 // ---------------------------------------------------------------------------
 // 25. HistoryRecallRestoresTheLastPrompt
 // ---------------------------------------------------------------------------
-
-// testEmacsHistoryRecallRestoresTheLastPrompt is scenario 25.
-//
-// History is pushed on ACCEPTANCE, not on the keystroke, so the recall waits
-// on the composer being cleared — which is the acceptance's own visible act —
-// rather than on a duration.
-func testEmacsHistoryRecallRestoresTheLastPrompt(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-
-	const submitted = "remember this one for the history"
-	typeIntoComposer(e, s.Input, submitted)
-	e.KeysIn(s.Input, "RET")
-
-	e.AwaitEval("the daemon's acceptance to clear the composer",
-		`(with-current-buffer `+elispString(s.Input)+` (buffer-string))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "" })
-
-	runInComposer(e, s.Input, "agent-repl--history-prev")
-
-	if got := composerText(e, s.Input); got != submitted {
-		t.Errorf("history recall put %q in the composer, want the previously submitted %q",
-			got, submitted)
-	}
-}
 
 // installArmObserver defines `agent-repl-e2e--arm-of', which answers a
 // workspace's current status arm out of the roster's own indexes.

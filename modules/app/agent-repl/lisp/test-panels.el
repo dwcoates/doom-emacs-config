@@ -4690,6 +4690,35 @@ it is covered by the mount, not by the user's work."
             (should (memq placeholder (agent-repl--panels-own-buffers "test-ws"))))
         (kill-buffer placeholder)))))
 
+(ert-deftest agent-repl-test-panels-open-placeholder-answers-open-progress-s-buffer ()
+  "The placeholder lookup answers what open-progress.el answers for WS."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder)
+             (lambda (ws) (and (equal ws "test-ws") 'the-placeholder))))
+    ;; Act / Assert
+    (should (eq (agent-repl--panels-open-placeholder "test-ws") 'the-placeholder))))
+
+(ert-deftest agent-repl-test-panels-open-placeholder-is-nil-without-open-progress ()
+  "With open-progress.el not loaded, the placeholder lookup answers nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder) nil))
+    ;; Act / Assert
+    (should-not (agent-repl--panels-open-placeholder "test-ws"))))
+
+(ert-deftest agent-repl-test-panels-open-placeholder-is-asked-only-through-the-helper ()
+  "panels.el asks open-progress.el for the placeholder in one place only."
+  ;; Arrange
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "panels.el" agent-repl-test-panels--lisp-dir))
+                  (buffer-string))))
+    ;; Act
+    (let ((calls (cl-loop with start = 0
+                          while (string-match "(agent-repl--open-progress-placeholder " source start)
+                          count t do (setq start (match-end 0)))))
+      ;; Assert
+      (should (= calls 1)))))
+
 (ert-deftest agent-repl-test-panels-a-frame-showing-the-placeholder-is-covered ()
   "A frame holding only the placeholder is covered by the mount."
   ;; Arrange
@@ -4987,3 +5016,266 @@ Running the restore again on no view would decline and mount again without end."
         (agent-repl--panels-mount-awaited-view "my-ws")
         ;; Assert
         (should (equal restored '("my-ws")))))))
+
+;;;; ---- Tests: the panel lifecycle through the gui frontend on real windows ----
+
+;; These drive the module's own commands (`agent-repl-simple', `agent-repl',
+;; `agent-repl-focus-input') through the REAL gui frontend registration and the
+;; frame's REAL windows.  The one boundary faked is the webview itself: batch
+;; Emacs has no xwidget support, so `agent-repl--frontend-ensure-webview-buffer'
+;; hands back an ordinary buffer, and the sidebar's web view is its own
+;; boundary.  The daemon is not involved: what the panels do on a frame is
+;; Emacs alone.
+
+(defmacro agent-repl-test-panels--with-gui-workspace (ws &rest body)
+  "Run BODY with WS the current gui workspace on a one-window frame.
+The gui frontend, the toggle, the open ladder and the window layout are
+all real; the webview is a plain buffer named like the real one, bound
+as WS's `:frontend-buffer' by the mount, and the host subscription is
+answered as held.  The frame's windows are restored afterwards."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl--open-progress (make-hash-table :test 'equal))
+           (wconf (current-window-configuration)))
+       (agent-repl--ws-put ,ws :frontend 'gui)
+       (agent-repl--ws-put ,ws :project-dir "/tmp/agent-repl-panels-gui")
+       (unwind-protect
+           (cl-letf (((symbol-function '+workspace-current-name) (lambda () ,ws))
+                     ((symbol-function 'use-region-p) (lambda () nil))
+                     ((symbol-function 'agent-repl--frontend-require-xwidget) #'ignore)
+                     ((symbol-function 'agent-repl--frontend-validate-for-ws) #'ignore)
+                     ((symbol-function 'agent-repl--panels-ensure-host-subscription)
+                      (lambda (_ws) t))
+                     ((symbol-function 'agent-repl-sidebar-view-show) #'ignore)
+                     ((symbol-function 'agent-repl-sidebar-view-hide) #'ignore)
+                     ((symbol-function 'agent-repl--call-in-background-workspace)
+                      (lambda (_ws fn) (funcall fn)))
+                     ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                      (lambda (ws)
+                        (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+                          (unless (buffer-live-p buf)
+                            (setq buf (generate-new-buffer
+                                       (format "*agent-frontend-%s*" ws)))
+                            (agent-repl--ws-put ws :frontend-buffer buf))
+                          buf))))
+             (delete-other-windows)
+             ,@body)
+         (set-window-configuration wconf)
+         (dolist (key '(:frontend-buffer :input-buffer))
+           (let ((buf (agent-repl--ws-get ,ws key)))
+             (when (buffer-live-p buf) (kill-buffer buf))))
+         (when-let ((entry (agent-repl--open-progress-entry ,ws)))
+           (when (buffer-live-p (plist-get entry :buffer))
+             (kill-buffer (plist-get entry :buffer))))))))
+
+(defun agent-repl-test-panels--panel-window-count ()
+  "Return how many windows on the frame show an agent panel buffer."
+  (cl-count-if (lambda (win)
+                 (string-match-p "\\`\\*agent-\\(frontend\\|panel-input\\)-"
+                                 (buffer-name (window-buffer win))))
+               (window-list)))
+
+(ert-deftest agent-repl-test-panels-a-plain-close-keeps-the-webview-alive ()
+  "`SPC o c' over open panels hides them and leaves the webview buffer live."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (should (= (agent-repl-test-panels--panel-window-count) 2))
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should (= (agent-repl-test-panels--panel-window-count) 0))
+    (should (buffer-live-p (agent-repl--ws-get "gui-ws" :frontend-buffer)))))
+
+(ert-deftest agent-repl-test-panels-a-hidden-webview-reads-as-running ()
+  "After a plain close the registry still answers running, so the toggle SHOWS."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should (funcall (agent-repl-frontend-running-p-fn
+                      (agent-repl--ws-frontend "gui-ws"))
+                     "gui-ws"))))
+
+(ert-deftest agent-repl-test-panels-a-second-plain-toggle-shows-the-same-webview ()
+  "The press after a plain close puts the SAME webview buffer back on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (let ((webview (agent-repl--ws-get "gui-ws" :frontend-buffer)))
+      (agent-repl-simple)
+      ;; Act
+      (agent-repl-simple)
+      ;; Assert
+      (should (= (agent-repl-test-panels--panel-window-count) 2))
+      (should (eq (agent-repl--ws-get "gui-ws" :frontend-buffer) webview))
+      (should (get-buffer-window webview)))))
+
+(ert-deftest agent-repl-test-panels-a-kill-close-puts-the-panel-windows-away ()
+  "`SPC o C' over open panels leaves no panel window on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (should (= (agent-repl-test-panels--panel-window-count) 2))
+    (cl-letf (((symbol-function 'agent-repl--frontend-release-workspace-webview) #'ignore))
+      ;; Act
+      (agent-repl))
+    ;; Assert
+    (should (= (agent-repl-test-panels--panel-window-count) 0))))
+
+(ert-deftest agent-repl-test-panels-a-kill-close-leaves-the-tab-order-alone ()
+  "`SPC o C' neither moves the workspace to the back nor reorders any tab."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl-roster--tab-order '("other-a" "gui-ws" "other-b")))
+      (agent-repl-simple)
+      (cl-letf (((symbol-function 'agent-repl--frontend-release-workspace-webview) #'ignore))
+        ;; Act
+        (agent-repl))
+      ;; Assert
+      (should (equal agent-repl-roster--tab-order '("other-a" "gui-ws" "other-b"))))))
+
+(ert-deftest agent-repl-test-panels-focus-input-from-the-webview-selects-the-composer ()
+  "`SPC o v' pressed in the webview window selects the composer window."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (select-window (get-buffer-window (agent-repl--ws-get "gui-ws" :frontend-buffer)))
+    ;; Act
+    (agent-repl-focus-input)
+    ;; Assert
+    (should (eq (window-buffer (selected-window))
+                (agent-repl--ws-get "gui-ws" :input-buffer)))))
+
+(defun agent-repl-test-panels--window-buffer-names ()
+  "Return the frame's window list as buffer names, in window order."
+  (mapcar (lambda (win) (buffer-name (window-buffer win))) (window-list)))
+
+(ert-deftest agent-repl-test-panels-the-plain-close-restores-the-work-layout-it-covered ()
+  "Panels opened over a two-window work layout close back to that layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((a (get-buffer-create "*fs-work-a*")) (b (get-buffer-create "*fs-work-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            (let ((before (agent-repl-test-panels--window-buffer-names)))
+              (agent-repl-simple)
+              ;; Act
+              (agent-repl-simple)
+              ;; Assert
+              (should (equal (agent-repl-test-panels--window-buffer-names) before))))
+        (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-fullscreen-maximizes-the-selected-work-window-alone ()
+  "`SPC w f' from a work window leaves exactly that window and saves a layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl--window-fullscreen-config nil)
+          (a (get-buffer-create "*fs-max-a*")) (b (get-buffer-create "*fs-max-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            ;; Act
+            (agent-repl-fullscreen-and-focus)
+            ;; Assert
+            (should agent-repl--window-fullscreen-config)
+            (should (equal (agent-repl-test-panels--window-buffer-names) '("*fs-max-b*"))))
+        (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-fullscreen-second-press-restores-the-same-windows-in-order ()
+  "The second `SPC w f' brings back the same buffers in the same order and drops the saved layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl--window-fullscreen-config nil)
+          (a (get-buffer-create "*fs-res-a*")) (b (get-buffer-create "*fs-res-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            (let ((before (agent-repl-test-panels--window-buffer-names)))
+              (agent-repl-fullscreen-and-focus)
+              ;; Act
+              (agent-repl-fullscreen-and-focus)
+              ;; Assert
+              (should-not agent-repl--window-fullscreen-config)
+              (should (equal (agent-repl-test-panels--window-buffer-names) before))))
+        (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-delete-other-windows-over-panels-keeps-the-users-window-through-the-close ()
+  "A sweep from the composer, repaired by the reconciler, closes onto the user's own window.
+The landing the panels were first opened over must not come back over it."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((landing (get-buffer-create "*dow-landing*"))
+          (work (get-buffer-create "*dow-work*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer landing)
+            (agent-repl-simple)
+            (select-window (get-buffer-window (agent-repl--ws-get "gui-ws" :input-buffer)))
+            (delete-other-windows)
+            (switch-to-buffer work)
+            ;; The reconciler's repair, which a timer runs in a live Emacs.
+            (agent-repl-window--ensure-layout)
+            (should (= (agent-repl-test-panels--panel-window-count) 2))
+            ;; Act
+            (agent-repl-simple)
+            ;; Assert
+            (should (= (agent-repl-test-panels--panel-window-count) 0))
+            (should (get-buffer-window work))
+            (should-not (get-buffer-window landing)))
+        (kill-buffer landing) (kill-buffer work)))))
+
+(defun agent-repl-test-panels--ladder-trail (ws body)
+  "Run BODY and return WS's open-progress phases as published, in order.
+\"gone\" stands for the registry holding no entry."
+  (let* ((trail nil)
+         (hook (lambda ()
+                (push (let ((entry (gethash ws agent-repl--open-progress)))
+                        (if entry (format "%s" (plist-get entry :phase)) "gone"))
+                      trail))))
+    (let ((agent-repl-open-progress-change-functions (list hook)))
+      (funcall body))
+    (nreverse trail)))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-opens-on-requested ()
+  "`SPC o c' raises a ladder whose first published phase is :requested."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple)))
+      ;; Assert
+      (should (equal (car trail) ":requested")))))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-rests-only-on-stages ()
+  "Every phase the ladder passes before its end is a declared stage."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let* ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple))
+           (stages (mapcar (lambda (entry) (format "%s" (car entry)))
+                           agent-repl--open-progress-stages)))
+      ;; Assert
+      (dolist (phase (butlast trail))
+        (should (member phase stages))))))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-ends-with-the-panel-up-and-no-terminal-phase ()
+  "The ladder ends with the placeholder finished and the real panels on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple)))
+      ;; Assert
+      (should (equal (car (last trail)) "gone"))
+      (dolist (phase trail)
+        (should-not (member phase (mapcar (lambda (p) (format "%s" p))
+                                          agent-repl--open-progress-terminal-phases))))
+      (should (= (agent-repl-test-panels--panel-window-count) 2)))))

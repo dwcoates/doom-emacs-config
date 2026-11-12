@@ -141,49 +141,18 @@ func TestHarness(t *testing.T) {
 	)
 }
 
-// TestEmacsLayout is Emacs's windows, panels, composer and file routing.
-func TestEmacsLayout(t *testing.T) {
-	scenario(t,
-		testEmacsPlainCloseTogglesThePanelsBack,
-		testEmacsKillCloseLeavesTheTabOrderAlone,
-		testEmacsFocusInputSelectsTheComposer,
-		testEmacsFullscreenTogglesAndRestores,
-		testEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout,
-		testEmacsOpenProgressLadderReachesRendered,
-		testEmacsDiscardInputClearsTheComposer,
-		testEmacsHistoryRecallRestoresTheLastPrompt,
-		testEmacsAnUnroutableFileRecordsARefusal,
-		testEmacsPendingPlacementResolvesAfterRosterReconcile,
-		testEmacsPopupOpensADirectoryInDired,
-	)
-}
-
 // TestEmacsWorkspaces is Emacs's workspaces, tabs, roster arms, banners and chat threads.
 func TestEmacsWorkspaces(t *testing.T) {
 	scenario(t,
 		testEmacsProofOfLife,
-		testEmacsCreateWorkspaceAppearsOnTheRoster,
-		testEmacsRegisterAnExistingDirectory,
-		testEmacsCloseWithAHeldPromptDoesNotTearTheTabDown,
-		testEmacsCloseThenKillDoesNotWedgeEmacs,
-		testEmacsRosterArmsPaintTheTabInOrder,
-		testEmacsUnknownRosterArmIsRefusedLoudly,
-		testEmacsPermissionAskFiresTheAttentionMarker,
-		testEmacsUnfocusedTurnEndRaisesTheDaemonsBanner,
-		testEmacsDrainScheduleDrawsTheStandingBanner,
 		testEmacsReachesAChatThreadOffTheTabBar,
-		testEmacsGuiRegistryNamesOnlyLiveCapabilities,
-		testEmacsGuiDurableSessionIdNamesTheVendorConversation,
 	)
 }
 
 // TestEmacsDaemonLifecycle is Emacs's daemon: cold start, restarts, handovers, reconnects and a daemon that is not there.
 func TestEmacsDaemonLifecycle(t *testing.T) {
 	scenario(t,
-		testEmacsLauncherArgvCarriesBothAccountRoots,
-		testEmacsSubmitWithNoDaemonIsRefusedLoudly,
 		testEmacsTabsRehydrateFromTheRosterOnConnect,
-		testEmacsDaemonDownSurfacesAndReconnects,
 		testEmacsHandoverTransfersAtFreeness,
 		testEmacsRestartKeepsTheSelectedWorkspace,
 		testEmacsForcedRestartInterruptsTheTurn,

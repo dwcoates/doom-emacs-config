@@ -147,6 +147,20 @@ system does."
           (should (eq (buffer-local-value 'major-mode buffer) 'dired-mode))
         (kill-buffer buffer)))))
 
+(ert-deftest agent-repl-test-popup-open-routes-a-directory-through-the-popup-rule ()
+  "The dired buffer for a directory is the popup rule's own: right side, like a file."
+  ;; Arrange
+  (agent-repl-test-popup--with-tree dir
+    ;; Act
+    (let ((buffer (agent-repl-test-popup--with-stubbed-display
+                    (agent-repl-popup-open dir))))
+      ;; Assert
+      (unwind-protect
+          (progn
+            (should (agent-repl-popup-buffer-p buffer))
+            (should (eq (plist-get agent-repl-popup-rule :side) 'right)))
+        (kill-buffer buffer)))))
+
 ;;;; ---- Refusals ----
 
 (ert-deftest agent-repl-test-popup-open-refuses-a-missing-path ()
