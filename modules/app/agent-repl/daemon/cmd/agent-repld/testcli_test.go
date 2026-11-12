@@ -152,8 +152,12 @@ func TestBuildSelections(t *testing.T) {
 			File: "src/a.test.ts", Tests: &testrunv1.TestSelectionVitestFile_Named{Named: &testrunv1.TestSelectionVitestNamedTests{FullNames: []string{"one, with a comma", "two"}}}}}}}},
 		{name: "a whole vitest file outranks its names", sel: testSelections{vitest: []string{"a.test.ts=one", "a.test.ts"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_VitestFile{VitestFile: &testrunv1.TestSelectionVitestFile{
 			File: "src/a.test.ts", Tests: &testrunv1.TestSelectionVitestFile_All{All: &testrunv1.TestSelectionVitestAllTests{}}}}}}},
-		{name: "named ERT tests", sel: testSelections{ert: []string{"test-x.el=a-test,b-test"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
+		{name: "named ERT tests of a file named by its path", sel: testSelections{ert: []string{"./test-x.el=a-test,b-test"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
 			File: "src/test-x.el", Tests: &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: []string{"a-test", "b-test"}}}}}}}},
+		{name: "an ERT file named by an absolute path inside the worktree", sel: testSelections{ert: []string{"/wt/caller/lisp/test-x.el=a-test"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
+			File: "lisp/test-x.el", Tests: &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: []string{"a-test"}}}}}}}},
+		{name: "a bare ERT file name, which the runner finds in the ERT suite's directory", sel: testSelections{ert: []string{"test-x.el=a-test"}}, want: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
+			File: "test-x.el", Tests: &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: []string{"a-test"}}}}}}}},
 		{name: "whole suites by name", sel: testSelections{suites: []string{"daemon", "ert"}}, want: []*testrunv1.TestSelection{
 			{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: "daemon"}}},
 			{Target: &testrunv1.TestSelection_Suite{Suite: &testrunv1.TestSelectionSuite{Name: "ert"}}}}},
@@ -183,6 +187,7 @@ func TestBuildSelectionsRefuses(t *testing.T) {
 		{name: "a path outside the worktree", sel: testSelections{goSel: []string{"../../elsewhere"}}, want: "outside the workspace's worktree"},
 		{name: "an empty Go test name", sel: testSelections{goSel: []string{"p=TestA,,TestB"}}, want: "an empty name in the list"},
 		{name: "an empty vitest name", sel: testSelections{vitest: []string{"a.test.ts= "}}, want: "an empty test name"},
+		{name: "an ERT file outside the worktree", sel: testSelections{ert: []string{"/elsewhere/lisp/test-x.el=a-test"}}, want: "outside the workspace's worktree"},
 		{name: "an empty ERT name", sel: testSelections{ert: []string{"x.el=a,"}}, want: "an empty name in the list"},
 		{name: "an empty harness group", sel: testSelections{harness: []string{"t.sh=,g"}}, want: "an empty name in the list"},
 	}
@@ -271,6 +276,22 @@ func TestTestRunNamesAHandCutWorktreeAndResolvesItsSelectionThere(t *testing.T) 
 	}
 	if got := daemon.got.GetRun().GetSelections()[0].GetGoPackage().GetPackageDir(); got != "src/pkg" {
 		t.Fatalf("package dir = %q, want src/pkg: relative to the named worktree", got)
+	}
+}
+
+func TestTestRunSendsABareERTFileNameAsWrittenFromOutsideTheNamedWorktree(t *testing.T) {
+	// Arrange: the caller stands in /wt/caller/src, which is not in /wt/cut.
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-worktree", "/wt/cut", "-ert", "test-x.el=a-test")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if got := daemon.got.GetRun().GetSelections()[0].GetErtFile().GetFile(); got != "test-x.el" {
+		t.Fatalf("ERT file = %q, want the bare name the runner resolves in the ERT suite's directory", got)
 	}
 }
 

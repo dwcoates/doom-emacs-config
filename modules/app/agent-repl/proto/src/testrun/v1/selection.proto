@@ -165,7 +165,9 @@ message TestSelectionVitestNamedTests {
 
 // One ERT test file's tests: all of them, or named ones.
 message TestSelectionErtFile {
-  // REQUIRED. The test file, relative to the repository root.
+  // REQUIRED. The test file, relative to the repository root, or a bare
+  // file name (no directory), which names the file of that name in the ERT
+  // suite's own directory. Both forms of one file select the same unit.
   string file = 1;
   // REQUIRED. Which of the file's tests run.
   oneof tests {

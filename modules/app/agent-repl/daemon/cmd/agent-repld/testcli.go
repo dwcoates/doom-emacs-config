@@ -247,7 +247,7 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 	}
 	for _, v := range ertSel {
 		file, names, named := strings.Cut(v, "=")
-		path, err := repoPath(file)
+		path, err := ertFile(repoPath, file)
 		if err != nil {
 			return nil, err
 		}
@@ -278,6 +278,17 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Harness{Harness: sel}})
 	}
 	return run, nil
+}
+
+// ertFile is an -ert file as the selection carries it: a bare file name
+// (no directory) as written, which the runner resolves in the ERT suite's own
+// directory, so it names the same file from any working directory; any other
+// path relative to the worktree.
+func ertFile(repoPath func(string) (string, error), file string) (string, error) {
+	if file != "" && !strings.ContainsRune(file, filepath.Separator) {
+		return file, nil
+	}
+	return repoPath(file)
 }
 
 // worktreePath answers a function turning a path (relative to cwd, or
