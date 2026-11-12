@@ -160,6 +160,12 @@ type Orchestrator interface {
 	// which gives back its lease, its queue entry, its ledger interval and its
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
+	// Requeue puts a merge that left its queue without landing back in line
+	// as itself: the same workspace, branch and request (offqueue.go).
+	Requeue(ctx context.Context, req Requeue) (Requeued, error)
+	// Discard ends a request standing off its queue without landing it;
+	// CLOSE closes an async merge's merge workspace (offqueue.go).
+	Discard(ctx context.Context, ws ids.WorkspaceID, close func(context.Context) error) (Discarded, error)
 	// SetGithubDeployments installs, WHOLE, every workspace whose owned pull
 	// request stands in a GitHub merge queue (githubdeploy.go): each is drawn
 	// as deploying, and at its GitHub place in its repository's merge queue.

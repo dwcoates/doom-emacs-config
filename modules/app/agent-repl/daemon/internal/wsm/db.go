@@ -599,15 +599,27 @@ type DB interface {
 	// ReturnAdmittedMerge puts an admitted merge with no run back in line at
 	// its own place, waiting, under its ledger identity.
 	ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error
-	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
-	// CLOSES, when set, closes the workspace in the same transaction
-	// (markClosedInTx): an evicted async merge's merge workspace.
-	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string, closes *Closure) error
-	// DropAdmittedMerge drops an admitted merge with no run: its entry, its
-	// merge lease and that lease's progress record, in one transaction.
-	// CLOSES closes the workspace in the same transaction, as for
-	// RemoveMergeQueueEntry.
-	DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string, closes *Closure) error
+	// RemoveMergeQueueEntry takes one entry off its queue with the cause it
+	// left for, through the one transition (leaveQueueInTx): a landing ends
+	// its request, any other cause keeps it off the queue.
+	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// DropAdmittedMerge drops an admitted merge with no run: its entry
+	// (through the one transition), its merge lease and that lease's progress
+	// record, in one transaction.
+	DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error
+	// OffQueueMerges loads every request standing off its queue, oldest
+	// departure first.
+	OffQueueMerges(ctx context.Context) ([]OffQueueMerge, error)
+	// OffQueueMergeOf answers one workspace's request off its queue; false
+	// when it holds none.
+	OffQueueMergeOf(ctx context.Context, id WorkspaceID) (OffQueueMerge, bool, error)
+	// RequeueOffQueueMerge puts a request off its queue back on it as
+	// itself, REQUESTED, at PLACE, recording MODEL (when set) as its
+	// session's model, in one transaction.
+	RequeueOffQueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place RequeuePlacement, version *VersionIncrement, model string, at time.Time) (MergeSource, error)
+	// DiscardOffQueueMerge ends a workspace's own merge's request off its
+	// queue.
+	DiscardOffQueueMerge(ctx context.Context, id WorkspaceID) error
 	// MergeQueue loads one repository's queue in order, all-or-nothing.
 	MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error)
 	// AllMergeQueues loads every repository's queue for the boot re-enqueue,

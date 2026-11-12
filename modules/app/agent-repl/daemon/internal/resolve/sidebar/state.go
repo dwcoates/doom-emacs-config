@@ -435,6 +435,9 @@ type rosterState struct {
 	// github is the GitHub merge queues' share (Resolver.SetGithubQueue), in
 	// queue order.
 	github []GithubQueueEntry
+	// offQueue are the merges off their queues (Resolver.SetOffQueue),
+	// oldest departure first.
+	offQueue []OffQueueEntry
 	// gates are the shown cold gates by workspace (SetColdGate), each
 	// carried to the webhost's dock while its workspace is listed open.
 	gates map[ids.WorkspaceID]coldGate

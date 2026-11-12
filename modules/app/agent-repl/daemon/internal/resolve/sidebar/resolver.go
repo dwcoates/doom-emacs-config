@@ -652,6 +652,18 @@ func (r *resolver) SetGithubQueue(entries []GithubQueueEntry) {
 		func() { r.state.github = entries })
 }
 
+// SetOffQueue replaces the merges off their queues as the roster draws them.
+func (r *resolver) SetOffQueue(entries []OffQueueEntry) {
+	ws := make([]ids.WorkspaceID, 0, len(entries))
+	for _, e := range entries {
+		ws = append(ws, e.Workspace)
+	}
+	r.mutate("daemon.sidebar.set_off_queue", "the roster took the merges standing off their queues",
+		dlog.Context{"workspaces": ids.Strings(ws)},
+		r.log.Global(),
+		func() { r.state.offQueue = entries })
+}
+
 // SetColdGate installs, or with nil lifts, WS's shown cold gate.
 func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate) {
 	if (row == nil) != (gate == nil) {

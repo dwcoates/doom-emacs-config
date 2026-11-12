@@ -293,6 +293,14 @@ func (c *cliClient) UpdateMergeQueue(_ context.Context, req *connect.Request[age
 	return connect.NewResponse(&agentreplv1.UpdateMergeQueueResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) RequeueMerge(_ context.Context, req *connect.Request[agentreplv1.RequeueMergeRequest]) (*connect.Response[agentreplv1.RequeueMergeResponse], error) {
+	return connect.NewResponse(&agentreplv1.RequeueMergeResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) DiscardMerge(_ context.Context, req *connect.Request[agentreplv1.DiscardMergeRequest]) (*connect.Response[agentreplv1.DiscardMergeResponse], error) {
+	return connect.NewResponse(&agentreplv1.DiscardMergeResponse{}), c.record(req.Msg)
+}
+
 // cliFixture is a daemon serving a roster of the calling workspace "caller"
 // at /wt/caller, its peer "peer" at /wt/peer, and two workspaces named "twin".
 type cliFixture struct {
@@ -3213,3 +3221,95 @@ func TestPlaceMarksEveryArrangementItSendsAsTheAgents(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// offQueueListing is queues listing each (name, workspace) pair off a queue.
+func offQueueListing(entries ...[2]string) *agentreplv1.GetMergeQueueStatusResponse {
+	queue := &agentreplv1.MergeQueueStatus{}
+	for _, e := range entries {
+		queue.OffQueue = append(queue.OffQueue, &agentreplv1.MergeQueueStatusOffQueue{Name: e[0], Workspace: &workspacev1.WorkspaceRef{Id: e[1]}})
+	}
+	return &agentreplv1.GetMergeQueueStatusResponse{Result: &agentreplv1.GetMergeQueueStatusResponse_Success{Success: &agentreplv1.GetMergeQueueStatusSuccess{Queues: []*agentreplv1.MergeQueueStatus{queue}}}}
+}
+
+func TestRequeueAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantFront bool
+		wantModel string
+		wantPart  bool
+	}{
+		{name: "at the back by default", args: []string{"pt3-sentences"}},
+		{name: "at the front", args: []string{"-placement", "front", "pt3-sentences"}, wantFront: true},
+		{name: "on a model", args: []string{"-model", "claude-opus-5-5", "pt3-sentences"}, wantModel: "claude-opus-5-5"},
+		{name: "with an adopted merge's increment", args: []string{"-version-part", "minor", "-changelog-line", "Merges land", "pt3-sentences"}, wantPart: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the name is listed off a queue, and in no line.
+			f := newCLIFixture()
+			f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{"requeue"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.RequeueMergeRequest](t, f)
+			if req.GetWorkspace().GetId() != "ws-hidden-merge" || (req.GetPlacement().GetFront() != nil) != tt.wantFront ||
+				req.GetModel().GetName() != tt.wantModel || (req.GetVersion() != nil) != tt.wantPart || req.GetRequester() == nil {
+				t.Fatalf("request = %v, want ws-hidden-merge front %v model %q increment %v from the caller", req, tt.wantFront, tt.wantModel, tt.wantPart)
+			}
+		})
+	}
+}
+
+func TestDiscardAsksForTheMergeOffItsQueueByItsName(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.queues = offQueueListing([2]string{"pt3-sentences", "ws-hidden-merge"})
+
+	// Act
+	code := f.run(mergeQueueNoun, "discard", "pt3-sentences")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if req := only[*agentreplv1.DiscardMergeRequest](t, f); req.GetWorkspace().GetId() != "ws-hidden-merge" || req.GetRequester() == nil {
+		t.Fatalf("request = %v, want ws-hidden-merge discarded by the caller", req)
+	}
+}
+
+// TestTheOffQueueVerbsReadOnlyTheMergesOffTheQueues pins the shared mergeArg:
+// a requeue or discard addresses a name listed off a queue, never one in line,
+// and a dequeue the reverse.
+func TestTheOffQueueVerbsReadOnlyTheMergesOffTheQueues(t *testing.T) {
+	tests := []struct {
+		verb   string
+		queues *agentreplv1.GetMergeQueueStatusResponse
+		stderr string
+	}{
+		{verb: "requeue", queues: queuesListing([2]string{"peer", "ws-a"}), stderr: `no merge off any queue is named "peer"`},
+		{verb: "discard", queues: queuesListing([2]string{"peer", "ws-a"}), stderr: `no merge off any queue is named "peer"`},
+		{verb: "requeue", queues: offQueueListing([2]string{"peer", "ws-a"}, [2]string{"peer", "ws-b"}), stderr: `2 merges off the queues are named "peer"`},
+		{verb: "dequeue", queues: offQueueListing([2]string{"peer", "ws-a"}), stderr: `no merge in any queue is named "peer"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.verb+" "+tt.stderr, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.queues = tt.queues
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.verb, "peer")
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.stderr) {
+				t.Fatalf("exit %d, stderr %q, want a failure saying %q", code, f.errOut.String(), tt.stderr)
+			}
+		})
+	}
+}

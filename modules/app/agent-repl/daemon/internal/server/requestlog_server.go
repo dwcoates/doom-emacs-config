@@ -937,6 +937,20 @@ func (s *requestLoggingServer) UnsubscribeMergeQueue(
 	return serveUnary(s, ctx, "UnsubscribeMergeQueue", req, s.server.UnsubscribeMergeQueue)
 }
 
+func (s *requestLoggingServer) RequeueMerge(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.RequeueMergeRequest],
+) (*connect.Response[agentreplv1.RequeueMergeResponse], error) {
+	return serveUnary(s, ctx, "RequeueMerge", req, s.server.RequeueMerge)
+}
+
+func (s *requestLoggingServer) DiscardMerge(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.DiscardMergeRequest],
+) (*connect.Response[agentreplv1.DiscardMergeResponse], error) {
+	return serveUnary(s, ctx, "DiscardMerge", req, s.server.DiscardMerge)
+}
+
 func (s *requestLoggingServer) UnsubscribeWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UnsubscribeWorkspaceRequest],

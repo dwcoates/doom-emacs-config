@@ -95,6 +95,9 @@ type repoQueue struct {
 	// github are the repository's workspaces standing in a GitHub merge
 	// queue, in queue order.
 	github []GithubQueueEntry
+	// offQueue are the repository's merges off their queue, oldest departure
+	// first.
+	offQueue []OffQueueEntry
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
@@ -102,7 +105,7 @@ type repoQueue struct {
 // repository leaves the section as soon as its line empties and nothing
 // stands out of line). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0
+	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0 || len(q.offQueue) > 0
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
@@ -150,6 +153,24 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			Subject:    sub,
 			Place:      &frontendv1.RosterMergeQueueGithubPlace{Place: uint32(entry.Place), Total: uint32(entry.Total)},
 			QueuedAtMs: entry.QueuedAt.UnixMilli(),
+		})
+	}
+	for _, entry := range q.offQueue {
+		own, ok := byID[entry.Workspace]
+		if !ok {
+			log.Error(op, "a merge off its queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
+				"workspace_id": string(entry.Workspace), "invariant_violation": "a merge off its queue references a registered workspace"})
+			continue
+		}
+		sub, ok := subject(QueueEntry{Workspace: entry.Workspace, Credited: entry.Credited, Async: entry.Async, AsyncName: asyncName(own, entry.Async)})
+		if !ok {
+			continue
+		}
+		out.OffQueue = append(out.OffQueue, &frontendv1.RosterMergeQueueOffQueue{
+			Subject: sub,
+			Cause:   &frontendv1.RosterMergeQueueOffQueueCause{Text: entry.Cause},
+			Requeue: &frontendv1.RosterMergeQueueOffQueueRequeue{Merge: own.Ref()},
+			Discard: &frontendv1.RosterMergeQueueOffQueueDiscard{Merge: own.Ref()},
 		})
 	}
 	if len(q.line) == 0 {
@@ -265,6 +286,15 @@ func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMe
 	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode}
 }
 
+// asyncName is the name an async merge off its queue is drawn under: its
+// merge workspace's own, and none for a workspace's own merge.
+func asyncName(own wsm.Workspace, async bool) string {
+	if !async {
+		return ""
+	}
+	return own.Name
+}
+
 // workspacesByID indexes the registry's workspaces by id.
 func (r *resolver) workspacesByID() map[ids.WorkspaceID]wsm.Workspace {
 	byID := make(map[ids.WorkspaceID]wsm.Workspace, len(r.state.reg.Workspaces))
@@ -347,6 +377,24 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 		}
 		rq := out[ws.Repo]
 		rq.github = append(rq.github, entry)
+		out[ws.Repo] = rq
+	}
+	for _, entry := range r.state.offQueue {
+		ws, ok := byID[entry.Workspace]
+		if !ok {
+			log.Error(op, "a merge off its queue names a workspace the registry does not carry, so it is not drawn", dlog.Context{
+				"workspace_id": string(entry.Workspace), "invariant_violation": "a merge off its queue references a registered workspace"})
+			continue
+		}
+		// A CLOSE ENDS THE REQUEST in the close's own store write
+		// (wsm.markClosedInTx), and the roster learns of the close from the
+		// registry before the orchestrator's next set arrives, so a closed
+		// workspace's merge is already gone.
+		if ws.Closed {
+			continue
+		}
+		rq := out[ws.Repo]
+		rq.offQueue = append(rq.offQueue, entry)
 		out[ws.Repo] = rq
 	}
 	return out

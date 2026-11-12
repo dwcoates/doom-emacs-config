@@ -631,18 +631,11 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 		log.Error(op, "could not read the queue entry of a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
 		return err
 	}
-	closes, err := o.exitClosure(ctx, ws, cause)
-	if err != nil {
-		putBack()
-		log.Error(op, "could not tell whether the merge taken back for its resume closes a merge workspace; it is left to resume", withField(fields, "error", err.Error()))
-		return err
-	}
-	if err := o.deps.DB.DropAdmittedMerge(ctx, repo, ws, lease, string(cause), closes); err != nil {
+	if err := o.deps.DB.DropAdmittedMerge(ctx, repo, ws, lease, string(cause)); err != nil {
 		putBack()
 		log.Error(op, "could not drop a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
 		return err
 	}
-	o.closedOnExit(ctx, ws, cause, closes)
 	o.deps.Queue.OnLeaseChanged(ws)
 	o.sweepTrees(ctx, ws, doc.Subject.TargetDir, lease, true)
 	o.mu.Lock()
@@ -670,6 +663,9 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 // a conversation that has ended for good.
 func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.merge.workspace_closed"
+	// THE CLOSE ENDED ANY REQUEST THE WORKSPACE HELD OFF ITS QUEUE
+	// (wsm.markClosedInTx), so the roster stops drawing it.
+	o.publishOffQueue(ctx)
 	o.dropAsyncRequestsOf(ctx, ws)
 	if _, running := o.runFor(ws); running {
 		// A RUNNING MERGE ENDS WITH ITS WORKSPACE TOO. Left alone, a merge
@@ -727,16 +723,10 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		}
 	}
-	closes, err := o.exitClosure(ctx, ws, cause)
-	if err != nil {
-		log.Error(op, "could not tell whether a queued merge closes a merge workspace; it is not dropped", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
-		return err
-	}
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause), closes); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
 		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
 	}
-	o.closedOnExit(ctx, ws, cause, closes)
 	o.mu.Lock()
 	delete(o.repoOf, ws)
 	// THE LEDGER IDENTITY IS KEPT LONG ENOUGH TO END THE BUBBLE. It addresses
@@ -1795,45 +1785,3 @@ func heldByAnother(err error) (*wsm.LeaseHeldError, bool) {
 	return nil, false
 }
 
-// exitClosure answers the close a merge's queue exit makes in the exit's own
-// write: an ASYNC merge RELEASED by the user or the operator (an evict, a
-// dequeue) closes its merge workspace, which existed only to run that merge,
-// so nothing of the merge stays open once it is off the queue (2026-11-09:
-// the evicted `land-zettel-notifier` merge workspace stayed open, hidden, for
-// a day). Its worktree and branch stay: the work on the branch may be queued
-// again. Nil for every other exit: a requester's own merge, a failed merge
-// (whose merge workspace is the user's to finish), and an end under
-// something else ending.
-func (o *orchestrator) exitClosure(ctx context.Context, ws ids.WorkspaceID, cause AbandonCause) (*wsm.Closure, error) {
-	if !cause.releases() {
-		return nil, nil
-	}
-	record, err := o.deps.DB.Workspace(ctx, ws)
-	if err != nil {
-		return nil, fmt.Errorf("merge: reading whether the released %s is a merge workspace: %w", ws, err)
-	}
-	if record.MergeOf == nil {
-		return nil, nil
-	}
-	return &wsm.Closure{At: o.deps.Now(), By: wsm.CloseByDaemon}, nil
-}
-
-// closedOnExit records a queue exit that closed its merge workspace and
-// republishes the roster's durable half, which nothing else republishes for
-// the close. A failed republish is recorded; the close stands.
-func (o *orchestrator) closedOnExit(ctx context.Context, ws ids.WorkspaceID, cause AbandonCause, closes *wsm.Closure) {
-	const op = "daemon.merge.abandoned"
-	if closes == nil {
-		return
-	}
-	log := o.log(ctx, ws)
-	log.Info(op, "the released merge's merge workspace closed as it left the queue; its branch and worktree stay", dlog.Context{
-		"workspace": string(ws), "cause": string(cause)})
-	if o.deps.PublishRegistry == nil {
-		return
-	}
-	if err := o.deps.PublishRegistry(ctx); err != nil {
-		log.Error(op, "could not republish the roster after the released merge's merge workspace closed",
-			dlog.Context{"workspace": string(ws), "cause": string(cause), "error": err.Error()})
-	}
-}

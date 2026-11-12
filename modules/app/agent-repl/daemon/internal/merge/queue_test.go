@@ -2521,8 +2521,7 @@ func TestAHardStopInterruptsAWaitingMergesBackgroundRebase(t *testing.T) {
 }
 
 // markMergeWorkspace records theWorkspace as a merge workspace forked for
-// otherWorkspace, registered as its requester, which is what exitClosure
-// reads.
+// REQUESTER, registered as its requester.
 func markMergeWorkspace(h *harness, requester ids.WorkspaceID) {
 	h.registerOther(requester, "ws-two", "b")
 	h.db.mu.Lock()
@@ -2532,15 +2531,16 @@ func markMergeWorkspace(h *harness, requester ids.WorkspaceID) {
 	h.db.workspaces[theWorkspace] = w
 }
 
-func TestAReleasedQueuedMergeClosesItsMergeWorkspaceAsItLeaves(t *testing.T) {
+func TestAReleasedQueuedMergeKeepsItsMergeWorkspaceOpenAndItsRequestOffTheQueue(t *testing.T) {
 	tests := []struct {
 		name    string
 		release func(h *harness) error
+		cause   AbandonCause
 	}{
-		{name: "evicted", release: func(h *harness) error { return h.o.Evict(context.Background(), theMergeWorkspace) }},
+		{name: "evicted", release: func(h *harness) error { return h.o.Evict(context.Background(), theMergeWorkspace) }, cause: CauseUserDrop},
 		{name: "dequeued", release: func(h *harness) error {
 			return h.o.dequeue(context.Background(), theMergeWorkspace, CauseUserDequeue)
-		}},
+		}, cause: CauseUserDequeue},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2549,104 +2549,53 @@ func TestAReleasedQueuedMergeClosesItsMergeWorkspaceAsItLeaves(t *testing.T) {
 			if err := requestDetached(t, h, RequestedByUser); err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
-			publishes := h.registryPublishes
 
 			// Act.
 			err := tt.release(h)
 
-			// Assert: the merge workspace closed in the exit's own write, the
-			// requester left open, the roster republished, and the close recorded.
+			// Assert: off the queue, the request kept under its cause, and
+			// the merge workspace left open under its name.
 			if err != nil {
 				t.Fatalf("the release: %v", err)
 			}
-			closes, closed := h.db.exitCloseOf(theMergeWorkspace)
-			if !closed || closes.By != wsm.CloseByDaemon {
-				t.Fatalf("the exit's close = %+v (made %v), want the merge workspace closed by the daemon", closes, closed)
+			if _, ok := h.entryOf(theMergeWorkspace); ok {
+				t.Fatal("the released merge is still queued")
 			}
-			if _, closed := h.db.exitCloseOf(theWorkspace); closed {
-				t.Fatal("the release closed the requester")
+			rec, kept, _ := h.db.OffQueueMergeOf(context.Background(), theMergeWorkspace)
+			if !kept || rec.Cause != string(tt.cause) {
+				t.Fatalf("the kept request = %+v (kept %v), want it kept for %q", rec, kept, tt.cause)
 			}
-			if h.registryPublishes == publishes {
-				t.Fatal("the roster was not republished after the close")
-			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.abandoned",
-				Message: "the released merge's merge workspace closed as it left the queue; its branch and worktree stay"}); !ok {
-				t.Fatalf("the close was not recorded: %v", h.logs.Records())
-			}
-		})
-	}
-}
-
-func TestAQueueExitThatIsNoReleaseOfAMergeWorkspaceClosesNothing(t *testing.T) {
-	tests := []struct {
-		name string
-		exit func(t *testing.T, h *harness) ids.WorkspaceID
-	}{
-		{name: "an evicted merge of a workspace's own branch", exit: func(t *testing.T, h *harness) ids.WorkspaceID {
-			enqueue(t, h)
-			if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
-				t.Fatalf("Evict: %v", err)
-			}
-			return theWorkspace
-		}},
-		{name: "an async merge whose merge workspace closed under it", exit: func(t *testing.T, h *harness) ids.WorkspaceID {
-			if err := requestDetached(t, h, RequestedByUser); err != nil {
-				t.Fatalf("Enqueue: %v", err)
-			}
-			h.o.OnWorkspaceClosed(context.Background(), theMergeWorkspace)
-			return theMergeWorkspace
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-
-			// Act.
-			ws := tt.exit(t, h)
-
-			// Assert.
-			if _, ok := h.entryOf(ws); ok {
-				t.Fatal("the merge is still queued")
-			}
-			if closes, closed := h.db.exitCloseOf(ws); closed {
-				t.Fatalf("the exit closed %s (%+v), want nothing closed", ws, closes)
+			h.db.mu.Lock()
+			closed := h.db.closed[theMergeWorkspace]
+			h.db.mu.Unlock()
+			if closed {
+				t.Fatal("the release closed the merge workspace")
 			}
 		})
 	}
 }
 
-func TestAReleaseWhoseMergeWorkspaceCannotBeReadDropsNothing(t *testing.T) {
-	// Arrange: an async merge in line, and a registry that will not read.
+func TestAKilledWorkspacesQueuedMergeKeepsNoRequest(t *testing.T) {
+	// Arrange: a kill marks the workspace closed before its merge is dropped.
 	h := newHarness(t)
-	if err := requestDetached(t, h, RequestedByUser); err != nil {
-		t.Fatalf("Enqueue: %v", err)
+	enqueue(t, h)
+	if err := h.db.MarkClosed(context.Background(), theWorkspace, wsm.Closure{By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
 	}
-	h.db.mu.Lock()
-	h.db.workspaceErr = errors.New("the state database is unreadable")
-	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Evict(context.Background(), theMergeWorkspace)
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
 
-	// Assert: refused, the entry kept, nothing closed, and the cause at ERROR.
-	if err == nil {
-		t.Fatal("Evict succeeded over an unreadable merge workspace")
+	// Assert.
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("the merge is still queued")
 	}
-	if _, ok := h.entryOf(theMergeWorkspace); !ok {
-		t.Fatal("the merge was dropped though its close could not be decided")
-	}
-	if _, closed := h.db.exitCloseOf(theMergeWorkspace); closed {
-		t.Fatal("the refused release closed the merge workspace")
-	}
-	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.drop_queued",
-		Message: "could not tell whether a queued merge closes a merge workspace; it is not dropped"})
-	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["cause"] != string(CauseUserDrop) {
-		t.Fatalf("no ERROR record naming the merge and the cause: %v", h.logs.Records())
+	if rec, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); kept {
+		t.Fatalf("a closed workspace kept a request: %+v", rec)
 	}
 }
 
-func TestEvictingAMergeWorkspaceTakenBackButNotResumedClosesIt(t *testing.T) {
+func TestEvictingAMergeWorkspaceTakenBackButNotResumedKeepsItsRequest(t *testing.T) {
 	// Arrange.
 	h := pendingResume(t)
 	markMergeWorkspace(h, otherWorkspace)
@@ -2658,35 +2607,14 @@ func TestEvictingAMergeWorkspaceTakenBackButNotResumedClosesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evict: %v", err)
 	}
-	if closes, closed := h.db.exitCloseOf(theWorkspace); !closed || closes.By != wsm.CloseByDaemon {
-		t.Fatalf("the drop's close = %+v (made %v), want the merge workspace closed by the daemon", closes, closed)
+	if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept {
+		t.Fatal("the dropped merge's request was not kept off the queue")
 	}
-}
-
-func TestEvictingAMergeTakenBackWhoseRecordCannotBeReadLeavesItToResume(t *testing.T) {
-	// Arrange.
-	h := pendingResume(t)
 	h.db.mu.Lock()
-	h.db.workspaceErr = errors.New("the state database is unreadable")
+	closed := h.db.closed[theWorkspace]
 	h.db.mu.Unlock()
-
-	// Act.
-	err := h.o.Evict(context.Background(), theWorkspace)
-
-	// Assert: refused, left to resume with its entry and lease, at ERROR.
-	if err == nil {
-		t.Fatal("Evict succeeded over an unreadable record")
-	}
-	h.o.mu.Lock()
-	_, pending := h.o.resumes[theWorkspace]
-	h.o.mu.Unlock()
-	_, held, _ := h.db.Lease(context.Background(), theWorkspace)
-	if !pending || !held {
-		t.Fatalf("after the refusal: pending %v, lease held %v; want both kept", pending, held)
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.drop_pending_resume",
-		Message: "could not tell whether the merge taken back for its resume closes a merge workspace; it is left to resume"}); !ok {
-		t.Fatalf("no ERROR record of the refusal: %v", h.logs.Records())
+	if closed {
+		t.Fatal("the drop closed the merge workspace")
 	}
 }
 
@@ -2726,7 +2654,7 @@ func requestHeldPick(t *testing.T, h *harness) {
 // or its eviction does.
 func aheadLeaves(t *testing.T, h *harness, cause string) {
 	t.Helper()
-	if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), aheadWorkspace, cause, nil); err != nil {
+	if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), aheadWorkspace, cause); err != nil {
 		t.Fatalf("removing the merge ahead: %v", err)
 	}
 }

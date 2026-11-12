@@ -166,7 +166,7 @@ func TestAMergeLeavingSettlesTheAsyncRequestsPlacedBehindIt(t *testing.T) {
 	asyncRequest(t, s, repo, requester.ID, source)
 
 	// Act
-	if err := s.RemoveMergeQueueEntry(context.Background(), repo, ahead.ID, MergeLeftLanded, nil); err != nil {
+	if err := s.RemoveMergeQueueEntry(context.Background(), repo, ahead.ID, MergeLeftLanded); err != nil {
 		t.Fatalf("RemoveMergeQueueEntry: %v", err)
 	}
 

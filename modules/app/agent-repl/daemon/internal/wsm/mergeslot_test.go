@@ -195,7 +195,7 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside}, {"admit b", admit(b)},
 				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }},
 				{"b lands", func(q *slotQueue, ctx context.Context) error {
-					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "landed", nil)
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "landed")
 				}}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["b lands"] }},
 		},
@@ -203,10 +203,10 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			name: "a remediated merge returning into a line with nobody ahead takes the head as it returns",
 			steps: []step{{"admit a", admit(a)}, {"step aside", stepAside},
 				{"b leaves", func(q *slotQueue, ctx context.Context) error {
-					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "taken off", nil)
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.b, "taken off")
 				}},
 				{"c leaves", func(q *slotQueue, ctx context.Context) error {
-					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off", nil)
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.c, "taken off")
 				}},
 				{"return", func(q *slotQueue, ctx context.Context) error { return q.s.ReturnRemediatedMerge(ctx, q.repo, q.a, nil) }}},
 			want: check{ws: a, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["return"] }},
@@ -215,7 +215,7 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			name: "the successor takes the head as the head lands",
 			steps: []step{{"admit a", admit(a)},
 				{"a lands", func(q *slotQueue, ctx context.Context) error {
-					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil)
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed")
 				}}},
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
 		},
@@ -223,7 +223,7 @@ func TestTheSlotMomentIsWrittenWithEverySlotChange(t *testing.T) {
 			name: "an admitted successor takes the head as the head lands",
 			steps: []step{{"admit a", admit(a)}, {"admit b", admit(b)},
 				{"a lands", func(q *slotQueue, ctx context.Context) error {
-					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed", nil)
+					return q.s.RemoveMergeQueueEntry(ctx, q.repo, q.a, "landed")
 				}}},
 			want: check{ws: b, slot: MergeSlotHead, at: func(m map[string]time.Time) time.Time { return m["a lands"] }},
 		},

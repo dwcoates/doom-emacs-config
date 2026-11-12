@@ -14,6 +14,9 @@ type QueueStatus struct {
 	Repository wsm.Repository
 	// Queue is its queue, every started member's step filled in.
 	Queue QueueSnapshot
+	// OffQueue are its merges that left the queue without landing and whose
+	// requests still stand, oldest departure first (offqueue.go).
+	OffQueue []OffQueueMember
 }
 
 // Status implements Orchestrator.
@@ -53,7 +56,12 @@ func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]Qu
 			}
 		}
 		o.events.mu.Unlock()
-		out = append(out, QueueStatus{Repository: repository, Queue: queue})
+		off, err := o.offQueueOf(ctx, repository)
+		if err != nil {
+			o.deps.Log.Global().Error(op, "could not read a repository's merges off its queue", dlog.WithCause(dlog.Context{"repository": string(repository.ID)}, err))
+			return nil, fmt.Errorf("merge: reading the merges off the queue of %s: %w", repository.ID, err)
+		}
+		out = append(out, QueueStatus{Repository: repository, Queue: queue, OffQueue: off})
 	}
 	return out, nil
 }

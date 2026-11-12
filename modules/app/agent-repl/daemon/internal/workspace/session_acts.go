@@ -112,6 +112,38 @@ func (v *verbs) requireServedModel(log dlog.Logger, verb string, ws ids.Workspac
 	return nil
 }
 
+// RequireCatalogModel implements Verbs: MODEL must be one the catalog the
+// session's login last served (wsm.AccountModelCatalog) offers. A login that
+// has served none offers nothing, and is refused the same way.
+func (v *verbs) RequireCatalogModel(ctx context.Context, ws ids.WorkspaceID, model string) error {
+	const verb = "RequireCatalogModel"
+	record, log, err := v.owned(ctx, verb, ws)
+	if err != nil {
+		return err
+	}
+	configDir, err := v.accountRoot(ctx, record)
+	if err != nil {
+		log.Error(opSetModel, "the workspace's login could not be resolved to read its model catalog", dlog.Context{"model": model, "cause": err.Error()})
+		return fmt.Errorf("check the model of %q: %w", ws, err)
+	}
+	catalog, found, err := v.deps.DB.AccountModelCatalog(ctx, configDir)
+	if err != nil {
+		log.Error(opSetModel, "the login's model catalog could not be read", dlog.Context{"config_dir": configDir, "model": model, "cause": err.Error()})
+		return fmt.Errorf("read the model catalog of login %q: %w", configDir, err)
+	}
+	var offered []string
+	if found {
+		for _, option := range catalog.GetOptions() {
+			offered = append(offered, option.GetModel().GetName())
+		}
+	}
+	if !contains(offered, model) {
+		return refuse(log, verb, ArmNotInCatalog,
+			fmt.Sprintf("the model %q is not in the catalog login %q last served %v", model, configDir, offered), false)
+	}
+	return nil
+}
+
 func contains(set []string, want string) bool {
 	for _, s := range set {
 		if s == want {
