@@ -51,6 +51,9 @@
 (defvar agent-repl-roster-view)
 (defvar agent-repl-roster--rows-by-id)
 (defvar persp-names-cache)
+(defvar agent-repl-wire-roster-row-status-keywords)
+(defvar agent-repl-status-color-table)
+(defvar agent-repl--color-by-name)
 (declare-function agent-repl--ws-tabline-names "workspace")
 (defvar agent-repl-roster-update-functions)
 (defvar agent-repl-roster-finish-functions)
@@ -2101,6 +2104,82 @@ once its CreateWorkspace has minted the workspace."
       (let ((persp-names-cache '("ws-standing" "ws-created")))
         (dolist (name (agent-repl-roster-tab-order))
           (should (member name (agent-repl--ws-tabline-names))))))))
+
+;;;; ---- A turn walks a running arm to a settled one ----
+
+(defvar agent-repl-roster-running-statuses)
+(defvar agent-repl-roster-settled-statuses)
+(declare-function agent-repl-roster-row-status "roster")
+
+(defun agent-repl-itest-roster--arm-walk (daemon id arms)
+  "Push ARMS for workspace ID on DAEMON in order; return the arms Emacs saw.
+The arms are collected on `agent-repl-roster-update-functions', the per-push
+hook, so a transient running arm cannot be missed."
+  (let ((seen nil))
+    (agent-repl--ws-put id :project-dir (agent-repl-itest--fixture-dir id))
+    (let ((agent-repl-roster-update-functions
+           (list (lambda (_roster)
+                   (let ((row (gethash id agent-repl-roster--rows-by-id)))
+                     (when row (push (agent-repl-roster-row-status row) seen)))))))
+      (dolist (arm arms)
+        (let ((before (length seen)))
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row id id arm))))
+          (agent-repl-itest--wait-until
+           (lambda () (> (length seen) before)) nil
+           (format "the %s push to reach the update hook" arm)))))
+    (nreverse seen)))
+
+(ert-deftest agent-repl-itest-roster-a-turns-pushes-are-seen-in-the-order-they-were-pushed ()
+  "The update hook sees each pushed arm once, in push order."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (equal seen '(:ready :submitting :thinking :ready)))))))
+
+(ert-deftest agent-repl-itest-roster-a-turn-passes-through-a-running-arm ()
+  "Between the opening and the settled arm the walk holds a running arm."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-run" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (seq-some (lambda (arm) (memq arm agent-repl-roster-running-statuses))
+                          seen))))))
+
+(ert-deftest agent-repl-itest-roster-a-turn-ends-on-a-settled-arm ()
+  "The walk's last arm is one the roster counts as settled."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-end" '(ready submitting thinking ready))))
+        ;; Assert.
+        (should (memq (car (last seen)) agent-repl-roster-settled-statuses))))))
+
+(ert-deftest agent-repl-itest-roster-every-arm-a-turn-walks-is-declared-and-painted ()
+  "Each arm a turn walks is a declared arm with a colour the renderer can draw."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (let ((seen (agent-repl-itest-roster--arm-walk
+                   daemon "itest-walk-paint" '(ready submitting thinking ready))))
+        ;; Assert.
+        (dolist (arm seen)
+          (should (memq arm agent-repl-wire-roster-row-status-keywords))
+          (let ((color (cdr (assq arm agent-repl-status-color-table))))
+            (should color)
+            (should (or (equal color "none")
+                        (assoc color agent-repl--color-by-name)))))))))
 
 (provide 'test-integration-roster)
 
