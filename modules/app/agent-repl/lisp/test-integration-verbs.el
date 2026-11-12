@@ -699,6 +699,52 @@ loudly — no staleness machinery softens it."
        nil "the transport-failure log line")
       (should (agent-repl-itest--logged-p daemon "elisp.verbs.transport-failure" "error")))))
 
+;;;; ---- Close then kill on a workspace with a live panel ----
+
+(ert-deftest agent-repl-itest-verbs-close-then-kill-both-reach-the-daemon ()
+  "Close and kill run back to back over a live panel, and both are sent."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let ((panel (generate-new-buffer " *agent-repl-itest-verbs-panel*")))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put agent-repl-itest-verbs--ws :input-buffer panel)
+              ;; Act.
+              (agent-repl-verb-close agent-repl-itest-verbs--ws)
+              (agent-repl-verb-kill agent-repl-itest-verbs--ws)
+              ;; Assert.
+              (agent-repl-itest--await-call daemon "CloseWorkspace")
+              (agent-repl-itest--await-call daemon "KillWorkspace"))
+          (agent-repl--ws-put agent-repl-itest-verbs--ws :input-buffer nil)
+          (when (buffer-live-p panel) (kill-buffer panel)))))))
+
+(ert-deftest agent-repl-itest-verbs-close-then-kill-leaves-the-tab-torn-down-and-emacs-answering ()
+  "After close then kill over a live panel the tab is gone and the editor still answers.
+The recursion this pins -- a teardown re-entering a sentinel that kills
+the buffer that ran it -- shows only as a command loop that stops, so the
+test finishing, and a fresh round trip being served, is the assertion."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let ((panel (generate-new-buffer " *agent-repl-itest-verbs-panel*")))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put agent-repl-itest-verbs--ws :input-buffer panel)
+              ;; Act.
+              (agent-repl-verb-close agent-repl-itest-verbs--ws)
+              (agent-repl-verb-kill agent-repl-itest-verbs--ws)
+              (agent-repl-itest--await-call daemon "KillWorkspace")
+              (agent-repl-itest--wait-until
+               (lambda () (not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))
+               nil "the tab to go away after close then kill")
+              ;; Assert: the wait above was served by the live command loop.
+              (should-not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))
+          (agent-repl--ws-put agent-repl-itest-verbs--ws :input-buffer nil)
+          (when (buffer-live-p panel) (kill-buffer panel)))))))
+
 ;;;; ---- Kill/Nuke success: tear the tab down (audit finding 69) ----
 
 (ert-deftest agent-repl-itest-verbs-kill-success-tears-the-tab-down ()

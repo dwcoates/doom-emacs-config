@@ -1716,6 +1716,30 @@ daemon, not Emacs, holds it until the running turn ends (owner ruling,
                 (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
+(declare-function agent-repl-held-ingress-waiting "held-ingress")
+
+(ert-deftest agent-repl-itest-composer-an-accepted-deferral-leaves-nothing-in-the-held-ingress ()
+  "The daemon took the deferral, so Emacs's only holding place stays empty."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "the deferred prompt")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              ;; Act.
+              (agent-repl-queue-deferred-prompt)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the daemon's acceptance to clear the composer")
+              ;; Assert.
+              (should (zerop (agent-repl-held-ingress-waiting
+                              agent-repl-itest-composer--ws))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 ;; audit-3 #47
 (ert-deftest agent-repl-itest-composer-an-ordinary-send-asks-for-no-delivery ()
   "An ordinary send spells no `delivery': its absence is the ordinary one,
