@@ -6,14 +6,10 @@
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
 ;;     -l lisp/test-services.el -f ert-run-tests-batch-and-exit
 ;;
-;; NO launchctl, NO build, NO service.  Every external boundary this file
-;; reaches — `agent-repl--launchctl-call', the two stamp wrappers, the
-;; store-socket probe, the artifact probe, the build script — is
-;; registered in `agent-repl--external-boundary-functions' and stubbed
-;; below; the harness's guard fails any test that misses one.
-;;
-;; Readiness is a TIMER poll and the tests drive it by hand: the store's
-;; socket probe answers from a variable a test flips between polls.
+;; NO build, NO service, NO daemon.  Every external boundary this file
+;; reaches — the artifact probe and the build script — is registered in
+;; `agent-repl--external-boundary-functions' and stubbed below; the
+;; harness's guard fails any test that misses one.
 
 ;;; Code:
 
@@ -23,32 +19,14 @@
 
 ;;;; ---- Harness ----
 
-(defvar agent-repl-test-services--launchctl nil
-  "launchctl invocations, newest first: the argv handed to the program.")
-
-(defvar agent-repl-test-services--launchctl-exit 0
-  "Exit code the stubbed launchctl answers.")
-
-(defvar agent-repl-test-services--socket-present nil
-  "What the stubbed store-socket probe answers.")
-
-(defvar agent-repl-test-services--stamps nil
-  "Stamp path → recorded digest, as the stubbed stamp reader sees it.")
-
-(defvar agent-repl-test-services--written nil
-  "Stamp writes, newest first: `(PATH . DIGEST)'.")
-
-(defvar agent-repl-test-services--digests nil
-  "Binary path → its stubbed SHA-256 digest.")
-
 (defvar agent-repl-test-services--build-failure nil
   "What the stubbed build answers: nil for success, a detail string else.")
 
+(defvar agent-repl-test-services--artifacts-present t
+  "What the stubbed artifact probe answers for every binary.")
+
 (defvar agent-repl-test-services--builds nil
   "Build invocations, newest first: the TARGETS argument.")
-
-(defvar agent-repl-test-services--timers nil
-  "Captured readiness timers, newest first: `(SECONDS . FUNCTION)'.")
 
 (defvar agent-repl-test-services--daemon-stops 0
   "How many daemon stops were requested.")
@@ -87,25 +65,12 @@
                    (string-search substring (cdr entry))))
             agent-repl-test-services--logs))
 
-(defun agent-repl-test-services--kickstarted-p (label)
-  "Return non-nil when LABEL's service was kickstarted."
-  (seq-some (lambda (args)
-              (and (equal (car args) "kickstart")
-                   (string-suffix-p label (car (last args)))))
-            agent-repl-test-services--launchctl))
-
 (defmacro agent-repl-test-services--with-harness (&rest body)
   "Run BODY with services.el's whole world faked and its state reset."
   (declare (indent 0))
-  `(let ((agent-repl-test-services--launchctl nil)
-         (agent-repl-test-services--launchctl-exit 0)
-         (agent-repl-test-services--socket-present t)
-         (agent-repl-test-services--stamps nil)
-         (agent-repl-test-services--written nil)
-         (agent-repl-test-services--digests nil)
-         (agent-repl-test-services--build-failure nil)
+  `(let ((agent-repl-test-services--build-failure nil)
+         (agent-repl-test-services--artifacts-present t)
          (agent-repl-test-services--builds nil)
-         (agent-repl-test-services--timers nil)
          (agent-repl-test-services--daemon-stops 0)
          (agent-repl-test-services--daemon-stop-outcome '(:arm :accepted))
          (agent-repl-test-services--daemon-departed t)
@@ -118,22 +83,8 @@
          (agent-repl-test-services--daemon-conn 'the-connection)
          (agent-repl-test-services--teardowns 0)
          (agent-repl-test-services--logs nil))
-     (cl-letf (((symbol-function 'agent-repl--launchctl-call)
-                (lambda (args)
-                  (push args agent-repl-test-services--launchctl)
-                  agent-repl-test-services--launchctl-exit))
-               ((symbol-function 'agent-repl--shim-store-socket-present-p)
-                (lambda () agent-repl-test-services--socket-present))
-               ((symbol-function 'agent-repl--shim-service-read-stamp)
-                (lambda (path) (cdr (assoc path agent-repl-test-services--stamps))))
-               ((symbol-function 'agent-repl--shim-service-write-stamp)
-                (lambda (path digest)
-                  (push (cons path digest) agent-repl-test-services--written)))
-               ((symbol-function 'agent-repl--shim-service-file-sha256)
-                (lambda (path)
-                  (or (cdr (assoc path agent-repl-test-services--digests))
-                      "sha-of-installed")))
-               ((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_p) t))
+     (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+                (lambda (_p) agent-repl-test-services--artifacts-present))
                ((symbol-function 'agent-repl-daemon--build)
                 (lambda (targets continuation)
                   (push targets agent-repl-test-services--builds)
@@ -166,10 +117,6 @@
                 (lambda ()
                   (setq agent-repl-test-services--teardowns
                         (1+ agent-repl-test-services--teardowns))))
-               ((symbol-function 'agent-repl--shim-services-run-timer)
-                (lambda (seconds callback)
-                  (push (cons seconds callback) agent-repl-test-services--timers)
-                  (timer-create)))
                ((symbol-function 'agent-repl--assert-main-thread) (lambda (_what) nil))
                ((symbol-function 'agent-repl--backend-phase) (lambda (&rest _) nil))
                ((symbol-function 'message) (lambda (&rest _) nil))
@@ -177,7 +124,6 @@
                 (lambda (_ws fmt &rest args)
                   (push (cons :log (apply #'format fmt args))
                         agent-repl-test-services--logs)))
-               ((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--info)
                 (lambda (_ws fmt &rest args)
                   (push (cons :info (apply #'format fmt args))
@@ -192,243 +138,77 @@
                         agent-repl-test-services--logs))))
        ,@body)))
 
-(defun agent-repl-test-services--stamp-current (binary)
-  "Record BINARY's stamp as matching its installed digest, so it is in sync."
-  (push (cons (agent-repl--shim-service-deployed-stamp binary) "sha-of-installed")
-        agent-repl-test-services--stamps))
+;;;; ---- The services' build ----
 
-;;;; ---- launchctl ----
-
-(ert-deftest agent-repl-test-services-print-addresses-the-gui-domain ()
-  "launchd jobs are addressed in the user's GUI domain."
+(ert-deftest agent-repl-test-services-build-builds-only-the-service-targets ()
+  "The services' build names the store, the sidecar and zettel, and nothing else."
   (agent-repl-test-services--with-harness
     ;; Arrange / Act
-    (agent-repl--shim-services-launchctl "print" agent-repl--shim-store-label)
+    (agent-repl--shim-services-build #'ignore #'ignore)
     ;; Assert
-    (should (equal (car agent-repl-test-services--launchctl)
-                   (list "print" (format "gui/%d/%s" (user-uid)
-                                         agent-repl--shim-store-label))))))
+    (should (equal agent-repl-test-services--builds '(("store" "sidecar" "zettel"))))))
 
-(ert-deftest agent-repl-test-services-kickstart-forces-a-restart ()
-  "`kickstart -k' is what actually replaces a running service."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label)
-    ;; Assert
-    (should (equal (nth 1 (car agent-repl-test-services--launchctl)) "-k"))))
-
-(ert-deftest agent-repl-test-services-unknown-verb-is-refused ()
-  "An invalid verb is a programming error and never reaches launchd."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act / Assert
-    (should-error (agent-repl--shim-services-launchctl "obliterate"
-                                                       agent-repl--shim-store-label))))
-
-(ert-deftest agent-repl-test-services-nonzero-launchctl-exit-fails-loudly ()
-  "A launchd refusal is fatal, never a shrug that leaves a stale service."
+(ert-deftest agent-repl-test-services-build-succeeds-once-both-binaries-are-installed ()
+  "A landed build with the store's and the sidecar's binaries is success."
   (agent-repl-test-services--with-harness
     ;; Arrange
-    (setq agent-repl-test-services--launchctl-exit 1)
-    ;; Act / Assert
-    (should-error (agent-repl--shim-services-launchctl "kickstart"
-                                                       agent-repl--shim-store-label))))
-
-(ert-deftest agent-repl-test-services-preflight-checks-both-jobs ()
-  "Nothing is mutated until launchd is known to own BOTH jobs."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-assert-launchd-loaded)
-    ;; Assert
-    (should (= (length agent-repl-test-services--launchctl) 2))))
-
-;;;; ---- The deployed-fingerprint stamp ----
-
-(ert-deftest agent-repl-test-services-missing-stamp-means-bounce ()
-  "Nothing to be in sync with is never \"in sync\"."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act / Assert
-    (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
-
-(ert-deftest agent-repl-test-services-matching-stamp-means-no-bounce ()
-  "A stamp equal to the installed digest means the live process serves it."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (agent-repl-test-services--stamp-current agent-repl--shim-store-binary)
-    ;; Act / Assert
-    (should-not (agent-repl--shim-service-needs-bounce-p
-                 agent-repl--shim-store-binary))))
-
-(ert-deftest agent-repl-test-services-differing-stamp-means-bounce ()
-  "A changed binary must reach the running service."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (push (cons (agent-repl--shim-service-deployed-stamp
-                 agent-repl--shim-store-binary)
-                "sha-of-something-older")
-          agent-repl-test-services--stamps)
-    ;; Act / Assert
-    (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary))))
-
-(ert-deftest agent-repl-test-services-absent-binary-means-bounce ()
-  "A binary that is not there cannot be the one being served."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (agent-repl-test-services--stamp-current agent-repl--shim-store-binary)
-    ;; Act / Assert
-    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_p) nil)))
-      (should (agent-repl--shim-service-needs-bounce-p agent-repl--shim-store-binary)))))
-
-(ert-deftest agent-repl-test-services-recording-writes-the-installed-digest ()
-  "The stamp records what launchd was actually started on."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-service-record-deployed agent-repl--shim-store-binary)
-    ;; Assert
-    (should (equal (car agent-repl-test-services--written)
-                   (cons (agent-repl--shim-service-deployed-stamp
-                          agent-repl--shim-store-binary)
-                         "sha-of-installed")))))
-
-;;;; ---- Store readiness ----
-
-(ert-deftest agent-repl-test-services-store-ready-immediately-succeeds ()
-  "A store already serving needs no wait at all."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (let ((ready nil))
-      (setq agent-repl-test-services--socket-present t)
+    (let ((done nil) (failure :unset))
       ;; Act
-      (agent-repl--shim-store-after-ready (lambda () (setq ready t)) #'ignore)
+      (agent-repl--shim-services-build (lambda () (setq done t))
+                                       (lambda (detail) (setq failure detail)))
       ;; Assert
-      (should ready))))
+      (should done)
+      (should (eq failure :unset)))))
 
-(ert-deftest agent-repl-test-services-store-not-yet-serving-polls ()
-  "An absent socket schedules another poll instead of failing at once."
+(ert-deftest agent-repl-test-services-build-failure-reaches-the-continuation ()
+  "The build's diagnostic is what the coordinator reports, logged at ERROR."
   (agent-repl-test-services--with-harness
     ;; Arrange
-    (setq agent-repl-test-services--socket-present nil)
-    ;; Act
-    (agent-repl--shim-store-after-ready #'ignore #'ignore)
-    ;; Assert
-    (should agent-repl-test-services--timers)))
-
-(ert-deftest agent-repl-test-services-store-poll-succeeds-when-the-socket-appears ()
-  "The socket appearing between polls is what readiness means."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (let ((ready nil))
-      (setq agent-repl-test-services--socket-present nil)
-      (agent-repl--shim-store-after-ready (lambda () (setq ready t)) #'ignore)
-      (setq agent-repl-test-services--socket-present t)
-      ;; Act
-      (funcall (cdr (car agent-repl-test-services--timers)))
-      ;; Assert
-      (should ready))))
-
-(ert-deftest agent-repl-test-services-store-readiness-timeout-fails ()
-  "A store that never comes up fails loudly rather than starting the sidecar cold."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (let ((failure :unset)
-          (agent-repl-shim-store-ready-timeout 0.0))
-      (setq agent-repl-test-services--socket-present nil)
-      ;; Act
-      (agent-repl--shim-store-after-ready #'ignore (lambda (detail) (setq failure detail)))
-      ;; Assert
-      (should (stringp failure)))))
-
-;;;; ---- The store/sidecar bounce ----
-
-(ert-deftest agent-repl-test-services-bounce-builds-only-the-service-targets ()
-  "The bounce builds the launchd services' binaries and nothing else: the
-store, the sidecar, and zettel, which the daemon's boot keeps current."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should (equal (car agent-repl-test-services--builds) '("store" "sidecar" "zettel")))))
-
-(ert-deftest agent-repl-test-services-bounce-kickstarts-a-stale-store ()
-  "A binary whose stamp does not match reaches the running service."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should (agent-repl-test-services--kickstarted-p agent-repl--shim-store-label))))
-
-(ert-deftest agent-repl-test-services-bounce-skips-a-current-store ()
-  "The stamp is the SOLE kickstart authority: a second bounce is pure outage."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (agent-repl-test-services--stamp-current agent-repl--shim-store-binary)
-    (agent-repl-test-services--stamp-current agent-repl--shim-sidecar-binary)
-    ;; Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should-not (agent-repl-test-services--kickstarted-p agent-repl--shim-store-label))))
-
-(ert-deftest agent-repl-test-services-a-store-bounce-always-bounces-the-sidecar ()
-  "The sidecar's link recovery is connection-scoped: a fresh pair is known-good."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (agent-repl-test-services--stamp-current agent-repl--shim-sidecar-binary)
-    ;; Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should (agent-repl-test-services--kickstarted-p agent-repl--shim-sidecar-label))))
-
-(ert-deftest agent-repl-test-services-bounce-waits-for-the-store-before-the-sidecar ()
-  "The sidecar dials the store's socket; it must not come up against nothing."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (setq agent-repl-test-services--socket-present nil)
-    ;; Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should-not (agent-repl-test-services--kickstarted-p agent-repl--shim-sidecar-label))))
-
-(ert-deftest agent-repl-test-services-bounce-stamps-the-store-after-its-kickstart ()
-  "The stamp is written only once launchd actually started that image."
-  (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should (assoc (agent-repl--shim-service-deployed-stamp
-                    agent-repl--shim-store-binary)
-                   agent-repl-test-services--written))))
-
-(ert-deftest agent-repl-test-services-bounce-build-failure-kickstarts-nothing ()
-  "A failed build must never reach launchd."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (setq agent-repl-test-services--build-failure "build failed (exit 2)")
-    ;; Act
-    (agent-repl--shim-services-build-and-bounce t #'ignore #'ignore)
-    ;; Assert
-    (should (null agent-repl-test-services--launchctl))))
-
-(ert-deftest agent-repl-test-services-bounce-build-failure-reaches-the-continuation ()
-  "The first diagnostic is what the coordinator reports, and no stage follows."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (let ((failure :unset))
+    (let ((done nil) (failure :unset))
       (setq agent-repl-test-services--build-failure "build failed (exit 2)")
       ;; Act
-      (agent-repl--shim-services-build-and-bounce t #'ignore
-                                                  (lambda (detail) (setq failure detail)))
+      (agent-repl--shim-services-build (lambda () (setq done t))
+                                       (lambda (detail) (setq failure detail)))
       ;; Assert
-      (should (equal failure "build failed (exit 2)")))))
+      (should-not done)
+      (should (equal failure "build failed (exit 2)"))
+      (should (agent-repl-test-services--logged-p
+               :error "elisp.services.build-failed detail=build failed (exit 2)")))))
 
-(ert-deftest agent-repl-test-services-bounce-runs-its-own-preflight-when-told-to ()
-  "Without an inherited preflight the bounce validates both jobs itself."
+(ert-deftest agent-repl-test-services-build-without-its-binaries-is-a-failure ()
+  "A build that reports success and installed no binary is a broken build."
   (agent-repl-test-services--with-harness
-    ;; Arrange / Act
-    (agent-repl--shim-services-build-and-bounce nil #'ignore #'ignore)
-    ;; Assert
-    (should (seq-some (lambda (args) (equal (car args) "print"))
-                      agent-repl-test-services--launchctl))))
+    ;; Arrange
+    (let ((done nil) (failure :unset))
+      (setq agent-repl-test-services--artifacts-present nil)
+      ;; Act
+      (agent-repl--shim-services-build (lambda () (setq done t))
+                                       (lambda (detail) (setq failure detail)))
+      ;; Assert
+      (should-not done)
+      (should (string-match-p "completed without both binaries" failure))
+      (should (agent-repl-test-services--logged-p
+               :error "elisp.services.build-artifacts-missing")))))
 
-;;;; ---- The coordinated runtime bounce ----
+(ert-deftest agent-repl-test-services-build-needs-callable-continuations ()
+  "A continuation that is not a function is a caller's bug, refused at once."
+  (agent-repl-test-services--with-harness
+    ;; Arrange / Act / Assert
+    (should-error (agent-repl--shim-services-build nil #'ignore))
+    (should (null agent-repl-test-services--builds))))
+
+(ert-deftest agent-repl-test-services-emacs-drives-no-service-manager ()
+  "The daemon restarts the services; this file keeps no launchctl of its own."
+  ;; Arrange / Act / Assert
+  (dolist (retired '(agent-repl--launchctl-call
+                     agent-repl--shim-services-launchctl
+                     agent-repl--shim-services-assert-launchd-loaded
+                     agent-repl--shim-services-build-and-bounce
+                     agent-repl--shim-service-needs-bounce-p
+                     agent-repl--shim-store-after-ready))
+    (should-not (fboundp retired))))
+
+;;;; ---- The coordinated runtime restart ----
 
 (ert-deftest agent-repl-test-services-runtime-restart-builds-the-whole-stack ()
   "The daemon's own build comes before the services', and covers everything."
@@ -437,6 +217,27 @@ store, the sidecar, and zettel, which the daemon's boot keeps current."
     (agent-repl--runtime-prepare #'ignore #'ignore)
     ;; Assert
     (should (member nil agent-repl-test-services--builds))))
+
+(ert-deftest agent-repl-test-services-runtime-restart-builds-the-services-after-the-stack ()
+  "The services' binaries are installed before the daemon is replaced."
+  (agent-repl-test-services--with-harness
+    ;; Arrange / Act
+    (agent-repl--runtime-prepare #'ignore #'ignore)
+    ;; Assert: newest first, so the services' build came second.
+    (should (equal agent-repl-test-services--builds
+                   '(("store" "sidecar" "zettel") nil)))))
+
+(ert-deftest agent-repl-test-services-runtime-restart-without-the-binaries-stops-nothing ()
+  "A services build that installed nothing must not take the daemon down."
+  (agent-repl-test-services--with-harness
+    ;; Arrange
+    (let ((failure :unset))
+      (setq agent-repl-test-services--artifacts-present nil)
+      ;; Act
+      (agent-repl--runtime-prepare #'ignore (lambda (detail) (setq failure detail)))
+      ;; Assert
+      (should (string-match-p "completed without both binaries" failure))
+      (should (= agent-repl-test-services--daemon-stops 0)))))
 
 (ert-deftest agent-repl-test-services-runtime-restart-asks-the-daemon-to-stop ()
   "EMACS NEVER KILLS A DAEMON, not even during its own restart."
@@ -540,27 +341,6 @@ store, the sidecar, and zettel, which the daemon's boot keeps current."
     (agent-repl--runtime-prepare #'ignore #'ignore)
     ;; Assert
     (should (= agent-repl-test-services--daemon-stops 0))))
-
-(ert-deftest agent-repl-test-services-runtime-restart-preflight-failure-builds-nothing ()
-  "launchd owning both jobs is checked before any runtime artifact is built."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (setq agent-repl-test-services--launchctl-exit 1)
-    ;; Act
-    (agent-repl--runtime-prepare #'ignore #'ignore)
-    ;; Assert
-    (should (null agent-repl-test-services--builds))))
-
-(ert-deftest agent-repl-test-services-runtime-restart-preflight-failure-reports ()
-  "A refused preflight reaches the failure continuation as its detail."
-  (agent-repl-test-services--with-harness
-    ;; Arrange
-    (let ((failure :unset))
-      (setq agent-repl-test-services--launchctl-exit 1)
-      ;; Act
-      (agent-repl--runtime-prepare #'ignore (lambda (detail) (setq failure detail)))
-      ;; Assert
-      (should (stringp failure)))))
 
 (ert-deftest agent-repl-test-services-runtime-restart-command-reports-a-failure ()
   "The interactive restart records why it failed rather than dying silently."

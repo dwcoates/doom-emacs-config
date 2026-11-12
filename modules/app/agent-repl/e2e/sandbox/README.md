@@ -26,8 +26,8 @@ a real Emacs with the module loaded through Doom. Run on the host, that means:
 - `~/.config` — this repo IS the doom config; a test that writes there edits
   the checkout.
 - `~/.gitconfig` — the module shells out to git.
-- `launchd` — `services.el` manages `shim-store` and `shim-claude-sidecar` as
-  OS-managed services.
+- the service manager (`launchd`, or `systemd --user`) — the daemon restarts
+  `shim-store`, `shim-claude-sidecar` and `zettel` as OS-managed services.
 
 The sandbox makes all five container-local, so a run cannot reach the host's.
 

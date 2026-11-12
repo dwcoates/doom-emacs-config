@@ -248,7 +248,7 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
   ;; Arrange / Act / Assert
   (should-error (agent-repl--early-git-string "rev-parse" "HEAD")
                 :type 'error)
-  (should-error (agent-repl--launchctl-call "list")
+  (should-error (agent-repl--frontend-artifact-exists-p "list")
                 :type 'error))
 
 
