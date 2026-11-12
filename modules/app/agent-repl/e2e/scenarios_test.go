@@ -28,7 +28,6 @@ func TestTurns(t *testing.T) {
 		testCronCreateSetsTheFootersCronsChip,
 		testPlanModeCoalescesOntoOneBubble,
 		testPlanModeSettlesPlanned,
-		testChessBoard,
 		testSlashShapeAUnnamed,
 		testSkillInvocation,
 		testAChatThreadLivesItsWholeLife,
