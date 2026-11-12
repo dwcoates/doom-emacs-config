@@ -1059,7 +1059,8 @@ unless the owner rules otherwise).
 RAISED 2026-10-14 (owner): the gate surfaces only when the context is
 MORE than 120,000 tokens; at or under 120,000 the session continues
 automatically (`COLD_GATE_FLOOR_TOKENS = 120_000`, `coldGateAsks` is `>`).
-The `!cold-seed` scenario now states 150,000 tokens.
+The `!cold-seed` scenario now states 180,000 tokens.
+RAISED AGAIN 2026-11-11 (owner): the floor is now 150,000 tokens (`COLD_GATE_FLOOR_TOKENS = 150_000`); the `!cold-seed` scenario states 180,000.
 Also ruled: hook attachments and total-token reminders are not stored
 (docs/STORE-VOLUME-PROPOSAL.md item 1, first two kinds).
 ## Sidebar chevron and detail panel, owner ruling 3 (2026-09-13)
