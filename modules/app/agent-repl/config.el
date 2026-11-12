@@ -400,10 +400,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; it.  It hooks host.el's update (above); input.el and panels.el call it at
 ;; run time only.
 (agent-repl--load-module "held-ingress")
-;; WHY: services.el owns launchd lifecycle for shim-store/sidecar and the
-;; coordinated runtime bounce.  It needs the daemon/client plus the pushed
-;; state stores loaded so its preflight can reject every active turn before
-;; changing any process.
+;; WHY: services.el owns the coordinated runtime restart (rebuild, then
+;; replace the daemon, whose boot restarts the services).  It needs the
+;; daemon/client plus the pushed state stores loaded, because it observes
+;; the daemon's identity before changing any process.
 (agent-repl--load-module "services")
 (agent-repl--load-module "frontend")
 ;; WHY: webhost.el is the one web view every workspace's page lives in; it
