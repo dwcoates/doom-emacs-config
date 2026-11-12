@@ -169,3 +169,41 @@ describe("an MCP server's tool call", () => {
     expect(activitiesNamed(activitiesOf(frames), "unmodeled")).toEqual([]);
   });
 });
+
+describe("the vendor's diagnostics report after a Write", () => {
+  test("arrives as AgentWrite.diagnostics on the write call's own activity, after its settled success", async () => {
+    const { frames } = await driveTurn("!ide-diagnostics-write");
+
+    const writes = activitiesNamed(activitiesOf(frames), "write").map((activity) => ({
+      id: activity.activityId?.value,
+      result: activity.item.case === "write" ? activity.item.value.result : undefined,
+    }));
+    const diagnostics = writes.find((write) => write.result?.case === "diagnostics");
+    expect({
+      arms: writes.map((write) => write.result?.case),
+      sameActivity: new Set(writes.map((write) => write.id)).size,
+      messages:
+        diagnostics?.result?.case === "diagnostics"
+          ? diagnostics.result.value.files.flatMap((file) =>
+              file.diagnostics.map((diagnostic) => [
+                file.path,
+                diagnostic.severity,
+                diagnostic.message,
+                diagnostic.source,
+              ]),
+            )
+          : undefined,
+    }).toEqual({
+      arms: ["start", "success", "diagnostics"],
+      sameActivity: 1,
+      messages: [
+        [
+          "/w/s/created.ts",
+          conversationv1.AgentDiagnosticSeverity.ERROR,
+          "Cannot find name 'missing'.",
+          "typescript",
+        ],
+      ],
+    });
+  });
+});
