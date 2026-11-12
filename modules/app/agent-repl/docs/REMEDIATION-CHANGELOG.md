@@ -1410,3 +1410,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): the suites are green on master again: the quiet-mode thaw guard meets the daemon's source scans, the shim's transcript lookup is no send, and the realtest harness no longer reads the host's free space
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A prompt sent through Remote Control while a turn runs no longer leaves the workspace stuck mid-turn, refusing local prompts.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A queue-bypass session now runs the full test suite once after its last planned landing and fixes every failure, so bypass mode never leaves master broken.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Records that a deploy's workspace adoption can stall the new daemon for seconds behind the sidebar's render lock.
