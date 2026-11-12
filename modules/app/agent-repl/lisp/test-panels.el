@@ -5083,3 +5083,27 @@ answered as held.  The frame's windows are restored afterwards."
       (should (= (agent-repl-test-panels--panel-window-count) 2))
       (should (eq (agent-repl--ws-get "gui-ws" :frontend-buffer) webview))
       (should (get-buffer-window webview)))))
+
+(ert-deftest agent-repl-test-panels-a-kill-close-puts-the-panel-windows-away ()
+  "`SPC o C' over open panels leaves no panel window on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (should (= (agent-repl-test-panels--panel-window-count) 2))
+    (cl-letf (((symbol-function 'agent-repl--frontend-release-workspace-webview) #'ignore))
+      ;; Act
+      (agent-repl))
+    ;; Assert
+    (should (= (agent-repl-test-panels--panel-window-count) 0))))
+
+(ert-deftest agent-repl-test-panels-a-kill-close-leaves-the-tab-order-alone ()
+  "`SPC o C' neither moves the workspace to the back nor reorders any tab."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl-roster--tab-order '("other-a" "gui-ws" "other-b")))
+      (agent-repl-simple)
+      (cl-letf (((symbol-function 'agent-repl--frontend-release-workspace-webview) #'ignore))
+        ;; Act
+        (agent-repl))
+      ;; Assert
+      (should (equal agent-repl-roster--tab-order '("other-a" "gui-ws" "other-b"))))))

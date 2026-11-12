@@ -147,52 +147,6 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		})
 }
 
-// testEmacsKillCloseLeavesTheTabOrderAlone is scenario 16. `SPC o C` closes
-// the panels and kills the session, and NO CLOSE REORDERS THE TABS: only the
-// daemon orders them (owner ruling, 2026-10-19). The kill may take the tab
-// away once the daemon accepts it, so the claim is that the workspace either
-// keeps its place or is gone, and never moves to the back.
-func testEmacsKillCloseLeavesTheTabOrderAlone(t *testing.T) {
-	w, _ := emacsPanelWorld(t, 2)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	before := e.EvalStrings(emacsTabOrderForm)
-
-	if want, got := "agent-repl", e.LeaderBinding("o C"); got != want {
-		t.Fatalf("SPC o C resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
-	}
-	e.Leader("o C")
-
-	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
-		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
-		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
-		})
-	after := e.EvalStrings(emacsTabOrderForm)
-	if !keptPlaceOrGone(before, after, current) {
-		t.Fatalf("the kill close moved %q in the tab order: %q -> %q; no close reorders the tabs", current, before, after)
-	}
-}
-
-// keptPlaceOrGone reports whether AFTER is BEFORE with WS either in the same
-// place or removed, every other tab in its order.
-func keptPlaceOrGone(before, after []string, ws string) bool {
-	if strings.Join(before, "\x00") == strings.Join(after, "\x00") {
-		return true
-	}
-	var without []string
-	for _, name := range before {
-		if name != ws {
-			without = append(without, name)
-		}
-	}
-	return strings.Join(without, "\x00") == strings.Join(after, "\x00")
-}
-
 // testEmacsFocusInputSelectsTheComposer is scenario 17.
 func testEmacsFocusInputSelectsTheComposer(t *testing.T) {
 	w, _ := emacsPanelWorld(t, 1)
