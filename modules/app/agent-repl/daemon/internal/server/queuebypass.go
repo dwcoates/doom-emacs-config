@@ -107,9 +107,22 @@ func (s *requestLoggingServer) UpdateQueueBypassMode(
 const ArmRequesterBypassingQueue = "requester_bypassing_queue"
 
 // bypassReminder is what a refused dispatch reminds its workspace to do.
-const bypassReminder = "this workspace holds its repository's queue bypass mode, which hard-stops the merge queue, " +
-	"and a one-shot workspace or an async merge lands through that queue. Do the work in this workspace, " +
-	"or create a child that is no one-shot and land its branch on the main branch yourself with land-direct.sh"
+const bypassReminder = "this workspace holds its repository's queue bypass mode, which hard-stops the merge queue " +
+	"and exists for this one workspace to fix things itself. It creates no one-shot, no async merge and no child workspace: " +
+	"do the work here and land it on the main branch with land-direct.sh"
+
+// bypassRefusedCreate names the create SPEC asks for that a workspace holding
+// the queue bypass mode may not make, or "" for one it may: a one-shot lands
+// through the stopped queue, and a child is the orchestration the mode skips.
+func bypassRefusedCreate(spec workspace.CreateSpec) string {
+	switch {
+	case spec.OneShot:
+		return "a one-shot workspace"
+	case spec.Parent != nil:
+		return "a child workspace"
+	}
+	return ""
+}
 
 // refuseWhileBypassing answers the refusal for WS dispatching WHAT while WS
 // holds its repository's queue bypass mode (owner ruling, 2026-11-10: a

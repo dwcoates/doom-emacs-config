@@ -25,15 +25,19 @@
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
 - Report the landing: the version, and that the queue stays hard-stopped.
 
-### Dispatch no one-shot and no async merge
+### One agent does the work: no new workspace, no async merge, few subagents
 
-- This workspace never creates a one-shot workspace, never marks one, and never queues an async merge.
-  - Each of those lands through the merge queue, which this mode hard-stops, so the work would wait there.
+- Bypass queue mode exists so this one agent fixes things quickly itself, without orchestration.
+- This workspace never creates a one-shot, never marks one, never queues an async merge, and never creates a child workspace.
+  - A one-shot and an async merge land through the merge queue, which this mode hard-stops, so the work would wait there.
+  - A child is the orchestration the mode exists to skip.
   - The daemon refuses each one with `requester_bypassing_queue`, and its `detail` repeats this reminder.
-- Every rule that would dispatch one (a handed failure's fix, a todo row's fix, work a main workspace splits off) is carried out here instead.
-  - Either this workspace does the work itself, or it creates a child that is no one-shot.
-  - Such a child stops when its work is committed and tells this workspace its branch, never finishing or queueing anything.
+- Every rule that would dispatch one (a handed failure's fix, a todo row's fix, work a main workspace splits off) is carried out here, by this workspace itself.
+- A child workspace that already existed when the mode was taken may still be prompted and answered.
+  - It stops when its work is committed and tells this workspace its branch, never finishing or queueing anything.
   - This workspace lands that branch with `land-direct.sh`, as it lands its own.
+- Avoid subagents: do the work in this conversation.
+  - Dispatch one only where the work genuinely cannot be done here, and say why in the response.
 
 ### Tests
 

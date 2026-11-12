@@ -53,6 +53,79 @@ func TestAOneShotAskedWhileHoldingTheBypassModeIsRefusedWithItsReminder(t *testi
 	}
 }
 
+// bypassStandardCreate is a standard create the test workspace asks for,
+// under RELATIONSHIP.
+func bypassStandardCreate(h *harness, relationship *agentreplv1.WorkspaceRelationship) *agentreplv1.CreateWorkspaceRequest {
+	req := validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+		r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: workspace.SaidText("fix the feed"), Relationship: relationship}}
+		r.Requester = workspaceRequester(ref())
+	})
+	req.Repository = registeredRepoRef(h)
+	return req
+}
+
+func TestAChildAskedWhileHoldingTheBypassModeIsRefusedWithItsReminder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	holdingBypass(h)
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassStandardCreate(h, childRelationship(ref()))))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	refusal := resp.Msg.GetError().GetRequesterBypassingQueue()
+	if refusal == nil || !strings.Contains(refusal.GetDetail(), "a child workspace refused") || !strings.Contains(refusal.GetDetail(), "no child workspace") {
+		t.Fatalf("answer = %v, want the bypass refusal naming the child", resp.Msg)
+	}
+	if len(h.Verbs.createSpecs) != 0 {
+		t.Fatalf("creates = %+v, want none", h.Verbs.createSpecs)
+	}
+}
+
+func TestAPeerAskedWhileHoldingTheBypassModeIsCreated(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	holdingBypass(h)
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassStandardCreate(h, peerRelationship())))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace = %v, %v; want success", resp, err)
+	}
+}
+
+func TestBypassRefusedCreateNamesEveryCreateTheModeRefuses(t *testing.T) {
+	parent := ids.WorkspaceID("ws-parent")
+	tests := []struct {
+		name string
+		spec workspace.CreateSpec
+		want string
+	}{
+		{name: "a one-shot", spec: workspace.CreateSpec{OneShot: true}, want: "a one-shot workspace"},
+		{name: "a one-shot child", spec: workspace.CreateSpec{OneShot: true, Parent: &parent}, want: "a one-shot workspace"},
+		{name: "a child", spec: workspace.CreateSpec{Parent: &parent}, want: "a child workspace"},
+		{name: "a peer", spec: workspace.CreateSpec{}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := bypassRefusedCreate(tt.spec)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("bypassRefusedCreate = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAOneShotAskedWithoutTheBypassModeIsCreated(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
