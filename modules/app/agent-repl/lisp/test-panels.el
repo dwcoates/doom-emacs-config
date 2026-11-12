@@ -4987,3 +4987,99 @@ Running the restore again on no view would decline and mount again without end."
         (agent-repl--panels-mount-awaited-view "my-ws")
         ;; Assert
         (should (equal restored '("my-ws")))))))
+
+;;;; ---- Tests: the panel lifecycle through the gui frontend on real windows ----
+
+;; These drive the module's own commands (`agent-repl-simple', `agent-repl',
+;; `agent-repl-focus-input') through the REAL gui frontend registration and the
+;; frame's REAL windows.  The one boundary faked is the webview itself: batch
+;; Emacs has no xwidget support, so `agent-repl--frontend-ensure-webview-buffer'
+;; hands back an ordinary buffer, and the sidebar's web view is its own
+;; boundary.  The daemon is not involved: what the panels do on a frame is
+;; Emacs alone.
+
+(defmacro agent-repl-test-panels--with-gui-workspace (ws &rest body)
+  "Run BODY with WS the current gui workspace on a one-window frame.
+The gui frontend, the toggle, the open ladder and the window layout are
+all real; the webview is a plain buffer named like the real one, bound
+as WS's `:frontend-buffer' by the mount, and the host subscription is
+answered as held.  The frame's windows are restored afterwards."
+  (declare (indent 1))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl--open-progress (make-hash-table :test 'equal))
+           (wconf (current-window-configuration)))
+       (agent-repl--ws-put ,ws :frontend 'gui)
+       (agent-repl--ws-put ,ws :project-dir "/tmp/agent-repl-panels-gui")
+       (unwind-protect
+           (cl-letf (((symbol-function '+workspace-current-name) (lambda () ,ws))
+                     ((symbol-function 'use-region-p) (lambda () nil))
+                     ((symbol-function 'agent-repl--frontend-require-xwidget) #'ignore)
+                     ((symbol-function 'agent-repl--frontend-validate-for-ws) #'ignore)
+                     ((symbol-function 'agent-repl--panels-ensure-host-subscription)
+                      (lambda (_ws) t))
+                     ((symbol-function 'agent-repl-sidebar-view-show) #'ignore)
+                     ((symbol-function 'agent-repl-sidebar-view-hide) #'ignore)
+                     ((symbol-function 'agent-repl--call-in-background-workspace)
+                      (lambda (_ws fn) (funcall fn)))
+                     ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
+                      (lambda (ws)
+                        (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+                          (unless (buffer-live-p buf)
+                            (setq buf (generate-new-buffer
+                                       (format "*agent-frontend-%s*" ws)))
+                            (agent-repl--ws-put ws :frontend-buffer buf))
+                          buf))))
+             (delete-other-windows)
+             ,@body)
+         (set-window-configuration wconf)
+         (dolist (key '(:frontend-buffer :input-buffer))
+           (let ((buf (agent-repl--ws-get ,ws key)))
+             (when (buffer-live-p buf) (kill-buffer buf))))
+         (when-let ((entry (agent-repl--open-progress-entry ,ws)))
+           (when (buffer-live-p (plist-get entry :buffer))
+             (kill-buffer (plist-get entry :buffer))))))))
+
+(defun agent-repl-test-panels--panel-window-count ()
+  "Return how many windows on the frame show an agent panel buffer."
+  (cl-count-if (lambda (win)
+                 (string-match-p "\\`\\*agent-\\(frontend\\|panel-input\\)-"
+                                 (buffer-name (window-buffer win))))
+               (window-list)))
+
+(ert-deftest agent-repl-test-panels-a-plain-close-keeps-the-webview-alive ()
+  "`SPC o c' over open panels hides them and leaves the webview buffer live."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (should (= (agent-repl-test-panels--panel-window-count) 2))
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should (= (agent-repl-test-panels--panel-window-count) 0))
+    (should (buffer-live-p (agent-repl--ws-get "gui-ws" :frontend-buffer)))))
+
+(ert-deftest agent-repl-test-panels-a-hidden-webview-reads-as-running ()
+  "After a plain close the registry still answers running, so the toggle SHOWS."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    ;; Act
+    (agent-repl-simple)
+    ;; Assert
+    (should (funcall (agent-repl-frontend-running-p-fn
+                      (agent-repl--ws-frontend "gui-ws"))
+                     "gui-ws"))))
+
+(ert-deftest agent-repl-test-panels-a-second-plain-toggle-shows-the-same-webview ()
+  "The press after a plain close puts the SAME webview buffer back on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (let ((webview (agent-repl--ws-get "gui-ws" :frontend-buffer)))
+      (agent-repl-simple)
+      ;; Act
+      (agent-repl-simple)
+      ;; Assert
+      (should (= (agent-repl-test-panels--panel-window-count) 2))
+      (should (eq (agent-repl--ws-get "gui-ws" :frontend-buffer) webview))
+      (should (get-buffer-window webview)))))

@@ -147,55 +147,6 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		})
 }
 
-// testEmacsPlainCloseTogglesThePanelsBack is the other half of scenario 15:
-// `SPC o c` is a TOGGLE, so a second press on a workspace whose panels are
-// merely hidden must put them back.
-//
-// It is a separate scenario from the close because it reaches a DIFFERENT
-// branch of `agent-repl--toggle`: with no panel window on the frame the
-// toggle asks the frontend registry whether the workspace is running
-// (`:running-p-fn`) and shows rather than opens. That slot pointed at a void
-// symbol, and nothing caught it — the close half passes without ever asking
-// the question, and no unit test of a function that does not exist can fail.
-func testEmacsPlainCloseTogglesThePanelsBack(t *testing.T) {
-	w, _ := emacsPanelWorld(t, 1)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-
-	e.Leader("o c")
-	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
-		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
-		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
-		})
-	// The hidden webview is what makes the workspace READ as running, which
-	// is the state the second press is about.
-	if !e.EvalBool(`(and (buffer-live-p (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer)) t)`) {
-		t.Fatal("the plain close killed the webview buffer; it only hides the panels")
-	}
-	if !e.EvalBool(`(and (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ` + elispString(current) + `)) ` + elispString(current) + `) t)`) {
-		t.Fatalf("the frontend registry says workspace %q is not running while its webview is alive; the toggle would mount a second page", current)
-	}
-
-	e.Leader("o c")
-	e.AwaitEvalFor(panelSettleBound, "the panel windows to come back",
-		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
-		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) >= 2
-		})
-	// SHOWN, NOT REMOUNTED: the same buffer is back, so the page the user was
-	// looking at was not thrown away and rebuilt.
-	if !e.EvalBool(`(and (buffer-live-p (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))
-                          (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))
-                          t)`) {
-		t.Fatalf("workspace %q's own webview buffer is not the one on the frame after the toggle reopened", current)
-	}
-}
-
 // testEmacsKillCloseLeavesTheTabOrderAlone is scenario 16. `SPC o C` closes
 // the panels and kills the session, and NO CLOSE REORDERS THE TABS: only the
 // daemon orders them (owner ruling, 2026-10-19). The kill may take the tab
