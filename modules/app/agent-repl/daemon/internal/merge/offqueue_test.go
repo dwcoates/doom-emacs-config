@@ -429,29 +429,20 @@ func TestTheSidebarIsToldTheMergesOffTheQueue(t *testing.T) {
 	}
 }
 
-// TestEveryOffQueueCauseHasItsArmAndItsWords pins the two maps to one set of
-// causes, so no cause is listed on the wire without words for the sidebar,
-// or the reverse.
-func TestEveryOffQueueCauseHasItsArmAndItsWords(t *testing.T) {
-	// Arrange
-	var arms, words []string
+// TestEveryOffQueueCauseHasItsArmAndReadsEvicted pins each kept cause to its
+// typed arm on the wire, and to the sidebar's one word, "evicted", whatever
+// the cause.
+func TestEveryOffQueueCauseHasItsArmAndReadsEvicted(t *testing.T) {
 	for cause := range offQueueCauses {
-		arms = append(arms, cause)
-	}
-	for cause := range offQueueWords {
-		words = append(words, cause)
-	}
-	slices.Sort(arms)
-	slices.Sort(words)
-
-	// Act and Assert
-	if !slices.Equal(arms, words) {
-		t.Fatalf("causes with an arm %v, causes with words %v; want the same set", arms, words)
-	}
-	for _, cause := range arms {
-		if OffQueueCause(cause).GetCause() == nil {
-			t.Errorf("cause %q maps to no arm", cause)
-		}
+		t.Run(cause, func(t *testing.T) {
+			// Act and Assert.
+			if OffQueueCause(cause).GetCause() == nil {
+				t.Errorf("cause %q maps to no arm", cause)
+			}
+			if got := OffQueueWords(cause); got != "evicted" {
+				t.Errorf("cause %q reads %q in the sidebar, want evicted", cause, got)
+			}
+		})
 	}
 }
 
@@ -577,5 +568,150 @@ func TestARunningMergeWhoseWorkspaceClosedKeepsNoRequestAndPanicsNothing(t *test
 	}
 	if rec, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); kept {
 		t.Fatalf("a merge whose workspace closed kept a request: %+v", rec)
+	}
+}
+
+// landedScript scripts the harness's master and the evicted merge's branch at
+// the two heads, and answers whether the merge's row is drawn once judged.
+type landedScript struct {
+	branchGone bool
+	ancestor   bool
+	equivalent bool
+}
+
+// offQueueLandedHarness evicts the harness's own merge and scripts git as
+// SCRIPT says: master at "m1", the branch at "b1".
+func offQueueLandedHarness(t *testing.T, script landedScript) (*harness, string) {
+	t.Helper()
+	h := newHarness(t)
+	rec := evicted(t, h)
+	branch := requestBranch(h.db.workspaces[theWorkspace], rec.Source)
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	h.git.defaultBranch = "master"
+	h.git.refs["refs/heads/master"] = "m1"
+	h.git.refs["refs/heads/"+branch] = "b1"
+	if script.branchGone {
+		delete(h.git.refs, "refs/heads/"+branch)
+	}
+	if h.git.ancestry == nil {
+		h.git.ancestry = map[string]bool{}
+	}
+	h.git.ancestry["b1>m1"] = script.ancestor
+	h.git.patchEquivalent = map[string]bool{"m1>b1": script.equivalent}
+	return h, branch
+}
+
+// gitCalls counts the git calls named CALL the fake recorded.
+func gitCalls(h *harness, call string) int {
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	n := 0
+	for _, c := range h.git.calls {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
+// drawnOffQueue answers whether the sidebar's last off-queue set draws the
+// harness's merge.
+func drawnOffQueue(h *harness) bool {
+	for _, entry := range h.sidebar.offQueueTold() {
+		if entry.Workspace == theWorkspace {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAMergeOffItsQueueWithWorkOnMasterIsNotDrawn(t *testing.T) {
+	tests := []struct {
+		name      string
+		script    landedScript
+		wantShown bool
+	}{
+		{name: "a branch master holds by ancestry is left out", script: landedScript{ancestor: true}},
+		{name: "a branch with one patch-equivalent commit among unlanded ones is left out", script: landedScript{equivalent: true}},
+		{name: "a branch with nothing landed is drawn", wantShown: true},
+		{name: "a branch that is gone is left out", script: landedScript{branchGone: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h, _ := offQueueLandedHarness(t, tt.script)
+
+			// Act.
+			h.o.refreshOffQueueLanded(context.Background())
+			statuses, err := h.o.Status(context.Background(), nil)
+
+			// Assert: the roster and the status agree, and the record stands.
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if drawnOffQueue(h) != tt.wantShown || (len(statuses[0].OffQueue) == 1) != tt.wantShown {
+				t.Fatalf("drawn %v, status lists %d; want shown %v", drawnOffQueue(h), len(statuses[0].OffQueue), tt.wantShown)
+			}
+			if _, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept {
+				t.Fatal("hiding the merge lost its record")
+			}
+		})
+	}
+}
+
+func TestAHiddenMergeOffItsQueueIsStillRequeuedByName(t *testing.T) {
+	// Arrange.
+	h, _ := offQueueLandedHarness(t, landedScript{equivalent: true})
+	h.o.refreshOffQueueLanded(context.Background())
+
+	// Act.
+	_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theWorkspace, By: RequestedByUser})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Requeue of a hidden merge: %v", err)
+	}
+}
+
+func TestTheLandedJudgementIsMadeAgainWhenMasterMoves(t *testing.T) {
+	// Arrange: judged shown at master m1.
+	h, _ := offQueueLandedHarness(t, landedScript{})
+	h.o.refreshOffQueueLanded(context.Background())
+	if !drawnOffQueue(h) {
+		t.Fatal("the merge with nothing landed is not drawn")
+	}
+	asked := gitCalls(h, "any_patch_equivalent")
+
+	// Act: a judgement at unchanged heads asks git nothing more; then master
+	// moves to m2, which holds a patch-equivalent of the branch's work.
+	h.o.refreshOffQueueLanded(context.Background())
+	reused := gitCalls(h, "any_patch_equivalent") == asked
+	h.git.mu.Lock()
+	h.git.refs["refs/heads/master"] = "m2"
+	h.git.patchEquivalent["m2>b1"] = true
+	h.git.mu.Unlock()
+	h.o.refreshOffQueueLanded(context.Background())
+
+	// Assert.
+	if !reused {
+		t.Fatal("a judgement at unchanged heads asked git again")
+	}
+	if drawnOffQueue(h) {
+		t.Fatal("the merge is still drawn after master took its work")
+	}
+}
+
+func TestThePublishOfMergesOffTheQueueNeverAsksGit(t *testing.T) {
+	// Arrange.
+	h, _ := offQueueLandedHarness(t, landedScript{})
+	before := gitCalls(h, "any_patch_equivalent") + gitCalls(h, "is_ancestor")
+
+	// Act.
+	h.o.publishOffQueue(context.Background())
+
+	// Assert.
+	if after := gitCalls(h, "any_patch_equivalent") + gitCalls(h, "is_ancestor"); after != before {
+		t.Fatalf("the publish asked git %d times, want none", after-before)
 	}
 }

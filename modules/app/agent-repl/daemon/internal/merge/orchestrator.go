@@ -86,6 +86,9 @@ type orchestrator struct {
 	lockDir string
 	// rosterQueue serializes the roster's queues (publishRosterQueue).
 	rosterQueue rosterQueuePublisher
+	// offQueueLanded is which merges off their queues have work on master
+	// already, judged off every lock (offqueuelanded.go).
+	offQueueLanded offQueueLanded
 
 	mu sync.Mutex
 	// facts is every workspace's last published merge facts, which is what

@@ -230,8 +230,16 @@ func (o *orchestrator) publishOffQueueLocked(ctx context.Context) {
 			"the read of the merges off their queues ended when its context was cancelled; the roster is not told them", dlog.Context{}, err)
 		return
 	}
+	// A MERGE NOT JUDGED YET IS DRAWN, and judged off this lock
+	// (offqueuelanded.go): the publish never asks git.
+	if !o.offQueueJudged(records) {
+		o.kickOffQueueLanded()
+	}
 	entries := make([]sidebar.OffQueueEntry, 0, len(records))
 	for _, record := range records {
+		if o.offQueueHidden(record.Workspace) {
+			continue
+		}
 		ws, err := o.deps.DB.Workspace(ctx, record.Workspace)
 		if err != nil {
 			recordFailed(o.deps.Log.Global(), op, "could not read the workspace of a merge off its queue, so the roster is not told them",

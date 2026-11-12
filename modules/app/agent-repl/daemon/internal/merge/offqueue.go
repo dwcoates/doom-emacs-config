@@ -82,20 +82,11 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 // workspace is hidden at its cold gate, as the cold-gate queue spells it.
 const causeHiddenAtColdGate = "hidden_at_cold_gate"
 
-// offQueueWords are the sidebar's words for each cause
-// (frontend.v1.RosterMergeQueueOffQueueCause), keyed as offQueueCauses is.
-var offQueueWords = map[string]string{
-	string(CauseUserDrop):       "evicted",
-	string(CauseUserDequeue):    "dequeued",
-	causeFailed:                 "failed",
-	causeRestartFailed:          "restart failed",
-	string(CauseDaemonShutdown): "daemon shut down",
-	causePickFailed:             "instruction failed",
-	causeFinishFailed:           "finish failed",
-	string(CauseAheadDidNotLand): "merge ahead did not land",
-	causeHiddenAtColdGate:       "hidden at cold gate",
-	wsm.MergeLeftAdopted:        "adopted",
-}
+// offQueueWords is the sidebar's one word for every merge off its queue
+// (frontend.v1.RosterMergeQueueOffQueueCause), whatever its cause (owner
+// request, 2026-11-12): the typed cause stays on the wire and in
+// `merge-queue status` (OffQueueCause), and the rail says only "evicted".
+const offQueueWords = "evicted"
 
 // OffQueueCause answers CAUSE's arm of agentrepl.v1
 // .MergeQueueStatusOffQueueCause. A cause no exit declares is a defect in the
@@ -109,14 +100,13 @@ func OffQueueCause(cause string) *agentreplv1.MergeQueueStatusOffQueueCause {
 	return build()
 }
 
-// OffQueueWords answers the sidebar's words for CAUSE, panicking for an
-// undeclared cause as OffQueueCause does.
+// OffQueueWords answers the sidebar's word for CAUSE (offQueueWords),
+// panicking for an undeclared cause as OffQueueCause does.
 func OffQueueWords(cause string) string {
-	words, declared := offQueueWords[cause]
-	if !declared {
+	if _, declared := offQueueCauses[cause]; !declared {
 		panic(fmt.Sprintf("merge: a request stands off its queue for the undeclared cause %q", cause))
 	}
-	return words
+	return offQueueWords
 }
 
 // OffQueueMember is one merge standing off its queue, as the status and the
@@ -148,6 +138,11 @@ func (o *orchestrator) offQueueOf(ctx context.Context, repository wsm.Repository
 	}
 	var out []OffQueueMember
 	for _, record := range records {
+		// A MERGE WITH WORK ON MASTER, OR NO BRANCH, IS LEFT OUT
+		// (offqueuelanded.go); its record stands.
+		if o.offQueueHidden(record.Workspace) {
+			continue
+		}
 		ws, err := o.deps.DB.Workspace(ctx, record.Workspace)
 		if err != nil {
 			return nil, fmt.Errorf("merge: reading the workspace of the merge %s off its queue: %w", record.Workspace, err)

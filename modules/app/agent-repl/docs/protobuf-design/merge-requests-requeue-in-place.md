@@ -207,3 +207,18 @@ Now `wsm.EndsRequest` names the causes that end a request (a landing,
 `merge.TestEveryExitCauseKeepsOrEndsItsRequest` reads every cause constant of
 the package and requires exactly one fate for each: ends, kept under a declared
 arm and words, or no queue exit.
+
+### Owner requests: hide landed work, one label, numeral size (2026-11-12)
+
+- No wire change. A merge off its queue is left out of the roster's rows and
+  `MergeQueueStatus.off_queue` once its branch is gone, its head is master's
+  ancestor, or `git cherry MASTER HEAD` marks any of its commits `-`
+  (`gitclient.Git.AnyPatchEquivalent`). The record stands, and a requeue by
+  name still works. The judgement lives in `merge/offqueuelanded.go`: made off
+  every lock, cached per (branch head, master head), read by the roster
+  publish without asking git, made again at boot, after every landing, for a
+  record not yet judged, and on every status read.
+- Known gap: a branch rewritten so its landed commits leave it is noticed at
+  the next landing, boot or status read, not at once.
+- `RosterMergeQueueOffQueueCause.text` is always "evicted"; the typed cause
+  stays in `MergeQueueStatusOffQueue.cause`.

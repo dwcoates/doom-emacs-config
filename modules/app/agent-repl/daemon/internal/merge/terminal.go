@@ -511,6 +511,11 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	if out.failed == "" && out.abandoned == "" && out.landed != "" && out.alreadyOn == "" {
 		r.o.rebaseWaiting(r.repo)
 	}
+	// A LANDING MOVED MASTER: a merge off its queue whose work it carries
+	// leaves the roster (offqueuelanded.go).
+	if out.landed != "" {
+		r.o.kickOffQueueLanded()
+	}
 	r.o.kick(r.repo)
 }
 

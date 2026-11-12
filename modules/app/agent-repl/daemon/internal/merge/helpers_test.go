@@ -1451,6 +1451,8 @@ type fakeGit struct {
 	// when unscripted.
 	contained bool
 	ancestry  map[string]bool
+	// patchEquivalent answers AnyPatchEquivalent by "UPSTREAM>HEAD".
+	patchEquivalent map[string]bool
 	// branches answers CurrentBranch by directory, "master" when unscripted.
 	branches map[string]string
 	// between answers CommitsBetween; nil answers one commit of work.
@@ -1653,6 +1655,13 @@ func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) 
 		return g.contained, nil
 	}
 	return g.ancestry[ancestor+">"+descendant], nil
+}
+
+func (g *fakeGit) AnyPatchEquivalent(_ context.Context, _, upstream, head string) (bool, error) {
+	g.record("any_patch_equivalent")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.patchEquivalent[upstream+">"+head], nil
 }
 
 func (g *fakeGit) Nuke(context.Context, string, string, string) error {

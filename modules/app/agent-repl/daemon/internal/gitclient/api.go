@@ -178,6 +178,12 @@ type Git interface {
 	// AheadBehind counts the commits on local that upstream lacks (ahead) and
 	// on upstream that local lacks (behind).
 	AheadBehind(ctx context.Context, dir, local, upstream string) (ahead, behind int, err error)
+	// AnyPatchEquivalent reports whether at least one commit of HEAD that
+	// UPSTREAM does not reach has a patch-equivalent commit in UPSTREAM
+	// (`git cherry UPSTREAM HEAD`'s "-" lines): work of HEAD that landed
+	// rebased or cherry-picked. A HEAD UPSTREAM already reaches lists no
+	// commit and answers false; ask IsAncestor for that.
+	AnyPatchEquivalent(ctx context.Context, dir, upstream, head string) (bool, error)
 }
 
 // Worktree is one entry of `git worktree list --porcelain`.
