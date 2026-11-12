@@ -219,3 +219,48 @@ func TestRemoteURLOfAMissingRemoteIsGitsFailure(t *testing.T) {
 		t.Fatalf("RemoteURL = %v, want git's exit-2 failure", err)
 	}
 }
+
+func TestAnyPatchEquivalentReadsGitCherry(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{name: "one equivalent commit among unlanded ones", out: "+ aaa\n- bbb\n+ ccc\n", want: true},
+		{name: "no commit equivalent", out: "+ aaa\n+ bbb\n"},
+		{name: "no commit listed", out: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			fake := newFakeGit(t, ok(tt.out))
+
+			// Act.
+			got, err := git.AnyPatchEquivalent(context.Background(), "/repo", "master", "feature")
+
+			// Assert.
+			if err != nil || got != tt.want {
+				t.Fatalf("AnyPatchEquivalent = %v, %v; want %v", got, err, tt.want)
+			}
+			fake.assertSubject(0, "cherry", "--end-of-options", "master", "feature")
+		})
+	}
+}
+
+func TestAnyPatchEquivalentRefusesAnUnreadableLine(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("? aaa\n"))
+
+	// Act.
+	_, err := git.AnyPatchEquivalent(context.Background(), "/repo", "master", "feature")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("AnyPatchEquivalent read an unreadable line")
+	}
+	if record, logged := recordFor(surfaces.records(), "error", "daemon.gitclient.any_patch_equivalent"); !logged || record.Context["head"] != "feature" {
+		t.Fatalf("refusal record = %+v (logged %v), want an ERROR naming the head", record, logged)
+	}
+}

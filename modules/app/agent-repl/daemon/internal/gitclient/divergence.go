@@ -104,3 +104,31 @@ func parseLeftRightCount(out string) (int, int, error) {
 func (c *client) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
 	return c.run(ctx, "daemon.gitclient.remote_url", repoDir, "remote", "get-url", remote)
 }
+
+// AnyPatchEquivalent implements Git: `git cherry UPSTREAM HEAD` lists each
+// commit of HEAD that UPSTREAM does not reach, "-" when UPSTREAM holds a
+// patch-equivalent commit and "+" when it does not. Any other line is an
+// answer this client cannot read, refused at ERROR.
+func (c *client) AnyPatchEquivalent(ctx context.Context, dir, upstream, head string) (bool, error) {
+	const operation = "daemon.gitclient.any_patch_equivalent"
+	out, err := c.run(ctx, operation, dir, "cherry", "--end-of-options", upstream, head)
+	if err != nil {
+		return false, err
+	}
+	equivalent := false
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case line == "":
+		case strings.HasPrefix(line, "- "):
+			equivalent = true
+		case strings.HasPrefix(line, "+ "):
+		default:
+			cause := fmt.Errorf("gitclient: cherry %s %s in %s answered the line %q, want \"+ SHA\" or \"- SHA\"", upstream, head, dir, line)
+			c.log.Global().Error(operation, "git cherry's answer could not be read", dlog.Context{
+				"dir": dir, "upstream": upstream, "head": head, "stdout": out, "cause": cause.Error(),
+			})
+			return false, cause
+		}
+	}
+	return equivalent, nil
+}
