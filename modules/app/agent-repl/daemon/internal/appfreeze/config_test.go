@@ -20,6 +20,8 @@ func TestAppsFromEnv(t *testing.T) {
 		{name: "a path is refused", value: "/Applications/Slack.app", wantErr: true},
 		{name: "the editor is refused", value: "Emacs", wantErr: true},
 		{name: "a terminal is refused", value: "Slack,iTerm2", wantErr: true},
+		{name: "a container runtime is refused", value: "Slack,Docker", wantErr: true},
+		{name: "a container runtime is refused whatever its case", value: "orbstack", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
