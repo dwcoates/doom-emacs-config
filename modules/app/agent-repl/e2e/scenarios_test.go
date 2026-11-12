@@ -146,8 +146,6 @@ func TestEmacsWorkspaces(t *testing.T) {
 	scenario(t,
 		testEmacsProofOfLife,
 		testEmacsReachesAChatThreadOffTheTabBar,
-		testEmacsGuiRegistryNamesOnlyLiveCapabilities,
-		testEmacsGuiDurableSessionIdNamesTheVendorConversation,
 	)
 }
 

@@ -2702,6 +2702,69 @@ is recorded, never performed."
       (should (stringp (plist-get minted :id)))
       (should-not (string-empty-p (plist-get minted :id))))))
 
+;;;; ---- The gui frontend's durable session id, off the host stream ----
+
+(declare-function agent-repl--gui-durable-session-id "frontend")
+(declare-function agent-repl-host-vendor-session-id "host")
+
+(defun agent-repl-itest-host--await-vendor-id (daemon ref)
+  "Push a live host state on DAEMON for REF and wait for its vendor id to land."
+  (agent-repl-itest-host--push-host daemon (plist-get ref :id)
+                                    (agent-repl-itest-host--live 'open))
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl-host-vendor-session-id agent-repl-itest-host--ws))
+   nil "the live arm's vendor session id"))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-is-the-vendor-conversation ()
+  "The gui capability answers the vendor id the daemon's host push published."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                     "vendor-1")))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-has-exactly-one-source ()
+  "The capability and the host stream's accessor answer the same id."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                     (agent-repl-host-vendor-session-id agent-repl-itest-host--ws))))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-is-not-the-ref-id ()
+  "The vendor conversation's uuid is not the daemon-minted echo token."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act.
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      ;; Assert.
+      (should-not (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                         (plist-get ref :id))))))
+
+(ert-deftest agent-repl-itest-host-the-gui-durable-session-id-holds-while-a-turn-runs ()
+  "A later host push in the same conversation does not move the id."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (agent-repl-itest-host--await-vendor-id daemon ref)
+      (let ((before (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)))
+        ;; Act.
+        (agent-repl-itest-host--push-host daemon (plist-get ref :id)
+                                          (agent-repl-itest-host--live 'merging))
+        (agent-repl-itest--wait-until
+         (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :merging))
+         nil "the second push to land")
+        ;; Assert.
+        (should (equal (agent-repl--gui-durable-session-id agent-repl-itest-host--ws)
+                       before))))))
+
 (provide 'test-integration-host)
 
 ;;; test-integration-host.el ends here
