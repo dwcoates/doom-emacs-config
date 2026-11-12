@@ -808,7 +808,9 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - Each waiting merge follows, in the order it will run.
     - Clicking a merge selects its workspace and opens the merge's bubble.
     - Dragging a waiting merge to another place in its line moves it there.
-    - Each merge that left the queue without landing (evicted, failed, or stopped by a restart) follows, with why it left.
+    - Each merge that left the queue without landing (evicted, failed, or stopped by a restart) follows, marked `evicted`.
+      - `merge-queue status` still names the exact cause.
+      - A merge is left out once any of its branch's commits is on master, by ancestry or as an equivalent patch, or once its branch is gone; its request stays and can still be requeued by name.
       - Its request stays: its branch, version increment, changelog line, hooks and cleanup are kept, and an async merge's hidden merge workspace stays open under its name.
       - `↺` puts it back in line, at the back, as itself; no new workspace is made.
       - `✕` discards it; an async merge's merge workspace closes, and the worktree it asked to clean up is removed when it holds no uncommitted changes. No branch is deleted.
