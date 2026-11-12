@@ -237,12 +237,13 @@ func TestPlanForGivesEachRunItsBudgetPoolAndGovernor(t *testing.T) {
 	}{
 		{name: "an ordinary run shares the host's governed pool", numCPU: 16,
 			want: Plan{Budget: 16 * CapPercent / 100, Dir: "/shared", Governed: true}},
-		{name: "a bypass holder's run holds every core from its own pool, ungoverned", ungoverned: "1", numCPU: 16,
-			want: Plan{Budget: 16, Dir: "/own"}},
+		{name: "a bypass holder's run holds the whole host from its own pool, ungoverned, a seat per SeatCost cores", ungoverned: "1", numCPU: 16,
+			want: Plan{Budget: 8, Dir: "/own"}},
+		{name: "an ungoverned run on a host of one core is refused", ungoverned: "1", numCPU: 1,
+			wantErr: "which is not one seat"},
 		{name: "a marker that is not 1 is refused", ungoverned: "yes", numCPU: 16,
 			wantErr: `AGENT_REPL_TEST_UNGOVERNED="yes" is not the "1"`},
-		{name: "an ungoverned run on a host reporting no cores is refused", ungoverned: "1", numCPU: 0,
-			wantErr: "reports 0 cores"},
+
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
