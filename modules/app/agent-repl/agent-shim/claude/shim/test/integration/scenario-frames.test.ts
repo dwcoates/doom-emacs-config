@@ -90,7 +90,7 @@ function responseProse(activities: readonly conversationv1.AgentActivity[]): str
 function terminalArm(frames: readonly conversationv1.AgentFrame[]): string | undefined {
   const terminal = frames.find((frame) => frame.result.case === "success" || frame.result.case === "failure");
   if (terminal?.result.case === "success") return `success.${terminal.result.value.outcome.case}`;
-  if (terminal?.result.case === "failure") return `failure.${terminal.result.value.cause.case}`;
+  if (terminal?.result.case === "failure") return `failure.${terminal.result.value.failure.case}`;
   return undefined;
 }
 
@@ -273,5 +273,116 @@ describe("a failing SessionStart hook", () => {
     const { frames } = await driveTurn("!hook-failed");
 
     expect(terminalArm(frames)).toBe("success.completed");
+  });
+});
+
+/** Every permission arm the frames carry, with the decision a settled one states. */
+function permissionArms(frames: readonly conversationv1.AgentFrame[]): string[] {
+  return frames.flatMap((frame) => {
+    if (frame.result.case !== "update" || frame.result.value.update.case !== "permission") return [];
+    const permission = frame.result.value.update.value;
+    if (permission.result.case === "success") {
+      const decision = permission.result.value.decision;
+      return [decision.case === "denied" ? `denied.${decision.value.by.case}` : `success.${decision.case}`];
+    }
+    return [permission.result.case ?? "unset"];
+  });
+}
+
+describe("a query that dies with a permission ask open", () => {
+  test("opens the ask, then settles it denied by the user before the turn ends", async () => {
+    const { frames } = await driveTurn("!query-eof-mid-ask");
+
+    expect(permissionArms(frames)).toEqual(["start", "denied.user"]);
+  });
+
+  test("ends the turn on the query_died failure arm carrying unexpected_eof", async () => {
+    const { frames } = await driveTurn("!query-eof-mid-ask");
+
+    const terminal = frames.find((frame) => frame.result.case === "failure");
+    const failure = terminal?.result.case === "failure" ? terminal.result.value.failure : undefined;
+    expect({
+      arm: failure?.case,
+      cause: failure?.case === "queryDied" ? failure.value.cause.case : undefined,
+    }).toEqual({ arm: "queryDied", cause: "unexpectedEof" });
+  });
+
+  test("reports the death on the session stream as query_died.unexpected_eof", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openSessionUpdates((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof-mid-ask" }));
+    const died = await watch.until((frame) => sessionUpdate(frame).update.case === "queryDied");
+
+    const update = sessionUpdate(died).update;
+    expect(update.case === "queryDied" ? update.value.cause.case : undefined).toBe("unexpectedEof");
+    watch.close();
+  });
+});
+
+describe("a converter fault and its recovery", () => {
+  /** The degraded windows a diagnostics push carries. */
+  function windowsOf(update: conversationv1.SessionUpdate): conversationv1.SessionDegradedWindow[] {
+    return update.update.case === "diagnostics" ? update.update.value.degradedWindows : [];
+  }
+
+  test("the window an unconvertible hook opens is the window the next clean turn closes, with the dropped count", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openSessionUpdates((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!fault-converter" }));
+    const opened = windowsOf(
+      sessionUpdate(
+        await watch.until((frame) =>
+          windowsOf(sessionUpdate(frame)).some((window) => window.extent.case === "open"),
+        ),
+      ),
+    ).find((window) => window.extent.case === "open");
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!fault-recover" }));
+    const closed = windowsOf(
+      sessionUpdate(
+        await watch.until((frame) =>
+          windowsOf(sessionUpdate(frame)).some(
+            (window) => window.extent.case === "closed" && window.beganAtMs === opened?.beganAtMs,
+          ),
+        ),
+      ),
+    ).find((window) => window.extent.case === "closed" && window.beganAtMs === opened?.beganAtMs);
+
+    expect(opened).toBeDefined();
+    expect({
+      component: closed?.component,
+      droppedAtLeastOne:
+        closed?.extent.case === "closed" ? closed.extent.value.droppedCount >= 1n : undefined,
+      endedNotBeforeItBegan:
+        closed?.extent.case === "closed" ? closed.extent.value.endedAtMs >= (opened?.beganAtMs ?? 0n) : undefined,
+    }).toEqual({ component: opened?.component, droppedAtLeastOne: true, endedNotBeforeItBegan: true });
+    watch.close();
+  });
+
+  test("the unconvertible hook produces no frame while the turn still concludes", async () => {
+    const { frames } = await driveTurn("!fault-converter");
+
+    expect({ hooks: hookArms(frames), terminal: terminalArm(frames) }).toEqual({
+      hooks: [],
+      terminal: "success.completed",
+    });
+  });
+
+  test("the same hook, well-formed, is a succeeded firing the shim does not put on the stream", async () => {
+    const { frames } = await driveTurn("!fault-recover");
+
+    expect({ hooks: hookArms(frames), terminal: terminalArm(frames) }).toEqual({
+      hooks: [],
+      terminal: "success.completed",
+    });
   });
 });

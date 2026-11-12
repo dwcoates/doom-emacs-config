@@ -1565,6 +1565,9 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 	if row.GetTurnEnded().GetErrored().GetHeadline().GetText() == "" {
 		t.Fatal("the query-died terminal carries no composed headline")
 	}
+	if row.GetTurnEnded().GetErrored().GetQueryDied().GetUnexpectedEof() == nil {
+		t.Fatalf("the query-died terminal's cause = %v, want unexpected_eof, the cause the shim reported", row.GetTurnEnded().GetErrored().GetQueryDied())
+	}
 }
 
 // ==========================================================================

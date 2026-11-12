@@ -37,9 +37,6 @@ func TestTurns(t *testing.T) {
 // TestFaults is what the vendor, the producer and the hooks get wrong, and the refusals and failure arms they end in.
 func TestFaults(t *testing.T) {
 	scenario(t,
-		testQueryEofEndsTheTurnAsQueryDied,
-		testQueryEofMidAskDeniesTheOpenAsk,
-		testConverterRecoveryClosesTheDegradedWindow,
 		testResidueAttachmentsDrawNoRow,
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
