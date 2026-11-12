@@ -55,7 +55,6 @@ func TestFaults(t *testing.T) {
 		testBubbleRefusedAgentBusy,
 		testUnknownAgentOnUpdateAgent,
 		testStartSessionVendorStartFailedRecovers,
-		testApiRateLimitedCarriesTheVendorWait,
 		testPermissionAskAnsweredArms,
 		testHookBlocked,
 		testHookFailed,

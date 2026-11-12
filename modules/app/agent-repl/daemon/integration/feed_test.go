@@ -1373,6 +1373,57 @@ func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
 	}
 }
 
+// A RATE-LIMITED TURN CARRIES THE VENDOR'S STATED WAIT. FeedTurnErrorRateLimited
+// has a `retry_after_ms` the client counts down from; the vendor's number
+// travels through the daemon unchanged, and an unset one stays unset (the
+// vendor said nothing, which is not "retry now").
+func TestARateLimitedTerminalCarriesTheVendorsStatedWaitAndNoneWhenUnstated(t *testing.T) {
+	t.Parallel()
+	statedMs := int64(549)
+	tests := []struct {
+		name       string
+		retryAfter *int64
+		wantSet    bool
+		wantMs     int64
+	}{
+		{name: "a stated wait is carried exactly", retryAfter: &statedMs, wantSet: true, wantMs: 549},
+		{name: "an unstated wait stays unset", retryAfter: nil, wantSet: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newOpened(t, harness.Opts{})
+			f.submit("go", "k-429", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+			tail := f.watchRootFeed()
+
+			// Act: the vendor rate-limited the call and the turn ended on it.
+			f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+				Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+					Message: "rate limited",
+					Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{RetryAfterMs: tt.retryAfter}},
+				}},
+			}))
+
+			// Assert
+			row := awaitRow(t, f, tail, "the rate-limited terminal", func(r *frontendv1.FeedRow) bool {
+				return r.GetTurnEnded().GetErrored().GetRateLimited() != nil
+			})
+			errored := row.GetTurnEnded().GetErrored()
+			if errored.GetHeadline().GetText() == "" {
+				t.Fatalf("the rate-limited terminal carries no composed headline: %v", errored)
+			}
+			limited := errored.GetRateLimited()
+			if limited.RetryAfterMs != nil != tt.wantSet {
+				t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %v, want set = %v", limited.RetryAfterMs, tt.wantSet)
+			}
+			if tt.wantSet && limited.GetRetryAfterMs() != tt.wantMs {
+				t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %d, want the vendor's stated %d", limited.GetRetryAfterMs(), tt.wantMs)
+			}
+		})
+	}
+}
+
 // THE RUN'S OWN TERMINALS (landing 8). One end-to-end path per arm family:
 // a FailureVendor* arm, which also resolves the workspace purple, and the
 // Stop-hook arm, which does not.
