@@ -44,7 +44,7 @@ or absolute, inside the workspace's worktree):
 -vitest FILE                   every test of the vitest file
 -vitest 'FILE=suite test'      one test or describe block by its full name; repeat the flag for more
 -ert FILE                      every test of the ERT file
--ert FILE=test-a,test-b        those ert-deftests
+-ert FILE=test-a,test-b        those ert-deftests; a FILE with no directory (test-x.el) is the one in lisp/, from any directory
 -harness SCRIPT                the whole shell harness
 -harness SCRIPT=group1,group2  those groups of a harness that lists groups
 -harness SCRIPT=TestA,TestB/s  those Go tests of a sandboxed suite (bin/test-e2e-emacs.sh); TestB/s is one scenario step

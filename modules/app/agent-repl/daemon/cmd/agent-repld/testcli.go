@@ -50,7 +50,10 @@ import (
 //	                         workspace's own (a main workspace only)
 //
 // A path is relative to the working directory (or absolute), and must lie in
-// the worktree the run runs in. Each frame of the run's stream is printed as one
+// the worktree the run runs in. An -ert FILE with no directory (test-x.el) is
+// the file of that name in the ERT suite's own directory, from any working
+// directory. A run the runner stopped before it planned exits failed, naming
+// what it was asked to run and why it stopped. Each frame of the run's stream is printed as one
 // line of protojson as it arrives. The command exits 0 when every run passed,
 // exitTestsFailed when one ran and failed, and exitRefused when the daemon or
 // the runner refused it.
