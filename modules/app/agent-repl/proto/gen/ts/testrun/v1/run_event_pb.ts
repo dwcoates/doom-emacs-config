@@ -5,7 +5,9 @@
 //
 // THE ORDER IS FIXED. A run that can plan states `planned` first, then one
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
-// cannot resolve states `refused` alone. Between `planned` and `ended`, a unit
+// cannot resolve states `refused` alone, and a run the runner resolved but
+// could not plan (an input it could not read, a plan it could not build)
+// states `aborted` alone. Between `planned` and `ended`, a unit
 // the host's CPU holds back states `waiting_for_cpu` when its wait begins and
 // `cpu_wait_ended` once it has its cores, in that order, before its own
 // `unit_ended`.
@@ -22,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file testrun/v1/run_event.proto.
  */
 export const file_testrun_v1_run_event: GenFile = /*@__PURE__*/
-  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSLMAgoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAQgcKBWV2ZW50ImQKDlRlc3RSdW5QbGFubmVkEi0KBXVuaXRzGAEgAygLMh4udGVzdHJ1bi52MS5UZXN0UnVuUGxhbm5lZFVuaXQSIwoDbG9nGAIgASgLMhYudGVzdHJ1bi52MS5UZXN0UnVuTG9nIjQKElRlc3RSdW5QbGFubmVkVW5pdBIPCgd1bml0X2lkGAEgASgJEg0KBXN1aXRlGAIgASgJIhoKClRlc3RSdW5Mb2cSDAoEcGF0aBgBIAEoCSKlAgoQVGVzdFJ1blVuaXRFbmRlZBIPCgd1bml0X2lkGAEgASgJEg0KBXN1aXRlGAIgASgJEg8KB3dhbGxfbXMYAyABKAMSLwoGcGFzc2VkGAQgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdFBhc3NlZEgAEi8KBmZhaWxlZBgFIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blVuaXRGYWlsZWRIABI1CgljYW5jZWxsZWQYByABKAsyIC50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0Q2FuY2VsbGVkSAASLAoFdGVzdHMYCCADKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5UZXN0UmVzdWx0QgkKB3ZlcmRpY3RKBAgGEAdSCGRlY2xpbmVkIhMKEVRlc3RSdW5Vbml0UGFzc2VkIjsKEVRlc3RSdW5Vbml0RmFpbGVkEhEKCWV4aXRfY29kZRgBIAEoBRITCgtvdXRwdXRfdGFpbBgCIAEoCSI0ChRUZXN0UnVuVW5pdENhbmNlbGxlZBIcChRjYW5jZWxsZWRfYnlfdW5pdF9pZBgBIAEoCSLSAQoRVGVzdFJ1blRlc3RSZXN1bHQSDAoEbmFtZRgBIAEoCRIPCgd3YWxsX21zGAIgASgDEi8KBnBhc3NlZBgDIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RQYXNzZWRIABIvCgZmYWlsZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5UZXN0RmFpbGVkSAASMQoHc2tpcHBlZBgFIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1blRlc3RTa2lwcGVkSABCCQoHb3V0Y29tZSITChFUZXN0UnVuVGVzdFBhc3NlZCITChFUZXN0UnVuVGVzdEZhaWxlZCIUChJUZXN0UnVuVGVzdFNraXBwZWQifQoMVGVzdFJ1bkVuZGVkEjAKBnBhc3NlZBgBIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1bkVuZGVkUGFzc2VkSAASMAoGZmFpbGVkGAIgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRGYWlsZWRIAEIJCgdvdXRjb21lIkAKElRlc3RSdW5FbmRlZFBhc3NlZBIUCgxwYXNzZWRfdW5pdHMYASABKAVKBAgCEANSDmRlY2xpbmVkX3VuaXRzIlkKElRlc3RSdW5FbmRlZEZhaWxlZBIUCgxmYWlsZWRfdW5pdHMYASABKAUSFwoPY2FuY2VsbGVkX3VuaXRzGAIgASgFEhQKDHBhc3NlZF91bml0cxgDIAEoBSIgCg5UZXN0UnVuUmVmdXNlZBIOCgZkZXRhaWwYASABKAkiUgoUVGVzdFJ1bldhaXRpbmdGb3JDcHUSDwoHdW5pdF9pZBgBIAEoCRIUCgxidXN5X3BlcmNlbnQYAiABKAESEwoLY2FwX3BlcmNlbnQYAyABKA0iOQoTVGVzdFJ1bkNwdVdhaXRFbmRlZBIPCgd1bml0X2lkGAEgASgJEhEKCXdhaXRlZF9tcxgCIAEoA0ImWiRhZ2VudHJlcGwvcHJvdG8vdGVzdHJ1bi92MTt0ZXN0cnVudjFiBnByb3RvMw");
+  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSL7AgoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAEi0KB2Fib3J0ZWQYByABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5BYm9ydGVkSABCBwoFZXZlbnQiZAoOVGVzdFJ1blBsYW5uZWQSLQoFdW5pdHMYASADKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkVW5pdBIjCgNsb2cYAiABKAsyFi50ZXN0cnVuLnYxLlRlc3RSdW5Mb2ciNAoSVGVzdFJ1blBsYW5uZWRVbml0Eg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkiGgoKVGVzdFJ1bkxvZxIMCgRwYXRoGAEgASgJIqUCChBUZXN0UnVuVW5pdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkSDwoHd2FsbF9tcxgDIAEoAxIvCgZwYXNzZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0UGFzc2VkSAASLwoGZmFpbGVkGAUgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdEZhaWxlZEgAEjUKCWNhbmNlbGxlZBgHIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1blVuaXRDYW5jZWxsZWRIABIsCgV0ZXN0cxgIIAMoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RSZXN1bHRCCQoHdmVyZGljdEoECAYQB1IIZGVjbGluZWQiEwoRVGVzdFJ1blVuaXRQYXNzZWQiOwoRVGVzdFJ1blVuaXRGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEhMKC291dHB1dF90YWlsGAIgASgJIjQKFFRlc3RSdW5Vbml0Q2FuY2VsbGVkEhwKFGNhbmNlbGxlZF9ieV91bml0X2lkGAEgASgJItIBChFUZXN0UnVuVGVzdFJlc3VsdBIMCgRuYW1lGAEgASgJEg8KB3dhbGxfbXMYAiABKAMSLwoGcGFzc2VkGAMgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFBhc3NlZEgAEi8KBmZhaWxlZBgEIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RGYWlsZWRIABIxCgdza2lwcGVkGAUgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVRlc3RSdW5UZXN0UGFzc2VkIhMKEVRlc3RSdW5UZXN0RmFpbGVkIhQKElRlc3RSdW5UZXN0U2tpcHBlZCJ9CgxUZXN0UnVuRW5kZWQSMAoGcGFzc2VkGAEgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRQYXNzZWRIABIwCgZmYWlsZWQYAiABKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5FbmRlZEZhaWxlZEgAQgkKB291dGNvbWUiQAoSVGVzdFJ1bkVuZGVkUGFzc2VkEhQKDHBhc3NlZF91bml0cxgBIAEoBUoECAIQA1IOZGVjbGluZWRfdW5pdHMiWQoSVGVzdFJ1bkVuZGVkRmFpbGVkEhQKDGZhaWxlZF91bml0cxgBIAEoBRIXCg9jYW5jZWxsZWRfdW5pdHMYAiABKAUSFAoMcGFzc2VkX3VuaXRzGAMgASgFIjMKDlRlc3RSdW5BYm9ydGVkEhEKCXNlbGVjdGlvbhgBIAEoCRIOCgZkZXRhaWwYAiABKAkiIAoOVGVzdFJ1blJlZnVzZWQSDgoGZGV0YWlsGAEgASgJIlIKFFRlc3RSdW5XYWl0aW5nRm9yQ3B1Eg8KB3VuaXRfaWQYASABKAkSFAoMYnVzeV9wZXJjZW50GAIgASgBEhMKC2NhcF9wZXJjZW50GAMgASgNIjkKE1Rlc3RSdW5DcHVXYWl0RW5kZWQSDwoHdW5pdF9pZBgBIAEoCRIRCgl3YWl0ZWRfbXMYAiABKANCJlokYWdlbnRyZXBsL3Byb3RvL3Rlc3RydW4vdjE7dGVzdHJ1bnYxYgZwcm90bzM");
 
 /**
  * One thing a run reports.
@@ -84,6 +86,15 @@ export type TestRunEvent = Message<"testrun.v1.TestRunEvent"> & {
      */
     value: TestRunCpuWaitEnded;
     case: "cpuWaitEnded";
+  } | {
+    /**
+     * The run stopped before it planned, on the runner's own failure: the
+     * run's only event. A runner never exits before planning without it.
+     *
+     * @generated from field: testrun.v1.TestRunAborted aborted = 7;
+     */
+    value: TestRunAborted;
+    case: "aborted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -514,6 +525,39 @@ export const TestRunEndedFailedSchema: GenMessage<TestRunEndedFailed> = /*@__PUR
   messageDesc(file_testrun_v1_run_event, 14);
 
 /**
+ * The run stopped before it planned, on a failure of the runner's own rather
+ * than of the selection: an input it could not read, a plan it could not
+ * build.
+ *
+ * @generated from message testrun.v1.TestRunAborted
+ */
+export type TestRunAborted = Message<"testrun.v1.TestRunAborted"> & {
+  /**
+   * What the run was asked to run, for a person: each selection's target
+   * (an ERT file, a Go package with its tests, a suite), or the suites its
+   * arguments select.
+   *
+   * @generated from field: string selection = 1;
+   */
+  selection: string;
+
+  /**
+   * Why it stopped, for a person: the step that failed and its cause,
+   * naming the file it could not read where there is one.
+   *
+   * @generated from field: string detail = 2;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message testrun.v1.TestRunAborted.
+ * Use `create(TestRunAbortedSchema)` to create a new message.
+ */
+export const TestRunAbortedSchema: GenMessage<TestRunAborted> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_run_event, 15);
+
+/**
  * The selection could not be run.
  *
  * @generated from message testrun.v1.TestRunRefused
@@ -533,7 +577,7 @@ export type TestRunRefused = Message<"testrun.v1.TestRunRefused"> & {
  * Use `create(TestRunRefusedSchema)` to create a new message.
  */
 export const TestRunRefusedSchema: GenMessage<TestRunRefused> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 15);
+  messageDesc(file_testrun_v1_run_event, 16);
 
 /**
  * A unit waits to start for the host's CPU. Every test and build on the host
@@ -570,7 +614,7 @@ export type TestRunWaitingForCpu = Message<"testrun.v1.TestRunWaitingForCpu"> & 
  * Use `create(TestRunWaitingForCpuSchema)` to create a new message.
  */
 export const TestRunWaitingForCpuSchema: GenMessage<TestRunWaitingForCpu> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 16);
+  messageDesc(file_testrun_v1_run_event, 17);
 
 /**
  * A unit that waited for the host's CPU has its cores and starts.
@@ -598,5 +642,5 @@ export type TestRunCpuWaitEnded = Message<"testrun.v1.TestRunCpuWaitEnded"> & {
  * Use `create(TestRunCpuWaitEndedSchema)` to create a new message.
  */
 export const TestRunCpuWaitEndedSchema: GenMessage<TestRunCpuWaitEnded> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 17);
+  messageDesc(file_testrun_v1_run_event, 18);
 
