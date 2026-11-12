@@ -1267,15 +1267,46 @@ message RosterMergeQueueWaiting {
   RosterMergeQueueSubject subject = 1;
   // When it was put in line, epoch ms.
   int64 queued_at_ms = 2;
-  // TRUE when it was put in line at the front
-  // (agentrepl.v1.MergeQueuePlacementFront).
-  bool placed_at_front = 3;
+  // HOW THE MERGE CAME TO STAND WHERE IT DOES, drawn as the label after its
+  // name. UNSET for a merge put in line in the ordinary way, at the back.
+  optional RosterMergeQueueWaitingPlacement placement = 5;
   // PRESENT while the merge is being worked on behind the head (racing it
   // to land): it then holds an active slot, and the row's clock ticks from
   // the moment it took that slot rather than from `queued_at_ms`. UNSET
   // while it only waits its turn.
   optional RosterMergeQueueWaitingRacing racing = 4;
+  // Tag 3 (`placed_at_front`) is RETIRED: a merge's front placement is the
+  // `front` arm of `placement`, beside the `returned` arm it is exclusive
+  // with.
+  reserved 3;
+  reserved "placed_at_front";
 }
+
+// Why a waiting merge stands ahead of the merges queued before it. The arms
+// are exclusive: a merge the user put at the front that later stepped aside
+// and came back is drawn `returned`, the latest of the two facts and the one
+// that placed it where it now stands.
+message RosterMergeQueueWaitingPlacement {
+  // THE ARM IS THE PLACEMENT. A set field with no arm is a placement this
+  // build does not name, and draws no label.
+  oneof placement {
+    // The user put the merge in line at the front
+    // (agentrepl.v1.MergeQueuePlacementFront), or moved it there. Drawn
+    // `front`.
+    RosterMergeQueueWaitingFront front = 1;
+    // The merge came back from repairing out of line (fixing its tests or
+    // resolving its conflicts) and waits at the first waiting place, behind
+    // every merge being worked on, to be taken up again. Drawn `returned`.
+    RosterMergeQueueWaitingReturned returned = 2;
+  }
+}
+
+// The user placed the merge at the front of the waiting line.
+message RosterMergeQueueWaitingFront {}
+
+// The merge is back in line from a repair out of line, and nothing has taken
+// it up again yet.
+message RosterMergeQueueWaitingReturned {}
 
 // A merge behind the head is being worked on, racing the head to land.
 message RosterMergeQueueWaitingRacing {

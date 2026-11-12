@@ -11,6 +11,16 @@ import (
 	"agent-repld/internal/dlog"
 )
 
+// mergeQueueReturnedDDL is the layout-125 addition: the mark of a merge back
+// in line from a repair out of line that nothing has taken up again
+// (MergeQueueEntry.Returned). Before it the return wrote the user's front mark
+// instead, so the two could not be told apart. IT IS ADDITIVE: a new column
+// the previous build never names. Rows already returned under the previous
+// build carry no mark; they read as worked on, as they did, until they land.
+const mergeQueueReturnedDDL = `
+ALTER TABLE merge_queue ADD COLUMN returned INTEGER NOT NULL DEFAULT 0;
+`
+
 // normalizeRepoKey is the ONE spelling of a merge queue's repository key. It is
 // a canonical common dir, so it normalizes exactly as a worktree dir does and
 // two spellings of one repository can never grow two queues.
@@ -726,7 +736,8 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 // failures its test suite finished with (MergeRemediating): it goes to the
 // back of the sequence, where it passes nobody, and keeps its lease and its
 // progress record. Anything but an admitted entry is a refusal: only the
-// merge being worked on steps aside.
+// merge being worked on steps aside. Its returned mark, if a stale one stood,
+// goes: only an admitted entry carries one (MergeQueueEntry.Returned).
 func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
 	const op = "daemon.wsm.step_aside_merge"
 	key, err := normalizeRepoKey(repo)
@@ -747,7 +758,7 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ? WHERE repo_key = ? AND workspace_id = ?`,
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ?, returned = 0 WHERE repo_key = ? AND workspace_id = ?`,
 			int(MergeRemediating), back, key, id)
 		return err
 	})
@@ -759,6 +770,12 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // 2026-10-31). With no merge waiting it stays at the back, which is then the
 // first place after whatever runs. Anything but a remediating entry is a
 // refusal.
+//
+// THE ENTRY IS MARKED RETURNED (MergeQueueEntry.Returned), so it reads as
+// waiting (WorkedOn) until the orchestrator takes it up again
+// (TakeUpReturnedMerge); its front mark is left as the user set it. Being
+// admitted already, it is passed by no waiting merge and needs no front mark
+// to hold its place.
 //
 // WORKED ON IS THE CALLER'S WORD, not the entries' states: a merge the
 // orchestrator has taken up (its chain's member joining behind the head) is
@@ -784,7 +801,7 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ?, source_front = 1 WHERE repo_key = ? AND workspace_id = ?`,
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ?, returned = 1 WHERE repo_key = ? AND workspace_id = ?`,
 			int(MergeAdmitted), back, key, id); err != nil {
 			return err
 		}
@@ -807,6 +824,40 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 	})
 }
 
+// TakeUpReturnedMerge clears the returned mark of ID's entry in REPO's queue:
+// the orchestrator is taking the merge up again, as the head or racing behind
+// it, so from here it is worked on (MergeQueueEntry.WorkedOn). Anything but an
+// admitted entry marked returned is a refusal: only a merge the return put
+// back is taken up this way.
+func (s *store) TakeUpReturnedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
+	const op = "daemon.wsm.take_up_returned_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET returned = 0 WHERE repo_key = ? AND workspace_id = ? AND state = ? AND returned = 1`,
+			key, id, int(MergeAdmitted))
+		if err != nil {
+			return err
+		}
+		cleared, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if cleared != 1 {
+			return fmt.Errorf("wsm: workspace %s in repo %q is taken up as returned while %s and not marked returned", id, key, state)
+		}
+		return nil
+	})
+}
+
 // AdmitMerge marks the entry the orchestrator is running now, and marks its
 // repository as owing its queue_drained scripts IN THE SAME WRITE, so no
 // admitted merge leaves the repository without the debt.
@@ -817,7 +868,9 @@ func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) er
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
 // ITS OWN PLACE, waiting, under LEDGER: a merge a restart interrupted before it
 // took a step runs again from where it stood -- the head of the line -- never
-// from the back. Its source, its front mark and its place are kept. An entry
+// from the back. Its source, its front mark and its place are kept; a returned
+// mark is dropped, since only an admitted entry carries one
+// (MergeQueueEntry.Returned) and the merge is admitted afresh. An entry
 // that is not admitted is refused: the caller lost track of the queue.
 func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error {
 	const op = "daemon.wsm.return_admitted_merge"
@@ -833,7 +886,7 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 		return err
 	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ?, returned = 0 WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
 			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
 		if err != nil {
 			return err
@@ -1011,7 +1064,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, slot, slot_since`
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind, slot, slot_since, returned`
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1053,8 +1106,9 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			behind    sql.NullString
 			slot      int64
 			slotSince int64
+			returned  bool
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind, &slot, &slotSince); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind, &slot, &slotSince, &returned); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -1086,6 +1140,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 		entry.EnqueuedAt = fromNanos(enqueued)
 		entry.Ledger = LeaseID(ledger.String)
 		entry.Slot = MergeSlot(slot)
+		entry.Returned = returned
 		if !entry.Slot.valid() {
 			return nil, &DecodeError{Table: "merge_queue", Row: row, Field: "slot", Err: fmt.Errorf("unknown merge slot %d", slot)}
 		}

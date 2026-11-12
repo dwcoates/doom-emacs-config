@@ -21,6 +21,7 @@ import {
   RosterMergeQueueRemediatingSchema,
   RosterMergeQueueStageSchema,
   RosterMergeQueueSubjectSchema,
+  RosterMergeQueueWaitingPlacementSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { RepositoryRefSchema as WorkspaceRepositorySchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -36,6 +37,8 @@ import {
   drawQueuedGroupHead,
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
+  MERGE_QUEUE_LABEL_CLASS,
+  placementLabel,
   MERGE_QUEUE_CARD_LINE_CLASS,
   githubPlaceText,
   MERGE_QUEUE_CLASS,
@@ -650,11 +653,26 @@ describe("drawRosterMergeQueueWaiting", () => {
   });
 
   it.each([
-    { name: "marks a merge put in line at the front", front: true, want: true },
-    { name: "marks no other merge", front: false, want: false },
-  ])("$name", ({ front, want }) => {
+    { name: "marks a merge the user put at the front front", init: { front: true }, want: "front" },
+    { name: "marks a merge back from a repair returned", init: { returned: true }, want: "returned" },
+    { name: "marks a merge put in line at the back with no label", init: {}, want: null },
+  ])("$name", ({ init, want }) => {
     const { sc } = daemon();
-    expect(drawRosterMergeQueueWaiting(waitingMerge("w1", { front }), sc, "w").querySelector(".sb-mq-front") !== null).toBe(want);
+    const labels = [...drawRosterMergeQueueWaiting(waitingMerge("w1", init), sc, "w").querySelectorAll(`.${MERGE_QUEUE_LABEL_CLASS}`)];
+    expect(labels.map((label) => label.textContent)).toEqual(want === null ? [] : [want]);
+  });
+
+  it("draws no label for a placement this build does not name", () => {
+    expect(placementLabel(create(RosterMergeQueueWaitingPlacementSchema, {}))).toBeNull();
+  });
+
+  it("draws the returned label as a peer of the front label, in the queue label's class", () => {
+    const { sc } = daemon();
+    const front = drawRosterMergeQueueWaiting(waitingMerge("w1", { front: true }), sc, "w").querySelector(".sb-mq-front");
+    const returned = drawRosterMergeQueueWaiting(waitingMerge("w1", { returned: true }), sc, "w").querySelector(".sb-mq-returned");
+    expect(front?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
+    expect(returned?.classList.contains(MERGE_QUEUE_LABEL_CLASS)).toBe(true);
+    expect(returned?.classList.contains("sb-mq-front")).toBe(false);
   });
 });
 

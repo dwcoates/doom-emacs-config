@@ -88,12 +88,16 @@ export const NARRATED_KINDS: readonly string[] = ["rebaseCommit", "testsRun"];
  * on the user wears the question mark emoji. A commit the replay has not
  * reached yet (`pending`) wears no glyph and no clock. A test run waiting for
  * its repository's test turn (`waitingForTurn`) wears a hollow dot: it is
- * under way, with its clock ticking, but nothing of it runs yet.
+ * under way, with its clock ticking, but nothing of it runs yet. A tab its
+ * merge left open while it waits in line again after a repair out of line
+ * (`held`) wears a pause mark and no clock: nothing of it runs, and it waits
+ * for its merge to be taken up.
  */
 export const STATE_GLYPHS = {
   live: "●",
   waitingOnUser: "❓",
   waitingForTurn: "○",
+  held: "‖",
   succeeded: "✓",
   failed: "✗",
 } as const satisfies Record<string, string>;
@@ -109,7 +113,7 @@ export interface MergeTab {
   label: FeedMergeTabLabel;
   /** The `kind` oneof arm ("queue", "hookPrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "waitingForTurn", "settled"). */
+  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "waitingForTurn", "held", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
@@ -284,10 +288,10 @@ export const TAB_DURATION_CLASS = "merge-tab-duration";
 /**
  * How long the tab has been in its state: a live tab ticks from when its work
  * began; a settled one shows how long it ran, fixed; a pending one has no
- * time yet and draws an empty slot.
+ * time yet, and a held one runs nothing, so both draw an empty slot.
  */
 export function drawTabDuration(tab: MergeTab, ticker: Ticker): HTMLElement {
-  if (tab.startedMs === undefined) {
+  if (tab.startedMs === undefined || tab.state === "held") {
     const el = document.createElement("span");
     el.className = TAB_DURATION_CLASS;
     return el;
@@ -372,6 +376,9 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
     case "waitingForTurn":
       // Another merge of the repository runs its tests; this run is in line.
       return ["is-waiting-for-turn", STATE_GLYPHS.waitingForTurn];
+    case "held":
+      // The merge is back in line after a repair out of line, not taken up.
+      return ["is-held", STATE_GLYPHS.held];
     case "settled":
       return tab.outcome === "failed"
         ? ["is-failed", STATE_GLYPHS.failed]
@@ -403,11 +410,18 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
  * most recently started one if several are. With nothing running the
  * concluded tab stays shown, since on a settled run that is where it ended.
  *
+ * A HELD TAB SELECTS NOTHING: a merge back in line after a repair out of line
+ * has its repair's tabs held until it is taken up, and the strip then shows no
+ * tab of its own accord (the reader may still click one).
+ *
  * Equal instants go to the later tab, because the strip is chronological: a
  * step that settles as the next begins hands over to the next. A strip with no
  * instant at all (only commits the replay has not reached) shows its last tab.
  */
 export function autoSelectedTab(tabs: readonly MergeTab[]): MergeTab | undefined {
+  // A STRIP WHOSE MERGE WAITS IN LINE AGAIN SHOWS NO TAB: its open tabs are
+  // held, nothing of them runs, and none is where the merge is.
+  if (tabs.some((tab) => tab.state === "held")) return undefined;
   const latest = latestBy(tabs, (tab) => tab.endedMs ?? tab.startedMs);
   if (latest === undefined) return tabs[tabs.length - 1];
   if (latest.state !== "settled") return latest;

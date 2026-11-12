@@ -86,12 +86,14 @@ UPDATE merge_queue SET
 type slotRow struct {
 	workspace WorkspaceID
 	state     MergeQueueState
+	returned  bool
 	slot      MergeSlot
 }
 
 // mergeSlotsOf answers the slot each of ROWS (one queue, in sequence order)
-// holds: the first entry in line is the head, an admitted entry behind it
-// races, a queued one waits, a remediating one remediates, and a requested
+// holds: the first entry in line is the head, an entry worked on behind it
+// races (workedOn: an admitted merge back from a repair waits until it is
+// taken up), a queued one waits, a remediating one remediates, and a requested
 // one holds none. It is the ONE definition of a slot, so the store's stamp
 // and the roster's line can never disagree on which merge heads.
 func mergeSlotsOf(rows []slotRow) []MergeSlot {
@@ -108,7 +110,7 @@ func mergeSlotsOf(rows []slotRow) []MergeSlot {
 			case !headed:
 				out[i] = MergeSlotHead
 				headed = true
-			case row.state == MergeAdmitted:
+			case workedOn(row.state, row.returned):
 				out[i] = MergeSlotRacing
 			default:
 				out[i] = MergeSlotWaiting
@@ -124,7 +126,7 @@ func mergeSlotsOf(rows []slotRow) []MergeSlot {
 // that leaves the queue's shape alone changes no clock. Every write that can
 // change a queue's shape runs it last, in the same transaction (writeQueue).
 func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Time) error {
-	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, slot FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, returned, slot FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
 	if err != nil {
 		return err
 	}
@@ -135,7 +137,7 @@ func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Tim
 			state int64
 			slot  int64
 		)
-		if err := rows.Scan(&row.workspace, &state, &slot); err != nil {
+		if err := rows.Scan(&row.workspace, &state, &row.returned, &slot); err != nil {
 			rows.Close()
 			return err
 		}

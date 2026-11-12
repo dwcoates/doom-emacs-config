@@ -139,7 +139,10 @@ type QueueMember struct {
 	Branch string
 	// Mode is how the merge was asked for.
 	Mode MergeMode
-	// Started reports whether the merge has started (been admitted).
+	// Started reports whether the merge is being worked on
+	// (wsm.MergeQueueEntry.WorkedOn): admitted, and not back from a repair
+	// out of line waiting to be taken up. Only a started merge carries a
+	// step.
 	Started bool
 	// Front reports that the merge asked to be put at the front of its queue.
 	Front bool
@@ -312,6 +315,14 @@ func (d queueEventsDB) ReturnAdmittedMerge(ctx context.Context, repo wsm.RepoKey
 func (d queueEventsDB) AdmitMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) error {
 	return d.reported(ctx, repo, false, func() (queueWrite, error) {
 		return queueWrite{report: true, kind: QueueChangeStarted, subject: id}, d.DB.AdmitMerge(ctx, repo, id)
+	})
+}
+
+// TakeUpReturnedMerge takes a merge back from a repair up again and reports
+// it started: it was waiting, and runs from here.
+func (d queueEventsDB) TakeUpReturnedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) error {
+	return d.reported(ctx, repo, false, func() (queueWrite, error) {
+		return queueWrite{report: true, kind: QueueChangeStarted, subject: id}, d.DB.TakeUpReturnedMerge(ctx, repo, id)
 	})
 }
 
@@ -541,7 +552,7 @@ func memberOf(entry wsm.MergeQueueEntry, record wsm.Workspace) QueueMember {
 		Name:      record.Name,
 		Branch:    branch,
 		Mode:      modeOf(entry.Source, record),
-		Started:   entry.State == wsm.MergeAdmitted,
+		Started:   entry.WorkedOn(),
 		Front:     entry.Source.Front,
 	}
 	switch {

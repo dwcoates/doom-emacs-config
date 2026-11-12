@@ -806,7 +806,7 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	}
 	waiting := 0
 	for _, entry := range entries {
-		if entry.State == wsm.MergeQueued {
+		if !entry.WorkedOn() {
 			waiting++
 		}
 	}
@@ -847,7 +847,10 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 			// would otherwise find with no record of why.
 			unledgered = append(unledgered, string(entry.Workspace))
 		}
-		if entry.State != wsm.MergeQueued {
+		// A MERGE BACK FROM A REPAIR WAITS WITH THE REST (wsm.MergeQueueEntry.
+		// WorkedOn): its footer reads enqueued, which also drops the step it
+		// stood on from the queue's status, until it is taken up.
+		if entry.WorkedOn() {
 			continue
 		}
 		// ENQUEUED k/n COUNTS ONLY THE WAITING: the merge being worked on is
@@ -1581,6 +1584,11 @@ type queueSpan struct {
 	queuedMS   int64
 	admitted   bool
 	admittedMS int64
+	// returned is a merge back in line from a repair out of line that nothing
+	// has taken up again (wsm.MergeQueueEntry.Returned): its queue wait ended
+	// at its first admission, yet it waits in line again, so its head is
+	// drawn waiting.
+	returned bool
 }
 
 // queueSpanOf resolves one in-line merge's wait. A zero queued time is an
@@ -1597,6 +1605,19 @@ func (o *orchestrator) queueSpanOf(entry wsm.MergeQueueEntry) (queueSpan, bool, 
 	}
 	if entry.State != wsm.MergeAdmitted {
 		return queueSpan{queuedMS: queuedMS}, true, nil
+	}
+	// A RETURNED MERGE HAS NO RUN, and its progress record holds when its run
+	// began: the instant its queue tab settled at. With no record in this
+	// daemon (another daemon drives it) nothing is drawn, as for a run not
+	// registered.
+	if entry.Returned {
+		o.mu.Lock()
+		doc, resuming := o.resumes[entry.Workspace]
+		o.mu.Unlock()
+		if !resuming {
+			return queueSpan{}, false, nil
+		}
+		return queueSpan{queuedMS: queuedMS, admitted: true, admittedMS: doc.StartedMS, returned: true}, true, nil
 	}
 	r, running := o.runFor(entry.Workspace)
 	if !running {
@@ -1624,13 +1645,15 @@ func (o *orchestrator) queueTabState(entry wsm.MergeQueueEntry) (tabState, bool,
 // left the queue, so the head shows only the time it has been worked on. A
 // mid-admission entry's head is not redrawn (false); the run draws it the
 // moment it starts. The head's stage switches on the same admission: WAITING
-// while it waits, MERGING once admitted (liveHead).
+// while it waits, MERGING once admitted (liveHead). A merge back in line from
+// a repair out of line waits again: its head is drawn waiting, its clock from
+// when it was queued, until it is taken up.
 func (o *orchestrator) headClockMS(entry wsm.MergeQueueEntry) (int64, liveHead, bool, error) {
 	span, clocked, err := o.queueSpanOf(entry)
 	if err != nil || !clocked {
 		return 0, liveHead{}, clocked, err
 	}
-	if span.admitted {
+	if span.admitted && !span.returned {
 		return span.admittedMS, headMerging, true, nil
 	}
 	return span.queuedMS, headWaiting, true, nil

@@ -283,7 +283,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		return err
 	}
 	if recorded {
-		return o.recoverResumable(ctx, repo, lease, doc, 0)
+		return o.recoverResumable(ctx, repo, lease, doc, 0, entry.Returned)
 	}
 	target, jobErr := o.targetDirOf(ctx, ws, entry.Source)
 	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
@@ -401,8 +401,11 @@ func (o *orchestrator) loadProgress(ctx context.Context, ws ids.WorkspaceID, lea
 // adopted by this process, its bubble and its footer drawn as they stood, and
 // the run itself handed to the admission pump, which resumes it first. ASIDE
 // is why a merge remediating out of line stepped aside, zero for every other
-// merge.
-func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc, aside AsideReason) error {
+// merge. RETURNED is a merge back in line from such a repair that nothing has
+// taken up again (wsm.MergeQueueEntry.Returned): it waits, so its open tabs
+// are drawn held (holdRepairTabs) and its head and footer are left to the
+// queue's drawing (republishQueue), which draws it waiting.
+func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc, aside AsideReason, returned bool) error {
 	const op = "daemon.merge.recover"
 	ws := lease.Workspace
 	// A PAUSED QUEUE RESUMES NOTHING (pumpOnce), so the record below says the
@@ -433,9 +436,13 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
-	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-	o.publishHead(ws, lease.ID, label, doc.StartedMS, headMerging, headRecover)
-	o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
+	if returned {
+		o.holdRepairTabs(ws, lease.ID, doc)
+	} else {
+		label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+		o.publishHead(ws, lease.ID, label, doc.StartedMS, headMerging, headRecover)
+		o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
+	}
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
@@ -445,6 +452,8 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	case aside != 0:
 		message = "a merge remediating out of line is taken back; it returns to the line once its repairing turn ends"
 		fields["reason"] = aside.String()
+	case returned:
+		message = "a merge back in line from its repair is taken back; it waits, its repair's tabs held, until it is taken up again"
 	case paused:
 		message = "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"
 	}
@@ -484,7 +493,7 @@ func (o *orchestrator) recoverRemediating(ctx context.Context, repo wsm.RepoKey,
 	o.mu.Lock()
 	o.remediating[ws] = &remediation{repo: repo, cancel: func() {}}
 	o.mu.Unlock()
-	if err := o.recoverResumable(ctx, repo, lease, doc, aside); err != nil {
+	if err := o.recoverResumable(ctx, repo, lease, doc, aside, false); err != nil {
 		o.mu.Lock()
 		delete(o.remediating, ws)
 		o.mu.Unlock()

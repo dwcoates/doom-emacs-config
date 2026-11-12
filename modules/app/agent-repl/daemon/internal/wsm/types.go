@@ -1469,4 +1469,23 @@ type MergeQueueEntry struct {
 	// every active slot ticks from SlotSince.
 	Slot      MergeSlot
 	SlotSince time.Time
+	// Returned reports that the merge came back in line from repairing out of
+	// line (ReturnRemediatedMerge) and nothing has taken it up again yet
+	// (TakeUpReturnedMerge). It is kept apart from the user's front placement
+	// (MergeSource.Front), which the return never writes. Only an admitted
+	// entry carries it: every write that moves an entry out of admitted
+	// clears it.
+	Returned bool
+}
+
+// WorkedOn reports whether the entry's merge is being worked on: admitted,
+// and not a merge returned from a repair out of line that waits to be taken
+// up again. It is the ONE answer to "is this merge running", so the status,
+// the roster, the bubble and the slots never disagree about a returned merge.
+func (e MergeQueueEntry) WorkedOn() bool { return workedOn(e.State, e.Returned) }
+
+// workedOn is WorkedOn over a row's two columns, for the reads that scan no
+// whole entry (mergeSlotsOf).
+func workedOn(state MergeQueueState, returned bool) bool {
+	return state == MergeAdmitted && !returned
 }

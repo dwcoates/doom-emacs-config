@@ -688,6 +688,8 @@ func TestQueueTabStateSpansTheWait(t *testing.T) {
 		name      string
 		state     wsm.MergeQueueState
 		running   bool
+		returned  bool
+		resuming  bool
 		wantDrawn bool
 		wantState func(r *run) tabState
 	}{
@@ -697,6 +699,8 @@ func TestQueueTabStateSpansTheWait(t *testing.T) {
 			wantState: func(r *run) tabState { return tabState{startedMS: 1000, settled: true, endedMS: r.startedMS} }},
 		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantDrawn: false,
 			wantState: func(*run) tabState { return tabState{} }},
+		{name: "back from a repair stays settled at its first admission", state: wsm.MergeAdmitted, returned: true, resuming: true, wantDrawn: true,
+			wantState: func(*run) tabState { return tabState{startedMS: 1000, settled: true, endedMS: 2000} }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -706,7 +710,10 @@ func TestQueueTabStateSpansTheWait(t *testing.T) {
 			if tc.running {
 				registerRunning(h, r)
 			}
-			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+			if tc.resuming {
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
 			// Act.
 			state, drawn, err := h.o.queueTabState(entry)
@@ -1061,6 +1068,8 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 		name        string
 		state       wsm.MergeQueueState
 		running     bool
+		returned    bool
+		resuming    bool
 		wantClocked bool
 		wantMS      func(r *run) int64
 		wantStage   liveHead
@@ -1071,6 +1080,10 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 			wantMS: func(r *run) int64 { return r.startedMS }, wantStage: headMerging},
 		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantClocked: false,
 			wantMS: func(*run) int64 { return 0 }},
+		{name: "back from a repair with its record taken back", state: wsm.MergeAdmitted, returned: true, resuming: true, wantClocked: true,
+			wantMS: func(*run) int64 { return 1000 }, wantStage: headWaiting},
+		{name: "back from a repair with no record here", state: wsm.MergeAdmitted, returned: true, wantClocked: false,
+			wantMS: func(*run) int64 { return 0 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1080,7 +1093,10 @@ func TestHeadClockMSFollowsTheEntrysStanding(t *testing.T) {
 			if tc.running {
 				registerRunning(h, r)
 			}
-			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+			if tc.resuming {
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
 			// Act.
 			ms, stage, clocked, err := h.o.headClockMS(entry)
@@ -1104,6 +1120,8 @@ func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
 		name      string
 		state     wsm.MergeQueueState
 		running   bool
+		returned  bool
+		resuming  bool
 		wantDrawn bool
 		wantSpan  func(r *run) queueSpan
 	}{
@@ -1112,6 +1130,12 @@ func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
 		{name: "admitted with its run", state: wsm.MergeAdmitted, running: true, wantDrawn: true,
 			wantSpan: func(r *run) queueSpan { return queueSpan{queuedMS: 1000, admitted: true, admittedMS: r.startedMS} }},
 		{name: "admitted before its run registers", state: wsm.MergeAdmitted, wantDrawn: false,
+			wantSpan: func(*run) queueSpan { return queueSpan{} }},
+		{name: "back from a repair ends its wait at its record's first admission", state: wsm.MergeAdmitted, returned: true, resuming: true, wantDrawn: true,
+			wantSpan: func(*run) queueSpan {
+				return queueSpan{queuedMS: 1000, admitted: true, admittedMS: 2000, returned: true}
+			}},
+		{name: "back from a repair with no record here draws nothing", state: wsm.MergeAdmitted, returned: true, wantDrawn: false,
 			wantSpan: func(*run) queueSpan { return queueSpan{} }},
 	}
 	for _, tc := range tests {
@@ -1122,7 +1146,10 @@ func TestQueueSpanOfFollowsTheEntrysStanding(t *testing.T) {
 			if tc.running {
 				registerRunning(h, r)
 			}
-			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, EnqueuedAt: time.UnixMilli(1000)}
+			if tc.resuming {
+				recordTakeBack(h, theWorkspace, progressDoc{StartedMS: 2000})
+			}
+			entry := wsm.MergeQueueEntry{Workspace: theWorkspace, State: tc.state, Returned: tc.returned, EnqueuedAt: time.UnixMilli(1000)}
 
 			// Act.
 			span, drawn, err := h.o.queueSpanOf(entry)
@@ -1508,12 +1535,19 @@ func resumeWorld(t *testing.T, entries []wsm.MergeQueueEntry, resumed ...ids.Wor
 	h.db.mu.Lock()
 	h.db.queues[h.repoKey()] = entries
 	h.db.mu.Unlock()
-	h.o.mu.Lock()
 	for _, ws := range resumed {
-		h.o.resumes[ws] = progressDoc{Repo: string(h.repoKey()), Step: TabTests}
+		recordTakeBack(h, ws, progressDoc{Repo: string(h.repoKey()), Step: TabTests})
 	}
-	h.o.mu.Unlock()
 	return h
+}
+
+// recordTakeBack stands DOC as the progress record h's orchestrator took
+// back for WS (orchestrator.resumes), as a boot or a step aside's take-back
+// leaves it.
+func recordTakeBack(h *harness, ws ids.WorkspaceID, doc progressDoc) {
+	h.o.mu.Lock()
+	defer h.o.mu.Unlock()
+	h.o.resumes[ws] = doc
 }
 
 func admittedEntry(ws ids.WorkspaceID) wsm.MergeQueueEntry {

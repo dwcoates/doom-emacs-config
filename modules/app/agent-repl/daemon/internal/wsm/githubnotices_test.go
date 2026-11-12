@@ -157,7 +157,7 @@ func TestScanGithubHealth(t *testing.T) {
 		{name: "never read and never failing"},
 		{name: "read and healthy", lastRead: sql.NullInt64{Int64: nanos(at), Valid: true}, wantRead: at},
 		{name: "failing on a spent rate limit", since: sql.NullInt64{Int64: nanos(at), Valid: true}, kind: sql.NullString{String: "rate_limited", Valid: true},
-			resets: sql.NullInt64{Int64: nanos(at.Add(time.Hour)), Valid: true},
+			resets:      sql.NullInt64{Int64: nanos(at.Add(time.Hour)), Valid: true},
 			wantFailing: &PullRequestFailure{Since: at, Kind: PullRequestFailureRateLimited, ResetsAt: at.Add(time.Hour)}},
 	}
 	for _, tt := range tests {

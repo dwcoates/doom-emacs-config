@@ -13,6 +13,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -1312,5 +1313,189 @@ func TestEveryStepAsideGoesThroughAsideOn(t *testing.T) {
 		if reasons[why] == 0 {
 			t.Errorf("no step asks asideOn to step aside for %s", why)
 		}
+	}
+}
+
+// returnedBehindTheHead runs a head whose rebase conflicts until it stepped
+// aside, holds ws-b, which took the head, inside its gate with ws-c waiting,
+// and returns the conflicting head to the line behind ws-b. RELEASE lets
+// ws-b's gate go on, and DONE is ws-b's admission ending.
+func returnedBehindTheHead(t *testing.T) (c *chain, release func(), done <-chan error) {
+	t.Helper()
+	c = conflictAsideScenario(t)
+	c.queue(t, "ws-c", "c1")
+	entered, hold := c.runner.hold(c.dirs["ws-b"])
+	done = admitAsync(c.h, context.Background())
+	receiveWithin(t, entered, "ws-b's gate starting at the head")
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		close(hold)
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	var once sync.Once
+	release = func() { once.Do(func() { close(hold) }) }
+	// A TEST THAT NEVER LETS WS-B GO ON lets it go here, and waits for the
+	// queue to settle, so nothing writes into the test's directories once it
+	// has ended.
+	t.Cleanup(func() {
+		release()
+		c.drain(t)
+	})
+	return c, release, done
+}
+
+// count answers how many rows the feed has been pushed.
+func (f *fakeFeed) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.rows)
+}
+
+// lastMergeOf answers the last head row pushed for WS's bubble.
+func (f *fakeFeed) lastMergeOf(ws ids.WorkspaceID) *frontendv1.FeedMerge {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.rows) - 1; i >= 0; i-- {
+		if merge := f.rows[i].Row.GetActivity().GetMerge(); merge != nil && f.rows[i].WS == ws {
+			return merge
+		}
+	}
+	return nil
+}
+
+func TestAReturnedMergeIsInLineButNotStartedAndCarriesNoStep(t *testing.T) {
+	// Arrange + Act
+	c, _, _ := returnedBehindTheHead(t)
+
+	// Assert
+	snapshot, err := c.h.o.readQueue(context.Background(), c.h.o.deps.DB, c.h.repoKey())
+	if err != nil {
+		t.Fatalf("readQueue: %v", err)
+	}
+	member, found := memberNamed(snapshot.Members, theWorkspace)
+	if !found || member.Started || member.Front {
+		t.Fatalf("member = %+v (found %v), want the returned merge in line, not started and not front", member, found)
+	}
+	c.h.o.events.mu.Lock()
+	step, stepped := c.h.o.events.steps[theWorkspace]
+	c.h.o.events.mu.Unlock()
+	if stepped {
+		t.Fatalf("the returned merge still carries the step %q it stood on before it stepped aside", step)
+	}
+}
+
+func TestAReturnedMergesBubbleHoldsItsConflictTabsAndDrawsItsHeadWaiting(t *testing.T) {
+	// Arrange + Act
+	c, _, _ := returnedBehindTheHead(t)
+
+	// Assert
+	if held := c.h.feed.lastTabOfKind(TabConflicts).GetResolvingConflicts().GetHeld(); held == nil {
+		t.Fatalf("resolving-conflicts tab = %v, want it held", c.h.feed.lastTabOfKind(TabConflicts))
+	}
+	if held := c.h.feed.lastResolution().GetHeld(); held == nil {
+		t.Fatalf("conflict resolution = %v, want it held", c.h.feed.lastResolution())
+	}
+	if head := c.h.feed.lastMergeOf(theWorkspace); head.GetUpdate().GetWaiting() == nil {
+		t.Fatalf("head = %v, want the returned merge's head drawn waiting", head)
+	}
+}
+
+func TestTheRosterDrawsAReturnedMergeWaitingAndReturnedNotFront(t *testing.T) {
+	// Arrange + Act
+	c, _, _ := returnedBehindTheHead(t)
+
+	// Assert
+	line := c.h.sidebar.queueOf(c.h.repoKey()).Line
+	at := slices.IndexFunc(line, func(e sidebar.QueueEntry) bool { return e.Workspace == theWorkspace })
+	if at < 0 {
+		t.Fatalf("line = %+v, want the returned merge in it", line)
+	}
+	if got := line[at]; got.Admitted || !got.Returned || got.PlacedAtFront {
+		t.Fatalf("roster entry = %+v, want waiting, returned and not front", got)
+	}
+}
+
+func TestAReturnedMergeHeadingItsQueueIsTakenUpRunsItsStepAgainAndLands(t *testing.T) {
+	// Arrange
+	c, release, done := returnedBehindTheHead(t)
+
+	// Act: ws-b lands, and the returned merge heads the queue.
+	release()
+	if err := receiveWithin(t, done, "ws-b's admission ending"); err != nil {
+		t.Fatalf("ws-b's admission ended on: %v", err)
+	}
+	c.drain(t)
+
+	// Assert
+	c.h.db.mu.Lock()
+	takenUp := slices.Clone(c.h.db.takenUp)
+	c.h.db.mu.Unlock()
+	if !slices.Equal(takenUp, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("taken up = %v, want the returned merge taken up once", takenUp)
+	}
+	if live := c.h.feed.lastResolution().GetSettled(); live == nil {
+		t.Fatalf("conflict resolution = %v, want it drawn again and settled by the resumed run", c.h.feed.lastResolution())
+	}
+	landed := c.git.landedOwn()
+	if !slices.ContainsFunc(landed, func(commits []string) bool { return slices.Equal(commits, []string{"a1"}) }) {
+		t.Fatalf("landings brought %v, want a1 among them", landed)
+	}
+}
+
+func TestAReturnWithNothingTakenBackToDrawItFromIsRefusedAndWritesNothing(t *testing.T) {
+	// Arrange: the remediating merge's take-back record is gone.
+	c := conflictAsideScenario(t)
+	c.h.o.mu.Lock()
+	delete(c.h.o.resumes, theWorkspace)
+	c.h.o.mu.Unlock()
+
+	// Act
+	err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey())
+
+	// Assert
+	if err == nil {
+		t.Fatal("returnRemediated = nil, want a refusal")
+	}
+	if !slices.ContainsFunc(c.h.logs.Records(), func(r dlog.Record) bool {
+		return r.Level == "error" && r.Operation == opRemediate && r.Context["workspace"] == string(theWorkspace) && r.Context["recorded"] == false
+	}) {
+		t.Fatalf("the refusal was not recorded at error with what was missing: %v", c.h.logs.Records())
+	}
+	if entry, _ := c.entryOf(t, theWorkspace); entry.State != wsm.MergeRemediating || entry.Returned {
+		t.Fatalf("entry = %+v, want it still remediating and unmarked", entry)
+	}
+}
+
+func TestARestartTakesAReturnedMergeBackWaitingWithItsRepairTabsHeld(t *testing.T) {
+	// Arrange: ws-b landed while the head resolved its conflicts out of line;
+	// the head came back in line, and the daemon restarts before it is taken
+	// up.
+	c := conflictAsideScenario(t)
+	c.drainUntil(t, "ws-b landing", func() bool { return len(c.git.landedOwn()) == 1 })
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	c.h.restart(t)
+	c.wire(c.h.o)
+	c.h.o.window = 1
+	before := c.h.feed.count()
+
+	// Act
+	if err := c.h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert
+	if held := c.h.feed.lastResolution().GetHeld(); held == nil || c.h.feed.count() == before {
+		t.Fatalf("conflict resolution = %v, want it drawn held by the boot", c.h.feed.lastResolution())
+	}
+	if head := c.h.feed.lastMergeOf(theWorkspace); head.GetUpdate().GetWaiting() == nil {
+		t.Fatalf("head = %v, want the returned merge drawn waiting after the boot", head)
+	}
+	if _, ok := c.h.recordFor("info", "daemon.merge.recover"); !ok {
+		t.Fatal("the boot recorded no take-back of the returned merge")
+	}
+	c.drain(t)
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want b1 then a1", got)
 	}
 }

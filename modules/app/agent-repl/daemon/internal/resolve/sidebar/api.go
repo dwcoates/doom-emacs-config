@@ -310,10 +310,14 @@ type QueueEntry struct {
 	Reveal *frontendv1.FeedId
 	// QueuedAt is when the merge was put in line.
 	QueuedAt time.Time
-	// PlacedAtFront reports that it was put in line at the front.
+	// PlacedAtFront reports that the user put it in line at the front.
 	PlacedAtFront bool
-	// Admitted reports that the merge's run was admitted: it is being worked
-	// on rather than waiting.
+	// Returned reports that it is back in line from a repair out of line and
+	// nothing has taken it up again (wsm.MergeQueueEntry.Returned).
+	Returned bool
+	// Admitted reports that the merge is being worked on rather than waiting
+	// (wsm.MergeQueueEntry.WorkedOn): a merge back from a repair is admitted
+	// in the store yet waits, and is not Admitted here.
 	Admitted bool
 	// Stages are the merge's stages so far, read from its ledger
 	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line

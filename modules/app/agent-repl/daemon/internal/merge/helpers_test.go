@@ -59,6 +59,10 @@ type fakeDB struct {
 
 	wsm.DB
 
+	// takenUp is every workspace TakeUpReturnedMerge was called for, in
+	// order.
+	takenUp []ids.WorkspaceID
+
 	// workspaceErr, when set, is what every Workspace read answers.
 	workspaceErr error
 
@@ -920,7 +924,7 @@ func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.Work
 		}
 		// THE SLOT MOMENT IS WRITTEN WITH THE STEP ASIDE, as the durable
 		// queue writes it (wsm.MergeQueueEntry.SlotSince).
-		entry.State, entry.Slot, entry.SlotSince = wsm.MergeRemediating, wsm.MergeSlotRemediating, time.Now()
+		entry.State, entry.Slot, entry.SlotSince, entry.Returned = wsm.MergeRemediating, wsm.MergeSlotRemediating, time.Now(), false
 		f.queues[repo] = append(append(queue[:i:i], queue[i+1:]...), entry)
 		f.renumber(repo)
 		return nil
@@ -928,8 +932,8 @@ func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.Work
 	return fmt.Errorf("step aside %s: %w", id, wsm.ErrNotFound)
 }
 
-// ReturnRemediatedMerge puts the remediating entry back, admitted, at the
-// first waiting place, as the durable queue does.
+// ReturnRemediatedMerge puts the remediating entry back, admitted and marked
+// returned, at the first waiting place, as the durable queue does.
 func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -947,7 +951,7 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 		return fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
 	}
 	entry := queue[at]
-	entry.State, entry.Source.Front = wsm.MergeAdmitted, true
+	entry.State, entry.Returned = wsm.MergeAdmitted, true
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)
 	for i, e := range rest {
@@ -959,6 +963,25 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{entry}, rest[place:]...)...)
 	f.renumber(repo)
 	return nil
+}
+
+// TakeUpReturnedMerge clears a returned entry's mark, as the durable queue
+// does, refusing an entry not admitted and marked returned.
+func (f *fakeDB) TakeUpReturnedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.takenUp = append(f.takenUp, id)
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeAdmitted || !entry.Returned {
+			return fmt.Errorf("take up %s while %s and returned %v", id, entry.State, entry.Returned)
+		}
+		f.queues[repo][i].Returned = false
+		return nil
+	}
+	return fmt.Errorf("take up %s: %w", id, wsm.ErrNotFound)
 }
 
 func (f *fakeDB) SweepOrphanedMergeState(context.Context, time.Time) (wsm.OrphanedMergeState, error) {
@@ -1078,7 +1101,7 @@ func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids
 	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
-			f.queues[repo][i].State, f.queues[repo][i].Ledger = wsm.MergeQueued, ledger
+			f.queues[repo][i].State, f.queues[repo][i].Ledger, f.queues[repo][i].Returned = wsm.MergeQueued, ledger, false
 			return nil
 		}
 	}
