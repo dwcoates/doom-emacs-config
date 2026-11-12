@@ -22,7 +22,6 @@ export const AGENT_ONLY_REFUSAL_ARMS = {
     "opIdWithAsyncMerge",
     "versionIncrementRequired",
     "versionIncrementUnexpected",
-    "asyncMergeRequesterQueued",
     "asyncMergeRequesterMerging",
     "asyncMergeRequesterSessionDeleted",
     "originFetchFailed",

@@ -429,12 +429,20 @@ func TestRequestMergeRefusesAMergeThatClosesAParentWithOpenChildren(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			err := f.s.RequestMerge(context.Background(), repo, tt.requester, tt.source, time.Unix(10, 0))
+			var err error
+			if tt.source.Detach != "" {
+				err = f.s.RequestAsyncMerge(context.Background(), repo, tt.requester, "", tt.source, time.Unix(10, 0))
+			} else {
+				err = f.s.RequestMerge(context.Background(), repo, tt.requester, tt.source, time.Unix(10, 0))
+			}
 
 			// Assert
 			requireHasOpenChildren(t, err, f.parent, f.child)
 			if queue, _ := f.s.MergeQueue(context.Background(), repo); len(queue) != 0 {
 				t.Fatalf("queue = %+v after a refused request, want it empty", queue)
+			}
+			if requests, _ := f.s.AllAsyncMergeRequests(context.Background()); len(requests) != 0 {
+				t.Fatalf("async requests = %+v after a refused request, want none", requests)
 			}
 		})
 	}
@@ -568,8 +576,14 @@ func TestClosingSQLAgreesWithMergeSourceCloses(t *testing.T) {
 				requester = ws
 			}
 			source := tt.source(other.ID, oneShot.ID)
-			if err := s.RequestMerge(ctx, RepoKey(t.TempDir()), requester.ID, source, time.Unix(10, 0)); err != nil {
-				t.Fatalf("RequestMerge: %v", err)
+			record := s.RequestMerge
+			if source.Detach != "" {
+				record = func(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
+					return s.RequestAsyncMerge(ctx, repo, id, "", source, at)
+				}
+			}
+			if err := record(ctx, RepoKey(t.TempDir()), requester.ID, source, time.Unix(10, 0)); err != nil {
+				t.Fatalf("record the request: %v", err)
 			}
 			want := source.Closes(requester.ID, requester.MergeOf)
 

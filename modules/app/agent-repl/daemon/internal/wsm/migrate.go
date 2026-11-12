@@ -234,6 +234,10 @@ var migrations = []migration{
 	// IT IS BREAKING: see mergeQueueThreeSlotsDDL.
 	{To: 126, Name: "merge_queue_three_slots", Kind: MigrationBreaking, DDL: mergeQueueThreeSlotsDDL},
 	{To: 127, Name: "merge_queue_waits_on", Kind: MigrationAdditive, DDL: mergeQueueWaitsOnDDL},
+	// IT IS BREAKING: it moves every async request standing off its
+	// requester's merge_queue row into async_merge_requests, where the build
+	// before it would never look for one, so that build would lose them.
+	{To: 128, Name: "async_merge_requests", Kind: MigrationBreaking, DDL: asyncMergeRequestsDDL + moveAsyncMergeRequestsDML},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

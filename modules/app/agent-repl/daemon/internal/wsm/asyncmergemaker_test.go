@@ -27,12 +27,12 @@ func TestADetachedRequestKeepsItsMakerAndTarget(t *testing.T) {
 				DetachMaker: maker.ID, DetachTargetMaker: tc.toMaker}
 
 			// Act
-			err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0))
-			queue, qerr := s.MergeQueue(context.Background(), repo)
+			err := s.RequestAsyncMerge(context.Background(), repo, requester.ID, "", source, time.Unix(100, 0))
+			queue, qerr := s.AsyncMergeRequestsOf(context.Background(), requester.ID)
 
 			// Assert
 			if err != nil || qerr != nil || len(queue) != 1 {
-				t.Fatalf("RequestMerge = %v, queue = %+v, %v", err, queue, qerr)
+				t.Fatalf("RequestAsyncMerge = %v, requests = %+v, %v", err, queue, qerr)
 			}
 			if got := queue[0].Source; got.DetachMaker != maker.ID || got.DetachTargetMaker != tc.toMaker {
 				t.Fatalf("maker = %q, into maker = %v; want %q, %v", got.DetachMaker, got.DetachTargetMaker, maker.ID, tc.toMaker)

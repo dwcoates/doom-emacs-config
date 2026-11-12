@@ -226,9 +226,6 @@ func TestAnAsyncMergeIsRefused(t *testing.T) {
 		}, got: func(e *agentreplv1.CreateWorkspaceError) bool {
 			return e.GetAsyncMergeContextNotMaker().GetMaker().GetId() == string(testWorkspaceID)
 		}},
-		{name: "a requester whose queue row is taken", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
-			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "queued"}
-		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeRequesterQueued() != nil }},
 		{name: "a requester whose own merge runs", arrange: func(h *harness, _ *agentreplv1.CreateWorkspaceRequest) {
 			h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "merging"}
 		}, got: func(e *agentreplv1.CreateWorkspaceError) bool { return e.GetAsyncMergeRequesterMerging() != nil }},

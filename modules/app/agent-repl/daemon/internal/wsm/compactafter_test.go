@@ -61,13 +61,13 @@ func TestADetachedRequestKeepsItsCompactAfterAsk(t *testing.T) {
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
 			repo := RepoKey(t.TempDir())
-			source := MergeSource{Kind: MergeSourceOwnBranch, Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "reconnect-fix", CompactAfter: tt.compactAfter}
+			source := MergeSource{Kind: MergeSourceBranch, Branch: "fix", Detach: NewDetachedMergeID(), DetachMaker: "maker", DetachName: "reconnect-fix", CompactAfter: tt.compactAfter}
 
 			// Act
-			if err := s.RequestMerge(context.Background(), repo, ws.ID, source, time.Unix(100, 0)); err != nil {
-				t.Fatalf("RequestMerge: %v", err)
+			if err := s.RequestAsyncMerge(context.Background(), repo, ws.ID, "", source, time.Unix(100, 0)); err != nil {
+				t.Fatalf("RequestAsyncMerge: %v", err)
 			}
-			queue, err := s.MergeQueue(context.Background(), repo)
+			queue, err := s.AsyncMergeRequestsOf(context.Background(), ws.ID)
 
 			// Assert
 			if err != nil || len(queue) != 1 || queue[0].Source.CompactAfter != tt.compactAfter {

@@ -726,9 +726,8 @@ func TestRecoverRefusesTheBootWhenTheQueuesPauseCannotBeRead(t *testing.T) {
 }
 
 // TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff is the
-// 2026-10-20 boot loop: an async request with an instruction was recorded on
-// its requester's row, and the daemon died before the fork handed it to its
-// merge workspace. The row still names the requester and its detach, so the
+// 2026-10-20 boot loop: an async request with an instruction was recorded,
+// and the daemon died before the fork handed it to its merge workspace. The
 // pick is not the requester's to begin: the request is re-armed, and its
 // wait's end makes the hand-off that then begins the pick.
 func TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff(t *testing.T) {
@@ -736,8 +735,8 @@ func TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff(t *testing.T
 	h := pickHarness(t)
 	source := asyncSource
 	source.Detach, source.DetachName, source.Pick = "req-1", "reconnect-fix", "the reconnect fix"
-	if err := h.db.RequestMerge(context.Background(), h.repoKey(), theWorkspace, source, h.clock()); err != nil {
-		t.Fatalf("RequestMerge: %v", err)
+	if err := h.db.RequestAsyncMerge(context.Background(), h.repoKey(), theWorkspace, "", source, h.clock()); err != nil {
+		t.Fatalf("RequestAsyncMerge: %v", err)
 	}
 
 	// Act

@@ -590,8 +590,11 @@ message CreateWorkspaceError {
   // Tag 27 (`async_merge_branch_owned`) is RETIRED (owner ruling,
   // 2026-11-10): who owns an async merge's branch is never a ground for
   // refusing it.
-  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 27;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned";
+  // Tag 36 (`async_merge_requester_queued`) is RETIRED (owner ruling,
+  // 2026-11-12): each async request is recorded on its own, so a requester
+  // asks for any number in one turn, beside a merge of its own branch.
+  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 27, 36;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned", "async_merge_requester_queued";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -692,12 +695,6 @@ message CreateWorkspaceError {
     // The merge carries a version increment but does not land on agent-repl's
     // master. Nothing was recorded.
     MergeWorkspaceVersionIncrementUnexpected version_increment_unexpected = 35;
-    // The requester's merge queue row is taken: an async merge it asked for
-    // earlier in the same turn, or a merge of its own branch, is still
-    // waiting. A requester holds one queue row, and an async merge moves to
-    // its own merge workspace's row only when the requesting turn ends.
-    // Nothing was recorded; the caller asks again in a later turn.
-    CreateWorkspaceAsyncMergeRequesterQueued async_merge_requester_queued = 36;
     // The requester's own merge is running. Nothing was recorded.
     CreateWorkspaceAsyncMergeRequesterMerging async_merge_requester_merging = 37;
     // The requester's session was deleted, so the merge's report could never
@@ -981,7 +978,6 @@ message CreateWorkspaceAsyncMergeNameTaken {
 }
 // The async merge's close-after workspace cannot be closed by this merge.
 message CreateWorkspaceAsyncMergeUnknownCloseAfter {}
-message CreateWorkspaceAsyncMergeRequesterQueued {}
 message CreateWorkspaceAsyncMergeRequesterMerging {}
 message CreateWorkspaceAsyncMergeRequesterSessionDeleted {}
 // An op id was set beside an async merge.

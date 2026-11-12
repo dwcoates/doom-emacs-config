@@ -98,14 +98,14 @@ func (s *store) RevealMergeWorkspace(ctx context.Context, id WorkspaceID) (bool,
 }
 
 // ReservedMergeNames answers every merge workspace name an async request
-// standing in any queue has reserved, each mapped to the workspace whose
+// not yet handed off has reserved (async_merge_requests), each mapped to the workspace whose
 // request reserved it. Every name allocation reads it, so nothing takes a
 // reserved name before its merge workspace is created under it.
 func (s *store) ReservedMergeNames(ctx context.Context) (map[string]WorkspaceID, error) {
 	const op = "daemon.wsm.reserved_merge_names"
 	out := map[string]WorkspaceID{}
 	err := s.read(ctx, op, dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx, `SELECT source_detach_name, workspace_id FROM merge_queue WHERE source_detach_name IS NOT NULL`)
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT name, requester_id FROM async_merge_requests`)
 		if err != nil {
 			return err
 		}

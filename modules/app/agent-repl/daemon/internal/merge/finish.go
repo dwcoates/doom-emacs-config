@@ -47,11 +47,8 @@ type finishTarget struct {
 }
 
 // finishTargetOf reads the finish stage WS's deploy runs: none for an async
-// merge (a detached request, or a merge workspace's own merge).
+// merge (a merge workspace's own merge).
 func (o *orchestrator) finishTargetOf(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (finishTarget, error) {
-	if source.Detach != "" {
-		return finishTarget{}, nil
-	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return finishTarget{}, fmt.Errorf("merge: reading the finishing workspace %s: %w", ws, err)

@@ -60,7 +60,11 @@ Either kind:
 - `-placement front` only for a merge that must land before the work already
   waiting (a hotfix); `-placement behind=MERGE` to land directly after a named
   merge in line (the name `merge-queue status` lists), taking its front mark;
-  otherwise `-placement back`. A name not in line is refused
+  otherwise `-placement back`. MERGE may also be an async merge this
+  workspace asked for and has not handed off yet, such as one asked for
+  earlier in the same turn. A turn may ask for any number of async merges;
+  they join the line in the order asked for, so the later one lands directly
+  behind it. Any other name not in line is still refused
   (`placement_behind_not_in_line`).
   - A merge placed `behind=MERGE` waits on MERGE: it is not admitted, and its
     `-instruction` does not run, until MERGE has left the queue. So an

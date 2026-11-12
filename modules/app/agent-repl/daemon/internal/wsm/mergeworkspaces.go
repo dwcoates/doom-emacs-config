@@ -71,19 +71,19 @@ func (s *store) MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) 
 	return out, found, nil
 }
 
-// HandOffDetachedMerge moves a detached request from the requester's queue row
-// onto the merge workspace forked for it, in ONE transaction: the requester's
-// REQUESTED row (which must still carry `request`) is deleted, and the merge
-// workspace's own-branch, in-place, close-on-landing request is written in its
-// place at the back of the queue, still REQUESTED, carrying the request's PICK
-// when it has one (the merge workspace's pick turn has not begun). The caller
-// then runs the pick, if any, and puts the merge workspace's request in line
-// as any other. The requester's reserved name leaves with its row: the merge
-// workspace now exists under it.
+// HandOffDetachedMerge moves an async request (async_merge_requests,
+// asyncrequests.go) onto the merge workspace forked for it, in ONE
+// transaction: the request's row (which must still be REQUESTER's) is
+// deleted, and the merge workspace's own-branch, in-place, close-on-landing
+// request is written in its place at the back of the queue, still REQUESTED,
+// carrying the request's PICK when it has one (the merge workspace's pick turn
+// has not begun). The caller then runs the pick, if any, and puts the merge
+// workspace's request in line as any other. The request's reserved name
+// leaves with its row: the merge workspace now exists under it.
 //
-// Either both rows change or neither does, so a crash leaves the request on
-// exactly one workspace: on the requester (the hand-off is redone, and finds
-// the merge workspace already forked by MergeWorkspaceFor) or on the merge
+// Either both rows change or neither does, so a crash leaves the request in
+// exactly one place: still a request (the hand-off is redone, and finds the
+// merge workspace already forked by MergeWorkspaceFor) or on the merge
 // workspace (the hand-off is done).
 func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error {
 	const op = "daemon.wsm.hand_off_detached_merge"
@@ -95,8 +95,7 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 	fields := dlog.Context{"repo": string(key), "requester": string(requester), "request": string(request), "merge_workspace": string(mergeWS), "branch": branch}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		var (
-			state   int64
-			detach  sql.NullString
+			owner   WorkspaceID
 			front   bool
 			behind  sql.NullString
 			verPart sql.NullInt64
@@ -106,27 +105,23 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 			waitsName sql.NullString
 			waitsLeft sql.NullString
 		)
-		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_behind, source_version_part, source_changelog_line, waits_on, waits_on_name, waits_on_left FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &behind, &verPart, &verLine, &waitsOn, &waitsName, &waitsLeft)
+		err := tx.QueryRowContext(ctx, `SELECT requester_id, front, behind, version_part, changelog_line, waits_on, waits_on_name, waits_on_left FROM async_merge_requests WHERE request_id = ? AND repo_key = ?`,
+			request, key).Scan(&owner, &front, &behind, &verPart, &verLine, &waitsOn, &waitsName, &waitsLeft)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s has no merge request: %w", request, requester, ErrNotFound)
+			return fmt.Errorf("wsm: hand-off of detached merge %s: no such request stands: %w", request, ErrNotFound)
 		case err != nil:
 			return err
 		}
-		if MergeQueueState(state) != MergeRequested || DetachedMergeID(detach.String) != request {
-			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s's merge is %s for request %q, not the requested detached merge",
-				request, requester, MergeQueueState(state), detach.String)
+		if owner != requester {
+			return fmt.Errorf("wsm: hand-off of detached merge %s: the request is %s's, not %s's", request, owner, requester)
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester)
-		if err != nil {
-			return err
-		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: merge request of workspace %s", requester)); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM async_merge_requests WHERE request_id = ?`, request); err != nil {
 			return err
 		}
 		version, err := scanVersion(verPart, verLine)
 		if err != nil {
-			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s's request: %w", request, requester, err)
+			return fmt.Errorf("wsm: hand-off of detached merge %s: %w", request, err)
 		}
 		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE AND ITS
 		// VERSION INCREMENT: a detached merge asked for the front still goes
@@ -135,14 +130,24 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 			return err
 		}
 		// THE WAIT MOVES WITH THE REQUEST: the merge workspace waits on what
-		// the request waited on, settled or not, and every merge that waited
-		// on the request now waits on the merge workspace that carries it.
+		// the request waited on, settled or not, and every merge or request
+		// placed behind the request now waits on, and is placed behind, the
+		// merge workspace that carries it.
 		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on = ?, waits_on_name = ?, waits_on_left = ? WHERE repo_key = ? AND workspace_id = ?`,
 			waitsOn, waitsName, waitsLeft, key, mergeWS); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET waits_on = ? WHERE repo_key = ? AND waits_on = ?`, mergeWS, key, requester)
-		return err
+		for _, stmt := range []string{
+			`UPDATE merge_queue SET waits_on = ? WHERE repo_key = ? AND waits_on = ?`,
+			`UPDATE merge_queue SET source_behind = ? WHERE repo_key = ? AND source_behind = ?`,
+			`UPDATE async_merge_requests SET waits_on = ? WHERE repo_key = ? AND waits_on = ?`,
+			`UPDATE async_merge_requests SET behind = ? WHERE repo_key = ? AND behind = ?`,
+		} {
+			if _, err := tx.ExecContext(ctx, stmt, mergeWS, key, string(request)); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
