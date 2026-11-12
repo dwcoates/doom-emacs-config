@@ -1417,3 +1417,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): The merge queue's roster tests, the Emacs create-error pin and the wire decoder scan follow the off-queue contract.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A prompt sent just as a turn ends no longer leaves the workspace holding every later prompt behind a turn that already finished.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A workspace in queue bypass mode now does its own work: agent-repl refuses its child workspaces as it refuses its one-shots.
+- 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): The sidebar hides an off-queue merge once any of its work is on master or its branch is gone, labels every off-queue merge evicted, and draws queue position numerals at their names' size.
