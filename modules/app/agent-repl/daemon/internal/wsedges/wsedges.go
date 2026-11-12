@@ -144,13 +144,35 @@ type reportingDB struct {
 }
 
 func (d reportingDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, closure wsm.Closure) error {
+	return d.closing(ctx, id, &closure, func() error { return d.DB.MarkClosed(ctx, id, closure) })
+}
+
+// RemoveMergeQueueEntry reports the close a queue exit makes in its own write
+// (an evicted merge workspace), exactly as MarkClosed reports its own.
+func (d reportingDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
+	return d.closing(ctx, id, closes, func() error { return d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes) })
+}
+
+// DropAdmittedMerge reports the close a drop makes in its own write.
+func (d reportingDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
+	return d.closing(ctx, id, closes, func() error { return d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes) })
+}
+
+// closing runs WRITE, which closes workspace ID when CLOSES is set, and tells
+// the hub of a close that took an open row closed. It is every closing
+// write's one report, so no close path goes untold. A write that closes
+// nothing is run as it is.
+func (d reportingDB) closing(ctx context.Context, id wsm.WorkspaceID, closes *wsm.Closure, write func() error) error {
+	if closes == nil {
+		return write()
+	}
 	before, err := d.DB.Workspace(ctx, id)
 	if err != nil {
 		d.log.Error(op, "could not read a workspace before closing it, so the close is refused rather than left untold",
-			dlog.WithCause(dlog.Context{"workspace": string(id), "closure_by": string(closure.By)}, err))
+			dlog.WithCause(dlog.Context{"workspace": string(id), "closure_by": string(closes.By)}, err))
 		return fmt.Errorf("wsedges: read %s before its close: %w", id, err)
 	}
-	if err := d.DB.MarkClosed(ctx, id, closure); err != nil {
+	if err := write(); err != nil {
 		return err
 	}
 	if !before.Closed {

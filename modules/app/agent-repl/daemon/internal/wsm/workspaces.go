@@ -699,65 +699,88 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 		s.log.Error(op, "refused a close with no declared cause", withError(fields, err))
 		return err
 	}
-	var (
-		released      sql.NullString
-		subscriptions int64
-		followings    int64
-	)
+	var effects closeEffects
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		var closed bool
-		err := scanWorkspaceRow(ctx, tx, id, "serving_instance, closed", &released, &closed)
-		if err != nil {
-			return err
-		}
-		// A USER'S OR AN AGENT'S CLOSE OF A WORKSPACE WITH OPEN CHILDREN IS
-		// REFUSED (family.go). The daemon's own closes record what already
-		// happened, and a row already closed is no close at all.
-		if !closed && closure.By.isGesture() {
-			if err := refuseOpenChildren(ctx, tx, id); err != nil {
-				return err
-			}
-		}
-		// `restamp` is evaluated against the row as it stood BEFORE this
-		// update: SQLite reads every right-hand side off the old row.
-		const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
-		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, close_when_turn_ends = NULL, awaiting_correspondence = NULL, `+
-			`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
-			`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
-			string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)
-		if err != nil {
-			return err
-		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
-			return err
-		}
-		// A CLOSE ENDS THE WORKSPACE'S SUBSCRIPTIONS -- to merge queues and
-		// to other workspaces -- in the same transaction, so no close path can
-		// leave one standing (mergesubscriptions.go,
-		// workspacesubscriptions.go).
-		subscriptions, err = endSubscriptionsInTx(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		followings, err = endWorkspaceSubscriptionsInTx(ctx, tx, id)
+		var err error
+		effects, err = markClosedInTx(ctx, tx, id, closure)
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	if released.Valid && released.String != "" {
-		s.log.Info(op, "the close released the workspace's serving ownership",
-			dlog.Context{"workspace": string(id), "instance": released.String})
-	}
-	if subscriptions > 0 {
-		s.log.Info(op, "the close ended the workspace's merge queue subscriptions",
-			dlog.Context{"workspace": string(id), "subscriptions": subscriptions})
-	}
-	if followings > 0 {
-		s.log.Info(op, "the close ended the workspace's subscriptions to other workspaces",
-			dlog.Context{"workspace": string(id), "subscriptions": followings})
-	}
+	s.logCloseEffects(op, id, effects)
 	return nil
+}
+
+// closeEffects is what one close released beside the row's own flag, for the
+// records the close leaves once its transaction commits.
+type closeEffects struct {
+	released      sql.NullString
+	subscriptions int64
+	followings    int64
+}
+
+// markClosedInTx is THE ONE CLOSE WRITE, run inside the caller's transaction:
+// MarkClosed's own, and a queue exit that closes the merge workspace it took
+// off the queue (RemoveMergeQueueEntry, DropAdmittedMerge), so a close is the
+// same statement wherever it is made. The cause is validated by the caller.
+func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Closure) (closeEffects, error) {
+	var (
+		effects closeEffects
+		closed  bool
+	)
+	err := scanWorkspaceRow(ctx, tx, id, "serving_instance, closed", &effects.released, &closed)
+	if err != nil {
+		return closeEffects{}, err
+	}
+	// A USER'S OR AN AGENT'S CLOSE OF A WORKSPACE WITH OPEN CHILDREN IS
+	// REFUSED (family.go). The daemon's own closes record what already
+	// happened, and a row already closed is no close at all.
+	if !closed && closure.By.isGesture() {
+		if err := refuseOpenChildren(ctx, tx, id); err != nil {
+			return closeEffects{}, err
+		}
+	}
+	// `restamp` is evaluated against the row as it stood BEFORE this
+	// update: SQLite reads every right-hand side off the old row.
+	const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, close_when_turn_ends = NULL, awaiting_correspondence = NULL, `+
+		`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
+		`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
+		string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)
+	if err != nil {
+		return closeEffects{}, err
+	}
+	if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+		return closeEffects{}, err
+	}
+	// A CLOSE ENDS THE WORKSPACE'S SUBSCRIPTIONS -- to merge queues and
+	// to other workspaces -- in the same transaction, so no close path can
+	// leave one standing (mergesubscriptions.go,
+	// workspacesubscriptions.go).
+	if effects.subscriptions, err = endSubscriptionsInTx(ctx, tx, id); err != nil {
+		return closeEffects{}, err
+	}
+	if effects.followings, err = endWorkspaceSubscriptionsInTx(ctx, tx, id); err != nil {
+		return closeEffects{}, err
+	}
+	return effects, nil
+}
+
+// logCloseEffects records what a committed close released, under OP.
+func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects) {
+	if effects.released.Valid && effects.released.String != "" {
+		s.log.Info(op, "the close released the workspace's serving ownership",
+			dlog.Context{"workspace": string(id), "instance": effects.released.String})
+	}
+	if effects.subscriptions > 0 {
+		s.log.Info(op, "the close ended the workspace's merge queue subscriptions",
+			dlog.Context{"workspace": string(id), "subscriptions": effects.subscriptions})
+	}
+	if effects.followings > 0 {
+		s.log.Info(op, "the close ended the workspace's subscriptions to other workspaces",
+			dlog.Context{"workspace": string(id), "subscriptions": effects.followings})
+	}
 }
 
 // Reopen records that a workspace's editor state stands again, and clears its

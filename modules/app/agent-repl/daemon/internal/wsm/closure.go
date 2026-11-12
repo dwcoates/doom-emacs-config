@@ -42,7 +42,8 @@ const (
 	// CloseByMerge is the merge that landed the workspace.
 	CloseByMerge CloseCause = "merge"
 	// CloseByDaemon is the daemon itself, unasked: the workspace's directory
-	// was gone, or a closed row's serving ownership was released.
+	// was gone, a closed row's serving ownership was released, or the merge a
+	// merge workspace existed to run was taken off its queue.
 	CloseByDaemon CloseCause = "daemon"
 )
 

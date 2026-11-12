@@ -131,7 +131,6 @@ var createRefusalArms = map[string]bool{
 	ArmUnknownLandingTarget:                 true,
 	ArmUnknownRequester:                     true,
 	"async_merge_unknown_branch":            true,
-	"async_merge_branch_owned":              true,
 	"async_merge_unknown_subagent":          true,
 	"async_merge_unknown_maker":             true,
 	"async_merge_context_not_maker":         true,

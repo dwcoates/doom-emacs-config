@@ -91,6 +91,8 @@ type closesDB struct {
 	readErr  error
 	closeErr error
 	closed   int
+	// exits counts the queue exits made.
+	exits int
 }
 
 func (d *closesDB) Workspace(context.Context, wsm.WorkspaceID) (wsm.Workspace, error) {
@@ -103,6 +105,89 @@ func (d *closesDB) MarkClosed(context.Context, wsm.WorkspaceID, wsm.Closure) err
 	}
 	d.closed++
 	return nil
+}
+
+func (d *closesDB) RemoveMergeQueueEntry(_ context.Context, _ wsm.RepoKey, _ wsm.WorkspaceID, _ string, closes *wsm.Closure) error {
+	return d.exit(closes)
+}
+
+func (d *closesDB) DropAdmittedMerge(_ context.Context, _ wsm.RepoKey, _ wsm.WorkspaceID, _ wsm.LeaseID, _ string, closes *wsm.Closure) error {
+	return d.exit(closes)
+}
+
+// exit stands for a queue exit that closes its workspace when CLOSES is set.
+func (d *closesDB) exit(closes *wsm.Closure) error {
+	if d.closeErr != nil {
+		return d.closeErr
+	}
+	d.exits++
+	if closes != nil {
+		d.closed++
+	}
+	return nil
+}
+
+func TestReportingEdgesTellsTheCloseAQueueExitMakes(t *testing.T) {
+	closes := &wsm.Closure{By: wsm.CloseByDaemon}
+	tests := []struct {
+		name   string
+		ws     wsm.Workspace
+		exit   func(wsm.DB) error
+		closed int
+		want   []string
+	}{
+		{name: "a removal closing an open merge workspace is told", ws: wsm.Workspace{ID: ws}, exit: func(db wsm.DB) error {
+			return db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", ws, "evicted", closes)
+		}, closed: 1, want: []string{"closed:ws-1"}},
+		{name: "a drop closing an open merge workspace is told", ws: wsm.Workspace{ID: ws}, exit: func(db wsm.DB) error {
+			return db.DropAdmittedMerge(context.Background(), "/repo/.git", ws, "lease", "evicted", closes)
+		}, closed: 1, want: []string{"closed:ws-1"}},
+		{name: "an exit that closes nothing tells nothing", ws: wsm.Workspace{ID: ws}, exit: func(db wsm.DB) error {
+			return db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", ws, "merged", nil)
+		}},
+		{name: "an exit closing a closed workspace tells nothing", ws: wsm.Workspace{ID: ws, Closed: true}, exit: func(db wsm.DB) error {
+			return db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", ws, "evicted", closes)
+		}, closed: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &recorder{}
+			inner := &closesDB{ws: tt.ws}
+			db := ReportingEdges(inner, New(r), dlog.NewTestLogger())
+
+			// Act
+			err := tt.exit(db)
+
+			// Assert
+			if err != nil || inner.exits != 1 || inner.closed != tt.closed {
+				t.Fatalf("exit = %v, exits %d, closes %d; want the exit made with %d close(s)", err, inner.exits, inner.closed, tt.closed)
+			}
+			if !slices.Equal(r.got, tt.want) {
+				t.Errorf("told %v, want %v", r.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReportingEdgesRefusesAClosingExitWhoseWorkspaceCannotBeRead(t *testing.T) {
+	// Arrange
+	r := &recorder{}
+	log := dlog.NewTestLogger()
+	inner := &closesDB{readErr: errors.New("disk gone")}
+	db := ReportingEdges(inner, New(r), log)
+
+	// Act
+	err := db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", ws, "evicted", &wsm.Closure{By: wsm.CloseByDaemon})
+
+	// Assert
+	if err == nil || inner.exits != 0 || len(r.got) != 0 {
+		t.Fatalf("exit = %v, exits %d, told %v; want a refusal that writes and tells nothing", err, inner.exits, r.got)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: op,
+		Message: "could not read a workspace before closing it, so the close is refused rather than left untold"}); !ok {
+		t.Errorf("no error record: %+v", log.Records())
+	}
 }
 
 func TestReportingEdgesTellsTheCloseOfAnOpenWorkspace(t *testing.T) {

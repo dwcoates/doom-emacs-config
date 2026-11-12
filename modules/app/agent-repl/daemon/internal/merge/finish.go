@@ -224,7 +224,7 @@ func (o *orchestrator) withdrawFinished(ctx context.Context, ws ids.WorkspaceID,
 	if err := o.clearFinish(ctx, log, fields, ws); err != nil {
 		return
 	}
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeFinishFailed); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeFinishFailed, nil); err != nil {
 		log.Error(opFinishStage, "could not withdraw the deploy whose finish stage failed; it stays recorded", withField(fields, "error", err.Error()))
 		return
 	}

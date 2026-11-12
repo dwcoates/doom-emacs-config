@@ -387,9 +387,11 @@ func TestRevealAnswersTheVerbsFailure(t *testing.T) {
 }
 
 func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
-	mergeWS := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge"}
+	mergeWS := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge", Branch: "sample-merge"}
 	tests := []struct {
-		name      string
+		name string
+		// noFork hands back with no merge workspace, as a merge never forked.
+		noFork    bool
 		outcome   merge.DetachedOutcome
 		wantLabel string
 		wantText  string
@@ -398,16 +400,23 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 			wantLabel: "merge of sample landed", wantText: "Recently Deployed"},
 		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"},
 			wantLabel: "merge of sample failed", wantText: "stays hidden at /w/sample-merge, exactly where the merge stopped, listed among the closed workspaces"},
-		{name: "abandoned", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
-			wantLabel: "merge of sample did not run", wantText: "the fork failed"},
+		{name: "evicted", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge while it was running", Branch: "sample"},
+			wantLabel: "merge of sample did not land",
+			wantText:  "It ended before it landed: the operator evicted this merge while it was running. Nothing of it landed. Its merge workspace `sample-merge` keeps its branch `sample-merge` with the merge's work, so that work can be queued again with `agent-repld workspace async-merge -branch sample-merge`."},
+		{name: "abandoned before its fork", noFork: true, outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
+			wantLabel: "merge of sample did not run", wantText: "It did not run: the fork failed."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
+			forked := mergeWS
+			if tt.noFork {
+				forked = wsm.Workspace{}
+			}
 
 			// Act
-			err := f.svc.HandBack(context.Background(), "ws-requester", mergeWS, tt.outcome)
+			err := f.svc.HandBack(context.Background(), "ws-requester", forked, tt.outcome)
 
 			// Assert
 			if err != nil || len(f.prompts.sent) != 1 {

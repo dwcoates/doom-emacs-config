@@ -41,6 +41,30 @@ func (o *closureObservedDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, 
 	return nil
 }
 
+// RemoveMergeQueueEntry records the queue exit, then tells the sink when the
+// exit closed its workspace in the same write (an evicted merge workspace).
+func (o *closureObservedDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
+	if err := o.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes); err != nil {
+		return err
+	}
+	if closes != nil {
+		o.sink.ClosureChanged(id)
+	}
+	return nil
+}
+
+// DropAdmittedMerge records the drop, then tells the sink when the drop closed
+// its workspace in the same write.
+func (o *closureObservedDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
+	if err := o.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes); err != nil {
+		return err
+	}
+	if closes != nil {
+		o.sink.ClosureChanged(id)
+	}
+	return nil
+}
+
 // Reopen records the reopen, then tells the sink.
 func (o *closureObservedDB) Reopen(ctx context.Context, id wsm.WorkspaceID, serving wsm.InstanceID) error {
 	if err := o.DB.Reopen(ctx, id, serving); err != nil {

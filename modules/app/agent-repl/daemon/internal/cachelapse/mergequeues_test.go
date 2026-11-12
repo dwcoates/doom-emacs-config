@@ -23,12 +23,12 @@ func (d *queueingDB) QueueMerge(_ context.Context, _ wsm.RepoKey, id wsm.Workspa
 	return 1, d.err
 }
 
-func (d *queueingDB) RemoveMergeQueueEntry(_ context.Context, _ wsm.RepoKey, id wsm.WorkspaceID, _ string) error {
+func (d *queueingDB) RemoveMergeQueueEntry(_ context.Context, _ wsm.RepoKey, id wsm.WorkspaceID, _ string, _ *wsm.Closure) error {
 	d.wrote = append(d.wrote, "remove "+string(id))
 	return d.err
 }
 
-func (d *queueingDB) DropAdmittedMerge(_ context.Context, _ wsm.RepoKey, id wsm.WorkspaceID, _ wsm.LeaseID, _ string) error {
+func (d *queueingDB) DropAdmittedMerge(_ context.Context, _ wsm.RepoKey, id wsm.WorkspaceID, _ wsm.LeaseID, _ string, _ *wsm.Closure) error {
 	d.wrote = append(d.wrote, "drop "+string(id))
 	return d.err
 }
@@ -52,10 +52,10 @@ func TestObserveMergeQueues(t *testing.T) {
 			return err
 		}, wrote: "queue " + string(theWorkspace), edge: "entered " + string(theWorkspace)},
 		{name: "a removal", write: func(db wsm.DB) error {
-			return db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", theWorkspace, "failed")
+			return db.RemoveMergeQueueEntry(context.Background(), "/repo/.git", theWorkspace, "failed", nil)
 		}, wrote: "remove " + string(theWorkspace), edge: "left " + string(theWorkspace)},
 		{name: "a dropped admitted merge", write: func(db wsm.DB) error {
-			return db.DropAdmittedMerge(context.Background(), "/repo/.git", theWorkspace, "lease", "evicted")
+			return db.DropAdmittedMerge(context.Background(), "/repo/.git", theWorkspace, "lease", "evicted", nil)
 		}, wrote: "drop " + string(theWorkspace), edge: "left " + string(theWorkspace)},
 	}
 	refused := errors.New("database is locked")

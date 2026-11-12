@@ -70,8 +70,8 @@ func (d rosterQueueDB) HandOffDetachedMerge(ctx context.Context, repo wsm.RepoKe
 }
 
 // RemoveMergeQueueEntry drops a row and republishes its repository's queue.
-func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string) error {
-	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause))
+func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, cause string, closes *wsm.Closure) error {
+	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause, closes))
 }
 
 // QueueMerge puts a requested merge in line and republishes its repository's
@@ -83,8 +83,8 @@ func (d rosterQueueDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 
 // DropAdmittedMerge drops an admitted merge and republishes its repository's
 // queue.
-func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string) error {
-	return d.republished(ctx, repo, d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause))
+func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
+	return d.republished(ctx, repo, d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause, closes))
 }
 
 // MoveMerge moves a waiting merge and republishes its repository's queue when

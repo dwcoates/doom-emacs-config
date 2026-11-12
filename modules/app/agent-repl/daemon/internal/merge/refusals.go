@@ -73,11 +73,6 @@ const (
 	// workspace is not open, is in another repository, or is the requester
 	// itself (CreateWorkspaceError.async_merge_unknown_close_after).
 	ArmUnknownCloseAfter = "async_merge_unknown_close_after"
-	// ArmBranchOwned refuses an async request whose branch a registered
-	// workspace owns: landing it is that workspace's own act
-	// (CreateWorkspaceError.async_merge_branch_owned). Its `branch` and
-	// `owner` fields name the branch and the workspace.
-	ArmBranchOwned = "async_merge_branch_owned"
 	// ArmUnknownMaker refuses an async request whose maker workspace is not
 	// registered in the requester's repository
 	// (CreateWorkspaceError.async_merge_unknown_maker).

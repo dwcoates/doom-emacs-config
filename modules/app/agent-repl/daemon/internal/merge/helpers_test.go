@@ -149,10 +149,13 @@ type fakeDB struct {
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
-	mergedAt       map[ids.WorkspaceID]time.Time
-	landedCommits  map[ids.WorkspaceID]uint32
-	closed         map[ids.WorkspaceID]bool
-	closures       map[ids.WorkspaceID]wsm.Closure
+	mergedAt      map[ids.WorkspaceID]time.Time
+	landedCommits map[ids.WorkspaceID]uint32
+	closed        map[ids.WorkspaceID]bool
+	closures      map[ids.WorkspaceID]wsm.Closure
+	// exitCloses is every close a queue exit made in its own write, by the
+	// workspace it closed.
+	exitCloses     map[ids.WorkspaceID]wsm.Closure
 	releasedLeases []wsm.LeaseID
 	policies       map[wsm.LeaseID]wsm.LeasePolicy
 	dropped        []string
@@ -288,6 +291,7 @@ func newFakeDB() *fakeDB {
 		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
 		closures:      map[ids.WorkspaceID]wsm.Closure{},
+		exitCloses:    map[ids.WorkspaceID]wsm.Closure{},
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
@@ -1025,7 +1029,7 @@ func (f *fakeDB) ClearMergePick(_ context.Context, repo wsm.RepoKey, id ids.Work
 	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
-func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string) error {
+func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string, closes *wsm.Closure) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.shut {
@@ -1039,10 +1043,30 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
 			f.renumber(repo)
 			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
+			f.closeOnExitLocked(id, closes)
 			return nil
 		}
 	}
 	return fmt.Errorf("no queue entry for %s", id)
+}
+
+// closeOnExitLocked stands for the close a queue exit makes in its own
+// transaction (wsm.markClosedInTx).
+func (f *fakeDB) closeOnExitLocked(id ids.WorkspaceID, closes *wsm.Closure) {
+	if closes == nil {
+		return
+	}
+	f.closed[id] = true
+	f.closures[id] = *closes
+	f.exitCloses[id] = *closes
+}
+
+// exitCloseOf answers the close a queue exit made for ID, if any.
+func (f *fakeDB) exitCloseOf(id ids.WorkspaceID) (wsm.Closure, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.exitCloses[id]
+	return c, ok
 }
 
 // ReturnAdmittedMerge puts an admitted entry back in line where it stands.
@@ -1063,7 +1087,7 @@ func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids
 
 // DropAdmittedMerge stands for the store's one transaction: the admitted
 // entry, the merge lease and its progress record go together, or nothing does.
-func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string) error {
+func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string, closes *wsm.Closure) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.dropAdmittedErr != nil {
@@ -1088,6 +1112,7 @@ func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.W
 		}
 	}
 	f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
+	f.closeOnExitLocked(id, closes)
 	return nil
 }
 

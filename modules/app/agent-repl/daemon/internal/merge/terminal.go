@@ -177,8 +177,14 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 }
 
 // handBack reports how a merge ended to the workspace whose feed carries the
-// bubble: an ASYNC merge's requester whether it landed or not, and a SYNC
-// merge's own workspace when it did not land (one that landed closed it). The
+// bubble: an ASYNC merge's requester however it ended, and a SYNC merge's own
+// workspace when it did not land (one that landed closed it).
+//
+// AN EVICTION IS REPORTED BACK TOO (2026-11-10), exactly as a landing or a
+// failure is: the requester's agent believes its merge is in line until it is
+// told otherwise (2026-11-09: the evicted `land-zettel-notifier` merge never
+// reached `desktop-notifications-missing`, which learned of it only when it
+// queued the branch again). The
 // bubble's own "open merge workspace" button (SelectWorkspace's own reveal,
 // internal/server/workspaces.go) is the one way in from here, by owner
 // ruling (2026-10-20): a merge workspace is never auto-revealed in the tab
@@ -190,14 +196,6 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 	requester, async := o.requesterOf(ws)
 	if !async {
 		o.handBackInPlace(ctx, ws, out)
-		return
-	}
-	// AN END SOMEBODY ASKED FOR IS NOT A FAILURE: the bubble and the roster
-	// say the merge ended, and the requester's agent is not prompted to deal
-	// with it.
-	if out.Requested {
-		o.log(ctx, ws).Info("daemon.merge.detached", "an async merge was taken off at an explicit request; its requester is not handed it back", dlog.Context{
-			"workspace": string(ws), "requester": string(requester), "outcome": out.Kind.String(), "summary": out.Summary})
 		return
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
@@ -217,10 +215,10 @@ func (o *orchestrator) handBack(ctx context.Context, ws ids.WorkspaceID, out Det
 
 // handBackInPlace reports a SYNC merge that did not land to its own
 // workspace's conversation, which stays open after it: a failure, or an
-// abandonment nobody asked for. A landing closed the workspace, and an end
-// somebody asked for failed nothing, so neither is reported.
+// abandonment, an eviction included. A landing closed the workspace, so it is
+// not reported.
 func (o *orchestrator) handBackInPlace(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
-	if out.Kind == DetachedLanded || out.Requested {
+	if out.Kind == DetachedLanded {
 		return
 	}
 	record, err := o.deps.DB.Workspace(ctx, ws)
@@ -445,12 +443,22 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		log.Error(op, "could not settle the finished merge's queue tab", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
 	}
+	// AN EVICTED ASYNC MERGE'S MERGE WORKSPACE CLOSES IN THE WRITE THAT TAKES
+	// ITS ENTRY OFF (exitClosure). One whose record cannot be read is left
+	// open, loudly: the teardown still gives back everything else.
+	closes, err := r.o.exitClosure(ctx, r.ws, out.abandoned)
+	if err != nil {
+		log.Error(op, "could not tell whether the abandoned merge closes its merge workspace; it is left open", dlog.Context{
+			"workspace": string(r.ws), "cause": string(out.abandoned), "error": err.Error()})
+	}
 	// THE RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine).
 	if err := r.o.leaveLine(r, func() error {
-		return r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out))
+		return r.o.deps.DB.RemoveMergeQueueEntry(ctx, r.repo, r.ws, terminalCause(out), closes)
 	}); err != nil {
 		log.Error(op, "could not drop the finished merge's queue entry", dlog.Context{
 			"workspace": string(r.ws), "repo": string(r.repo), "error": err.Error()})
+	} else {
+		r.o.closedOnExit(ctx, r.ws, out.abandoned, closes)
 	}
 	r.o.mu.Lock()
 	if r.o.running[r.repo] == r {
@@ -1132,7 +1140,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 			}, headAbandoned)
 		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
-	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()}
+	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary}
 	if ledger != "" {
 		o.ended(ctx, ws, out)
 	} else {
@@ -1355,7 +1363,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
 		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Requested: cause.releases()})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
 	})
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the

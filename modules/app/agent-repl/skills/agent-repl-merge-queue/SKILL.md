@@ -1,6 +1,6 @@
 ---
 name: agent-repl-merge-queue
-description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH no workspace owns (a subagent''s, or one cut by hand) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, disables or enables racing, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
+description: 'Land work through the agent-repl merge queue, the ONLY way into master in this repository, and control the queue. A merge is one of two kinds. Finishing THIS WORKSPACE (`workspace finished here`) deploys its own branch as its repository''s `.agent-repl/lifecycle.yaml` says (for agent-repl: landed where its landing target says, then the runtime rolled out), in place once the current turn ends, holding the feed, and closes this workspace once the deploy succeeds (a failure leaves it open and is reported back). An ASYNC MERGE (`workspace async-merge`) lands a NAMED BRANCH (a subagent''s, one cut by hand, or any workspace''s, whoever owns it) in a hidden merge workspace forked from a workspace''s conversation, while this workspace keeps working, optionally preparing the branch first from a free-text instruction, closing another workspace and removing the branch''s worktree once it lands, and reporting how it ended back here. Any merge may go to the FRONT of the queue (a hotfix), and a merge that must run before the one ALREADY RUNNING commandeers its spot. A deploy onto a versioned repository''s main branch (agent-repl''s master) names how it moves the version (minor or patch) and its changelog line. Also reads the queue''s status, takes a merge off it, moves a waiting merge up or down, pauses, hard-stops or resumes a queue, disables or enables racing, and subscribes this workspace to a queue''s changes. Use whenever work is finished and must reach master or a parent workspace, whenever a tangential fix or an attempt to test on master should land while work goes on, whenever you would otherwise run git merge, commit, cherry-pick or push onto master, when a subagent reports a finished branch, whenever a queued merge must be removed or moved, or the queue paused, hard-stopped, resumed or followed. Holding a repository''s deploys is /agent-repl-runtime''s.'
 argument-hint: "here [front] [minor|patch <changelog-line>] | async <name> <branch> ... | status | dequeue | move-up | move-down | pause [-hard] | resume | disable-racing | enable-racing | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-merge-queue/agent-repld:*)
 ---
@@ -43,8 +43,10 @@ Before an async merge:
 
 - The branch holds exactly the work to land, committed, with its tests passed;
   where it does not, `-instruction` says how the merge workspace makes it so.
-- CRITICAL: the branch is NEVER the one checked out in this workspace, nor one
-  any workspace owns. A workspace's branch lands only into that workspace.
+- Any existing branch may be queued, whichever workspace owns it, open or
+  closed; who owns it is never a refusal. To land THIS workspace's own work,
+  finish the workspace (`workspace finished here`) unless it must land while
+  this workspace keeps working.
 - Give `-cleanup-worktree` unless the branch's worktree must be kept, and
   `-close-after WS` when the work came from another workspace that is done
   once it lands.
@@ -104,8 +106,11 @@ Either kind:
   until every one passes; then commit the fix with its tests and end the turn.
   CRITICAL: NEVER run a whole suite or `bin/test-all.sh` while remediating, and
   NEVER end the turn while a handed-over case still fails.
-- c. A report of how a merge ended: report it in one line, then go to step 3e
-  for a round of an instrumentation loop; otherwise STOP. A report of a landing
+- c. A report of how a merge ended (landed, failed or evicted): report it in
+  one line, then go to step 3e for a round of an instrumentation loop;
+  otherwise STOP. An evicted merge's merge workspace is closed and its branch
+  kept: queue it again with `agent-repld workspace async-merge -branch <the
+  merge workspace's branch>`. A report of a landing
   on agent-repl's master arrives once the build carrying it runs; a report that
   the repository's deploy stage is held or the rollout failed means the
   running build does NOT carry it.

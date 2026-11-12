@@ -845,7 +845,12 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 // RemoveMergeQueueEntry drops one entry, recording the cause it was dropped for
 // in the operation's log record. Removing an entry that is not queued is a
 // refusal, never a no-op: it means the caller lost track of the queue.
-func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error {
+//
+// CLOSES, when set, closes the workspace in the SAME transaction: an evicted
+// async merge's merge workspace leaves the queue and closes in one write, so
+// no reader ever sees it off the queue yet open (2026-11-09: an evicted merge
+// workspace stayed open for a day, and its branch could not be queued again).
+func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string, closes *Closure) error {
 	const op = "daemon.wsm.remove_merge_queue_entry"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -853,13 +858,56 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "cause": cause}
-	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+	if err := s.refuseUndeclaredExitClose(op, fields, closes); err != nil {
+		return err
+	}
+	var effects closeEffects
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id)
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		effects, err = closeOnExitInTx(ctx, tx, id, closes)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	s.logExitClose(op, fields, id, closes, effects)
+	return nil
+}
+
+// refuseUndeclaredExitClose refuses a queue exit whose close names no
+// declared cause, before anything is written.
+func (s *store) refuseUndeclaredExitClose(op string, fields dlog.Context, closes *Closure) error {
+	if closes == nil || closes.By.valid() {
+		return nil
+	}
+	err := fmt.Errorf("wsm: a queue exit closes its workspace with the unknown cause %q", closes.By)
+	s.log.Error(op, "refused a queue exit whose close has no declared cause", withError(fields, err))
+	return err
+}
+
+// closeOnExitInTx closes the workspace a queue exit takes off, inside the
+// exit's own transaction, when the exit asks for it.
+func closeOnExitInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closes *Closure) (closeEffects, error) {
+	if closes == nil {
+		return closeEffects{}, nil
+	}
+	return markClosedInTx(ctx, tx, id, *closes)
+}
+
+// logExitClose records the close a committed queue exit made, if it made one.
+func (s *store) logExitClose(op string, fields dlog.Context, id WorkspaceID, closes *Closure, effects closeEffects) {
+	if closes == nil {
+		return
+	}
+	s.log.Info(op, "the queue exit closed its workspace in the same transaction",
+		dlog.Merge(fields, dlog.Context{"closure_by": string(closes.By), "closure_at": closes.At}))
+	s.logCloseEffects(op, id, effects)
 }
 
 // DropAdmittedMerge takes an ADMITTED merge that has no run off its queue:
@@ -871,7 +919,10 @@ func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id Work
 // lease standing over none, and every later prompt on the workspace would be
 // refused. An entry that is not admitted, or a lease that is not that
 // workspace's merge lease, is a refusal and changes nothing.
-func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error {
+//
+// CLOSES closes the workspace in the same transaction, as for
+// RemoveMergeQueueEntry.
+func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string, closes *Closure) error {
 	const op = "daemon.wsm.drop_admitted_merge"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -879,6 +930,10 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "cause": cause}
+	if err := s.refuseUndeclaredExitClose(op, fields, closes); err != nil {
+		return err
+	}
+	var effects closeEffects
 	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
 		// A REMEDIATING MERGE IS ADMITTED WORK OUT OF LINE: it holds its lease
 		// and its progress record just as an admitted one does, and ends the
@@ -898,13 +953,17 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 		if err := requireOneRow(res, fmt.Sprintf("wsm: merge lease %s of workspace %s", lease, id)); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease)
+		if _, err = tx.ExecContext(ctx, `DELETE FROM merge_progress WHERE lease_id = ?`, lease); err != nil {
+			return err
+		}
+		effects, err = closeOnExitInTx(ctx, tx, id, closes)
 		return err
 	})
 	if err != nil {
 		return err
 	}
 	s.disown(lease)
+	s.logExitClose(op, fields, id, closes, effects)
 	return nil
 }
 

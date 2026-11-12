@@ -310,7 +310,7 @@ func (o *orchestrator) pickFailed(ctx context.Context, p *pick, summary string) 
 		EndedAtMs: o.nowMS(),
 		Reason:    &frontendv1.FeedMergeError_Failed{Failed: &frontendv1.FeedMergeFailed{Summary: summary}},
 	}, headPick)
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, p.repo, p.ws, causePickFailed); err != nil {
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, p.repo, p.ws, causePickFailed, nil); err != nil {
 		o.log(ctx, p.ws).Error(op, "could not drop the merge whose pick failed", dlog.Context{"workspace": string(p.ws), "repo": string(p.repo), "error": err.Error()})
 	}
 	o.mu.Lock()

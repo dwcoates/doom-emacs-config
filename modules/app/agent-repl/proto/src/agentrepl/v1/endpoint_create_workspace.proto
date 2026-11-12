@@ -322,8 +322,9 @@ message CreateWorkspaceOneShotContext {
 message CreateWorkspaceUngatedConsent {
 }
 
-// AN ASYNC MERGE: land a branch NO WORKSPACE OWNS -- a subagent's, or one an
-// agent cut by hand -- without holding the requester. When the requesting
+// AN ASYNC MERGE: land a NAMED BRANCH -- a subagent's, one an agent cut by
+// hand, or any workspace's, the requester's own included -- without holding
+// the requester. When the requesting
 // turn ends the merge is put in line; when it STARTS, the queue creates a
 // HIDDEN MERGE WORKSPACE cut from the branch's tip, with the maker's
 // conversation forked as it then stands, runs `instruction` as its first
@@ -336,9 +337,11 @@ message CreateWorkspaceUngatedConsent {
 // fails, when its agent asks a permission or a question, when the user
 // interrupts it from the bubble, or when the user selects it.
 //
-// A BRANCH A WORKSPACE OWNS IS NEVER ASYNC-MERGED: landing a workspace's
-// branch is that workspace's own act (MergeWorkspace), so such a branch is
-// refused (`async_merge_branch_owned`).
+// WHO OWNS THE BRANCH IS NEVER A GROUND FOR REFUSAL (owner ruling,
+// 2026-11-10): a workspace can always queue a branch, whichever workspace has
+// it checked out, open or closed. No two merges ever work one git branch even
+// so: the merge runs on its merge workspace's own branch, cut from this one's
+// tip, and the queue holds one entry per workspace.
 message CreateWorkspaceAsyncMerge {
   // The merge workspace's name, chosen by the calling agent: a short slug
   // naming what is merged ("reconnect-fix"). Prefixed and validated as a
@@ -399,8 +402,8 @@ message CreateWorkspaceAsyncMerge {
 message CreateWorkspaceAsyncMergeSource {
   // The branch, as git spells it in the requester's repository. REQUIRED:
   // blank is refused as invalid; a branch that does not exist is
-  // `async_merge_unknown_branch`; a branch a registered workspace owns is
-  // `async_merge_branch_owned`.
+  // `async_merge_unknown_branch`. Any existing branch is admitted, whichever
+  // workspace owns it.
   string branch = 1;
   // Who made the branch. REQUIRED.
   CreateWorkspaceAsyncMergeMaker maker = 2;
@@ -584,8 +587,11 @@ message CreateWorkspaceError {
   // other. Tags 22 and 23 (`owner_notice_required`, `owner_notice_unexpected`)
   // are RETIRED with the owner notice: every workspace lands itself, so no
   // create owes its owner a notice.
-  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected";
+  // Tag 27 (`async_merge_branch_owned`) is RETIRED (owner ruling,
+  // 2026-11-10): who owns an async merge's branch is never a ground for
+  // refusing it.
+  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 27;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -661,9 +667,6 @@ message CreateWorkspaceError {
     CreateWorkspaceUnknownRequester unknown_requester = 25;
     // The async merge's branch does not exist in the repository.
     CreateWorkspaceAsyncMergeUnknownBranch async_merge_unknown_branch = 26;
-    // The async merge's branch is owned by a registered workspace, which lands
-    // it itself.
-    CreateWorkspaceAsyncMergeBranchOwned async_merge_branch_owned = 27;
     // No workspace's session holds the named subagent.
     CreateWorkspaceAsyncMergeUnknownSubagent async_merge_unknown_subagent = 28;
     // The maker workspace is not in the daemon's registry, or is in another
@@ -954,13 +957,6 @@ message CreateWorkspaceUnknownRequester {
 message CreateWorkspaceAsyncMergeUnknownBranch {
   // The branch as the request named it.
   string branch = 1;
-}
-// Names the async merge branch and the workspace that owns it.
-message CreateWorkspaceAsyncMergeBranchOwned {
-  // The branch as the request named it.
-  string branch = 1;
-  // The workspace whose branch it is, which lands it with MergeWorkspace.
-  workspace.v1.WorkspaceRef owner = 2;
 }
 // Names the subagent no workspace's session holds.
 message CreateWorkspaceAsyncMergeUnknownSubagent {

@@ -25,16 +25,6 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 		run     *DetachedRun
 		arm     string
 	}{
-		{name: "the requester's own branch", arrange: func(h *harness) {
-			h.db.mu.Lock()
-			w := h.db.workspaces[theWorkspace]
-			w.Branch = asyncBranch
-			h.db.workspaces[theWorkspace] = w
-			h.db.mu.Unlock()
-		}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}, arm: ArmBranchOwned},
-		{name: "another workspace's own branch", arrange: func(h *harness) {
-			h.registerOther(otherWorkspace, "ws-two", asyncBranch)
-		}, run: &DetachedRun{Maker: theWorkspace, Name: "n"}, arm: ArmBranchOwned},
 		{name: "a maker no workspace is registered as", run: &DetachedRun{Maker: "ws-9", Name: "n"}, arm: ArmUnknownMaker},
 		{name: "a maker of another repository", arrange: func(h *harness) {
 			h.registerOther(otherWorkspace, "ws-two", "b")
@@ -81,6 +71,61 @@ func TestAnAsyncRequestIsRefusedWhatItCannotRunAsAsked(t *testing.T) {
 			}
 			if _, ok := h.entryOf(theWorkspace); ok {
 				t.Fatal("a refused async request was recorded")
+			}
+		})
+	}
+}
+
+// TestAnAsyncRequestIsAdmittedWhoeverOwnsItsBranch pins the owner ruling of
+// 2026-11-10: who owns a branch is never a ground for refusing its merge.
+// The closed owner is the incident: an evicted merge workspace's branch,
+// queued again by its requester, was refused as owned by that workspace.
+func TestAnAsyncRequestIsAdmittedWhoeverOwnsItsBranch(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "the requester's own branch", arrange: func(h *harness) {
+			h.db.mu.Lock()
+			w := h.db.workspaces[theWorkspace]
+			w.Branch = asyncBranch
+			h.db.workspaces[theWorkspace] = w
+			h.db.mu.Unlock()
+		}},
+		{name: "an open workspace's own branch", arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", asyncBranch)
+		}},
+		{name: "a closed merge workspace's own branch", arrange: func(h *harness) {
+			h.registerOther(otherWorkspace, "ws-two", asyncBranch)
+			h.db.mu.Lock()
+			w := h.db.workspaces[otherWorkspace]
+			w.Closed = true
+			w.MergeOf = &wsm.MergeOrigin{Requester: theWorkspace}
+			h.db.workspaces[otherWorkspace] = w
+			h.db.mu.Unlock()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tt.arrange(h)
+			h.inFlight = "turn-asking"
+
+			// Act: an agent's request, still waiting on the turn that asked.
+			_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByAgent, Asker: theWorkspace,
+				Detached: &DetachedRun{Maker: theWorkspace, Name: "n"}})
+
+			// Assert: admitted, and recorded for the branch as asked.
+			if err != nil {
+				t.Fatalf("Enqueue = %v, want the request admitted", err)
+			}
+			entry, ok := h.entryOf(theWorkspace)
+			if !ok {
+				t.Fatal("the admitted async request was not recorded")
+			}
+			if entry.Source.Branch != asyncBranch {
+				t.Fatalf("the recorded branch = %q, want %q", entry.Source.Branch, asyncBranch)
 			}
 		})
 	}

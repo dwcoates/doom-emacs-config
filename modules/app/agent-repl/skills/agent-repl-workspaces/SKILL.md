@@ -189,7 +189,7 @@ one repository, except the move below):
 - The workspaces a new one derives from (its parent, and the one it forks) are
   told when it is created, when it lands and when it closes without landing.
   Nothing needs to be relayed by hand.
-- A branch no workspace owns (a subagent's) is landed through an async merge,
+- A named branch, such as a subagent's, is landed through an async merge,
   not a create: see `/agent-repl-merge-queue`.
 
 ## Reorganizing across repositories

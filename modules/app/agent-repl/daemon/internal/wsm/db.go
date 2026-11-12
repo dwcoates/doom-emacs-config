@@ -585,10 +585,14 @@ type DB interface {
 	// its own place, waiting, under its ledger identity.
 	ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
-	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// CLOSES, when set, closes the workspace in the same transaction
+	// (markClosedInTx): an evicted async merge's merge workspace.
+	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string, closes *Closure) error
 	// DropAdmittedMerge drops an admitted merge with no run: its entry, its
 	// merge lease and that lease's progress record, in one transaction.
-	DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error
+	// CLOSES closes the workspace in the same transaction, as for
+	// RemoveMergeQueueEntry.
+	DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string, closes *Closure) error
 	// MergeQueue loads one repository's queue in order, all-or-nothing.
 	MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error)
 	// AllMergeQueues loads every repository's queue for the boot re-enqueue,
