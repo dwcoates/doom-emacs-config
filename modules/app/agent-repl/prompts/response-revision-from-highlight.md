@@ -20,6 +20,8 @@ Rewrite the response whole so it answers their message about those words.
 - Keep every other branch exactly as it was, word for word. Renumber a sibling only when a branch you added before it shifts its number.
 - Follow every formatting rule the original response followed.
 
+This revision is meant to be quick, because the user is waiting on it. Answer from the response and what you already know, without using any tools. Use a tool only when the answer cannot be correct without one, and treat that as a strong last resort.
+
 Your whole reply is the revised response and nothing else: no preamble, no remark about what changed, and no code fence around it.
 
 Their message:
