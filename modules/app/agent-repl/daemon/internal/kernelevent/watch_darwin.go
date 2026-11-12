@@ -58,18 +58,25 @@ func (w *Watch) Add(path string) error {
 // ends, then takes every change already pending so the next Wait waits for a
 // new one.
 func (w *Watch) Wait(ctx context.Context) error {
-	if _, err := awaitQueue(ctx, w.kq); err != nil {
+	return awaitAndTakePending(ctx, w.kq)
+}
+
+// awaitAndTakePending blocks on KQ until one of its registered events fires
+// or ctx ends, then takes every event already pending, so the next wait
+// waits for a new one. Watch.Wait and Spawns.Wait share it.
+func awaitAndTakePending(ctx context.Context, kq int) error {
+	if _, err := awaitQueue(ctx, kq); err != nil {
 		return err
 	}
 	zero := unix.Timespec{}
 	events := make([]unix.Kevent_t, 16)
 	for {
-		n, err := unix.Kevent(w.kq, nil, events, &zero)
+		n, err := unix.Kevent(kq, nil, events, &zero)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("take the pending changes: %w", err)
+			return fmt.Errorf("take the pending events: %w", err)
 		}
 		if n < len(events) {
 			return nil
