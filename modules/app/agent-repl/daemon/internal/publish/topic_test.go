@@ -516,3 +516,45 @@ func TestAChangeNeverTakenEndsWithItsSubscription(t *testing.T) {
 		t.Fatalf("the untaken change is still counted: %v", err)
 	}
 }
+
+func TestAnAckAfterTheSubscriptionEndedEndsNothingAndDoesNotPanic(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	tracker := &inflight.Tracker{}
+	ctx, cancel := context.WithCancel(context.Background())
+	changes, ack := publish.ChangesOn(ctx, &topic, tracker)
+	topic.Publish(1)
+	<-changes
+
+	// Act: the subscription ends while the consumer still holds the change,
+	// and its end ends that change's count (the tracker goes idle only then),
+	// and only after that does the consumer ack.
+	cancel()
+	if err := tracker.AwaitIdle(t.Context()); err != nil {
+		t.Fatalf("the ended subscription left its change counted: %v", err)
+	}
+	ack()
+
+	// Assert.
+	if got := tracker.InFlight(); got != 0 {
+		t.Fatalf("in flight = %d after the subscription ended, want 0", got)
+	}
+}
+
+func TestAnAckWithNothingHandedOnALiveSubscriptionPanics(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+	_, ack := publish.ChangesOn(t.Context(), &topic, &inflight.Tracker{})
+
+	// Act.
+	got := func() (r any) {
+		defer func() { r = recover() }()
+		ack()
+		return nil
+	}()
+
+	// Assert.
+	if got != "publish: a counted subscription acknowledged a value it was never handed" {
+		t.Fatalf("recovered %v, want the never-handed panic", got)
+	}
+}

@@ -290,6 +290,9 @@ type Mailbox[T any] struct {
 	// handed are the ends of the values the pump handed to the consumer and
 	// the consumer has not yet acknowledged, oldest first.
 	handed []func()
+	// ended is set once the subscription is over (endAll), which ended the
+	// count of every value the consumer still held.
+	ended bool
 }
 
 // item is one queued value and the end of its count (nil when uncounted).
@@ -375,8 +378,13 @@ func (s *Mailbox[T]) Ack() { s.ack() }
 func (s *Mailbox[T]) ack() {
 	s.mu.Lock()
 	if len(s.handed) == 0 {
+		ended := s.ended
 		s.mu.Unlock()
-		if s.tracker != nil {
+		// A CONSUMER MAY ACK AFTER ITS SUBSCRIPTION ENDED: it received the
+		// value, its ctx ended while it acted on it, and the pump's endAll
+		// already ended that value's count. Only an ack on a live
+		// subscription with nothing handed is a bug.
+		if s.tracker != nil && !ended {
 			panic("publish: a counted subscription acknowledged a value it was never handed")
 		}
 		return
@@ -393,6 +401,7 @@ func (s *Mailbox[T]) endAll() {
 	s.mu.Lock()
 	queued, handed := s.queue, s.handed
 	s.queue, s.handed = nil, nil
+	s.ended = true
 	s.mu.Unlock()
 	for _, it := range queued {
 		if it.end != nil {
