@@ -1096,7 +1096,6 @@ func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *fronten
 	return nil
 }
 
-
 // ---------------------------------------------------------------------------
 // Connectivity truth per hop (daemon.md invariant 11): a workspace is
 // CONNECTED only while its shim.v1 WatchSession, its WatchHostWorkspace and its

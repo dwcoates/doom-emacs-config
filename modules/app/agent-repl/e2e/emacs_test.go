@@ -975,8 +975,8 @@ const trampolineCacheDir = "/tmp/agent-repl-e2e-trampolines"
 // emacsAdvisedPrimitives is every primitive a scenario's Emacs redefines, as
 // OBSERVED: it is the key set of `comp-installed-trampolines-h' after a boot,
 // not a reading of the sources. Seven come from this module (`status.el',
-// `close-panels-on-open.el', `find-file-workspace.el', and `spell.el''s
-// bound on `accept-process-output'), `define-key' from
+// `close-panels-on-open.el', `find-file-workspace.el', and the bound
+// `spell.el' puts on `accept-process-output'), `define-key' from
 // Doom's `general-auto-unbind-keys', and `yes-or-no-p' from the unanswerable
 // -prompt guard the harness itself installs in e2e-settings.el.
 //
