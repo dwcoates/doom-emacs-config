@@ -654,6 +654,56 @@ func TestRevListCountsTheRange(t *testing.T) {
 	}
 }
 
+func TestCherryMarksEachCommitByWhetherUpstreamHoldsItsPatch(t *testing.T) {
+	tests := []struct {
+		name string
+		// landOnMain is the commit main gains after feature forks, "" for none.
+		landOnMain string
+		want       func(first, second string) string
+	}{
+		{name: "nothing landed: every commit is +", want: func(first, second string) string {
+			return "+ " + first + "\n+ " + second + "\n"
+		}},
+		{name: "the first one's patch landed under another commit: it is -", landOnMain: "first", want: func(first, second string) string {
+			return "- " + first + "\n+ " + second + "\n"
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two commits on feature beyond main.
+			s, repo, dir := world(t)
+			base := repo.BranchHeads["main"]
+			repo.AddBranch("feature", base)
+			first := s.AddCommit(repo, "feature", "first", []string{base}, []string{"a.txt"})
+			second := s.AddCommit(repo, "feature", "second", []string{first.SHA}, []string{"b.txt"})
+			if tt.landOnMain != "" {
+				s.AddCommit(repo, "main", tt.landOnMain, []string{base}, []string{"a.txt"})
+			}
+
+			// Act.
+			got := Run(s, "/", []string{"-C", dir, "cherry", "--end-of-options", "main", "feature"})
+
+			// Assert.
+			if want := tt.want(first.SHA, second.SHA); got.Exit != 0 || got.Stdout != want {
+				t.Fatalf("cherry = %+v, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCherryRefusesAnUnknownCommit(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "cherry", "--end-of-options", "main", "nowhere"})
+
+	// Assert.
+	if got.Exit != 128 || got.Stdout != "" {
+		t.Fatalf("cherry = %+v, want git's unknown-commit failure", got)
+	}
+}
+
 func TestDiffOverARangeListsTheChangedPaths(t *testing.T) {
 	// Arrange.
 	s, repo, dir := world(t)

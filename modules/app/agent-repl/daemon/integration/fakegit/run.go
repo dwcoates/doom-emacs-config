@@ -113,6 +113,8 @@ func answer(s *State, cwd string, args []string) Result {
 		return mergeBase(s, repo, wt, subject)
 	case "rev-list":
 		return revList(s, repo, subject)
+	case "cherry":
+		return cherry(s, repo, subject)
 	case "show":
 		return show(s, repo, wt, subject)
 	case "update-index":
@@ -1128,6 +1130,51 @@ func revList(s *State, repo *Repo, subject []string) Result {
 		out += s.render(format, c) + "\n"
 	}
 	return Result{Stdout: out}
+}
+
+// cherry answers `git cherry [--end-of-options] UPSTREAM HEAD`: one line per
+// commit of HEAD that UPSTREAM does not reach, oldest first, "- SHA" when
+// UPSTREAM's own side holds a patch-equivalent commit and "+ SHA" when it does
+// not. A fixture commit carries no diff, so its patch identity is its subject
+// and the paths it touched, which is what a fixture states to mean "the same
+// change landed under another commit".
+func cherry(s *State, repo *Repo, subject []string) Result {
+	args := make([]string, 0, len(subject))
+	for _, arg := range subject[1:] {
+		if arg != "--end-of-options" {
+			args = append(args, arg)
+		}
+	}
+	if len(args) != 2 {
+		return Result{Stderr: "usage: git cherry [<upstream> [<head>]]\n", Exit: 129}
+	}
+	upstream, head := args[0], args[1]
+	for _, ref := range []string{upstream, head} {
+		if _, ok := s.resolve(repo, nil, ref); !ok {
+			return Result{Stderr: fmt.Sprintf("fatal: unknown commit %s\n", ref), Exit: 128}
+		}
+	}
+	landed := map[string]bool{}
+	for _, c := range s.rangeCommits(repo, head+".."+upstream) {
+		landed[patchIdentity(c)] = true
+	}
+	out := ""
+	for _, c := range s.rangeCommits(repo, upstream+".."+head) {
+		mark := "+"
+		if landed[patchIdentity(c)] {
+			mark = "-"
+		}
+		out += mark + " " + c.SHA + "\n"
+	}
+	return Result{Stdout: out}
+}
+
+// patchIdentity is a fixture commit's stand-in for git's patch id: its subject
+// and the sorted paths it touched.
+func patchIdentity(c *Commit) string {
+	paths := append([]string(nil), c.Paths...)
+	sort.Strings(paths)
+	return c.Subject + "\x00" + strings.Join(paths, "\x00")
 }
 
 func show(s *State, repo *Repo, wt *Worktree, subject []string) Result {
