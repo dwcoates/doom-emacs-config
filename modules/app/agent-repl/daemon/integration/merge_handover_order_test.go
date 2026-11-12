@@ -24,8 +24,8 @@ import (
 
 func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackIsEvictedWithItsLease(t *testing.T) {
 	t.Parallel()
-	// Arrange: A, the head, inside its gate; B, behind it, in line for the
-	// test turn.
+	// Arrange: A, the head, inside its gate; B, behind it, waiting in
+	// line.
 	repo := harness.NewRepo(t)
 	gate := newTurnGate(t)
 	repo.DeploysAsAgentRepl()
@@ -44,7 +44,7 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
 	d.AwaitLogRecord(harness.WorkspaceLogPath(b.ws.GetDir(), "daemon"), "beta in line", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, "joined the line")
+		return r.Operation == "daemon.merge.request" && strings.Contains(r.Message, "put a merge in line")
 	})
 	daemonStream := d.WatchDaemonStream()
 
