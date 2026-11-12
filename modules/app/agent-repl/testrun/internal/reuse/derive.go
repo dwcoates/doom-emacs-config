@@ -80,6 +80,9 @@ func checkDeclaredUnits(s roster.Suite, units []Unit) error {
 	have := map[string]bool{}
 	for _, u := range units {
 		have[u.Name] = true
+		for _, m := range u.Members {
+			have[m] = true
+		}
 	}
 	var stale []string
 	for _, m := range []map[string]bool{keysOf(s.Reuse.Units), keysOf(s.Reuse.Never)} {
@@ -147,16 +150,36 @@ func unitDesc(s roster.Suite, name string, extra ...string) string {
 	}, extra...), " ")
 }
 
+// batchDesc is unitDesc for a batched unit, with its members and what the
+// roster declares each reads, so a member joining or leaving the batch, or a
+// declaration changing, moves its key.
+func batchDesc(s roster.Suite, name string, members []string, extra ...string) string {
+	own := make([]string, 0, len(members))
+	for _, m := range members {
+		own = append(own, fmt.Sprintf("%s=%q", m, s.Reuse.Units[m]))
+	}
+	return unitDesc(s, name, append([]string{fmt.Sprintf("members=%q member_own=%q", members, own)}, extra...)...)
+}
+
 // unitSet is a unit's input set beneath its derived graph: what the suite
 // declares every unit reads, what it declares this one reads, and the
 // runner's own code, which decides how every unit is built, split and run.
 func unitSet(d Deps, s roster.Suite, name string, runner []GoPackage) (*InputSet, error) {
+	return batchSet(d, s, name, nil, runner)
+}
+
+// batchSet is unitSet for a batched unit: what the roster declares the unit
+// reads and what it declares each of its MEMBERS reads, since a batch reads
+// every member's inputs in its one confinement.
+func batchSet(d Deps, s roster.Suite, name string, members []string, runner []GoPackage) (*InputSet, error) {
 	set := NewInputSet()
 	if err := addDeclared(d, set, s.Reuse); err != nil {
 		return nil, fmt.Errorf("reuse: %s: %w", s.Name, err)
 	}
-	if err := addInputs(d, set, s.Reuse.Units[name]); err != nil {
-		return nil, fmt.Errorf("reuse: %s's unit %s: %w", s.Name, name, err)
+	for _, n := range append([]string{name}, members...) {
+		if err := addInputs(d, set, s.Reuse.Units[n]); err != nil {
+			return nil, fmt.Errorf("reuse: %s's unit %s: %w", s.Name, n, err)
+		}
 	}
 	if err := AddGoPackages(set, d.Repo, runner); err != nil {
 		return nil, err
@@ -342,11 +365,11 @@ func addProgramGraphs(d Deps, set *InputSet, s roster.Suite, names []string) err
 	return nil
 }
 
-// VITEST. Each test file is its own unit, run in its own process (a file
-// sharing a process with another could read that file's inputs unconfined),
-// named by its path relative to the package. Its inputs are its import graph,
+// VITEST. Each batch of test files (suites.BatchFiles) is one unit, named by
+// its batch, confined as a whole: its inputs are every member's import graph,
 // with its config's and the config's setup files', the package's manifests,
-// and the runner's reporter. The typecheck is one unit over the package's
+// and the runner's reporter, so a member reading what no member declares
+// fails loudly. The typecheck is one unit over the package's
 // tree and every file's graph; the integration bundle is infra.
 
 // vitestManifests are the package files every vitest unit reads when present.
@@ -367,16 +390,23 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 	}
 	b := newUnitBuilder(s)
 	configOf := map[string]string{}
+	seenFile := map[string]string{}
 	for _, sp := range u.Splits {
-		file, config, err := suites.VitestFileOfGroup(s, sp.Group)
+		batch, config, err := suites.VitestBatchOfGroup(s, sp.Group)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, dup := configOf[file]; dup {
-			return nil, nil, fmt.Errorf("reuse: %s runs %s under two configs", s.Name, file)
+		if _, dup := configOf[batch]; dup {
+			return nil, nil, fmt.Errorf("reuse: %s cuts two splits into the batch %s", s.Name, batch)
 		}
-		b.own(file, sp.Group)
-		configOf[file] = config
+		for _, f := range sp.Items {
+			if other, dup := seenFile[f]; dup {
+				return nil, nil, fmt.Errorf("reuse: %s runs %s in two batches, %s and %s", s.Name, f, other, batch)
+			}
+			seenFile[f] = batch
+		}
+		b.own(batch, sp.Group).Members = append([]string(nil), sp.Items...)
+		configOf[batch] = config
 	}
 	typecheck := ""
 	for _, a := range u.Atomic {
@@ -404,7 +434,7 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		if !ok || unit.Never != "" {
 			continue
 		}
-		set, err := unitSet(d, s, name, runner)
+		set, err := batchSet(d, s, name, unit.Members, runner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -430,9 +460,13 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		if err != nil {
 			return nil, nil, err
 		}
-		files, err := graph.Closure(append([]string{path.Join(pkgRel, name), configRel}, setup...))
+		roots := []string{configRel}
+		for _, m := range unit.Members {
+			roots = append(roots, path.Join(pkgRel, m))
+		}
+		files, err := graph.Closure(append(roots, setup...))
 		if err != nil {
-			return nil, nil, fmt.Errorf("reuse: %s's file %s: %w", s.Name, name, err)
+			return nil, nil, fmt.Errorf("reuse: %s's batch %s (%s): %w", s.Name, name, strings.Join(unit.Members, ", "), err)
 		}
 		for _, f := range files {
 			if err := set.AddFile(f); err != nil {
@@ -444,7 +478,7 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 			}
 		}
 		unit.Set = set
-		unit.Desc = unitDesc(s, name, fmt.Sprintf("config=%q", config))
+		unit.Desc = batchDesc(s, name, unit.Members, fmt.Sprintf("config=%q", config))
 		all.AddAll(set)
 	}
 	if typecheck != "" && b.units[typecheck].Never == "" {
@@ -510,11 +544,11 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 	}
 	b := newUnitBuilder(s)
 	for _, sp := range u.Splits {
-		file, ok := strings.CutPrefix(sp.Group, s.Name+"/")
-		if !ok || file == "" {
-			return nil, nil, fmt.Errorf("reuse: %q is no file group of %s", sp.Group, s.Name)
+		batch, ok := strings.CutPrefix(sp.Group, s.Name+"/")
+		if !ok || batch == "" {
+			return nil, nil, fmt.Errorf("reuse: %q is no batch group of %s", sp.Group, s.Name)
 		}
-		b.own(file, sp.Group)
+		b.own(batch, sp.Group).Members = append([]string(nil), sp.Items...)
 	}
 	for _, a := range u.Atomic {
 		if a.ID != s.Name+":fakedaemon" {
@@ -535,7 +569,7 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 		if unit.Never != "" {
 			continue
 		}
-		set, err := unitSet(d, s, name, runner)
+		set, err := batchSet(d, s, name, unit.Members, runner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -550,16 +584,20 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 		if err := AddGoPackages(set, d.Repo, fake); err != nil {
 			return nil, nil, err
 		}
-		own, err := ERTFileLoads(d.Repo, lispRel, name)
-		if err != nil {
-			return nil, nil, err
+		own := append([]string(nil), loaded...)
+		for _, m := range unit.Members {
+			loads, err := ERTFileLoads(d.Repo, lispRel, m)
+			if err != nil {
+				return nil, nil, err
+			}
+			own = append(own, loads...)
 		}
-		for _, f := range append(append([]string(nil), loaded...), own...) {
+		for _, f := range own {
 			if err := set.AddFile(f); err != nil {
 				return nil, nil, err
 			}
 		}
-		unit.Set, unit.Desc = set, unitDesc(s, name)
+		unit.Set, unit.Desc = set, batchDesc(s, name, unit.Members)
 	}
 	return b.list(), b.infra, nil
 }

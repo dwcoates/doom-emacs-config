@@ -400,7 +400,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 			log.Errorf("create the ungoverned run's own core pool %s: %v", plan.Dir, err)
 			return 1
 		}
-		log.Infof("core budget: all %d of the host's cores, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, plan.Dir, cores.UngovernedEnv, rank)
+		log.Infof("core budget: the whole host, %d seats for its %d cores at %.0f cores a seat, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, runtime.NumCPU(), cores.SeatCost, plan.Dir, cores.UngovernedEnv, rank)
 	}
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {

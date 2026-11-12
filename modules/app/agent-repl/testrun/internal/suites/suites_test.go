@@ -840,7 +840,7 @@ func TestVitestCoverageModes(t *testing.T) {
 			s := roster.Suite{Name: "webapp"}
 
 			// Act
-			u, err := vitestUnitsForFiles(l, s, dir, []string{"src/a.test.ts"})
+			u, err := vitestUnitsForBatches(l, s, dir, soloBatches([]string{"src/a.test.ts"}))
 
 			// Assert
 			if err != nil {
@@ -868,7 +868,7 @@ func TestVitestTypecheckHoldsTheTwoCoresItUses(t *testing.T) {
 	l := Layout{Module: dir, Work: t.TempDir()}
 
 	// Act
-	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, dir, []string{"src/a.test.ts"})
+	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
 
 	// Assert
 	if err != nil {
@@ -1306,7 +1306,7 @@ func TestVitestIntegrationSplitRunsUnderItsConfig(t *testing.T) {
 	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
 
 	// Act
-	splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+	splits, err := vitestIntegrationSplits(l, s, dir, soloBatches([]string{"test/integration/a.integration.test.ts"}))
 
 	// Assert
 	if err != nil {
@@ -1339,7 +1339,7 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 			dir, work := t.TempDir(), t.TempDir()
 			l := Layout{Module: dir, Work: work, Coverage: tt.coverage}
 			s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
-			splits, err := vitestIntegrationSplits(l, s, dir, []string{"test/integration/a.integration.test.ts"})
+			splits, err := vitestIntegrationSplits(l, s, dir, soloBatches([]string{"test/integration/a.integration.test.ts"}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1439,7 +1439,7 @@ func TestTheVitestMergeUnitWritesWhereTheBaselineReads(t *testing.T) {
 	s := roster.Suite{Name: "webapp"}
 
 	// Act
-	u, err := vitestUnitsForFiles(l, s, dir, []string{"test/a.test.ts"})
+	u, err := vitestUnitsForBatches(l, s, dir, soloBatches([]string{"test/a.test.ts"}))
 
 	// Assert
 	if err != nil {
@@ -1477,7 +1477,7 @@ func TestEveryChunkKindReadsItsTestTimes(t *testing.T) {
 		t.Fatal(err)
 	}
 	vitestDir := t.TempDir()
-	vitest, err := vitestUnitsForFiles(Layout{Module: vitestDir, Work: t.TempDir()}, roster.Suite{Name: "webapp"}, vitestDir, []string{"a.test.ts"})
+	vitest, err := vitestUnitsForBatches(Layout{Module: vitestDir, Work: t.TempDir()}, roster.Suite{Name: "webapp"}, vitestDir, soloBatches([]string{"a.test.ts"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1565,7 +1565,7 @@ func TestGoPkgNamedChunkRefusesTwoPaths(t *testing.T) {
 func TestVitestNamedChunkPassesItsNames(t *testing.T) {
 	// Arrange
 	l := Layout{Repo: t.TempDir(), Module: t.TempDir(), Work: t.TempDir()}
-	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, t.TempDir(), []string{"src/a.test.ts"})
+	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, t.TempDir(), soloBatches([]string{"src/a.test.ts"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1580,45 +1580,50 @@ func TestVitestNamedChunkPassesItsNames(t *testing.T) {
 	}
 }
 
-func TestEveryVitestFileIsItsOwnSplit(t *testing.T) {
+func TestEachVitestBatchIsOneSplitHoldingItsFiles(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()
 	l := Layout{Module: dir, Work: t.TempDir(), Coverage: true}
-	files := []string{"test/a.test.ts", "test/sub/a.test.ts"}
+	batches := []FileBatch{
+		{Name: "sidebar", Files: []string{"test/sidebar/a.test.ts", "test/sidebar/b.test.ts"}},
+		{Name: "topbar", Files: []string{"test/topbar/a.test.ts"}},
+	}
 
 	// Act
-	u, err := vitestUnitsForFiles(l, roster.Suite{Name: "webapp"}, dir, files)
+	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, batches)
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
 	var groups []string
-	for _, sp := range u.Splits {
+	for i, sp := range u.Splits {
 		groups = append(groups, sp.Group)
-		if len(sp.Items) != 1 {
-			t.Errorf("%s holds %v, want its one file", sp.Group, sp.Items)
+		if !slices.Equal(sp.Items, batches[i].Files) {
+			t.Errorf("%s holds %v, want its batch's files %v", sp.Group, sp.Items, batches[i].Files)
 		}
 	}
-	if want := []string{"webapp/test/a.test.ts", "webapp/test/sub/a.test.ts"}; !slices.Equal(groups, want) {
+	if want := []string{"webapp/sidebar", "webapp/topbar"}; !slices.Equal(groups, want) {
 		t.Fatalf("groups = %v, want %v", groups, want)
 	}
 	for _, a := range u.Atomic {
 		if a.ID == "webapp:coverage" && !slices.Equal(a.Deps, groups) {
-			t.Fatalf("the coverage merge waits on %v, want every file", a.Deps)
+			t.Fatalf("the coverage merge waits on %v, want every batch", a.Deps)
 		}
-	}
-	first := strings.Join(u.Splits[0].Chunk("webapp/test/a.test.ts#00", files[:1]).Argv, " ")
-	second := strings.Join(u.Splits[1].Chunk("webapp/test/sub/a.test.ts#00", files[1:]).Argv, " ")
-	if strings.Contains(first, "--coverage.all=false") || !strings.Contains(second, "--coverage.all=false") {
-		t.Fatalf("first %q second %q, want only the first file's chunk to carry the all-files pass", first, second)
-	}
-	if !strings.Contains(first, "webapp%test%a.test.ts#00") || !strings.Contains(second, "webapp%test%sub%a.test.ts#00") {
-		t.Fatalf("first %q second %q, want each chunk's outputs under its own tag", first, second)
 	}
 }
 
-func TestEveryERTFileIsItsOwnSplitAfterTheFakeDaemon(t *testing.T) {
+func TestVitestUnitsForNoBatchIsRefused(t *testing.T) {
+	// Act
+	_, err := vitestUnitsForBatches(Layout{Module: t.TempDir(), Work: t.TempDir()}, roster.Suite{Name: "webapp"}, t.TempDir(), nil)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no batch of test files") {
+		t.Fatalf("err = %v, want the empty batch list refused", err)
+	}
+}
+
+func TestERTFilesRunInBatchesAfterTheFakeDaemon(t *testing.T) {
 	// Arrange
 	module := t.TempDir()
 	lisp := filepath.Join(module, "lisp")
@@ -1644,33 +1649,48 @@ func TestEveryERTFileIsItsOwnSplitAfterTheFakeDaemon(t *testing.T) {
 			t.Errorf("%s waits on %v, want the fake daemon's build", sp.Group, sp.Deps)
 		}
 	}
-	if want := []string{"ert/test-helpers.el", "ert/test-a.el"}; !slices.Equal(groups, want) {
+	// Two one-file families are too small for batches of their own, so they pool.
+	if want := []string{"ert/pooled"}; !slices.Equal(groups, want) {
 		t.Fatalf("groups = %v, want %v", groups, want)
+	}
+	if want := []string{"test-a.el", "test-helpers.el"}; !slices.Equal(u.Splits[0].Items, want) {
+		t.Fatalf("the pooled batch holds %v, want %v", u.Splits[0].Items, want)
 	}
 }
 
-func TestVitestFileOfGroup(t *testing.T) {
+func TestVitestBatchOfGroup(t *testing.T) {
 	s := roster.Suite{Name: "webapp", IntegrationConfig: "vitest.integration.config.ts"}
 	tests := []struct {
-		group, file, config string
-		wantErr             bool
+		group, batch, config string
+		wantErr              bool
 	}{
-		{group: "webapp/test/a.test.ts", file: "test/a.test.ts", config: VitestConfig},
-		{group: "webapp[integration]/test/i.test.ts", file: "test/i.test.ts", config: "vitest.integration.config.ts"},
+		{group: "webapp/sidebar", batch: "sidebar", config: VitestConfig},
+		{group: "webapp/test/a.test.ts", batch: "test/a.test.ts", config: VitestConfig},
+		{group: "webapp[integration]/integration-feed", batch: "integration-feed", config: "vitest.integration.config.ts"},
 		{group: "webapp", wantErr: true},
-		{group: "shim/test/a.test.ts", wantErr: true},
+		{group: "shim/sidebar", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.group, func(t *testing.T) {
 			// Act
-			file, config, err := VitestFileOfGroup(s, tt.group)
+			batch, config, err := VitestBatchOfGroup(s, tt.group)
 
 			// Assert
-			if (err != nil) != tt.wantErr || file != tt.file || config != tt.config {
-				t.Fatalf("VitestFileOfGroup = %q %q %v, want %q %q error %v", file, config, err, tt.file, tt.config, tt.wantErr)
+			if (err != nil) != tt.wantErr || batch != tt.batch || config != tt.config {
+				t.Fatalf("VitestBatchOfGroup = %q %q %v, want %q %q error %v", batch, config, err, tt.batch, tt.config, tt.wantErr)
 			}
 		})
 	}
+}
+
+// soloBatches is FILES as one batch each, named by the file: the shape a
+// suite whose every file the roster never reuses is cut into.
+func soloBatches(files []string) []FileBatch {
+	out := make([]FileBatch, 0, len(files))
+	for _, f := range files {
+		out = append(out, FileBatch{Name: f, Files: []string{f}})
+	}
+	return out
 }
 
 func TestUnitTagSpellsSlashesSoTwoDirectoriesNeverShareOne(t *testing.T) {

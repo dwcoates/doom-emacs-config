@@ -92,9 +92,12 @@ type Plan struct {
 
 // PlanFor answers the run's Plan. A governed run shares SHAREDDIR's pool of
 // Budget(numCPU) seats with every other run on the host, held back by the
-// governor. An ungoverned one (UngovernedEnv) holds all numCPU seats from
-// OWNDIR, a pool no other run shares, so neither another run's seats nor
-// the governor's withheld ones can wait it.
+// governor. An ungoverned one (UngovernedEnv) holds the whole host from
+// OWNDIR, a pool no other run shares, so neither another run's seats nor the
+// governor's withheld ones can wait it: one seat per SeatCost cores, since a
+// seat's unit uses that many (governor.go). A seat per core oversubscribed
+// the host by about 2.4 times (load average 38 on 16 cores, 2026-11-12), and
+// a typecheck ran past its time limit.
 func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (Plan, error) {
 	switch v := getenv(UngovernedEnv); v {
 	case "":
@@ -104,10 +107,11 @@ func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (
 		}
 		return Plan{Budget: budget, Dir: sharedDir, Governed: true}, nil
 	case "1":
-		if numCPU < 1 {
-			return Plan{}, fmt.Errorf("this host reports %d cores; an ungoverned run holds every one, which is none", numCPU)
+		seats := int(float64(numCPU) / SeatCost)
+		if seats < 1 {
+			return Plan{}, fmt.Errorf("this host has %d cores; an ungoverned run holds one seat per %.0f of them, which is not one seat", numCPU, SeatCost)
 		}
-		return Plan{Budget: numCPU, Dir: ownDir}, nil
+		return Plan{Budget: seats, Dir: ownDir}, nil
 	default:
 		return Plan{}, fmt.Errorf("%s=%q is not the \"1\" the daemon sets on a queue bypass holder's run", UngovernedEnv, v)
 	}

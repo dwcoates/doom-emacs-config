@@ -79,7 +79,11 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(files) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s", s.Name, dir)
 	}
-	u, err := vitestUnitsForFiles(l, s, dir, files)
+	batches, err := vitestBatches(s, dir, files, "")
+	if err != nil {
+		return Units{}, err
+	}
+	u, err := vitestUnitsForBatches(l, s, dir, batches)
 	if err != nil || s.IntegrationConfig == "" {
 		return u, err
 	}
@@ -90,7 +94,13 @@ func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	if len(ifiles) == 0 {
 		return Units{}, fmt.Errorf("suites: %s lists no test files under %s's %s", s.Name, dir, s.IntegrationConfig)
 	}
-	splits, err := vitestIntegrationSplits(l, s, dir, ifiles)
+	// The integration batches' areas carry IntegrationAreaPrefix, so no batch
+	// shares a unit name with a unit-config batch of the same area.
+	ibatches, err := vitestBatches(s, dir, ifiles, IntegrationAreaPrefix)
+	if err != nil {
+		return Units{}, err
+	}
+	splits, err := vitestIntegrationSplits(l, s, dir, ibatches)
 	if err != nil {
 		return Units{}, err
 	}
@@ -119,7 +129,7 @@ func vitestIntegrationBuild(s roster.Suite, dir string) (run.Spec, bool) {
 // coverage run has each chunk write istanbul JSON of the files it loaded
 // (cover.VitestIntegrationCoverage), which the baseline merges into the suite's
 // unit coverage.
-func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, files []string) ([]Split, error) {
+func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []FileBatch) ([]Split, error) {
 	work := filepath.Join(l.Work, "vitest", s.Name+"-integration")
 	if err := os.MkdirAll(filepath.Join(work, "items"), 0o755); err != nil {
 		return nil, fmt.Errorf("suites: create %s: %w", work, err)
@@ -154,10 +164,10 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, files []strin
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	return fileSplits(VitestIntegrationGroup(s.Name), s.Name, files, chunk, named), nil
+	return batchSplits(VitestIntegrationGroup(s.Name), s.Name, batches, chunk, named), nil
 }
 
-func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (Units, error) {
+func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileBatch) (Units, error) {
 	work := filepath.Join(l.Work, "vitest", s.Name)
 	blobs := filepath.Join(work, "blobs")
 	dirs := []string{filepath.Join(work, "items")}
@@ -175,7 +185,10 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.
 	typecheck.Slots = TypecheckSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
-	allChunk := sched.ChunkID(VitestFileGroup(s.Name, files[0]), 0)
+	if len(batches) == 0 {
+		return Units{}, fmt.Errorf("suites: %s has no batch of test files to run", s.Name)
+	}
+	allChunk := sched.ChunkID(VitestBatchGroup(s.Name, batches[0].Name), 0)
 	named := func(id string, items []string, names []string) run.Spec {
 		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
@@ -207,7 +220,7 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	splits := fileSplits(s.Name, s.Name, files, chunk, named)
+	splits := batchSplits(s.Name, s.Name, batches, chunk, named)
 	atomic := []run.Spec{typecheck}
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
@@ -222,42 +235,57 @@ func vitestUnitsForFiles(l Layout, s roster.Suite, dir string, files []string) (
 	return Units{Atomic: atomic, Splits: splits}, nil
 }
 
-// ONE PROCESS PER TEST FILE. Each vitest and ERT test file is its own split,
-// so its own process: the file is the unit its reuse records
-// (agentrepl/testrun/internal/reuse), and a unit's profile confines exactly
-// its own inputs only when no other file shares its process.
+// IntegrationAreaPrefix opens the area of every integration-config batch.
+const IntegrationAreaPrefix = "integration-"
 
-// fileSplits is one split per file under prefix ("<prefix>/<file>"), every
-// one built by chunk and named.
-func fileSplits(prefix, suite string, files []string, chunk func(id string, items []string) run.Spec, named func(id string, items, names []string) run.Spec) []Split {
-	out := make([]Split, 0, len(files))
+// vitestBatches is a vitest suite's files cut into batches by their areas
+// (VitestArea, each opened by prefix), each file its roster never reuses in a
+// batch of its own.
+func vitestBatches(s roster.Suite, dir string, files []string, prefix string) ([]FileBatch, error) {
+	areas := make(map[string]string, len(files))
 	for _, f := range files {
-		out = append(out, Split{Group: prefix + "/" + f, Suite: suite, Items: []string{f}, Chunk: chunk, Named: named})
+		a, err := VitestArea(dir, f)
+		if err != nil {
+			return nil, err
+		}
+		areas[f] = prefix + a
 	}
-	return out
+	return BatchFiles(files, func(f string) string { return areas[f] }, neverReused(s), prefix+PooledArea), nil
+}
+
+// neverReused answers whether the roster names a file as a unit it never
+// reuses, which therefore runs in a batch of its own.
+func neverReused(s roster.Suite) func(string) bool {
+	return func(f string) bool {
+		if s.Reuse == nil {
+			return false
+		}
+		_, never := s.Reuse.Never[f]
+		return never
+	}
 }
 
 // unitTag is a unit ID as one file name: its slashes spelled "%", so two
 // files of one name in different directories never share a tag.
 func unitTag(id string) string { return strings.ReplaceAll(id, "/", "%") }
 
-// VitestFileGroup is the split group of a vitest suite's unit-config file.
-func VitestFileGroup(suite, file string) string { return suite + "/" + file }
+// VitestBatchGroup is the split group of a vitest suite's unit-config batch.
+func VitestBatchGroup(suite, batch string) string { return suite + "/" + batch }
 
 // VitestIntegrationGroup is the group prefix of a vitest suite's integration
 // files: "<suite>[integration]/<file>".
 func VitestIntegrationGroup(suite string) string { return suite + "[integration]" }
 
-// VitestFileOfGroup is the file a vitest suite's split group runs, and the
+// VitestBatchOfGroup is the batch a vitest suite's split group runs, and the
 // config it runs under (relative to the package).
-func VitestFileOfGroup(s roster.Suite, group string) (file, config string, err error) {
-	if f, ok := strings.CutPrefix(group, VitestIntegrationGroup(s.Name)+"/"); ok && f != "" && s.IntegrationConfig != "" {
-		return f, s.IntegrationConfig, nil
+func VitestBatchOfGroup(s roster.Suite, group string) (batch, config string, err error) {
+	if b, ok := strings.CutPrefix(group, VitestIntegrationGroup(s.Name)+"/"); ok && b != "" && s.IntegrationConfig != "" {
+		return b, s.IntegrationConfig, nil
 	}
-	if f, ok := strings.CutPrefix(group, s.Name+"/"); ok && f != "" {
-		return f, VitestConfig, nil
+	if b, ok := strings.CutPrefix(group, s.Name+"/"); ok && b != "" {
+		return b, VitestConfig, nil
 	}
-	return "", "", fmt.Errorf("suites: %q is no file group of %s", group, s.Name)
+	return "", "", fmt.Errorf("suites: %q is no batch group of %s", group, s.Name)
 }
 
 // VitestConfig is the config `vitest run` reads when given none.

@@ -39,6 +39,10 @@ type Unit struct {
 	Desc string
 	// Never is why the unit is never reused, "" for a keyed one.
 	Never string
+	// Members are the files a batched unit runs (a vitest or ERT batch,
+	// suites.BatchFiles), each of which the roster may name for what it
+	// reads; nil for every other unit.
+	Members []string
 }
 
 // RecordName is the unit's name in the store.
