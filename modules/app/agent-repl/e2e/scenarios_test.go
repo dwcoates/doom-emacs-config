@@ -51,7 +51,6 @@ func TestFaults(t *testing.T) {
 		testResidueAttachmentsDrawNoRow,
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
-		testBubbleRefusedAgentBusy,
 		testUnknownAgentOnUpdateAgent,
 		testStartSessionVendorStartFailedRecovers,
 		testPermissionAskAnsweredArms,

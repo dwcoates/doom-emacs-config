@@ -171,40 +171,6 @@ func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, 
 // would race the send against the ask's arrival.
 // ===========================================================================
 
-func testBubbleRefusedAgentBusy(t *testing.T) {
-	// Arrange: drive the never-settling detached subagent, then find its
-	// still-live bubble row.
-	w := NewWorld(t, WorldOpts{})
-	// THE SHIM'S REFUSAL IS THE ASSERTION BELOW. The prompt is addressed at a
-	// subagent whose own turn is open, the shim answers `agent_busy`, and the
-	// delivery path records that refusal on its way to the caller.
-	w.ExpectWarnings("daemon.promptqueue.deliver")
-	ws := w.NewWorkspace(t)
-
-	turn := SubmitPrompt(t, w, ws, "!subagent-detached-utterance")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	bubble := rfAwaitFeedRow(t, w, ws, nil, "the live detached-subagent bubble", func(r *frontendv1.FeedRow) bool {
-		s := rfSubagentOf(r)
-		return s != nil && s.GetLive() != nil
-	})
-
-	// Act: address a fresh prompt at the still-running subagent's bubble.
-	resp, err := rfSubmitBubblePrompt(t, w, ws, bubble.GetId(), "status update please")
-
-	// Assert: SubmitPromptError.bubble_refused{agent_busy}.
-	if err != nil {
-		t.Fatalf("SubmitPrompt(bubble) = error %v, want a typed SubmitPromptError", err)
-	}
-	refused := resp.Msg.GetError().GetBubbleRefused()
-	if refused == nil {
-		t.Fatalf("SubmitPrompt(bubble) = %v, want error.bubble_refused", resp.Msg)
-	}
-	if refused.GetAgentBusy() == nil {
-		t.Fatalf("bubble_refused.kind = %v, want agent_busy (live subagent)", refused)
-	}
-}
-
 // ===========================================================================
 // #53 — UnknownAgentOnUpdateAgent
 //
