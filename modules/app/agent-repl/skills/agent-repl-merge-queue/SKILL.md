@@ -62,6 +62,12 @@ Either kind:
   merge in line (the name `merge-queue status` lists), taking its front mark;
   otherwise `-placement back`. A name not in line is refused
   (`placement_behind_not_in_line`).
+  - A merge placed `behind=MERGE` waits on MERGE: it is not admitted, and its
+    `-instruction` does not run, until MERGE has left the queue. So an
+    instruction may rely on MERGE's work being on the target, and the merge
+    workspace is told to rebase onto it first.
+  - If MERGE leaves without landing, the merge behind it fails too, naming
+    MERGE, and its requester is told.
 - `-compact-after`, and the hook flags `-pre-deploy-prompt`,
   `-pre-deploy-script`, `-post-deploy-prompt` and `-post-deploy-script` (which
   replace the repository's hooks of that stage), ONLY when the user asked for

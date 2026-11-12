@@ -449,6 +449,14 @@ export type MergeQueuePlacement = Message<"agentrepl.v1.MergeQueuePlacement"> & 
      * left by the time this one is put in line left its place at the head
      * of the waiting line, which is where this one goes.
      *
+     * THE MERGE WAITS ON THE NAMED MERGE: it is not admitted, and an async
+     * merge's instruction does not run, while the named merge still stands
+     * in the queue, out of line or not; merges behind it are admitted past
+     * it meanwhile. Once the named merge lands this one runs as usual (an
+     * instruction is told to rebase onto the target first); if it leaves
+     * without landing (it fails, or is evicted or dequeued), this one fails
+     * too, naming it. The wait is durable across a daemon restart.
+     *
      * @generated from field: agentrepl.v1.MergeQueuePlacementBehind behind = 3;
      */
     value: MergeQueuePlacementBehind;
