@@ -447,9 +447,9 @@
     {
       "id": "persistent-wifi-hotspot",
       "kind": "env",
-      "why": "names the phone hotspot persistent-wifi mode joins",
+      "why": "names the phone hotspot persistent-wifi mode joins when Wi-Fi is lost with the lid closed; without it nothing reconnects and every agent stops until the lid opens",
       "profile": "run",
-      "optional": true,
+      "optional": false,
       "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT",
       "doc": "docs/USER-GUIDE.md#setup"
     },
