@@ -55,7 +55,6 @@ func TestSubagents(t *testing.T) {
 		testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot,
 		testBashDetachedStartAndComplete,
 		testBashDetachExplicitPoll,
-		testBashForegroundCompleted,
 		testDetachedLostWentSilent,
 	)
 }

@@ -498,3 +498,36 @@ describe("a synchronous subagent's nested activity", () => {
     });
   });
 });
+
+describe("a foreground Bash", () => {
+  test("starts with its command and settles as a completed success carrying its stdout", async () => {
+    const { frames } = await driveTurn("!bash");
+
+    const results = activitiesOf(frames)
+      .filter((activity) => activity.item.case === "bash")
+      .map((activity) => (activity.item.case === "bash" ? activity.item.value.result : undefined));
+    const start = results.find((result) => result?.case === "start");
+    const success = results.find((result) => result?.case === "success");
+    const output = success?.case === "success" ? success.value.outcome : undefined;
+    expect({
+      arms: results.map((result) => result?.case),
+      command: start?.case === "start" ? start.value.command?.line : undefined,
+      outcome: output?.case,
+      stdout:
+        output?.case === "completed" && output.value.output?.form.case === "text"
+          ? output.value.output.form.value.stdout
+          : undefined,
+    }).toEqual({
+      arms: ["start", "success"],
+      command: "pwd; ls | head",
+      outcome: "completed",
+      stdout: "one\ntwo\n",
+    });
+  });
+
+  test("is never announced as detached work", async () => {
+    const { frames } = await driveTurn("!bash");
+
+    expect(frames.filter((frame) => frame.result.case === "detachedWork")).toEqual([]);
+  });
+});
