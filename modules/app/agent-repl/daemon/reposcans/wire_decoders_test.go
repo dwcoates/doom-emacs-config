@@ -42,7 +42,7 @@ var anyCheck = regexp.MustCompile(`\(agent-repl-wire--check-keys\b`)
 var computed = map[string]int{
 	"wire-common.el": 3,
 	"wire-host.el":   16,
-	"wire-roster.el": 14,
+	"wire-roster.el": 15,
 	"wire-verbs.el":  1,
 }
 
