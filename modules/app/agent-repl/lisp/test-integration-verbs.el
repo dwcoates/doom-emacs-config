@@ -2114,6 +2114,22 @@ be an epoch instant MINUTES from now, not the bare minute count."
             (should (>= at-ms (+ before (* 5 60 1000))))
             (should (<= at-ms (+ before (* 5 60 1000) 60000)))))))))
 
+(ert-deftest agent-repl-itest-verbs-daemon-shutdown-schedule-interactive-sends-the-picked-reason ()
+  "`agent-repl-daemon-shutdown-schedule' sends the reason arm the user picked."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "maintenance")))
+        ;; Act.
+        (agent-repl-daemon-shutdown-schedule 5)
+        (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+        ;; Assert.
+        (should (assq 'maintenance
+                      (agent-repl-itest--body-field
+                       (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")
+                       'schedule 'reason)))))))
+
 ;; audit-3 #54
 (ert-deftest agent-repl-itest-verbs-daemon-shutdown-now-interactive-blank-operator-note-refuses-before-send ()
   "`agent-repl-daemon-shutdown-now' with a BLANK operator note refuses before send.
