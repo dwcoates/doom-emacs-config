@@ -1613,7 +1613,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   cursor: pointer;
 }
 #ws-sidebar .sb-mq-off-queue-control:first-of-type { margin-left: auto; }
-#ws-sidebar .sb-mq-off-queue-control:hover { color: var(--fg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-off-queue-control:hover { color: var(--fg); }
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));
 }
