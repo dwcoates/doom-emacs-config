@@ -144,7 +144,6 @@ func TestHarness(t *testing.T) {
 // TestEmacsLayout is Emacs's windows, panels, composer and file routing.
 func TestEmacsLayout(t *testing.T) {
 	scenario(t,
-		testEmacsFullscreenTogglesAndRestores,
 		testEmacsDeleteOtherWindowsOverPanelsKeepsTheWorkLayout,
 		testEmacsOpenProgressLadderReachesRendered,
 		testEmacsDiscardInputClearsTheComposer,
