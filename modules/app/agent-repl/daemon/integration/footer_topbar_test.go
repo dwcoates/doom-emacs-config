@@ -457,6 +457,45 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	}
 }
 
+// A SEVEN-DAY WINDOW'S WARNING FEEDS THE WEEKLY ALLOWANCE, its verdict and its
+// figure, on the enduring usage line alone: the event is never a salient line
+// (owner ruling, 2026-10-01). Both hops are asserted, the drawn allowance and
+// the session-arm record behind it, because the allowance alone would not say
+// the event's own window reached the footer's session-update path.
+func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigureAndNoSalientLine(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
+	status := ratelimittest.Figured(ratelimittest.AllowedWarning(ratelimittest.SevenDay()), 91, resetsAtMs)
+
+	// Act
+	f.shim.PushSessionUpdate(ratelimittest.Update(status))
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the weekly allowance's warning at the event's figure", func(v *frontendv1.FooterView) bool {
+		allowance := v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
+		return allowance.GetAllowedWarning() != nil
+	})
+	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
+	if utilization := allowance.GetUtilization(); utilization < 0.905 || utilization > 0.915 {
+		t.Fatalf("the weekly allowance's utilization = %v, want the event's 0.91 as a 0..1 fraction", utilization)
+	}
+	if allowance.GetResetsAtS() != resetsAtMs/1000 {
+		t.Fatalf("the weekly allowance's resets_at_s = %d, want the event's reset in epoch seconds %d", allowance.GetResetsAtS(), resetsAtMs/1000)
+	}
+	if salient := got.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient(); salient != nil {
+		t.Fatalf("the footer stands salient line %v, want none: a rate-limit event feeds the enduring usage line only", salient)
+	}
+	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the footer's session-update record for the rate-limit arm", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "rate_limit_status"
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Deny-and-continue.
 // ---------------------------------------------------------------------------

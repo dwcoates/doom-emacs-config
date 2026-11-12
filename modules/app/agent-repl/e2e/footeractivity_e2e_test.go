@@ -50,14 +50,3 @@ func footerTier(v *frontendv1.FooterView, tier protoreflect.Name) protoreflect.M
 	}
 	return cell.Get(cell.Descriptor().Fields().ByName("salient")).Message()
 }
-
-// footerEnduringUsage answers the enduring line's usage when the cell is
-// unpinned and the daemon chose the usage line, or nil.
-func footerEnduringUsage(v *frontendv1.FooterView) *frontendv1.FooterActivityEnduringUsage {
-	unpinned := footerTier(v, "unpinned")
-	if unpinned == nil {
-		return nil
-	}
-	enduring := unpinned.Get(unpinned.Descriptor().Fields().ByName("enduring")).Message()
-	return enduring.Interface().(*frontendv1.FooterActivityEnduring).GetUsage()
-}
