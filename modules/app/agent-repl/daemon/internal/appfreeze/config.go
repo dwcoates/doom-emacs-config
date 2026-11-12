@@ -36,11 +36,14 @@ const NoApps = "none"
 var DefaultApps = []string{"Slack", "Google Chrome", "Spotify", "WhatsApp", "Activity Monitor"}
 
 // neverFrozen are the bundles no entry may name: the editor agent-repl runs
-// in, every terminal, and agent-repl's own applications. A process of one is
-// never frozen, so an entry naming one is refused outright.
+// in, every terminal, agent-repl's own applications, and every container
+// runtime, since the merge queue's e2e-emacs gate runs in a container while
+// the lid is closed (owner ruling, 2026-11-12). A process of one is never
+// frozen, so an entry naming one is refused outright.
 var neverFrozen = []string{
 	"Emacs", "Zettel",
 	"Terminal", "iTerm", "iTerm2", "Ghostty", "WezTerm", "Alacritty", "kitty", "Warp", "Hyper", "Tabby",
+	"Docker", "Docker Desktop", "OrbStack", "Rancher Desktop", "Podman Desktop",
 }
 
 // AppsFromEnv resolves the configured list. Every entry is trimmed; an empty
