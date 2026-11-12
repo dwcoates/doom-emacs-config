@@ -246,16 +246,25 @@ func (f *fakeLidDims) kept() *float64 {
 type fakeFreezer struct {
 	frozen []appfreeze.Frozen
 	calls  []string
+	// held is what Frozen answers: frozen from a freeze until a thaw.
+	held     []appfreeze.Frozen
+	onChange func()
 }
 
 func (f *fakeFreezer) Freeze(_ context.Context, trigger string) []appfreeze.Frozen {
 	f.calls = append(f.calls, "freeze:"+trigger)
+	f.held = f.frozen
 	return f.frozen
 }
 
 func (f *fakeFreezer) Thaw(_ context.Context, trigger string) {
 	f.calls = append(f.calls, "thaw:"+trigger)
+	f.held = nil
 }
+
+func (f *fakeFreezer) Frozen() []appfreeze.Frozen { return f.held }
+
+func (f *fakeFreezer) OnChange(fn func()) { f.onChange = fn }
 
 // count answers how many recorded calls start with prefix ("freeze", "thaw").
 func (f *fakeFreezer) count(prefix string) int {

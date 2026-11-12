@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"syscall"
 	"testing"
 
@@ -97,11 +98,17 @@ type rig struct {
 	events []string
 	log    *dlog.TestLogger
 	tel    *countTelemetry
+	// table is the process table the lister answers; a test changes it
+	// only between handshakes with the follower (fakeSpawns).
+	table  []Process
+	spawns *fakeSpawns
+	// changes is told of each OnChange call.
+	changes chan struct{}
 }
 
 func newRig(t *testing.T, apps []string, signalErrs map[int]error, listErr error, store *memStore) *rig {
 	t.Helper()
-	r := &rig{log: dlog.NewTestLogger(), tel: &countTelemetry{}}
+	r := &rig{log: dlog.NewTestLogger(), tel: &countTelemetry{}, table: slices.Clone(table), spawns: newFakeSpawns(), changes: make(chan struct{}, 16)}
 	if store == nil {
 		store = &memStore{}
 	}
@@ -113,10 +120,11 @@ func newRig(t *testing.T, apps []string, signalErrs map[int]error, listErr error
 			if listErr != nil {
 				return nil, listErr
 			}
-			return table, nil
+			return slices.Clone(r.table), nil
 		},
 		Signal:     signalLog(&r.events, signalErrs),
 		Store:      store,
+		Spawns:     func() (SpawnFollower, error) { return r.spawns, nil },
 		Protection: protection,
 		Log:        r.log,
 		Telemetry:  r.tel,
@@ -124,7 +132,9 @@ func newRig(t *testing.T, apps []string, signalErrs map[int]error, listErr error
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	f.OnChange(func() { r.changes <- struct{}{} })
 	r.f = f
+	t.Cleanup(func() { f.Thaw(context.Background(), "test_cleanup") })
 	return r
 }
 
@@ -176,9 +186,10 @@ func TestFreeze(t *testing.T) {
 		{name: "no applications configured reads nothing", apps: nil},
 		{name: "an unreadable process table freezes nothing",
 			apps: []string{"Slack"}, listErr: errors.New("ps: not found"), wantErrors: 1},
-		{name: "a kept set is adopted and nothing is stopped again",
+		{name: "a kept set is adopted, its processes are not stopped again, and one it misses is frozen",
 			apps: []string{"Slack"}, store: &memStore{rec: &Record{Apps: []RecordedApp{{Name: "Slack", PIDs: []int{200}}}}},
-			wantFrozen: []Frozen{{Name: "Slack", Processes: 1}}, wantKept: map[string][]int{"Slack": {200}}},
+			wantEvents: []string{"save:map[Slack:[200 201 202]]", "stop:201", "stop:202", "save:map[Slack:[200 201 202]]"},
+			wantFrozen: []Frozen{{Name: "Slack", Processes: 3}}, wantKept: map[string][]int{"Slack": {200, 201, 202}}},
 		{name: "an unreadable kept set freezes nothing",
 			apps: []string{"Slack"}, store: &memStore{loadErr: errors.New("corrupt")}, wantErrors: 1},
 	}
@@ -298,6 +309,7 @@ func TestNewRefusesIncompleteDeps(t *testing.T) {
 			Processes: func(context.Context) ([]Process, error) { return nil, nil },
 			Signal:    func(int, syscall.Signal) error { return nil },
 			Store:     &memStore{}, Log: dlog.NewTestLogger(),
+			Spawns: func() (SpawnFollower, error) { return newFakeSpawns(), nil },
 		}
 	}
 	tests := []struct {
@@ -307,6 +319,7 @@ func TestNewRefusesIncompleteDeps(t *testing.T) {
 		{name: "no lister", break_: func(d *Deps) { d.Processes = nil }},
 		{name: "no signaler", break_: func(d *Deps) { d.Signal = nil }},
 		{name: "no store", break_: func(d *Deps) { d.Store = nil }},
+		{name: "no source of process starts", break_: func(d *Deps) { d.Spawns = nil }},
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
 	}
 	for _, tt := range tests {

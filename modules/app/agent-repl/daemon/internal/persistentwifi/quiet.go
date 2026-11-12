@@ -28,10 +28,15 @@ const opQuiet = "daemon.persistentwifi.quiet"
 // earlier daemon is adopted while the state stands and thawed the moment it
 // does not.
 
-// AppFreezer freezes and thaws the configured applications (appfreeze).
+// AppFreezer freezes and thaws the configured applications (appfreeze). It
+// freezes a process an application starts while the state stands on its
+// own, and tells OnChange's function, outside its own lock, so the standing
+// shows what Frozen answers now.
 type AppFreezer interface {
 	Freeze(ctx context.Context, trigger string) []appfreeze.Frozen
 	Thaw(ctx context.Context, trigger string)
+	Frozen() []appfreeze.Frozen
+	OnChange(fn func())
 }
 
 // QuietTelemetry is the quiet state's gauge. The metrics surface is the
@@ -54,8 +59,9 @@ func quietWanted(lid lidKind, mode modeKnown, standing bool) bool {
 // holdQuietLocked holds the quiet state to quietWanted, entering or leaving
 // it, and answers the display step's outcome for an Update. With the state
 // standing and the display awake (a sleep that failed), the sleep is tried
-// again; the applications are not frozen again, since one launched with the
-// lid closed is never chased. With the state not standing, a kept frozen set
+// again; the applications are not frozen again here, since the freezer
+// freezes each process started while the state stands itself
+// (frozenChanged). With the state not standing, a kept frozen set
 // is thawed, which is how a daemon booting with the lid open thaws what an
 // earlier one froze. trigger names what asked, for the record. Caller holds
 // mu.
@@ -79,7 +85,7 @@ func (c *Controller) holdQuietLocked(ctx context.Context, mode modeKnown, trigge
 
 func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
 	c.views.Set(true)
-	c.frozen = c.freezer.Freeze(ctx, trigger)
+	frozen := c.freezer.Freeze(ctx, trigger)
 	display := c.sleepDisplayLocked(ctx, trigger)
 	c.quiet = true
 	if c.telemetry != nil {
@@ -87,15 +93,14 @@ func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, trigg
 	}
 	c.log.Info(opQuiet, "the lid closed with persistent wifi on; the machine entered the lid-closed quiet state", dlog.Context{
 		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode),
-		"frozen": frozenNames(c.frozen), "display": displayArm(display)})
+		"frozen": frozenNames(frozen), "display": displayArm(display)})
 	return display
 }
 
 func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
 	display := c.wakeDisplayLocked(ctx, trigger)
-	thawed := c.frozen
+	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)
-	c.frozen = nil
 	c.views.Set(false)
 	c.quiet = false
 	if c.telemetry != nil {
@@ -115,7 +120,7 @@ func (c *Controller) stampQuiet(state *agentreplv1.PersistentWifiState) {
 		return
 	}
 	q := &agentreplv1.PersistentWifiQuiet{}
-	for _, f := range c.frozen {
+	for _, f := range c.freezer.Frozen() {
 		q.FrozenApps = append(q.FrozenApps, &agentreplv1.PersistentWifiFrozenApp{Name: f.Name, Processes: uint32(f.Processes)})
 	}
 	if c.displayAsleep {
@@ -124,6 +129,15 @@ func (c *Controller) stampQuiet(state *agentreplv1.PersistentWifiState) {
 		q.Display = &agentreplv1.PersistentWifiQuiet_DisplayAwake{DisplayAwake: &agentreplv1.PersistentWifiQuietDisplayAwake{Detail: c.displayCause}}
 	}
 	state.Quiet = q
+}
+
+// frozenChanged republishes the standing after the freezer froze a process
+// started while the state stands, so its frozen_apps are what is frozen now.
+// The freezer calls it outside its own lock (AppFreezer).
+func (c *Controller) frozenChanged() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.republishLocked()
 }
 
 // frozenNames states the frozen applications for a record.
