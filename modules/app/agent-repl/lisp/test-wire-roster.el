@@ -1955,7 +1955,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                        #'agent-repl-wire-decode-roster-merge-queue-section
                        (concat
                         "{\"header\":{\"label\":{\"text\":\"Merge Queue\"}},\"expanded\":{}"
-                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
+                        (format ",\"groups\":[{\"key\":{\"repository\":{\"id\":\"r1\",\"dir\":\"/src\"}},\"header\":{\"label\":{\"text\":\"doom\"}},\"queue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"suspended\":{}}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placement\":{\"front\":{}}}],\"paused\":{\"pausedAtMs\":\"7\",\"by\":{\"workspace\":{\"name\":\"doom\"}},\"hard\":true}}}]"
                                 agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)
                         "}"))
                       :groups)))
@@ -1970,11 +1970,52 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                          (plist-get (plist-get (car (plist-get head :stages)) :state) :value)
                          (plist-get head :standing)
                          (plist-get (car (plist-get queue :waiting)) :queued-at-ms)
-                         (plist-get (car (plist-get queue :waiting)) :placed-at-front)
+                         (plist-get (plist-get (car (plist-get queue :waiting)) :placement) :arm)
                          (plist-get queue :paused))
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
-                     (:arm :merging :value (:suspended t)) 9 t
+                     (:arm :merging :value (:suspended t)) 9 :front
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
+
+(defun agent-repl-test-wire-roster--waiting-placement (placement)
+  "Decode a waiting merge carrying PLACEMENT, a JSON member or \"\", and return its placement."
+  (plist-get (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-merge-queue-waiting
+              (format "{\"subject\":%s,\"queuedAtMs\":\"9\"%s}"
+                      agent-repl-test-wire-roster--subject placement))
+             :placement))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-a-front-placement ()
+  "A merge the user put at the front decodes its placement as the front arm."
+  (should (equal (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{\"front\":{}}")
+                 '(:arm :front :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-a-returned-placement ()
+  "A merge back from a repair decodes its placement as the returned arm."
+  (should (equal (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{\"returned\":{}}")
+                 '(:arm :returned :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-no-placement-as-nil ()
+  "A merge put in line the ordinary way carries no placement."
+  (should (null (agent-repl-test-wire-roster--waiting-placement ""))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-an-empty-placement-as-nil ()
+  "A set placement with no arm this build names decodes to nil and draws no label."
+  (should (null (agent-repl-test-wire-roster--waiting-placement ",\"placement\":{}"))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-both-placement-arms ()
+  "A placement with both arms set breaks its oneof and is refused."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-waiting-placement
+                  "{\"front\":{},\"returned\":{}}")
+                 '("RosterMergeQueueWaitingPlacement" placement "oneof has more than one arm set"))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-front-flag ()
+  "The retired placedAtFront field is an unknown field and is refused."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-waiting
+                  (format "{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueWaiting" placedAtFront "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-decodes-its-racing-slot ()
   "A merge racing behind the head carries when it took its racing slot."

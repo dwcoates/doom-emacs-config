@@ -1422,20 +1422,39 @@ reached the head.  The standing is never unset."
 
 (defun agent-repl-wire-decode-roster-merge-queue-waiting (value)
   "Decode VALUE as `RosterMergeQueueWaiting'.
-A plist `(:subject SUBJECT :queued-at-ms MS :placed-at-front BOOL :racing
-RACING)'.  RACING is nil while the merge waits, and `(:since-ms MS)' while
-it is worked on behind the head, MS when it took that slot."
+A plist `(:subject SUBJECT :queued-at-ms MS :placement PLACEMENT :racing
+RACING)'.  PLACEMENT is nil for a merge put in line the ordinary way, and
+otherwise `RosterMergeQueueWaitingPlacement''s decode.  RACING is nil while
+the merge waits, and `(:since-ms MS)' while it is worked on behind the head,
+MS when it took that slot."
   (let ((object (agent-repl-wire--object "RosterMergeQueueWaiting" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placedAtFront racing))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placement racing))
     (agent-repl-wire--decoded
      "RosterMergeQueueWaiting"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueWaiting" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
            :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)
-           :placed-at-front (agent-repl-wire--decode-bool "RosterMergeQueueWaiting" 'placedAtFront object)
+           :placement (agent-repl-wire--decode-optional-message
+                       "RosterMergeQueueWaiting" 'placement object
+                       #'agent-repl-wire-decode-roster-merge-queue-waiting-placement)
            :racing (agent-repl-wire--decode-optional-message
                     "RosterMergeQueueWaiting" 'racing object
                     #'agent-repl-wire-decode-roster-merge-queue-waiting-racing)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-waiting-placement (value)
+  "Decode VALUE as `RosterMergeQueueWaitingPlacement'.
+`(:arm ARM :value nil)', ARM `:front' for a merge the user put at the
+front and `:returned' for one back from a repair out of line; nil for a
+set placement whose arm this build does not name, which draws no label."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueWaitingPlacement" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaitingPlacement" object '(front returned))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueWaitingPlacement"
+     (agent-repl-wire--decode-oneof
+      "RosterMergeQueueWaitingPlacement" 'placement object
+      `((front :front ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueWaitingFront" v)))
+        (returned :returned ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueWaitingReturned" v))))
+      t))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-waiting-racing (value)
   "Decode VALUE as `RosterMergeQueueWaitingRacing'.
