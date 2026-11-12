@@ -513,6 +513,23 @@ const testNicenessEnv = "AGENT_REPL_TEST_NICENESS"
 // behind the owner's processes.
 const HeadNice = 10
 
+// BypassNice is the niceness a bypass holder's test run runs at: the best a
+// test run may have (bin/background.sh admits 1 to 19), ahead of the gate's
+// HeadNice, behind only the owner's own processes.
+const BypassNice = 1
+
+// TestUngovernedEnv tells agent-repl's test runner (testrun's
+// cores.UngovernedEnv, the same name) to give its run every core of the host
+// from a pool of its own, with no CPU governor holding its units back.
+const TestUngovernedEnv = "AGENT_REPL_TEST_UNGOVERNED"
+
+// BypassTestArgv is a bypass holder's test run's command line: ARGV under
+// BypassNice and TestUngovernedEnv (owner ruling, 2026-11-12: a workspace in
+// the queue bypass mode tests undeterred).
+func BypassTestArgv(argv []string) []string {
+	return append([]string{"env", fmt.Sprintf("%s=%d", testNicenessEnv, BypassNice), TestUngovernedEnv + "=1"}, argv...)
+}
+
 // testMetricsRootEnv and testMetricsTriggerEnv tell agent-repl's test runner
 // (testrun) where to push every test's time when its run ends, and what ran
 // it: the merge queue's gate. A gate whose daemon records no metrics names

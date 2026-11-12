@@ -383,16 +383,25 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("%v", err)
 		return 1
 	}
-	slots, err := cores.Budget(runtime.NumCPU())
+	plan, err := cores.PlanFor(os.Getenv, runtime.NumCPU(), cores.DefaultDir, filepath.Join(work, "cores"))
 	if err != nil {
 		log.Errorf("size the run: %v", err)
 		return 1
 	}
+	slots := plan.Budget
 	if err := os.Setenv(cores.NestedEnv, strconv.Itoa(os.Getpid())); err != nil {
 		log.Errorf("mark the run's units as holding core seats (%s): %v", cores.NestedEnv, err)
 		return 1
 	}
-	log.Infof("core budget: up to %d of the host's %d cores (%d%%), shared by every test run on the host through %s and held back by the CPU governor while the host is busy; this run ranks %d", slots, runtime.NumCPU(), cores.CapPercent, cores.DefaultDir, rank)
+	if plan.Governed {
+		log.Infof("core budget: up to %d of the host's %d cores (%d%%), shared by every test run on the host through %s and held back by the CPU governor while the host is busy; this run ranks %d", slots, runtime.NumCPU(), cores.CapPercent, cores.DefaultDir, rank)
+	} else {
+		if err := os.MkdirAll(plan.Dir, 0o755); err != nil {
+			log.Errorf("create the ungoverned run's own core pool %s: %v", plan.Dir, err)
+			return 1
+		}
+		log.Infof("core budget: all %d of the host's cores, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, plan.Dir, cores.UngovernedEnv, rank)
+	}
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -410,7 +419,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		defer stream.Close()
 		emitter = events.New(stream, log)
 	}
-	host := cores.NewHost(cores.DefaultDir, slots, rank, log)
+	host := cores.NewHost(plan.Dir, slots, rank, log)
 	if emitter != nil {
 		host.WaitingForCPU = func(id string, state cores.CPUState) {
 			emitter.WaitingForCPU(id, state.BusyPercent, state.CapPercent)
@@ -423,7 +432,9 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	defer ticker.Stop()
 	governorCtx, stopGovernor := context.WithCancel(ctx)
 	defer stopGovernor()
-	go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Ticks: ticker.C, Log: log}).Run(governorCtx)
+	if plan.Governed {
+		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Ticks: ticker.C, Log: log}).Run(governorCtx)
+	}
 	return cli.Run(ctx, cli.Deps{
 		Events:            emitter,
 		Reuse:             reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},

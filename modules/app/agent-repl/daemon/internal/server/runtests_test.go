@@ -420,6 +420,63 @@ func TestRunTestsHoldsTheUsersRunUnderCPULoad(t *testing.T) {
 	}
 }
 
+// A QUEUE BYPASS HOLDER TESTS UNDETERRED (owner ruling, 2026-11-12): its
+// run is told to take every core, ungoverned, at niceness 1.
+func TestRunTestsRunsABypassHoldersRunUngovernedAtTheBestTestPriority(t *testing.T) {
+	tests := []struct {
+		name  string
+		holds bool
+		want  string
+	}{
+		{name: "a bypass holder's run", holds: true,
+			want: "env AGENT_REPL_TEST_NICENESS=1 AGENT_REPL_TEST_UNGOVERNED=1 env AGENT_REPL_TEST_RUN_BY_DAEMON=1 "},
+		{name: "any other run", holds: false,
+			want: "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.DB.bypass = map[ids.WorkspaceID]wsm.QueueBypass{ids.WorkspaceID(ref.GetId()): {Holds: tt.holds}}
+			h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
+
+			// Act
+			runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+
+			// Assert
+			if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, tt.want) {
+				t.Fatalf("argv = %s, want it to start %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunTestsWhoseBypassStandingCannotBeReadRunsNothing(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ref := testsWorkspace(t, h, testsDeploy)
+	h.DB.bypassErr = errors.New("store down")
+
+	// Act
+	stream, err := h.Client.RunTests(context.Background(), connect.NewRequest(&agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()}))
+	if err != nil {
+		t.Fatalf("RunTests: %v", err)
+	}
+	for stream.Receive() {
+	}
+
+	// Assert
+	if stream.Err() == nil || h.Tests.argv != nil {
+		t.Fatalf("err %v, argv %v; want the read's failure and nothing run", stream.Err(), h.Tests.argv)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opRunTests})
+	if !ok || rec.Context["workspace"] != ref.GetId() || rec.Context["cause"] != "store down" {
+		t.Fatalf("record = %+v (found %v), want the failed read at ERROR naming the workspace and its cause", rec, ok)
+	}
+}
+
 func TestRunTestsArgv(t *testing.T) {
 	command := []string{"env", "M=1", "bash", "/w/bin/test-all.sh"}
 	cases := []struct {

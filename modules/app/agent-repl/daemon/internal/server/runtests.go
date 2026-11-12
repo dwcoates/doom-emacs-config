@@ -20,6 +20,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
@@ -116,6 +117,18 @@ func (s *server) RunTests(
 	}
 	defer os.Remove(selection) //nolint:errcheck // a temp file the run is done with
 	argv := runTestsArgv(merge.TestCommandFor(dir, script, w.name), msg.GetCpuLoad().GetLoops(), selection)
+	// A WORKSPACE HOLDING THE QUEUE BYPASS MODE TESTS UNDETERRED (owner
+	// ruling, 2026-11-12): its run takes every core at the test runs' best
+	// priority, since the mode exists for it to fix things quickly.
+	bypass, err := s.deps.DB.QueueBypass(ctx, w.id)
+	if err != nil {
+		log.Error(opRunTests, "could not read whether the workspace holds the queue bypass mode; nothing was run", dlog.Context{"dir": dir, "workspace": string(w.id), "cause": err.Error()})
+		return fmt.Errorf("RunTests: read the queue bypass standing of %s: %w", w.id, err)
+	}
+	if bypass.Holds {
+		argv = merge.BypassTestArgv(argv)
+		log.Info(opRunTests, "the workspace holds the queue bypass mode; its run takes every core, ungoverned, at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
+	}
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
 		outcome, err := s.relayTestRun(ctx, log, stream, dir, argv, run)
@@ -279,6 +292,9 @@ type testWorktree struct {
 	// name is the workspace's name, which its run names itself by in the RAM
 	// disk seat it holds (merge.TestCommandFor).
 	name string
+	// id is the workspace whose run this is, which decides whether the run
+	// is a bypass holder's (merge.BypassTestArgv).
+	id ids.WorkspaceID
 }
 
 // testWorktreeOf resolves ref to the worktree its test run runs in, recording
@@ -295,7 +311,7 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 			"workspace_id": ref.GetId(), "arm": refused.Arm, "reason": refused.Reason})
 		return testWorktree{}, errUnknownTestWorkspace
 	}
-	w := testWorktree{log: subject.Log, dir: subject.Record.Dir, name: subject.Record.Name}
+	w := testWorktree{log: subject.Log, dir: subject.Record.Dir, name: subject.Record.Name, id: subject.Record.ID}
 	if w.script, err = testScriptOf(w.dir); err != nil {
 		w.log.Error(op, "a test run has no test script to run", dlog.Context{"dir": w.dir, "cause": err.Error()})
 		return testWorktree{}, &noTestScriptError{cause: err}

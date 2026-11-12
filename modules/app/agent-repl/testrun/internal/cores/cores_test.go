@@ -226,3 +226,47 @@ func TestHoldTakesSeatsAtTheRunsRank(t *testing.T) {
 		t.Fatalf("Hold = %v; want the pool to see the run's rank", err)
 	}
 }
+
+func TestPlanForGivesEachRunItsBudgetPoolAndGovernor(t *testing.T) {
+	tests := []struct {
+		name       string
+		ungoverned string
+		numCPU     int
+		want       Plan
+		wantErr    string
+	}{
+		{name: "an ordinary run shares the host's governed pool", numCPU: 16,
+			want: Plan{Budget: 16 * CapPercent / 100, Dir: "/shared", Governed: true}},
+		{name: "a bypass holder's run holds every core from its own pool, ungoverned", ungoverned: "1", numCPU: 16,
+			want: Plan{Budget: 16, Dir: "/own"}},
+		{name: "a marker that is not 1 is refused", ungoverned: "yes", numCPU: 16,
+			wantErr: `AGENT_REPL_TEST_UNGOVERNED="yes" is not the "1"`},
+		{name: "an ungoverned run on a host reporting no cores is refused", ungoverned: "1", numCPU: 0,
+			wantErr: "reports 0 cores"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(name string) string {
+				if name == UngovernedEnv {
+					return tt.ungoverned
+				}
+				return ""
+			}
+
+			// Act
+			got, err := PlanFor(getenv, tt.numCPU, "/shared", "/own")
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("PlanFor err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("PlanFor = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
