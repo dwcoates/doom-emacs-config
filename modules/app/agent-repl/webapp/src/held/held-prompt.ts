@@ -46,7 +46,8 @@
  * listens in production (the composer is host-native) and the event is
  * harmless there — it is the seam, not a promise about who is on the far end.
  */
-import { USER_PROMPT_CAP_LINES } from "../bubble/draw.js";
+import { AGENT_PROMPT_CAP_LINES, BUBBLE_MORE_ELLIPSIS, USER_PROMPT_CAP_LINES } from "../bubble/draw.js";
+import { drawFeedAgentPromptAddress } from "../feed/rows/agent-prompt.js";
 import { userPromptLook, type HeldPromptLook } from "../feed/rows/user-prompt.js";
 import { labelledControl, whileControlsDisabled, type Control } from "../control.js";
 import { getOption } from "@bufbuild/protobuf";
@@ -238,6 +239,15 @@ export function drawHeldPrompt(
       ? userPromptLook(requireMessage(u.body, `${path}.body`), `${path}.body`)
       : { content: [drawHeldSessionAct(u.act, `${path}.act`)], capLines: USER_PROMPT_CAP_LINES };
 
+  // A PROMPT ANOTHER WORKSPACE'S AGENT SENT (`sender`, owner request,
+  // 2026-11-12) is headed as its settled row will be, the sender's name and a
+  // left arrow ABOVE the status line, and folds at two lines of its content as
+  // an agent-to-agent prompt does: the strip and the controls are outside the
+  // fold, so they always show.
+  const cap =
+    u.sender === undefined
+      ? ({ capLines: look.capLines } as const)
+      : ({ capLines: AGENT_PROMPT_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS } as const);
   // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
   // element, so a refusal an action draws beside its row lands in it too.
   const controls = document.createElement("div");
@@ -269,8 +279,10 @@ export function drawHeldPrompt(
       role: "prompt",
       variant: "held",
       hooks: holdCardHooks(hold === null ? null : hold.case),
-      strip: [head],
-      ...look,
+      strip: u.sender === undefined ? [head] : [drawFeedAgentPromptAddress(u.sender), head],
+      content: look.content,
+      corner: look.corner,
+      ...cap,
       footer: classifierForm === null ? [controls] : [controls, classifierForm.element],
     },
     previous,

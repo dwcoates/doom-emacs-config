@@ -18,6 +18,8 @@ import { boundCopyText } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
+  BUBBLE_MORE_ATTRIBUTE,
+  BUBBLE_MORE_ELLIPSIS,
   AGENT_PROMPT_CAP_LINES,
   BUBBLE_ROLE_ATTRIBUTE,
   BUBBLE_STRIP_CLASS,
@@ -118,8 +120,16 @@ describe("drawFeedAgentPrompt: its spec", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("agent");
   });
 
-  it("folds at the subagent prompt cap, which has no line limit", () => {
-    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(AGENT_PROMPT_CAP_LINES));
+  it("folds at two lines", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe("2");
+  });
+
+  it("states the agent prompt cap as the two-line cap", () => {
+    expect(AGENT_PROMPT_CAP_LINES).toBe(2);
+  });
+
+  it("ends its folded second line in the ellipsis rather than the fade", () => {
+    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute(BUBBLE_MORE_ATTRIBUTE)).toBe(BUBBLE_MORE_ELLIPSIS);
   });
 
   it("puts the address line in the header strip", () => {

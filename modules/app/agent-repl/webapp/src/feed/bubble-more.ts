@@ -179,6 +179,15 @@ function isEllipsisBox(box: HTMLElement): boolean {
 }
 
 /**
+ * Whether BOX is an ellipsis bubble clamped to ONE line, the only clamp whose
+ * `…` ellipsis-trim.ts places: its trim reads the clamp's first line, which is
+ * the whole of a one-line clamp and not the line a two-line clamp cuts on.
+ */
+function isOneLineEllipsisBox(box: HTMLElement): boolean {
+  return isEllipsisBox(box) && box.parentElement?.getAttribute("data-cap-lines") === "1";
+}
+
+/**
  * One kind of box the affordance serves: the selector a box is recognized by,
  * when that box's FOLD is open, and whether it hides content. The affordance
  * only ever points at content a collapsed fold is hiding, so each kind states
@@ -210,7 +219,7 @@ const MORE_KINDS: readonly MoreKind[] = [
     selector: MORE_BUBBLE_SELECTOR,
     isOpen: (box) => box.classList.contains(EXPANDED_CLASS),
     hidesContent: hidesContentBeyondCap,
-    clamp: (box) => (isEllipsisBox(box) ? box.querySelector<HTMLElement>(BODY_SELECTOR) : null),
+    clamp: (box) => (isOneLineEllipsisBox(box) ? box.querySelector<HTMLElement>(BODY_SELECTOR) : null),
     fitsWidth: true,
   },
   {
