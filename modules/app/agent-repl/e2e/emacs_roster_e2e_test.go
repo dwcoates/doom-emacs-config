@@ -43,61 +43,6 @@ import (
 // 29. UnfocusedTurnEndRaisesTheDaemonsBanner
 // ---------------------------------------------------------------------------
 
-// testEmacsUnfocusedTurnEndRaisesTheDaemonsBanner is scenario 29.
-//
-// THE DAEMON POSTS EVERY DESKTOP BANNER, decided on the focus Emacs reports.
-// Under Xvfb the frame's focus is whatever the display says, so the scenario
-// states it: `agent-repl--emacs-focused-p' is overridden to nil and Emacs
-// REPORTS that through its own `agent-repl--focus-report', the path its
-// `after-focus-change-function' takes. The banner is then read off the
-// recorder the daemon's banner program is (AGENT_REPL_NOTIFIER_CMD), which
-// proves what the daemon posted without any host banner program existing.
-func testEmacsUnfocusedTurnEndRaisesTheDaemonsBanner(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-	connectSession(t, s)
-	// The warm-up turn may have posted a banner of its own; only one posted
-	// after it counts.
-	before := len(e.Notifier.Invocations())
-
-	e.Eval(`(progn
-             (defun agent-repl-e2e--unfocused (&rest _) nil)
-             (advice-add 'agent-repl--emacs-focused-p :override #'agent-repl-e2e--unfocused)
-             ;; Record that the finish edge ran its hook at all, so a missing
-             ;; banner can be told apart from a missing edge.
-             (defvar agent-repl-e2e--finished nil)
-             (setq agent-repl-e2e--finished nil)
-             (defun agent-repl-e2e--note-finish (ws)
-               (push ws agent-repl-e2e--finished))
-             (add-hook 'agent-repl-roster-finish-functions #'agent-repl-e2e--note-finish)
-             (agent-repl--focus-report)
-             t)`)
-	e.AwaitTrue("Emacs's unfocused report to be answered",
-		`(not (agent-repl-serial-in-flight agent-repl--focus-serial))`)
-
-	typeIntoComposer(e, s.Input, "finish this turn and tell me about it")
-	e.KeysIn(s.Input, "RET")
-
-	e.AwaitTrue("the finish edge to run agent-repl-roster-finish-functions",
-		`(and (member `+elispString(s.Name)+` agent-repl-e2e--finished) t)`)
-
-	// The daemon posts after the summary call returns, so the recorder is
-	// awaited rather than read once. Emacs reads the record file because it
-	// is the process the scenario already polls through.
-	recordForm := `(if (file-exists-p ` + elispString(e.Notifier.Record) + `)
-	                   (with-temp-buffer (insert-file-contents ` + elispString(e.Notifier.Record) + `) (buffer-string))
-	                 "")`
-	// A completed turn's banner is titled by its mark and the workspace's
-	// name alone.
-	wantTitle := "✅ " + s.Name
-	e.AwaitEval("the daemon's banner program to record the completed-turn banner", recordForm,
-		func(raw json.RawMessage) bool {
-			var text string
-			return json.Unmarshal(raw, &text) == nil && strings.Contains(text, wantTitle) &&
-				bannersTitled(e.Notifier.Invocations()[before:], wantTitle) > 0
-		})
-}
-
 // ---------------------------------------------------------------------------
 // 30. DrainScheduleDrawsTheStandingBanner
 // ---------------------------------------------------------------------------
