@@ -40,6 +40,11 @@ const (
 	BatchMin = 12
 )
 
+// BatchingLabel names the batch sizes in force, for the test-time series a
+// run pushes (testtimes.Report.Batching), so runs under different sizes
+// compare: "max48-min12".
+func BatchingLabel() string { return fmt.Sprintf("max%d-min%d", BatchMax, BatchMin) }
+
 // PooledArea names the batches small areas are pooled into, opened by the
 // suite's area prefix where it has one.
 const PooledArea = "pooled"
