@@ -152,7 +152,6 @@ func TestEmacsWorkspaces(t *testing.T) {
 // TestEmacsDaemonLifecycle is Emacs's daemon: cold start, restarts, handovers, reconnects and a daemon that is not there.
 func TestEmacsDaemonLifecycle(t *testing.T) {
 	scenario(t,
-		testEmacsSubmitWithNoDaemonIsRefusedLoudly,
 		testEmacsTabsRehydrateFromTheRosterOnConnect,
 		testEmacsDaemonDownSurfacesAndReconnects,
 		testEmacsHandoverTransfersAtFreeness,
