@@ -1419,3 +1419,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A workspace in queue bypass mode now does its own work: agent-repl refuses its child workspaces as it refuses its one-shots.
 - 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): The sidebar hides an off-queue merge once any of its work is on master or its branch is gone, labels every off-queue merge evicted, and draws queue position numerals at their names' size.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A workspace in queue bypass mode now runs its tests on every core, at the best test priority, without the CPU governor.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Test runs are fast again: vitest and ERT files run in batches of files that read the same code, instead of one process per file, and a bypass workspace's run no longer oversubscribes the CPU.
