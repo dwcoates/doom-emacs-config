@@ -305,29 +305,6 @@ func composerText(e *Emacs, buffer string) string {
 // 23. DiscardInputClearsTheComposer
 // ---------------------------------------------------------------------------
 
-// testEmacsDiscardInputClearsTheComposer is scenario 23: the composer empties
-// and NOTHING was submitted.
-//
-// The negative half needs no probe window: `agent-repl-discard-input' is
-// synchronous and returns before the readback, so a submission it made would
-// already be in the observer. The observer is proved live by every other
-// scenario in this file.
-func testEmacsDiscardInputClearsTheComposer(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-	armSubmissionObserver(t, e)
-	typeIntoComposer(e, s.Input, "this draft is going nowhere")
-
-	runInComposer(e, s.Input, "agent-repl-discard-input")
-
-	if got := composerText(e, s.Input); got != "" {
-		t.Errorf("the composer still holds %q after a discard, want it empty", got)
-	}
-	if got := observedSubmissionCount(e); got != 0 {
-		t.Errorf("a discard submitted %d prompts, want none", got)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 24. DeferredPromptIsSubmittedDeferredAtOnce
 // ---------------------------------------------------------------------------

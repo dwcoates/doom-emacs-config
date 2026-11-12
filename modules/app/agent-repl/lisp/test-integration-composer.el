@@ -1993,6 +1993,62 @@ RED until the parallel fix lands."
               (should (equal (with-current-buffer buf (buffer-string)) "my draft")))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
+(declare-function agent-repl-discard-input "input")
+(declare-function agent-repl--history-prev "history")
+
+(ert-deftest agent-repl-itest-composer-discard-empties-the-composer ()
+  "`agent-repl-discard-input' leaves the composer empty."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "this draft is going nowhere")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (call-interactively #'agent-repl-discard-input))
+              ;; Assert.
+              (should (equal (with-current-buffer buf (buffer-string)) "")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-discard-submits-nothing ()
+  "A discard sends no SubmitPrompt to the daemon."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "this draft is going nowhere")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (call-interactively #'agent-repl-discard-input))
+              ;; Assert.
+              (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-history-recall-restores-the-last-submitted-prompt ()
+  "After an accepted send empties the composer, history recall puts the prompt back."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "remember this one for the history")))
+        (unwind-protect
+            (progn
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the daemon's acceptance to clear the composer")
+              ;; Act.
+              (with-current-buffer buf (agent-repl--history-prev))
+              ;; Assert.
+              (should (equal (with-current-buffer buf (buffer-string))
+                             "remember this one for the history")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 (provide 'test-integration-composer)
 
 ;;; test-integration-composer.el ends here
