@@ -674,8 +674,8 @@ Two edges point backwards and are closed with FORWARDERS in
 `cmd/agent-repld/forward.go`, bound by `run` immediately after `server.New`
 and before anything is served: the rollout's and the drain's pushes
 (`WorkspacePusher`, `ParticipantSource`, the announcers) and the workspace
-verbs' `HostRelay` (`srv.Relay()`). The background loops — the drain sweep and the command-file ingress —
-start after the bindings, because each of them can push.
+verbs' `HostRelay` (`srv.Relay()`). The background loops, the drain sweep
+among them, start after the bindings, because each of them can push.
 
 The feed's image origin IS produced, by `internal/imageorigin` mounted at
 `/feed-images/`: `feed.PathImageResolver` registers a prompt's
@@ -1451,74 +1451,39 @@ gate governor are gone.
     in flight never stands as a lease with no entry, because its teardown
     releases the lease before it removes the entry.
 
-## `agent-repld merge-queue` is how an agent asks for a merge
+## `agent-repld merge-queue` is how an agent reads and steers a queue
 
-`cmd/agent-repld/mergequeueverb.go`, the merge-queue skill's one tool
-(`skills/agent-repl-merge-queue/SKILL.md`). It decides nothing and never runs git.
+`cmd/agent-repld/agentcli.go` (the `merge-queue` noun), one of the agent
+API's nouns. Like every agent API command it is ONE rpc, prints the answer
+as protojson, decides nothing and never runs git. Asking for a merge is not
+this noun's: `agent-repld workspace finished` lands a workspace's own branch
+and `agent-repld workspace async-merge` a named branch.
 
-- The REQUESTER is the calling workspace: the roster row whose worktree holds
-  the cwd (the deepest match). It asks through the command-file ingress
-  (`commandfile.Write`), so the merge is an agent's ask
-  (`merge.RequestedByAgent`) exactly as a skill-written file is.
-- Exactly one mode: `-one-shot [-pr-merged]` (the requester's own branch,
-  sync, closing it once it lands) or `-async -name NAME -branch BRANCH`
-  with `-instruction TEXT`, `-close-dir WORKTREE`, `-cleanup-worktree`,
-  `-compact-after`, `-before-merge TEXT` and `-after-merge TEXT` (the named
-  branch, in a merge workspace; the last two are the merge workspace's own
-  merge actions, written as the entry's `before_ws_merge` and
-  `postprocessing_prompt`).
-- `-one-shot` ANNOUNCES a one-shot merge from inside the turn it
-  follows: the command file's merge carries `one_shot`, the request
-  (`merge.Request.OneShot`) runs in place once the turn ends and closes the
-  requester once it lands, and `wsm.DB.RequestOneShotMerge` records it and
-  marks `creation_jobs.one_shot` in ONE transaction, then republishes the
-  roster. So a one-shot mark never stands without its merge, and a refused
-  request marks nothing.
-- Without `-wait` it returns when the ingress settles the file: `applied/` is
-  requested (exit 0), `quarantine/` is a refusal (exit 6).
-- `-wait` reads the outcome off `WatchWorkspaceRoster` (the row's status as it
-  stood BEFORE the command was written is the baseline): LANDED, or FAILED
-  with its area read from the footer and the `daemon.merge.abort` record named.
-  `-wait` is REFUSED while the requester's turn is in flight: the merge starts
-  only when that turn ends, and that turn is the one that would wait.
-- The queue's controls go through the same writer: `-evict` (the requester's
-  own merge) or `-evict-dir WORKTREE` (merge_evict), `-pause` / `-resume`
-  with an optional `-repository-dir DIR` (merge_pause, merge_resume),
-  `-hold-rollouts` / `-release-rollouts` (merge_hold_rollouts,
-  merge_release_rollouts: daemon-wide, durable; while held a landing in the
-  daemon's own checkout does not tell the deploy), `-subscribe DETAIL` / `-unsubscribe` with an optional
-  `-repository-dir DIR` (merge_subscribe, merge_unsubscribe). A control is answered at
-  once, so `-wait` is refused with one; the verb waits
-  at most `-answer-timeout` (15s) for the file's fate and prints the answer
-  the ingress keyed by the file's path in the run log (or its `.1`
-  generation): `merge-queue: outcome: <evicted|not_queued|paused|resumed|held|released|subscribed|resubscribed|unsubscribed|not_subscribed>`
-  when applied, the refusal's `cause` when quarantined. An answer the run log
-  does not carry is printed `unread` on stderr; the fate still decides the
-  exit.
-- Exits: 0 landed (or requested, without `-wait`; or a control applied), 5
-  failed, 6 refused, 7 a control unanswered within `-answer-timeout` (the
-  file stays pending), 2 the verb itself failed.
-
-## An agent controls the merge queue through command files
-
-`merge_evict`, `merge_pause`, `merge_resume`, `merge_hold_rollouts`,
-`merge_release_rollouts`, `merge_subscribe`
-and `merge_unsubscribe` entries (`internal/commandfile`, ARCHITECTURE.md "The
-merge queue's controls") are `UpdateMergeQueue`'s evict, pause, resume,
-hold_rollouts, release_rollouts, subscribe and
-unsubscribe for an agent: the same
-orchestrator calls, the requester named by `project_dir`. The answer is the
-file's fate (`applied/` or `quarantine/`) and the record keyed by its path:
-INFO `daemon.commandfile.merge_queue` (`outcome` `evicted`, `not_queued`,
-`paused`, `resumed`, `held`, `released`, `subscribed`, `resubscribed`,
-`unsubscribed`, `not_subscribed`) or WARN `daemon.commandfile.entry` (the refusal in
-`cause`). Evicting what is not queued is `not_queued`, never a refusal.
+- `status [-repository here|DIR]` reads `GetMergeQueueStatus`, every queue
+  when unset.
+- `dequeue`, `move-up` and `move-down` take `MERGE|here`: `here` is the
+  calling workspace's own merge, and a NAME is matched against the merges the
+  queues list (`queuedArg`), never the roster, because the roster leaves out
+  the hidden workspace an async merge runs in. A name must match exactly one
+  merge across every queue. They send `UpdateMergeQueue`'s `evict`, `move_up`
+  and `move_down`.
+- `pause [-repository here|DIR] [-hard]` and `resume [-repository here|DIR]`
+  send `pause` (a hard stop also interrupts the turns the queue's merges
+  drive) and `resume`, every queue when unset.
+- Every `UpdateMergeQueue` goes through `cliCall.updateMergeQueue`, which
+  names the calling workspace as the requester, so no verb acts on a queue
+  without the daemon recording who asked.
+- `subscribe` and `unsubscribe [-repository here|DIR]` send
+  `SubscribeMergeQueue` and `UnsubscribeMergeQueue` for the calling
+  workspace.
+- Exits: 0 success, 6 (`exitRefused`) the daemon answered the error arm, 2
+  (`exitFailure`) the call itself failed.
 
 ## A retarget always tells the workspace
 
 A workspace's parent is its merge target (`creation_jobs.target_dir`) and
-its roster nesting (`workspaces.parent_id`). `SetWorkspaceParent` and the
-command file's `retarget` entry change both, and both go through ONE
+its roster nesting (`workspaces.parent_id`). `SetWorkspaceParent`, which
+`agent-repld workspace set -parent` sends, changes both through ONE
 operation, `internal/retarget`, which never answers success unless the
 notice naming the new target is queued in the workspace's session.
 
@@ -3058,8 +3023,7 @@ it, and `TestBothAsyncLandingSitesDecideByTheOneRule` pins that they do.
 
 A MERGE WORKSPACE NEVER INHERITS ITS REQUESTER'S MERGE ACTIONS (owner ruling,
 2026-10-14). It runs exactly the actions its async request named
-(`agentrepl.v1.MergeWorkspaceAsync.merge_actions`, or the command-file entry's
-`before_ws_merge` / `postprocessing_prompt`), and none when it named none. The
+(`agentrepl.v1.MergeWorkspaceAsync.merge_actions`), and none when it named none. The
 actions ride the requester's queue row (`merge_queue.source_actions_before`,
 `source_actions_after`, layout 51) until the hand-off, so a restart in between
 keeps them; only a detached request may carry them, and the merge workspace's
