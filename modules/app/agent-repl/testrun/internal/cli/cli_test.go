@@ -1638,6 +1638,48 @@ func TestRunWhoseUnitsAreAllReusedNeverStartsTheSuite(t *testing.T) {
 	}
 }
 
+func TestARunThatStopsBeforeItPlansStatesItsAbort(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      func(t *testing.T) []string
+		selection string
+	}{
+		{name: "a selection names its targets", args: func(t *testing.T) []string {
+			return []string{"--selection", writeSelection(t, harnessSelection())}
+		}, selection: "harness modules/app/agent-repl/bin/test-test-all.sh"},
+		{name: "a suite run names its suites", args: func(*testing.T) []string { return []string{"--suites", "daemon"} }, selection: "suites daemon"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, nil, nil)
+			h.deps.Build = packageBuild
+			var stream bytes.Buffer
+			h.deps.Events = events.New(&stream, h.deps.Log)
+			h.reuser.decideErr = errors.New("reuse: read lisp/test-x.el/test-x.el: not a directory")
+
+			// Act
+			code := h.run(t, tc.args(t)...)
+
+			// Assert
+			evs := eventsOf(t, &stream)
+			if code != 1 || len(evs) != 1 || evs[0].GetAborted() == nil {
+				t.Fatalf("exit = %d, events = %v; want 1 and one aborted", code, evs)
+			}
+			wantDetail := "deciding which units an earlier run's pass covers failed: reuse: read lisp/test-x.el/test-x.el: not a directory"
+			if got := evs[0].GetAborted(); got.GetSelection() != tc.selection || got.GetDetail() != wantDetail {
+				t.Fatalf("aborted = %v, want selection %q and detail %q", got, tc.selection, wantDetail)
+			}
+			if !strings.Contains(h.errOut.String(), "ERROR: "+wantDetail) {
+				t.Fatalf("stderr lacks the logged cause:\n%s", h.errOut)
+			}
+			if len(h.exec.ran) != 0 {
+				t.Fatalf("units ran after the abort: %v", h.exec.ran)
+			}
+		})
+	}
+}
+
 func TestRunWhoseReuseDecisionFailsRunsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t, nil, nil)

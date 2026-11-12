@@ -46,8 +46,9 @@ const (
 type target struct {
 	kind kind
 	// where is the package directory relative to the suite's module (Go), the
-	// file relative to the suite's directory (vitest), the file's base name
-	// (ERT), or the script's path (harness).
+	// file relative to the suite's directory (vitest and ERT: the item its
+	// split runs, and its split group's suffix), or the script's path
+	// (harness).
 	where string
 	// all runs everything the target holds; otherwise names does.
 	all bool
@@ -102,6 +103,50 @@ func Whole(req *testrunv1.TestRunRequest) (names []string, ok bool, err error) {
 	return names, true, nil
 }
 
+// Describe names what req asks to run, for a person: each selection's
+// target with the tests it names, in the request's order.
+func Describe(req *testrunv1.TestRunRequest) string {
+	var parts []string
+	named := func(what string, names []string) string {
+		if len(names) == 0 {
+			return what
+		}
+		return what + "=" + strings.Join(names, ",")
+	}
+	for _, sel := range req.GetSelections() {
+		switch t := sel.GetTarget().(type) {
+		case *testrunv1.TestSelection_GoPackage:
+			var tests []string
+			for _, gt := range t.GoPackage.GetNamed().GetTests() {
+				if paths := gt.GetSubtests().GetPaths(); len(paths) > 0 {
+					for _, p := range paths {
+						tests = append(tests, gt.GetName()+"/"+strings.Join(p.GetSegments(), "/"))
+					}
+					continue
+				}
+				tests = append(tests, gt.GetName())
+			}
+			parts = append(parts, named("Go package "+t.GoPackage.GetPackageDir(), tests))
+		case *testrunv1.TestSelection_VitestFile:
+			parts = append(parts, named("vitest file "+t.VitestFile.GetFile(), t.VitestFile.GetNamed().GetFullNames()))
+		case *testrunv1.TestSelection_ErtFile:
+			parts = append(parts, named("ERT file "+t.ErtFile.GetFile(), t.ErtFile.GetNamed().GetTestNames()))
+		case *testrunv1.TestSelection_Harness:
+			parts = append(parts, named("harness "+t.Harness.GetScript(), t.Harness.GetNamed().GetNames()))
+		case *testrunv1.TestSelection_Suite:
+			parts = append(parts, "suite "+t.Suite.GetName())
+		case *testrunv1.TestSelection_EverySuite:
+			parts = append(parts, "every suite")
+		default:
+			parts = append(parts, "a selection with no target")
+		}
+	}
+	if len(parts) == 0 {
+		return "no test"
+	}
+	return strings.Join(parts, "; ")
+}
+
 // Resolve resolves every selection of req to the suite that owns it.
 func Resolve(req *testrunv1.TestRunRequest, l suites.Layout) (Resolved, error) {
 	if len(req.GetSelections()) == 0 {
@@ -113,7 +158,7 @@ func Resolve(req *testrunv1.TestRunRequest, l suites.Layout) (Resolved, error) {
 		if err != nil {
 			return Resolved{}, fmt.Errorf("selection %d: %w", i+1, err)
 		}
-		r.targets[suite.Name] = append(r.targets[suite.Name], t)
+		r.targets[suite.Name] = fold(r.targets[suite.Name], t)
 	}
 	for _, s := range roster.Suites {
 		if _, ok := r.targets[s.Name]; ok {
@@ -141,8 +186,12 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 		if err != nil {
 			return roster.Suite{}, target{}, err
 		}
-		s, rel, err := owningDir(l, f.GetFile(), "ERT file", roster.ERT)
-		return s, target{kind: kindERT, where: filepath.Base(rel), all: all, names: names, what: "ERT file " + f.GetFile()}, err
+		path, err := ertPath(l, f.GetFile())
+		if err != nil {
+			return roster.Suite{}, target{}, err
+		}
+		s, rel, err := owningDir(l, path, "ERT file", roster.ERT)
+		return s, target{kind: kindERT, where: rel, all: all, names: names, what: "ERT file " + f.GetFile()}, err
 	case *testrunv1.TestSelection_Suite:
 		suite, known := roster.Lookup(t.Suite.GetName())
 		if !known {
@@ -161,6 +210,32 @@ func resolveOne(sel *testrunv1.TestSelection, l suites.Layout) (roster.Suite, ta
 		return s, target{kind: kindHarness, where: h.GetScript(), all: all, names: names, what: "harness " + h.GetScript()}, err
 	}
 	return roster.Suite{}, target{}, errors.New("the selection names no target")
+}
+
+// fold adds t to a suite's targets. A vitest or ERT file selected twice is
+// one target, because one file is one split group (suites.fileSplits): all of
+// it when either selection asks for all, otherwise every name either names.
+func fold(targets []target, t target) []target {
+	if t.kind != kindVitest && t.kind != kindERT {
+		return append(targets, t)
+	}
+	for i, had := range targets {
+		if had.kind != t.kind || had.where != t.where {
+			continue
+		}
+		switch {
+		case had.all || t.all:
+			targets[i].all, targets[i].names = true, nil
+		default:
+			for _, n := range t.names {
+				if !slices.Contains(had.names, n) {
+					targets[i].names = append(targets[i].names, n)
+				}
+			}
+		}
+		return targets
+	}
+	return append(targets, t)
 }
 
 // allOrNamed reads a target's all-or-named choice, refusing an unset one or
@@ -214,6 +289,31 @@ func resolveGo(p *testrunv1.TestSelectionGoPackage, l suites.Layout) (roster.Sui
 	s, rel, err := owningDir(l, p.GetPackageDir(), "Go package", roster.GoModule, roster.E2E)
 	t.where = rel
 	return s, t, err
+}
+
+// ertPath answers an ERT selection's file relative to the repository root.
+// A bare file name (no directory) names the file of that name in the ERT
+// suite's own directory, so `test-wire-verbs.el` and
+// `modules/app/agent-repl/lisp/test-wire-verbs.el` select the same unit.
+func ertPath(l suites.Layout, file string) (string, error) {
+	if file == "" || strings.ContainsRune(file, '/') {
+		return file, nil
+	}
+	var dirs []string
+	for _, s := range roster.Suites {
+		if s.Kind != roster.ERT {
+			continue
+		}
+		rel, err := filepath.Rel(l.Repo, roster.Resolve(l.Repo, l.Module, s.Path))
+		if err != nil {
+			return "", fmt.Errorf("ERT file %s: the %s suite's directory is outside the repository: %w", file, s.Name, err)
+		}
+		dirs = append(dirs, filepath.ToSlash(rel))
+	}
+	if len(dirs) != 1 {
+		return "", fmt.Errorf("ERT file %s: a bare file name needs exactly one ERT suite to name a file of, and the roster has %d (%s); name the file by its path", file, len(dirs), strings.Join(dirs, ", "))
+	}
+	return dirs[0] + "/" + file, nil
 }
 
 // owningDir finds the suite of one of kinds whose directory holds path (a
@@ -436,7 +536,9 @@ func narrowItems(u suites.Units, t target) ([]suites.Split, error) {
 		if sp.Named == nil {
 			return nil, fmt.Errorf("%s: its suite cannot run single tests", t.what)
 		}
-		return []suites.Split{withItems(sp, sp.Group+"/"+t.where, []string{t.where}, t.names)}, nil
+		// ONE FILE IS ONE SPLIT (suites.fileSplits), so the split's own group
+		// already names the file; the reuse step reads the file off it.
+		return []suites.Split{withItems(sp, sp.Group, []string{t.where}, t.names)}, nil
 	}
 	return nil, fmt.Errorf("%s: its suite does not run it", t.what)
 }

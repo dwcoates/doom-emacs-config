@@ -169,10 +169,13 @@ const (
 	runPassed
 	runFailed
 	runRefused
+	// runAborted is a run the runner stopped before it planned, on its own
+	// failure (testrun.v1.TestRunAborted).
+	runAborted
 )
 
 func (o runOutcome) String() string {
-	return [...]string{"unended", "passed", "failed", "refused"}[o]
+	return [...]string{"unended", "passed", "failed", "refused", "aborted"}[o]
 }
 
 // relayTestRun runs argv in dir with an events pipe as its fd 3, sending every
@@ -225,6 +228,9 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 			outcome = runFailed
 		case ev.GetRefused() != nil:
 			outcome = runRefused
+		case ev.GetAborted() != nil:
+			outcome = runAborted
+			log.Error(opRunTests, "a test run stopped before it planned", dlog.Context{"dir": dir, "run": run, "selection": ev.GetAborted().GetSelection(), "cause": ev.GetAborted().GetDetail()})
 		}
 		if sendErr == nil {
 			sendErr = stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Event{Event: ev}, Run: run})

@@ -958,7 +958,9 @@ func (x *TestSelectionVitestNamedTests) GetFullNames() []string {
 // One ERT test file's tests: all of them, or named ones.
 type TestSelectionErtFile struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. The test file, relative to the repository root.
+	// REQUIRED. The test file, relative to the repository root, or a bare
+	// file name (no directory), which names the file of that name in the ERT
+	// suite's own directory. Both forms of one file select the same unit.
 	File string `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`
 	// REQUIRED. Which of the file's tests run.
 	//

@@ -5,7 +5,9 @@
 //
 // THE ORDER IS FIXED. A run that can plan states `planned` first, then one
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
-// cannot resolve states `refused` alone. Between `planned` and `ended`, a unit
+// cannot resolve states `refused` alone, and a run the runner resolved but
+// could not plan (an input it could not read, a plan it could not build)
+// states `aborted` alone. Between `planned` and `ended`, a unit
 // the host's CPU holds back states `waiting_for_cpu` when its wait begins and
 // `cpu_wait_ended` once it has its cores, in that order, before its own
 // `unit_ended`.
@@ -32,6 +34,9 @@ message TestRunEvent {
     TestRunWaitingForCpu waiting_for_cpu = 5;
     // A unit that waited for the host's CPU has its cores and starts.
     TestRunCpuWaitEnded cpu_wait_ended = 6;
+    // The run stopped before it planned, on the runner's own failure: the
+    // run's only event. A runner never exits before planning without it.
+    TestRunAborted aborted = 7;
   }
 }
 
@@ -161,6 +166,19 @@ message TestRunEndedFailed {
   int32 cancelled_units = 2;
   // How many units passed.
   int32 passed_units = 3;
+}
+
+// The run stopped before it planned, on a failure of the runner's own rather
+// than of the selection: an input it could not read, a plan it could not
+// build.
+message TestRunAborted {
+  // What the run was asked to run, for a person: each selection's target
+  // (an ERT file, a Go package with its tests, a suite), or the suites its
+  // arguments select.
+  string selection = 1;
+  // Why it stopped, for a person: the step that failed and its cause,
+  // naming the file it could not read where there is one.
+  string detail = 2;
 }
 
 // The selection could not be run.

@@ -451,3 +451,118 @@ func TestNarrowKeepsAWholeSuiteNamedBesideItsTests(t *testing.T) {
 		t.Fatalf("Narrow = %v, %v; want every unit of the suite, %v", groups(got), err, groups(u))
 	}
 }
+
+func ertNamed(file string, names ...string) *testrunv1.TestSelection {
+	return &testrunv1.TestSelection{Target: &testrunv1.TestSelection_ErtFile{ErtFile: &testrunv1.TestSelectionErtFile{
+		File: file, Tests: &testrunv1.TestSelectionErtFile_Named{Named: &testrunv1.TestSelectionErtNamedTests{TestNames: names}}}}}
+}
+
+// ertUnits is the ERT suite's units as suites.fileSplits makes them: one
+// split per file, grouped "ert/<file>", running its file and named tests.
+func ertUnits(files ...string) suites.Units {
+	named := func(id string, items, names []string) run.Spec {
+		return run.Spec{Argv: append(append([]string{"emacs"}, items...), names...)}
+	}
+	var u suites.Units
+	for _, f := range files {
+		u.Splits = append(u.Splits, suites.Split{Group: "ert/" + f, Suite: "ert", Items: []string{f}, Named: named,
+			Chunk: func(id string, items []string) run.Spec { return named(id, items, nil) }})
+	}
+	return u
+}
+
+func TestNarrowRunsANamedERTFileUnderItsOwnGroup(t *testing.T) {
+	cases := []struct {
+		name string
+		sels []*testrunv1.TestSelection
+		want string
+		argv []string
+	}{
+		{name: "a path inside the worktree", sels: []*testrunv1.TestSelection{ertNamed(mod+"lisp/test-wire-verbs.el", "case-a")},
+			want: "ert/test-wire-verbs.el", argv: []string{"emacs", "test-wire-verbs.el", "case-a"}},
+		{name: "a bare file name", sels: []*testrunv1.TestSelection{ertNamed("test-wire-verbs.el", "case-a")},
+			want: "ert/test-wire-verbs.el", argv: []string{"emacs", "test-wire-verbs.el", "case-a"}},
+		{name: "a path and a bare name of one file fold their names", sels: []*testrunv1.TestSelection{ertNamed(mod+"lisp/test-wire-verbs.el", "case-a"), ertNamed("test-wire-verbs.el", "case-b")},
+			want: "ert/test-wire-verbs.el", argv: []string{"emacs", "test-wire-verbs.el", "case-a", "case-b"}},
+		{name: "a whole file beside a named one runs the whole file", sels: []*testrunv1.TestSelection{ertNamed("test-wire-verbs.el", "case-a"), ertAll(mod + "lisp/test-wire-verbs.el")},
+			want: "ert/test-wire-verbs.el", argv: []string{"emacs", "test-wire-verbs.el"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, err := Resolve(request(tc.sels...), layout)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got, err := r.Narrow(suiteNamed(t, "ert"), ertUnits("test-status.el", "test-wire-verbs.el"))
+
+			// Assert
+			if err != nil || len(got.Splits) != 1 {
+				t.Fatalf("Narrow = %+v, %v; want the one file's split", got, err)
+			}
+			if got.Splits[0].Group != tc.want {
+				t.Fatalf("group = %q, want %q: the reuse step reads the file off the group", got.Splits[0].Group, tc.want)
+			}
+			if argv := chunkArgv(got.Splits[0]); !reflect.DeepEqual(argv, tc.argv) {
+				t.Fatalf("chunk = %v, want %v", argv, tc.argv)
+			}
+		})
+	}
+}
+
+func TestResolveRefusesAnERTFileItsSuiteDoesNotRun(t *testing.T) {
+	cases := []struct {
+		name string
+		sel  *testrunv1.TestSelection
+		want string
+	}{
+		{name: "a file below the suite's directory", sel: ertAll(mod + "lisp/testsupport/test-x.el"), want: "its suite does not run it"},
+		{name: "a bare name the suite does not load", sel: ertAll("test-nope.el"), want: "its suite does not run it"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, err := Resolve(request(tc.sel), layout)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			_, err = r.Narrow(suiteNamed(t, "ert"), ertUnits("test-wire-verbs.el"))
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Narrow error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDescribe(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *testrunv1.TestRunRequest
+		want string
+	}{
+		{name: "a named ERT file", req: request(ertNamed("test-x.el", "a-test", "b-test")), want: "ERT file test-x.el=a-test,b-test"},
+		{name: "a whole ERT file", req: request(ertAll(mod + "lisp/test-x.el")), want: "ERT file " + mod + "lisp/test-x.el"},
+		{name: "Go tests and a subtest path", req: request(goNamed("daemon/internal/merge", whole("TestA"), sub("TestB", []string{"case", "inner"}))), want: "Go package daemon/internal/merge=TestA,TestB/case/inner"},
+		{name: "a named vitest file", req: request(vitestNamed("webapp/src/a.test.ts", "one")), want: "vitest file webapp/src/a.test.ts=one"},
+		{name: "harness groups", req: request(harness("bin/t.sh", "g1")), want: "harness bin/t.sh=g1"},
+		{name: "several targets in order", req: request(suiteSel("daemon"), everySuite()), want: "suite daemon; every suite"},
+		{name: "no selection", req: request(), want: "no test"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := Describe(tc.req)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Describe = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

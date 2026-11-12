@@ -50,7 +50,10 @@ import (
 //	                         workspace's own (a main workspace only)
 //
 // A path is relative to the working directory (or absolute), and must lie in
-// the worktree the run runs in. Each frame of the run's stream is printed as one
+// the worktree the run runs in. An -ert FILE with no directory (test-x.el) is
+// the file of that name in the ERT suite's own directory, from any working
+// directory. A run the runner stopped before it planned exits failed, naming
+// what it was asked to run and why it stopped. Each frame of the run's stream is printed as one
 // line of protojson as it arrives. The command exits 0 when every run passed,
 // exitTestsFailed when one ran and failed, and exitRefused when the daemon or
 // the runner refused it.
@@ -157,6 +160,7 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 	}
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
 	code, failed := exitFailure, false
+	var aborted *testrunv1.TestRunAborted
 	for stream.Receive() {
 		frame := stream.Msg()
 		text, err := protojson.Marshal(frame)
@@ -168,6 +172,8 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 		switch {
 		case frame.GetError().GetRunnerFailed() != nil:
 			code = exitFailure
+		case frame.GetEvent().GetAborted() != nil:
+			code, aborted = exitFailure, frame.GetEvent().GetAborted()
 		case frame.GetError() != nil, frame.GetEvent().GetRefused() != nil:
 			code = exitRefused
 		case frame.GetEvent().GetEnded().GetPassed() != nil:
@@ -184,7 +190,10 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 		c.failed("the run's stream broke: %v", err)
 		return exitFailure
 	}
-	if code == exitFailure {
+	switch {
+	case aborted != nil:
+		c.failed("the run of %s stopped before it planned: %s", aborted.GetSelection(), aborted.GetDetail())
+	case code == exitFailure:
 		c.failed("the run did not report how it ended")
 	}
 	return code
@@ -247,7 +256,7 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 	}
 	for _, v := range ertSel {
 		file, names, named := strings.Cut(v, "=")
-		path, err := repoPath(file)
+		path, err := ertFile(repoPath, file)
 		if err != nil {
 			return nil, err
 		}
@@ -278,6 +287,17 @@ func buildSelections(worktree, cwd string, sel testSelections) (*testrunv1.TestR
 		run.Selections = append(run.Selections, &testrunv1.TestSelection{Target: &testrunv1.TestSelection_Harness{Harness: sel}})
 	}
 	return run, nil
+}
+
+// ertFile is an -ert file as the selection carries it: a bare file name
+// (no directory) as written, which the runner resolves in the ERT suite's own
+// directory, so it names the same file from any working directory; any other
+// path relative to the worktree.
+func ertFile(repoPath func(string) (string, error), file string) (string, error) {
+	if file != "" && !strings.ContainsRune(file, filepath.Separator) {
+		return file, nil
+	}
+	return repoPath(file)
 }
 
 // worktreePath answers a function turning a path (relative to cwd, or

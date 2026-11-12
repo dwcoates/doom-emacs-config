@@ -467,7 +467,9 @@ export const TestSelectionVitestNamedTestsSchema: GenMessage<TestSelectionVitest
  */
 export type TestSelectionErtFile = Message<"testrun.v1.TestSelectionErtFile"> & {
   /**
-   * REQUIRED. The test file, relative to the repository root.
+   * REQUIRED. The test file, relative to the repository root, or a bare
+   * file name (no directory), which names the file of that name in the ERT
+   * suite's own directory. Both forms of one file select the same unit.
    *
    * @generated from field: string file = 1;
    */
