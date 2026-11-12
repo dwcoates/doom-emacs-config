@@ -79,7 +79,7 @@ SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 
 # WHERE THE PLISTS LIVE. The same directory the installer (bin/requirements.sh,
-# the launchd_service kind) writes each rewritten template into, and the
+# the service kind) renders each plist into, and the
 # same `$LABEL.plist` naming, because a bootstrap needs the file the service
 # was bootstrapped from originally. Overridable for the hermetic harness, for
 # the same reason AGENT_REPL_LAUNCHCTL is.

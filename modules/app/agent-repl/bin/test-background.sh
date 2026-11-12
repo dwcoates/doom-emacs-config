@@ -524,9 +524,10 @@ scan() {
     done
 
     # (f) The live runtime and the deploy's builds are never demoted: the
-    # daemon's deploy (daemon/internal/deploy) runs bin/build-frontend.sh.
+    # daemon's deploy (daemon/internal/deploy) runs bin/build-frontend.sh, and
+    # bin/requirements.sh renders every service's definition.
     for file in "$module"/daemon/internal/deploy/*.go "$module/bin/build-frontend.sh" \
-        "$module"/launchd/* "$module"/lisp/*.el; do
+        "$module/bin/requirements.sh" "$module"/lisp/*.el; do
         [ -f "$file" ] || continue
         case "$(basename "$file")" in test-*.el | *_test.go) continue ;; esac
         if grep -Eq 'background\.sh|nice -n|"nice"|taskpolicy|require-background' "$file"; then

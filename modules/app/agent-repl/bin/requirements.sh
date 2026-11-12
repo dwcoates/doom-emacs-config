@@ -34,10 +34,13 @@
 #                            bin dir (AGENT_REPL_BIN_DIR, ~/.local/bin by
 #                            default), which must be on PATH
 #   git_hook                 a managed git hook in the repository's hooks dir
-#   launchd_service          a launchd user agent installed and running: its
-#                            program built here (`build_target` + `binary`) or
-#                            an installed command (`command`), with any
-#                            `files` copied from the module into the cache
+#   service                  a service the platform's service manager keeps
+#                            running (launchd on macOS, systemd --user on
+#                            Linux), rendered from the entry: its program built
+#                            here (`build_target` + `binary`) or an installed
+#                            command (`command`), its `args`, `env` and `log`
+#                            files, with any `files` copied from the module into
+#                            the cache
 #   download                 files unpacked from a zip at a URL into the cache,
 #                            each pinned by its sha256
 #
@@ -59,15 +62,19 @@
 # PACKAGES COME FROM THE PLATFORM'S OWN PACKAGE MANAGER: Homebrew on macOS, and
 # on Linux the distribution's, the first of apt, dnf, pacman and zypper on PATH
 # (package_manager). An entry names its package for each under `install`
-# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A Linux install runs as root
+# (`brew`, `apt`, `dnf`, `pacman`, `zypper`). A program no Linux package manager
+# carries everywhere names a pinned `release` instead: an archive its
+# publisher ships per machine, checked against its sha256 and installed into
+# the user's bin dir. A Linux install runs as root
 # through sudo, which asks for a password only when it has a terminal to ask
 # on; without one it never prompts (`sudo -n`), and an install it cannot run
 # says so with the command for the user to run.
 #
 # Test seams (bin/test-requirements.sh): AGENT_REPL_REQUIREMENTS_ROOT (the
-# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM,
+# module dir), AGENT_REPL_REQUIREMENTS_PLATFORM, AGENT_REPL_REQUIREMENTS_ARCH,
 # AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER, AGENT_REPL_REQUIREMENTS_BUILD
-# (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, and HOME / PATH.
+# (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, AGENT_REPL_SYSTEMCTL,
+# AGENT_REPL_SYSTEMD_USER_DIR, and HOME / PATH.
 
 set -euo pipefail
 
@@ -76,6 +83,7 @@ MODULE_DIR="${AGENT_REPL_REQUIREMENTS_ROOT:-$(cd "$THIS_DIR/.." && pwd -P)}"
 ROOT_MANIFEST="$MODULE_DIR/requirements.json"
 BUILD_FRONTEND="${AGENT_REPL_REQUIREMENTS_BUILD:-$MODULE_DIR/bin/build-frontend.sh}"
 LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
+SYSTEMCTL="${AGENT_REPL_SYSTEMCTL:-systemctl}"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
 SKILLS_DIR="$HOME/.claude/skills"
 # BIN_DIR is where a command_link puts its command: the user's own bin dir.
@@ -93,6 +101,9 @@ skills_dirs() {
   fi
 }
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+# SYSTEMD_USER_DIR is where a Linux service's unit is installed: the user's own
+# systemd unit directory, the one the daemon reads too.
+SYSTEMD_USER_DIR="${AGENT_REPL_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 
 # ---------------------------------------------------------------------------
 # Reporting. THE ONE OUTPUT PATH: every line this script prints goes through
@@ -128,6 +139,23 @@ platform() {
     *) err "platform: $(uname -s) is not a platform the manifests describe"; exit 2 ;;
   esac
 }
+
+# machine: this machine as a release names it, `<platform>-<arch>` with the
+# arch spelled the way Go and most publishers do (arm64, amd64).
+machine() {
+  local arch="${AGENT_REPL_REQUIREMENTS_ARCH:-$(uname -m)}"
+  case "$arch" in
+    aarch64) arch=arm64 ;;
+    x86_64) arch=amd64 ;;
+  esac
+  printf '%s-%s\n' "$(platform)" "$arch"
+}
+
+# find_program CMD: the path CMD runs from: PATH's, else the user's bin dir
+# (BIN_DIR), where a source-built Emacs and a pinned release are installed.
+# Whether that dir is on the user's PATH is one entry's to say (the
+# command_link kind), not every program's.
+find_program() { PATH="$PATH:$BIN_DIR" command -v "$1" 2>/dev/null; }
 
 # The Linux package managers install knows, in the order package_manager
 # prefers them.
@@ -177,7 +205,9 @@ package_manager_command() {
 # package manager PM without asking anything, the packages following them.
 package_install_argv() {
   case "$1" in
-    apt) echo "apt-get install -y" ;;
+    # apt waits for dpkg's lock, which another apt (Ubuntu's own unattended
+    # upgrades, most often) may hold, rather than failing on it at once.
+    apt) echo "apt-get -o DPkg::Lock::Timeout=600 install -y" ;;
     dnf) echo "dnf install -y" ;;
     pacman) echo "pacman -S --needed --noconfirm" ;;
     zypper) echo "zypper --non-interactive install" ;;
@@ -270,7 +300,12 @@ validate_entries() {
     (.[] | . as $e |
       (["id", "kind", "why", "profile"][] as $f | select($e[$f] == null) | "\($e._file): \($e.id // "?"): every entry needs \"\($f)\""),
       (select(($e.profile != "run") and ($e.profile != "dev")) | "\($e._file): \($e.id): profile must be run or dev, not \($e.profile)"),
-      (if $e.kind == "program" then need($e; ["command", "install", "platforms"])
+      (if $e.kind == "program" then need($e; ["command", "install", "platforms"]),
+         (select($e.install.release != null) | $e.install.release
+           | (select(.file == null) | "\($e._file): \($e.id): an install.release needs \"file\""),
+             (to_entries[] | select(.key != "file") | .key as $m | .value
+               | ("url", "sha256") as $f | select(.[$f] == null)
+               | "\($e._file): \($e.id): install.release.\($m) needs \"\($f)\""))
        elif $e.kind == "emacs" then need($e; ["command", "min", "features", "install", "platforms"]),
          (select($e.install.source != null) | need($e; ["revision"]),
            (select($e.install.source.repo == null)
@@ -288,12 +323,14 @@ validate_entries() {
        elif $e.kind == "command_link" then need($e; ["name", "source"]),
          (select($e.source != null and $e.source.repo == null) | "\($e._file): \($e.id): a command_link source is a path in the repository (\"repo\")")
        elif $e.kind == "git_hook" then need($e; ["hook", "source", "markers"])
-       elif $e.kind == "launchd_service" then need($e; ["label", "plist", "platforms"]),
+       elif $e.kind == "service" then need($e; ["label", "args", "log", "platforms"]),
+         (("stdout", "stderr") as $f | select($e.log != null and $e.log[$f] == null)
+           | "\($e._file): \($e.id): a service log needs \"\($f)\""),
          (select((($e.command != null) and (($e.build_target != null) or ($e.binary != null)))
                  or (($e.command == null) and (($e.build_target == null) or ($e.binary == null))))
-           | "\($e._file): \($e.id): launchd_service needs either \"command\" or both \"build_target\" and \"binary\""),
+           | "\($e._file): \($e.id): service needs either \"command\" or both \"build_target\" and \"binary\""),
          ($e.files // [] | .[] | select(.from == null or .to == null)
-           | "\($e._file): \($e.id): every launchd_service file needs \"from\" and \"to\"")
+           | "\($e._file): \($e.id): every service file needs \"from\" and \"to\"")
        elif $e.kind == "download" then need($e; ["url", "archive", "dest", "files"]),
          (select($e.archive != null and $e.archive != "zip") | "\($e._file): \($e.id): download archive must be zip, not \($e.archive)"),
          ($e.files // [] | .[] | select(.from == null or .to == null or .sha256 == null)
@@ -349,9 +386,12 @@ install_text() {
   local e="$1" how pm
   pm="$(package_manager)"
   if [ "$pm" != brew ]; then
-    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" '.install |
+    how="$(printf '%s\n' "$e" | jq -r --arg pm "$pm" --arg argv "$(package_install_argv "$pm")" --arg known "$LINUX_PACKAGE_MANAGERS" \
+      --arg machine "$(machine)" --arg bin "$BIN_DIR" --arg command "$(field "$e" .command)" '.install |
       if $pm != "" and .[$pm] then "sudo \($argv) \(.[$pm] | if type == "array" then join(" ") else . end)"
       elif .go_install then "go install \(.go_install)"
+      elif .release then (if .release[$machine] then "download the pinned \(.release[$machine].url) and install its \(.release.file) as \($bin)/\($command)"
+                          else "no release is pinned for \($machine); add install.release.\($machine) to its manifest entry" end)
       elif .source then "build \(.source.repo) at the pinned revision and install it"
       elif .manual then .manual
       elif $pm == "" then "install it yourself: no package manager install knows (\($known)) is on PATH"
@@ -373,7 +413,7 @@ check_program() {
   local e="$1" cmd path min args out have
   cmd="$(field "$e" .command)"
   FIX="$(install_text "$e")"
-  if ! path="$(command -v "$cmd" 2>/dev/null)"; then
+  if ! path="$(find_program "$cmd")"; then
     STATUS=missing; DETAIL="$cmd is not on PATH"; return
   fi
   min="$(field "$e" .version.min)"
@@ -400,7 +440,7 @@ check_emacs() {
   local e="$1" cmd path min have lacking
   cmd="$(field "$e" .command)"
   FIX="$(install_text "$e")"
-  if ! path="$(command -v "$cmd" 2>/dev/null)"; then
+  if ! path="$(find_program "$cmd")"; then
     STATUS=missing; DETAIL="$cmd is not on PATH"; return
   fi
   min="$(field "$e" .min)"
@@ -631,43 +671,140 @@ check_git_hook() {
   fi
 }
 
-# rendered_plist ENTRY: the plist template with every leading ~/ made absolute
-# (launchd does not expand ~).
-rendered_plist() { sed "s|~/|$HOME/|g" "$MODULE_DIR/$(field "$1" .plist)"; }
+# The service's settings every platform renders alike: a service is started at
+# login and kept running, restarted no faster than every SERVICE_RESTART_SECONDS
+# when it crash-loops, and killed when a stop it was asked for is not done
+# within SERVICE_STOP_SECONDS (each service bounds its own shutdown well inside
+# that, so reaching it means the process is stuck).
+SERVICE_RESTART_SECONDS=10
+SERVICE_STOP_SECONDS=20
+
+# command_service_path: the PATH a `command` service's program is found on. A
+# service manager's own PATH holds neither Homebrew's prefixes nor the user's
+# bin dir.
+command_service_path() {
+  if [ "$(platform)" = darwin ]; then
+    echo "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  else
+    echo "$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  fi
+}
+
+# service_definition ENTRY: where the platform's service manager reads the
+# service's definition from: a launchd plist, or a systemd user unit.
+service_definition() {
+  if [ "$(platform)" = darwin ]; then
+    printf '%s/%s.plist\n' "$LAUNCH_AGENTS_DIR" "$(field "$1" .label)"
+  else
+    printf '%s/%s.service\n' "$SYSTEMD_USER_DIR" "$(field "$1" .label)"
+  fi
+}
+
+# rendered_service ENTRY: the service's definition for this platform, rendered
+# from the entry, so a plist and a unit can never disagree about a service.
+# Every `~/` becomes the absolute $HOME (no service manager expands ~).
+#
+# THE PROGRAM IS RUN THROUGH /usr/bin/env ON BOTH PLATFORMS. On macOS the
+# background task manager names a login item by its program's code signature,
+# and a binary built here is only ad-hoc signed, so every rebuild read as a new
+# item and posted an "App Background Activity" notice; Apple-signed
+# /usr/bin/env never changes. A `command` service needs env to find its
+# program on PATH on either platform.
+#
+# A macOS SERVICE IS `ProcessType` `Standard`, NEVER `Background`: the live
+# editor waits on these services, and Background is darwinbg (efficiency cores,
+# throttled disk I/O), which loses every I/O contention to a `nice 19` suite.
+rendered_service() {
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
+    --arg path "$(command_service_path)" --arg restart "$SERVICE_RESTART_SECONDS" --arg stop "$SERVICE_STOP_SECONDS" '
+    def home: gsub("~/"; $home + "/");
+    def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+    def unit: gsub("%"; "%%");
+    def word: "\"" + (gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\\$"; "$$") | unit) + "\"";
+    (if .command then .command else $cache + "/bin/" + .binary end) as $program
+    | (["/usr/bin/env", $program] + .args | map(home)) as $argv
+    | ((if .command then {PATH: $path} else {} end) + ((.env // {}) | map_values(home))) as $env
+    | ($cache + "/log/" + .log.stdout) as $out | ($cache + "/log/" + .log.stderr) as $err
+    | "Rendered by bin/requirements.sh from the \(.id) entry of its requirements.json; change that entry, never this file." as $note
+    | if $platform == "darwin" then
+        ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+         "<!-- \($note | xml) -->",
+         "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+         "<plist version=\"1.0\">", "<dict>",
+         "    <key>Label</key>", "    <string>\(.label | xml)</string>",
+         "    <key>ProgramArguments</key>", "    <array>",
+         ($argv[] | "        <string>\(xml)</string>"),
+         "    </array>",
+         (if ($env | length) > 0 then
+            "    <key>EnvironmentVariables</key>", "    <dict>",
+            ($env | to_entries[] | "        <key>\(.key | xml)</key>", "        <string>\(.value | xml)</string>"),
+            "    </dict>"
+          else empty end),
+         "    <key>RunAtLoad</key>", "    <true/>",
+         "    <key>KeepAlive</key>", "    <true/>",
+         "    <key>ThrottleInterval</key>", "    <integer>\($restart)</integer>",
+         "    <key>ExitTimeOut</key>", "    <integer>\($stop)</integer>",
+         "    <key>ProcessType</key>", "    <string>Standard</string>",
+         "    <key>StandardOutPath</key>", "    <string>\($out | xml)</string>",
+         "    <key>StandardErrorPath</key>", "    <string>\($err | xml)</string>",
+         "</dict>", "</plist>"]
+      else
+        ["# \($note)",
+         "[Unit]", "Description=agent-repl \(.label)",
+         "", "[Service]",
+         "ExecStart=\($argv | map(word) | join(" "))",
+         ($env | to_entries[] | "Environment=\((.key + "=" + .value) | word)"),
+         "Restart=always", "RestartSec=\($restart)", "TimeoutStopSec=\($stop)",
+         "StandardOutput=append:\($out | unit)", "StandardError=append:\($err | unit)",
+         "", "[Install]", "WantedBy=default.target"]
+      end | .[]'
+}
+
+# service_held ENTRY: 0 when the platform's service manager is keeping the
+# service running.
+service_held() {
+  local label
+  label="$(field "$1" .label)"
+  if [ "$(platform)" = darwin ]; then
+    "$LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1
+  else
+    "$SYSTEMCTL" --user is-active --quiet "$label.service" >/dev/null 2>&1
+  fi
+}
 
 # service_files ENTRY: one "FROM<tab>TO" line per file a service copies from
 # the module into the cache.
 service_files() { printf '%s\n' "$1" | jq -r '(.files // [])[] | "\(.from)\t\(.to)"'; }
 
-check_launchd_service() {
+check_service() {
   local e="$1" label command binary dest from to stale=""
   label="$(field "$e" .label)"
   command="$(field "$e" .command)"
-  dest="$LAUNCH_AGENTS_DIR/$label.plist"
+  dest="$(service_definition "$e")"
   if [ -n "$command" ]; then
-    FIX="install $command, install $dest, and bootstrap $label"
+    FIX="install $command, install $dest, and start $label"
   else
     binary="$CACHE_ROOT/bin/$(field "$e" .binary)"
-    FIX="build $(field "$e" .build_target) with bin/build-frontend.sh, install $dest, and bootstrap $label"
+    FIX="build $(field "$e" .build_target) with bin/build-frontend.sh, install $dest, and start $label"
   fi
   while IFS=$'\t' read -r from to; do
     [ -n "$from" ] || continue
     cmp -s "$MODULE_DIR/$from" "$CACHE_ROOT/$to" || stale="$stale $to"
   done < <(service_files "$e")
-  if [ -n "$command" ] && ! command -v "$command" >/dev/null 2>&1; then
+  if [ -n "$command" ] && ! find_program "$command" >/dev/null; then
     STATUS=missing; DETAIL="$command is not on PATH"
   elif [ -z "$command" ] && [ ! -x "$binary" ]; then
     STATUS=missing; DETAIL="$binary is not built"
   elif [ ! -f "$dest" ]; then
     STATUS=missing; DETAIL="$dest is not installed"
-  elif ! rendered_plist "$e" | cmp -s - "$dest"; then
-    STATUS=outdated; DETAIL="$dest differs from $(field "$e" .plist)"
+  elif ! rendered_service "$e" | cmp -s - "$dest"; then
+    STATUS=outdated; DETAIL="$dest differs from the $(field "$e" .id) entry's rendering"
   elif [ -n "$stale" ]; then
     STATUS=outdated; DETAIL="$CACHE_ROOT lacks the module's copy of$stale"
-  elif ! "$LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1; then
-    STATUS=missing; DETAIL="$label is not loaded"
+  elif ! service_held "$e"; then
+    STATUS=missing; DETAIL="$label is not running under the service manager"
   else
-    STATUS=ok; DETAIL="$label loaded from $dest"
+    STATUS=ok; DETAIL="$label running from $dest"
   fi
 }
 
@@ -721,6 +858,8 @@ install_program() {
       os_install "$pm" $pkgs
     elif [ -n "$goi" ]; then
       go install "$goi"
+    elif [ -n "$(field "$e" .install.release.file)" ]; then
+      install_release "$e"
     else
       return 1
     fi
@@ -745,6 +884,47 @@ install_program() {
   else
     return 1
   fi
+}
+
+# install_release ENTRY: install the program from the release its entry pins
+# for this machine: download the archive, check it against the pinned sha256,
+# unpack it, and put its `file` into the user's bin dir under the entry's
+# command name. Nothing reaches the bin dir unless the archive is the one
+# pinned: a changed upstream copy is an entry to re-pin, never a file to run.
+install_release() {
+  local e="$1" id m url want have file cmd work
+  id="$(field "$e" .id)"
+  m="$(machine)"
+  url="$(field "$e" ".install.release[\"$m\"].url")"
+  want="$(field "$e" ".install.release[\"$m\"].sha256")"
+  file="$(field "$e" .install.release.file)"
+  cmd="$(field "$e" .command)"
+  if [ -z "$url" ]; then
+    err "install: $id: no release is pinned for $m; add install.release.$m to its manifest entry"; return 1
+  fi
+  work="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-release.XXXXXX")" || { err "install: $id: no temporary directory could be made"; return 1; }
+  if ! curl -fsSL --retry 2 -o "$work/archive.tar.gz" "$url"; then
+    err "install: $id: downloading $url failed"; rm -rf "$work"; return 1
+  fi
+  have="$(sha256_of "$work/archive.tar.gz")"
+  if [ "$have" != "$want" ]; then
+    err "install: $id: $url has sha256 $have, not the pinned $want; the upstream copy changed, so re-pin the entry"; rm -rf "$work"; return 1
+  fi
+  mkdir -p "$work/unpacked"
+  if ! tar -xzf "$work/archive.tar.gz" -C "$work/unpacked"; then
+    err "install: $id: $url is not a tar.gz tar can unpack"; rm -rf "$work"; return 1
+  fi
+  if [ ! -f "$work/unpacked/$file" ]; then
+    err "install: $id: $url holds no $file; fix the entry's install.release.file"; rm -rf "$work"; return 1
+  fi
+  mkdir -p "$BIN_DIR"
+  # Written beside its final name and renamed, so a running copy is never
+  # truncated and a failed copy never leaves half a program.
+  if ! cp "$work/unpacked/$file" "$BIN_DIR/.$cmd.new" || ! chmod 755 "$BIN_DIR/.$cmd.new" || ! mv -f "$BIN_DIR/.$cmd.new" "$BIN_DIR/$cmd"; then
+    err "install: $id: installing $file as $BIN_DIR/$cmd failed"; rm -f "$BIN_DIR/.$cmd.new"; rm -rf "$work"; return 1
+  fi
+  rm -rf "$work"
+  say "install: $id: installed $BIN_DIR/$cmd from $url"
 }
 
 install_emacs() {
@@ -923,16 +1103,15 @@ install_git_hook() {
   chmod +x "$HOOK_DEST"
 }
 
-install_launchd_service() {
+install_service() {
   local e="$1" label dest uid
   label="$(field "$e" .label)"
-  dest="$LAUNCH_AGENTS_DIR/$label.plist"
-  uid="$(id -u)"
-  # launchd creates none of these, and the services bind sockets and open
+  dest="$(service_definition "$e")"
+  # No service manager creates these, and the services bind sockets and open
   # their logs and databases in them.
-  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$LAUNCH_AGENTS_DIR"
+  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$(dirname "$dest")"
   if [ -n "$(field "$e" .command)" ]; then
-    if ! command -v "$(field "$e" .command)" >/dev/null 2>&1; then
+    if ! find_program "$(field "$e" .command)" >/dev/null; then
       err "install: $(field "$e" .id): $(field "$e" .command) is not on PATH; install it first"; return 1
     fi
   else
@@ -944,12 +1123,22 @@ install_launchd_service() {
     mkdir -p "$(dirname "$CACHE_ROOT/$to")"
     cp "$MODULE_DIR/$from" "$CACHE_ROOT/$to"
   done < <(service_files "$e")
-  rendered_plist "$e" >"$dest"
-  if "$LAUNCHCTL" print "gui/$uid/$label" >/dev/null 2>&1; then
-    "$LAUNCHCTL" bootout "gui/$uid" "$dest"
+  rendered_service "$e" >"$dest"
+  if [ "$(platform)" = darwin ]; then
+    uid="$(id -u)"
+    if service_held "$e"; then
+      "$LAUNCHCTL" bootout "gui/$uid" "$dest"
+    fi
+    "$LAUNCHCTL" bootstrap "gui/$uid" "$dest"
+    "$LAUNCHCTL" kickstart -k "gui/$uid/$label"
+  else
+    # daemon-reload has systemd read the unit just written; enable starts it
+    # at every login; restart runs it now, from the new unit, whether or not
+    # it was running.
+    "$SYSTEMCTL" --user daemon-reload || { err "install: $(field "$e" .id): systemctl --user daemon-reload failed"; return 1; }
+    "$SYSTEMCTL" --user enable "$label.service" || { err "install: $(field "$e" .id): systemctl --user enable $label.service failed"; return 1; }
+    "$SYSTEMCTL" --user restart "$label.service" || { err "install: $(field "$e" .id): systemctl --user restart $label.service failed"; return 1; }
   fi
-  "$LAUNCHCTL" bootstrap "gui/$uid" "$dest"
-  "$LAUNCHCTL" kickstart -k "gui/$uid/$label"
 }
 
 # fetch_download ENTRY WORK: download and unzip the entry's archive into WORK,
@@ -1023,14 +1212,20 @@ uninstall_entry() {
       elif [ -f "$HOOK_DEST" ] && is_managed_hook "$e" "$HOOK_DEST"; then
         rm -f "$HOOK_DEST"; say "uninstall: removed $HOOK_DEST"
       fi ;;
-    launchd_service)
+    service)
       label="$(field "$e" .label)"
-      dest="$LAUNCH_AGENTS_DIR/$label.plist"
-      uid="$(id -u)"
-      if "$LAUNCHCTL" print "gui/$uid/$label" >/dev/null 2>&1; then
-        "$LAUNCHCTL" bootout "gui/$uid" "$dest"; say "uninstall: booted out $label"
+      dest="$(service_definition "$e")"
+      if [ "$(platform)" = darwin ]; then
+        if service_held "$e"; then
+          "$LAUNCHCTL" bootout "gui/$(id -u)" "$dest"; say "uninstall: booted out $label"
+        fi
+        if [ -f "$dest" ]; then rm -f "$dest"; say "uninstall: removed $dest"; fi
+      elif [ -f "$dest" ]; then
+        "$SYSTEMCTL" --user disable --now "$label.service" || err "uninstall: systemctl --user disable --now $label.service failed"
+        say "uninstall: stopped and disabled $label"
+        rm -f "$dest"; say "uninstall: removed $dest"
+        "$SYSTEMCTL" --user daemon-reload || err "uninstall: systemctl --user daemon-reload failed"
       fi
-      if [ -f "$dest" ]; then rm -f "$dest"; say "uninstall: removed $dest"; fi
       if [ -n "$(field "$e" .binary)" ] && [ -f "$CACHE_ROOT/bin/$(field "$e" .binary)" ]; then
         rm -f "$CACHE_ROOT/bin/$(field "$e" .binary)"; say "uninstall: removed $CACHE_ROOT/bin/$(field "$e" .binary)"
       fi

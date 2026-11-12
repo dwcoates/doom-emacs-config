@@ -164,7 +164,7 @@ How each kind of entry point routes through it:
     `agent-repld test run`, which runs them inside the helper.
 - The e2e sandbox entrypoint execs every command through the helper.
 - The live runtime and the deploy builds (the daemon's deploy, `build-frontend.sh`,
-  `launchd/`, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
+  the services `bin/requirements.sh` renders, the non-test `lisp/*.el`, npm `build`/`dev`) are NEVER demoted.
 
 `bin/test-background.sh` (the `background-harness` suite) scans the repository
 and fails on any entry point that bypasses the helper, and on any live-runtime
@@ -1905,14 +1905,18 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - Linux uses the distribution's, the first of `apt`, `dnf`, `pacman` and `zypper` on PATH, so no distribution is singled out.
   - A `program` names its package for each under `install` (a name, or a list when one tool takes several packages), and `go_install` or `manual` only where no package manager carries it.
   - A Linux install runs through sudo, which asks for a password only on a terminal; an install it cannot run says so, with the command for the user to run.
+  - A program some Linux distribution does not package names a pinned `release` instead (VictoriaMetrics, which Fedora lacks, and whose Debian package starts a system-wide copy on the same port): the publisher's archive for each machine (`linux-arm64`, `linux-amd64`), its sha256, and the `file` inside it. Install checks the archive against the pin and puts the program into the user's bin dir; an archive that differs is refused, and the fix is a new pin.
+  - A program is looked for on PATH and then in the user's bin dir (`~/.local/bin`), where a release and the Linux Emacs build are installed. Whether that dir is on the user's PATH is the `command_link` entry's to report, once.
   - A Linux machine whose package manager an entry has no package for reports the entry `missing` with "add install.<manager>": the manifest is inadequate, and the fix is the missing package name.
-- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `command_link`, `git_hook`, `launchd_service`, `download`), and checks and installs each kind one way.
+- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
-- **A `launchd_service` names where its program comes from.**
-  - `build_target` and `binary`: built here by `bin/build-frontend.sh` into the cache (the store, the sidecar).
-  - `command`: an installed program, declared by its own `program` entry that installs it (VictoriaMetrics, `victoria-metrics`). The plist reaches it through `/usr/bin/env` with a `PATH` that includes Homebrew's prefixes, since launchd's own `PATH` does not.
+- **A `service` is one entry the runner renders for the platform's service manager**: a launchd plist on macOS, a systemd user unit on Linux (`services/AGENTS.md`). No plist or unit is checked in.
+  - `build_target` and `binary`: its program is built here by `bin/build-frontend.sh` into the cache (the store, the sidecar, zettel).
+  - `command`: its program is an installed one, declared by its own `program` entry that installs it (VictoriaMetrics, `victoria-metrics`), and found on a `PATH` the renderer states.
+  - `args`, `env` and `log`: its arguments, environment and log files, each `~/` made absolute.
   - `files`: config copied from the module into the cache (`from` module-relative, `to` cache-relative). A copy that differs reads as `outdated`, and install copies it again and restarts the service.
+  - A service lists both platforms; `bin/test-requirements.sh` refuses one left to a single platform.
 - **The `emacs` entry pins zettel-emacs, a fork of Emacs carrying the patches agent-repl needs.**
   - `revision` is the fork's commit, and check compares it to the installed Emacs's `emacs-repository-version`; `configuration_features` must all appear in its `system-configuration-features`.
   - `install.source` builds that commit with one build block per platform (`darwin`, `linux`): the block's `deps` for this machine's package manager first, then `autogen.sh`, `configure` with the block's arguments, `make` and `make install`, in a checkout under the cache (`src/<repo>`).

@@ -128,7 +128,7 @@ func TestTheStoreFileNamesTheStoreTheServiceRuns(t *testing.T) {
 	if err := json.Unmarshal([]byte(read("metrics/store.json")), &store); err != nil {
 		t.Fatalf("decode metrics/store.json: %v", err)
 	}
-	listen := regexp.MustCompile(`-httpListenAddr=([0-9.]+:[0-9]+)`).FindStringSubmatch(read("launchd/com.agentrepl.victoriametrics.plist"))
+	listen := regexp.MustCompile(`-httpListenAddr=([0-9.]+:[0-9]+)`).FindStringSubmatch(read("metrics/requirements.json"))
 	job := regexp.MustCompile(`(?m)^\s*-\s*job_name:\s*(\S+)`).FindStringSubmatch(read("metrics/scrape.yml"))
 
 	// Act

@@ -693,9 +693,10 @@ var daemonUnitInputs = map[string][]string{
 // unplaced until someone decides who tests it.
 var AlwaysRunRegions = []string{
 	// The module's scripts and what their harnesses and the e2e suites read.
-	"bin/", "scripts/", "skills/", "hooks/", "launchd/", "images/", "testdata/",
+	"bin/", "scripts/", "skills/", "hooks/", "services/", "images/", "testdata/",
 	// The metrics store's manifest and scrape config, which the requirements
-	// harness reads and installs, as it does launchd/'s plists.
+	// harness reads and installs, as it renders every service's definition
+	// (services/ documents them).
 	"metrics/",
 	// The proto suite (proto/scripts/test-validate.sh) reads the
 	// contract's sources; the keyed suites read what they import of

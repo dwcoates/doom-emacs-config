@@ -247,7 +247,7 @@
               "--without-dbus",
               "--disable-gc-mark-trace",
               "--prefix={home}/.local",
-              "CFLAGS=-O3 -march=native"
+              "CFLAGS=-O3"
             ]
           }
         }

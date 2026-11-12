@@ -40,14 +40,30 @@
     },
     {
       "id": "service-shim-claude-sidecar",
-      "kind": "launchd_service",
-      "why": "watches Claude transcripts and spools into the store, kept running by launchd",
+      "kind": "service",
+      "why": "watches Claude transcripts and spools into the store, kept running by the platform's service manager",
       "profile": "run",
       "platforms": [
-        "darwin"
+        "darwin",
+        "linux"
       ],
       "label": "com.agentrepl.shim-claude-sidecar",
-      "plist": "launchd/com.agentrepl.shim-claude-sidecar.plist",
+      "args": [
+        "--store-socket",
+        "~/.cache/agent-repl/sock/store.sock",
+        "--config-roots",
+        "~/.claude,~/.claude-chesscom",
+        "--spool-root",
+        "/tmp",
+        "--state-dir",
+        "~/.claude-emacs",
+        "--metrics-root",
+        "~/.cache/agent-repl/metrics"
+      ],
+      "log": {
+        "stdout": "shim-claude-sidecar.out.log",
+        "stderr": "shim-claude-sidecar.err.log"
+      },
       "build_target": "sidecar",
       "binary": "shim-claude-sidecar"
     }
