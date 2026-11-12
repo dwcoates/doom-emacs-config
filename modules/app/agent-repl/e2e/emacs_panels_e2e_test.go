@@ -147,49 +147,6 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		})
 }
 
-// testEmacsFocusInputSelectsTheComposer is scenario 17.
-func testEmacsFocusInputSelectsTheComposer(t *testing.T) {
-	w, _ := emacsPanelWorld(t, 1)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-
-	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	openPanel(e)
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-
-	want := e.AwaitEvalFor(panelSettleBound, "the workspace's input buffer to exist",
-		`(let ((buf (agent-repl--input-buffer `+elispString(current)+`))) (and buf (buffer-name buf)))`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-	var inputBuffer string
-	if err := json.Unmarshal(want, &inputBuffer); err != nil {
-		t.Fatalf("decode the input buffer name: %v", err)
-	}
-
-	// Select the WEBVIEW window, which is the one window on the frame that is
-	// not the composer. `(car (window-list))` is the SELECTED window by
-	// definition, so the old arrangement moved nothing: once the open's own
-	// mount had selected the composer — which it does, and under load it wins
-	// the race — the press landed in the jump-back branch rather than the
-	// show-or-focus branch this scenario is about.
-	e.AwaitEvalFor(panelSettleBound, "the workspace's webview window to be on the frame",
-		`(let ((buf (agent-repl--ws-get `+elispString(current)+` :frontend-buffer)))
-                   (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)) t))`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-	e.Eval(`(progn (select-window (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))) t)`)
-
-	if want, got := "agent-repl-focus-input", e.LeaderBinding("o v"); got != want {
-		t.Fatalf("SPC o v resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
-	}
-	e.Leader("o v")
-
-	e.AwaitEvalFor(panelSettleBound, "the composer window to be selected",
-		`(buffer-name (window-buffer (selected-window)))`,
-		func(raw json.RawMessage) bool {
-			var name string
-			return json.Unmarshal(raw, &name) == nil && name == inputBuffer
-		})
-}
-
 // testEmacsFullscreenTogglesAndRestores is scenario 18.
 //
 // The command has two branches and only the non-agent one maximizes, so the

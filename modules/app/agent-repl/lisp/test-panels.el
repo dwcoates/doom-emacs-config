@@ -5107,3 +5107,15 @@ answered as held.  The frame's windows are restored afterwards."
         (agent-repl))
       ;; Assert
       (should (equal agent-repl-roster--tab-order '("other-a" "gui-ws" "other-b"))))))
+
+(ert-deftest agent-repl-test-panels-focus-input-from-the-webview-selects-the-composer ()
+  "`SPC o v' pressed in the webview window selects the composer window."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (agent-repl-simple)
+    (select-window (get-buffer-window (agent-repl--ws-get "gui-ws" :frontend-buffer)))
+    ;; Act
+    (agent-repl-focus-input)
+    ;; Assert
+    (should (eq (window-buffer (selected-window))
+                (agent-repl--ws-get "gui-ws" :input-buffer)))))
