@@ -5119,3 +5119,63 @@ answered as held.  The frame's windows are restored afterwards."
     ;; Assert
     (should (eq (window-buffer (selected-window))
                 (agent-repl--ws-get "gui-ws" :input-buffer)))))
+
+(defun agent-repl-test-panels--window-buffer-names ()
+  "Return the frame's window list as buffer names, in window order."
+  (mapcar (lambda (win) (buffer-name (window-buffer win))) (window-list)))
+
+(ert-deftest agent-repl-test-panels-the-plain-close-restores-the-work-layout-it-covered ()
+  "Panels opened over a two-window work layout close back to that layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((a (get-buffer-create "*fs-work-a*")) (b (get-buffer-create "*fs-work-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            (let ((before (agent-repl-test-panels--window-buffer-names)))
+              (agent-repl-simple)
+              ;; Act
+              (agent-repl-simple)
+              ;; Assert
+              (should (equal (agent-repl-test-panels--window-buffer-names) before))))
+        (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-fullscreen-maximizes-the-selected-work-window-alone ()
+  "`SPC w f' from a work window leaves exactly that window and saves a layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl--window-fullscreen-config nil)
+          (a (get-buffer-create "*fs-max-a*")) (b (get-buffer-create "*fs-max-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            ;; Act
+            (agent-repl-fullscreen-and-focus)
+            ;; Assert
+            (should agent-repl--window-fullscreen-config)
+            (should (equal (agent-repl-test-panels--window-buffer-names) '("*fs-max-b*"))))
+        (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-fullscreen-second-press-restores-the-same-windows-in-order ()
+  "The second `SPC w f' brings back the same buffers in the same order and drops the saved layout."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((agent-repl--window-fullscreen-config nil)
+          (a (get-buffer-create "*fs-res-a*")) (b (get-buffer-create "*fs-res-b*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer a)
+            (select-window (split-window))
+            (switch-to-buffer b)
+            (let ((before (agent-repl-test-panels--window-buffer-names)))
+              (agent-repl-fullscreen-and-focus)
+              ;; Act
+              (agent-repl-fullscreen-and-focus)
+              ;; Assert
+              (should-not agent-repl--window-fullscreen-config)
+              (should (equal (agent-repl-test-panels--window-buffer-names) before))))
+        (kill-buffer a) (kill-buffer b)))))

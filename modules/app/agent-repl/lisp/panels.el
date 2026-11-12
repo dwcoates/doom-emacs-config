@@ -1882,10 +1882,21 @@ took the main area before the view saved, so the saved layout WAS the
 placeholder, the close restored it after the placeholder was killed,
 and Emacs filled the window with the webview -- which the layout
 reconciler then remounted the composer beside, so a close undid itself."
-  (if (agent-repl--panels-cover-frame-p ws)
-      (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site)
+  (cond
+   ((agent-repl--panels-cover-frame-p ws)
+    (agent-repl--log ws "%s: kept-fullscreen-layout reason=panels-cover-frame" site))
+   ;; The placeholder takes ONE window, so the user's other windows still
+   ;; stand beside it and the frame is not "covered" -- but the layout the
+   ;; placeholder saved is exactly the frame under it.  Saving again here
+   ;; recorded the placeholder's own window as the layout to restore.
+   ((let ((placeholder (and (fboundp 'agent-repl--open-progress-placeholder)
+                            (agent-repl--open-progress-placeholder ws))))
+      (and placeholder (get-buffer-window placeholder)
+           (window-configuration-p (agent-repl--ws-get ws :fullscreen-config))))
+    (agent-repl--log ws "%s: kept-fullscreen-layout reason=placeholder-saved-it" site))
+   (t
     (agent-repl--ws-put ws :fullscreen-config (agent-repl-window--save-configuration))
-    (agent-repl--log ws "%s: saved-fullscreen-layout" site)))
+    (agent-repl--log ws "%s: saved-fullscreen-layout" site))))
 
 (defun agent-repl--panels-cover-frame-p (ws)
   "Return non-nil when WS's own panels are all this frame's main area holds.
