@@ -5179,3 +5179,28 @@ answered as held.  The frame's windows are restored afterwards."
               (should-not agent-repl--window-fullscreen-config)
               (should (equal (agent-repl-test-panels--window-buffer-names) before))))
         (kill-buffer a) (kill-buffer b)))))
+
+(ert-deftest agent-repl-test-panels-delete-other-windows-over-panels-keeps-the-users-window-through-the-close ()
+  "A sweep from the composer, repaired by the reconciler, closes onto the user's own window.
+The landing the panels were first opened over must not come back over it."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    (let ((landing (get-buffer-create "*dow-landing*"))
+          (work (get-buffer-create "*dow-work*")))
+      (unwind-protect
+          (progn
+            (switch-to-buffer landing)
+            (agent-repl-simple)
+            (select-window (get-buffer-window (agent-repl--ws-get "gui-ws" :input-buffer)))
+            (delete-other-windows)
+            (switch-to-buffer work)
+            ;; The reconciler's repair, which a timer runs in a live Emacs.
+            (agent-repl-window--ensure-layout)
+            (should (= (agent-repl-test-panels--panel-window-count) 2))
+            ;; Act
+            (agent-repl-simple)
+            ;; Assert
+            (should (= (agent-repl-test-panels--panel-window-count) 0))
+            (should (get-buffer-window work))
+            (should-not (get-buffer-window landing)))
+        (kill-buffer landing) (kill-buffer work)))))
