@@ -124,13 +124,13 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// must be impossible, and the write path is where that is decided.
 	//
 	// The CreateWorkspace endpoint has always resolved its RepositoryRef
-	// against the registry and refused a miss on this same arm, but it is only
-	// ONE of three ways into this verb. The COMMAND-FILE channel supplies a
-	// bare `git_root` an agent wrote into a file (internal/commandfile), and
-	// the support-workspace verb derives its dir from a record; neither passed
-	// through that lookup, so a create naming any directory on disk minted a
-	// brand-new repository row for it. Putting the check on the verb makes the
-	// endpoint's lookup a redundancy rather than the only guard.
+	// against the registry and refused a miss on this same arm, but it is not
+	// the only way into this verb. The intake, support-workspace and
+	// merge-workspace verbs each derive their dir from a spec or a record and
+	// never pass through that lookup, so without this check a create naming
+	// any directory on disk would mint a brand-new repository row for it.
+	// Putting the check on the verb makes the endpoint's lookup a redundancy
+	// rather than the only guard.
 	//
 	// It is a REFUSAL and not a mint because the roster's repository sections
 	// are the create targets: a repository nothing has registered is not one
@@ -138,8 +138,8 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// A TEMPORARY REPOSITORY IS REFUSED BY NAME, ahead of the registry miss
 	// it would otherwise be: the registry refuses every temporary directory
 	// (owner ruling, 2026-10-06), so no such repository is registered, and a
-	// command-file create naming a scratch folder is told WHY rather than
-	// that nothing is registered there. The check is the registry's own.
+	// create naming a scratch folder is told WHY rather than that nothing is
+	// registered there. The check is the registry's own.
 	if err := v.deps.DB.RefuseTemporary(repoDir); err != nil {
 		if refused := temporaryRefusal(global, "CreateWorkspace", err); refused != nil {
 			return wsm.Workspace{}, refused
@@ -1174,9 +1174,9 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 	return nil
 }
 
-// SaidText composes the one canonical prompt form from plain text. It is
-// exported because the command-file ingress composes prompts the same way, and
-// two spellings of "the user said this" would drift.
+// SaidText composes the one canonical prompt form from plain text, for the
+// verbs that prompt a workspace with a text of their own, so two spellings of
+// "the user said this" cannot drift.
 //
 // THE COMPOSITION ITSELF LIVES IN THE FEED PACKAGE, which draws a fork's
 // ported prompt rows from the same shape and cannot import this one. This is
