@@ -1408,3 +1408,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-11 lid-closed-quiet-mode (landed in queue bypass mode): persistent Wi-Fi: closing the lid enters a quiet mode (listed apps frozen, drawing stopped, display asleep, Spotlight excluded), with a thaw guard
 - 2026-11-11 per-unit-test-reuse (landed in queue bypass mode): testrun: daemon unit-test binaries build in one command per module, and a unit whose inputs are unchanged reuses its last green result
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): the suites are green on master again: the quiet-mode thaw guard meets the daemon's source scans, the shim's transcript lookup is no send, and the realtest harness no longer reads the host's free space
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A prompt sent through Remote Control while a turn runs no longer leaves the workspace stuck mid-turn, refusing local prompts.
