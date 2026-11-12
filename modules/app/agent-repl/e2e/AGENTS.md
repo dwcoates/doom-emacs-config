@@ -17,5 +17,5 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
   - Its steps run in order, each a function `testXxx(t *testing.T)` reported as the case `Scenario/Xxx`.
   - A step builds or takes its own world and owns its own workspaces, under the shared-fixture rule in `modules/app/agent-repl/AGENTS.md`.
 - `TestEveryStepRunsInExactlyOneScenario` and `TestEveryWorldBuildingTestIsAScenario` (`scenario_unit_test.go`) fail a step no scenario lists and a world-building test outside a scenario.
-- A step reruns alone by its path: `-go e2e=TestTurns/ContextUsage`, or `-harness bin/test-e2e-emacs.sh=TestEmacsLayout/EmacsFullscreenTogglesAndRestores` for the Emacs layer and the Doom tier.
+- A step reruns alone by its path: `-go e2e=TestTurns/ContextUsage`, or `-harness bin/test-e2e-emacs.sh=TestEmacsWorkspaces/EmacsProofOfLife` for the Emacs layer and the Doom tier.
 - Where new e2e coverage goes is the `agent-repl-tests` skill's rule ("E2E coverage is a step of a scenario").

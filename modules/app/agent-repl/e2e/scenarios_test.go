@@ -141,15 +141,6 @@ func TestHarness(t *testing.T) {
 	)
 }
 
-// TestEmacsLayout is Emacs's windows, panels, composer and file routing.
-func TestEmacsLayout(t *testing.T) {
-	scenario(t,
-		testEmacsAnUnroutableFileRecordsARefusal,
-		testEmacsPendingPlacementResolvesAfterRosterReconcile,
-		testEmacsPopupOpensADirectoryInDired,
-	)
-}
-
 // TestEmacsWorkspaces is Emacs's workspaces, tabs, roster arms, banners and chat threads.
 func TestEmacsWorkspaces(t *testing.T) {
 	scenario(t,

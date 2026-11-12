@@ -516,6 +516,126 @@ itself forever and wedge Emacs."
           (should (zerop (hash-table-count agent-repl--ffw-pending)))
           (should (zerop (hash-table-count agent-repl--ffw-refused))))))))
 
+;;;; ---- A visit through the real display advice ----
+
+(defmacro agent-repl-test--ffw-with-visit (var name &rest body)
+  "Run BODY with VAR a file buffer for NAME under home on a one-window frame.
+Every table the routing keeps is fresh, and the frame's windows return after."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (agent-repl-test--ffw-with-pending
+       (agent-repl-test--ffw-with-file-buffer ,var ,name
+         (agent-repl-test--ffw-with-one-window
+           ,@body)))))
+
+(ert-deftest agent-repl-test-ffw-a-visit-whose-create-is-refused-records-one-refusal ()
+  "A root no workspace owns, whose create verb refuses, is recorded as refused."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/orphan.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function
+            (lambda (_root) (error "the workspace could not be created")))
+           (persp-names-cache nil))
+      ;; Act
+      (switch-to-buffer buf)
+      ;; Assert
+      (should (equal (hash-table-keys agent-repl--ffw-refused) (list root))))))
+
+(ert-deftest agent-repl-test-ffw-a-refused-visit-still-displays-the-file ()
+  "The file is never lost: a refused routing falls through to ordinary display."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/orphan.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function
+            (lambda (_root) (error "the workspace could not be created")))
+           (persp-names-cache nil))
+      ;; Act
+      (switch-to-buffer buf)
+      ;; Assert
+      (should (get-buffer-window buf t)))))
+
+(ert-deftest agent-repl-test-ffw-a-refused-visit-lands-in-an-ordinary-window ()
+  "The fallen-through file's window is not a side window."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/orphan.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function
+            (lambda (_root) (error "the workspace could not be created")))
+           (persp-names-cache nil))
+      ;; Act
+      (switch-to-buffer buf)
+      ;; Assert
+      (should-not (window-parameter (get-buffer-window buf t) 'window-side)))))
+
+(ert-deftest agent-repl-test-ffw-a-refused-visit-warns-with-the-root-and-the-cause ()
+  "The refusal is logged at the warning rung, naming the root and the verb's error."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/orphan.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function
+            (lambda (_root) (error "the workspace could not be created")))
+           (persp-names-cache nil)
+           (warnings nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (agent-repl-test--record-into warnings)))
+        ;; Act
+        (switch-to-buffer buf)
+        ;; Assert
+        (should (cl-some (lambda (line)
+                           (and (string-match-p "verb refused" line)
+                                (string-match-p (regexp-quote root) line)
+                                (string-match-p "could not be created" line)))
+                         warnings))))))
+
+(ert-deftest agent-repl-test-ffw-a-visit-whose-tab-is-missing-holds-one-placement ()
+  "A create verb that answers but opens no tab leaves the placement held, not refused."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/later.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function (lambda (_root) nil))
+           (persp-names-cache nil))
+      ;; Act
+      (switch-to-buffer buf)
+      ;; Assert
+      (should (equal (hash-table-keys agent-repl--ffw-pending) (list root)))
+      (should (zerop (hash-table-count agent-repl--ffw-refused))))))
+
+(ert-deftest agent-repl-test-ffw-a-held-placement-shows-the-file-nowhere-meanwhile ()
+  "The held file is deliberately displayed in no window until its tab arrives."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/later.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function (lambda (_root) nil))
+           (persp-names-cache nil))
+      ;; Act
+      (switch-to-buffer buf)
+      ;; Assert
+      (should-not (get-buffer-window buf t)))))
+
+(ert-deftest agent-repl-test-ffw-the-roster-push-that-opens-the-tab-drains-the-placement ()
+  "A roster reconcile that brings the tab drains the held placement and shows the file."
+  ;; Arrange
+  (agent-repl-test--ffw-with-visit buf "ffw-repo/later.txt"
+    (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+           (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+           (agent-repl-find-file-workspace-create-function (lambda (_root) nil))
+           (persp-names-cache nil))
+      (switch-to-buffer buf)
+      (agent-repl--ws-put "ffw-ws" :project-dir root)
+      (setq persp-names-cache '("ffw-ws"))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--ws-switch) (lambda (_ws &rest _) nil)))
+        (run-hook-with-args 'agent-repl-roster-update-functions nil))
+      ;; Assert
+      (should (zerop (hash-table-count agent-repl--ffw-pending)))
+      (should (get-buffer-window buf t)))))
+
 (provide 'test-find-file-workspace)
 
 ;;; test-find-file-workspace.el ends here

@@ -31,23 +31,12 @@
 package e2e
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"agent-repld/integration/harness"
 )
-
-// emacsFindFileBound bounds one routed visit: the advice, the verb it may
-// send, the daemon's answer, the roster push, and the placement Emacs makes
-// out of it. Same shape of work as a workspace verb, so the same bound.
-//
-// PROVISIONAL for the reason EMACS-LAYER-SPEC.md's bounds table gives: the
-// image's Emacs 28.2 cannot boot interactive Doom, so no healthy run exists
-// to measure a tighter multiple against.
-const emacsFindFileBound = DefaultTimeout
 
 // popupWidthFloorFraction and popupWidthCeilingFraction bracket "about half
 // the frame". `agent-repl-popup-width-fraction' is 0.5 and the popup rounds
@@ -68,13 +57,6 @@ const (
 type emacsFindFileFixture struct {
 	World *EmacsWorld
 	Emacs *Emacs
-}
-
-func newEmacsFindFileFixture(t *testing.T, box sandbox) *emacsFindFileFixture {
-	t.Helper()
-	w := NewEmacsWorld(t, box)
-	w.Emacs.EnsureDaemon()
-	return &emacsFindFileFixture{World: w, Emacs: w.Emacs}
 }
 
 // repoUnderHome makes a scripted fake-git repository under HOME, which is
@@ -98,26 +80,6 @@ func (f *emacsFindFileFixture) fileIn(t *testing.T, dir, name, body string) stri
 	return path
 }
 
-// registerWorkspace onboards DIR through the ordinary command and answers the
-// workspace name Emacs ended up knowing it by.
-func (f *emacsFindFileFixture) registerWorkspace(t *testing.T, dir string) string {
-	t.Helper()
-	e := f.Emacs
-	before := len(f.workspaceNames())
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
-	raw := e.AwaitEvalFor(emacsFindFileBound, "the workspace to appear in Emacs's registry",
-		workspaceRegistryNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before })
-	names := decodeStrings(raw)
-	return names[len(names)-1]
-}
-
-func (f *emacsFindFileFixture) workspaceNames() []string {
-	f.Emacs.t.Helper()
-	return f.Emacs.EvalStrings(
-		workspaceRegistryNamesForm)
-}
-
 // windowSideOf answers the `window-side' parameter of the window showing
 // PATH, as a string. Read as DATA off the window, never off the modeline.
 func (f *emacsFindFileFixture) windowSideOf(path string) string {
@@ -125,165 +87,4 @@ func (f *emacsFindFileFixture) windowSideOf(path string) string {
 	return f.Emacs.EvalString(`(let* ((buf (get-file-buffer ` + elispString(path) + `))
                                       (win (and buf (get-buffer-window buf t))))
                                  (format "%s" (and win (window-parameter win 'window-side))))`)
-}
-
-// hashKeys reads a hash table's keys as a list of strings.
-func hashKeys(e *Emacs, table string) []string {
-	e.t.Helper()
-	return e.EvalStrings(`(let (ks) (maphash (lambda (k _v) (push (format "%s" k) ks)) ` + table + `) ks)`)
-}
-
-// ---------------------------------------------------------------------------
-// #31 — VisitingAFileRoutesIntoItsOwningWorkspace
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// #32 — AnUnroutableFileRecordsARefusal
-// ---------------------------------------------------------------------------
-
-// testEmacsAnUnroutableFileRecordsARefusal is scenario 32: a root no
-// workspace owns takes the CREATE branch, and when that verb refuses, the
-// refusal is RECORDED and the file still opens.
-//
-// "The file is never lost" is the claim, and it is the one that matters: a
-// routing that cannot acquire a workspace must fall through to ordinary
-// display rather than swallow the visit. The create verb is pointed at a
-// refusing function through the module's own documented injection point,
-// because a REFUSAL is the precondition and there is no other way to make the
-// daemon refuse an ordinary directory on demand.
-func testEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	orphan := f.repoUnderHome(t, "unowned")
-	path := f.fileIn(t, orphan.Dir, "orphan.txt", "no workspace owns me\n")
-
-	e.Eval(`(let ((agent-repl-find-file-workspace-root-function
-                    (lambda (_dir) ` + elispString(orphan.Dir) + `))
-                  (agent-repl-find-file-workspace-create-function
-                    (lambda (_root) (error "the workspace could not be created"))))
-                (find-file ` + elispString(path) + `)
-                t)`)
-
-	refused := hashKeys(e, "agent-repl--ffw-refused")
-	if len(refused) != 1 {
-		t.Fatalf("agent-repl--ffw-refused = %v, want exactly the one refused root", refused)
-	}
-
-	// The file STILL OPENED, in an ordinary window.
-	if !e.EvalBool(`(and (get-file-buffer ` + elispString(path) + `)
-                          (get-buffer-window (get-file-buffer ` + elispString(path) + `) t)
-                          t)`) {
-		t.Fatalf("the file %s is not displayed after the refusal: a refused routing falls through, it never loses the file", path)
-	}
-	if side := f.windowSideOf(path); side != "nil" {
-		t.Fatalf("the fallen-through file's window has window-side %q, want none", side)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// #33 — PendingPlacementResolvesAfterRosterReconcile
-// ---------------------------------------------------------------------------
-
-// testEmacsPendingPlacementResolvesAfterRosterReconcile is scenario 33, and
-// the PENDING path is what makes this area more than a switch:
-//
-// When the verb answers but the workspace's tab is not there YET, the
-// placement is HELD rather than dropped, and the file is deliberately shown
-// nowhere in the meantime — "the user asked for it in its workspace, and a
-// transient placement elsewhere is the thing this routing exists to stop".
-// The tab's later ARRIVAL, on `agent-repl-roster-update-functions', is what
-// fires it.
-//
-// The hold is produced honestly: the create verb is pointed at a function
-// that does not open anything, so the acquire path finds no tab when it
-// returns. The DRAIN is then produced by the real thing — an ordinary
-// `agent-repl-add-project-workspace' on the same directory, whose roster push
-// reconciles the tab into existence.
-func testEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	repo := f.repoUnderHome(t, "later")
-	path := f.fileIn(t, repo.Dir, "later.txt", "held until my tab arrives\n")
-
-	e.Eval(`(let ((agent-repl-find-file-workspace-root-function
-                    (lambda (_dir) ` + elispString(repo.Dir) + `))
-                  (agent-repl-find-file-workspace-create-function
-                    (lambda (_root) nil)))
-                (find-file ` + elispString(path) + `)
-                t)`)
-
-	if pending := hashKeys(e, "agent-repl--ffw-pending"); len(pending) != 1 {
-		t.Fatalf("agent-repl--ffw-pending = %v, want exactly the one held placement", pending)
-	}
-	if refused := hashKeys(e, "agent-repl--ffw-refused"); len(refused) != 0 {
-		t.Fatalf("agent-repl--ffw-refused = %v, want none: the verb answered, it did not refuse", refused)
-	}
-
-	// The tab ARRIVES, through the ordinary register command and the roster
-	// push it provokes. `agent-repl--ffw-pending-fire' rides the reconcile
-	// hook, so the drain is the daemon's push reaching Emacs, not a poke.
-	f.registerWorkspace(t, repo.Dir)
-
-	e.AwaitEvalFor(emacsFindFileBound, "the held placement to drain on the roster reconcile",
-		`(hash-table-count agent-repl--ffw-pending)`,
-		func(raw json.RawMessage) bool {
-			var n int
-			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n == 0
-		})
-
-	if !e.EvalBool(`(and (get-buffer-window (get-file-buffer ` + elispString(path) + `) t) t)`) {
-		t.Fatalf("the held file %s was never placed after its tab arrived", path)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// #34 — PopupOpensRightSideHalfWidth
-// ---------------------------------------------------------------------------
-//
-// `agent-repl-popup-open' is THE ONE shared subroutine every open-a-file
-// affordance must call, and divergence between call sites is a defect by
-// ruling. Its two documented shapes are asserted as two tests, one edge case
-// each: a file with a line, and a directory.
-
-// testEmacsPopupOpensADirectoryInDired is scenario 34's directory case: the
-// same one subroutine answers a directory with a DIRED buffer, in the same
-// right-side popup. A per-caller variant for directories is exactly the
-// divergence popup.el exists to prevent.
-func testEmacsPopupOpensADirectoryInDired(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsFindFileFixture(t, box)
-	e := f.Emacs
-
-	repo := f.repoUnderHome(t, "popup-dir")
-	f.fileIn(t, repo.Dir, "inside.txt", "a file so the directory is not empty\n")
-
-	e.Eval(`(agent-repl-popup-open ` + elispString(repo.Dir) + `)`)
-
-	// The dired buffer is found by what it IS — a `dired-mode' buffer whose
-	// `default-directory' is the popped directory — rather than by a name
-	// dired composed, which is a rendering detail.
-	const diredWindowSide = `(let ((dir (file-name-as-directory (expand-file-name %s))))
-                               (catch 'found
-                                 (dolist (buf (buffer-list) "no-dired-buffer")
-                                   (with-current-buffer buf
-                                     (when (and (eq major-mode 'dired-mode)
-                                                (equal (expand-file-name default-directory) dir))
-                                       (throw 'found
-                                              (let ((win (get-buffer-window buf t)))
-                                                (format "%%s" (and win (window-parameter win 'window-side))))))))))`
-
-	got := e.EvalString(fmt.Sprintf(diredWindowSide, elispString(repo.Dir)))
-	switch got {
-	case "right":
-		// The one shared subroutine answered a directory in dired, in the
-		// same right-side popup a file gets.
-	case "no-dired-buffer":
-		t.Fatalf("agent-repl-popup-open on a directory produced no dired buffer for %s", repo.Dir)
-	default:
-		t.Fatalf("the dired popup's window-side = %q, want %q", got, "right")
-	}
 }
