@@ -868,6 +868,45 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 	}
 }
 
+// A PROMPT ADDRESSED AT A SETTLED SUBAGENT'S BUBBLE IS REFUSED not_deliverable,
+// by the shim's own verdict (a subagent has no SDK route for a prompt), relayed
+// by kind on SubmitPromptError.bubble_refused with the shim's words as detail.
+func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
+	row := awaitRow(t, f, feed, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent().GetSettled() != nil
+	})
+	const detail = "a subagent has no SDK route for a prompt"
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: detail,
+			Kind:   &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("are you still there?"), IdempotencyKey: "k-bubble-settled", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetNotDeliverable() == nil {
+		t.Fatalf("a submit to a settled subagent's bubble = %v, want error.bubble_refused{kind: not_deliverable}", resp)
+	}
+	if refused.GetDetail() != detail {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's own words %q", refused.GetDetail(), detail)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Slash commands
 // ---------------------------------------------------------------------------

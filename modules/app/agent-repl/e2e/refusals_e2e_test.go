@@ -154,40 +154,6 @@ func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, 
 // by the time the turn ends it is settled, never busy.
 // ===========================================================================
 
-func testBubbleRefusedNotDeliverable(t *testing.T) {
-	// Arrange: drive a synchronous subagent to completion, then find its
-	// settled bubble row.
-	w := SharedWorld(t)
-	// THE SHIM'S REFUSAL IS THE ASSERTION BELOW. A prompt addressed to a
-	// subagent has no SDK route at all, the shim answers `not_deliverable`,
-	// and the delivery path records that refusal on its way to the caller.
-	w.ExpectWarnings("daemon.promptqueue.deliver")
-	ws := w.NewWorkspace(t)
-
-	turn := SubmitPrompt(t, w, ws, "!subagent")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	bubble := rfAwaitFeedRow(t, w, ws, nil, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
-		s := rfSubagentOf(r)
-		return s != nil && s.GetSettled() != nil
-	})
-
-	// Act: address a fresh prompt at the now-idle subagent's own bubble.
-	resp, err := rfSubmitBubblePrompt(t, w, ws, bubble.GetId(), "are you still there?")
-
-	// Assert: SubmitPromptError.bubble_refused{not_deliverable}.
-	if err != nil {
-		t.Fatalf("SubmitPrompt(bubble) = error %v, want a typed SubmitPromptError", err)
-	}
-	refused := resp.Msg.GetError().GetBubbleRefused()
-	if refused == nil {
-		t.Fatalf("SubmitPrompt(bubble) = %v, want error.bubble_refused", resp.Msg)
-	}
-	if refused.GetNotDeliverable() == nil {
-		t.Fatalf("bubble_refused.kind = %v, want not_deliverable (settled subagent)", refused)
-	}
-}
-
 // ===========================================================================
 // #52 — BubbleRefusedAgentBusy
 //
