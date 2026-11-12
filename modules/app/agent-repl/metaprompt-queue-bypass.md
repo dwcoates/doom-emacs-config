@@ -37,5 +37,10 @@
 
 ### Tests
 
-- Run no tests before landing: no gate runs while the queue is stopped, and the change lands on its own review.
-  - Keep every test the change touches compiling, so the queue's gate can run the suite once the mode is released.
+- Run no gate before each landing: no gate runs while the queue is stopped, and each change lands on its own review.
+  - Run only the tests a change adds or changes while writing it, and keep every test it touches compiling.
+- Bypass queue mode never leaves the main branch broken.
+  - Once every change planned for this bypass session has landed, run the full suite once on the main branch: `agent-repld test run -every-suite`.
+  - Run it once for the whole session, after the last planned landing, never after each landing.
+  - Fix every failure it finds, land each fix the same way, and rerun only the cases that failed, until all of them pass.
+  - Never call the session's work done, or ask for the mode to be released, while the main branch fails a tracked test.
