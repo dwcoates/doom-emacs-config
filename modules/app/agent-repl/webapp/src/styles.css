@@ -1096,7 +1096,9 @@ body {
    stands out from the line it leads without the line fading away. A waiting
    merge's line opens with its position among the waiting merges (owner
    request, 2026-11-11), in the name's own color, and its name follows. */
-#ws-sidebar .sb-mq-position { font-variant-numeric: tabular-nums; margin-right: 0.4em; }
+/* A POSITION NUMERAL IS ITS NAME'S SIZE (owner request, 2026-11-12): left
+   at its line's own size it drew larger than the name beside it. */
+#ws-sidebar .sb-mq-position { font-variant-numeric: tabular-nums; margin-right: 0.4em; font-size: var(--mq-name-font-size); }
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
 /* THE HEAD'S NAME AND ITS LIVE STAGE WEAR THE OPEN REPOSITORY NAMES' INK
    (owner request, 2026-10-28): at the full --fg they read brighter than

@@ -57,6 +57,7 @@ import {
   queueLine,
 } from "../../src/sidebar/merge-queue-view.js";
 import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
+import { cascadedValue, inRail } from "../stylesheet.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
   appContext,
@@ -809,14 +810,14 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const { sc } = offQueueDaemon();
     const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), sc, "queue");
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`).length]).toEqual([null, 1]);
-    const full = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), offQueue: [offQueue("w2", "failed")] }), sc, "queue");
+    const full = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), offQueue: [offQueue("w2", "evicted")] }), sc, "queue");
     expect([...full.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_OFF_QUEUE_CLASS]);
   });
 
   it("draws the merge's name and why it left", () => {
     const { sc } = offQueueDaemon();
-    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "restart failed")] }), sc, "queue").querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
-    expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "restart failed"]);
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), sc, "queue").querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
+    expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "evicted"]);
   });
 
   it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {
@@ -841,3 +842,25 @@ describe("drawRosterMergeQueueOffQueue", () => {
     expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [broken] }), sc, "queue")).toThrow(MalformedView);
   });
 });
+
+describe("a waiting merge's position numeral", () => {
+  it("is drawn at its name's size", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), waiting: [waitingMerge("w2")] }), sc, "queue");
+    const [numeral, name] = inRail(body, (rail) => {
+      const line = rail.querySelector(`.${MERGE_QUEUE_WAITING_CLASS}`);
+      return [
+        cascadedValue(requireElement(line?.querySelector(`.${MERGE_QUEUE_POSITION_CLASS}`)), "font-size"),
+        cascadedValue(requireElement(line?.querySelector(".sb-mq-name")), "font-size"),
+      ];
+    });
+    expect([numeral, numeral === name]).toEqual([name, true]);
+    expect(name).not.toBe("");
+  });
+});
+
+/** EL, failing the test when the line drew none. */
+function requireElement(el: Element | null | undefined): Element {
+  if (el === null || el === undefined) throw new Error("the waiting line drew no such element");
+  return el;
+}
