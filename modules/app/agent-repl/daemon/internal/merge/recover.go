@@ -96,6 +96,7 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	// THE MERGES OFF THEIR QUEUES ARE DRAWN FROM BOOT, a repository with no
 	// queue row included: only a queue's change republishes them otherwise.
 	o.publishOffQueue(ctx)
+	o.kickOffQueueLanded()
 	return o.offerOwedDrains(ctx, op, repos)
 }
 

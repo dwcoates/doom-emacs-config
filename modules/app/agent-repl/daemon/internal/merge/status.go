@@ -37,6 +37,11 @@ func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]Qu
 		}
 		repositories = all
 	}
+	// THE MERGES OFF THEIR QUEUES ARE JUDGED NOW: a status read is an
+	// agent's, which may wait on git, and it answers what holds now.
+	if o.judgeOffQueue(ctx) {
+		o.publishOffQueue(ctx)
+	}
 	out := make([]QueueStatus, 0, len(repositories))
 	for _, repository := range repositories {
 		key, err := o.repoKeyFor(ctx, repository.Dir)

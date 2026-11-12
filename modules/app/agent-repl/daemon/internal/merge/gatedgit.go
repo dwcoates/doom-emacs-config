@@ -505,6 +505,14 @@ func (g *gatedGit) AheadBehind(ctx context.Context, dir, local, upstream string)
 	return g.inner.AheadBehind(ctx, dir, local, upstream)
 }
 
+func (g *gatedGit) AnyPatchEquivalent(ctx context.Context, dir, upstream, head string) (bool, error) {
+	if err := g.enter("AnyPatchEquivalent"); err != nil {
+		return false, err
+	}
+	defer g.leave()
+	return g.inner.AnyPatchEquivalent(ctx, dir, upstream, head)
+}
+
 func (g *gatedGit) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
 	if err := g.enter("RemoteURL"); err != nil {
 		return "", err
