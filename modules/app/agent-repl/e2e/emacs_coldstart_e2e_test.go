@@ -62,48 +62,6 @@ func procFields(t *testing.T, pid int, file string) []string {
 	return strings.FieldsFunc(string(body), func(r rune) bool { return r == 0 })
 }
 
-// testEmacsLauncherArgvCarriesBothAccountRoots is scenario 2, and it is THE
-// account-flags regression pinned: the defect reached the user's live logs
-// and SPEC.md §G raised it as unresolved, because only a test where Emacs
-// spawns the daemon can see the argv the launcher actually composed.
-func testEmacsLauncherArgvCarriesBothAccountRoots(t *testing.T) {
-	w := coldStartWorld(t)
-	e := w.Emacs
-
-	e.EnsureDaemon()
-
-	pid := daemonPID(e)
-	if pid == 0 {
-		t.Fatal("no live daemon process to read an argv from")
-	}
-	argv := procFields(t, pid, "cmdline")
-
-	for _, tc := range []struct {
-		name string
-		flag string
-		want string
-	}{
-		{name: "the default account root", flag: "--default-config-dir", want: e.DefaultConfigDir},
-		{name: "the multi-repo account root", flag: "--multi-repo-config-dir", want: e.MultiRepoConfigDir},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			value, ok := flagValue(argv, tc.flag)
-			if !ok {
-				t.Fatalf("the launcher's argv carries no %s; argv was %q", tc.flag, argv)
-			}
-			// `expand-file-name`d, per the launcher's own contract: the
-			// daemon compares config roots against resolved workspace
-			// paths, so a `~' the shell never saw would never match.
-			if !filepath.IsAbs(value) {
-				t.Fatalf("%s was passed unexpanded as %q", tc.flag, value)
-			}
-			if value != filepath.Clean(tc.want) {
-				t.Fatalf("%s = %q, want %q", tc.flag, value, filepath.Clean(tc.want))
-			}
-		})
-	}
-}
-
 // flagValue returns the value following a `--flag` in an argv, either as the
 // next element or as the `--flag=value` tail.
 func flagValue(argv []string, flag string) (string, bool) {

@@ -521,6 +521,76 @@ spawn without the roots exits 2 before the daemon ever serves."
             (should (equal (split-string (string-trim (buffer-string)) "\n" t)
                            (cdr (agent-repl-daemon--argv))))))))))
 
+(ert-deftest agent-repl-itest-daemon-the-spawn-receives-the-default-account-root ()
+  "The spawned process is handed the default account root, expanded, as the OS saw it.
+The recorded argv is what the spawned process received, so a launcher that
+composed the flag and then dropped it fails here."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--stop-daemon daemon t)
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir) "exit 0"))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (agent-repl-itest-daemon--record-shell
+                        "printf '%s\\n' \"$@\""
+                        (expand-file-name "argv" boot-dir))))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-default-config-dir "~/itest-default-root")
+               (agent-repl-daemon-multi-repo-config-dir "~/itest-multi-root")
+               (agent-repl-daemon-boot-timeout-seconds 2)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "argv"))
+           nil "the daemon command to record its arguments")
+          ;; Assert.
+          (let ((argv (with-temp-buffer
+                        (insert-file-contents (expand-file-name "argv" boot-dir))
+                        (split-string (string-trim (buffer-string)) "\n" t))))
+            (should (equal (cadr (member "--default-config-dir" argv))
+                           (expand-file-name "~/itest-default-root")))))))))
+
+(ert-deftest agent-repl-itest-daemon-the-spawn-receives-the-multi-repo-account-root ()
+  "The spawned process is handed the multi-repo account root, expanded, as the OS saw it.
+The recorded argv is what the spawned process received, so a launcher that
+composed the flag and then dropped it fails here."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--stop-daemon daemon t)
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir) "exit 0"))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (agent-repl-itest-daemon--record-shell
+                        "printf '%s\\n' \"$@\""
+                        (expand-file-name "argv" boot-dir))))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-default-config-dir "~/itest-default-root")
+               (agent-repl-daemon-multi-repo-config-dir "~/itest-multi-root")
+               (agent-repl-daemon-boot-timeout-seconds 2)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "argv"))
+           nil "the daemon command to record its arguments")
+          ;; Assert.
+          (let ((argv (with-temp-buffer
+                        (insert-file-contents (expand-file-name "argv" boot-dir))
+                        (split-string (string-trim (buffer-string)) "\n" t))))
+            (should (equal (cadr (member "--multi-repo-config-dir" argv))
+                           (expand-file-name "~/itest-multi-root")))))))))
+
 ;;;; ---- A build failure ----
 
 (ert-deftest agent-repl-itest-daemon-build-failure-does-not-start-a-daemon ()
