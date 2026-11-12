@@ -79,6 +79,8 @@ import "agentrepl/v1/endpoint_park_workspace.proto";
 import "agentrepl/v1/endpoint_plan_rollback.proto";
 import "agentrepl/v1/endpoint_prune_storage.proto";
 import "agentrepl/v1/endpoint_reap_worktrees.proto";
+import "agentrepl/v1/endpoint_requeue_merge.proto";
+import "agentrepl/v1/endpoint_discard_merge.proto";
 import "agentrepl/v1/endpoint_refresh_news_digest.proto";
 import "agentrepl/v1/endpoint_register_repository.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
@@ -750,6 +752,12 @@ service AgentRepl {
   // End a merge-queue subscription. See
   // endpoint_unsubscribe_merge_queue.proto.
   rpc UnsubscribeMergeQueue(UnsubscribeMergeQueueRequest) returns (UnsubscribeMergeQueueResponse);
+  // Put a merge that left its queue without landing back in line as itself:
+  // the same workspace, branch and request. See endpoint_requeue_merge.proto.
+  rpc RequeueMerge(RequeueMergeRequest) returns (RequeueMergeResponse);
+  // End a merge request that stands off its queue; for an async merge, close
+  // its merge workspace. See endpoint_discard_merge.proto.
+  rpc DiscardMerge(DiscardMergeRequest) returns (DiscardMergeResponse);
   // Tell one workspace's agent about a GitHub pull request's activity,
   // answering with the pull request now. Agents are subscribed by owning a
   // link instead (ChangeWorkspaceLinksSet.ownership). See

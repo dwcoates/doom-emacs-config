@@ -5,7 +5,10 @@
 // describe a queue differently from a read.
 //
 // A merge only REQUESTED -- its asking turn still running, so not yet put in
-// line -- is not in any queue and never appears here.
+// line -- is not in any queue and never appears here. A merge that LEFT its
+// queue without landing is listed apart from the queue's entries, off the
+// queue (MergeQueueStatus.off_queue), until it is put back in line
+// (RequeueMerge) or discarded (DiscardMerge).
 
 syntax = "proto3";
 
@@ -30,7 +33,90 @@ message MergeQueueStatus {
   // -- then every merge out of line: the holder of each repair slot, then the
   // merges awaiting each slot, in the order each will be granted it.
   repeated MergeQueueStatusEntry entries = 3;
+  // Every merge that left this queue without landing and whose request still
+  // stands, oldest departure first. None of them is in line, so none runs:
+  // each waits for `merge-queue requeue` to put it back in line as itself, or
+  // `merge-queue discard` to end it.
+  repeated MergeQueueStatusOffQueue off_queue = 4;
 }
+
+// ONE MERGE OFF ITS QUEUE: it left without landing, and its request -- its
+// branch, its version increment and changelog line, its deploy hooks and its
+// cleanup flags -- stands until it is requeued or discarded. An async merge's
+// merge workspace stays open, hidden, under the merge's name while it stands
+// here, so the name is never free for a new request: a new async merge asked
+// for under it is refused, naming this merge, so the caller requeues it.
+message MergeQueueStatusOffQueue {
+  // The workspace whose merge this is: the workspace landing its own branch,
+  // or an async merge's merge workspace. RequeueMerge and DiscardMerge take
+  // this ref.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The merge's name, as the queue listed it while it stood in line: the
+  // landing workspace's name, or an async merge's own name (its merge
+  // workspace's). `merge-queue requeue` and `merge-queue discard` take it.
+  string name = 2;
+  // The branch the request lands.
+  string branch = 3;
+  // What kind of merge this is, exactly as an entry in line says it.
+  MergeQueueStatusEntryKind kind = 4;
+  // Why it left the queue.
+  MergeQueueStatusOffQueueCause cause = 5;
+  // When it left the queue, epoch ms. Never zero.
+  int64 left_at_ms = 6;
+}
+
+// WHY A MERGE LEFT ITS QUEUE WITHOUT LANDING. THE ARM IS THE CAUSE. A set
+// message with no arm assigned is a cause this schema revision does not name.
+message MergeQueueStatusOffQueueCause {
+  oneof cause {
+    // Taken off the queue by the user or an agent (`merge-queue dequeue`,
+    // the sidebar's evict).
+    MergeQueueStatusOffQueueCauseEvicted evicted = 1;
+    // The user released its slot in answer to an interrupt's dequeue offer.
+    MergeQueueStatusOffQueueCauseDequeued dequeued = 2;
+    // It ran and gave up: a failing suite past its last fixing attempt, a
+    // conflict resolution that gave up, a landing step that failed.
+    MergeQueueStatusOffQueueCauseFailed failed = 3;
+    // A restart left it unfinished and it could not run again.
+    MergeQueueStatusOffQueueCauseRestartFailed restart_failed = 4;
+    // The daemon went away under it and the restart could not put it back.
+    MergeQueueStatusOffQueueCauseDaemonShutdown daemon_shutdown = 5;
+    // An async merge whose preparing instruction failed.
+    MergeQueueStatusOffQueueCausePickFailed pick_failed = 6;
+    // A deploy whose finish stage failed before it was put in line.
+    MergeQueueStatusOffQueueCauseFinishFailed finish_failed = 7;
+    // The merge it was placed behind left the queue without landing.
+    MergeQueueStatusOffQueueCauseAheadDidNotLand ahead_did_not_land = 8;
+    // Its workspace was hidden while it stood at its cold gate.
+    MergeQueueStatusOffQueueCauseHiddenAtColdGate hidden_at_cold_gate = 9;
+    // ADOPTED: an async merge's merge workspace found open with no request
+    // standing, left by an exit from before requests outlived their place in
+    // line. Its request's values were never kept, so it records no version
+    // increment, changelog line or deploy hooks: a requeue onto a versioned
+    // main branch must supply the increment (RequeueMergeRequest.version).
+    MergeQueueStatusOffQueueCauseAdopted adopted = 10;
+  }
+}
+// Evicted. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseEvicted {}
+// Dequeued. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseDequeued {}
+// Failed. No fields: the merge's bubble carries the failure's account.
+message MergeQueueStatusOffQueueCauseFailed {}
+// Restart failed. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseRestartFailed {}
+// Daemon shutdown. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseDaemonShutdown {}
+// Pick failed. No fields: the merge's bubble carries the failure's account.
+message MergeQueueStatusOffQueueCausePickFailed {}
+// Finish failed. No fields: the merge's bubble carries the failure's account.
+message MergeQueueStatusOffQueueCauseFinishFailed {}
+// The merge ahead did not land. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseAheadDidNotLand {}
+// Hidden at its cold gate. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseHiddenAtColdGate {}
+// Adopted with no request values. No fields: the arm is the fact.
+message MergeQueueStatusOffQueueCauseAdopted {}
 
 // Whether a queue advances.
 message MergeQueueStatusAdvance {

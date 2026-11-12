@@ -1056,6 +1056,50 @@ message RosterRepoMergeQueue {
   // drawn at its GitHub place, which may skip numbers held by pull requests
   // no workspace here owns. A queue listing only these carries no head.
   repeated RosterMergeQueueGithubEntry github = 6;
+  // EVERY MERGE THAT LEFT THIS QUEUE WITHOUT LANDING and whose request still
+  // stands (agentrepl.v1.MergeQueueStatus.off_queue), oldest departure
+  // first, drawn below the queue under its own "off the queue" line: each by
+  // its name and why it left, with a control that puts it back in line as
+  // itself and one that discards it. A queue whose line is empty and that
+  // holds only these is still listed, with no head.
+  repeated RosterMergeQueueOffQueue off_queue = 11;
+}
+
+// ONE MERGE OFF ITS QUEUE, drawn as a row:
+//
+//   ┌─ RosterMergeQueueOffQueue ───────────────────────────┐
+//   │ name (RosterMergeQueueSubject)   cause   [↺] [✕]     │
+//   └──────────────────────────────────────────────────────┘
+//      RosterMergeQueueOffQueueCause ─┘  Requeue ┘   └ Discard
+message RosterMergeQueueOffQueue {
+  // The merge's name and the workspace a click on it selects, as every
+  // merge of the queue is drawn (RosterMergeQueueSubject).
+  RosterMergeQueueSubject subject = 1;
+  // Why it left the queue, drawn beside its name.
+  RosterMergeQueueOffQueueCause cause = 2;
+  // The control that puts it back in line, at the back.
+  RosterMergeQueueOffQueueRequeue requeue = 3;
+  // The control that ends its request.
+  RosterMergeQueueOffQueueDiscard discard = 4;
+}
+// Why the merge left its queue, in the sidebar's words ("evicted", "failed",
+// "restart failed", "adopted"), drawn verbatim and resolved by the daemon
+// from agentrepl.v1.MergeQueueStatusOffQueueCause.
+message RosterMergeQueueOffQueueCause {
+  string text = 1;
+}
+// The requeue control: a click sends agentrepl.v1.RequeueMerge for `merge`,
+// placed at the back, asked by the user.
+message RosterMergeQueueOffQueueRequeue {
+  // The merge's own workspace (an async merge's merge workspace, never the
+  // requester the subject credits), echoed verbatim in the request.
+  workspace.v1.WorkspaceRef merge = 1;
+}
+// The discard control: a click sends agentrepl.v1.DiscardMerge for `merge`,
+// asked by the user. An async merge's discard closes its merge workspace.
+message RosterMergeQueueOffQueueDiscard {
+  // The merge's own workspace, echoed verbatim in the request.
+  workspace.v1.WorkspaceRef merge = 1;
 }
 
 // One workspace whose owned pull request stands in a GitHub merge queue.

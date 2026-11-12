@@ -407,6 +407,10 @@ const (
 	// AgentReplUnsubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UnsubscribeMergeQueue RPC.
 	AgentReplUnsubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeMergeQueue"
+	// AgentReplRequeueMergeProcedure is the fully-qualified name of the AgentRepl's RequeueMerge RPC.
+	AgentReplRequeueMergeProcedure = "/agentrepl.v1.AgentRepl/RequeueMerge"
+	// AgentReplDiscardMergeProcedure is the fully-qualified name of the AgentRepl's DiscardMerge RPC.
+	AgentReplDiscardMergeProcedure = "/agentrepl.v1.AgentRepl/DiscardMerge"
 	// AgentReplSubscribePullRequestProcedure is the fully-qualified name of the AgentRepl's
 	// SubscribePullRequest RPC.
 	AgentReplSubscribePullRequestProcedure = "/agentrepl.v1.AgentRepl/SubscribePullRequest"
@@ -581,6 +585,8 @@ var (
 	agentReplGetGatherStatusMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("GetGatherStatus")
 	agentReplSubscribeMergeQueueMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
 	agentReplUnsubscribeMergeQueueMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
+	agentReplRequeueMergeMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("RequeueMerge")
+	agentReplDiscardMergeMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("DiscardMerge")
 	agentReplSubscribePullRequestMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SubscribePullRequest")
 	agentReplUnsubscribePullRequestMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("UnsubscribePullRequest")
 	agentReplListPullRequestSubscriptionsMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ListPullRequestSubscriptions")
@@ -1027,6 +1033,12 @@ type AgentReplClient interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Put a merge that left its queue without landing back in line as itself:
+	// the same workspace, branch and request. See endpoint_requeue_merge.proto.
+	RequeueMerge(context.Context, *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error)
+	// End a merge request that stands off its queue; for an async merge, close
+	// its merge workspace. See endpoint_discard_merge.proto.
+	DiscardMerge(context.Context, *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error)
 	// Tell one workspace's agent about a GitHub pull request's activity,
 	// answering with the pull request now. Agents are subscribed by owning a
 	// link instead (ChangeWorkspaceLinksSet.ownership). See
@@ -1908,6 +1920,18 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		requeueMerge: connect.NewClient[v1.RequeueMergeRequest, v1.RequeueMergeResponse](
+			httpClient,
+			baseURL+AgentReplRequeueMergeProcedure,
+			connect.WithSchema(agentReplRequeueMergeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		discardMerge: connect.NewClient[v1.DiscardMergeRequest, v1.DiscardMergeResponse](
+			httpClient,
+			baseURL+AgentReplDiscardMergeProcedure,
+			connect.WithSchema(agentReplDiscardMergeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		subscribePullRequest: connect.NewClient[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse](
 			httpClient,
 			baseURL+AgentReplSubscribePullRequestProcedure,
@@ -2122,6 +2146,8 @@ type agentReplClient struct {
 	getGatherStatus                   *connect.Client[v1.GetGatherStatusRequest, v1.GetGatherStatusResponse]
 	subscribeMergeQueue               *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
 	unsubscribeMergeQueue             *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
+	requeueMerge                      *connect.Client[v1.RequeueMergeRequest, v1.RequeueMergeResponse]
+	discardMerge                      *connect.Client[v1.DiscardMergeRequest, v1.DiscardMergeResponse]
 	subscribePullRequest              *connect.Client[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse]
 	unsubscribePullRequest            *connect.Client[v1.UnsubscribePullRequestRequest, v1.UnsubscribePullRequestResponse]
 	listPullRequestSubscriptions      *connect.Client[v1.ListPullRequestSubscriptionsRequest, v1.ListPullRequestSubscriptionsResponse]
@@ -2811,6 +2837,16 @@ func (c *agentReplClient) UnsubscribeMergeQueue(ctx context.Context, req *connec
 	return c.unsubscribeMergeQueue.CallUnary(ctx, req)
 }
 
+// RequeueMerge calls agentrepl.v1.AgentRepl.RequeueMerge.
+func (c *agentReplClient) RequeueMerge(ctx context.Context, req *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error) {
+	return c.requeueMerge.CallUnary(ctx, req)
+}
+
+// DiscardMerge calls agentrepl.v1.AgentRepl.DiscardMerge.
+func (c *agentReplClient) DiscardMerge(ctx context.Context, req *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error) {
+	return c.discardMerge.CallUnary(ctx, req)
+}
+
 // SubscribePullRequest calls agentrepl.v1.AgentRepl.SubscribePullRequest.
 func (c *agentReplClient) SubscribePullRequest(ctx context.Context, req *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error) {
 	return c.subscribePullRequest.CallUnary(ctx, req)
@@ -3303,6 +3339,12 @@ type AgentReplHandler interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Put a merge that left its queue without landing back in line as itself:
+	// the same workspace, branch and request. See endpoint_requeue_merge.proto.
+	RequeueMerge(context.Context, *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error)
+	// End a merge request that stands off its queue; for an async merge, close
+	// its merge workspace. See endpoint_discard_merge.proto.
+	DiscardMerge(context.Context, *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error)
 	// Tell one workspace's agent about a GitHub pull request's activity,
 	// answering with the pull request now. Agents are subscribed by owning a
 	// link instead (ChangeWorkspaceLinksSet.ownership). See
@@ -4180,6 +4222,18 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplRequeueMergeHandler := connect.NewUnaryHandler(
+		AgentReplRequeueMergeProcedure,
+		svc.RequeueMerge,
+		connect.WithSchema(agentReplRequeueMergeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplDiscardMergeHandler := connect.NewUnaryHandler(
+		AgentReplDiscardMergeProcedure,
+		svc.DiscardMerge,
+		connect.WithSchema(agentReplDiscardMergeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSubscribePullRequestHandler := connect.NewUnaryHandler(
 		AgentReplSubscribePullRequestProcedure,
 		svc.SubscribePullRequest,
@@ -4526,6 +4580,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribeMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeMergeQueueProcedure:
 			agentReplUnsubscribeMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplRequeueMergeProcedure:
+			agentReplRequeueMergeHandler.ServeHTTP(w, r)
+		case AgentReplDiscardMergeProcedure:
+			agentReplDiscardMergeHandler.ServeHTTP(w, r)
 		case AgentReplSubscribePullRequestProcedure:
 			agentReplSubscribePullRequestHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribePullRequestProcedure:
@@ -5097,6 +5155,14 @@ func (UnimplementedAgentReplHandler) SubscribeMergeQueue(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeMergeQueue is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) RequeueMerge(context.Context, *connect.Request[v1.RequeueMergeRequest]) (*connect.Response[v1.RequeueMergeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RequeueMerge is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) DiscardMerge(context.Context, *connect.Request[v1.DiscardMergeRequest]) (*connect.Response[v1.DiscardMergeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.DiscardMerge is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SubscribePullRequest(context.Context, *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error) {

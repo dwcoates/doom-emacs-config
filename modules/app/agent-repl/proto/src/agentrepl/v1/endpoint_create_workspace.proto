@@ -36,6 +36,7 @@ package agentrepl.v1;
 
 import "agentrepl/v1/lifecycle_config_refusal.proto";
 import "agentrepl/v1/family.proto";
+import "agentrepl/v1/merge_queue_status.proto";
 import "agentrepl/v1/merge_version_increment.proto";
 import "agentrepl/v1/workspace_priority.proto";
 import "agentrepl/v1/workspace_topology.proto";
@@ -681,6 +682,12 @@ message CreateWorkspaceError {
     // pending async merge's reservation. Nothing was recorded; the caller
     // retries with another name.
     CreateWorkspaceAsyncMergeNameTaken async_merge_name_taken = 31;
+    // The async merge's name is held by a merge that left its queue without
+    // landing and whose request still stands (agentrepl.v1
+    // .MergeQueueStatusOffQueue): that merge is put back in line as itself
+    // with `agent-repld merge-queue requeue NAME`, never asked for again.
+    // Nothing was recorded.
+    CreateWorkspaceAsyncMergeNameOffQueue async_merge_name_off_queue = 62;
     // The async merge asked to go behind a merge not in its queue.
     MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 45;
     // The async merge's close-after workspace is not open, is in another
@@ -975,6 +982,15 @@ message CreateWorkspaceAsyncMergeContextNotMaker {
 message CreateWorkspaceAsyncMergeNameTaken {
   // The branch the name resolves to ("agent-1a2b/reconnect-fix").
   string branch = 1;
+}
+// The merge off its queue that holds the async merge's name.
+message CreateWorkspaceAsyncMergeNameOffQueue {
+  // The merge's workspace: its merge workspace, which RequeueMerge takes.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The merge's name, which `merge-queue requeue` takes.
+  string name = 2;
+  // Why it left its queue.
+  MergeQueueStatusOffQueueCause cause = 3;
 }
 // The async merge's close-after workspace cannot be closed by this merge.
 message CreateWorkspaceAsyncMergeUnknownCloseAfter {}

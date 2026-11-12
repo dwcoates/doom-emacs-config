@@ -1,0 +1,81 @@
+// endpoint_discard_merge.proto — DiscardMerge: end a merge request that
+// stands off its queue without landing it. AGENT API section.
+//
+// It is the ONE way a request ends short of a landing, so it is the one way
+// an async merge's merge workspace is closed for a merge that never landed:
+// leaving the queue never closes it (RequeueMerge). Discarding an async
+// merge's request closes its merge workspace, and removes the worktree the
+// request asked to clean up on landing, through git's clean door: a worktree
+// holding uncommitted changes is kept. No branch is ever deleted: a discarded
+// merge's branch still holds work that never landed. Discarding a workspace's own merge drops only the request: the workspace,
+// its worktree and its branch stay as they were.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message DiscardMergeRequest {
+  // The workspace whose merge off its queue is discarded: the workspace landing
+  // its own branch, or an async merge's merge workspace. The command line
+  // resolves the name `merge-queue status` lists the merge under to this ref.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHO ASKED. REQUIRED: the user (the sidebar) or a workspace's agent
+  // (`agent-repld merge-queue discard`).
+  WorkspaceRequester requester = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message DiscardMergeResponse {
+  oneof result {
+    DiscardMergeSuccess success = 1;
+    DiscardMergeError error = 2;
+  }
+}
+// The request is gone.
+message DiscardMergeSuccess {
+  // What the discard did beyond dropping the request. THE ARM IS THE KIND
+  // of merge discarded.
+  oneof discarded {
+    // A workspace's own merge: only the request went.
+    DiscardMergeSuccessOwnBranch own_branch = 1;
+    // An async merge: its merge workspace was closed too.
+    DiscardMergeSuccessAsyncMerge async_merge = 2;
+  }
+}
+// Only the request went. No fields: the arm is the fact.
+message DiscardMergeSuccessOwnBranch {}
+// The merge workspace was closed.
+message DiscardMergeSuccessAsyncMerge {
+  // TRUE when the worktree the request asked to clean up was removed; FALSE
+  // when it asked for none, or the worktree held uncommitted changes and was
+  // kept.
+  bool cleanup_worktree_removed = 1;
+}
+// Why nothing was discarded. Nothing was changed.
+message DiscardMergeError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    DiscardMergeUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    DiscardMergeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // No request of this workspace's merge stands off its queue.
+    DiscardMergeUnknownMerge unknown_merge = 3;
+    // The workspace's merge stands in line: take it off with
+    // `merge-queue dequeue` first, which leaves it off its queue.
+    DiscardMergeStillQueued still_queued = 4;
+  }
+}
+message DiscardMergeUnknownWorkspace {}
+message DiscardMergeWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// No request off its queue. No fields: the arm is the fact.
+message DiscardMergeUnknownMerge {}
+// In line. No fields: `merge-queue status` says where.
+message DiscardMergeStillQueued {}
