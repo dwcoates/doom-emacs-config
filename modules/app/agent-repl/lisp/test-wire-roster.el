@@ -2046,11 +2046,35 @@ carrying it is an unknown field."
 (ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
   "A queue with no head and nothing waiting decodes to no head, none waiting,
 not paused, no repair slot held or awaited, nothing in a GitHub merge
-queue."
+queue, nothing off the queue."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
                  '(:head nil :waiting nil :paused nil :fixing-tests nil :resolving-conflicts nil
-                         :awaiting-fixing-tests nil :awaiting-resolving-conflicts nil :github nil))))
+                         :awaiting-fixing-tests nil :awaiting-resolving-conflicts nil :github nil
+                         :off-queue nil))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-off-its-queue-decodes-its-cause-and-controls ()
+  "A merge off its queue decodes its subject, its cause and the merge
+workspace its requeue and discard controls name."
+  (let ((off (car (plist-get
+                   (agent-repl-test-wire-roster--decode
+                    #'agent-repl-wire-decode-roster-repo-merge-queue
+                    (format "{\"offQueue\":[{\"subject\":%s,\"cause\":{\"text\":\"evicted\"},\"requeue\":{\"merge\":{\"id\":\"m1\",\"dir\":\"/m\"}},\"discard\":{\"merge\":{\"id\":\"m1\",\"dir\":\"/m\"}}}]}"
+                            agent-repl-test-wire-roster--subject))
+                   :off-queue))))
+    (should (equal (list (plist-get (plist-get off :subject) :name)
+                         (plist-get (plist-get off :cause) :text)
+                         (plist-get (plist-get (plist-get off :requeue) :merge) :id)
+                         (plist-get (plist-get (plist-get off :discard) :merge) :id))
+                   '("one" "evicted" "m1" "m1")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-off-its-queue-without-its-requeue-is-a-breach ()
+  "A merge off its queue always carries its requeue control."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-off-queue
+                  (format "{\"subject\":%s,\"cause\":{\"text\":\"evicted\"},\"discard\":{\"merge\":{\"id\":\"m1\",\"dir\":\"/m\"}}}"
+                          agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueOffQueue" requeue "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-refuses-the-retired-failed-arm ()
   "The failed head is retired; its arm is refused as an unknown field."
