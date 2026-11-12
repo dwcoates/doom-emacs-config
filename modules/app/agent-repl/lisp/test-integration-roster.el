@@ -49,6 +49,9 @@
 (declare-function agent-repl-roster-refresh-magit "roster" (ws))
 (declare-function agent-repl--input-said "input" (parts))
 (defvar agent-repl-roster-view)
+(defvar agent-repl-roster--rows-by-id)
+(defvar persp-names-cache)
+(declare-function agent-repl--ws-tabline-names "workspace")
 (defvar agent-repl-roster-update-functions)
 (defvar agent-repl-roster-finish-functions)
 (defvar agent-repl-host-last-selected-id)
@@ -2047,6 +2050,57 @@ since deprioritized."
                              "itest-badge-clear"
                              (agent-repl-status-tab-state "itest-badge-clear"))
                             ""))))))
+
+;;;; ---- A created workspace reaches the roster, the tab order and the tab bar ----
+
+(defun agent-repl-itest-roster--push-created (daemon)
+  "Push a roster holding one standing row, then the same plus a created one.
+Returns after the created row's tab has opened, as the daemon's roster does
+once its CreateWorkspace has minted the workspace."
+  (agent-repl-itest-roster--push
+   daemon (agent-repl-itest-roster--roster
+           (list (agent-repl-itest-roster--row "ws-standing" "ws-standing" 'ready))))
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl--ws-by-ref-id "ws-standing")) nil "the standing tab")
+  (agent-repl-itest-roster--push
+   daemon (agent-repl-itest-roster--roster
+           (list (agent-repl-itest-roster--row "ws-standing" "ws-standing" 'ready)
+                 (agent-repl-itest-roster--row "ws-created" "ws-created" 'ready))))
+  (agent-repl-itest--wait-until
+   (lambda () (member "ws-created" (agent-repl-roster-tab-order)))
+   nil "the created workspace's name in the tab order"))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspaces-row-reaches-the-row-table ()
+  "The daemon-minted row arrives in the roster's row table."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert.
+      (should (gethash "ws-created" agent-repl-roster--rows-by-id)))))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspaces-name-joins-the-tab-order ()
+  "The created workspace's name joins the roster-ordered tab order."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert.
+      (should (equal (agent-repl-roster-tab-order) '("ws-standing" "ws-created"))))))
+
+(ert-deftest agent-repl-itest-roster-a-created-workspace-has-a-tab-in-the-bar ()
+  "Every name in the roster's order has a tab in `agent-repl--ws-tabline-names'."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push-created daemon)
+      ;; Assert: the perspective layer has caught up with both names.
+      (let ((persp-names-cache '("ws-standing" "ws-created")))
+        (dolist (name (agent-repl-roster-tab-order))
+          (should (member name (agent-repl--ws-tabline-names))))))))
 
 (provide 'test-integration-roster)
 

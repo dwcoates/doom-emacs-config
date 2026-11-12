@@ -2646,6 +2646,62 @@ adopts onto a daemon that has not proven it is listening."
           (ignore-errors
             (agent-repl-itest--release-gate successor "WatchDaemon")))))))
 
+;;;; ---- Registering an existing directory (`SPC TAB p') ----
+
+(declare-function agent-repl-add-project-workspace "commands")
+(declare-function agent-repl-verbs-select-minted "verbs")
+
+(defmacro agent-repl-itest-host--with-registered-directory (daemon dir minted &rest body)
+  "Run `agent-repl-add-project-workspace' on a fresh DIR against DAEMON, then BODY.
+MINTED is bound to the ref the command handed to `agent-repl-verbs-select-minted'.
+The landing and the projectile registration are Doom boundaries: the landing
+is recorded, never performed."
+  (declare (indent 3) (debug (form symbolp symbolp body)))
+  `(let* ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon)))
+          (,dir (agent-repl-itest--fixture-dir "itest-host-added"))
+          (,minted nil))
+     (make-directory ,dir t)
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () conn))
+                   ((symbol-function 'agent-repl-verbs-select-minted)
+                    (lambda (ref _dispatched-at &optional _lander) (setq ,minted ref))))
+           (agent-repl-add-project-workspace ,dir)
+           (agent-repl-itest--wait-until (lambda () ,minted) nil
+                                         "RegisterWorkspace's ref to reach the landing")
+           ,@body)
+       (agent-repl-connect-close conn))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-sends-the-daemon-that-directory ()
+  "`SPC TAB p' hands the daemon the directory it was given."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore minted)
+      ;; Assert.
+      (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
+        (should (equal (file-name-as-directory (agent-repl-itest--body-field body 'dir))
+                       (file-name-as-directory dir)))))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-sends-no-identity ()
+  "The register request carries a directory and no identity: the daemon mints it."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore dir minted)
+      ;; Assert.
+      (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
+        (should (null (agent-repl-itest--body-field body 'id)))))))
+
+(ert-deftest agent-repl-itest-host-adding-a-directory-lands-on-the-daemons-minted-ref ()
+  "The workspace Emacs stands on is the ref the daemon answered with."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-registered-directory daemon dir minted
+      (ignore dir)
+      ;; Assert.
+      (should (stringp (plist-get minted :id)))
+      (should-not (string-empty-p (plist-get minted :id))))))
+
 (provide 'test-integration-host)
 
 ;;; test-integration-host.el ends here

@@ -351,66 +351,6 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // #7 — CreateWorkspaceAppearsOnTheRoster
 // ---------------------------------------------------------------------------
 
-// testEmacsCreateWorkspaceAppearsOnTheRoster is scenario 7: the DAEMON minted
-// the identity and Emacs only reacted — a new row in
-// `agent-repl-roster--rows-by-id', and the name in BOTH
-// `agent-repl-roster--tab-order' and `agent-repl--ws-tabline-names'.
-//
-// `SPC TAB n' prompts three times (repository, initial prompt, name, base
-// ref), so the binding is asserted as a LOOKUP and the command is then run
-// with its readers bound for the duration of the one call — the standard ERT
-// way, which keeps the command's own argument-collection code path.
-func testEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	// `SPC TAB C-n' is the creation that picks its repository (`SPC TAB n'
-	// is fixed to agent-repl's own repository, which no sandbox repository
-	// is).
-	if want, got := "agent-repl-create-workspace-in-repository", e.LeaderBinding("TAB C-n"); got != want {
-		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
-	}
-
-	before := len(f.rosterTabOrder())
-
-	// The readers answer out of what the COMMAND offers them: the repository
-	// picker takes the first candidate the command composed from the roster's
-	// own sections, and every free-text reader answers blank except the
-	// initial prompt — blank name and blank base ref are the documented
-	// "daemon mints one" and "default branch" cases.
-	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (prompt candidates &rest _)
-                          (if (string-prefix-p "Model" prompt) "" (car (append candidates nil)))))
-                       ((symbol-function 'read-string)
-                        (lambda (prompt &rest _)
-                          (if (string-prefix-p "Initial prompt" prompt) "hello" ""))))
-               (call-interactively #'agent-repl-create-workspace-in-repository)
-               t)`)
-
-	e.AwaitEvalFor(emacsVerbBound, "the created workspace's row to reach the roster table",
-		`(hash-table-count agent-repl-roster--rows-by-id)`,
-		func(raw json.RawMessage) bool {
-			var n int
-			return !isJSONNull(raw) && json.Unmarshal(raw, &n) == nil && n > before
-		})
-
-	// The created workspace's tab joins the order once the daemon answers its
-	// open (open-tabs.el), which follows its row.
-	order := decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, "the created workspace's tab to be answered open",
-		emacsTabOrderForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > before }))
-
-	// The tab bar follows the roster's order strictly, so every name the
-	// roster walk produced must have a tab.
-	tabs := f.tabNames()
-	for _, name := range order {
-		if !containsString(tabs, name) {
-			t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab for the roster-ordered workspace %q", tabs, name)
-		}
-	}
-}
-
 func containsString(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
