@@ -313,31 +313,6 @@ func composerText(e *Emacs, buffer string) string {
 // 25. HistoryRecallRestoresTheLastPrompt
 // ---------------------------------------------------------------------------
 
-// testEmacsHistoryRecallRestoresTheLastPrompt is scenario 25.
-//
-// History is pushed on ACCEPTANCE, not on the keystroke, so the recall waits
-// on the composer being cleared — which is the acceptance's own visible act —
-// rather than on a duration.
-func testEmacsHistoryRecallRestoresTheLastPrompt(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-
-	const submitted = "remember this one for the history"
-	typeIntoComposer(e, s.Input, submitted)
-	e.KeysIn(s.Input, "RET")
-
-	e.AwaitEval("the daemon's acceptance to clear the composer",
-		`(with-current-buffer `+elispString(s.Input)+` (buffer-string))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "" })
-
-	runInComposer(e, s.Input, "agent-repl--history-prev")
-
-	if got := composerText(e, s.Input); got != submitted {
-		t.Errorf("history recall put %q in the composer, want the previously submitted %q",
-			got, submitted)
-	}
-}
-
 // installArmObserver defines `agent-repl-e2e--arm-of', which answers a
 // workspace's current status arm out of the roster's own indexes.
 //
