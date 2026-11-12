@@ -428,3 +428,73 @@ describe("an allow-standing answer to a gated Bash", () => {
     stream.close();
   });
 });
+
+/** The AgentFrames the shim wrote to the store, each with the agent book its page line files it under. */
+function storedFrames(shim: Shim): Array<{ book: string | undefined; frame: conversationv1.AgentFrame }> {
+  return writtenEntries(shim.store?.writes() ?? []).flatMap((entry) => {
+    const line = pageLineOf(entry);
+    return line?.agentItem?.item.case === "agentFrame"
+      ? [{ book: pageBookOf(line), frame: line.agentItem.item.value }]
+      : [];
+  });
+}
+
+describe("a synchronous subagent's nested activity", () => {
+  const COMMISSION = "Read the module's AGENTS.md and report the test command.";
+
+  test("rides the main agent's book as one subagent unit: its commission at the start, its report at the settle", async () => {
+    const { shim, vendorSessionId } = await driveTurn("!subagent");
+
+    const units = storedFrames(shim)
+      .filter(({ book }) => book === vendorSessionId)
+      .flatMap(({ frame }) => activitiesOf([frame]))
+      .filter((activity) => activity.item.case === "subagent");
+    const arms = units.map((activity) => (activity.item.case === "subagent" ? activity.item.value.result : undefined));
+    const start = arms.find((result) => result?.case === "start");
+    const success = arms.find((result) => result?.case === "success");
+    expect({
+      arms: arms.map((result) => result?.case),
+      commission: start?.case === "start" ? start.value.prompt?.text : undefined,
+      description: start?.case === "start" ? start.value.prompt?.description : undefined,
+      label: start?.case === "start" ? start.value.prompt?.subagentType : undefined,
+      report: success?.case === "success" ? success.value.report?.prose?.markdown : undefined,
+    }).toEqual({
+      arms: ["start", "success"],
+      commission: COMMISSION,
+      description: "Explore the module",
+      label: "general-purpose",
+      report: "The module's test command is `npm test`.",
+    });
+  });
+
+  test("is filed under the subagent's own book: its prose and its Read, none of it on the main book", async () => {
+    const { shim, vendorSessionId } = await driveTurn("!subagent");
+
+    const stored = storedFrames(shim);
+    const spawner = stored
+      .flatMap(({ frame }) => activitiesOf([frame]))
+      .find((activity) => activity.item.case === "subagent" && activity.item.value.result.case === "start");
+    const spawned =
+      spawner?.item.case === "subagent" && spawner.item.value.result.case === "start"
+        ? spawner.item.value.result.value.createdAgentId?.value
+        : undefined;
+    const proseIn = (book: string | undefined): string[] =>
+      responseProse(stored.filter((entry) => entry.book === book).flatMap(({ frame }) => activitiesOf([frame])));
+    const readsIn = (book: string | undefined): number =>
+      stored
+        .filter((entry) => entry.book === book)
+        .flatMap(({ frame }) => activitiesOf([frame]))
+        .filter((activity) => activity.item.case === "read").length;
+
+    expect({
+      subBook: { prose: proseIn(spawned), reads: readsIn(spawned) > 0 },
+      mainBook: { prose: proseIn(vendorSessionId), reads: readsIn(vendorSessionId) },
+    }).toEqual({
+      subBook: {
+        prose: ["Reading the module's conventions.", "The module's test command is `npm test`."],
+        reads: true,
+      },
+      mainBook: { prose: ["The subagent reported back."], reads: 0 },
+    });
+  });
+});

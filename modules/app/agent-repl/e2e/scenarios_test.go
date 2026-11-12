@@ -47,7 +47,6 @@ func TestFaults(t *testing.T) {
 // TestSubagents is subagents, their feeds, and detached work that outlives its turn.
 func TestSubagents(t *testing.T) {
 	scenario(t,
-		testSubagentSyncNestedActivity,
 		testSubagentDetached,
 		testNestedSubagentHistoricalUsage,
 		testSubagentBubbleFromAReplayIsStillAddressable,
