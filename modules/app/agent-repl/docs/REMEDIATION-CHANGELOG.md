@@ -1424,3 +1424,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Integration tests pass again: the fake git answers git cherry, which the merge queue's off-queue check now reads.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Records which e2e tests cross a real seam and which belong in one system's own tests.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): The installer now asks for the phone hotspot persistent-wifi mode joins, which keeps agents online when Wi-Fi drops with the lid closed.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Persistent-wifi mode never freezes a container runtime such as Docker, which merge-queue tests need with the lid closed.
