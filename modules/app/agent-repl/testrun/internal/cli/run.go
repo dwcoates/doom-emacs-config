@@ -342,7 +342,8 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		log.Errorf("recording this run's timings in the host history failed: %v", err)
 		return 1
 	}
-	if err := pushTimes(ctx, d, results, suiteResults, end); err != nil {
+	runTimes := runTimes{start: start, end: end, predicted: p.Makespan, verdicts: verdicts}
+	if err := pushTimes(ctx, d, results, suiteResults, runTimes); err != nil {
 		log.Errorf("recording this run's test times in the metrics store failed: %v", err)
 		return 1
 	}
@@ -430,11 +431,30 @@ var unitOutcomes = suiteOutcomes
 // (Deps.Metrics), stamped with the run's end. A suite's time is its slot time
 // (run.SuiteResult.UnitSeconds). A cancelled unit never ran, so it used
 // nothing and is left out.
-func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, end time.Time) error {
+// runTimes is what pushTimes reports of the whole run: when its units ran,
+// what its plan predicted, and how many of each suite's units it reused.
+type runTimes struct {
+	start, end time.Time
+	predicted  float64
+	verdicts   []reuse.SuiteVerdict
+}
+
+func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults []run.SuiteResult, rt runTimes) error {
 	if !d.Metrics.Enabled() {
 		return nil
 	}
-	var report testtimes.Report
+	end := rt.end
+	report := testtimes.Report{Batching: suites.BatchingLabel()}
+	outcome := testtimes.Pass
+	for _, s := range suiteResults {
+		if s.Outcome != run.Passed {
+			outcome = testtimes.Fail
+		}
+	}
+	report.Run = &testtimes.Run{Seconds: rt.end.Sub(rt.start).Seconds(), PredictedSeconds: rt.predicted, Outcome: outcome}
+	for _, v := range rt.verdicts {
+		report.SuiteUnits = append(report.SuiteUnits, testtimes.SuiteUnits{Suite: v.Suite.Name, Run: len(v.Units) - v.Reused(), Reused: v.Reused()})
+	}
 	for _, r := range results {
 		report.Tests = append(report.Tests, r.Tests...)
 		if r.Outcome == run.Cancelled {
@@ -452,8 +472,8 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 	if err := d.PushTimes(ctx, d.Metrics, report, end); err != nil {
 		return err
 	}
-	d.Log.Infof("metrics: pushed %d test, %d suite and %d unit records (trigger %s)",
-		len(report.Tests), len(report.Suites), len(report.Units), d.Metrics.Trigger)
+	d.Log.Infof("metrics: pushed %d test, %d suite and %d unit records, the run's %.1fs and %d suites' unit counts (trigger %s, batching %s)",
+		len(report.Tests), len(report.Suites), len(report.Units), report.Run.Seconds, len(report.SuiteUnits), d.Metrics.Trigger, report.Batching)
 	return nil
 }
 

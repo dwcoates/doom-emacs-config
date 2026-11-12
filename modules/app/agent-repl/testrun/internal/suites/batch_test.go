@@ -227,3 +227,13 @@ func TestVitestBatchesPrefixEveryAreaAndKeepANeverReusedFileAlone(t *testing.T) 
 		t.Fatalf("batches = %v, want %v", names(got), want)
 	}
 }
+
+func TestBatchingLabelNamesTheBatchSizesInForce(t *testing.T) {
+	// Act
+	got := BatchingLabel()
+
+	// Assert
+	if want := fmt.Sprintf("max%d-min%d", BatchMax, BatchMin); got != want {
+		t.Fatalf("BatchingLabel = %q, want %q", got, want)
+	}
+}

@@ -56,6 +56,26 @@ const (
 	UnitBlockWritesSeriesName = "agentrepl_test_unit_block_writes"
 )
 
+// RunSeriesName is the gauge a whole run's wall time lands in, from its
+// first unit's start to its last unit's end, one sample per run;
+// RunPredictedSeriesName the plan's predicted makespan beside it.
+const (
+	RunSeriesName          = "agentrepl_test_run_seconds"
+	RunPredictedSeriesName = "agentrepl_test_run_predicted_seconds"
+)
+
+// SuiteUnitsSeriesName is the gauge every suite's unit count lands in, one
+// sample per run for each state: "run" (units that ran, each a process) and
+// "reused" (units a pass record let the run skip). Batching trades these:
+// larger batches start fewer processes and reuse less after a change.
+const SuiteUnitsSeriesName = "agentrepl_test_suite_units"
+
+// The unit states SuiteUnitsSeriesName is labeled with.
+const (
+	UnitsRun    = "run"
+	UnitsReused = "reused"
+)
+
 // The outcomes a test is labeled with.
 const (
 	Pass = "pass"
@@ -92,11 +112,29 @@ type Unit struct {
 	BlockReads, BlockWrites int64
 }
 
-// Report is everything one run pushes.
+// Run is a whole run's time: its wall time, its plan's prediction, and
+// whether every suite passed.
+type Run struct {
+	Seconds, PredictedSeconds float64
+	Outcome                   string
+}
+
+// SuiteUnits is how many of a suite's units a run ran and reused.
+type SuiteUnits struct {
+	Suite       string
+	Run, Reused int
+}
+
+// Report is everything one run pushes. Batching names the file batching the
+// run's suites were cut under (suites.BatchingLabel); it labels the run, suite
+// and unit-count series so runs under different batch sizes compare.
 type Report struct {
-	Tests  []Test
-	Suites []Suite
-	Units  []Unit
+	Tests      []Test
+	Suites     []Suite
+	Units      []Unit
+	Run        *Run
+	SuiteUnits []SuiteUnits
+	Batching   string
 }
 
 // Target is where a run pushes and what ran it.
@@ -237,9 +275,28 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 		fmt.Fprintf(&b, "%s{suite=\"%s\",test=\"%s\",outcome=\"%s\",trigger=\"%s\"} %s %d\n",
 			SeriesName, labelValue(t.Suite), labelValue(t.Name), t.Outcome, labelValue(trigger), num(t.Seconds), ms)
 	}
+	batching := labelValue(report.Batching)
 	for _, s := range report.Suites {
-		fmt.Fprintf(&b, "%s{suite=\"%s\",outcome=\"%s\",trigger=\"%s\"} %s %d\n",
-			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger), num(s.Seconds), ms)
+		fmt.Fprintf(&b, "%s{suite=\"%s\",outcome=\"%s\",trigger=\"%s\",batching=\"%s\"} %s %d\n",
+			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger), batching, num(s.Seconds), ms)
+	}
+	if r := report.Run; r != nil {
+		for _, v := range []struct {
+			name  string
+			value float64
+		}{{RunSeriesName, r.Seconds}, {RunPredictedSeriesName, r.PredictedSeconds}} {
+			fmt.Fprintf(&b, "%s{outcome=\"%s\",trigger=\"%s\",batching=\"%s\"} %s %d\n",
+				v.name, r.Outcome, labelValue(trigger), batching, num(v.value), ms)
+		}
+	}
+	for _, su := range report.SuiteUnits {
+		for _, v := range []struct {
+			state string
+			n     int
+		}{{UnitsRun, su.Run}, {UnitsReused, su.Reused}} {
+			fmt.Fprintf(&b, "%s{suite=\"%s\",state=\"%s\",trigger=\"%s\",batching=\"%s\"} %d %d\n",
+				SuiteUnitsSeriesName, labelValue(su.Suite), v.state, labelValue(trigger), batching, v.n, ms)
+		}
 	}
 	for _, u := range report.Units {
 		labels := fmt.Sprintf("suite=\"%s\",unit=\"%s\",outcome=\"%s\",trigger=\"%s\"",

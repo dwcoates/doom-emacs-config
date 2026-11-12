@@ -1175,11 +1175,58 @@ func TestAPushLeavesOutACancelledUnit(t *testing.T) {
 	}
 
 	// Act
-	err := pushTimes(context.Background(), d, results, nil, at)
+	err := pushTimes(context.Background(), d, results, nil, runTimes{start: at, end: at})
 
 	// Assert
 	if err != nil || len(got.Units) != 1 || got.Units[0].ID != "a" || got.Units[0].Outcome != testtimes.Fail || got.Units[0].Wall != 1 {
 		t.Fatalf("pushTimes = %v, units %+v; want only the failed unit, with its wall time", err, got.Units)
+	}
+}
+
+func TestAPushReportsTheWholeRunAndEachSuitesUnitsUnderItsBatching(t *testing.T) {
+	tests := []struct {
+		name        string
+		outcomes    []run.Outcome
+		wantOutcome string
+	}{
+		{name: "every suite passed", outcomes: []run.Outcome{run.Passed, run.Passed}, wantOutcome: testtimes.Pass},
+		{name: "a suite failed", outcomes: []run.Outcome{run.Passed, run.Failed}, wantOutcome: testtimes.Fail},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			start := time.Unix(100, 0)
+			var suiteResults []run.SuiteResult
+			for i, o := range tt.outcomes {
+				suiteResults = append(suiteResults, run.SuiteResult{Name: fmt.Sprintf("s%d", i), Outcome: o})
+			}
+			verdict := reuse.SuiteVerdict{SuiteUnits: reuse.SuiteUnits{Suite: roster.Suite{Name: "webapp"}},
+				Units: []reuse.UnitVerdict{{}, {}, {Reused: &reuse.Record{}}}}
+			var got testtimes.Report
+			d := Deps{
+				Log:     &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}},
+				Metrics: testtimes.Target{Root: "/m", Trigger: "merge_queue"},
+				PushTimes: func(_ context.Context, _ testtimes.Target, report testtimes.Report, _ time.Time) error {
+					got = report
+					return nil
+				},
+			}
+
+			// Act
+			err := pushTimes(context.Background(), d, nil, suiteResults,
+				runTimes{start: start, end: start.Add(90 * time.Second), predicted: 75, verdicts: []reuse.SuiteVerdict{verdict}})
+
+			// Assert
+			if err != nil || got.Run == nil || got.Run.Seconds != 90 || got.Run.PredictedSeconds != 75 || got.Run.Outcome != tt.wantOutcome {
+				t.Fatalf("pushTimes = %v, run %+v; want 90s against a 75s plan, %s", err, got.Run, tt.wantOutcome)
+			}
+			if len(got.SuiteUnits) != 1 || got.SuiteUnits[0] != (testtimes.SuiteUnits{Suite: "webapp", Run: 2, Reused: 1}) {
+				t.Fatalf("suite units = %+v, want webapp's 2 run and 1 reused", got.SuiteUnits)
+			}
+			if got.Batching != suites.BatchingLabel() {
+				t.Fatalf("batching = %q, want %q", got.Batching, suites.BatchingLabel())
+			}
+		})
 	}
 }
 
