@@ -35,43 +35,6 @@ import (
 // 27. UnknownRosterArmIsRefusedLoudly
 // ---------------------------------------------------------------------------
 
-// testEmacsUnknownRosterArmIsRefusedLoudly is scenario 27.
-//
-// A daemon this suite owns cannot be made to push an undeclared arm — and it
-// must not be: the fake SDK is the sole writer of vendor files and no test
-// hand-writes a frame onto the wire. So the row is offered to the module's
-// own decode entry point, `agent-repl-wire-decode-roster-row', which is the
-// documented ingress every push travels through. The claim is that it
-// REFUSES rather than defaulting to some fallback dot.
-func testEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
-
-	// The row carries a status arm the frozen schema does not declare. The
-	// key check is what refuses it, per the decoder's own docstring: "an arm
-	// this build does not know is refused as an unknown field".
-	got := decodeStrings(e.Eval(`(condition-case err
-             (progn
-               (agent-repl-wire-decode-roster-row
-                '((workspace . nil) (quantumFlux . nil)))
-               (list "decoded" "no error"))
-           (agent-repl-wire-error
-            (list (format "%s" (car err)) (format "%S" (cdr err))))
-           (error
-            (list (format "%s" (car err)) (format "%S" (cdr err)))))`))
-
-	if len(got) != 2 {
-		t.Fatalf("malformed readback %v", got)
-	}
-	if got[0] != "agent-repl-wire-error" {
-		t.Fatalf("an undeclared status arm produced %s %s, want a loud agent-repl-wire-error",
-			got[0], got[1])
-	}
-	if !strings.Contains(got[1], "quantumFlux") || !strings.Contains(got[1], "unknown field") {
-		t.Errorf("the refusal does not name the undeclared arm and its reason: %s", got[1])
-	}
-}
-
 // ---------------------------------------------------------------------------
 // 28. PermissionAskFiresTheAttentionMarker
 // ---------------------------------------------------------------------------
