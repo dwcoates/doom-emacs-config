@@ -472,6 +472,41 @@ a root the daemon has never heard of."
       ;; Assert
       (should (member "MULTI_REPO_ROOT=/roots/inherited" env)))))
 
+(defvar doom-env-file)  ; Doom's `defconst', bound here by each test
+
+(ert-deftest agent-repl-test-daemon-environment-names-the-user-env-file ()
+  "Doom's env file is named, so every later daemon takes the user's settings from it."
+  ;; Arrange
+  (let* ((file (make-temp-file "doom-env"))
+         (doom-env-file file))
+    (unwind-protect
+        ;; Act
+        (let ((env (agent-repl-daemon--environment)))
+          ;; Assert
+          (should (member (format "AGENT_REPL_USER_ENV_FILE=%s" (expand-file-name file)) env)))
+      (delete-file file))))
+
+(ert-deftest agent-repl-test-daemon-environment-names-no-env-file-when-there-is-none ()
+  "With no readable env file, nothing is named and successors inherit."
+  ;; Arrange
+  (let ((doom-env-file "/no/such/doom/env")
+        (process-environment (cons "AGENT_REPL_USER_ENV_FILE=/stale" process-environment)))
+    ;; Act
+    (let ((env (agent-repl-daemon--environment)))
+      ;; Assert
+      (should-not (seq-find (lambda (e) (string-prefix-p "AGENT_REPL_USER_ENV_FILE=" e)) env)))))
+
+(ert-deftest agent-repl-test-daemon-environment-names-what-emacs-states ()
+  "The variables Emacs states itself are named once, so the env file never overrides them."
+  ;; Arrange
+  (let ((agent-repl-daemon-multi-repo-root "/roots/mine")
+        (process-environment (cons "AGENT_REPL_EMACS_STATED_ENV=STALE" process-environment)))
+    ;; Act
+    (let ((env (agent-repl-daemon--environment)))
+      ;; Assert
+      (should (equal (seq-filter (lambda (e) (string-prefix-p "AGENT_REPL_EMACS_STATED_ENV=" e)) env)
+                     (list "AGENT_REPL_EMACS_STATED_ENV=AGENT_REPL_STATE_DIR,MULTI_REPO_ROOT"))))))
+
 (ert-deftest agent-repl-test-daemon-empty-default-config-dir-refuses-the-launch ()
   "An empty required root REFUSES the spawn instead of buying a status-2 exit."
   (agent-repl-test-daemon--with-harness

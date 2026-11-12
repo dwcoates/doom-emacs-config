@@ -1611,8 +1611,31 @@ is stated on the spawn rather than assumed."
     ;; a configured root is STATED here the same way the state root is.  An
     ;; unconfigured one leaves the inherited value alone: nil is "Emacs has
     ;; no opinion", not "unset whatever the session had".
-    (if root
-        (cons (format "MULTI_REPO_ROOT=%s" (directory-file-name root)) env)
+    (when root
+      (push (format "MULTI_REPO_ROOT=%s" (directory-file-name root)) env))
+    ;; EVERY LATER DAEMON TAKES THE USER'S SETTINGS FRESH from the env file
+    ;; Doom loads Emacs's environment from, so a setting added after Emacs
+    ;; started reaches it through an ordinary deploy (the daemon's userenv).
+    ;; What Emacs states itself is named, and the file never overrides it.
+    (agent-repl-daemon--with-user-env-file
+     (cons (format "AGENT_REPL_EMACS_STATED_ENV=%s"
+                   (string-join (append '("AGENT_REPL_STATE_DIR")
+                                        (and root '("MULTI_REPO_ROOT")))
+                                ","))
+           (cl-remove-if (lambda (entry)
+                           (or (string-prefix-p "AGENT_REPL_EMACS_STATED_ENV=" entry)
+                               (string-prefix-p "AGENT_REPL_USER_ENV_FILE=" entry)))
+                         env)))))
+
+(defvar doom-env-file)  ; Doom's `defconst', bound only inside a booted Doom
+
+(defun agent-repl-daemon--with-user-env-file (env)
+  "ENV with `AGENT_REPL_USER_ENV_FILE' naming Doom's env file, when there is one.
+Outside Doom, or before `doom env' has written the file, there is none, and
+every later daemon inherits its predecessor's environment unchanged."
+  (let ((file (and (boundp 'doom-env-file) doom-env-file)))
+    (if (and (stringp file) (file-readable-p file))
+        (cons (format "AGENT_REPL_USER_ENV_FILE=%s" (expand-file-name file)) env)
       env)))
 
 (defun agent-repl-daemon--start ()

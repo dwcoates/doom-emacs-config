@@ -118,6 +118,11 @@ type ProcessSpawner struct {
 	ReapBound time.Duration
 	// Probe asks a reported address for a health answer; see Successor.Ready.
 	Probe HealthProbe
+	// Environ answers the environment a spawned daemon starts with
+	// (userenv.Successor): this process's, every per-user setting refreshed
+	// from the env file Emacs named. Its failure fails the spawn, so no
+	// successor starts on settings the user already changed.
+	Environ func() ([]string, error)
 }
 
 // The production spawner's stop windows.
@@ -128,8 +133,9 @@ const (
 	DefaultSuccessorReapBound = 5 * time.Second
 )
 
-// NewProcessSpawner builds the production spawner.
-func NewProcessSpawner(exe, stateDir string, argv []string) *ProcessSpawner {
+// NewProcessSpawner builds the production spawner, whose spawned daemons
+// start on environ's answer.
+func NewProcessSpawner(exe, stateDir string, argv []string, environ func() ([]string, error)) *ProcessSpawner {
 	return &ProcessSpawner{
 		Exe:       exe,
 		StateDir:  stateDir,
@@ -138,6 +144,7 @@ func NewProcessSpawner(exe, stateDir string, argv []string) *ProcessSpawner {
 		StopGrace: DefaultSuccessorStopGrace,
 		ReapBound: DefaultSuccessorReapBound,
 		Probe:     DaemonHealthProbe,
+		Environ:   environ,
 	}
 }
 
@@ -173,8 +180,12 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// just been handed refusing connections. ctx still bounds the WAIT below,
 	// which is this call's own work; it must not bound the process this call
 	// exists to leave running.
+	env, err := s.Environ()
+	if err != nil {
+		return nil, fmt.Errorf("rollout: the successor's environment: %w", err)
+	}
 	cmd := childproc.Command(childproc.Stable, s.Exe, successorArgv(s.Argv, incumbentAddress)...)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	// ITS OWN SESSION, WHICH IS WHAT "OUTLIVES" ACTUALLY TAKES.
 	//
@@ -270,8 +281,12 @@ func (s *ProcessSpawner) SpawnReplacement(_ context.Context) (int, error) {
 	if strings.TrimSpace(s.Exe) == "" {
 		return 0, fmt.Errorf("rollout: no daemon binary to spawn the replacement from")
 	}
+	env, err := s.Environ()
+	if err != nil {
+		return 0, fmt.Errorf("rollout: the replacement's environment: %w", err)
+	}
 	cmd := childproc.Command(childproc.Stable, s.Exe, replacementArgv(s.Argv)...)
-	cmd.Env = os.Environ()
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
