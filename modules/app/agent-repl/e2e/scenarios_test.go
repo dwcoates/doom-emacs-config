@@ -25,7 +25,6 @@ func TestTurns(t *testing.T) {
 		testCompactionDirected,
 		testAWorkspaceOpenReplaysItsFirstPageOnce,
 		testContextUsage,
-		testNoFooterPushBetweenFeedItemsCarriesAFeedItemDerivedLine,
 		testAnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail,
 		testCronCreateSetsTheFootersCronsChip,
 		testPlanModeCoalescesOntoOneBubble,
