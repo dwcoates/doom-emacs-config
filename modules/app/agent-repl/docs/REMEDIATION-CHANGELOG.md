@@ -1415,3 +1415,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): A merge whose workspace closes no longer crashes the daemon's merge queue, and the fake daemon, the Emacs roster decoder and the sidebar's off-queue controls follow the requeue contract.
 - 2026-11-12 lid-closed-quiet-mode (landed in queue bypass mode): While the lid is closed in persistent-wifi mode, every process of a frozen application stays frozen, including one launched after the lid closed or missed by a restarted daemon.
 - 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): The merge queue's roster tests, the Emacs create-error pin and the wire decoder scan follow the off-queue contract.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A prompt sent just as a turn ends no longer leaves the workspace holding every later prompt behind a turn that already finished.
