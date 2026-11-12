@@ -1871,9 +1871,10 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 
 	// Assert: the helper's own query, and one call per reordering (move,
 	// move to a place, prioritize, the yield's read of both racers, a failed
-	// head stepping aside and a remediated merge returning).
-	if reads != 1 || calls != 6 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 6", reads, calls)
+	// head stepping aside and a remediated merge returning), plus a returned
+	// merge's take-up, which reads its entry's state the same way.
+	if reads != 1 || calls != 7 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 7", reads, calls)
 	}
 }
 
