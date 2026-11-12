@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -212,5 +213,82 @@ func TestNewRefusesWithoutAReconnectTracker(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "reconnect tracker is required") {
 		t.Fatalf("New = %v, want the missing reconnect tracker refused", err)
+	}
+}
+
+func TestAnAdoptionRunSettlesOnceWithItsOutcome(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome error
+	}{
+		{name: "a failed run keeps its failure", outcome: errFake},
+		{name: "a successful run keeps no failure", outcome: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			e := &entry{run: newAdoptionRun()}
+			run := e.run
+
+			// Act: a second settle must not overwrite the first outcome.
+			e.settle(tc.outcome)
+			e.settle(errors.New("a later settle"))
+
+			// Assert
+			if !run.settled() {
+				t.Fatal("the run did not settle")
+			}
+			if run.failed != tc.outcome {
+				t.Fatalf("failed = %v, want %v", run.failed, tc.outcome)
+			}
+		})
+	}
+}
+
+func TestBeginAdoptionReplacesOnlyASettledRun(t *testing.T) {
+	cases := []struct {
+		name        string
+		settleFirst bool
+		wantFresh   bool
+	}{
+		{name: "a settled run is replaced by a fresh one", settleFirst: true, wantFresh: true},
+		{name: "a run still in flight is kept", settleFirst: false, wantFresh: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			e := &entry{run: newAdoptionRun()}
+			first := e.run
+			if tc.settleFirst {
+				e.settle(errFake)
+			}
+
+			// Act
+			e.beginAdoption()
+
+			// Assert
+			if fresh := e.run != first; fresh != tc.wantFresh {
+				t.Fatalf("replaced = %v, want %v", fresh, tc.wantFresh)
+			}
+			if e.run.settled() {
+				t.Fatal("the run begun is already settled")
+			}
+			if tc.settleFirst && first.failed != errFake {
+				t.Fatalf("the replaced run's failure = %v, want it left as it settled", first.failed)
+			}
+		})
+	}
+}
+
+func TestBeginAdoptionLeavesAnEntryWithNoRunWithout(t *testing.T) {
+	// Arrange
+	e := &entry{}
+
+	// Act
+	e.beginAdoption()
+
+	// Assert
+	if e.run != nil || !e.adopting {
+		t.Fatalf("run = %v, adopting = %v, want no run and the latch closed", e.run, e.adopting)
 	}
 }

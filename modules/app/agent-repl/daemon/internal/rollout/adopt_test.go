@@ -333,7 +333,7 @@ func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayIsPointedOnwardAtOnce(t
 			h := newHarness(t)
 			ws, _ := h.workspace(t)
 			h.c.mu.Lock()
-			h.c.rendezvous[ws] = &entry{expected: Participants{Host: true, Web: true}, done: make(chan struct{})}
+			h.c.rendezvous[ws] = &entry{expected: Participants{Host: true, Web: true}, run: newAdoptionRun()}
 			h.c.mu.Unlock()
 			h.c.recordTransfer(ws, "127.0.0.1:7788")
 			ctx, cancel := context.WithCancel(context.Background())
@@ -358,7 +358,7 @@ func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayFillsNoParticipantSlot(
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	e := &entry{expected: Participants{Host: true, Web: true}, done: make(chan struct{})}
+	e := &entry{expected: Participants{Host: true, Web: true}, run: newAdoptionRun()}
 	h.c.mu.Lock()
 	h.c.rendezvous[ws] = e
 	h.c.mu.Unlock()
@@ -1543,6 +1543,35 @@ func TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure(t *test
 	}
 }
 
+// TestAWaiterOnAFailedRunKeepsItsFailureThoughARerunBegins pins the 2026-11-12
+// merge-gate race: a failed run's waiter woke, and before it read the outcome a
+// retry began a re-run that cleared the entry's failure, so the waiter
+// reported the failed run as a success. The waiter reads the run it waited on.
+func TestAWaiterOnAFailedRunKeepsItsFailureThoughARerunBegins(t *testing.T) {
+	// Arrange: a run fails, and a re-run begins before its waiter reads it.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+	h.c.mu.Lock()
+	e := h.c.rendezvous[ws]
+	e.beginAdoption()
+	failedRun := e.run
+	e.settle(errFake)
+	e.beginAdoption()
+	h.c.unlock()
+
+	// Act
+	err := h.c.awaitRendezvous(context.Background(), e, failedRun, opAdoptHost, dlog.Context{"workspace": string(ws)})
+
+	// Assert
+	if !errors.Is(err, errFake) {
+		t.Fatalf("awaitRendezvous = %v, want the failed run's own failure", err)
+	}
+}
+
 // TestAClaimAfterAFailedRunBeginsAFreshCompletion pins that claiming a
 // workspace and beginning its run are one step: a participant that finds the
 // workspace claimed must wait on THAT run, never on the earlier failed run's
@@ -1568,7 +1597,7 @@ func TestAClaimAfterAFailedRunBeginsAFreshCompletion(t *testing.T) {
 
 	// Assert
 	h.c.mu.Lock()
-	done, failed := e.done, e.failed
+	done, failed := e.run.done, e.run.failed
 	h.c.unlock()
 	if len(claimed) != 1 || claimed[0] != ws {
 		t.Fatalf("claimed = %v, want %q", claimed, ws)

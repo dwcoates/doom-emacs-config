@@ -392,7 +392,7 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 			outgoing: outgoing,
 			expected: expected,
 			called:   make(chan struct{}),
-			done:     make(chan struct{}),
+			run:      newAdoptionRun(),
 		}
 		c.joining[session.Workspace] = true
 		armed = append(armed, session)
@@ -563,7 +563,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		// must not answer this caller with that run's failure.
 		e.claim()
 	}
-	done := e.done
+	run := e.run
 	state := dlog.Context{
 		"expected_host": e.expected.Host, "expected_web": e.expected.Web,
 		"host_called": e.hostCalled, "web_called": e.webCalled,
@@ -578,7 +578,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	}
 	c.log.Info(operation, "a participant called; it waits for the daemon's adoption of the workspace",
 		dlog.Merge(fields, state))
-	return c.awaitRendezvous(ctx, e, done, operation, fields)
+	return c.awaitRendezvous(ctx, e, run, operation, fields)
 }
 
 // awaitRendezvous waits for a rendezvous's one adoption to settle, and shares
@@ -589,14 +589,13 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 // one that completes the rendezvous. `not_yet_adopted` on an ADOPT call means
 // only that this caller's own context expired first, which is the
 // retry-with-backoff case.
-func (c *controller) awaitRendezvous(ctx context.Context, e *entry, done <-chan struct{}, operation string, fields dlog.Context) error {
+func (c *controller) awaitRendezvous(ctx context.Context, e *entry, run *adoptionRun, operation string, fields dlog.Context) error {
 	select {
-	case <-done:
-		c.mu.Lock()
-		failed := e.failed
-		c.unlock()
-		if failed != nil {
-			return failed
+	case <-run.done:
+		// THIS RUN'S OUTCOME, never the entry's: a re-run that began since
+		// replaced e.run and leaves this one as it settled.
+		if run.failed != nil {
+			return run.failed
 		}
 		c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
 		return nil
