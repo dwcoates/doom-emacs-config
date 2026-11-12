@@ -3,7 +3,6 @@ package e2e
 import (
 	"encoding/json"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -145,58 +144,4 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 		func(raw json.RawMessage) bool {
 			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) > 0
 		})
-}
-
-// testEmacsOpenProgressLadderReachesRendered is scenario 19: the blessed
-// host-native progress ladder raised by `SPC o c` walks its stages and ends
-// with the real panel on the frame, never on a terminal phase.
-//
-// THE LADDER IS RAISED ONLY BY THE TOGGLE (`agent-repl--panels-show-or-open`
-// calls `agent-repl--open-progress-start`); `agent-repl-frontend-open-panel`
-// mounts the page without one, so a test that opened through it read the
-// registry as "gone" before any ladder ever existed. The ladder is therefore
-// recorded off its one publication, `agent-repl-open-progress-change-functions`,
-// from before the keypress: the trail must open on `:requested`, rest only on
-// ladder stages, and end "gone" -- `agent-repl--open-progress-finish`, which
-// runs once the real panel is displayed -- with no terminal phase anywhere.
-func testEmacsOpenProgressLadderReachesRendered(t *testing.T) {
-	w, _ := emacsPanelWorld(t, 1)
-	e := w.Emacs
-	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
-	current := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
-	e.Eval(`(progn
-	          (defvar e2e-open-progress-trail nil)
-	          (setq e2e-open-progress-trail nil)
-	          (add-hook 'agent-repl-open-progress-change-functions
-	                    (lambda ()
-	                      (push (let ((entry (gethash ` + elispString(current) + ` agent-repl--open-progress)))
-	                              (if entry (format "%s" (plist-get entry :phase)) "gone"))
-	                            e2e-open-progress-trail)))
-	          t)`)
-	terminal := e.EvalStrings(`(mapcar (lambda (p) (format "%s" p)) agent-repl--open-progress-terminal-phases)`)
-	stages := e.EvalStrings(`(mapcar (lambda (entry) (format "%s" (car entry))) agent-repl--open-progress-stages)`)
-
-	// Act.
-	e.Leader("o c")
-	awaitPanelWindows(e, frontendPrefix, panelPrefix)
-	raw := e.AwaitEvalFor(panelSettleBound, "the open-progress ladder to end",
-		`(reverse e2e-open-progress-trail)`,
-		func(raw json.RawMessage) bool {
-			trail := decodeStrings(raw)
-			return len(trail) > 0 && (trail[len(trail)-1] == "gone" || slices.Contains(terminal, trail[len(trail)-1]))
-		})
-
-	// Assert.
-	trail := decodeStrings(raw)
-	if trail[0] != ":requested" {
-		t.Fatalf("the ladder's trail %q does not open on :requested; SPC o c raised no ladder", trail)
-	}
-	for _, phase := range trail[:len(trail)-1] {
-		if !slices.Contains(stages, phase) {
-			t.Fatalf("the ladder's trail %q passes %q, which is not a stage of %q", trail, phase, stages)
-		}
-	}
-	if last := trail[len(trail)-1]; last != "gone" {
-		t.Fatalf("the ladder's trail %q ends on the terminal phase %q, want the placeholder finished with the panel up", trail, last)
-	}
 }

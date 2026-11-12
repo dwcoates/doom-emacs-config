@@ -5204,3 +5204,49 @@ The landing the panels were first opened over must not come back over it."
             (should (get-buffer-window work))
             (should-not (get-buffer-window landing)))
         (kill-buffer landing) (kill-buffer work)))))
+
+(defun agent-repl-test-panels--ladder-trail (ws body)
+  "Run BODY and return WS's open-progress phases as published, in order.
+\"gone\" stands for the registry holding no entry."
+  (let* ((trail nil)
+         (hook (lambda ()
+                (push (let ((entry (gethash ws agent-repl--open-progress)))
+                        (if entry (format "%s" (plist-get entry :phase)) "gone"))
+                      trail))))
+    (let ((agent-repl-open-progress-change-functions (list hook)))
+      (funcall body))
+    (nreverse trail)))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-opens-on-requested ()
+  "`SPC o c' raises a ladder whose first published phase is :requested."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple)))
+      ;; Assert
+      (should (equal (car trail) ":requested")))))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-rests-only-on-stages ()
+  "Every phase the ladder passes before its end is a declared stage."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let* ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple))
+           (stages (mapcar (lambda (entry) (format "%s" (car entry)))
+                           agent-repl--open-progress-stages)))
+      ;; Assert
+      (dolist (phase (butlast trail))
+        (should (member phase stages))))))
+
+(ert-deftest agent-repl-test-panels-the-open-ladder-ends-with-the-panel-up-and-no-terminal-phase ()
+  "The ladder ends with the placeholder finished and the real panels on the frame."
+  ;; Arrange
+  (agent-repl-test-panels--with-gui-workspace "gui-ws"
+    ;; Act
+    (let ((trail (agent-repl-test-panels--ladder-trail "gui-ws" #'agent-repl-simple)))
+      ;; Assert
+      (should (equal (car (last trail)) "gone"))
+      (dolist (phase trail)
+        (should-not (member phase (mapcar (lambda (p) (format "%s" p))
+                                          agent-repl--open-progress-terminal-phases))))
+      (should (= (agent-repl-test-panels--panel-window-count) 2)))))
