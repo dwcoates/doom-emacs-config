@@ -1411,3 +1411,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A prompt sent through Remote Control while a turn runs no longer leaves the workspace stuck mid-turn, refusing local prompts.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A queue-bypass session now runs the full test suite once after its last planned landing and fixes every failure, so bypass mode never leaves master broken.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Records that a deploy's workspace adoption can stall the new daemon for seconds behind the sidebar's render lock.
+- 2026-11-12 merge-requests-requeue-in-place (landed in queue bypass mode): Merges that leave the queue without landing keep their request and are put back in line as themselves with merge-queue requeue (optionally on a new model), or ended with merge-queue discard.
