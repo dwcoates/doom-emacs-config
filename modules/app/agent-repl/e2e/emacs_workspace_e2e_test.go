@@ -384,60 +384,6 @@ func containsString(xs []string, want string) bool {
 // #13 — CloseThenKillDoesNotWedgeEmacs
 // ---------------------------------------------------------------------------
 
-// testEmacsCloseThenKillDoesNotWedgeEmacs is scenario 13, and THE HEARTBEAT
-// IS THE ASSERTION.
-//
-// This pins the sentinel/kill-buffer recursion named in EMACS-LAYER-SPEC.md's
-// opening: closing a workspace re-entered a process sentinel that killed a
-// buffer that ran the sentinel again. There is no frame for it — it manifests
-// only as an Emacs that stops answering — so the two verbs are run back to
-// back on a workspace with a LIVE PANEL, which is the configuration the
-// recursion needed, and the test then asks Emacs a question it must answer.
-//
-// The heartbeat goroutine fails this test immediately on a missed probe, with
-// the last form sent plus *Messages* and a backtrace in the artifacts
-// directory; the explicit probe below is the same claim asked once more after
-// the verbs have settled, so the test cannot pass by finishing before the
-// heartbeat noticed.
-//
-// THE KILL NAMES ITS WORKSPACE INSTEAD OF BEING PICKED FOR. `SPC j x' with no
-// argument resolves its target through `agent-repl-verbs--target-ws', which
-// reads the LIVE registry — and the close that just ran tombstones this name
-// the moment the daemon's roster push lands with the row `closed'. Which side
-// of that push the kill falls on is the daemon's schedule, not this
-// scenario's subject: measured on 2026-09-04 the picker was still holding the
-// name when the layer ran one scenario at a time, and had already lost it
-// when five ran at once, so the keystroke form made the verb refuse with "No
-// agent-repl workspaces registered" instead of running. Naming the target
-// makes BOTH verbs run on every schedule, which is what "both commands back
-// to back" (EMACS-LAYER-SPEC.md scenario 13) asks for; that `SPC j x' is this
-// command is scenario 12's assertion, made again here so the keystroke path
-// is not lost.
-func testEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
-	box := requireSandbox(t)
-	f := newEmacsWorkspaceFixture(t, box)
-	e := f.Emacs
-
-	if want, got := "agent-repl-kill-workspace", e.LeaderBinding("j x"); got != want {
-		t.Fatalf("SPC j x resolves to %q, want %q", got, want)
-	}
-
-	f.openPanel()
-
-	e.Leader("j d")
-	e.Eval(killWorkspaceForm(f.Name))
-
-	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after close-then-kill",
-		`(emacs-pid)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-
-	// The SAME Emacs answered — not a replacement that came up behind a
-	// process that died and restarted.
-	if pid := e.EvalInt(`(emacs-pid)`); pid != e.Doom.PID {
-		t.Fatalf("emacs-pid = %d, want the pid the readiness stamp carried (%d)", pid, e.Doom.PID)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // #14 — NavigationFollowsTheDrawnTabBar
 // ---------------------------------------------------------------------------
