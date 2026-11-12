@@ -911,6 +911,86 @@ func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *
 // Slash commands
 // ---------------------------------------------------------------------------
 
+// ctxUsage is a context_usage push of TOTAL tokens against a 200k window.
+func ctxUsage(total int64, percent int64) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens: total,
+			MaxTokens:   200_000,
+			Percentage:  percent,
+			Model:       "claude-opus-5",
+			Categories:  []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 4_000, Color: "blue"}},
+		}},
+	}
+}
+
+// contextPanelAfter reads /context once the topbar's context chip shows CHIP,
+// which orders the read behind the daemon having taken the push that figure came
+// from.
+func contextPanelAfter(t *testing.T, f *fixture, topbar *harness.Stream[*frontendv1.TopbarView], chip, key string) *frontendv1.ContextPanelView {
+	t.Helper()
+	awaitTopbar(t, f, topbar, "the context chip at "+chip, func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == chip
+	})
+	resp := f.submit("/context", key, origin)
+	panel := resp.GetSuccess().GetCommandPanel().GetContext()
+	if panel == nil {
+		t.Fatalf("SubmitPrompt(/context) = %v, want a command_panel.context", resp)
+	}
+	return panel
+}
+
+// THE /context PANEL RESOLVES FROM THE CONTEXT USAGE THE SHIM ALREADY PUSHED,
+// never a round trip to the vendor: after one push it answers a composed
+// header (used, total, model) and at least one section, with no StartTurn.
+func TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+
+	// Act
+	panel := contextPanelAfter(t, f, topbar, "142.3k", "k-context-1")
+
+	// Assert
+	header := panel.GetHeader()
+	if header.GetUsed() == "" || header.GetTotal() == "" || header.GetModel() == "" {
+		t.Fatalf("the /context panel header = %v, want used, total and model composed", header)
+	}
+	if len(panel.GetSections()) == 0 {
+		t.Fatalf("the /context panel = %v, want at least one section", panel)
+	}
+	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
+		t.Fatalf("StartTurn count after /context = %d, want 0: the panel is answered inline", got)
+	}
+}
+
+// A SECOND PUSH MOVES THE PANEL: the daemon's held usage is what /context
+// reads, so a larger figure pushed between two reads shows in the second
+// header without the reader asking the vendor anything.
+func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
+
+	// Act
+	f.shim.PushSessionUpdate(ctxUsage(168_900, 84))
+	second := contextPanelAfter(t, f, topbar, "168.9k", "k-context-second")
+
+	// Assert
+	if second.GetHeader().GetUsed() == first.GetHeader().GetUsed() && second.GetHeader().GetPercent() == first.GetHeader().GetPercent() {
+		t.Fatalf("the /context header did not move between pushes: used %q/percent %d then used %q/percent %d",
+			first.GetHeader().GetUsed(), first.GetHeader().GetPercent(), second.GetHeader().GetUsed(), second.GetHeader().GetPercent())
+	}
+	if second.GetHeader().GetUsed() == "" {
+		t.Fatalf("the second /context header = %v, want it composed", second.GetHeader())
+	}
+}
+
 func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow(t *testing.T) {
 	t.Parallel()
 	// Arrange: a DEPLOYED daemon, stated through AGENT_REPL_DEPLOY_STAMP. The

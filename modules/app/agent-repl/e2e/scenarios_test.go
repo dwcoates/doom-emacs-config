@@ -24,7 +24,6 @@ func TestTurns(t *testing.T) {
 		testInterruptAfterTextDelta,
 		testCompactionDirected,
 		testAWorkspaceOpenReplaysItsFirstPageOnce,
-		testContextUsage,
 		testPlanModeCoalescesOntoOneBubble,
 		testPlanModeSettlesPlanned,
 		testSkillInvocation,
