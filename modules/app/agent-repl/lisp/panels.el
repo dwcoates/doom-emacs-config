@@ -1864,8 +1864,14 @@ placeholder is part of the mount: the frame under it is the frame the
 panels are covering."
   (delq nil (list (agent-repl-window--panel-buffer :view ws)
                   (agent-repl-window--panel-buffer :input ws)
-                  (and (fboundp 'agent-repl--open-progress-placeholder)
-                       (agent-repl--open-progress-placeholder ws)))))
+                  (agent-repl--panels-open-placeholder ws))))
+
+(defun agent-repl--panels-open-placeholder (ws)
+  "Return WS's open placeholder buffer while an open is in flight, else nil.
+THE ONE PLACE panels.el asks open-progress.el for it; the lookup is
+guarded because a batch suite may load panels.el without open-progress.el."
+  (and (fboundp 'agent-repl--open-progress-placeholder)
+       (agent-repl--open-progress-placeholder ws)))
 
 (defun agent-repl--save-pre-panel-layout (ws site)
   "Record the layout WS's panels are about to cover as its `:fullscreen-config'.
@@ -1889,8 +1895,7 @@ reconciler then remounted the composer beside, so a close undid itself."
    ;; stand beside it and the frame is not "covered" -- but the layout the
    ;; placeholder saved is exactly the frame under it.  Saving again here
    ;; recorded the placeholder's own window as the layout to restore.
-   ((let ((placeholder (and (fboundp 'agent-repl--open-progress-placeholder)
-                            (agent-repl--open-progress-placeholder ws))))
+   ((let ((placeholder (agent-repl--panels-open-placeholder ws)))
       (and placeholder (get-buffer-window placeholder)
            (window-configuration-p (agent-repl--ws-get ws :fullscreen-config))))
     (agent-repl--log ws "%s: kept-fullscreen-layout reason=placeholder-saved-it" site))

@@ -4690,6 +4690,35 @@ it is covered by the mount, not by the user's work."
             (should (memq placeholder (agent-repl--panels-own-buffers "test-ws"))))
         (kill-buffer placeholder)))))
 
+(ert-deftest agent-repl-test-panels-open-placeholder-answers-open-progress-s-buffer ()
+  "The placeholder lookup answers what open-progress.el answers for WS."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder)
+             (lambda (ws) (and (equal ws "test-ws") 'the-placeholder))))
+    ;; Act / Assert
+    (should (eq (agent-repl--panels-open-placeholder "test-ws") 'the-placeholder))))
+
+(ert-deftest agent-repl-test-panels-open-placeholder-is-nil-without-open-progress ()
+  "With open-progress.el not loaded, the placeholder lookup answers nil."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--open-progress-placeholder) nil))
+    ;; Act / Assert
+    (should-not (agent-repl--panels-open-placeholder "test-ws"))))
+
+(ert-deftest agent-repl-test-panels-open-placeholder-is-asked-only-through-the-helper ()
+  "panels.el asks open-progress.el for the placeholder in one place only."
+  ;; Arrange
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "panels.el" agent-repl-test-panels--lisp-dir))
+                  (buffer-string))))
+    ;; Act
+    (let ((calls (cl-loop with start = 0
+                          while (string-match "(agent-repl--open-progress-placeholder " source start)
+                          count t do (setq start (match-end 0)))))
+      ;; Assert
+      (should (= calls 1)))))
+
 (ert-deftest agent-repl-test-panels-a-frame-showing-the-placeholder-is-covered ()
   "A frame holding only the placeholder is covered by the mount."
   ;; Arrange
