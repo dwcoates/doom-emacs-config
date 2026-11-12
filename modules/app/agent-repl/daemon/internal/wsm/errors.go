@@ -371,6 +371,9 @@ func (m MergeSource) validate() error {
 	if m.Front && m.Behind != "" {
 		return fmt.Errorf("a merge is placed at the front or behind %s, not both", m.Behind)
 	}
+	if m.BehindName != "" && m.Behind == "" {
+		return fmt.Errorf("a merge names the merge %q it is placed behind, but no such merge", m.BehindName)
+	}
 	if m.KeepOpen && !m.Kind.ClosesRequester() {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
 	}

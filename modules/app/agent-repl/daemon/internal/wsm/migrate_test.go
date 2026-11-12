@@ -1224,3 +1224,24 @@ func TestOwnedLinksSubscribedBeforeTheMergeQueueEventGainIt(t *testing.T) {
 		t.Fatalf("events = owned %d, requested %d; want the owned link's every event (126) and the request untouched (2)", owned, requested)
 	}
 }
+
+// TestTheMigrationAddsTheMergeQueueWaitColumns pins the layout-127 step: a
+// file written before a merge could wait on the merge it was placed behind
+// carries the three wait columns afterwards.
+func TestTheMigrationAddsTheMergeQueueWaitColumns(t *testing.T) {
+	// Arrange
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	s := handle.(*store)
+	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('merge_queue') WHERE name IN ('waits_on', 'waits_on_name', 'waits_on_left')`); got != 3 {
+		t.Fatalf("merge_queue has %d of the three wait columns after the migration, want 3", got)
+	}
+}

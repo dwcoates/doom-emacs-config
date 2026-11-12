@@ -152,8 +152,14 @@ func (f *fakeDB) HandOffDetachedMerge(_ context.Context, repo wsm.RepoKey, reque
 		f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
 		f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
 			Repo: repo, Workspace: mergeWS, State: wsm.MergeRequested,
-			Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch, Pick: pick}, EnqueuedAt: at,
+			Source:  wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, Branch: branch, Pick: pick, Behind: entry.Source.Behind}, EnqueuedAt: at,
+			WaitsOn: entry.WaitsOn, WaitsOnName: entry.WaitsOnName, WaitsOnLeft: entry.WaitsOnLeft,
 		})
+		for j, waiting := range f.queues[repo] {
+			if waiting.WaitsOn == requester {
+				f.queues[repo][j].WaitsOn = mergeWS
+			}
+		}
 		f.renumber(repo)
 		return nil
 	}

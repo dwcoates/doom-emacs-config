@@ -2689,3 +2689,183 @@ func TestEvictingAMergeTakenBackWhoseRecordCannotBeReadLeavesItToResume(t *testi
 		t.Fatalf("no ERROR record of the refusal: %v", h.logs.Records())
 	}
 }
+
+// aheadWorkspace is the merge a held merge was placed behind.
+const aheadWorkspace = ids.WorkspaceID("ws-ahead")
+
+// requestHeldPick asks for the harness's async pick with its merge workspace
+// placed behind the merge "ahead-merge", which still stands in the queue: the
+// shape `merge-queue-verb-docs` had on 2026-11-12, placed behind
+// `three-slots-landing` while that merge stood out of line.
+func requestHeldPick(t *testing.T, h *harness) {
+	t.Helper()
+	repo := h.repoKey()
+	h.db.mu.Lock()
+	h.db.queues[repo] = append(h.db.queues[repo], wsm.MergeQueueEntry{
+		Repo: repo, Workspace: aheadWorkspace, State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch},
+	})
+	h.db.renumber(repo)
+	h.db.mu.Unlock()
+	_, err := h.o.Enqueue(context.Background(), Request{
+		Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix", Pick: "the reconnect fix"},
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	h.db.mu.Lock()
+	for i, entry := range h.db.queues[repo] {
+		if entry.Workspace == theMergeWorkspace {
+			h.db.queues[repo][i].WaitsOn, h.db.queues[repo][i].WaitsOnName = aheadWorkspace, "ahead-merge"
+		}
+	}
+	h.db.mu.Unlock()
+}
+
+// aheadLeaves takes the merge ahead off the queue for CAUSE, as its run's end
+// or its eviction does.
+func aheadLeaves(t *testing.T, h *harness, cause string) {
+	t.Helper()
+	if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), aheadWorkspace, cause, nil); err != nil {
+		t.Fatalf("removing the merge ahead: %v", err)
+	}
+}
+
+// picking reports whether the merge workspace's pick has begun.
+func picking(h *harness) bool {
+	h.o.mu.Lock()
+	defer h.o.mu.Unlock()
+	_, begun := h.o.picks[theMergeWorkspace]
+	return begun
+}
+
+func TestAMergePlacedBehindAMergeStillInTheQueueIsNeitherPickedNorAdmitted(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestHeldPick(t, h)
+
+	// Act
+	admitted, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("pumpOnce: %v", err)
+	}
+	if admitted || picking(h) || len(h.queue.submissions) != 0 {
+		t.Fatalf("admitted %v, picking %v, submissions %d; want the merge held behind the merge ahead", admitted, picking(h), len(h.queue.submissions))
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.merge.behind",
+		Message: "a merge waits for the merge it was placed behind to leave the queue; it is not admitted or picked before then"})
+	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["behind_name"] != "ahead-merge" {
+		t.Fatalf("hold record = %+v, %v; want it naming the held merge and the merge ahead", record, ok)
+	}
+}
+
+func TestAMergePlacedBehindAnotherIsPickedOnceThatMergeLands(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestHeldPick(t, h)
+	aheadLeaves(t, h, causeMerged)
+
+	// Act
+	_, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("pumpOnce: %v", err)
+	}
+	if !picking(h) {
+		t.Fatal("the pick did not begin once the merge ahead landed")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.pick", Message: "an async merge's pick begins in its merge workspace"}); !ok {
+		t.Fatalf("no pick-begins record: %+v", h.logs.Records())
+	}
+}
+
+func TestAMergePlacedBehindAnotherFailsWhenThatMergeLeavesWithoutLanding(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause string
+	}{
+		{name: "the merge ahead failed", cause: causeFailed},
+		{name: "the merge ahead was evicted", cause: string(CauseUserDrop)},
+		{name: "the merge ahead was dequeued", cause: string(CauseUserDequeue)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := pickHarness(t)
+			requestHeldPick(t, h)
+			aheadLeaves(t, h, tt.cause)
+
+			// Act
+			_, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("pumpOnce: %v", err)
+			}
+			if _, queued := h.entryOf(theMergeWorkspace); queued || picking(h) {
+				t.Fatalf("queued %v, picking %v; want the merge failed off its queue unpicked", queued, picking(h))
+			}
+			if !slices.Contains(h.db.dropped, string(theMergeWorkspace)+":"+string(CauseAheadDidNotLand)) {
+				t.Fatalf("dropped = %v, want the merge dropped for its merge ahead", h.db.dropped)
+			}
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind",
+				Message: "the merge this one was placed behind left the queue without landing; this merge fails"})
+			if !ok || record.Context["behind_name"] != "ahead-merge" || record.Context["behind_left"] != tt.cause {
+				t.Fatalf("failure record = %+v, %v; want it naming the merge ahead and the cause %q", record, ok, tt.cause)
+			}
+			abandoned, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.abandoned", Message: "a merge left the queue without running"})
+			if want := fmt.Sprintf("the merge ahead-merge this one was placed behind left the queue without landing (%s)", tt.cause); !ok || abandoned.Context["summary"] != want {
+				t.Fatalf("abandoned record = %+v, %v; want the summary %q", abandoned, ok, want)
+			}
+		})
+	}
+}
+
+func TestARestartKeepsAMergeHeldBehindTheMergeItWasPlacedBehind(t *testing.T) {
+	// Arrange: the wait is on the merge's durable row, which the next boot reads.
+	h := pickHarness(t)
+	requestHeldPick(t, h)
+	h.restart(t)
+
+	// Act
+	held, err := h.o.pumpOnce(context.Background(), h.repoKey())
+	aheadLeaves(t, h, causeMerged)
+	released, releaseErr := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert
+	if err != nil || releaseErr != nil {
+		t.Fatalf("pumpOnce: %v, %v", err, releaseErr)
+	}
+	if held || released {
+		t.Fatalf("admitted while held %v, at release %v; want the pick to hold the head, not an admission", held, released)
+	}
+	if !picking(h) {
+		t.Fatal("the restarted daemon did not begin the pick once the merge ahead landed")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.merge.behind"}); !ok {
+		t.Fatalf("no hold record after the restart: %+v", h.logs.Records())
+	}
+}
+
+func TestEnqueueRecordsTheWaitOnTheMergeARequestIsPlacedBehind(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	requestPick(t, h)
+
+	// Act
+	_, err := h.o.Enqueue(context.Background(), Request{
+		Workspace: theWorkspace, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, KeepOpen: true}, By: RequestedByUser, PlaceBehind: "feature-merge",
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entry, ok := h.entryOf(theWorkspace)
+	if !ok || entry.WaitsOn != theMergeWorkspace || entry.WaitsOnName != "feature-merge" || !entry.HeldBehind() {
+		t.Fatalf("entry = %+v, %v; want it waiting on the merge it was placed behind", entry, ok)
+	}
+}

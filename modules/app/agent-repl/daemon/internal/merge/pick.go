@@ -52,6 +52,19 @@ type pick struct {
 	label string
 	// instruction is the requesting agent's instruction.
 	instruction string
+	// aheadLanded names the merge this one was placed behind once it has
+	// landed (wsm.MergeQueueEntry.AheadLanded), "" otherwise: the pick waited
+	// for it, so the branch was cut before that landing.
+	aheadLanded string
+}
+
+// aheadLandedOf answers the name of the merge ENTRY was placed behind when
+// that merge has landed, "" otherwise.
+func aheadLandedOf(entry wsm.MergeQueueEntry) string {
+	if entry.AheadLanded() {
+		return entry.WaitsOnName
+	}
+	return ""
 }
 
 // startPick begins merge workspace WS's pick: it mints the bubble, records the
@@ -67,7 +80,7 @@ func (o *orchestrator) startPick(ctx context.Context, ws ids.WorkspaceID, repo w
 		log.Error(op, "a pick was asked of a workspace that is no merge workspace", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return err
 	}
-	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.mintLedger(ws), turn: wsm.NewTurnID(), instruction: entry.Source.Pick}
+	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.mintLedger(ws), turn: wsm.NewTurnID(), instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry)}
 	started := o.deps.Now()
 	p.startedMS = started.UnixMilli()
 	if err := o.deps.DB.StartMergePick(ctx, repo, ws, p.ledger, p.turn, started); err != nil {
@@ -110,7 +123,7 @@ func (o *orchestrator) resumePick(ctx context.Context, repo wsm.RepoKey, entry w
 	o.mu.Unlock()
 	p := &pick{
 		ws: ws, requester: requester, repo: repo, ledger: entry.Ledger, turn: entry.Source.PickTurn,
-		startedMS: entry.Source.PickStartedAt.UnixMilli(), label: label, instruction: entry.Source.Pick,
+		startedMS: entry.Source.PickStartedAt.UnixMilli(), label: label, instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry),
 	}
 	o.log(ctx, ws).Info(op, "resumed an async merge's pick the restart interrupted", dlog.Context{
 		"workspace": string(ws), "turn": string(p.turn), "ledger": string(p.ledger)})
@@ -229,7 +242,7 @@ func (o *orchestrator) runPick(ctx context.Context, p *pick, resumed bool) {
 // the worktree. A value that cannot be read is spliced as it is known, and the
 // failure is recorded: the brief still states the instruction.
 func (o *orchestrator) pickBriefValues(ctx context.Context, p *pick) map[string]string {
-	values := map[string]string{"pick_instruction": p.instruction}
+	values := map[string]string{"pick_instruction": p.instruction, "ahead_landed": ""}
 	if record, err := o.deps.DB.Workspace(ctx, p.ws); err == nil && record.MergeOf != nil {
 		values["fork_head"] = record.MergeOf.ForkHead
 	} else if err != nil {
@@ -241,6 +254,12 @@ func (o *orchestrator) pickBriefValues(ctx context.Context, p *pick) map[string]
 		values["worktree_dir"] = job.Layout.SourceDir
 		if target, err := o.deps.Git.CurrentBranch(ctx, job.Layout.TargetDir); err == nil {
 			values["target_branch"] = target
+			// A PICK HELD BEHIND A MERGE THAT HAS SINCE LANDED starts on a
+			// branch cut before that landing, so the brief says to rebase
+			// onto the target first.
+			if p.aheadLanded != "" {
+				values["ahead_landed"] = fmt.Sprintf(" This merge was placed behind %s, which has landed on %s since that branch was cut, so first rebase this branch onto %s's tip, then prepare it.", p.aheadLanded, target, target)
+			}
 		} else {
 			o.log(ctx, p.ws).Error("daemon.merge.pick", "could not read the target branch for the pick's brief", dlog.Context{"workspace": string(p.ws), "error": err.Error()})
 		}

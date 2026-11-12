@@ -82,6 +82,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	if req.PlaceBehind != "" {
 		fields["place_behind"] = req.PlaceBehind
+		source.BehindName = req.PlaceBehind
 		if source.Behind, err = o.placeBehind(ctx, record, req); err != nil {
 			if _, refused := Refused(err); refused {
 				logRefusal(log, op, "refused a merge placed behind a merge not in its queue", fields, err)
