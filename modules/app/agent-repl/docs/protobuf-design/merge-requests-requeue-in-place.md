@@ -166,3 +166,30 @@ Drawing, under the repository's Merge Queue group, below the queue:
   (`detached_fork_failed`) never stood in a queue under a workspace and is not
   kept: there is no workspace to requeue it as. Its requester is told, as
   before, and asks again.
+
+### RequeueMerge takes a model (parent workspace's request, 2026-11-12)
+
+- WHAT: `RequeueMergeRequest.model` (optional `conversation.v1.AgentModel`)
+  and the refusal `not_in_catalog`; `RequeueMergeSuccess.position` became
+  optional, unset while the daemon drains (the request stays recorded and
+  joins the line at the next boot).
+- WHY: a requeued merge whose session parked cold would otherwise need a
+  separate SetModel, which a cold conversation refuses
+  (`SetModelError.cold_gate`); the model must take effect as the session
+  resumes, so the conversation is read once, on the new model.
+- HOW: every session start names the session's recorded model
+  (`workspace.Fleet.startSessionRequest`), so the requeue records the model
+  in the same store transaction that puts the merge back
+  (`wsm.setSessionModelInTx`, now the one write `SetSessionModel` also uses).
+- THE CATALOG IS THE LOGIN'S RECORDED ONE (`wsm.AccountModelCatalog`, checked
+  by `workspace.Verbs.RequireCatalogModel`), not the topbar-served one
+  `SetModel` checks: a hidden merge workspace serves no selector.
+- Accepted cost: a session that is live (not cold) when requeued switches at
+  its next start, not at once; the target case is the cold session.
+
+### Webapp
+
+- `drawRosterMergeQueueOffQueue` (`webapp/src/sidebar/merge-queue-view.ts`)
+  draws each row after the queue's own lines: name, cause label, `↺`
+  (RequeueMerge at the back, as the user) and `✕` (DiscardMerge, as the user).
+  Refusal words live in `webapp/src/rpc/merge-queue-refusal.ts`.

@@ -114,7 +114,7 @@ These clicks jump to an entry in the feed:
   - Once it stays where it finished, click its head to close it; it stays closed until you click the head again.
 - **`C-c C-k` with no turn running, while your workspace's sync merge is queued, asks what to do with the merge.**
   - The question covers the pinned bubble's tabs, and its buttons take keyboard focus.
-  - `Evict` takes the merge off the queue.
+  - `Evict` takes the merge off the queue; its request stays, off the queue, to be requeued or discarded.
   - `Prioritize` moves it to the front of the merges waiting, so it runs next.
   - `Cancel` leaves the queue as it is.
   - Pressing `C-c C-k` changes nothing on the queue by itself, and offers no rollback.
@@ -808,6 +808,11 @@ The top bar's phone chip, on the left after the account and just left of the wif
     - Each waiting merge follows, in the order it will run.
     - Clicking a merge selects its workspace and opens the merge's bubble.
     - Dragging a waiting merge to another place in its line moves it there.
+    - Each merge that left the queue without landing (evicted, failed, or stopped by a restart) follows, with why it left.
+      - Its request stays: its branch, version increment, changelog line, hooks and cleanup are kept, and an async merge's hidden merge workspace stays open under its name.
+      - `↺` puts it back in line, at the back, as itself; no new workspace is made.
+      - `✕` discards it; an async merge's merge workspace closes, and the worktree it asked to clean up is removed when it holds no uncommitted changes. No branch is deleted.
+      - A repository with only such merges is still listed.
   - A paused queue shows on its own repository.
     - The repository's name turns red, and its merge icons amber.
     - The head's clock stops at the moment of the pause.
