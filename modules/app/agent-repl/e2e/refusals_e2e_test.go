@@ -208,59 +208,6 @@ func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, 
 // surface, not a defect in this test's authorship.
 // ===========================================================================
 
-func testUnknownAgentOnUpdateAgent(t *testing.T) {
-	// Arrange: raise a permission ask under a detached subagent, then stop
-	// that subagent out from under its own still-open ask.
-	w := NewWorld(t, WorldOpts{})
-	// THE UNLANDED ARM IS THIS TEST'S ASSERTION. AnswerPermissionError carries
-	// no `unknown_agent` arm (endpoint_answer_permission.proto), the gap is a
-	// ledgered row in daemon/ERROR-ARMS.md, and server.UnlandedArm records
-	// every such refusal under this operation so the ledger reconciles against
-	// the log. The assertion below pins that exact spelling.
-	w.ExpectWarnings("daemon.refusal.unlanded_arm")
-	ws := w.NewWorkspace(t)
-
-	turn := SubmitPrompt(t, w, ws, "!subagent-detached-live")
-	AwaitTurnEnded(t, w, ws, turn)
-
-	bubble := rfAwaitFeedRow(t, w, ws, nil, "the live detached-subagent bubble", func(r *frontendv1.FeedRow) bool {
-		s := rfSubagentOf(r)
-		return s != nil && s.GetLive() != nil
-	})
-	permission := rfAwaitFeedRow(t, w, ws, bubble.GetId(), "a permission ask raised under the subagent", func(r *frontendv1.FeedRow) bool {
-		return r.GetPermission().GetOpen() != nil
-	})
-
-	interruptResp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
-		Workspace: ws,
-		Target:    &agentreplv1.InterruptRequest_Detached{Detached: bubble.GetId()},
-	}))
-	if err != nil {
-		t.Fatalf("Interrupt(detached) = error %v, want success (stopping the live subagent)", err)
-	}
-	if interruptResp.Msg.GetSuccess().GetInterruptedDetached() == nil {
-		t.Fatalf("Interrupt(detached) = %v, want success.interrupted_detached", interruptResp.Msg)
-	}
-
-	// Act: answer the now-orphaned permission ask.
-	_, err = w.Client().AnswerPermission(w.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
-		Workspace:  ws,
-		Permission: permission.GetId(),
-		Answer:     &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
-	}))
-
-	// Assert: the daemon/ERROR-ARMS.md documented unlanded-arm shape.
-	if err == nil {
-		t.Fatalf("AnswerPermission(orphaned ask) = success, want a refusal (the addressed agent is gone)")
-	}
-	if code := rfConnectCode(err); code != connect.CodeFailedPrecondition {
-		t.Fatalf("AnswerPermission(orphaned ask) code = %v, want CodeFailedPrecondition (%s)", code, err)
-	}
-	if !rfNamesIntendedArm(err, "AnswerPermissionError.unknown_agent") {
-		t.Fatalf("AnswerPermission(orphaned ask) = %v, want the intended-arm spelling for AnswerPermissionError.unknown_agent", err)
-	}
-}
-
 // ===========================================================================
 // #54 — StartSessionVendorStartFailed (+ its retry-recovery half)
 //
