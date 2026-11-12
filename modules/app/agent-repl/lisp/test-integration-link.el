@@ -1418,6 +1418,39 @@ acceptance is told here, once a stream stands to own it."
       (should (equal (alist-get 'focus (car (agent-repl-itest--call-bodies daemon "ReportEditorFocus")))
                      '((unfocused)))))))
 
+(declare-function agent-repl--focus-report "notifications")
+
+(ert-deftest agent-repl-itest-link-an-unfocused-report-reaches-the-daemon-as-unfocused ()
+  "`agent-repl--focus-report' tells the live daemon Emacs is unfocused.
+The daemon decides every desktop banner on this report; Emacs posts none."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-real-hooks daemon
+      (agent-repl-itest--await-call daemon "ReportEditorFocus")
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil)))
+        ;; Act.
+        (agent-repl--focus-report)
+        (agent-repl-itest--await-call daemon "ReportEditorFocus" 2)
+        ;; Assert.
+        (should (equal (alist-get 'focus (car (last (agent-repl-itest--call-bodies
+                                                     daemon "ReportEditorFocus"))))
+                       '((unfocused))))))))
+
+(ert-deftest agent-repl-itest-link-a-focused-report-reaches-the-daemon-as-focused ()
+  "`agent-repl--focus-report' tells the live daemon Emacs is focused once it is."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-real-hooks daemon
+      (agent-repl-itest--await-call daemon "ReportEditorFocus")
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) t)))
+        ;; Act.
+        (agent-repl--focus-report)
+        (agent-repl-itest--await-call daemon "ReportEditorFocus" 2)
+        ;; Assert.
+        (should (equal (alist-get 'focus (car (last (agent-repl-itest--call-bodies
+                                                     daemon "ReportEditorFocus"))))
+                       '((focused))))))))
+
 (ert-deftest agent-repl-itest-link-reload-elisp-for-another-root-is-refused ()
   "A reload naming another checkout is refused at ERROR; the link stays up."
   ;; Arrange.

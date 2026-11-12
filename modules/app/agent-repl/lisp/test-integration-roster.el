@@ -495,6 +495,29 @@ notification would be a spurious re-alert."
           ;; Assert.
           (should (equal (length blinked) 1)))))))
 
+(ert-deftest agent-repl-itest-roster-a-permission-ask-on-an-unselected-workspace-draws-the-marker ()
+  "A `permission' row carrying `attention' draws the steady marker on its tab.
+EMACS ANSWERS NOTHING: the notification policy is its whole reaction to an ask,
+and the workspace under the ask is not the selected one."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
+        (agent-repl--ws-put "itest-perm" :project-dir (agent-repl-itest--fixture-dir "itest-perm"))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "itest-other")))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-perm" "itest-perm" 'permission
+                          '(attention . ())))))
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-status-attention-visible-p "itest-perm"))
+           nil "the permission ask's marker to show")
+          (should (agent-repl-status-attention-visible-p "itest-perm")))))))
+
 (ert-deftest agent-repl-itest-roster-attention-clears-when-removed-from-the-row ()
   "A row that stops carrying `attention' clears the steady marker.
 Fanout §8: \"a steady marker until the marker leaves the row\" — a marker
