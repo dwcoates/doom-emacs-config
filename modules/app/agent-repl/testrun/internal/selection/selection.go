@@ -103,6 +103,50 @@ func Whole(req *testrunv1.TestRunRequest) (names []string, ok bool, err error) {
 	return names, true, nil
 }
 
+// Describe names what req asks to run, for a person: each selection's
+// target with the tests it names, in the request's order.
+func Describe(req *testrunv1.TestRunRequest) string {
+	var parts []string
+	named := func(what string, names []string) string {
+		if len(names) == 0 {
+			return what
+		}
+		return what + "=" + strings.Join(names, ",")
+	}
+	for _, sel := range req.GetSelections() {
+		switch t := sel.GetTarget().(type) {
+		case *testrunv1.TestSelection_GoPackage:
+			var tests []string
+			for _, gt := range t.GoPackage.GetNamed().GetTests() {
+				if paths := gt.GetSubtests().GetPaths(); len(paths) > 0 {
+					for _, p := range paths {
+						tests = append(tests, gt.GetName()+"/"+strings.Join(p.GetSegments(), "/"))
+					}
+					continue
+				}
+				tests = append(tests, gt.GetName())
+			}
+			parts = append(parts, named("Go package "+t.GoPackage.GetPackageDir(), tests))
+		case *testrunv1.TestSelection_VitestFile:
+			parts = append(parts, named("vitest file "+t.VitestFile.GetFile(), t.VitestFile.GetNamed().GetFullNames()))
+		case *testrunv1.TestSelection_ErtFile:
+			parts = append(parts, named("ERT file "+t.ErtFile.GetFile(), t.ErtFile.GetNamed().GetTestNames()))
+		case *testrunv1.TestSelection_Harness:
+			parts = append(parts, named("harness "+t.Harness.GetScript(), t.Harness.GetNamed().GetNames()))
+		case *testrunv1.TestSelection_Suite:
+			parts = append(parts, "suite "+t.Suite.GetName())
+		case *testrunv1.TestSelection_EverySuite:
+			parts = append(parts, "every suite")
+		default:
+			parts = append(parts, "a selection with no target")
+		}
+	}
+	if len(parts) == 0 {
+		return "no test"
+	}
+	return strings.Join(parts, "; ")
+}
+
 // Resolve resolves every selection of req to the suite that owns it.
 func Resolve(req *testrunv1.TestRunRequest, l suites.Layout) (Resolved, error) {
 	if len(req.GetSelections()) == 0 {

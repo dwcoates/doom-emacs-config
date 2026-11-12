@@ -96,28 +96,54 @@ func RunConditions(unitPrefix []string) string {
 	return "ramdisk-io-" + ramdisk.UnitIOTier
 }
 
+// asked names what a run was asked to run, for its abort: the selection
+// file's targets once read, else the suites its arguments select.
+func asked(a Args, req *testrunv1.TestRunRequest, selected []roster.Suite) string {
+	switch {
+	case req != nil:
+		return selection.Describe(req)
+	case a.Selection != "":
+		return "the selection in " + a.Selection
+	case len(selected) > 0:
+		names := make([]string, len(selected))
+		for i, s := range selected {
+			names[i] = s.Name
+		}
+		return "suites " + strings.Join(names, ", ")
+	}
+	return "the suites its arguments select"
+}
+
 // Run executes `testrun run` and returns the process exit status.
 func Run(ctx context.Context, d Deps, a Args) int {
 	log := d.Log
-	// EVERY SUITE DECLARES ITS INPUTS, or why it never can: a roster that
-	// does not is refused before anything runs (roster.Check).
-	if err := roster.Check(roster.Suites); err != nil {
-		log.Errorf("the roster is refused: %v", err)
-		return 1
-	}
-	moduleRoot, err := filepath.Abs(a.Module)
-	if err != nil {
-		log.Errorf("resolve the module root %s: %v", a.Module, err)
-		return 1
-	}
 	ev := d.Events
 	if ev == nil {
 		ev = events.New(io.Discard, log)
 	}
+	var req *testrunv1.TestRunRequest
+	var selected []roster.Suite
+	// abort ends a run that stops before it plans: the failure is logged and
+	// stated as the run's one event (testrun.v1.TestRunAborted), so no run
+	// leaves its caller without its end.
+	abort := func(format string, args ...any) int {
+		detail := fmt.Sprintf(format, args...)
+		log.Errorf("%s", detail)
+		ev.Aborted(asked(a, req, selected), detail)
+		return 1
+	}
+	// EVERY SUITE DECLARES ITS INPUTS, or why it never can: a roster that
+	// does not is refused before anything runs (roster.Check).
+	if err := roster.Check(roster.Suites); err != nil {
+		return abort("the roster is refused: %v", err)
+	}
+	moduleRoot, err := filepath.Abs(a.Module)
+	if err != nil {
+		return abort("resolve the module root %s: %v", a.Module, err)
+	}
 	// A SELECTION FILE IS READ FIRST: a request of whole suites lowers onto
 	// the ordinary suite run (its coverage and record included) before
 	// anything is planned from the arguments.
-	var req *testrunv1.TestRunRequest
 	if a.Selection != "" {
 		req = &testrunv1.TestRunRequest{}
 		err := protofile.Read(a.Selection, req)
@@ -142,24 +168,20 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 	csvPath := filepath.Join(moduleRoot, "test_time.csv")
 	if err := ValidateCSV(csvPath); err != nil {
-		log.Errorf("%v", err)
-		return 1
+		return abort("%v", err)
 	}
 	var startBranch, startCommit string
 	if a.Record {
 		startBranch, startCommit, err = d.Git(layout.Repo)
 		if err != nil {
-			log.Errorf("could not resolve the initial git branch and commit: %v", err)
-			return 1
+			return abort("could not resolve the initial git branch and commit: %v", err)
 		}
 	}
 	hist, err := history.Load(d.HistoryPath)
 	if err != nil {
-		log.Errorf("%v", err)
-		return 1
+		return abort("%v", err)
 	}
 
-	var selected []roster.Suite
 	var resolved selection.Resolved
 	if a.Selection != "" {
 		resolved, err = selection.Resolve(req, layout)
@@ -225,8 +247,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		return 1
 	}
 	if err := errors.Join(decideErrs...); err != nil {
-		log.Errorf("deciding which units an earlier run's pass covers failed: %v", err)
-		return 1
+		return abort("deciding which units an earlier run's pass covers failed: %v", err)
 	}
 	// A suite every unit of which is reused does not run at all; one that
 	// could not be built has no verdict, and fails below.
@@ -249,8 +270,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	selected, built, buildErrs = running, runningBuilt, runningErrs
 	unplaced, err := d.Reuse.Unplaced(verdicts)
 	if err != nil {
-		log.Errorf("the placement check could not run: %v", err)
-		return 1
+		return abort("the placement check could not run: %v", err)
 	}
 	placed := reuse.ReportPlacement(log, unplaced)
 	var planned []suites.Units
@@ -268,8 +288,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 	programs, err := programUnits(layout, selected, built, buildErrs)
 	if err != nil {
-		log.Errorf("planning the run's shared programs failed: %v", err)
-		return 1
+		return abort("planning the run's shared programs failed: %v", err)
 	}
 	if len(programs.Atomic) > 0 {
 		planned = append(planned, programs)
@@ -277,8 +296,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if a.Coverage {
 		baseline, ok, err := baselineUnit(layout, d, planned)
 		if err != nil {
-			log.Errorf("planning the coverage baseline failed: %v", err)
-			return 1
+			return abort("planning the coverage baseline failed: %v", err)
 		}
 		if ok {
 			planned = append(planned, baseline)
@@ -289,8 +307,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 
 	p, err := plan.Build(hist, planned, d.Slots, a.Remeasure)
 	if err != nil {
-		log.Errorf("planning the run failed: %v", err)
-		return 1
+		return abort("planning the run failed: %v", err)
 	}
 	var chunkNote []string
 	for group, n := range p.Chunks {
@@ -303,8 +320,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if needsWebappDist(selected) {
 		log.Infof("webapp dist: building it once, before any unit starts, if it is stale")
 		if err := d.PrepareWebappDist(moduleRoot); err != nil {
-			log.Errorf("webapp dist: building it before the run failed, so no suite that reads it can run: %v", err)
-			return 1
+			return abort("webapp dist: building it before the run failed, so no suite that reads it can run: %v", err)
 		}
 	}
 

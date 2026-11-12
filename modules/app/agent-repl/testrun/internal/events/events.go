@@ -126,6 +126,12 @@ func (e *Emitter) Ended(results []run.Result, unplannable int) {
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: ended}})
 }
 
+// Aborted states that the run stopped before it planned, on the runner's
+// own failure: what it was asked to run, and why it stopped.
+func (e *Emitter) Aborted(selection, detail string) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Aborted{Aborted: &testrunv1.TestRunAborted{Selection: selection, Detail: detail}}})
+}
+
 // Refused states that the selection could not be run, and why.
 func (e *Emitter) Refused(detail string) {
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: detail}}})

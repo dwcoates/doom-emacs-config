@@ -152,6 +152,21 @@ func TestRefused(t *testing.T) {
 	}
 }
 
+func TestAborted(t *testing.T) {
+	// Arrange
+	var buf bytes.Buffer
+	e := New(&buf, &run.Log{Out: io.Discard, Err: io.Discard})
+
+	// Act
+	e.Aborted("ERT file test-x.el=a-test", "reuse: read lisp/test-x.el: no such file")
+
+	// Assert
+	got := readAll(t, &buf)
+	if len(got) != 1 || got[0].GetAborted().GetSelection() != "ERT file test-x.el=a-test" || got[0].GetAborted().GetDetail() != "reuse: read lisp/test-x.el: no such file" {
+		t.Fatalf("events = %v, want one aborted naming the selection and its cause", got)
+	}
+}
+
 type brokenWriter struct{ writes int }
 
 func (w *brokenWriter) Write([]byte) (int, error) { w.writes++; return 0, errors.New("broken pipe") }

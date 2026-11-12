@@ -539,3 +539,30 @@ func TestResolveRefusesAnERTFileItsSuiteDoesNotRun(t *testing.T) {
 		})
 	}
 }
+
+func TestDescribe(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *testrunv1.TestRunRequest
+		want string
+	}{
+		{name: "a named ERT file", req: request(ertNamed("test-x.el", "a-test", "b-test")), want: "ERT file test-x.el=a-test,b-test"},
+		{name: "a whole ERT file", req: request(ertAll(mod + "lisp/test-x.el")), want: "ERT file " + mod + "lisp/test-x.el"},
+		{name: "Go tests and a subtest path", req: request(goNamed("daemon/internal/merge", whole("TestA"), sub("TestB", []string{"case", "inner"}))), want: "Go package daemon/internal/merge=TestA,TestB/case/inner"},
+		{name: "a named vitest file", req: request(vitestNamed("webapp/src/a.test.ts", "one")), want: "vitest file webapp/src/a.test.ts=one"},
+		{name: "harness groups", req: request(harness("bin/t.sh", "g1")), want: "harness bin/t.sh=g1"},
+		{name: "several targets in order", req: request(suiteSel("daemon"), everySuite()), want: "suite daemon; every suite"},
+		{name: "no selection", req: request(), want: "no test"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := Describe(tc.req)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Describe = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
