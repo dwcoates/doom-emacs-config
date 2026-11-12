@@ -1497,6 +1497,20 @@ type MergeQueueEntry struct {
 // that releases the merges placed behind it rather than failing them.
 const MergeLeftLanded = "merged"
 
+// MergeLeftWorkspaceClosed is the removal cause of a merge whose workspace was
+// closed (killed, nuked) under it: the close is the merge's explicit end, so
+// it keeps no request off the queue.
+const MergeLeftWorkspaceClosed = "workspace_closed"
+
+// EndsRequest reports whether a merge that leaves its queue for CAUSE ends its
+// request rather than keeping it off the queue (offqueue.go): a landing, its
+// workspace's close, or a removal only to be put straight back in line
+// (MergeLeftToReturn), which must never leave a second copy of the request
+// behind. Every other cause keeps it.
+func EndsRequest(cause string) bool {
+	return cause == MergeLeftLanded || cause == MergeLeftWorkspaceClosed || cause == MergeLeftToReturn
+}
+
 // MergeLeftToReturn is the removal cause of a merge a restart takes out of
 // line only to put straight back in it under the same workspace: no
 // departure, so the merges placed behind it keep waiting on it.

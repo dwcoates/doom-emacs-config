@@ -377,7 +377,7 @@ const (
 	CauseUserDequeue AbandonCause = "dequeued"
 	// CauseWorkspaceClosed is the workspace itself being torn down — killed or
 	// nuked — while its merge was still waiting.
-	CauseWorkspaceClosed AbandonCause = "workspace_closed"
+	CauseWorkspaceClosed AbandonCause = wsm.MergeLeftWorkspaceClosed
 	// CauseDaemonShutdown is the daemon going away under a waiting merge: the
 	// queue is durable, so this is only reached at the RESTORE, for a merge the
 	// restart could not put back on its queue.
