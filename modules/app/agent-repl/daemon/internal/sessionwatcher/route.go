@@ -808,12 +808,22 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 		// replayed against the turn the queue stated.
 		w.releaseHeldTerminalLocked()
 	}
-	if a.id == nil && promptorigin.Adopted(prompt.GetOrigin()) {
+	// A FOLDED PROMPT OPENS NO TURN, whatever its origin: the vendor took it
+	// into the running turn its row names. A remote-control prompt typed while
+	// a turn runs is written folded, and adopting it stood a turn in flight that
+	// no terminal ever ended, holding every later prompt behind it (2026-11-12).
+	joined := prompt.GetFoldedInto().GetValue()
+	switch {
+	case a.id != nil:
+	case promptorigin.Adopted(prompt.GetOrigin()) && joined != "":
+		w.log.Debug("daemon.sessionwatcher.adopted_prompt_folded", "an adopted prompt was folded into the running turn; it opens no turn", dlog.Context{
+			"turn_id": prompt.GetId().GetValue(), "folded_into": joined, "origin": prompt.GetOrigin().String(),
+		})
+	case promptorigin.Adopted(prompt.GetOrigin()):
 		w.adoptVendorTurnLocked(prompt)
-	}
-	// A FOLDED PROMPT'S ROW IS THE ONE STATEMENT THAT ITS JOIN LANDED: the
-	// vendor took it into the turn it names, so its own turn ends unrun.
-	if joined := prompt.GetFoldedInto().GetValue(); a.id == nil && joined != "" {
+	case joined != "":
+		// A FOLDED PROMPT'S ROW IS THE ONE STATEMENT THAT ITS JOIN LANDED: the
+		// vendor took it into the turn it names, so its own turn ends unrun.
 		w.foldJoinLocked(ids.TurnID(prompt.GetId().GetValue()), ids.TurnID(joined))
 	}
 	if turn := prompt.GetId().GetValue(); turn != "" {
