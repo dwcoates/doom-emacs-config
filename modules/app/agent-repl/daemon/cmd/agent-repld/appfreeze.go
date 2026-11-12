@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -39,8 +40,10 @@ var (
 func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, selfExe string, metrics *runtimemetrics.Surface, log dlog.Logger) (*appfreeze.Freezer, error) {
 	dir := freezeDir(stateDir)
 	signal := appfreeze.Signaler(appfreeze.KillSignaler)
+	spawns := appfreeze.SpawnSource(appfreeze.KernelSpawns)
 	if cfg.FakeLid != "" {
 		signal = refuseSignal
+		spawns = idleSpawns
 	} else {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("agent-repld: make the frozen set's directory: %w", err)
@@ -63,6 +66,7 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 		Processes: appfreeze.PSLister(runner, cfg.Tools.Ps),
 		Signal:    signal,
 		Store:     appfreeze.FileStore{Path: filepath.Join(dir, appfreeze.RecordFile)},
+		Spawns:    spawns,
 		Protection: appfreeze.Protection{
 			Self:         os.Getpid(),
 			PathPrefixes: []string{filepath.Dir(selfExe), filepath.Join(home, ".cache", "agent-repl")},
@@ -81,6 +85,21 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 func refuseSignal(pid int, _ syscall.Signal) error {
 	return fmt.Errorf("a fake host signals no process (pid %d)", pid)
 }
+
+// idleSpawns is a fake host's source of process starts: its follower
+// reports none, so a harness's fake process table is read only when the
+// quiet state asks.
+func idleSpawns() (appfreeze.SpawnFollower, error) { return idleFollower{}, nil }
+
+type idleFollower struct{}
+
+func (idleFollower) FollowForks(int) (bool, error) { return true, nil }
+func (idleFollower) FollowExec(int) (bool, error)  { return true, nil }
+func (idleFollower) Wait(ctx context.Context) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (idleFollower) Close() {}
 
 // startThawGuard starts this daemon's thaw guard in a session of its own, so
 // it outlives the daemon, handing it the read end of a pipe whose write end

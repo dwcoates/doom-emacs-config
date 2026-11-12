@@ -12,7 +12,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"agent-repld/internal/appfreeze"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
@@ -102,11 +101,10 @@ type Controller struct {
 	failover failoverSchedule
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
 	lid lidFact
-	// quiet is whether the lid-closed quiet state stands (quiet.go); frozen
-	// is what its freeze left frozen, displayAsleep whether its display
-	// sleep took, and displayCause why the last sleep failed.
+	// quiet is whether the lid-closed quiet state stands (quiet.go);
+	// displayAsleep whether its display sleep took, and displayCause why the
+	// last sleep failed. What is frozen is the freezer's (Frozen).
 	quiet         bool
-	frozen        []appfreeze.Frozen
 	displayAsleep bool
 	displayCause  string
 }
@@ -137,13 +135,15 @@ func New(d Deps) (*Controller, error) {
 	if exists == nil {
 		exists = regularFile
 	}
-	return &Controller{
+	c := &Controller{
 		cfg: d.Config, runner: d.Runner, clock: d.Clock,
 		network: d.NetworkChanged, power: d.PowerChanges,
 		exists: exists, onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry,
-	}, nil
+	}
+	d.Freezer.OnChange(c.frozenChanged)
+	return c, nil
 }
 
 // regularFile is the production Exists.

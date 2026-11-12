@@ -29,6 +29,28 @@ func (h *harness) lastStanding(t *testing.T) *harness {
 	return h
 }
 
+func TestALateFreezeRepublishesTheStandingWithWhatIsFrozenNow(t *testing.T) {
+	// Arrange: the quiet state stands with Slack's 4 processes frozen.
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
+	h.r.on(argPowerSource, answer{out: onBattery})
+	h.r.on(argDisplaySleep, answer{})
+	h.hear(LidClosed)
+	if h.freezer.onChange == nil {
+		t.Fatal("the controller did not name its function for the freezer's late freezes")
+	}
+
+	// Act: the freezer froze a fifth process started with the lid closed.
+	h.freezer.held = []appfreeze.Frozen{{Name: "Slack", Processes: 5}}
+	h.freezer.onChange()
+
+	// Assert
+	q := h.lastStanding(t).changes[len(h.changes)-1].GetQuiet()
+	if len(q.GetFrozenApps()) != 1 || q.GetFrozenApps()[0].GetProcesses() != 5 {
+		t.Fatalf("quiet = %v, want Slack's 5 processes frozen", q)
+	}
+}
+
 func TestALidCloseWithTheModeOnEntersTheQuietState(t *testing.T) {
 	// Arrange
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
