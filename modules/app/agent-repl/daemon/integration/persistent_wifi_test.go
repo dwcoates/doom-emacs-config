@@ -63,7 +63,7 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	})
 }
 
-func TestWithTheModeOnClosingTheLidDimsAndOpeningItRestores(t *testing.T) {
+func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -84,33 +84,36 @@ func TestWithTheModeOnClosingTheLidDimsAndOpeningItRestores(t *testing.T) {
 	// Act: close the lid.
 	d.Lid.Close()
 
-	// Assert: dimmed to 0, keeping the user's level.
+	// Assert: the quiet state stands, the display asleep at the user's level.
 	closedCtx, cancelClosed := d.WaitCtx()
 	defer cancelClosed()
-	harness.AwaitView(t, closedCtx, stream, "the closed lid dimmed", func(r *agentreplv1.WatchDaemonResponse) bool {
+	harness.AwaitView(t, closedCtx, stream, "the closed lid quieted the machine", func(r *agentreplv1.WatchDaemonResponse) bool {
 		s := r.GetPersistentWifi()
-		return s.GetLidClosed() != nil && s.GetLidDim() != nil
+		return s.GetLidClosed() != nil && s.GetQuiet().GetDisplayAsleep() != nil
 	})
-	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != "0" {
-		t.Fatalf("brightness with the lid closed = %s, want 0", got)
+	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "asleep" {
+		t.Fatalf("display with the lid closed = %s, want asleep", got)
+	}
+	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
+		t.Fatalf("brightness with the lid closed = %s, want the user's own %s", got, harness.FakeBrightness)
 	}
 
 	// Act: open it.
 	d.Lid.Open()
 
-	// Assert: restored to the level it had before it closed.
+	// Assert: the quiet state is over and the display awake.
 	reopenedCtx, cancelReopened := d.WaitCtx()
 	defer cancelReopened()
-	harness.AwaitView(t, reopenedCtx, stream, "the opened lid restored", func(r *agentreplv1.WatchDaemonResponse) bool {
+	harness.AwaitView(t, reopenedCtx, stream, "the opened lid left the quiet state", func(r *agentreplv1.WatchDaemonResponse) bool {
 		s := r.GetPersistentWifi()
-		return s.GetLidOpen() != nil && s.GetLidDim() == nil
+		return s.GetLidOpen() != nil && s.GetQuiet() == nil
 	})
-	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
-		t.Fatalf("brightness after opening = %s, want the pre-close %s", got, harness.FakeBrightness)
+	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
+		t.Fatalf("display after opening = %s, want awake", got)
 	}
 }
 
-func TestTurningTheModeOffUnderAClosedLidRestoresTheDisplay(t *testing.T) {
+func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	t.Parallel()
 	// Arrange.
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -126,8 +129,8 @@ func TestTurningTheModeOffUnderAClosedLidRestoresTheDisplay(t *testing.T) {
 	on, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
 		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
 	}))
-	if err != nil || on.Msg.GetSuccess().GetDisplay().GetDimmed().GetRestoreLevel() != 0.81 {
-		t.Fatalf("UpdatePersistentWifiMode(on) = %v, %v, want the closed lid dimmed from 0.81", on, err)
+	if err != nil || on.Msg.GetSuccess().GetDisplay().GetSlept() == nil {
+		t.Fatalf("UpdatePersistentWifiMode(on) = %v, %v, want the display slept for the closed lid", on, err)
 	}
 
 	// Act.
@@ -138,10 +141,10 @@ func TestTurningTheModeOffUnderAClosedLidRestoresTheDisplay(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || off.Msg.GetSuccess().GetDisplay().GetRestored().GetLevel() != 0.81 || off.Msg.GetSuccess().GetState().GetLidDim() != nil {
-		t.Fatalf("UpdatePersistentWifiMode(off) = %v, %v, want the display restored to 0.81 and no dim", off, err)
+	if err != nil || off.Msg.GetSuccess().GetDisplay().GetWoke() == nil || off.Msg.GetSuccess().GetState().GetQuiet() != nil {
+		t.Fatalf("UpdatePersistentWifiMode(off) = %v, %v, want the display woken and no quiet state", off, err)
 	}
-	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
-		t.Fatalf("brightness = %s, want the pre-close %s", got, harness.FakeBrightness)
+	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
+		t.Fatalf("display = %s, want awake", got)
 	}
 }

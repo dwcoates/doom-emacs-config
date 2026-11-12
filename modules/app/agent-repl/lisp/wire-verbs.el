@@ -3271,7 +3271,7 @@ NAME is nil when macOS withholds the network's name."
   "Decode PersistentWifiFrozenApp from JSON into (:name NAME :processes N)."
   (let* ((message "PersistentWifiFrozenApp")
          (object (agent-repl-wire--object message json)))
-    (agent-repl-wire--check-keys message object '(name processes))
+    (agent-repl-wire--check-keys "PersistentWifiFrozenApp" object '(name processes))
     (list :name (agent-repl-wire-verbs--decode-string message 'name object)
           :processes (agent-repl-wire--decode-uint32 message 'processes object))))
 
@@ -3282,14 +3282,14 @@ Returns (:frozen-apps APPS :display ONEOF): APPS is a list of
 or (:arm :display-awake :value (:detail TEXT))."
   (let* ((message "PersistentWifiQuiet")
          (object (agent-repl-wire--object message json)))
-    (agent-repl-wire--check-keys message object '(frozenApps displayAsleep displayAwake))
+    (agent-repl-wire--check-keys "PersistentWifiQuiet" object '(frozenApps displayAsleep displayAwake))
     (list :frozen-apps (agent-repl-wire--decode-repeated
                         message 'frozenApps object #'agent-repl-wire-decode-persistent-wifi-frozen-app)
           :display (agent-repl-wire--decode-oneof
                     message 'display object
-                    '((displayAsleep :display-asleep
-                                     (lambda (v) (agent-repl-wire-verbs--decode-empty
-                                                  "PersistentWifiQuietDisplayAsleep" v)))
+                    `((displayAsleep :display-asleep
+                                     ,(agent-repl-wire-verbs--empty-arm
+                                       "PersistentWifiQuietDisplayAsleep"))
                       (displayAwake :display-awake
                                     (lambda (v) (agent-repl-wire-verbs--decode-scalar-fields
                                                  "PersistentWifiQuietDisplayAwake" v '((detail :detail))))))))))

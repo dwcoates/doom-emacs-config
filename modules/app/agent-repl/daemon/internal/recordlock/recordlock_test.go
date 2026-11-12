@@ -2,6 +2,7 @@ package recordlock
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,9 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
+
+	"agent-repld/internal/inflight"
 )
 
 // A record lock's guarantees are about OTHER processes, so these cases run a
@@ -539,5 +543,114 @@ func TestEveryDaemonKernelLockGoesThroughThisPackage(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("kernel locks taken outside recordlock in %v; take recordlock.Hold or recordlock.TryExclusive", offenders)
+	}
+}
+
+// fakeSharedWait replaces the kernel's shared wait for one test: the wait
+// answers what answer sends, when the test sends it.
+func fakeSharedWait(t *testing.T) chan error {
+	t.Helper()
+	answer := make(chan error)
+	was := waitShared
+	waitShared = func(*os.File) error { return <-answer }
+	t.Cleanup(func() { waitShared = was })
+	return answer
+}
+
+func TestHoldShared(t *testing.T) {
+	tests := []struct {
+		name    string
+		kernel  error
+		wantErr error
+	}{
+		{name: "a granted wait is a hold", kernel: nil},
+		{name: "a refused wait is an error", kernel: syscall.EDEADLK, wantErr: syscall.EDEADLK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "owners")
+			answer := fakeSharedWait(t)
+			go func() { answer <- tt.kernel }()
+
+			// Act
+			held, err := HoldShared(path, time.Minute)
+
+			// Assert
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("HoldShared() = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("HoldShared() = %v", err)
+			}
+			if err := held.Release(); err != nil {
+				t.Fatalf("Release() = %v", err)
+			}
+			// The gate is free again either way: an exclusive take succeeds.
+			rec, _, err := TryExclusive(path)
+			if err != nil {
+				t.Fatalf("TryExclusive() after the shared hold = %v", err)
+			}
+			_ = rec.Release()
+		})
+	}
+}
+
+func TestHoldSharedRefusesWhileThisProcessHoldsItExclusive(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "owners")
+	rec, _, err := TryExclusive(path)
+	if err != nil {
+		t.Fatalf("TryExclusive() = %v", err)
+	}
+	defer rec.Release()
+
+	// Act
+	_, err = HoldShared(path, time.Minute)
+
+	// Assert
+	if !errors.Is(err, ErrWouldBlock) {
+		t.Fatalf("HoldShared() = %v, want ErrWouldBlock", err)
+	}
+}
+
+func TestHoldSharedPastItsBoundReleasesTheLateGrant(t *testing.T) {
+	// Arrange: the kernel's wait is still open when the bound fires.
+	path := filepath.Join(t.TempDir(), "owners")
+	answer := fakeSharedWait(t)
+
+	// Act
+	_, err := HoldShared(path, time.Millisecond)
+	answer <- nil
+	// Bounded by the test's own deadline, which the runner sets.
+	ctx, cancel := context.WithCancel(context.Background())
+	if deadline, ok := t.Deadline(); ok {
+		ctx, cancel = context.WithDeadline(context.Background(), deadline)
+	}
+	defer cancel()
+	idle := inflight.Default.AwaitIdle(ctx)
+
+	// Assert: the bound is refused, and the late grant let the gate go.
+	if !errors.Is(err, ErrSharedWaitBound) {
+		t.Fatalf("HoldShared() = %v, want ErrSharedWaitBound", err)
+	}
+	if idle != nil {
+		t.Fatalf("AwaitIdle() = %v", idle)
+	}
+	rec, _, err := TryExclusive(path)
+	if err != nil {
+		t.Fatalf("TryExclusive() after the abandoned wait = %v", err)
+	}
+	_ = rec.Release()
+}
+
+func TestASharedHoldReleasesTwiceSafely(t *testing.T) {
+	// Arrange
+	var nilHold *Shared
+
+	// Act and assert
+	if err := nilHold.Release(); err != nil {
+		t.Fatalf("Release() on nil = %v", err)
 	}
 }
