@@ -41,7 +41,6 @@ func TestFaults(t *testing.T) {
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
 		testApiRateLimitedCarriesTheVendorWait,
-		testPermissionAskAnsweredArms,
 	)
 }
 

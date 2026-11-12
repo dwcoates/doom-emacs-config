@@ -386,3 +386,45 @@ describe("a converter fault and its recovery", () => {
     });
   });
 });
+
+describe("an allow-standing answer to a gated Bash", () => {
+  test("lets the gated Bash run to a completed success and the turn conclude", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-allow-standing" }));
+    const ask = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      return (
+        agentFrame?.result.case === "update" &&
+        agentFrame.result.value.update.case === "permission" &&
+        agentFrame.result.value.update.value.result.case === "start"
+      );
+    });
+    const asked = entryFrame(watchAgentEntry(ask));
+    const permission =
+      asked?.result.case === "update" && asked.result.value.update.case === "permission"
+        ? asked.result.value.update.value
+        : undefined;
+    const offered = permission?.result.case === "start" ? permission.result.value.offeredStanding : undefined;
+    if (permission === undefined || offered === undefined) throw new Error("the ask offered no standing");
+
+    await shim.clients.h1.updateAgent(allowStanding(create(conversationv1.AgentPermissionIdSchema, { value: permission.id?.value ?? "" }), offered));
+    await stream.until(isTerminal);
+
+    const frames = framesOf(stream);
+    const bash = activitiesOf(frames)
+      .filter((activity) => activity.item.case === "bash")
+      .map((activity) => {
+        const result = activity.item.case === "bash" ? activity.item.value.result : undefined;
+        return result?.case === "success" ? `success.${result.value.outcome.case}` : result?.case;
+      });
+    expect({ permission: permissionArms(frames), bash, terminal: terminalArm(frames) }).toEqual({
+      permission: ["start", "success.allowed"],
+      bash: ["start", "success.completed"],
+      terminal: "success.completed",
+    });
+    stream.close();
+  });
+});
