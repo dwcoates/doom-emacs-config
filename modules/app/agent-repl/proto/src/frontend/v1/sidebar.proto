@@ -418,27 +418,43 @@ message RosterOpenRows {
 // parent's run. A workspace whose parent is not open (a closed or hidden
 // parent of a family that predates the rule against one) takes its parent's
 // place instead.
+//
+// A FAMILY'S CHILDREN ARE GROUPED BY REPOSITORY (owner ruling, 2026-11-09):
+// first the children of the row's own repository (`children`), then ONE
+// BLOCK per other repository (`repository_blocks`), each headed by one
+// divider naming its repository. Every row of a block is indented exactly
+// as the row's own-repository children are. A child drawn in a block never
+// leaves it: it moves only among that block's rows, and a block moves only
+// among the row's blocks, always after the own-repository children.
 message RosterOpenRow {
   // Everything every list draws the same way: identity, name, status,
   // markers, the when-column and the detail panel.
   RosterRow row = 1;
   // The row's tab, as the daemon numbers it. Always set.
   RosterOpenRowTab tab = 2;
-  // The workspace's open children, in drawn order, each followed by its own.
+  // The workspace's open children OF ITS OWN REPOSITORY, in drawn order,
+  // each followed by its own family. Their tabs precede every tab of
+  // `repository_blocks`.
   repeated RosterOpenRow children = 3;
-  // SET when this row is of a different repository than the row drawn just
-  // before it in its family (its parent, or its previous sibling): the
-  // repository it begins, drawn as a divider (a rule, the name, a rule) above
-  // the row, inset to the row's indent and ending where the rows' durations
-  // begin. A child of its parent's repository after a run of
-  // other-repository siblings carries its parent's repository. UNSET on a
-  // top-level row, and on a row of the same repository as the one before it.
-  optional RosterOpenRowRepositoryDivider repository_divider = 4;
+  // `repository_divider` (field 4) is RETIRED and reserved: a child of
+  // another repository is drawn inside its repository's block
+  // (`repository_blocks`), whose one divider heads every row of it.
+  reserved 4;
+  reserved "repository_divider";
   // WHETHER THE ROW'S CHILDREN ARE FOLDED. DAEMON-HELD (UpdateSidebarView),
   // for the readers a subsection's fold has: the sidebar hides the children's
-  // rows, and each child's tab is folded (RosterOpenRowTabFolded). SET exactly
-  // when the row has children, collapsed or not; UNSET on a row with none.
+  // rows, and each child's tab is folded (RosterOpenRowTabFolded). The
+  // children are ALL of them, the own-repository ones (`children`) and every
+  // repository block's rows (`repository_blocks`) alike. SET exactly when the
+  // row has a child of either kind, collapsed or not; UNSET on a row with none.
   optional RosterOpenRowChildrenFold children_fold = 5;
+  // The workspace's open children of OTHER repositories, one block per
+  // repository, in the order the user arranged the blocks
+  // (agentrepl.v1.ArrangeMoveRepositoryBlock; a block never arranged comes
+  // after the arranged ones, in the repositories' stored order). Every
+  // block holds at least one row. Their tabs follow `children`'s, block by
+  // block. Empty when every child is of the row's own repository.
+  repeated RosterOpenRowRepositoryBlock repository_blocks = 6;
 }
 
 // A row's children's fold, as a subsection's is drawn
@@ -475,11 +491,34 @@ message RosterOpenRowChildrenHoldsCurrent {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenRowChildrenCollapsed {}
 
-// The repository a run of rows in a family begins, drawn as a divider above
-// its first row (RosterOpenRow.repository_divider).
+// ONE OTHER REPOSITORY'S CHILDREN of an open row: a divider (a rule, the
+// repository's name, a rule) drawn above the block's rows, the rows indented
+// as the parent's own-repository children are. The block is the unit a drag
+// of its divider moves among the parent's blocks
+// (agentrepl.v1.ArrangeMoveRepositoryBlock).
+message RosterOpenRowRepositoryBlock {
+  // The block's repository: the key a block move names
+  // (agentrepl.v1.ArrangeMoveRepositoryBlock.repository) and the block's
+  // stable identity across pushes.
+  workspace.v1.RepositoryRef repository = 1;
+  // The divider heading the block.
+  RosterOpenRowRepositoryDivider divider = 2;
+  // The parent's open children of this repository, in drawn order, each
+  // followed by its own family. Never empty: a repository with no child
+  // under the parent has no block.
+  repeated RosterOpenRow rows = 3;
+}
+
+// The divider heading a repository block (RosterOpenRowRepositoryBlock).
 message RosterOpenRowRepositoryDivider {
-  // The repository's name, as its section is headed.
+  // The repository's name, as its section is headed. Never empty.
   string name = 1;
+  // The repository's MAIN WORKSPACE (the one on its main worktree), which a
+  // click on the name selects, exactly as a click on that workspace's own row
+  // does. SET when the repository's main workspace is registered and not
+  // closed; UNSET otherwise, and the name is then plain text that selects
+  // nothing.
+  optional workspace.v1.WorkspaceRef main_workspace = 2;
 }
 
 // An open row's tab. THE DAEMON NUMBERS EVERY TAB, so the number the sidebar

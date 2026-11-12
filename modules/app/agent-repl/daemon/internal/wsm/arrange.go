@@ -153,7 +153,7 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNoOpenConstituent)
+		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNoOpenConstituent) || errors.Is(err, ErrNoRepositoryBlock)
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -740,6 +740,9 @@ type Arrangement struct {
 	Workspaces   []Workspace
 	Repositories []Repository
 	Subsections  []Subsection
+	// RepositoryBlocks are every parent's arranged block order
+	// (repositoryblocks.go).
+	RepositoryBlocks []RepositoryBlock
 }
 
 // ReadArrangement reads the workspaces, the repositories and the subsections
@@ -760,6 +763,9 @@ func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
 			return err
 		}
 		if read.Subsections, err = listSubsections(ctx, tx); err != nil {
+			return err
+		}
+		if read.RepositoryBlocks, err = listRepositoryBlocks(ctx, tx); err != nil {
 			return err
 		}
 		out = read

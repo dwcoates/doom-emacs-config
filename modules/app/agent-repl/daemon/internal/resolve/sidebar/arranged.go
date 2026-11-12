@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -45,15 +46,16 @@ func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 		}
 	}
 	arranged, _ := arrange(reg, listed)
+	order := newBlockOrder(reg)
 	out := make([]ArrangedRepository, 0, len(arranged))
 	for _, placed := range arranged {
 		repo := ArrangedRepository{Repository: placed.repo}
 		for _, b := range placed.buckets {
 			if b.subsection != nil {
-				repo.Entries = append(repo.Entries, ArrangedEntry{Subsection: &ArrangedSubsection{Subsection: *b.subsection, Workspaces: families(b.workspaces, log)}})
+				repo.Entries = append(repo.Entries, ArrangedEntry{Subsection: &ArrangedSubsection{Subsection: *b.subsection, Workspaces: families(b.workspaces, order, log)}})
 				continue
 			}
-			for _, family := range families(b.workspaces, log) {
+			for _, family := range families(b.workspaces, order, log) {
 				repo.Entries = append(repo.Entries, ArrangedEntry{Workspace: family})
 			}
 		}
@@ -63,8 +65,10 @@ func Arranged(reg Registry, log dlog.Logger) []ArrangedRepository {
 }
 
 // families nests one run's workspaces as the sidebar does and lists its open
-// families root by root, a closed workspace's open children in its place.
-func families(run []wsm.Workspace, log dlog.Logger) []ArrangedWorkspace {
+// families root by root, a closed workspace's open children in its place,
+// each workspace's children in drawn order: its own repository's, then its
+// blocks' (group, in ORDER).
+func families(run []wsm.Workspace, order blockOrder, log dlog.Logger) []ArrangedWorkspace {
 	tree := nest(run, log)
 	var list func(ws []wsm.Workspace) []ArrangedWorkspace
 	list = func(ws []wsm.Workspace) []ArrangedWorkspace {
@@ -75,7 +79,8 @@ func families(run []wsm.Workspace, log dlog.Logger) []ArrangedWorkspace {
 				out = append(out, children...)
 				continue
 			}
-			out = append(out, ArrangedWorkspace{Workspace: w, Children: children})
+			own, blocks := group(order, w, children, func(a ArrangedWorkspace) ids.RepoID { return a.Workspace.Repo })
+			out = append(out, ArrangedWorkspace{Workspace: w, Children: flatten(own, blocks)})
 		}
 		return out
 	}

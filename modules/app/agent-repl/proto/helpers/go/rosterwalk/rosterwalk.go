@@ -13,13 +13,25 @@ import (
 )
 
 // FlattenOpen lists every open row of a region depth-first, each row before
-// its nested family. It is the Open section's drawn order, and so the tab
-// bar's.
+// its nested family (OpenFamily). It is the Open section's drawn order, and
+// so the tab bar's.
 func FlattenOpen(rows []*frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
 	var out []*frontendv1.RosterOpenRow
 	for _, row := range rows {
 		out = append(out, row)
-		out = append(out, FlattenOpen(row.GetChildren())...)
+		out = append(out, FlattenOpen(OpenFamily(row))...)
+	}
+	return out
+}
+
+// OpenFamily lists ROW's open children in drawn order: its own-repository
+// children, then each repository block's rows, block by block
+// (frontend.v1.RosterOpenRow.repository_blocks). A reader that took only
+// `children` would miss every child of another repository.
+func OpenFamily(row *frontendv1.RosterOpenRow) []*frontendv1.RosterOpenRow {
+	out := append([]*frontendv1.RosterOpenRow(nil), row.GetChildren()...)
+	for _, block := range row.GetRepositoryBlocks() {
+		out = append(out, block.GetRows()...)
 	}
 	return out
 }

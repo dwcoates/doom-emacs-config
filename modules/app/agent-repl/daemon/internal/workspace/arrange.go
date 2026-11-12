@@ -29,6 +29,7 @@ const (
 	opDeleteSubsection      = "daemon.workspace.delete_subsection"
 	opMoveSubsection        = "daemon.workspace.move_subsection"
 	opMoveRepository        = "daemon.workspace.move_repository"
+	opMoveRepositoryBlock   = "daemon.workspace.move_repository_block"
 	opPlaceWorkspace        = "daemon.workspace.place_workspaces"
 	// opPlaceWorkspaceByAgent is an agent's placement.
 	opPlaceWorkspaceByAgent = "daemon.workspace.place_workspaces_by_agent"
@@ -118,6 +119,19 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 	})
 }
 
+// MoveRepositoryBlock moves PARENT's block of repository REPO before its
+// block of BEFORE (nil: after every other block). The parent must be this
+// daemon's to serve, as every per-workspace verb's is.
+func (v *verbs) MoveRepositoryBlock(ctx context.Context, parent ids.WorkspaceID, repo ids.RepoID, before *ids.RepoID) error {
+	if _, _, err := v.owned(ctx, arrangeRPC, parent); err != nil {
+		return err
+	}
+	log := v.deps.Log.Global().With(dlog.Context{"parent": string(parent), "repo_id": string(repo), "before": ids.Optional(before)})
+	return v.arrange(ctx, log, opMoveRepositoryBlock, "move the repository block", func() error {
+		return v.deps.DB.MoveRepositoryBlock(ctx, parent, repo, before)
+	})
+}
+
 // PlaceWorkspaces puts root workspaces WS, in that order and with their
 // families, into subsection INTO (nil: none) as one block at AT. Every
 // workspace named must be this daemon's to serve, as every per-workspace
@@ -203,6 +217,8 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmNoOpenWorkspace, err.Error(), false)
 	case errors.Is(err, wsm.ErrMainWorkspaceNotSortable):
 		return refuse(log, arrangeRPC, ArmMainWorkspaceNotSortable, err.Error(), false)
+	case errors.Is(err, wsm.ErrNoRepositoryBlock):
+		return refuse(log, arrangeRPC, ArmNoRepositoryBlock, err.Error(), false)
 	default:
 		return nil
 	}

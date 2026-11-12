@@ -39,6 +39,18 @@ func moveRepository(repo string, before *workspacev1.RepositoryRef) *agentreplv1
 	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{MoveRepository: move}}
 }
 
+// moveRepositoryBlock is a move_repository_block change of PARENT's block of
+// REPO, before BEFORE's block (nil: last).
+func moveRepositoryBlock(parent *workspacev1.WorkspaceRef, repo string, before *workspacev1.RepositoryRef) *agentreplv1.ArrangeSidebarRequest {
+	move := &agentreplv1.ArrangeMoveRepositoryBlock{Parent: parent, Repository: repoRef(repo)}
+	if before != nil {
+		move.To = &agentreplv1.ArrangeMoveRepositoryBlock_Before{Before: before}
+	} else {
+		move.To = &agentreplv1.ArrangeMoveRepositoryBlock_End{End: endPlace()}
+	}
+	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{MoveRepositoryBlock: move}}
+}
+
 // placeBeforeSubsection is a place_workspace change of WS into no
 // subsection, just before subsection SUB.
 func placeBeforeSubsection(ws *workspacev1.WorkspaceRef, sub string) *agentreplv1.ArrangeSidebarRequest {
@@ -107,6 +119,10 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 					To: &agentreplv1.ArrangeMoveSubsection_End{End: endPlace()}}}}},
 		{name: "move a repository before another", req: moveRepository("repo-2", repoRef("repo-1")), want: "MoveRepository repo-2 repo-1"},
 		{name: "move a repository to the end", req: moveRepository("repo-1", nil), want: "MoveRepository repo-1 "},
+		{name: "move a repository block before another", req: moveRepositoryBlock(ref(), "repo-2", repoRef("repo-1")),
+			want: "MoveRepositoryBlock " + string(testWorkspaceID) + " repo-2 repo-1"},
+		{name: "move a repository block last", req: moveRepositoryBlock(ref(), "repo-2", nil),
+			want: "MoveRepositoryBlock " + string(testWorkspaceID) + " repo-2 "},
 		{name: "place a workspace before another in a subsection", req: placeWorkspace(ref(), "sub-1", other),
 			want: "PlaceWorkspaces [" + string(testWorkspaceID) + "] sub-1 before workspace ws-2"},
 		{name: "place a workspace last among the unsectioned", req: placeWorkspace(ref(), "", nil),
@@ -229,6 +245,43 @@ func TestArrangeSidebarRefusesARepositoryMovedBeforeItselfByAnotherSpelling(t *t
 	}
 }
 
+func TestArrangeSidebarRefusesARepositoryBlockMovedBeforeItself(t *testing.T) {
+	// Arrange
+	h, _ := arrangeHarness(t)
+
+	// Act
+	_, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(
+		moveRepositoryBlock(ref(), "repo-2", &workspacev1.RepositoryRef{Dir: "/repos/two"})))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("ArrangeSidebar = %v, want invalid argument", err)
+	}
+	if len(h.Verbs.arrangements) != 0 {
+		t.Fatalf("verb calls = %v, want none", h.Verbs.arrangements)
+	}
+}
+
+func TestArrangeSidebarNamesAnUnknownBlockParentBeforeTheVerb(t *testing.T) {
+	// Arrange
+	h, _ := arrangeHarness(t)
+
+	// Act
+	resp, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(
+		moveRepositoryBlock(&workspacev1.WorkspaceRef{Id: "ws-nope"}, "repo-2", nil)))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ArrangeSidebar: %v", err)
+	}
+	if got := resp.Msg.GetError().GetUnknownWorkspace(); got.GetWorkspace().GetId() != "ws-nope" {
+		t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.arrangements) != 0 {
+		t.Fatalf("verb calls = %v, want none", h.Verbs.arrangements)
+	}
+}
+
 func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 	tests := []struct {
 		arm    string
@@ -244,6 +297,7 @@ func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 		{arm: workspace.ArmAnchorElsewhere, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetAnchorElsewhere() != nil }},
 		{arm: workspace.ArmNoOpenWorkspace, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoOpenWorkspace() != nil }},
 		{arm: workspace.ArmMainWorkspaceNotSortable, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetMainWorkspaceNotSortable() != nil }},
+		{arm: workspace.ArmNoRepositoryBlock, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoRepositoryBlock() != nil }},
 		{arm: workspace.ArmTransferringAway, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetTransferringAway() != nil }},
 		{arm: workspace.ArmNotYetAdopted, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotYetAdopted() != nil }},
 	}
@@ -301,6 +355,11 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 				To: &agentreplv1.ArrangeMoveSubsection_Before{Before: subRef("sub-1")}}}}},
 		{"a repository move with no place", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepository{
 			MoveRepository: &agentreplv1.ArrangeMoveRepository{Repository: repoRef("repo-1")}}}},
+		{"a repository block move with no place", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{
+			MoveRepositoryBlock: &agentreplv1.ArrangeMoveRepositoryBlock{Parent: ref(), Repository: repoRef("repo-1")}}}},
+		{"a repository block move with no parent", moveRepositoryBlock(nil, "repo-1", nil)},
+		{"a repository block move with no repository", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock{
+			MoveRepositoryBlock: &agentreplv1.ArrangeMoveRepositoryBlock{Parent: ref(), To: &agentreplv1.ArrangeMoveRepositoryBlock_End{End: endPlace()}}}}},
 		{"a placement with no destination", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
 			PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{Workspace: ref(), At: &agentreplv1.ArrangePlaceWorkspace_End{End: endPlace()}}}}},
 		{"a placement with no place", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{

@@ -809,6 +809,10 @@ func (d *fakeDB) MoveSubsection(_ context.Context, id ids.SubsectionID, to wsm.A
 	return d.arrange("MoveSubsection " + string(id) + " " + wsm.AnchorField(to))
 }
 
+func (d *fakeDB) MoveRepositoryBlock(_ context.Context, parent ids.WorkspaceID, repo ids.RepoID, before *ids.RepoID) error {
+	return d.arrange("MoveRepositoryBlock " + string(parent) + " " + string(repo) + " " + ids.Optional(before))
+}
+
 func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.RepoID) error {
 	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }

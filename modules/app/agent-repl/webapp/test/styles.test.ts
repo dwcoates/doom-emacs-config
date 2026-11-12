@@ -6244,18 +6244,22 @@ describe("the row indent", () => {
     ]).toEqual([false, true, expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/)]);
   });
 
-  it("steps a row under a repository divider back so its mark lines up with the divider", () => {
-    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-divider ~ .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem - 1rem\)/);
+  it("indents a repository block's rows one generation step, as an own-repository child", () => {
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .ws")).toMatch(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/);
   });
 
-  it("keeps the divider itself at one generation step, as a same-repository row", () => {
+  it("starts a block's divider at its rows' indent, adding none of its own", () => {
+    expect(declarationsOf("#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider")).toMatch(
+      /margin:\s*0\.15rem calc\(0\.7rem \+ var\(--when-col-w\)\) 0\.05rem calc\(0\.9rem \+ var\(--row-indent-parent\) \+ 1\.2rem\)/,
+    );
+  });
+
+  it("leaves no rule indenting a block or stepping its rows back", () => {
     expect([
-      declarationsOf("#ws-sidebar .kids > .sb-repo-divider"),
-      declarationsOf("#ws-sidebar .kids > .ws"),
-    ]).toEqual([
-      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/),
-      expect.stringMatching(/--row-indent:\s*calc\(var\(--row-indent-parent\) \+ 1\.2rem\)/),
-    ]);
+      declarationsOf("#ws-sidebar .kids > .sb-repo-block"),
+      declarationsOf("#ws-sidebar .kids > .sb-repo-divider ~ .ws"),
+      declarationsOf("#ws-sidebar .kids > .sb-repo-block > .sb-repo-divider ~ .ws"),
+    ]).toEqual([undefined, undefined, undefined]);
   });
 
   it("draws the family guide where the generation's box once began", () => {

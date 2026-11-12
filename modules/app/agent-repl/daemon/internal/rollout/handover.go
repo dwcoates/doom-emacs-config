@@ -293,7 +293,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	for _, ws := range workspaces {
 		p := c.deps.Participants.Participants(ws.ID)
 		snapshot[ws.ID] = p
-		c.rendezvous[ws.ID] = &entry{expected: p, done: make(chan struct{})}
+		c.rendezvous[ws.ID] = &entry{expected: p, run: newAdoptionRun()}
 		slot.armed = append(slot.armed, ws.ID)
 	}
 	c.unlock()
@@ -1210,7 +1210,7 @@ func (c *controller) rendezvousDone(ws ids.WorkspaceID) <-chan struct{} {
 	c.mu.Lock()
 	defer c.unlock()
 	if e, ok := c.rendezvous[ws]; ok {
-		return e.done
+		return e.run.done
 	}
 	return nil
 }

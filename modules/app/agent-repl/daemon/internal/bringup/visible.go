@@ -50,7 +50,7 @@ func folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[id
 	if err != nil {
 		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
 	}
-	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections}
+	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections, RepositoryBlocks: arrangement.RepositoryBlocks}
 	out := map[ids.WorkspaceID]bool{}
 	for _, tab := range sidebar.Tabs(reg, log) {
 		if tab.Withheld == wsm.WithheldCollapsed {

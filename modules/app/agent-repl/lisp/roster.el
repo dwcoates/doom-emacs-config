@@ -419,7 +419,7 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
   "Walk the list rows ROWS depth-first under LABEL, pushing entries onto ACC.
 ROWS are one list's own row type (`RosterOpenRow', `RosterHiddenRow',
 `RosterMergedRow', `RosterClosedRow'), each a plist carrying the shared
-`:row' and, for the lists that nest, its family as `:children'.  Each entry
+`:row' and, for the lists that nest, its family (`agent-repl-roster-row-kin').  Each entry
 is `(:row ROW :label LABEL :section SECTION :collapsed C :tab TAB)'.
 SECTION names which list the row sits in -- `:repository' (the Open
 section), `:hidden', `:merged' or `:closed' -- so a reader that treats them
@@ -432,8 +432,18 @@ which is the render order the contract's nesting states."
     (push (list :row (plist-get wrapped :row) :label label :section section
                 :collapsed (funcall collapsed wrapped) :tab (plist-get wrapped :tab))
           (car acc))
-    (agent-repl-roster--walk-rows (plist-get wrapped :children) label section acc collapsed))
+    (agent-repl-roster--walk-rows (agent-repl-roster-row-kin wrapped) label section acc collapsed))
   acc)
+
+(defun agent-repl-roster-row-kin (wrapped)
+  "Return the list row WRAPPED's nested rows, in drawn order.
+Its `:children' first, then, for an open row, every repository block's
+`:rows', block by block (`frontend.v1.RosterOpenRow.repository_blocks'):
+the order the sidebar draws them and the tab bar walks them.  A reader that
+took only `:children' would miss every child of another repository."
+  (append (plist-get wrapped :children)
+          (mapcan (lambda (block) (copy-sequence (plist-get block :rows)))
+                  (plist-get wrapped :repository-blocks))))
 
 (defun agent-repl-roster-flatten (rows)
   "Return the shared rows of the list rows ROWS and their families, depth-first.

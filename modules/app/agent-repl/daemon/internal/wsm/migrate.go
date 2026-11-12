@@ -229,6 +229,7 @@ var migrations = []migration{
 	// IT IS ADDITIVE: three new tables the previous build never names.
 	{To: 122, Name: "gathers", Kind: MigrationAdditive, DDL: turnSuccessionsDDL + gathersDDL},
 	{To: 123, Name: "owed_start_work", Kind: MigrationAdditive, DDL: owedStartWorkDDL},
+	{To: 124, Name: "repository_blocks", Kind: MigrationAdditive, DDL: repositoryBlocksDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

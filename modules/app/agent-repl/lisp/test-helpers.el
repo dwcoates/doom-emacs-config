@@ -1357,6 +1357,8 @@ daemon numbers it."
   "Return fixture ROWS as a decoded `RosterClosedRows'."
   (list :rows (mapcar (lambda (row) (list :row row)) rows)))
 
+(declare-function agent-repl-roster-row-kin "agent-repl-roster" (wrapped))
+
 (defun agent-repl-test--number-tabs (sections)
   "Number the tabs of SECTIONS' open rows in the Open section's walk.
 Repository by repository, entry by entry, a subsection's rows where it
@@ -1369,7 +1371,7 @@ subsection's, exactly as the daemon numbers them.  Answers SECTIONS."
                              (list :tab (if folded
                                             (list :arm :folded :value nil)
                                           (list :arm :numbered :value (list :number (cl-incf next))))))
-                  (dolist (child (plist-get open :children)) (visit child folded)))
+                  (dolist (child (agent-repl-roster-row-kin open)) (visit child folded)))
                 (collapsed-p (box) (eq (plist-get (plist-get box :fold) :arm) :collapsed)))
       (dolist (section sections)
         (let ((folded (collapsed-p section)))

@@ -45,6 +45,13 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			}},
 		{name: "move a repository", op: opMoveRepository, want: "MoveRepository repo-1 ",
 			act: func(ctx context.Context, v Verbs) error { return v.MoveRepository(ctx, "repo-1", nil) }},
+		{name: "move a repository block before another", op: opMoveRepositoryBlock, want: "MoveRepositoryBlock w1 repo-2 repo-3",
+			act: func(ctx context.Context, v Verbs) error {
+				before := ids.RepoID("repo-3")
+				return v.MoveRepositoryBlock(ctx, "w1", "repo-2", &before)
+			}},
+		{name: "move a repository block last", op: opMoveRepositoryBlock, want: "MoveRepositoryBlock w1 repo-2 ",
+			act: func(ctx context.Context, v Verbs) error { return v.MoveRepositoryBlock(ctx, "w1", "repo-2", nil) }},
 		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 before workspace w2",
 			act: func(ctx context.Context, v Verbs) error {
 				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.BeforeWorkspace{ID: "w2"})
@@ -108,6 +115,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 		{name: "an anchor elsewhere", err: wsm.ErrAnchorElsewhere, arm: ArmAnchorElsewhere},
 		{name: "no open workspace", err: wsm.ErrNoOpenConstituent, arm: ArmNoOpenWorkspace},
 		{name: "a main workspace an agent may not sort", err: fmt.Errorf("x: %w", wsm.ErrMainWorkspaceNotSortable), arm: ArmMainWorkspaceNotSortable},
+		{name: "no such repository block", err: wsm.ErrNoRepositoryBlock, arm: ArmNoRepositoryBlock},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -174,6 +182,20 @@ func TestTheArrangementVerbsSurfaceAStoreFailure(t *testing.T) {
 	}
 	if rec.Context["repo_id"] != "repo-1" || rec.Context["cause"] != "disk on fire" {
 		t.Fatalf("the failure's record context = %v", rec.Context)
+	}
+}
+
+func TestMoveRepositoryBlockRefusesAParentThisDaemonDoesNotServe(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	err := f.verbs.MoveRepositoryBlock(context.Background(), "w-nope", "repo-2", nil)
+
+	// Assert
+	asRefusal(t, err, ArmUnknownWorkspace)
+	if len(f.db.arrangements) != 0 {
+		t.Fatalf("writes = %v, want none", f.db.arrangements)
 	}
 }
 

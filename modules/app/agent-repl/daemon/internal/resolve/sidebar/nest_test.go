@@ -2,7 +2,11 @@ package sidebar_test
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
+	"slices"
+	"strings"
 	"testing"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -300,69 +304,66 @@ func TestRosterNestsAChildOfAnotherRepositoryUnderItsParent(t *testing.T) {
 	if len(alpha) != 1 || rowNames(innerRows(alpha))[0] != "parent" {
 		t.Fatalf("alpha's rows = %v, want the parent alone at the top level", rowNames(innerRows(alpha)))
 	}
-	if got := rowNames(innerRows(alpha[0].GetChildren())); !equal(got, []string{"beta-one", "beta-two", "alpha-one"}) {
-		t.Fatalf("children = %v, want all three under the parent", got)
+	if got := rowNames(innerRows(rosterwalk.OpenFamily(alpha[0]))); !equal(got, []string{"alpha-one", "beta-one", "beta-two"}) {
+		t.Fatalf("family = %v, want all three under the parent", got)
 	}
 	if beta := rosterwalk.UnsectionedRows(sections[1]); len(beta) != 0 {
 		t.Fatalf("beta's rows = %v, want none", rowNames(innerRows(beta)))
 	}
 }
 
-func TestRosterDividesAFamilyWhereItsRepositoryChanges(t *testing.T) {
-	tests := []struct {
-		name  string
-		child int
-		want  string
-	}{
-		{name: "the first child of another repository names it", child: 0, want: "beta"},
-		{name: "a sibling of the same repository as the one before draws none", child: 1, want: ""},
-		{name: "a child of the parent's repository after other-repository siblings names it", child: 2, want: "alpha"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
+// gammaRepo is a third repository, so a parent can carry two blocks.
+var gammaRepo = wsm.Repository{ID: "repo-3", Dir: "/repos/three", Name: "gamma", DefaultBranch: "main", Place: 3}
 
-			// Act.
-			r.SetRegistry(crossRepositoryFamily())
-
-			// Assert.
-			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
-			child := parent.GetChildren()[tc.child]
-			if got := child.GetRepositoryDivider().GetName(); got != tc.want || (tc.want == "") != (child.RepositoryDivider == nil) {
-				t.Fatalf("divider = %v, want %q", child.GetRepositoryDivider(), tc.want)
-			}
-			if parent.RepositoryDivider != nil {
-				t.Fatalf("the top-level row carries a divider %v, want none", parent.GetRepositoryDivider())
-			}
-		})
-	}
-}
-
-// mixedFamily is a parent of repo with an own-repository child first, then
-// (when foreign) one child of otherRepo.
-func mixedFamily(foreign bool) sidebar.Registry {
+// blockFamily is a parent of repo with, in roster order, a child of
+// gammaRepo, a child of otherRepo, a child of its own repository, and a
+// second child of gammaRepo, with the arranged block order STORED.
+func blockFamily(stored ...wsm.RepositoryBlock) sidebar.Registry {
 	parent := placed(workspace("w-p", "parent"), 1)
-	own := placed(workspace("w-a1", "alpha-one"), 2)
-	other := placed(workspace("w-b1", "beta-one"), 3)
-	other.Repo, other.Dir = otherRepo.ID, "/repos/two/w-b1"
-	own.Parent, other.Parent = &parent.ID, &parent.ID
-	if !foreign {
-		return registry(parent, own)
+	g1 := placed(workspace("w-g1", "gamma-one"), 2)
+	b1 := placed(workspace("w-b1", "beta-one"), 3)
+	own := placed(workspace("w-a1", "alpha-one"), 4)
+	g2 := placed(workspace("w-g2", "gamma-two"), 5)
+	for _, ws := range []*wsm.Workspace{&g1, &g2} {
+		ws.Repo, ws.Dir = gammaRepo.ID, "/repos/three/"+string(ws.ID)
 	}
-	reg := registry(parent, own, other)
-	reg.Repositories = append(reg.Repositories, otherRepo)
+	b1.Repo, b1.Dir = otherRepo.ID, "/repos/two/w-b1"
+	for _, ws := range []*wsm.Workspace{&g1, &b1, &own, &g2} {
+		ws.Parent = &parent.ID
+	}
+	reg := registry(parent, g1, b1, own, g2)
+	reg.Repositories = append(reg.Repositories, otherRepo, gammaRepo)
+	reg.RepositoryBlocks = stored
 	return reg
 }
 
-func TestRosterHeadsTheParentsRepositoryOnceAChildIsOfAnotherRepository(t *testing.T) {
+// blockShape spells ROW's family: its own children, then each block as
+// name[rows].
+func blockShape(row *frontendv1.RosterOpenRow) []string {
+	got := rowNames(innerRows(row.GetChildren()))
+	for _, block := range row.GetRepositoryBlocks() {
+		got = append(got, block.GetDivider().GetName()+"["+strings.Join(rowNames(innerRows(block.GetRows())), " ")+"]")
+	}
+	return got
+}
+
+func TestRosterGroupsAParentsChildrenIntoRepositoryBlocks(t *testing.T) {
 	tests := []struct {
-		name    string
-		foreign bool
-		want    []string
+		name   string
+		stored []wsm.RepositoryBlock
+		want   []string
 	}{
-		{name: "the parent's own children are headed beside a foreign child", foreign: true, want: []string{"alpha", "beta"}},
-		{name: "no header is drawn once no child is of another repository", foreign: false, want: []string{""}},
+		{name: "own-repository children come first and each other repository is one block in the repositories' order",
+			want: []string{"alpha-one", "beta[beta-one]", "gamma[gamma-one gamma-two]"}},
+		{name: "the arranged block order wins over the repositories' order",
+			stored: []wsm.RepositoryBlock{{Parent: "w-p", Repo: gammaRepo.ID, Place: 1}, {Parent: "w-p", Repo: otherRepo.ID, Place: 2}},
+			want:   []string{"alpha-one", "gamma[gamma-one gamma-two]", "beta[beta-one]"}},
+		{name: "an arranged block precedes an unarranged one",
+			stored: []wsm.RepositoryBlock{{Parent: "w-p", Repo: gammaRepo.ID, Place: 1}},
+			want:   []string{"alpha-one", "gamma[gamma-one gamma-two]", "beta[beta-one]"}},
+		{name: "another parent's arrangement does not order this parent's blocks",
+			stored: []wsm.RepositoryBlock{{Parent: "w-elsewhere", Repo: gammaRepo.ID, Place: 1}},
+			want:   []string{"alpha-one", "beta[beta-one]", "gamma[gamma-one gamma-two]"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -370,31 +371,226 @@ func TestRosterHeadsTheParentsRepositoryOnceAChildIsOfAnotherRepository(t *testi
 			r, _ := newResolver(t)
 
 			// Act.
-			r.SetRegistry(mixedFamily(tc.foreign))
+			r.SetRegistry(blockFamily(tc.stored...))
 
 			// Assert.
 			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
-			var got []string
-			for _, child := range parent.GetChildren() {
-				got = append(got, child.GetRepositoryDivider().GetName())
-			}
-			if !equal(got, tc.want) {
-				t.Fatalf("dividers = %q, want %q", got, tc.want)
+			if got := blockShape(parent); !equal(got, tc.want) {
+				t.Fatalf("family = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestTheTabBarWalksAChildOfAnotherRepositoryWithItsFamily(t *testing.T) {
+func TestARepositoryBlockNamesItsRepository(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
 	// Act.
-	got := sidebar.Tabs(crossRepositoryFamily(), dlog.NewTestLogger())
+	r.SetRegistry(blockFamily())
 
 	// Assert.
-	var tabs []string
-	for _, tab := range got {
-		tabs = append(tabs, string(tab.Workspace.ID))
+	parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+	block := parent.GetRepositoryBlocks()[0]
+	if got := block.GetRepository().GetId(); got != string(otherRepo.ID) {
+		t.Fatalf("block repository = %q, want %q", got, otherRepo.ID)
 	}
-	if !equal(tabs, []string{"w-p", "w-b1", "w-b2", "w-a1"}) {
-		t.Fatalf("tabs = %v, want the family depth-first in its root's section", tabs)
+	if got := block.GetRepository().GetDir(); got != otherRepo.Dir {
+		t.Fatalf("block repository dir = %q, want %q", got, otherRepo.Dir)
+	}
+}
+
+func TestAFamilyOfOneRepositoryCarriesNoBlock(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	parent := placed(workspace("w-p", "parent"), 1)
+	own := placed(workspace("w-a1", "alpha-one"), 2)
+	own.Parent = &parent.ID
+
+	// Act.
+	r.SetRegistry(registry(parent, own))
+
+	// Assert.
+	row := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+	if len(row.GetRepositoryBlocks()) != 0 {
+		t.Fatalf("blocks = %v, want none", row.GetRepositoryBlocks())
+	}
+}
+
+func TestADescendantStandingInForAClosedChildJoinsItsRepositorysBlock(t *testing.T) {
+	// Arrange: a closed own-repository child whose open child is of another
+	// repository takes its place under the parent.
+	r, _ := newResolver(t)
+	parent := placed(workspace("w-p", "parent"), 1)
+	closedChild := placed(workspace("w-c", "closed"), 2)
+	closedChild.Closed = true
+	closedChild.Parent = &parent.ID
+	grandchild := placed(workspace("w-g", "grandchild"), 3)
+	grandchild.Repo, grandchild.Dir = otherRepo.ID, "/repos/two/w-g"
+	grandchild.Parent = &closedChild.ID
+	reg := registry(parent, closedChild, grandchild)
+	reg.Repositories = append(reg.Repositories, otherRepo)
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	row := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+	if got := blockShape(row); !equal(got, []string{"beta[grandchild]"}) {
+		t.Fatalf("family = %q, want the grandchild in beta's block", got)
+	}
+}
+
+func TestTheTabBarWalksABlockAfterTheOwnRepositoryChildren(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored []wsm.RepositoryBlock
+		want   []string
+	}{
+		{name: "blocks in the repositories' order", want: []string{"w-p", "w-a1", "w-b1", "w-g1", "w-g2"}},
+		{name: "blocks in their arranged order",
+			stored: []wsm.RepositoryBlock{{Parent: "w-p", Repo: gammaRepo.ID, Place: 1}},
+			want:   []string{"w-p", "w-a1", "w-g1", "w-g2", "w-b1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := sidebar.Tabs(blockFamily(tc.stored...), dlog.NewTestLogger())
+
+			// Assert.
+			var tabs []string
+			for _, tab := range got {
+				tabs = append(tabs, string(tab.Workspace.ID))
+			}
+			if !equal(tabs, tc.want) {
+				t.Fatalf("tabs = %v, want %v", tabs, tc.want)
+			}
+		})
+	}
+}
+
+func TestABlocksRowsAreNumberedAfterTheOwnRepositoryChildren(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(blockFamily())
+
+	// Assert.
+	parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+	var numbers []uint32
+	for _, row := range rosterwalk.FlattenOpen([]*frontendv1.RosterOpenRow{parent}) {
+		numbers = append(numbers, row.GetTab().GetNumbered().GetNumber())
+	}
+	if want := []uint32{1, 2, 3, 4, 5}; !slices.Equal(numbers, want) {
+		t.Fatalf("numbers in drawn order = %v, want %v", numbers, want)
+	}
+}
+
+func TestArrangedListsABlocksChildrenAfterTheOwnRepositoryChildren(t *testing.T) {
+	// Act.
+	got := sidebar.Arranged(blockFamily(wsm.RepositoryBlock{Parent: "w-p", Repo: gammaRepo.ID, Place: 1}), dlog.NewTestLogger())
+
+	// Assert.
+	if shape, want := arrangedShape(got[0]), []string{"w-p(w-a1 w-g1 w-g2 w-b1)"}; !equal(shape, want) {
+		t.Fatalf("entries = %v, want %v", shape, want)
+	}
+}
+
+// foldedBlockFamily is blockFamily with the parent's children folded.
+func foldedBlockFamily() sidebar.Registry {
+	reg := blockFamily()
+	for i := range reg.Workspaces {
+		if reg.Workspaces[i].ID == "w-p" {
+			reg.Workspaces[i].ChildrenFolded = true
+		}
+	}
+	return reg
+}
+
+func TestAFoldedParentFoldsItsBlockRowsTabs(t *testing.T) {
+	// Act
+	got := sidebar.Tabs(foldedBlockFamily(), dlog.NewTestLogger())
+
+	// Assert
+	for _, tab := range got {
+		want := wsm.WithheldCollapsed
+		if tab.Workspace.ID == "w-p" {
+			want = wsm.Drawn
+		}
+		if tab.Withheld != want {
+			t.Fatalf("%s's tab = %v, want %v", tab.Workspace.ID, tab.Withheld, want)
+		}
+	}
+}
+
+func TestAFoldedParentsBlockRowsCarryFoldedTabs(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	r.SetRegistry(foldedBlockFamily())
+
+	// Assert
+	parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+	for _, block := range parent.GetRepositoryBlocks() {
+		for _, row := range block.GetRows() {
+			if row.GetTab().GetFolded() == nil {
+				t.Fatalf("block row %s's tab = %v, want folded", row.GetRow().GetWorkspace().GetWorkspace().GetId(), row.GetTab())
+			}
+		}
+	}
+}
+
+func TestARowWhoseOnlyChildrenAreInBlocksCarriesAChildrenFold(t *testing.T) {
+	// Arrange: a parent of repo whose one child is of otherRepo.
+	r, _ := newResolver(t)
+	parent := placed(workspace("w-p", "parent"), 1)
+	child := placed(workspace("w-b1", "beta-one"), 2)
+	child.Repo, child.Dir, child.Parent = otherRepo.ID, "/repos/two/w-b1", &parent.ID
+	reg := registry(parent, child)
+	reg.Repositories = append(reg.Repositories, otherRepo)
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	if got := childrenFoldArm(t, r, "w-p"); got != "collapsible" {
+		t.Fatalf("children fold = %s, want collapsible", got)
+	}
+}
+
+func TestABlockDividerNamesItsRepositorysMainWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		main   bool
+		closed bool
+		want   string
+	}{
+		{name: "an open main workspace is named", main: true, want: "w-beta-main"},
+		{name: "a closed main workspace is not named", main: true, closed: true, want: ""},
+		{name: "a repository with no main workspace names none", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := blockFamily()
+			if tc.main {
+				main := placed(workspace("w-beta-main", "main (beta)"), 9)
+				main.Repo, main.Dir, main.Closed = otherRepo.ID, otherRepo.Dir, tc.closed
+				reg.Workspaces = append(reg.Workspaces, main)
+			}
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert
+			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+			divider := parent.GetRepositoryBlocks()[0].GetDivider()
+			if got := divider.GetMainWorkspace().GetId(); got != tc.want || (tc.want == "") != (divider.MainWorkspace == nil) {
+				t.Fatalf("main workspace = %v, want %q", divider.GetMainWorkspace(), tc.want)
+			}
+		})
 	}
 }

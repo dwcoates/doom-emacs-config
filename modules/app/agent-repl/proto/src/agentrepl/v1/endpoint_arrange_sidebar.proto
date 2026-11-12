@@ -53,6 +53,8 @@ message ArrangeSidebarRequest {
     // Add a subsection a workspace's agent creates, with the workspaces it
     // gathers, in one change.
     ArrangeCreateAgentSubsection create_agent_subsection = 8;
+    // Move one repository block among its parent's blocks.
+    ArrangeMoveRepositoryBlock move_repository_block = 10;
   }
   // THE REQUEST COMES FROM A WORKSPACE'S AGENT, not from the user's hands
   // (a drag, the sidebar's menus). THE MAIN WORKSPACE IS NEVER SORTED
@@ -142,6 +144,35 @@ message ArrangeMoveRepository {
     workspace.v1.RepositoryRef before = 2;
     // After every other repository.
     ArrangeEnd end = 3;
+  }
+}
+
+// Move one REPOSITORY BLOCK among its parent's blocks: the parent's open
+// children of one other repository than the parent's own
+// (frontend.v1.RosterOpenRowRepositoryBlock), moved as one unit. The blocks
+// always follow the parent's own-repository children, so a block can stand
+// only before another block or after them all; the rows inside it keep their
+// order.
+//
+// The order is DURABLE and per parent: a block keeps its place while its
+// repository has a child under the parent, and a block never arranged comes
+// after the arranged ones, in the repositories' stored order.
+message ArrangeMoveRepositoryBlock {
+  // The workspace whose children form the block, as the roster served it.
+  workspace.v1.WorkspaceRef parent = 1;
+  // The block's repository, echoed from
+  // frontend.v1.RosterOpenRowRepositoryBlock.repository. It must be another
+  // repository than the parent's and have a child under the parent
+  // (no_repository_block otherwise).
+  workspace.v1.RepositoryRef repository = 2;
+  // WHERE IT GOES. THE ARM IS THE PLACE; unset is malformed.
+  oneof to {
+    // Just before this other block of the same parent (no_repository_block
+    // when the parent has no such block). Naming the moved block's own
+    // repository is malformed.
+    workspace.v1.RepositoryRef before = 3;
+    // After every other block of the parent.
+    ArrangeEnd end = 4;
   }
 }
 
@@ -284,6 +315,10 @@ message ArrangeSidebarError {
     // family whose root it is), which agents never sort
     // (ArrangeSidebarRequest.by_agent).
     ArrangeSidebarMainWorkspaceNotSortable main_workspace_not_sortable = 12;
+    // A block move named a repository block the parent does not have: the
+    // parent's own repository (whose children are no block), or a
+    // repository with no child under the parent.
+    ArrangeSidebarNoRepositoryBlock no_repository_block = 13;
   }
   // `has_parent` (field 10) is RETIRED and reserved: a family moves whole
   // (owner request, 2026-10-20), so placing a workspace with a recorded
@@ -323,3 +358,5 @@ message ArrangeSidebarAnchorElsewhere {}
 message ArrangeSidebarNoOpenWorkspace {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarMainWorkspaceNotSortable {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarNoRepositoryBlock {}

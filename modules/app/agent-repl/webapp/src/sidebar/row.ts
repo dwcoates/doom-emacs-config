@@ -58,6 +58,7 @@ import type {
   RosterRowReviving,
   RosterRowViewed,
   RosterRowWorkspace,
+  RosterOpenRowRepositoryBlock,
   RosterOpenRowRepositoryDivider,
   RosterOpenRowChildrenFold,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -122,16 +123,25 @@ import { queryAll } from "../dom.js";
 export interface RowFamily {
   /** The row as every list draws it. */
   row?: RosterRow;
-  /** The row's family in the same list, in drawn order. */
+  /**
+   * The row's family in the same list, in drawn order: for an open row, its
+   * children of its own repository.
+   */
   children?: readonly RowFamily[];
   /**
-   * The repository this row begins within its family, when it differs from
-   * the row drawn just before it (frontend.v1.RosterOpenRow.repository_divider).
+   * An open row's children of other repositories, one block per repository,
+   * drawn after `children` (frontend.v1.RosterOpenRow.repository_blocks).
    */
-  repositoryDivider?: RosterOpenRowRepositoryDivider;
-  /** Whether the row's children are folded, set on an open row with children (frontend.v1.RosterOpenRow.children_fold). */
+  repositoryBlocks?: readonly RosterOpenRowRepositoryBlock[];
+  /**
+   * Whether the row's children are folded, set on an open row with any child,
+   * own-repository or in a block (frontend.v1.RosterOpenRow.children_fold).
+   */
   childrenFold?: RosterOpenRowChildrenFold;
 }
+
+/** A row's kin: its own children and its repository blocks, as `RowFamily` carries them. */
+export type RowKin = Pick<RowFamily, "children" | "repositoryBlocks">;
 
 /** One family of a rows region, with its message path. */
 export interface PathedFamily {
@@ -146,7 +156,7 @@ export function pathedFamilies(rows: readonly RowFamily[], path: string): Pathed
 
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
-  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family.children ?? [], path, family.childrenFold);
+  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
 }
 
 /**
@@ -166,7 +176,7 @@ export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: st
 export type RowPlace = "grouping" | "merged" | "hidden";
 
 /**
- * One roster row, with CHILDREN, its family in its list, nested under it.
+ * One roster row, with KIN, its family in its list, nested under it.
  *
  * Returns the WHOLE subtree — the row line, the detail panel and the children
  * — because a row IS its family in this view: a child is drawn by this same
@@ -178,7 +188,7 @@ export function drawRosterRow(
   sc: SidebarContext,
   path: string,
   place: RowPlace = "grouping",
-  children: readonly RowFamily[] = [],
+  kin: RowKin = {},
   familyPath: string = path,
   childrenFold?: RosterOpenRowChildrenFold,
 ): HTMLElement {
@@ -205,7 +215,8 @@ export function drawRosterRow(
       status: status.case,
       current,
       closed,
-      children: children.length,
+      children: kin.children?.length ?? 0,
+      repositoryBlocks: kin.repositoryBlocks?.length ?? 0,
     },
   });
 
@@ -384,9 +395,12 @@ export function drawRosterRow(
   // the row into it without it closing.
   installHoverPanel(ws, line, { duration, more }, detail, sc, workspace.id);
 
-  appendRowKids(ws, children, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place));
+  appendRowKids(ws, kin, familyPath, (child, childPath) => drawRosterFamily(child, sc, childPath, place), (label, main) =>
+    void guardMalformed(sc.ctx, "sidebar.repo-divider.select", selectWorkspace(label, sc, main)),
+  );
   // THE STATUS MARK OF A ROW WITH CHILDREN FOLDS THEM (owner request,
-  // 2026-11-09): one more access point to a fold the daemon holds.
+  // 2026-11-09): one more access point to a fold the daemon holds. The fold
+  // hides the whole `.kids` box, so a block's rows fold with the rest.
   if (childrenFold !== undefined && statusMark !== undefined) {
     wireChildrenFold(ws, statusMark, sc, workspace, childrenFold, `${familyPath}.childrenFold`);
   }
@@ -419,50 +433,111 @@ export function drawRosterRowStandIn(family: RowFamily, familyPath: string): HTM
   label.textContent = drawRosterRowName(requireMessage(u.name, `${path}.name`), `${path}.name`);
   line.appendChild(label);
   ws.appendChild(line);
-  appendRowKids(ws, family.children ?? [], familyPath, drawRosterRowStandIn);
+  appendRowKids(ws, family, familyPath, drawRosterRowStandIn, null);
   return ws;
 }
 
 /**
- * Append CHILDREN, the family of the list row at FAMILY_PATH, to its box WS,
- * each drawn by DRAW, in the one `.kids` box the search and the stylesheet
- * look for a nested row in. A child that begins another repository is drawn
- * under its repository divider (`drawRosterOpenRowRepositoryDivider`). A row
- * with no child draws no box.
+ * Append KIN, the family of the list row at FAMILY_PATH, to its box WS, each
+ * row drawn by DRAW, in the one `.kids` box the search and the stylesheet look
+ * for a nested row in: the own-repository children first, then each
+ * repository block (`drawRosterOpenRowRepositoryBlock`), each divider's name
+ * selecting through SELECT_MAIN (null: a stand-in, whose names select
+ * nothing). A row with no kin draws no box.
  */
 export function appendRowKids(
   ws: HTMLElement,
-  children: readonly RowFamily[],
+  kin: RowKin,
   familyPath: string,
   draw: (child: RowFamily, childPath: string) => HTMLElement,
+  selectMain: SelectMainWorkspace | null,
 ): void {
-  if (children.length === 0) return;
+  const children = kin.children ?? [];
+  const blocks = kin.repositoryBlocks ?? [];
+  if (children.length === 0 && blocks.length === 0) return;
   const kids = document.createElement("div");
   kids.className = "kids";
-  for (const child of pathedFamilies(children, `${familyPath}.children`)) {
-    const divider = child.family.repositoryDivider;
-    if (divider) kids.appendChild(drawRosterOpenRowRepositoryDivider(divider, `${child.path}.repositoryDivider`));
-    kids.appendChild(draw(child.family, child.path));
-  }
+  for (const child of pathedFamilies(children, `${familyPath}.children`)) kids.appendChild(draw(child.family, child.path));
+  blocks.forEach((block, b) =>
+    kids.appendChild(drawRosterOpenRowRepositoryBlock(block, `${familyPath}.repositoryBlocks[${b}]`, draw, selectMain)),
+  );
   ws.appendChild(kids);
 }
 
-/** The class of a repository divider in a family (frontend.v1.RosterOpenRowRepositoryDivider). */
+/**
+ * What a click on a divider's repository name does with the main workspace it
+ * names: select it, LABEL being the control a refusal is drawn beside.
+ */
+export type SelectMainWorkspace = (label: HTMLElement, main: WorkspaceRef) => void;
+
+/** The class of a repository block in a family (frontend.v1.RosterOpenRowRepositoryBlock). */
+export const REPOSITORY_BLOCK_CLASS = "sb-repo-block";
+
+/** The attribute naming a repository block's repository, the key a block move names. */
+export const REPOSITORY_BLOCK_ATTRIBUTE = "data-repository-block";
+
+/** The class of a repository divider, heading its block (frontend.v1.RosterOpenRowRepositoryDivider). */
 export const REPOSITORY_DIVIDER_CLASS = "sb-repo-divider";
 
 /**
- * Draw U, the divider above the first row of a run of one repository in a
- * family: a rule, the repository's name, a rule, as the deploy queue heads
- * a repository's group, inset to the row's indent and ending where the rows'
- * durations begin.
+ * Draw U, one other repository's children of a row: its divider, then its
+ * rows, each drawn by DRAW. The rows sit at the same depth as the row's
+ * own-repository children, so they indent exactly as those do; the divider
+ * adds no indent of its own. The block is the unit a drag of its divider
+ * moves (`subsections.ts`).
  */
-export function drawRosterOpenRowRepositoryDivider(u: RosterOpenRowRepositoryDivider, path: string): HTMLElement {
+export function drawRosterOpenRowRepositoryBlock(
+  u: RosterOpenRowRepositoryBlock,
+  path: string,
+  draw: (child: RowFamily, childPath: string) => HTMLElement,
+  selectMain: SelectMainWorkspace | null,
+): HTMLElement {
+  const repository = requireMessage(u.repository, `${path}.repository`);
+  if (repository.id === "") throw new Error(`${path}.repository.id: a repository block names its repository`);
+  if (u.rows.length === 0) throw new Error(`${path}.rows: a repository block holds at least one row`);
+  const block = document.createElement("div");
+  block.className = REPOSITORY_BLOCK_CLASS;
+  block.setAttribute(REPOSITORY_BLOCK_ATTRIBUTE, repository.id);
+  block.appendChild(drawRosterOpenRowRepositoryDivider(requireMessage(u.divider, `${path}.divider`), `${path}.divider`, selectMain));
+  for (const row of pathedFamilies(u.rows, `${path}.rows`)) block.appendChild(draw(row.family, row.path));
+  return block;
+}
+
+/** The attribute a divider's name wears when a click on it selects the repository's main workspace. */
+export const DIVIDER_MAIN_WORKSPACE_ATTRIBUTE = "data-main-workspace";
+
+/**
+ * Draw U, the divider heading a repository block: a rule, the repository's
+ * name, a rule, as the deploy queue heads a repository's group, starting at
+ * the block's rows' indent and ending where the rows' durations begin.
+ *
+ * THE NAME SELECTS THE REPOSITORY'S MAIN WORKSPACE (owner request,
+ * 2026-11-09) when the daemon names one (`main_workspace`): a click sends the
+ * same SelectInEditor a row click sends, through SELECT_MAIN. With none named,
+ * or no SELECT_MAIN, the name is plain text.
+ */
+export function drawRosterOpenRowRepositoryDivider(
+  u: RosterOpenRowRepositoryDivider,
+  path: string,
+  selectMain: SelectMainWorkspace | null,
+): HTMLElement {
   if (u.name === "") throw new Error(`${path}.name: a repository divider names its repository`);
   const divider = document.createElement("div");
   divider.className = REPOSITORY_DIVIDER_CLASS;
   const label = document.createElement("span");
   label.className = "sb-label";
   label.textContent = u.name;
+  const main = u.mainWorkspace;
+  if (main !== undefined && selectMain !== null) {
+    if (main.id === "") throw new Error(`${path}.main_workspace.id: a divider's main workspace names a workspace`);
+    label.setAttribute(DIVIDER_MAIN_WORKSPACE_ATTRIBUTE, main.id);
+    label.setAttribute("data-select", "");
+    label.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectMain(label, main);
+    });
+  }
   divider.appendChild(label);
   return divider;
 }

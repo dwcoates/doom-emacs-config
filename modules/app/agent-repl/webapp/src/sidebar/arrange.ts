@@ -64,6 +64,8 @@ export function arrangeSidebarRefusal(
       return "a subsection an agent creates needs an open workspace";
     case "mainWorkspaceNotSortable":
       return "the main workspace is arranged by hand, never sorted by an agent";
+    case "noRepositoryBlock":
+      return "the sidebar changed under the drag; try again";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("ArrangeSidebarError.cause", other.case);

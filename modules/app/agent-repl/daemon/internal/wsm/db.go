@@ -177,6 +177,9 @@ type DB interface {
 	MoveSubsection(ctx context.Context, id SubsectionID, to Anchor) error
 	// MoveRepository moves one repository before another (nil: last).
 	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
+	// MoveRepositoryBlock moves a parent's block of one other repository
+	// before another of its blocks (nil: last) (repositoryblocks.go).
+	MoveRepositoryBlock(ctx context.Context, parent WorkspaceID, repo RepoID, before *RepoID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
 	// subsection of their repository (nil: none) as one block at an anchor
 	// there: before a root, before a subsection (into none only), or last.

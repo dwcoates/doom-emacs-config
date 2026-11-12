@@ -9,7 +9,14 @@ import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { RosterOpenRowRepositoryDividerSchema, RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import {
+  RosterOpenRowRepositoryBlockSchema,
+  RosterOpenRowRepositoryDividerSchema,
+  RosterRowSchema,
+  type RosterOpenRow,
+  type RosterRowWhenSchema,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { withRepositoryBlocks } from "../roster-families.js";
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
@@ -37,7 +44,11 @@ import {
   drawRosterFamily,
   pathedFamilies,
   noteSelectRoute,
+  DIVIDER_MAIN_WORKSPACE_ATTRIBUTE,
+  REPOSITORY_BLOCK_ATTRIBUTE,
+  REPOSITORY_BLOCK_CLASS,
   REPOSITORY_DIVIDER_CLASS,
+  drawRosterOpenRowRepositoryBlock,
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
@@ -925,33 +936,132 @@ describe("the family", () => {
   });
 });
 
-describe("the repository divider", () => {
-  /** A parent ws-1 whose children ws-2 and ws-3 carry the dividers given. */
-  function familyWithDividers(second?: string, third?: string): HTMLElement {
-    const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] }));
-    if (second !== undefined) family.children[0].repositoryDivider = create(RosterOpenRowRepositoryDividerSchema, { name: second });
-    if (third !== undefined) family.children[1].repositoryDivider = create(RosterOpenRowRepositoryDividerSchema, { name: third });
+describe("a repository block", () => {
+  /**
+   * Parent ws-1 with own-repository child ws-2, then a beta block of ws-3 and
+   * ws-4 and a gamma block of ws-5; ws-2 and ws-3 each have one child.
+   */
+  function blockFamily(): HTMLElement {
+    const family = withRepositoryBlocks(openRow(row({ id: "ws-1", children: [row({ id: "ws-2", children: [row({ id: "ws-2a" })] })] })), [
+      { repo: "repo-beta", name: "beta", rows: [row({ id: "ws-3", children: [row({ id: "ws-3a" })] }), row({ id: "ws-4" })] },
+      { repo: "repo-gamma", name: "gamma", rows: [row({ id: "ws-5" })] },
+    ]);
     return drawRosterFamily(family, sidebarContext(), "R");
   }
 
-  it("draws a child's divider just above it, naming its repository", () => {
-    const kids = familyWithDividers("beta").querySelector(".kids")!;
-    const divider = kids.querySelector(`.${REPOSITORY_DIVIDER_CLASS}`)!;
-    expect(divider.textContent).toBe("beta");
-    expect((divider.nextElementSibling as HTMLElement).getAttribute("data-roster-row")).toBe("ws-2");
+  it("draws the own-repository children first, then each block in order", () => {
+    const kids = blockFamily().querySelector(":scope > .kids")!;
+    expect(
+      [...kids.children].map((el) =>
+        el.classList.contains(REPOSITORY_BLOCK_CLASS) ? `block:${el.getAttribute(REPOSITORY_BLOCK_ATTRIBUTE)}` : el.getAttribute("data-roster-row"),
+      ),
+    ).toEqual(["ws-2", "block:repo-beta", "block:repo-gamma"]);
   });
 
-  it("draws no divider for a child that carries none", () => {
-    expect(familyWithDividers().querySelector(`.${REPOSITORY_DIVIDER_CLASS}`)).toBeNull();
+  it("heads each block with one divider naming its repository, above its rows", () => {
+    const blocks = [...blockFamily().querySelectorAll(`:scope > .kids > .${REPOSITORY_BLOCK_CLASS}`)];
+    expect(
+      blocks.map((block) => [...block.children].map((el) => (el.classList.contains(REPOSITORY_DIVIDER_CLASS) ? `divider:${el.textContent}` : el.getAttribute("data-roster-row")))),
+    ).toEqual([
+      ["divider:beta", "ws-3", "ws-4"],
+      ["divider:gamma", "ws-5"],
+    ]);
   });
 
-  it("draws one divider per child that carries one, in order", () => {
-    const names = [...familyWithDividers("beta", "alpha").querySelectorAll(`.${REPOSITORY_DIVIDER_CLASS}`)].map((d) => d.textContent);
-    expect(names).toEqual(["beta", "alpha"]);
+  it("draws one divider per block, never one per row", () => {
+    expect([...blockFamily().querySelectorAll(`.${REPOSITORY_DIVIDER_CLASS}`)].map((d) => d.textContent)).toEqual(["beta", "gamma"]);
+  });
+
+  it("draws a block row's own family under it", () => {
+    expect(blockFamily().querySelector(`.${REPOSITORY_BLOCK_CLASS} > [data-roster-row='ws-3'] > .kids > [data-roster-row='ws-3a']`)).not.toBeNull();
+  });
+
+  it("indents a block row exactly as an own-repository sibling, at both depths", () => {
+    inRail(blockFamily(), (rail) => {
+      const indent = (id: string): string => cascadedValue(rail.querySelector(`[data-roster-row='${id}']`)!, "--row-indent");
+      const generationStep = "calc(var(--row-indent-parent) + 1.2rem)";
+      expect([indent("ws-2"), indent("ws-3"), indent("ws-5"), indent("ws-2a"), indent("ws-3a")]).toEqual(Array(5).fill(generationStep));
+    });
+  });
+
+  it("gives a block no indent of its own, so its rows read their parent's generation", () => {
+    inRail(blockFamily(), (rail) => {
+      const block = rail.querySelector(`.${REPOSITORY_BLOCK_CLASS}`)!;
+      const kids = block.parentElement!;
+      expect([
+        cascadedValue(block, "--row-indent-parent"),
+        cascadedValue(block, "--row-indent"),
+      ]).toEqual([cascadedValue(kids, "--row-indent-parent"), cascadedValue(kids, "--row-indent")]);
+    });
+  });
+
+  it("refuses a block naming no repository", () => {
+    const bad = create(RosterOpenRowRepositoryBlockSchema, { divider: { name: "beta" }, rows: [openRow(row({ id: "ws-3" }))] });
+    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), null)).toThrow(/R\.b\.repository/);
+  });
+
+  it("refuses a block holding no row", () => {
+    const bad = create(RosterOpenRowRepositoryBlockSchema, { repository: { id: "repo-beta" }, divider: { name: "beta" } });
+    expect(() => drawRosterOpenRowRepositoryBlock(bad, "R.b", () => document.createElement("div"), null)).toThrow(/R\.b\.rows/);
+  });
+
+  /** Parent ws-1 with a beta block of ws-3, its divider naming MAIN as the repository's main workspace. */
+  function blockWithMain(main: string | undefined): RosterOpenRow {
+    const family = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", name: "beta", rows: [row({ id: "ws-3" })] }]);
+    if (main !== undefined) family.repositoryBlocks[0]!.divider!.mainWorkspace = create(WorkspaceRefSchema, { id: main, dir: `/w/${main}` });
+    return family;
+  }
+
+  it("selects the repository's main workspace when its name is clicked", async () => {
+    // Arrange
+    const selected: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        selectInEditor: (request) => {
+          selected.push(request.workspace?.id ?? "");
+          return SELECT_OK;
+        },
+      }),
+    );
+    const drawn = drawRosterFamily(blockWithMain("ws-beta-main"), sc, "R");
+
+    // Act
+    await click(drawn.querySelector(`.${REPOSITORY_DIVIDER_CLASS} > .sb-label`) as Element);
+
+    // Assert
+    expect(selected).toEqual(["ws-beta-main"]);
+  });
+
+  it("selects nothing else when the name is clicked, the parent row included", async () => {
+    // Arrange
+    const selected: string[] = [];
+    const sc = sidebarContext(appContext({ selectInEditor: (request) => (selected.push(request.workspace?.id ?? ""), SELECT_OK) }));
+    const drawn = drawRosterFamily(blockWithMain("ws-beta-main"), sc, "R");
+
+    // Act
+    await click(drawn.querySelector(`.${REPOSITORY_DIVIDER_CLASS} > .sb-label`) as Element);
+
+    // Assert
+    expect(selected).not.toContain("ws-1");
+  });
+
+  it("draws the name as plain text when the daemon names no main workspace", () => {
+    const label = drawRosterFamily(blockWithMain(undefined), sidebarContext(), "R").querySelector(`.${REPOSITORY_DIVIDER_CLASS} > .sb-label`)!;
+    expect([label.hasAttribute("data-select"), label.hasAttribute(DIVIDER_MAIN_WORKSPACE_ATTRIBUTE)]).toEqual([false, false]);
+  });
+
+  it("draws a stand-in's divider name as plain text", () => {
+    const label = drawRosterRowStandIn(blockWithMain("ws-beta-main"), "R").querySelector(`.${REPOSITORY_DIVIDER_CLASS} > .sb-label`)!;
+    expect(label.hasAttribute("data-select")).toBe(false);
+  });
+
+  it("refuses a main workspace naming no workspace", () => {
+    const divider = create(RosterOpenRowRepositoryDividerSchema, { name: "beta", mainWorkspace: { id: "" } });
+    expect(() => drawRosterOpenRowRepositoryDivider(divider, "R.d", () => {})).toThrow(/R\.d\.main_workspace/);
   });
 
   it("refuses a divider naming no repository", () => {
-    expect(() => drawRosterOpenRowRepositoryDivider(create(RosterOpenRowRepositoryDividerSchema, { name: "" }), "R.d")).toThrow(/R\.d\.name/);
+    expect(() => drawRosterOpenRowRepositoryDivider(create(RosterOpenRowRepositoryDividerSchema, { name: "" }), "R.d", null)).toThrow(/R\.d\.name/);
   });
 });
 
@@ -2950,7 +3060,7 @@ describe("appendRowKids", () => {
     const parent = row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] });
 
     // Act
-    appendRowKids(ws, openRow(parent).children, "row", (child) => drawRosterRowStandIn(child, "child"));
+    appendRowKids(ws, { children: openRow(parent).children }, "row", (child) => drawRosterRowStandIn(child, "child"), null);
 
     // Assert
     expect([...ws.querySelectorAll(":scope > .kids > [data-roster-row]")].map((el) => el.getAttribute("data-roster-row"))).toEqual([
@@ -2965,10 +3075,10 @@ describe("appendRowKids", () => {
     const parent = row({ id: "ws-1", children: [row({ id: "ws-2" })] });
 
     // Act
-    appendRowKids(document.createElement("div"), openRow(parent).children, "row", (child, childPath) => {
+    appendRowKids(document.createElement("div"), { children: openRow(parent).children }, "row", (child, childPath) => {
       paths.push(childPath);
       return document.createElement("div");
-    });
+    }, null);
 
     // Assert
     expect(paths).toEqual(["row.children[0]"]);
@@ -2979,10 +3089,37 @@ describe("appendRowKids", () => {
     const ws = document.createElement("div");
 
     // Act
-    appendRowKids(ws, [], "row", () => document.createElement("div"));
+    appendRowKids(ws, {}, "row", () => document.createElement("div"), null);
 
     // Assert
     expect(ws.querySelector(".kids")).toBeNull();
+  });
+
+  it("hands each block row its path under the parent's block", () => {
+    // Arrange
+    const paths: string[] = [];
+    const parent = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", rows: [row({ id: "ws-2" })] }]);
+
+    // Act
+    appendRowKids(document.createElement("div"), parent, "row", (child, childPath) => {
+      paths.push(childPath);
+      return document.createElement("div");
+    }, null);
+
+    // Assert
+    expect(paths).toEqual(["row.repositoryBlocks[0].rows[0]"]);
+  });
+
+  it("draws a kids box for a row whose only kin is a block", () => {
+    // Arrange
+    const ws = document.createElement("div");
+    const parent = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", rows: [row({ id: "ws-2" })] }]);
+
+    // Act
+    appendRowKids(ws, parent, "row", (child) => drawRosterRowStandIn(child, "child"), null);
+
+    // Assert
+    expect(ws.querySelector(`:scope > .kids > .${REPOSITORY_BLOCK_CLASS} > [data-roster-row='ws-2']`)).not.toBeNull();
   });
 
   it("is how both a drawn row and its stand-in nest their children", () => {

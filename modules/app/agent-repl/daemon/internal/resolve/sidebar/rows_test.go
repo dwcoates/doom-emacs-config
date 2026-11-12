@@ -35,9 +35,10 @@ func TestRowNamesItsRepository(t *testing.T) {
 			name: "an open child names its own repository, not its section's",
 			reg:  crossRepositoryFamily(),
 			rows: func(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterRow {
-				return innerRows(rosterwalk.UnsectionedRows(roster.GetRepository().GetSections()[0])[0].GetChildren())
+				return innerRows(rosterwalk.OpenFamily(rosterwalk.UnsectionedRows(roster.GetRepository().GetSections()[0])[0]))
 			},
-			want: []string{"beta", "beta", "alpha"},
+			// The parent's own-repository child first, then beta's block.
+			want: []string{"alpha", "beta", "beta"},
 		},
 		{
 			name: "a hidden row, in no repository section, names its repository",

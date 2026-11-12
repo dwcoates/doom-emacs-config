@@ -182,7 +182,7 @@ func TestASubsectionNestsAChildOfAnotherRepositoryUnderItsParent(t *testing.T) {
 
 	// Assert
 	rows := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])[0].GetOpenRows().GetRows()
-	if len(rows) != 1 || !equal(rowNames(innerRows(rows[0].GetChildren())), []string{"child"}) {
+	if len(rows) != 1 || !equal(rowNames(innerRows(rosterwalk.OpenFamily(rows[0]))), []string{"child"}) {
 		t.Fatalf("subsection rows = %v, want parent with the other repository's child nested", rowNames(innerRows(rows)))
 	}
 }

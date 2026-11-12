@@ -314,6 +314,43 @@ whose calls are the observation."
       ;; Assert
       (should (equal ids '("p" "c" "q"))))))
 
+(ert-deftest agent-repl-test-roster-flatten-answers-a-blocks-rows-after-the-own-children ()
+  "Flattening walks a row's own children, then each repository block's rows."
+  ;; Arrange
+  (let* ((own (agent-repl-test-roster--row "o" "o" :ready))
+         (open (lambda (id) (agent-repl-test--open-row (agent-repl-test-roster--row id id :ready))))
+         (parent (append (agent-repl-test--open-row
+                          (agent-repl-test-roster--row "p" "p" :ready :children (list own)))
+                         (list :repository-blocks
+                               (list (list :rows (list (funcall open "x")))
+                                     (list :rows (list (funcall open "y")))))))
+         (rows (list parent)))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id (agent-repl-roster-flatten rows))))
+      ;; Assert
+      (should (equal ids '("p" "o" "x" "y"))))))
+
+(ert-deftest agent-repl-test-roster-fixture-numbers-a-blocks-rows-through-the-one-kin-walk ()
+  "The fixture's tab numbering visits a block's rows, after the own children."
+  ;; Arrange
+  (let* ((open (lambda (id) (agent-repl-test--open-row (agent-repl-test-roster--row id id :ready))))
+         (parent (append (funcall open "p")
+                         (list :repository-blocks (list (list :rows (list (funcall open "x")))))))
+         (section (list :entries (list (list :entry (list :arm :row :value parent))))))
+    ;; Act
+    (agent-repl-test--number-tabs (list section))
+    ;; Assert
+    (should (equal (mapcar (lambda (row) (plist-get (plist-get (plist-get row :tab) :tab) :value))
+                           (list parent (car (plist-get (car (plist-get parent :repository-blocks)) :rows))))
+                   '((:number 1) (:number 2))))))
+
+(ert-deftest agent-repl-test-roster-row-kin-of-a-row-with-no-block-is-its-children ()
+  "A row with no repository block's kin is exactly its children."
+  ;; Arrange
+  (let ((row (list :children (list 'a 'b))))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-row-kin row) '(a b)))))
+
 (ert-deftest agent-repl-test-roster-walk-visits-a-sections-subsections ()
   "The walk finds a workspace in a subsection, after the section's own rows."
   ;; Arrange

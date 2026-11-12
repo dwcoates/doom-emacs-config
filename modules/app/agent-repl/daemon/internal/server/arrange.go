@@ -66,6 +66,15 @@ func (s *server) ArrangeSidebar(
 		if answered {
 			return answer(resp, cerr)
 		}
+	case *agentreplv1.ArrangeSidebarRequest_MoveRepositoryBlock:
+		var (
+			answered bool
+			cerr     *connect.Error
+		)
+		answered, cerr, err = s.moveRepositoryBlock(ctx, rpc, resp, change.MoveRepositoryBlock)
+		if answered {
+			return answer(resp, cerr)
+		}
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspace:
 		place := change.PlaceWorkspace
 		var (
@@ -168,6 +177,38 @@ func (s *server) moveRepository(
 		before = &anchor.ID
 	}
 	return false, nil, s.deps.Verbs.MoveRepository(ctx, repository.ID, before)
+}
+
+// moveRepositoryBlock resolves the parent, the block's repository and its
+// anchor, then moves the block. `answered` says a resolution refused (or the
+// two repository refs name one repository) and the caller answers at once
+// with cerr; otherwise err is the verb's.
+func (s *server) moveRepositoryBlock(
+	ctx context.Context,
+	rpc string,
+	resp *agentreplv1.ArrangeSidebarResponse,
+	move *agentreplv1.ArrangeMoveRepositoryBlock,
+) (answered bool, cerr *connect.Error, err error) {
+	subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, []*workspacev1.WorkspaceRef{move.GetParent()})
+	if done {
+		return true, refused, nil
+	}
+	repository, refused, done := s.resolveRepository(ctx, rpc, resp, move.GetRepository())
+	if done {
+		return true, refused, nil
+	}
+	var before *ids.RepoID
+	if ref := move.GetBefore(); ref != nil {
+		anchor, refused, done := s.resolveRepository(ctx, rpc, resp, ref)
+		if done {
+			return true, refused, nil
+		}
+		if anchor.ID == repository.ID {
+			return true, invalid("move_repository_block.before", "a repository block cannot move before itself"), nil
+		}
+		before = &anchor.ID
+	}
+	return false, nil, s.deps.Verbs.MoveRepositoryBlock(ctx, subjects[0].Record.ID, repository.ID, before)
 }
 
 // placeWorkspaces resolves the placed workspaces and their anchor (a

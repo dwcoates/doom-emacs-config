@@ -212,28 +212,48 @@ type entry struct {
 	// called closes once every expected participant has called. Only the
 	// Deps.AdoptAwaitsParticipants test seam waits on it.
 	called chan struct{}
-	// done closes when the adoption completes. Every Adopt* call WAITS on it:
-	// the participants call concurrently and "all calls succeed together" is
-	// the rendezvous's whole meaning, so the caller that arrives first is not
-	// told not_yet_adopted -- it waits for the one that completes it.
+	// run is the current adoption run's completion. Every Adopt* call WAITS
+	// on it: the participants call concurrently and "all calls succeed
+	// together" is the rendezvous's whole meaning, so the caller that arrives
+	// first is not told not_yet_adopted -- it waits for the one that completes
+	// it.
+	run *adoptionRun
+}
+
+// adoptionRun is ONE adoption run's completion and outcome, together.
+//
+// A RE-RUN REPLACES THE RUN, NEVER EDITS IT. A waiter holds the run it waited
+// on, so the outcome it reads is that run's: when done and failed lived on the
+// entry, a retry that began between a failed run's close and its waiter's read
+// cleared failed under the waiter, which then reported the failed run as a
+// success (merge gate, 2026-11-12,
+// TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure).
+type adoptionRun struct {
+	// done closes when the run completes.
 	done chan struct{}
-	// failed carries an adoption failure to the waiters, so a caller that did
-	// not run the adoption still learns why it did not happen.
+	// failed carries the run's failure to its waiters, so a caller that did
+	// not run the adoption still learns why it did not happen. It is written
+	// once, before done closes, and never again.
 	failed error
+}
+
+// newAdoptionRun opens a run whose completion has not settled.
+func newAdoptionRun() *adoptionRun {
+	return &adoptionRun{done: make(chan struct{})}
+}
+
+// settled reports whether the run has completed.
+func (r *adoptionRun) settled() bool {
+	return rendezvousClosed(r.done)
 }
 
 // settle closes an entry's completion channel exactly once, with the outcome.
 func (e *entry) settle(err error) {
-	if e.done == nil {
+	if e.run == nil || e.run.settled() {
 		return
 	}
-	select {
-	case <-e.done:
-		return
-	default:
-	}
-	e.failed = err
-	close(e.done)
+	e.run.failed = err
+	close(e.run.done)
 }
 
 // claim takes the entry's adoption claim and begins its run, as ONE step: a
@@ -255,14 +275,8 @@ func (e *entry) claim() {
 // the re-run sat waiting for the incumbent's release).
 func (e *entry) beginAdoption() {
 	e.adopting = true
-	if e.done == nil {
-		return
-	}
-	select {
-	case <-e.done:
-		e.done = make(chan struct{})
-		e.failed = nil
-	default:
+	if e.run != nil && e.run.settled() {
+		e.run = newAdoptionRun()
 	}
 }
 
