@@ -445,9 +445,13 @@ export type MergeQueuePlacement = Message<"agentrepl.v1.MergeQueuePlacement"> & 
      * Directly behind a named merge in the queue, waiting or running: the
      * merge takes that neighbor's front mark, so front merges stay ahead of
      * ordinary ones. The named merge must stand in the queue when this one
-     * is asked for (placement_behind_not_in_line otherwise); one that has
-     * left by the time this one is put in line left its place at the head
-     * of the waiting line, which is where this one goes.
+     * is asked for, or be an async merge the same requester asked for and
+     * has not yet handed off, such as one asked for earlier in the same turn
+     * (placement_behind_not_in_line otherwise): the requester's async merges
+     * join the line first, in the order they were asked for, so this one is
+     * put directly behind it. One that has left by the time this one is put
+     * in line left its place at the head of the waiting line, which is where
+     * this one goes.
      *
      * THE MERGE WAITS ON THE NAMED MERGE: it is not admitted, and an async
      * merge's instruction does not run, while the named merge still stands

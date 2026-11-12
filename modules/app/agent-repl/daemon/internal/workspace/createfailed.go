@@ -140,7 +140,6 @@ var createRefusalArms = map[string]bool{
 	"op_id_with_async_merge":                true,
 	"version_increment_required":            true,
 	"version_increment_unexpected":          true,
-	"async_merge_requester_queued":          true,
 	"async_merge_requester_merging":         true,
 	"async_merge_requester_session_deleted": true,
 	"requester_bypassing_queue":             true,

@@ -29,7 +29,6 @@ type SubagentMakers interface {
 // asyncMergeRenames spells the merge queue's refusals of the requester's own
 // row as the create's arms.
 var asyncMergeRenames = map[string]string{
-	merge.ArmAlreadyQueued:       "async_merge_requester_queued",
 	merge.ArmAlreadyMerging:      "async_merge_requester_merging",
 	merge.ArmSessionDeleted:      "async_merge_requester_session_deleted",
 	merge.ArmNoDeployConfig:      "async_merge_no_deploy_config",
