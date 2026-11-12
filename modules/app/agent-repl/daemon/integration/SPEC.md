@@ -227,11 +227,10 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   succeeds
 - NukeWorkspace kills, removes the worktree and branch (assert on the fake
   git repo), and removes the row
-- a `forget` command-file entry on a CLOSED workspace removes the row and,
-  when it was the last workspace under its repository, that repository's
-  section too, touching no files; on an OPEN one the file is quarantined and
-  the row stands (the rpc is unlanded, so the command-file ingress is the only
-  route -- see ERROR-ARMS.md)
+- ForgetWorkspace on a CLOSED workspace removes the row and, when it was
+  the last workspace under its repository, that repository's section too,
+  touching no files; on an OPEN one it answers `not_closed` and the row
+  stands
 - RestartWorkspace{force:false} prelaunches a second fake shim (inert: no
   StartSession until freeness), waits for the running turn to end, sends
   KillSession to the old, reaps it, then StartSession(resume) on the new;
@@ -473,12 +472,6 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - OpenExternal invokes the configured browser launcher with the url
 - workflow rpcs / arms answer the typed not-implemented refusal
 
-### commandfile_test.go
-- a `workspace_commands_*.json` file with a create entry materializes a
-  workspace exactly like CreateWorkspace; a merge entry enqueues; a prompt
-  entry submits; a malformed file is quarantined and logged, never
-  ingested; ingestion is atomic (a half-written file is not claimed)
-
 ### create_test.go
 - CreateWorkspace standard: slug derived from the initial prompt, branch
   and worktree created off the default branch, layout facts recorded,
@@ -525,10 +518,6 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 Folded into the suites above rather than listed twice; recorded here so the
 audit's charge can be reconciled against the files.
 
-- COMMAND-FILE INGRESS beyond create/merge/prompt/task-create: one test per
-  verb (send, close, open, switch, task-toggle-done, task-add-workspace),
-  `dir` addressing proven equivalent to `workspace`, one-shot decoration,
-  `base_ref`, and a file with ONE invalid entry applying NOTHING.
 - HOLD ARMS: `uninterruptible_turn` (a /clear's turn open) reaches the tray
   with NO classifying push and refuses release; a revival-time entry carries
   `session_starting` and refuses release; `AnswerMergeQueueOffer` with nothing
