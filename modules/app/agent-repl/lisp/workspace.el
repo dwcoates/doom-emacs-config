@@ -2645,7 +2645,7 @@ the landing a walk ends on (`agent-repl--end-recency-walk') alike."
   (agent-repl--history-push-front name))
 
 (defun agent-repl--history-push-front (name)
-  "Put NAME first in `agent-repl--workspace-history', dropping any prior occurrence.
+  "Put NAME first in `agent-repl--workspace-history', dropping its prior place.
 The one writer of the history's order, for a visit
 \(`agent-repl--note-workspace-visit') and a creation
 \(`agent-repl--note-workspace-created') alike."
@@ -2662,7 +2662,7 @@ it comes back, without waiting for the user to switch there first."
   (agent-repl--info name "elisp.workspace.history-created ws=%s" name))
 
 (defun agent-repl--end-recency-walk (log-ws reason)
-  "End the recency walk the frame stands in, if any, recording its landing as a visit.
+  "End the frame's recency walk, if any, recording its landing as a visit.
 THE WALK'S LANDING IS A VISIT ONCE THE WALK ENDS.  Its steps record nothing
 while the walk runs (`agent-repl--recency-walk-landing'), so the history
 holds still under it; but the step the user stopped on is the workspace

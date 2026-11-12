@@ -89,6 +89,7 @@ import (
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/turnlatch"
+	"agent-repld/internal/userenv"
 	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
 	"agent-repld/internal/webfootprint"
@@ -1196,7 +1197,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StateDir:                p.Layout.Dir(),
 		IntentManifest:          p.Layout.IntentManifest(),
 		DB:                      p.DB,
-		Spawner:                 rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited),
+		Spawner:                 rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited, successorEnviron(paths.Checkout, log)),
 		Announcer:               pushes,
 		Pusher:                  pushes,
 		Participants:            pushes,
@@ -2563,4 +2564,29 @@ func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent boo
 		return nil, fmt.Errorf("agent-repld: build the external browser: %w", err)
 	}
 	return browser, nil
+}
+
+// opSuccessorEnv is the operation a spawned daemon's environment is recorded under.
+const opSuccessorEnv = "daemon.rollout.successor_env"
+
+// successorEnviron answers a spawned daemon's environment: this process's,
+// every per-user setting refreshed from the env file Emacs named
+// (userenv.Successor), the settings agent-repl's requirements manifest under
+// checkout declares. Each setting it changes is recorded, and a failure is
+// recorded at ERROR before it fails the spawn.
+func successorEnviron(checkout string, log dlog.Logger) func() ([]string, error) {
+	manifest := filepath.Join(checkout, "modules", "app", "agent-repl", "requirements.json")
+	return func() ([]string, error) {
+		env, changed, err := userenv.Successor(os.Environ(), manifest)
+		if err != nil {
+			log.Error(opSuccessorEnv, "could not refresh the spawned daemon's per-user settings from the env file; nothing is spawned",
+				dlog.Context{"manifest": manifest, "env_file": os.Getenv(userenv.EnvFile), "cause": err.Error()})
+			return nil, err
+		}
+		for _, c := range changed {
+			log.Info(opSuccessorEnv, "a per-user setting changed since this daemon started; the spawned daemon takes the env file's value",
+				dlog.Context{"name": c.Name, "was_set": c.Was != "", "now_set": c.Now != ""})
+		}
+		return env, nil
+	}
 }

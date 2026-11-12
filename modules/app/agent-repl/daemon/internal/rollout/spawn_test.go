@@ -97,7 +97,7 @@ func TestJoiningAddrPathNamesTheOneReportFile(t *testing.T) {
 
 func TestSpawnRefusesWithNoDaemonBinary(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("", t.TempDir(), nil)
+	spawner := NewProcessSpawner("", t.TempDir(), nil, inheritEnv)
 
 	// Act
 	_, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -110,7 +110,7 @@ func TestSpawnRefusesWithNoDaemonBinary(t *testing.T) {
 
 func TestSpawnRefusesWithNoIncumbentAddress(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("/bin/true", t.TempDir(), nil)
+	spawner := NewProcessSpawner("/bin/true", t.TempDir(), nil, inheritEnv)
 
 	// Act
 	_, err := spawner.Spawn(context.Background(), "")
@@ -133,7 +133,7 @@ func TestSpawnAnswersTheAddressTheSuccessorReports(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state, nil)
+	spawner := NewProcessSpawner(script, state, nil, inheritEnv)
 	spawner.Timeout = 10 * time.Second
 
 	// Act
@@ -168,7 +168,7 @@ func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state, nil)
+	spawner := NewProcessSpawner(script, state, nil, inheritEnv)
 	spawner.Timeout = 10 * time.Second
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -267,7 +267,7 @@ func TestSpawnPutsTheSuccessorInItsOwnSession(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write the stand-in: %v", err)
 	}
-	spawner := NewProcessSpawner(script, state, nil)
+	spawner := NewProcessSpawner(script, state, nil, inheritEnv)
 	spawner.Timeout = 10 * time.Second
 
 	// Act
@@ -322,7 +322,7 @@ func reportingBody(state string) string {
 func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 	// Arrange: a successor that stays up and never reports.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state, nil)
+	spawner := NewProcessSpawner(spawnScript(t, state, "exec sleep 60\n"), state, nil, inheritEnv)
 	spawner.Timeout = 20 * time.Millisecond
 	spawner.StopGrace = 50 * time.Millisecond
 
@@ -346,7 +346,7 @@ func TestSpawnFailsAtTheDeadlineWhenALiveSuccessorNeverReports(t *testing.T) {
 func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 	// Arrange: a deadline no test run reaches, so only the exit can answer.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state, nil)
+	spawner := NewProcessSpawner(spawnScript(t, state, "exit 2\n"), state, nil, inheritEnv)
 	spawner.Timeout = time.Hour
 
 	// Act
@@ -365,7 +365,7 @@ func TestSpawnNamesTheExitOfASuccessorThatDiesBeforeReporting(t *testing.T) {
 func TestSpawnAnswersTheAddressASuccessorReportedBeforeItExited(t *testing.T) {
 	// Arrange: the report lands, then the process ends, before any poll.
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state, nil)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+"exit 3\n"), state, nil, inheritEnv)
 	spawner.Timeout = time.Hour
 
 	// Act
@@ -386,7 +386,7 @@ func TestSpawnClearsAStaleReportFromAnEarlierHandover(t *testing.T) {
 	if err := ReportJoiningAddr(state, "127.0.0.1:9999"); err != nil {
 		t.Fatalf("ReportJoiningAddr: %v", err)
 	}
-	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
+	spawner := NewProcessSpawner("/usr/bin/true", state, nil, inheritEnv)
 	spawner.Timeout = 20 * time.Millisecond
 
 	// Act
@@ -432,7 +432,7 @@ func TestTheSuccessorInheritsTheIncumbentsConfiguration(t *testing.T) {
 func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
 	// Arrange: a process that starts and exits without reporting.
 	state := t.TempDir()
-	spawner := NewProcessSpawner("/usr/bin/true", state, nil)
+	spawner := NewProcessSpawner("/usr/bin/true", state, nil, inheritEnv)
 	spawner.Timeout = 20 * time.Millisecond
 
 	// Act
@@ -452,7 +452,7 @@ func TestSpawnAnswersTheHandleWhenTheSuccessorNeverReports(t *testing.T) {
 
 func TestSpawnAnswersNoHandleWhenNothingStarted(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner(filepath.Join(t.TempDir(), "absent"), t.TempDir(), nil)
+	spawner := NewProcessSpawner(filepath.Join(t.TempDir(), "absent"), t.TempDir(), nil, inheritEnv)
 
 	// Act
 	successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -493,7 +493,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 				t.Fatalf("write the stand-in: %v", err)
 			}
-			spawner := NewProcessSpawner(script, state, nil)
+			spawner := NewProcessSpawner(script, state, nil, inheritEnv)
 			spawner.Timeout = 10 * time.Second
 			spawner.StopGrace = 50 * time.Millisecond
 			successor, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
@@ -522,7 +522,7 @@ func TestStopReapsTheSuccessor(t *testing.T) {
 func spawnStandIn(t *testing.T, tail string, probe HealthProbe) Successor {
 	t.Helper()
 	state := t.TempDir()
-	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state, nil)
+	spawner := NewProcessSpawner(spawnScript(t, state, reportingBody(state)+tail), state, nil, inheritEnv)
 	spawner.Timeout = 10 * time.Second
 	spawner.StopGrace = 50 * time.Millisecond
 	spawner.Probe = probe
@@ -616,7 +616,7 @@ func TestSpawnReplacementStartsAnOrdinaryDaemonThatReplaces(t *testing.T) {
 	state := t.TempDir()
 	report := filepath.Join(state, "last")
 	body := "for last; do :; done\nprintf '%s' \"$last\" > " + report + ".tmp\nmv " + report + ".tmp " + report + "\n"
-	spawner := NewProcessSpawner(spawnScript(t, state, body), state, nil)
+	spawner := NewProcessSpawner(spawnScript(t, state, body), state, nil, inheritEnv)
 
 	// Act
 	pid, err := spawner.SpawnReplacement(context.Background())
@@ -685,7 +685,7 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 			state := t.TempDir()
 			argv := filepath.Join(state, "argv")
 			body := reportingBody(state) + "printf '%s\\n' \"$@\" > " + argv + ".tmp\nmv " + argv + ".tmp " + argv + "\n"
-			spawner := NewProcessSpawner(spawnScript(t, state, body), state, config)
+			spawner := NewProcessSpawner(spawnScript(t, state, body), state, config, inheritEnv)
 
 			// Act
 			exited, err := tt.spawn(spawner)
@@ -709,7 +709,7 @@ func TestEverySpawnStartsItsProcessOnTheConfigurationArgv(t *testing.T) {
 
 func TestSpawnReplacementRefusesWithNoDaemonBinary(t *testing.T) {
 	// Arrange
-	spawner := NewProcessSpawner("", t.TempDir(), nil)
+	spawner := NewProcessSpawner("", t.TempDir(), nil, inheritEnv)
 
 	// Act
 	_, err := spawner.SpawnReplacement(context.Background())
@@ -734,4 +734,39 @@ func pidExited(t *testing.T, pid int) <-chan struct{} {
 		}
 	}()
 	return gone
+}
+
+// inheritEnv is a spawner's environment answer that hands the spawned
+// process this one's environment, as a daemon Emacs did not start does.
+func inheritEnv() ([]string, error) { return os.Environ(), nil }
+
+func TestSpawnStartsNoSuccessorWhoseEnvironmentCannotBeRead(t *testing.T) {
+	// Arrange
+	state := t.TempDir()
+	script := spawnScript(t, state, reportingBody(state))
+	spawner := NewProcessSpawner(script, state, nil, func() ([]string, error) { return nil, errors.New("the env file is gone") })
+
+	// Act
+	_, err := spawner.Spawn(context.Background(), "127.0.0.1:7777")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the env file is gone") {
+		t.Fatalf("Spawn = %v, want the environment's failure", err)
+	}
+	if _, statErr := os.Stat(JoiningAddrPath(state)); !os.IsNotExist(statErr) {
+		t.Fatalf("a successor ran: its report exists (%v)", statErr)
+	}
+}
+
+func TestSpawnReplacementStartsNoProcessWhoseEnvironmentCannotBeRead(t *testing.T) {
+	// Arrange
+	spawner := NewProcessSpawner("/bin/true", t.TempDir(), nil, func() ([]string, error) { return nil, errors.New("the env file is gone") })
+
+	// Act
+	pid, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err == nil || pid != 0 || !strings.Contains(err.Error(), "the env file is gone") {
+		t.Fatalf("SpawnReplacement = %d, %v; want no process and the environment's failure", pid, err)
+	}
 }
