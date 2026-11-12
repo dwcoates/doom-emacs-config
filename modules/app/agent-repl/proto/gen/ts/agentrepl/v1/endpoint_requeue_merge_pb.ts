@@ -23,6 +23,8 @@ import type { MergeWorkspaceVersionIncrement, MergeWorkspaceVersionIncrementRequ
 import { file_agentrepl_v1_merge_version_increment } from "./merge_version_increment_pb";
 import type { MergeQueuePlacement, MergeQueuePlacementBehindNotInLine, WorkspaceRequester } from "./workspace_topology_pb";
 import { file_agentrepl_v1_workspace_topology } from "./workspace_topology_pb";
+import type { AgentModel } from "../../conversation/v1/api_pb";
+import { file_conversation_v1_api } from "../../conversation/v1/api_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -31,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_requeue_merge.proto.
  */
 export const file_agentrepl_v1_endpoint_requeue_merge: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWV1ZV9tZXJnZS5wcm90bxIMYWdlbnRyZXBsLnYxIv8BChNSZXF1ZXVlTWVyZ2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoJcGxhY2VtZW50GAIgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnQSQgoHdmVyc2lvbhgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRIAIgBARIzCglyZXF1ZXN0ZXIYBCABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyQgoKCF92ZXJzaW9uIogBChRSZXF1ZXVlTWVyZ2VSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VFcnJvckgAQggKBnJlc3VsdCInChNSZXF1ZXVlTWVyZ2VTdWNjZXNzEhAKCHBvc2l0aW9uGAEgASgNIuoGChFSZXF1ZXVlTWVyZ2VFcnJvchJHChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIqLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VVbmtub3duV29ya3NwYWNlSAASUAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIuLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEj8KDXVua25vd25fbWVyZ2UYAyABKAsyJi5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlVW5rbm93bk1lcmdlSAASPQoMc3RpbGxfcXVldWVkGAQgASgLMiUuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVN0aWxsUXVldWVkSAASOwoLYnJhbmNoX2dvbmUYBSABKAsyJC5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQnJhbmNoR29uZUgAEkEKDmFscmVhZHlfbGFuZGVkGAYgASgLMicuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZUFscmVhZHlMYW5kZWRIABJaChp2ZXJzaW9uX2luY3JlbWVudF9yZXF1aXJlZBgHIAEoCzI0LmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRSZXF1aXJlZEgAEl4KHHZlcnNpb25faW5jcmVtZW50X3VuZXhwZWN0ZWQYCCABKAsyNi5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VWZXJzaW9uSW5jcmVtZW50VW5leHBlY3RlZEgAElQKGHZlcnNpb25fYWxyZWFkeV9yZWNvcmRlZBgJIAEoCzIwLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VWZXJzaW9uQWxyZWFkeVJlY29yZGVkSAASWAoccGxhY2VtZW50X2JlaGluZF9ub3RfaW5fbGluZRgKIAEoCzIwLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlUGxhY2VtZW50QmVoaW5kTm90SW5MaW5lSAASRQoQd29ya3NwYWNlX2Nsb3NlZBgLIAEoCzIpLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VXb3Jrc3BhY2VDbG9zZWRIAEIHCgVjYXVzZSIeChxSZXF1ZXVlTWVyZ2VVbmtub3duV29ya3NwYWNlIjgKIFJlcXVldWVNZXJnZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIaChhSZXF1ZXVlTWVyZ2VVbmtub3duTWVyZ2UiGQoXUmVxdWV1ZU1lcmdlU3RpbGxRdWV1ZWQiKAoWUmVxdWV1ZU1lcmdlQnJhbmNoR29uZRIOCgZicmFuY2gYASABKAkiGwoZUmVxdWV1ZU1lcmdlQWxyZWFkeUxhbmRlZCIkCiJSZXF1ZXVlTWVyZ2VWZXJzaW9uQWxyZWFkeVJlY29yZGVkIh0KG1JlcXVldWVNZXJnZVdvcmtzcGFjZUNsb3NlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_merge_version_increment, file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWV1ZV9tZXJnZS5wcm90bxIMYWdlbnRyZXBsLnYxIroCChNSZXF1ZXVlTWVyZ2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoJcGxhY2VtZW50GAIgASgLMiEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnQSQgoHdmVyc2lvbhgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRIAIgBARIzCglyZXF1ZXN0ZXIYBCABKAsyIC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyEi8KBW1vZGVsGAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAYgBAUIKCghfdmVyc2lvbkIICgZfbW9kZWwiiAEKFFJlcXVldWVNZXJnZVJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZUVycm9ySABCCAoGcmVzdWx0IjkKE1JlcXVldWVNZXJnZVN1Y2Nlc3MSFQoIcG9zaXRpb24YASABKA1IAIgBAUILCglfcG9zaXRpb24irAcKEVJlcXVldWVNZXJnZUVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASPwoNdW5rbm93bl9tZXJnZRgDIAEoCzImLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VVbmtub3duTWVyZ2VIABI9CgxzdGlsbF9xdWV1ZWQYBCABKAsyJS5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlU3RpbGxRdWV1ZWRIABI7CgticmFuY2hfZ29uZRgFIAEoCzIkLmFnZW50cmVwbC52MS5SZXF1ZXVlTWVyZ2VCcmFuY2hHb25lSAASQQoOYWxyZWFkeV9sYW5kZWQYBiABKAsyJy5hZ2VudHJlcGwudjEuUmVxdWV1ZU1lcmdlQWxyZWFkeUxhbmRlZEgAEloKGnZlcnNpb25faW5jcmVtZW50X3JlcXVpcmVkGAcgASgLMjQuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlVmVyc2lvbkluY3JlbWVudFJlcXVpcmVkSAASXgocdmVyc2lvbl9pbmNyZW1lbnRfdW5leHBlY3RlZBgIIAEoCzI2LmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVZlcnNpb25JbmNyZW1lbnRVbmV4cGVjdGVkSAASVAoYdmVyc2lvbl9hbHJlYWR5X3JlY29yZGVkGAkgASgLMjAuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVZlcnNpb25BbHJlYWR5UmVjb3JkZWRIABJYChxwbGFjZW1lbnRfYmVoaW5kX25vdF9pbl9saW5lGAogASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmROb3RJbkxpbmVIABJFChB3b3Jrc3BhY2VfY2xvc2VkGAsgASgLMikuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZVdvcmtzcGFjZUNsb3NlZEgAEkAKDm5vdF9pbl9jYXRhbG9nGAwgASgLMiYuYWdlbnRyZXBsLnYxLlJlcXVldWVNZXJnZU5vdEluQ2F0YWxvZ0gAQgcKBWNhdXNlIh4KHFJlcXVldWVNZXJnZVVua25vd25Xb3Jrc3BhY2UiOAogUmVxdWV1ZU1lcmdlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIhoKGFJlcXVldWVNZXJnZVVua25vd25NZXJnZSIZChdSZXF1ZXVlTWVyZ2VTdGlsbFF1ZXVlZCIoChZSZXF1ZXVlTWVyZ2VCcmFuY2hHb25lEg4KBmJyYW5jaBgBIAEoCSIbChlSZXF1ZXVlTWVyZ2VBbHJlYWR5TGFuZGVkIiQKIlJlcXVldWVNZXJnZVZlcnNpb25BbHJlYWR5UmVjb3JkZWQiHQobUmVxdWV1ZU1lcmdlV29ya3NwYWNlQ2xvc2VkIhoKGFJlcXVldWVNZXJnZU5vdEluQ2F0YWxvZ0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_merge_version_increment, file_agentrepl_v1_workspace_topology, file_conversation_v1_api, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RequeueMergeRequest
@@ -77,6 +79,21 @@ export type RequeueMergeRequest = Message<"agentrepl.v1.RequeueMergeRequest"> & 
    * @generated from field: agentrepl.v1.WorkspaceRequester requester = 4;
    */
   requester?: WorkspaceRequester | undefined;
+
+  /**
+   * The model the merge's session resumes under. It is recorded as the
+   * session's model in the same store write that puts the merge back in line,
+   * and every start of the session names the recorded model, so a session
+   * parked cold reads its conversation once, on this model, when the merge
+   * resumes it: no separate model switch is needed, which a cold conversation
+   * refuses (SetModelError.cold_gate). It must be in the model catalog the
+   * session's login last served (conversation.v1.ModelCatalog), or the
+   * requeue is refused as `not_in_catalog` with nothing changed. UNSET keeps
+   * the session's model as it stands.
+   *
+   * @generated from field: optional conversation.v1.AgentModel model = 5;
+   */
+  model?: AgentModel | undefined;
 };
 
 /**
@@ -126,10 +143,12 @@ export const RequeueMergeResponseSchema: GenMessage<RequeueMergeResponse> = /*@_
 export type RequeueMergeSuccess = Message<"agentrepl.v1.RequeueMergeSuccess"> & {
   /**
    * Its one-based place among the merges in line once it was put there.
+   * UNSET when the daemon is draining: the request stands on its queue,
+   * recorded, and joins the line at the next boot.
    *
-   * @generated from field: uint32 position = 1;
+   * @generated from field: optional uint32 position = 1;
    */
-  position: number;
+  position?: number | undefined;
 };
 
 /**
@@ -243,6 +262,15 @@ export type RequeueMergeError = Message<"agentrepl.v1.RequeueMergeError"> & {
      */
     value: RequeueMergeWorkspaceClosed;
     case: "workspaceClosed";
+  } | {
+    /**
+     * `model` is not in the catalog the session's login last served, or the
+     * login has served none.
+     *
+     * @generated from field: agentrepl.v1.RequeueMergeNotInCatalog not_in_catalog = 12;
+     */
+    value: RequeueMergeNotInCatalog;
+    case: "notInCatalog";
   } | { case: undefined; value?: undefined };
 };
 
@@ -380,4 +408,20 @@ export type RequeueMergeWorkspaceClosed = Message<"agentrepl.v1.RequeueMergeWork
  */
 export const RequeueMergeWorkspaceClosedSchema: GenMessage<RequeueMergeWorkspaceClosed> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 11);
+
+/**
+ * The model is not in the login's catalog. No fields: the catalog is the
+ * model selector's to show.
+ *
+ * @generated from message agentrepl.v1.RequeueMergeNotInCatalog
+ */
+export type RequeueMergeNotInCatalog = Message<"agentrepl.v1.RequeueMergeNotInCatalog"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RequeueMergeNotInCatalog.
+ * Use `create(RequeueMergeNotInCatalogSchema)` to create a new message.
+ */
+export const RequeueMergeNotInCatalogSchema: GenMessage<RequeueMergeNotInCatalog> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_requeue_merge, 12);
 
