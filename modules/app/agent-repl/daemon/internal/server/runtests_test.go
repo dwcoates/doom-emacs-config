@@ -312,6 +312,33 @@ func endedFailed() *testrunv1.TestRunEvent {
 	return &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{Outcome: &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{FailedUnits: 1}}}}}
 }
 
+func abortedEvent() *testrunv1.TestRunEvent {
+	return &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Aborted{Aborted: &testrunv1.TestRunAborted{
+		Selection: "ERT file test-x.el=a-test", Detail: "reuse: read lisp/test-x.el: no such file"}}}
+}
+
+func TestRunTestsRelaysARunThatStoppedBeforeItPlanned(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace, h.Surfaces.global = log, log
+	ref := testsWorkspace(t, h, testsDeploy)
+	h.Tests.runEvents = [][]*testrunv1.TestRunEvent{{abortedEvent()}}
+	h.Tests.exit = 1
+
+	// Act
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+
+	// Assert
+	if len(frames) != 1 || frames[0].GetEvent().GetAborted() == nil {
+		t.Fatalf("frames = %v, want the aborted event alone, and no runner_failed", frames)
+	}
+	rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opRunTests, Message: "a test run stopped before it planned"})
+	if !found || rec.Context["selection"] != "ERT file test-x.el=a-test" || rec.Context["cause"] != "reuse: read lisp/test-x.el: no such file" {
+		t.Fatalf("records = %+v, want the abort recorded at error with its selection and cause", log.Records())
+	}
+}
+
 func refusedEvent() *testrunv1.TestRunEvent {
 	return &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: "no"}}}
 }
@@ -338,6 +365,7 @@ func TestRunTestsRepeatsTheRun(t *testing.T) {
 		{name: "a failing run is repeated past", runs: 3, runEvents: [][]*testrunv1.TestRunEvent{{endedFailed()}, {endedPassed()}, {endedFailed()}}, wantCalls: 3, wantRuns: []uint32{1, 2, 3}},
 		{name: "stop at the first failure", runs: 3, stop: true, runEvents: [][]*testrunv1.TestRunEvent{{endedPassed()}, {endedFailed()}, {endedPassed()}}, wantCalls: 2, wantRuns: []uint32{1, 2}},
 		{name: "a refused run is never repeated", runs: 3, runEvents: [][]*testrunv1.TestRunEvent{{refusedEvent()}}, wantCalls: 1, wantRuns: []uint32{1}},
+		{name: "an aborted run is never repeated", runs: 3, runEvents: [][]*testrunv1.TestRunEvent{{abortedEvent()}}, wantCalls: 1, wantRuns: []uint32{1}},
 		{name: "zero runs runs once", runs: 0, runEvents: [][]*testrunv1.TestRunEvent{{endedPassed()}}, wantCalls: 1, wantRuns: []uint32{1}},
 	}
 	for _, tc := range cases {

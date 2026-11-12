@@ -157,6 +157,7 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 	}
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
 	code, failed := exitFailure, false
+	var aborted *testrunv1.TestRunAborted
 	for stream.Receive() {
 		frame := stream.Msg()
 		text, err := protojson.Marshal(frame)
@@ -168,6 +169,8 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 		switch {
 		case frame.GetError().GetRunnerFailed() != nil:
 			code = exitFailure
+		case frame.GetEvent().GetAborted() != nil:
+			code, aborted = exitFailure, frame.GetEvent().GetAborted()
 		case frame.GetError() != nil, frame.GetEvent().GetRefused() != nil:
 			code = exitRefused
 		case frame.GetEvent().GetEnded().GetPassed() != nil:
@@ -184,7 +187,10 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 		c.failed("the run's stream broke: %v", err)
 		return exitFailure
 	}
-	if code == exitFailure {
+	switch {
+	case aborted != nil:
+		c.failed("the run of %s stopped before it planned: %s", aborted.GetSelection(), aborted.GetDetail())
+	case code == exitFailure:
 		c.failed("the run did not report how it ended")
 	}
 	return code

@@ -80,6 +80,7 @@ func TestTestRunExitsByHowTheRunEnded(t *testing.T) {
 		{name: "a daemon error", frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}}}}}, want: exitRefused},
 		{name: "a stream that ends without its end", frames: nil, want: exitFailure},
 		{name: "a repeat whose first run failed and last passed", frames: []*agentreplv1.RunTestsResponse{endedFrame(false), endedFrame(true)}, want: exitTestsFailed},
+		{name: "a run the runner stopped before it planned", frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Aborted{Aborted: &testrunv1.TestRunAborted{Selection: "ERT file test-x.el", Detail: "no"}}})}, want: exitFailure},
 		{name: "a run the runner never ended", frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_RunnerFailed{RunnerFailed: &agentreplv1.RunTestsRunnerFailed{ExitCode: 2}}}}}}, want: exitFailure},
 	}
 	for _, tc := range cases {
@@ -292,6 +293,21 @@ func TestTestRunSendsABareERTFileNameAsWrittenFromOutsideTheNamedWorktree(t *tes
 	}
 	if got := daemon.got.GetRun().GetSelections()[0].GetErtFile().GetFile(); got != "test-x.el" {
 		t.Fatalf("ERT file = %q, want the bare name the runner resolves in the ERT suite's directory", got)
+	}
+}
+
+func TestTestRunSaysWhatAnAbortedRunWasAskedToRunAndWhy(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Aborted{Aborted: &testrunv1.TestRunAborted{
+		Selection: "ERT file test-x.el=a-test", Detail: "reuse: read lisp/test-x.el: no such file"}}})}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-ert", "test-x.el=a-test")
+
+	// Assert
+	want := "the run of ERT file test-x.el=a-test stopped before it planned: reuse: read lisp/test-x.el: no such file"
+	if code != exitFailure || !strings.Contains(errOut, want) || strings.Contains(errOut, "did not report how it ended") {
+		t.Fatalf("exit %d, stderr %q; want exit %d saying %q", code, errOut, exitFailure, want)
 	}
 }
 
