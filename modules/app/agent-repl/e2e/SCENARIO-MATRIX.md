@@ -183,7 +183,7 @@ Two further limits, stated rather than hidden:
 | `!push-sent` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!push-user-present` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | query-death | Go: TestFaults/QueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedRaisesTheFootersTurnDiedFault asserts the footer's agent_repl_fault · turn_died (a dead query is agent-repl's fault, never a block) and its FooterStatusActivityTurnEnded line. | covered |
-| `!query-eof-mid-ask` | ungrounded | producerfaults_e2e_test.go | — | — | — | — | — | Go: TestFaults/QueryEofMidAskDeniesTheOpenAsk asserts the ask genuinely OPENED, then that the death settles it — FeedPermissionAnswered.denied_by_user, the gate's stand-down — and that the turn still ends on query_died. The fate of the in-flight ask, not only the notice. | covered |
+| `!query-eof-mid-ask` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
 | `!query-fail` | ungrounded | — | — | — | ✓ | ✓ | query-death | Both halves are pinned by its goldens (frames.json, feed.json); the `query-death` seam is wired by TestFaults/QueryEofEndsTheTurnAsQueryDied. | covered |
 | `!queue-vendor-turn` | ungrounded | hibernation_e2e_test.go | — | — | — | — | — | Go: TestCompletedTaskBesideKeepAliveAnchorsTheRewind asserts the next rewind anchors on the completed task's adopted turn and discards exactly [keepalive], no rewind is refused, and the vendor's own answer is drawn; TestKeepAlive/KeepAliveAnswerAfterVendorTurnNeverServed asserts no keep-alive row is served beside it. | covered |
 | `!rate-limit` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestTurns/RateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
@@ -247,13 +247,13 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 - Shim half pinned: 125 scenarios
 - Daemon half pinned: 125 scenarios
 - Seam families: 18, each wired by its e2e test
-- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **138**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **137**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **2**
-- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **17**
+- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **18**
 - Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 33 scenarios referenced across 19 files
+- Go e2e (non-emacs): 32 scenarios referenced across 19 files
 - Webapp layer: 9 scenarios referenced across 2 files
 - Emacs e2e: 2 scenarios referenced across 2 files
 
@@ -278,6 +278,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 - `!perm-answered-remotely`
 - `!perm-no-standing`
 - `!perm-remote-interrupt`
+- `!query-eof-mid-ask`
 - `!rate-limit-five-hour`
 - `!remote-interrupt`
 - `!remote-prompt`

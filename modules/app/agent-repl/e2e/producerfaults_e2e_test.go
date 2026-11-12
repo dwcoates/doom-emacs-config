@@ -133,6 +133,151 @@ func pfAssertOnlyProseRows(t *testing.T, rows []*frontendv1.FeedRow, turn *conve
 	}
 }
 
+// pfOpenDegradedWindow answers the first OPEN degraded-window warning on a
+// topbar view, or nil.
+func pfOpenDegradedWindow(v *frontendv1.TopbarView) *frontendv1.TopbarDegradedWindowWarningDetail {
+	for _, warn := range v.GetWarnings().GetWarnings() {
+		if dw := warn.GetDegradedWindow(); dw != nil && dw.GetOpen() != nil {
+			return dw
+		}
+	}
+	return nil
+}
+
+// pfClosedDegradedWindow answers the CLOSED degraded-window warning naming
+// the SAME component and began_at_ms as `open` — that window, recovered.
+func pfClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarDegradedWindowWarningDetail) *frontendv1.TopbarDegradedWindowWarningDetail {
+	for _, warn := range v.GetWarnings().GetWarnings() {
+		dw := warn.GetDegradedWindow()
+		if dw == nil || dw.GetClosed() == nil {
+			continue
+		}
+		if dw.GetComponent().GetText() == open.GetComponent().GetText() && dw.GetBeganAtMs() == open.GetBeganAtMs() {
+			return dw
+		}
+	}
+	return nil
+}
+
+// pfQueryDiedWarnings names the daemon operations a dying vendor query
+// legitimately logs above INFO, so the harness's unconditional warning sweep
+// does not fail a test for the very fault it provoked: the session watcher's
+// own routing (route.go: `w.log.Error("daemon.sessionwatcher.query_died"...)`),
+// the feed resolver's terminal draw, and the workspace health fault the
+// death opens.
+func pfQueryDiedWarnings(w *World) {
+	w.ExpectWarnings(
+		"daemon.sessionwatcher.query_died",
+		"daemon.feed.query_died",
+		"daemon.health.open_fault",
+	)
+}
+
+// ===========================================================================
+// The vendor query dying: `!query-eof`, `!query-fail`, `!query-eof-mid-ask`.
+// ===========================================================================
+
+// testQueryEofEndsTheTurnAsQueryDied drives `!query-eof` — the fake vendor's
+// iterable ENDING with no result, "the CLI going away cleanly mid-turn"
+// (lifecycle.ts), whose arm is SessionQueryDied.cause=unexpected_eof.
+//
+// The turn it kills never produced a vendor result, so its terminal is not
+// the vendor's: it is the daemon's, drawn from the session's death
+// (route.go's routeQueryDiedLocked, "an open turn will never get a terminal
+// now"). feed.proto's arm for exactly that is
+// FeedTurnEndedErrored.query_died.
+//
+// Seam: query-death
+func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
+	// Arrange
+	w := SharedWorld(t)
+	pfQueryDiedWarnings(w)
+	ws, _ := pfNewWorkspace(t, w)
+
+	// Act
+	turn := SubmitPrompt(t, w, ws, "!query-eof")
+
+	// Assert: the terminal is specifically the query-died arm, not a plain
+	// conclusion and not a generic vendor failure.
+	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	if ended.GetConcluded() != nil {
+		t.Fatalf("turn ended = %v, want an errored terminal (the query died mid-turn)", ended)
+	}
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("turn ended = %v, want the errored arm", ended)
+	}
+	if errored.GetQueryDied() == nil {
+		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
+	}
+	// Landing 10 gave the arm a cause; an EOF is the agent binary vanishing.
+	if errored.GetQueryDied().GetUnexpectedEof() == nil {
+		t.Errorf("query_died cause = %v, want unexpected_eof", errored.GetQueryDied())
+	}
+	if errored.GetHeadline().GetText() == "" {
+		t.Errorf("turn error headline = %q, want the daemon's composed sentence (FeedTurnErrorHeadline)", errored.GetHeadline().GetText())
+	}
+}
+
+// ===========================================================================
+// The converter fault window: `!fault-converter`, `!fault-recover`.
+// ===========================================================================
+
+// testConverterRecoveryClosesTheDegradedWindow is the pair's second half:
+// after the defect, `!fault-recover` sends the SAME hook announcement
+// WELL-FORMED, and `fault-recover`'s arms line is "the diagnostics returning
+// to HEALTHY with the degraded window CLOSED carrying the dropped count the
+// fault left behind".
+//
+// The window is identified across the transition exactly as the store-outage
+// area identifies its own: by component plus began_at_ms, so this asserts
+// THAT window closed rather than merely that some closed window exists.
+//
+// Seam: shim-diagnostics
+func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
+	// Arrange
+	w := SharedWorld(t)
+	w.ExpectWarnings("daemon.health.open_fault")
+	ws, configDir := pfNewWorkspace(t, w)
+	topbar := w.WatchTopbar(ws)
+	defer topbar.Close()
+
+	driveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
+	openedView := pfAwaitView(t, w, topbar, "an open degraded window from the converter defect", func(v *frontendv1.TopbarView) bool {
+		return pfOpenDegradedWindow(v) != nil
+	})
+	opened := pfOpenDegradedWindow(openedView)
+	if opened == nil {
+		t.Fatalf("topbar push matched an open degraded window but re-scanning it found none")
+	}
+
+	// Act: an ordinary turn in which every message converts.
+	recoverTurn := driveScenarioToCompletion(t, w, ws, configDir, "fault-recover")
+
+	// Assert: the recovery turn concluded, and its WELL-FORMED hook drew no
+	// card either — bubbles.go's drawHook: "A succeeded hook draws NOTHING"
+	// (the same fact TestHookSucceeded pins).
+	rows := openFeedPage(t, w, ws)
+	if ended := turnEndedRow(t, rows, recoverTurn); ended.GetConcluded() == nil {
+		t.Fatalf("recovery turn ended = %v, want a plain conclusion", ended)
+	}
+
+	// Assert: THAT window closed, carrying its dropped count.
+	closedView := pfAwaitView(t, w, topbar, "the same degraded window closing after the clean turn", func(v *frontendv1.TopbarView) bool {
+		return pfClosedDegradedWindow(v, opened) != nil
+	})
+	closed := pfClosedDegradedWindow(closedView, opened)
+	if closed == nil {
+		t.Fatalf("topbar push matched the closed window but re-scanning it found none")
+	}
+	if got, want := closed.GetClosed().GetEndedAtMs(), opened.GetBeganAtMs(); got < want {
+		t.Errorf("closed degraded window ended_at_ms = %d, want >= began_at_ms %d", got, want)
+	}
+	if got := closed.GetClosed().GetDroppedCount(); got < 1 {
+		t.Errorf("closed degraded window dropped_count = %d, want >= 1 (the one message the converter refused)", got)
+	}
+}
+
 // ===========================================================================
 // Bookkeeping turns that draw NOTHING extra.
 // ===========================================================================

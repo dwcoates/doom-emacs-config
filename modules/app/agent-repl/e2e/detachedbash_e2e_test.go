@@ -222,6 +222,40 @@ func dbExitedZero(s *frontendv1.FeedShellSettled) bool {
 	return s.GetOutcome() != nil && s.GetExit() != nil && s.GetExit().GetCode() == 0
 }
 
+// dbAwaitSimpleToolCall drives a root feed until a FeedRow.activity.simple_tool_call
+// named `toolName` whose input line contains `inputSubstring` reaches
+// `returned` — the foreground counterpart of dbAwaitSettledShell, for the
+// tests that contrast a FOREGROUND bash round trip with the detached family
+// (#35-38 never detach at all).
+func dbAwaitSimpleToolCall(
+	t *testing.T,
+	ctx context.Context,
+	initial []*frontendv1.FeedRow,
+	stream *harness.Stream[*frontendv1.FeedRow],
+	toolName, inputSubstring string,
+	returned func(*frontendv1.FeedToolCallReturned) bool,
+) *frontendv1.FeedToolCallReturned {
+	t.Helper()
+	check := func(row *frontendv1.FeedRow) bool {
+		call := row.GetActivity().GetSimpleToolCall()
+		if call == nil || call.GetName().GetText() != toolName {
+			return false
+		}
+		if !strings.Contains(call.GetInput().GetText(), inputSubstring) {
+			return false
+		}
+		r := call.GetReturned()
+		return r != nil && returned(r)
+	}
+	for _, row := range initial {
+		if call := row.GetActivity().GetSimpleToolCall(); call != nil && check(row) {
+			return call.GetReturned()
+		}
+	}
+	row := harness.AwaitView(t, ctx, stream, "a "+toolName+" tool call to return", check)
+	return row.GetActivity().GetSimpleToolCall().GetReturned()
+}
+
 // ===========================================================================
 // #31 — BashDetachedStartAndComplete.
 //
@@ -379,4 +413,47 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 			}
 			return false
 		})
+}
+
+// ===========================================================================
+// #35 — BashForegroundCompleted.
+//
+// Golden "bash-foreground-completed" -> prompt "!bash" (shell.ts's BASH,
+// golden-conformance.test.ts's mapping). An ORDINARY, non-detached round
+// trip, contrasted against #31/#33's detached shapes: no detached_shell row
+// should ever appear for this command.
+// ===========================================================================
+
+// Seam: stream-tool-card
+func testBashForegroundCompleted(t *testing.T) {
+	w := SharedWorld(t)
+	ws := w.NewWorkspace(t)
+
+	initial, stream := dbOpenRootFeed(t, w, ws)
+	defer stream.Close()
+
+	turn := SubmitPrompt(t, w, ws, "!bash")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	ctx, cancel := w.WaitCtx()
+	defer cancel()
+
+	// BASH's default command (no !bash args): "pwd; ls | head", stdout
+	// "one\ntwo\n" — a COMPLETED command is drawn succeeded regardless of its
+	// exit code (daemon/internal/resolve/feed/toolcall.go's bashOutcomeText:
+	// "case *conversationv1.AgentBashSuccess_Completed: return true, ...").
+	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "pwd; ls | head",
+		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetSucceeded() != nil })
+	if returned == nil {
+		t.Fatalf("no Bash tool call returned within %s", DefaultTimeout)
+	}
+	if got := returned.GetText().GetText(); !strings.Contains(got, "one") || !strings.Contains(got, "two") {
+		t.Errorf("returned text = %q, want it to contain the scenario's stdout (\"one\", \"two\")", got)
+	}
+
+	for _, row := range initial {
+		if row.GetShellHead() != nil || row.GetDetachedShell() != nil {
+			t.Errorf("an ordinary foreground bash round trip produced a detached shell bubble: %v", row)
+		}
+	}
 }

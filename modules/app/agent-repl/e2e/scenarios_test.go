@@ -37,16 +37,20 @@ func TestTurns(t *testing.T) {
 // TestFaults is what the vendor, the producer and the hooks get wrong, and the refusals and failure arms they end in.
 func TestFaults(t *testing.T) {
 	scenario(t,
+		testQueryEofEndsTheTurnAsQueryDied,
+		testConverterRecoveryClosesTheDegradedWindow,
 		testResidueAttachmentsDrawNoRow,
 		testContextTipDrawsNoRow,
 		testTokensReminderDrawsNoRow,
 		testApiRateLimitedCarriesTheVendorWait,
+		testPermissionAskAnsweredArms,
 	)
 }
 
 // TestSubagents is subagents, their feeds, and detached work that outlives its turn.
 func TestSubagents(t *testing.T) {
 	scenario(t,
+		testSubagentSyncNestedActivity,
 		testSubagentDetached,
 		testNestedSubagentHistoricalUsage,
 		testSubagentBubbleFromAReplayIsStillAddressable,
@@ -55,6 +59,7 @@ func TestSubagents(t *testing.T) {
 		testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot,
 		testBashDetachedStartAndComplete,
 		testBashDetachExplicitPoll,
+		testBashForegroundCompleted,
 		testDetachedLostWentSilent,
 	)
 }
