@@ -1423,3 +1423,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): The merge queue's gate now records each test run's total time and how many units each suite ran or reused, labeled with the batch sizes in force, so batch sizes can be compared over time.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Integration tests pass again: the fake git answers git cherry, which the merge queue's off-queue check now reads.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Records which e2e tests cross a real seam and which belong in one system's own tests.
+- 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): The installer now asks for the phone hotspot persistent-wifi mode joins, which keeps agents online when Wi-Fi drops with the lid closed.
