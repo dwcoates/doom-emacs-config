@@ -81,7 +81,7 @@ func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
 
 		// Assert.
 		if strings.Contains(string(raw), ".OpenAgentSession(") {
-			t.Fatalf("%s opens a store book by hand; use readAgentBook", name)
+			t.Fatalf("%s opens a store book by hand; use kit.ReadAgentBook", name)
 		}
 	}
 }
@@ -234,11 +234,11 @@ func TestNoTestRequiresAnOpenByHand(t *testing.T) {
 	}
 }
 
-// handRolledTurnEnded is the match endsTurn owns, written out by hand.
+// handRolledTurnEnded is the match kit.EndsTurn owns, written out by hand.
 var handRolledTurnEnded = regexp.MustCompile(`GetTurn\(\)\.GetValue\(\) == \w+\.GetValue\(\) && \w+\.GetTurnEnded\(\) != nil`)
 
 // TestTurnEndedMatchIsShared fails on any test in this suite that writes the
-// turn-ended match out by hand instead of calling endsTurn, so a divergent
+// turn-ended match out by hand instead of calling kit.EndsTurn, so a divergent
 // copy cannot drift from the one every wait shares.
 func TestTurnEndedMatchIsShared(t *testing.T) {
 	t.Parallel()
@@ -252,16 +252,14 @@ func TestTurnEndedMatchIsShared(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
+		// endsTurn's own body is kit.EndsTurn's, outside this package.
 		n := len(handRolledTurnEnded.FindAll(src, -1))
-		if f == "world_test.go" {
-			n-- // endsTurn's own body
-		}
 		if n > 0 {
 			offenders = append(offenders, f)
 		}
 	}
 	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled turn-ended matches in %v; call endsTurn(turn) instead", offenders)
+		t.Fatalf("hand-rolled turn-ended matches in %v; call kit.EndsTurn(turn) instead", offenders)
 	}
 }
 

@@ -31,6 +31,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -212,7 +213,7 @@ func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	if stop.Msg.GetSuccess().GetInterruptedTurn() == nil {
 		t.Fatalf("Interrupt(turn) on the successor = %v, want success.interrupted_turn: the handover must have carried the running turn", stop.Msg)
 	}
-	ended := awaitFeedRowOn(t, w, successor, ws, "turn "+turn.GetValue()+" to end on the successor", endsTurn(turn)).GetTurnEnded()
+	ended := awaitFeedRowOn(t, w, successor, ws, "turn "+turn.GetValue()+" to end on the successor", kit.EndsTurn(turn)).GetTurnEnded()
 	if ended.GetInterrupted() == nil {
 		t.Fatalf("turn ended = %v, want the user's own interrupt as its only ending", ended)
 	}

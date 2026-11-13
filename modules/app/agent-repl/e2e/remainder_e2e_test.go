@@ -123,6 +123,7 @@ import (
 	"fmt"
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -162,7 +163,7 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	page, err := readAgentBook(ctx, w.Store.Client, agent)
+	page, err := kit.ReadAgentBook(ctx, w.Store.Client, agent)
 	if err != nil {
 		t.Fatal(err)
 	}

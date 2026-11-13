@@ -1268,14 +1268,7 @@ func newIdempotencyKey(t testing.TB) string {
 // turn's FeedTurnEnded row arrives, and answers that row.
 func AwaitTurnEnded(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", endsTurn(turn))
-}
-
-// endsTurn matches TURN's FeedTurnEnded row.
-func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
-	return func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-	}
+	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", kit.EndsTurn(turn))
 }
 
 // turnEndedRow finds the given turn's terminal row in a feed snapshot, or
@@ -1283,7 +1276,7 @@ func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
 // activity never froze or misclassified the turn's own outcome.
 func turnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
 	t.Helper()
-	ends := endsTurn(turn)
+	ends := kit.EndsTurn(turn)
 	for _, row := range rows {
 		if ends(row) {
 			return row.GetTurnEnded()
@@ -1423,19 +1416,8 @@ func awaitFileIngested(t testing.TB, w *World, path string) {
 		t.Fatalf("e2e: stat %s: %v", path, err)
 	}
 	awaitCursors(t, w, DefaultTimeout, fmt.Sprintf("the sidecar to durably ingest %s through byte %d", path, info.Size()), func(cursors []*storev1.CursorState) bool {
-		return cursorIngested(cursors, path, info.Size())
+		return kit.CursorIngested(cursors, path, info.Size())
 	})
-}
-
-// cursorIngested reports whether a cursor of the file at path has read to
-// size or past it.
-func cursorIngested(cursors []*storev1.CursorState, path string, size int64) bool {
-	for _, c := range cursors {
-		if c.GetPath() == path && c.GetOffset() >= size {
-			return true
-		}
-	}
-	return false
 }
 
 // awaitCursors polls the store's durable sidecar cursors until done holds of

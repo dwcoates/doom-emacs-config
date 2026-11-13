@@ -21,6 +21,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -122,7 +123,7 @@ func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 
 	// Assert: the pre-stop turn is on the page the relaunched daemon serves.
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn, rehydrated after the relaunch",
-		endsTurn(turn))
+		kit.EndsTurn(turn))
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn's prompt bubble, rehydrated after the relaunch",
 		func(row *frontendv1.FeedRow) bool {
 			return row.GetTurn().GetValue() == turn.GetValue() && row.GetUserPrompt() != nil

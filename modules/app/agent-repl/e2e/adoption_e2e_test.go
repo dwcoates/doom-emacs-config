@@ -72,6 +72,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -116,7 +117,7 @@ func testColdBootReadsReplayFromStore(t *testing.T) {
 	// cursor/replay semantics) — this daemon never started that session
 	// itself.
 	adAwaitReplayedFeedRow(t, successor, ws, "the prior REAL session's turn replayed from the store",
-		endsTurn(turn))
+		kit.EndsTurn(turn))
 }
 
 // ===========================================================================

@@ -48,6 +48,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -360,7 +361,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
-	endedRow := root.AwaitRow("the displaced turn's own terminal", endsTurn(turn))
+	endedRow := root.AwaitRow("the displaced turn's own terminal", kit.EndsTurn(turn))
 	if endedRow.GetTurnEnded().GetInterrupted() == nil {
 		t.Fatalf("the displaced turn's terminal = %v, want FeedTurnEndedInterrupted (KillTurn's feed-visible shape)", endedRow.GetTurnEnded())
 	}

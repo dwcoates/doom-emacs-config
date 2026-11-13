@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -415,7 +416,7 @@ func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 	var said []string
 	for {
 		said = said[:0]
-		page, err := readAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
+		page, err := kit.ReadAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
 		if err == nil {
 			for _, line := range page.GetLines() {
 				prompt := line.GetLine().GetAgentItem().GetAgentPrompt()

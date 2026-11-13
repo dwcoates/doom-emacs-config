@@ -33,24 +33,3 @@ func openFeedPage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*front
 	}
 	return success.GetPage().GetSuccess().GetRows()
 }
-
-// hookRow answers the one FeedHook card in a feed snapshot, or nil if the
-// feed drew none — which, per bubbles.go's drawHook, is the CORRECT outcome
-// for a succeeded or a cancelled hook, not a gap in this test.
-func hookRow(rows []*frontendv1.FeedRow) *frontendv1.FeedHook {
-	if hooks := hookRows(rows); len(hooks) > 0 {
-		return hooks[0]
-	}
-	return nil
-}
-
-// hookRows answers every FeedHook card in a feed snapshot, in feed order.
-func hookRows(rows []*frontendv1.FeedRow) []*frontendv1.FeedHook {
-	var hooks []*frontendv1.FeedHook
-	for _, row := range rows {
-		if hook := row.GetActivity().GetHook(); hook != nil {
-			hooks = append(hooks, hook)
-		}
-	}
-	return hooks
-}
