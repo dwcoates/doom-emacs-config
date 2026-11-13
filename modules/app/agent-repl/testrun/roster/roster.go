@@ -439,23 +439,23 @@ var Suites = []Suite{
 		// programs a world spawns.
 		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		Reuse: &Reuse{Units: map[string][]string{
-		// The preflight's own tests run the sandbox's preflight script, and
-		// the webapp layer's boot budget is held to its driver's.
-		".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
-		// The world's layout checks each system's tree is where it says (a
-		// file in each stands for its directory), and the trampoline
-		// prewarm's own test reads the Emacs scenarios it serves.
-		"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
-			"agent-shim/claude/shim-sidecar/go.mod", "lisp/testsupport/fakedaemon/go.mod", "daemon/go.mod"},
-		// The scans read the e2e package's sources, and the scenario matrix
-		// the mocked vendor's scenarios, their goldens and the webapp
-		// layer's areas it summarizes.
-		// Its retired steps' pins name tests of the daemon's and the shim's
-		// integration tiers, which it checks exist.
-		"scans": {"e2e/", "testdata/scenario-goldens/", "agent-shim/claude/shim/src/fake/",
-			"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/",
-			"daemon/integration/", "agent-shim/claude/shim/test/"},
-	}}},
+			// The preflight's own tests run the sandbox's preflight script, and
+			// the webapp layer's boot budget is held to its driver's.
+			".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
+			// The world's layout checks each system's tree is where it says (a
+			// file in each stands for its directory), and the trampoline
+			// prewarm's own test reads the Emacs scenarios it serves.
+			"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
+				"agent-shim/claude/shim-sidecar/go.mod", "lisp/testsupport/fakedaemon/go.mod", "daemon/go.mod"},
+			// The scans read the e2e package's sources, and the scenario matrix
+			// the mocked vendor's scenarios, their goldens and the webapp
+			// layer's areas it summarizes.
+			// Its retired steps' pins name tests of the daemon's and the shim's
+			// integration tiers, which it checks exist.
+			"scans": {"e2e/", "testdata/scenario-goldens/", "agent-shim/claude/shim/src/fake/",
+				"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/",
+				"daemon/integration/", "agent-shim/claude/shim/test/"},
+		}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		NeverReused: "its sandbox staging walks the whole module, every untracked build output in it included, so no input set short of the checkout covers it"},
