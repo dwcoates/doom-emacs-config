@@ -258,6 +258,10 @@ type Orchestrator interface {
 	// under those writes, and merged_at, closed and the lease release were
 	// lost to failed transactions.
 	Drain(ctx context.Context)
+	// FollowStanding holds every queue still while this daemon may not
+	// advance it (a handover in flight, or a successor not up yet), and
+	// takes the queues on again when it may, until ctx ends.
+	FollowStanding(ctx context.Context) error
 	// Recover RESUMES every in-flight merge at boot from its progress record
 	// (the step it stood on, under the same lease and in the same bubble),
 	// runs again from the queue an admitted merge that never took a step,
@@ -708,6 +712,9 @@ type Deps struct {
 	// Rollout is the deploy, told of a landing ONLY after lease release and
 	// terminal publication.
 	Rollout Trigger
+	// Standing is whether this daemon may advance its queues across a
+	// handover, and which workspaces it serves (rollout.Controller).
+	Standing Standing
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time
@@ -855,4 +862,13 @@ type Trigger interface {
 // missing.
 func LoadBrief(dir, name string) (prompts.Prompt, error) {
 	return prompts.Load(dir, name)
+}
+
+// Standing is the part of the rollout controller the queue reads: whether
+// this daemon's queues may advance, the edge on which that answer changes,
+// and whether it serves a workspace now.
+type Standing interface {
+	ServesQueue() bool
+	QueueChanged() <-chan struct{}
+	ServesWorkspace(ws ids.WorkspaceID) bool
 }

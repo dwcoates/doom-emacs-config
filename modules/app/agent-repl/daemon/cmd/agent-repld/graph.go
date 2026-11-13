@@ -1388,6 +1388,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
 		TurnInFlight:      turnInFlight(fleet),
 		Rollout:           deployer,
+		Standing:          rolloutController,
 		Log:               p.Surfaces,
 	})
 	if err != nil {
@@ -1738,6 +1739,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
+		{Name: "merge_queue_standing", Run: mergeOrchestrator.FollowStanding},
 		{Name: "deployed_version", Run: deployedVersion.Run},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {

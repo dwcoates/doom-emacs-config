@@ -2739,6 +2739,9 @@ type harness struct {
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
+	// standing is the rollout controller's queue standing: serving, and
+	// every workspace served, unless a test says otherwise.
+	standing *fakeStanding
 	stateDir        string
 	targetD         string
 	sourceD         string
@@ -3129,6 +3132,7 @@ func newHarness(t *testing.T) *harness {
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
+	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
@@ -3280,8 +3284,9 @@ func (h *harness) deps() Deps {
 			h.interrupted = append(h.interrupted, ws)
 			return h.interruptRunning, h.interruptErr
 		},
-		Rollout: h.rollout,
-		Now:     h.clock,
+		Rollout:  h.rollout,
+		Standing: h.standing,
+		Now:      h.clock,
 		Log:     h.logs,
 	}
 }
@@ -4009,4 +4014,51 @@ func (h *harness) asyncRequestOf(ws ids.WorkspaceID) (wsm.AsyncMergeRequest, boo
 		return wsm.AsyncMergeRequest{}, false
 	}
 	return requests[0], true
+}
+
+// fakeStanding is the rollout controller's queue standing: whether the queue
+// may advance, the edge its change closes, and the workspaces not served.
+type fakeStanding struct {
+	mu        sync.Mutex
+	serves    bool
+	changed   chan struct{}
+	notServed map[ids.WorkspaceID]bool
+}
+
+func newFakeStanding() *fakeStanding {
+	return &fakeStanding{serves: true, changed: make(chan struct{}), notServed: map[ids.WorkspaceID]bool{}}
+}
+
+func (f *fakeStanding) ServesQueue() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.serves
+}
+
+func (f *fakeStanding) QueueChanged() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.changed
+}
+
+func (f *fakeStanding) ServesWorkspace(ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.notServed[ws]
+}
+
+// set moves the queue standing to SERVES, closing the change edge.
+func (f *fakeStanding) set(serves bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.serves = serves
+	close(f.changed)
+	f.changed = make(chan struct{})
+}
+
+// serve marks WS served or not.
+func (f *fakeStanding) serve(ws ids.WorkspaceID, served bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notServed[ws] = !served
 }
