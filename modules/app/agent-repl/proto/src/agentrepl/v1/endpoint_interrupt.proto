@@ -59,6 +59,15 @@ message InterruptTurn {
   // runs on, and the answer is `rolled_back_unanswered` carrying the held
   // prompt's words. Once output has been drawn after it was queued, the stop
   // stops the turn as above and the held prompt stays queued.
+  //
+  // A RESPONSE REVISION IS STOPPED FIRST. While the workspace is revising a
+  // final response from words the user highlighted (the footer reads
+  // `updating`), a turn stop stops every revision the workspace runs or has
+  // queued INSTEAD of stopping anything else: no revision is written, each
+  // revised response stands as it was, with neither a pending nor a failed
+  // state, a turn in flight runs on, and the answer is
+  // `interrupted_revisions`. The next press, once the revisions are stopped,
+  // stops the turn as above.
   optional InterruptTurnRollBackUnanswered roll_back_unanswered = 1;
 }
 // Presence asks a turn stop to roll back an unanswered prompt. DELIBERATELY
@@ -101,6 +110,10 @@ message InterruptSuccess {
     // by rolling that prompt back, or a held prompt nothing had answered
     // since it was queued was taken out of the queue, and the turn runs on.
     InterruptRolledBackUnanswered rolled_back_unanswered = 5;
+    // A turn stop found the workspace revising final responses and stopped
+    // those revisions, touching nothing else (InterruptTurn): a turn in
+    // flight runs on, and the next press stops it.
+    InterruptedRevisions interrupted_revisions = 6;
   }
 }
 // The turn was interrupted.
@@ -141,6 +154,16 @@ message InterruptedDetached {
   // How many detached agents the stop reached ("cancelled 3 agents"). The
   // shim's task ids stay on the shim wire — daemon bookkeeping a frontend
   // has no vocabulary for.
+  int64 count = 1;
+}
+// The response revisions a turn stop ended. Each revised response stands as
+// it was before its revision was asked for, and no revised prose is written
+// for any of them; a revision whose prose the shim had already written before
+// the stop reached it lands regardless, as a turn that ended on its own does.
+message InterruptedRevisions {
+  // How many revisions the stop ended: the one running plus every one queued
+  // behind it. Always at least 1, since a stop that finds no revision answers
+  // another arm.
   int64 count = 1;
 }
 // The stop found the session quiet. A turn stop that finds nothing running is
