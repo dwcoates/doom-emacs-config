@@ -511,6 +511,20 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 		return ErrTransferredAway
 	}
 	e, armed := c.rendezvous[ws]
+	// A CALL ON THE DAEMON THAT IS HANDING THE WORKSPACE OVER, BEFORE ITS
+	// TRANSFER, is an ordinary boot here: this daemon still serves the
+	// workspace, and the caller hears of the transfer on the streams it opens
+	// now. Joining the outgoing daemon's own entry claimed it and ran an
+	// adoption of the workspace ON ITS OWN SERVER, which has no incumbent to
+	// adopt from: on 2026-11-13 three busy workspaces' pages booted on the
+	// incumbent before their transfer, each boot failed with "the intent
+	// manifest names no outgoing daemon", and the incumbent retried each
+	// self-adoption every 2s until it exited (414 errors).
+	if armed && e.servedHere {
+		c.unlock()
+		c.log.Info(operation, "this daemon still serves the workspace it is handing over; the caller is served here until the transfer, which its streams are told of", fields)
+		return ErrNoTransferAnnounced
+	}
 	if armed && carriedOK {
 		c.followCarriedLocked(ws, e, carried, sealedBy)
 	}

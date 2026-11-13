@@ -293,7 +293,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	for _, ws := range workspaces {
 		p := c.deps.Participants.Participants(ws.ID)
 		snapshot[ws.ID] = p
-		c.rendezvous[ws.ID] = &entry{expected: p, run: newAdoptionRun()}
+		c.rendezvous[ws.ID] = &entry{servedHere: true, expected: p, run: newAdoptionRun()}
 		slot.armed = append(slot.armed, ws.ID)
 	}
 	c.unlock()
