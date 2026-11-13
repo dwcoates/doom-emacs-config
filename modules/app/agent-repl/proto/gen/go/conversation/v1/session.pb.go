@@ -280,6 +280,15 @@ type SessionStarted struct {
 	// scheduled wakeup, or idle, without waiting for the next change. UNSET only
 	// for a shim whose contract predates SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL.
 	VendorActivity *SessionVendorActivity `protobuf:"bytes,12,opt,name=vendor_activity,json=vendorActivity,proto3,oneof" json:"vendor_activity,omitempty"`
+	// The session's MAIN agent: the id every frame of its stream carries (the
+	// cross-plane minting rule on AgentId). UNSET only for a shim whose build
+	// predates the field, whose daemon names the main agent from its main
+	// watch as before. A daemon that attaches
+	// learns from it which agent's rows are the root feed's BEFORE it routes the
+	// live work above, whose owners it is compared with (2026-11-13: a handover
+	// routed a subagent's frames before the main watch named the main agent,
+	// and nothing was drawn for them).
+	MainAgent *AgentId `protobuf:"bytes,13,opt,name=main_agent,json=mainAgent,proto3" json:"main_agent,omitempty"`
 	// The session contract this shim speaks. UNSPECIFIED means it predates the
 	// stamp. See SessionContract.
 	Contract      SessionContract `protobuf:"varint,10,opt,name=contract,proto3,enum=conversation.v1.SessionContract" json:"contract,omitempty"`
@@ -383,6 +392,13 @@ func (x *SessionStarted) GetOpenAsks() []*SessionOpenAsk {
 func (x *SessionStarted) GetVendorActivity() *SessionVendorActivity {
 	if x != nil {
 		return x.VendorActivity
+	}
+	return nil
+}
+
+func (x *SessionStarted) GetMainAgent() *AgentId {
+	if x != nil {
+		return x.MainAgent
 	}
 	return nil
 }
@@ -7789,7 +7805,7 @@ var File_conversation_v1_session_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_session_proto_rawDesc = "" +
 	"\n" +
-	"\x1dconversation/v1/session.proto\x12\x0fconversation.v1\x1a\x19conversation/v1/api.proto\x1a#conversation/v1/detached_work.proto\x1a$conversation/v1/agent_activity.proto\x1a conversation/v1/permission.proto\x1a\x1econversation/v1/question.proto\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/turn.proto\"\x8b\x06\n" +
+	"\x1dconversation/v1/session.proto\x12\x0fconversation.v1\x1a\x19conversation/v1/api.proto\x1a#conversation/v1/detached_work.proto\x1a$conversation/v1/agent_activity.proto\x1a conversation/v1/permission.proto\x1a\x1econversation/v1/question.proto\x1a#conversation/v1/slash_command.proto\x1a\x1aconversation/v1/turn.proto\"\xc4\x06\n" +
 	"\x0eSessionStarted\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x129\n" +
 	"\aruntime\x18\x02 \x01(\v2\x1f.conversation.v1.SessionRuntimeR\aruntime\x12D\n" +
@@ -7800,7 +7816,9 @@ const file_conversation_v1_session_proto_rawDesc = "" +
 	"\rturns_waiting\x18\t \x03(\v2\x17.conversation.v1.TurnIdR\fturnsWaiting\x12?\n" +
 	"\tlive_work\x18\x06 \x03(\v2\".conversation.v1.AgentDetachedWorkR\bliveWork\x12<\n" +
 	"\topen_asks\x18\v \x03(\v2\x1f.conversation.v1.SessionOpenAskR\bopenAsks\x12T\n" +
-	"\x0fvendor_activity\x18\f \x01(\v2&.conversation.v1.SessionVendorActivityH\x01R\x0evendorActivity\x88\x01\x01\x12<\n" +
+	"\x0fvendor_activity\x18\f \x01(\v2&.conversation.v1.SessionVendorActivityH\x01R\x0evendorActivity\x88\x01\x01\x127\n" +
+	"\n" +
+	"main_agent\x18\r \x01(\v2\x18.conversation.v1.AgentIdR\tmainAgent\x12<\n" +
 	"\bcontract\x18\n" +
 	" \x01(\x0e2 .conversation.v1.SessionContractR\bcontractB\x11\n" +
 	"\x0f_turn_in_flightB\x12\n" +
@@ -8404,139 +8422,140 @@ var file_conversation_v1_session_proto_depIdxs = []int32{
 	114, // 6: conversation.v1.SessionStarted.live_work:type_name -> conversation.v1.AgentDetachedWork
 	4,   // 7: conversation.v1.SessionStarted.open_asks:type_name -> conversation.v1.SessionOpenAsk
 	57,  // 8: conversation.v1.SessionStarted.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
-	2,   // 9: conversation.v1.SessionStarted.contract:type_name -> conversation.v1.SessionContract
-	115, // 10: conversation.v1.SessionOpenAsk.agent:type_name -> conversation.v1.AgentId
-	116, // 11: conversation.v1.SessionOpenAsk.permission:type_name -> conversation.v1.AgentPermission
-	117, // 12: conversation.v1.SessionOpenAsk.question:type_name -> conversation.v1.AgentQuestion
-	110, // 13: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
-	7,   // 14: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
-	8,   // 15: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
-	10,  // 16: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
-	11,  // 17: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
-	12,  // 18: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
-	110, // 19: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
-	0,   // 20: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
-	51,  // 21: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
-	52,  // 22: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
-	60,  // 23: conversation.v1.SessionUpdate.model_changed:type_name -> conversation.v1.SessionModelChanged
-	62,  // 24: conversation.v1.SessionUpdate.fast_mode:type_name -> conversation.v1.SessionFastMode
-	66,  // 25: conversation.v1.SessionUpdate.mcp_server:type_name -> conversation.v1.SessionMcpServer
-	55,  // 26: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
-	37,  // 27: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
-	72,  // 28: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
-	89,  // 29: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
-	36,  // 30: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
-	35,  // 31: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
-	33,  // 32: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
-	27,  // 33: conversation.v1.SessionUpdate.network_resume_waits:type_name -> conversation.v1.SessionNetworkResumeWaits
-	29,  // 34: conversation.v1.SessionUpdate.network_resume_outcome:type_name -> conversation.v1.SessionNetworkResumeOutcome
-	61,  // 35: conversation.v1.SessionUpdate.effort_changed:type_name -> conversation.v1.SessionEffortChanged
-	56,  // 36: conversation.v1.SessionUpdate.live_work:type_name -> conversation.v1.SessionLiveWork
-	118, // 37: conversation.v1.SessionUpdate.command_catalog:type_name -> conversation.v1.SessionCommandCatalog
-	24,  // 38: conversation.v1.SessionUpdate.cache_lapse:type_name -> conversation.v1.SessionCacheLapse
-	20,  // 39: conversation.v1.SessionUpdate.rollback_settled:type_name -> conversation.v1.SessionRollbackSettled
-	16,  // 40: conversation.v1.SessionUpdate.vendor_error_retry:type_name -> conversation.v1.SessionVendorErrorRetry
-	15,  // 41: conversation.v1.SessionUpdate.skills_changed:type_name -> conversation.v1.SessionSkillsChanged
-	14,  // 42: conversation.v1.SessionUpdate.join_withdrawn:type_name -> conversation.v1.SessionJoinWithdrawn
-	57,  // 43: conversation.v1.SessionUpdate.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
-	49,  // 44: conversation.v1.SessionUpdate.plan_usage:type_name -> conversation.v1.SessionPlanUsage
-	113, // 45: conversation.v1.SessionJoinWithdrawn.turn:type_name -> conversation.v1.TurnId
-	113, // 46: conversation.v1.SessionJoinWithdrawn.into:type_name -> conversation.v1.TurnId
-	18,  // 47: conversation.v1.SessionVendorErrorRetry.scheduled:type_name -> conversation.v1.SessionVendorErrorRetryScheduled
-	17,  // 48: conversation.v1.SessionVendorErrorRetry.attempting:type_name -> conversation.v1.SessionVendorErrorRetryAttempting
-	19,  // 49: conversation.v1.SessionVendorErrorRetry.awaiting_network:type_name -> conversation.v1.SessionVendorErrorRetryAwaitingNetwork
-	113, // 50: conversation.v1.SessionRollbackSettled.dropped_turns:type_name -> conversation.v1.TurnId
-	21,  // 51: conversation.v1.SessionRollbackSettled.resumed_at_cut:type_name -> conversation.v1.SessionRollbackResumedAtCut
-	22,  // 52: conversation.v1.SessionRollbackSettled.refused:type_name -> conversation.v1.SessionRollbackRefused
-	23,  // 53: conversation.v1.SessionRollbackSettled.failed:type_name -> conversation.v1.SessionRollbackFailed
-	25,  // 54: conversation.v1.SessionCacheLapse.gated:type_name -> conversation.v1.SessionCacheLapseGated
-	26,  // 55: conversation.v1.SessionCacheLapse.ungated:type_name -> conversation.v1.SessionCacheLapseUngated
-	28,  // 56: conversation.v1.SessionNetworkResumeWaits.waits:type_name -> conversation.v1.SessionNetworkResumeWait
-	119, // 57: conversation.v1.SessionNetworkResumeWait.work:type_name -> conversation.v1.DetachedWorkId
-	119, // 58: conversation.v1.SessionNetworkResumeOutcome.work:type_name -> conversation.v1.DetachedWorkId
-	30,  // 59: conversation.v1.SessionNetworkResumeOutcome.resumed:type_name -> conversation.v1.SessionNetworkResumeResumed
-	31,  // 60: conversation.v1.SessionNetworkResumeOutcome.gave_up:type_name -> conversation.v1.SessionNetworkResumeGaveUp
-	32,  // 61: conversation.v1.SessionNetworkResumeOutcome.abandoned:type_name -> conversation.v1.SessionNetworkResumeAbandoned
-	1,   // 62: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
-	34,  // 63: conversation.v1.SessionCompactionProgress.spend:type_name -> conversation.v1.SessionCompactionSpend
-	110, // 64: conversation.v1.SessionCompactionSpend.model:type_name -> conversation.v1.AgentModel
-	120, // 65: conversation.v1.SessionCompacting.compaction:type_name -> conversation.v1.CompactionId
-	38,  // 66: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	39,  // 67: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	40,  // 68: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	41,  // 69: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
-	48,  // 70: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
-	42,  // 71: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
-	43,  // 72: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
-	44,  // 73: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
-	45,  // 74: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
-	46,  // 75: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
-	47,  // 76: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
-	38,  // 77: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
-	39,  // 78: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
-	40,  // 79: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
-	50,  // 80: conversation.v1.SessionPlanUsage.seven_day:type_name -> conversation.v1.SessionPlanUsageWindow
-	50,  // 81: conversation.v1.SessionPlanUsage.seven_day_opus:type_name -> conversation.v1.SessionPlanUsageWindow
-	50,  // 82: conversation.v1.SessionPlanUsage.seven_day_sonnet:type_name -> conversation.v1.SessionPlanUsageWindow
-	53,  // 83: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
-	54,  // 84: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
-	111, // 85: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
-	119, // 86: conversation.v1.SessionLiveWork.live_work:type_name -> conversation.v1.DetachedWorkId
-	58,  // 87: conversation.v1.SessionVendorActivity.idle:type_name -> conversation.v1.SessionVendorActivityIdle
-	59,  // 88: conversation.v1.SessionVendorActivity.busy:type_name -> conversation.v1.SessionVendorActivityBusy
-	110, // 89: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
-	121, // 90: conversation.v1.SessionEffortChanged.effective_effort:type_name -> conversation.v1.AgentEffortLevel
-	64,  // 91: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
-	65,  // 92: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
-	63,  // 93: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
-	70,  // 94: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
-	71,  // 95: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
-	67,  // 96: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
-	68,  // 97: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
-	69,  // 98: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
-	73,  // 99: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
-	74,  // 100: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
-	82,  // 101: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
-	75,  // 102: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
-	76,  // 103: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
-	77,  // 104: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
-	78,  // 105: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
-	79,  // 106: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
-	80,  // 107: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
-	81,  // 108: conversation.v1.SessionFault.network_unreachable:type_name -> conversation.v1.SessionFaultNetworkUnreachable
-	83,  // 109: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
-	84,  // 110: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
-	86,  // 111: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
-	87,  // 112: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
-	113, // 113: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
-	119, // 114: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
-	113, // 115: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
-	119, // 116: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
-	57,  // 117: conversation.v1.SessionLive.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
-	90,  // 118: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
-	91,  // 119: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
-	92,  // 120: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
-	93,  // 121: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
-	94,  // 122: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
-	95,  // 123: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
-	96,  // 124: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
-	97,  // 125: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
-	98,  // 126: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
-	100, // 127: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
-	103, // 128: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
-	99,  // 129: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
-	101, // 130: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
-	102, // 131: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
-	105, // 132: conversation.v1.LockHolderFailure.spawn_failed:type_name -> conversation.v1.LockHolderSpawnFailed
-	106, // 133: conversation.v1.LockHolderFailure.exited:type_name -> conversation.v1.LockHolderExited
-	107, // 134: conversation.v1.LockHolderFailure.signaled:type_name -> conversation.v1.LockHolderSignaled
-	108, // 135: conversation.v1.LockHolderFailure.misanswered:type_name -> conversation.v1.LockHolderMisanswered
-	109, // 136: conversation.v1.LockHolderFailure.silent:type_name -> conversation.v1.LockHolderSilent
-	137, // [137:137] is the sub-list for method output_type
-	137, // [137:137] is the sub-list for method input_type
-	137, // [137:137] is the sub-list for extension type_name
-	137, // [137:137] is the sub-list for extension extendee
-	0,   // [0:137] is the sub-list for field type_name
+	115, // 9: conversation.v1.SessionStarted.main_agent:type_name -> conversation.v1.AgentId
+	2,   // 10: conversation.v1.SessionStarted.contract:type_name -> conversation.v1.SessionContract
+	115, // 11: conversation.v1.SessionOpenAsk.agent:type_name -> conversation.v1.AgentId
+	116, // 12: conversation.v1.SessionOpenAsk.permission:type_name -> conversation.v1.AgentPermission
+	117, // 13: conversation.v1.SessionOpenAsk.question:type_name -> conversation.v1.AgentQuestion
+	110, // 14: conversation.v1.SessionCold.requested_model:type_name -> conversation.v1.AgentModel
+	7,   // 15: conversation.v1.SessionCold.lapsed:type_name -> conversation.v1.SessionColdLapsed
+	8,   // 16: conversation.v1.SessionCold.model_switch:type_name -> conversation.v1.SessionColdModelSwitch
+	10,  // 17: conversation.v1.SessionColdRemediation.pay:type_name -> conversation.v1.SessionColdPay
+	11,  // 18: conversation.v1.SessionColdRemediation.clear:type_name -> conversation.v1.SessionColdClear
+	12,  // 19: conversation.v1.SessionColdRemediation.compact:type_name -> conversation.v1.SessionColdCompact
+	110, // 20: conversation.v1.SessionColdCompact.model:type_name -> conversation.v1.AgentModel
+	0,   // 21: conversation.v1.SessionColdCompact.scope:type_name -> conversation.v1.SessionCompactScope
+	51,  // 22: conversation.v1.SessionUpdate.identity_rotated:type_name -> conversation.v1.SessionIdentityRotated
+	52,  // 23: conversation.v1.SessionUpdate.query_died:type_name -> conversation.v1.SessionQueryDied
+	60,  // 24: conversation.v1.SessionUpdate.model_changed:type_name -> conversation.v1.SessionModelChanged
+	62,  // 25: conversation.v1.SessionUpdate.fast_mode:type_name -> conversation.v1.SessionFastMode
+	66,  // 26: conversation.v1.SessionUpdate.mcp_server:type_name -> conversation.v1.SessionMcpServer
+	55,  // 27: conversation.v1.SessionUpdate.permission_mode_changed:type_name -> conversation.v1.SessionPermissionModeChanged
+	37,  // 28: conversation.v1.SessionUpdate.rate_limit_status:type_name -> conversation.v1.SessionRateLimitStatus
+	72,  // 29: conversation.v1.SessionUpdate.diagnostics:type_name -> conversation.v1.SessionDiagnostics
+	89,  // 30: conversation.v1.SessionUpdate.context_usage:type_name -> conversation.v1.SessionContextUsage
+	36,  // 31: conversation.v1.SessionUpdate.compacting:type_name -> conversation.v1.SessionCompacting
+	35,  // 32: conversation.v1.SessionUpdate.title:type_name -> conversation.v1.SessionTitle
+	33,  // 33: conversation.v1.SessionUpdate.compaction_progress:type_name -> conversation.v1.SessionCompactionProgress
+	27,  // 34: conversation.v1.SessionUpdate.network_resume_waits:type_name -> conversation.v1.SessionNetworkResumeWaits
+	29,  // 35: conversation.v1.SessionUpdate.network_resume_outcome:type_name -> conversation.v1.SessionNetworkResumeOutcome
+	61,  // 36: conversation.v1.SessionUpdate.effort_changed:type_name -> conversation.v1.SessionEffortChanged
+	56,  // 37: conversation.v1.SessionUpdate.live_work:type_name -> conversation.v1.SessionLiveWork
+	118, // 38: conversation.v1.SessionUpdate.command_catalog:type_name -> conversation.v1.SessionCommandCatalog
+	24,  // 39: conversation.v1.SessionUpdate.cache_lapse:type_name -> conversation.v1.SessionCacheLapse
+	20,  // 40: conversation.v1.SessionUpdate.rollback_settled:type_name -> conversation.v1.SessionRollbackSettled
+	16,  // 41: conversation.v1.SessionUpdate.vendor_error_retry:type_name -> conversation.v1.SessionVendorErrorRetry
+	15,  // 42: conversation.v1.SessionUpdate.skills_changed:type_name -> conversation.v1.SessionSkillsChanged
+	14,  // 43: conversation.v1.SessionUpdate.join_withdrawn:type_name -> conversation.v1.SessionJoinWithdrawn
+	57,  // 44: conversation.v1.SessionUpdate.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
+	49,  // 45: conversation.v1.SessionUpdate.plan_usage:type_name -> conversation.v1.SessionPlanUsage
+	113, // 46: conversation.v1.SessionJoinWithdrawn.turn:type_name -> conversation.v1.TurnId
+	113, // 47: conversation.v1.SessionJoinWithdrawn.into:type_name -> conversation.v1.TurnId
+	18,  // 48: conversation.v1.SessionVendorErrorRetry.scheduled:type_name -> conversation.v1.SessionVendorErrorRetryScheduled
+	17,  // 49: conversation.v1.SessionVendorErrorRetry.attempting:type_name -> conversation.v1.SessionVendorErrorRetryAttempting
+	19,  // 50: conversation.v1.SessionVendorErrorRetry.awaiting_network:type_name -> conversation.v1.SessionVendorErrorRetryAwaitingNetwork
+	113, // 51: conversation.v1.SessionRollbackSettled.dropped_turns:type_name -> conversation.v1.TurnId
+	21,  // 52: conversation.v1.SessionRollbackSettled.resumed_at_cut:type_name -> conversation.v1.SessionRollbackResumedAtCut
+	22,  // 53: conversation.v1.SessionRollbackSettled.refused:type_name -> conversation.v1.SessionRollbackRefused
+	23,  // 54: conversation.v1.SessionRollbackSettled.failed:type_name -> conversation.v1.SessionRollbackFailed
+	25,  // 55: conversation.v1.SessionCacheLapse.gated:type_name -> conversation.v1.SessionCacheLapseGated
+	26,  // 56: conversation.v1.SessionCacheLapse.ungated:type_name -> conversation.v1.SessionCacheLapseUngated
+	28,  // 57: conversation.v1.SessionNetworkResumeWaits.waits:type_name -> conversation.v1.SessionNetworkResumeWait
+	119, // 58: conversation.v1.SessionNetworkResumeWait.work:type_name -> conversation.v1.DetachedWorkId
+	119, // 59: conversation.v1.SessionNetworkResumeOutcome.work:type_name -> conversation.v1.DetachedWorkId
+	30,  // 60: conversation.v1.SessionNetworkResumeOutcome.resumed:type_name -> conversation.v1.SessionNetworkResumeResumed
+	31,  // 61: conversation.v1.SessionNetworkResumeOutcome.gave_up:type_name -> conversation.v1.SessionNetworkResumeGaveUp
+	32,  // 62: conversation.v1.SessionNetworkResumeOutcome.abandoned:type_name -> conversation.v1.SessionNetworkResumeAbandoned
+	1,   // 63: conversation.v1.SessionCompactionProgress.phase:type_name -> conversation.v1.SessionCompactionPhase
+	34,  // 64: conversation.v1.SessionCompactionProgress.spend:type_name -> conversation.v1.SessionCompactionSpend
+	110, // 65: conversation.v1.SessionCompactionSpend.model:type_name -> conversation.v1.AgentModel
+	120, // 66: conversation.v1.SessionCompacting.compaction:type_name -> conversation.v1.CompactionId
+	38,  // 67: conversation.v1.SessionRateLimitStatus.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	39,  // 68: conversation.v1.SessionRateLimitStatus.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	40,  // 69: conversation.v1.SessionRateLimitStatus.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	41,  // 70: conversation.v1.SessionRateLimitStatus.rate_limit_type:type_name -> conversation.v1.SessionRateLimitType
+	48,  // 71: conversation.v1.SessionRateLimitStatus.overage:type_name -> conversation.v1.SessionRateLimitOverage
+	42,  // 72: conversation.v1.SessionRateLimitType.five_hour:type_name -> conversation.v1.SessionRateLimitWindowFiveHour
+	43,  // 73: conversation.v1.SessionRateLimitType.seven_day:type_name -> conversation.v1.SessionRateLimitWindowSevenDay
+	44,  // 74: conversation.v1.SessionRateLimitType.seven_day_opus:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOpus
+	45,  // 75: conversation.v1.SessionRateLimitType.seven_day_sonnet:type_name -> conversation.v1.SessionRateLimitWindowSevenDaySonnet
+	46,  // 76: conversation.v1.SessionRateLimitType.seven_day_overage_included:type_name -> conversation.v1.SessionRateLimitWindowSevenDayOverageIncluded
+	47,  // 77: conversation.v1.SessionRateLimitType.overage:type_name -> conversation.v1.SessionRateLimitWindowOverage
+	38,  // 78: conversation.v1.SessionRateLimitOverage.allowed:type_name -> conversation.v1.SessionRateLimitAllowed
+	39,  // 79: conversation.v1.SessionRateLimitOverage.allowed_warning:type_name -> conversation.v1.SessionRateLimitAllowedWarning
+	40,  // 80: conversation.v1.SessionRateLimitOverage.rejected:type_name -> conversation.v1.SessionRateLimitRejected
+	50,  // 81: conversation.v1.SessionPlanUsage.seven_day:type_name -> conversation.v1.SessionPlanUsageWindow
+	50,  // 82: conversation.v1.SessionPlanUsage.seven_day_opus:type_name -> conversation.v1.SessionPlanUsageWindow
+	50,  // 83: conversation.v1.SessionPlanUsage.seven_day_sonnet:type_name -> conversation.v1.SessionPlanUsageWindow
+	53,  // 84: conversation.v1.SessionQueryDied.unexpected_eof:type_name -> conversation.v1.SessionQueryUnexpectedEof
+	54,  // 85: conversation.v1.SessionQueryDied.iterator_failure:type_name -> conversation.v1.SessionQueryIteratorFailure
+	111, // 86: conversation.v1.SessionPermissionModeChanged.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	119, // 87: conversation.v1.SessionLiveWork.live_work:type_name -> conversation.v1.DetachedWorkId
+	58,  // 88: conversation.v1.SessionVendorActivity.idle:type_name -> conversation.v1.SessionVendorActivityIdle
+	59,  // 89: conversation.v1.SessionVendorActivity.busy:type_name -> conversation.v1.SessionVendorActivityBusy
+	110, // 90: conversation.v1.SessionModelChanged.effective_model:type_name -> conversation.v1.AgentModel
+	121, // 91: conversation.v1.SessionEffortChanged.effective_effort:type_name -> conversation.v1.AgentEffortLevel
+	64,  // 92: conversation.v1.SessionFastMode.on:type_name -> conversation.v1.SessionFastModeOn
+	65,  // 93: conversation.v1.SessionFastMode.off:type_name -> conversation.v1.SessionFastModeOff
+	63,  // 94: conversation.v1.SessionFastMode.cooldown:type_name -> conversation.v1.SessionFastModeCooldown
+	70,  // 95: conversation.v1.SessionMcpServer.connected:type_name -> conversation.v1.SessionMcpServerConnected
+	71,  // 96: conversation.v1.SessionMcpServer.failed:type_name -> conversation.v1.SessionMcpServerFailed
+	67,  // 97: conversation.v1.SessionMcpServer.needs_auth:type_name -> conversation.v1.SessionMcpServerNeedsAuth
+	68,  // 98: conversation.v1.SessionMcpServer.pending:type_name -> conversation.v1.SessionMcpServerPending
+	69,  // 99: conversation.v1.SessionMcpServer.disabled:type_name -> conversation.v1.SessionMcpServerDisabled
+	73,  // 100: conversation.v1.SessionDiagnostics.healthy:type_name -> conversation.v1.SessionHealthy
+	74,  // 101: conversation.v1.SessionDiagnostics.unhealthy:type_name -> conversation.v1.SessionUnhealthy
+	82,  // 102: conversation.v1.SessionDiagnostics.degraded_windows:type_name -> conversation.v1.SessionDegradedWindow
+	75,  // 103: conversation.v1.SessionUnhealthy.faults:type_name -> conversation.v1.SessionFault
+	76,  // 104: conversation.v1.SessionFault.store_unreachable:type_name -> conversation.v1.SessionFaultStoreUnreachable
+	77,  // 105: conversation.v1.SessionFault.converter_defect:type_name -> conversation.v1.SessionFaultConverterDefect
+	78,  // 106: conversation.v1.SessionFault.log_sink_poisoned:type_name -> conversation.v1.SessionFaultLogSinkPoisoned
+	79,  // 107: conversation.v1.SessionFault.keepalive_failed:type_name -> conversation.v1.SessionFaultKeepaliveFailed
+	80,  // 108: conversation.v1.SessionFault.vendor_query_failed:type_name -> conversation.v1.SessionFaultVendorQueryFailed
+	81,  // 109: conversation.v1.SessionFault.network_unreachable:type_name -> conversation.v1.SessionFaultNetworkUnreachable
+	83,  // 110: conversation.v1.SessionDegradedWindow.open:type_name -> conversation.v1.SessionDegradedOpen
+	84,  // 111: conversation.v1.SessionDegradedWindow.closed:type_name -> conversation.v1.SessionDegradedClosed
+	86,  // 112: conversation.v1.SessionKilled.idle:type_name -> conversation.v1.SessionKilledIdle
+	87,  // 113: conversation.v1.SessionKilled.forced:type_name -> conversation.v1.SessionKilledForced
+	113, // 114: conversation.v1.SessionKilledForced.interrupted_turn:type_name -> conversation.v1.TurnId
+	119, // 115: conversation.v1.SessionKilledForced.stopped_work:type_name -> conversation.v1.DetachedWorkId
+	113, // 116: conversation.v1.SessionLive.turn_in_flight:type_name -> conversation.v1.TurnId
+	119, // 117: conversation.v1.SessionLive.live_work:type_name -> conversation.v1.DetachedWorkId
+	57,  // 118: conversation.v1.SessionLive.vendor_activity:type_name -> conversation.v1.SessionVendorActivity
+	90,  // 119: conversation.v1.SessionContextUsage.categories:type_name -> conversation.v1.SessionContextCategory
+	91,  // 120: conversation.v1.SessionContextUsage.memory_files:type_name -> conversation.v1.SessionContextMemoryFile
+	92,  // 121: conversation.v1.SessionContextUsage.mcp_tools:type_name -> conversation.v1.SessionContextMcpTool
+	93,  // 122: conversation.v1.SessionContextUsage.deferred_builtin_tools:type_name -> conversation.v1.SessionContextDeferredBuiltinTool
+	94,  // 123: conversation.v1.SessionContextUsage.system_tools:type_name -> conversation.v1.SessionContextSystemTool
+	95,  // 124: conversation.v1.SessionContextUsage.system_prompt_sections:type_name -> conversation.v1.SessionContextSystemPromptSection
+	96,  // 125: conversation.v1.SessionContextUsage.agents:type_name -> conversation.v1.SessionContextAgent
+	97,  // 126: conversation.v1.SessionContextUsage.slash_commands:type_name -> conversation.v1.SessionContextSlashCommands
+	98,  // 127: conversation.v1.SessionContextUsage.skills:type_name -> conversation.v1.SessionContextSkills
+	100, // 128: conversation.v1.SessionContextUsage.message_breakdown:type_name -> conversation.v1.SessionContextMessageBreakdown
+	103, // 129: conversation.v1.SessionContextUsage.api_usage:type_name -> conversation.v1.SessionContextApiUsage
+	99,  // 130: conversation.v1.SessionContextSkills.skill_frontmatter:type_name -> conversation.v1.SessionContextSkillFrontmatter
+	101, // 131: conversation.v1.SessionContextMessageBreakdown.tool_calls_by_type:type_name -> conversation.v1.SessionContextToolCallsByType
+	102, // 132: conversation.v1.SessionContextMessageBreakdown.attachments_by_type:type_name -> conversation.v1.SessionContextAttachmentsByType
+	105, // 133: conversation.v1.LockHolderFailure.spawn_failed:type_name -> conversation.v1.LockHolderSpawnFailed
+	106, // 134: conversation.v1.LockHolderFailure.exited:type_name -> conversation.v1.LockHolderExited
+	107, // 135: conversation.v1.LockHolderFailure.signaled:type_name -> conversation.v1.LockHolderSignaled
+	108, // 136: conversation.v1.LockHolderFailure.misanswered:type_name -> conversation.v1.LockHolderMisanswered
+	109, // 137: conversation.v1.LockHolderFailure.silent:type_name -> conversation.v1.LockHolderSilent
+	138, // [138:138] is the sub-list for method output_type
+	138, // [138:138] is the sub-list for method input_type
+	138, // [138:138] is the sub-list for extension type_name
+	138, // [138:138] is the sub-list for extension extendee
+	0,   // [0:138] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_session_proto_init() }

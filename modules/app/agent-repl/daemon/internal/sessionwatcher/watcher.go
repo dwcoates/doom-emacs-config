@@ -2163,6 +2163,11 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 // re-announcement on an adopted watch.
 func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
 	first := !w.started
+	// THE MAIN AGENT IS NAMED FIRST, before the views are told the facts or
+	// any live work is routed: every owner the live work names is compared
+	// with it, and a subagent routed before it was named had no feed
+	// (2026-11-13, a handover).
+	w.adoptMainAgentLocked(started.GetMainAgent(), "session_started")
 	w.takeContractLocked(started)
 	w.started = true
 	// THE OPENING STATES THE LEVEL TOO, for a shim that speaks it: its live
@@ -2203,6 +2208,9 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	}
 	w.reconcileOpenAtAttachLocked(started)
 	w.standOpenAsksLocked(started.GetOpenAsks())
+	// A TERMINAL HELD FOR THE NAME is routed now the turn the facts name is
+	// stood (adoptMainAgentLocked leaves the release to its caller).
+	w.releaseHeldTerminalLocked()
 }
 
 // standOpenAsksLocked restates every ask the session's facts name open to the

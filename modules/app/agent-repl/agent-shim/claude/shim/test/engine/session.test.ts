@@ -2198,6 +2198,20 @@ describe("a turn the vendor started on its own", () => {
     }).toEqual({ inFlight: inFlight(h), waiting });
   });
 
+  it("names the main agent in the opening and in every re-announcement, so an attaching daemon names it before routing live work", async () => {
+    // Arrange
+    const h = harness();
+    const response = await started(h);
+    const opening = response.result.case === "success" ? response.result.value.session : undefined;
+
+    // Act
+    const again = await reannounced(h);
+
+    // Assert
+    const main = opening?.mainAgent?.value;
+    expect([main !== undefined && main !== "", again?.mainAgent?.value === main]).toEqual([true, true]);
+  });
+
   it("re-announces the ask blocking the vendor, so an attaching daemon stands the gate", async () => {
     // Arrange
     const h = harness();

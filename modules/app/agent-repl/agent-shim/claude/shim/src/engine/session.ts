@@ -5937,6 +5937,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       modelCatalog,
       liveWork,
       vendorActivity: vendorActivity(),
+      mainAgent: identity.agentId,
       contract: conversationv1.SessionContract.VENDOR_ACTIVITY_LEVEL,
     });
     // KEPT SO A LATER WATCH CAN BE TOLD. A daemon that adopts an already-started
@@ -7717,6 +7718,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // turn in flight as working while a card waits on the user.
       openAsks: gate.openAsks(),
       vendorActivity: vendorActivity(),
+      mainAgent: identity.agentId,
       contract: conversationv1.SessionContract.VENDOR_ACTIVITY_LEVEL,
     });
   }
