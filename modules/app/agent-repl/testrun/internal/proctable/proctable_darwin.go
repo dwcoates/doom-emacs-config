@@ -99,7 +99,7 @@ func record(pid int) (procRecord, error) {
 		return procRecord{}, err
 	}
 	return procRecord{
-		Ppid: int(bi.Ppid), Pgid: int(bi.Pgid), Status: int8(bi.Status),
+		Ppid: int(bi.Ppid), Pgid: int(bi.Pgid), UID: int(bi.UID), Status: int8(bi.Status),
 		Start: time.Unix(int64(bi.StartSec), int64(bi.StartUsec)*1000),
 		Comm:  unix.ByteSliceToString(bi.Comm[:]),
 	}, nil

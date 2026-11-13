@@ -14,6 +14,12 @@
 //   - a chunk's overhead is assumed to be UnknownOverhead.
 //
 // After one run every one of them is measured.
+//
+// EVERY UNIT IS COSTED IN CORES TOO, from its own history: the CPU its
+// passing runs used over their wall time (the runner's per-unit CPU
+// accounting, run.Usage), which the host's CPU governor admits it by
+// (cores.Governor). An atomic unit's cores are its own, a chunk's its
+// group's; a unit never measured is costed cores.DefaultCoresPerSlot a slot.
 package plan
 
 import (
@@ -21,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
@@ -44,6 +51,28 @@ func ItemKey(group, item string) string { return "item:" + group + ":" + item }
 
 // OverheadKey is a group's per-chunk overhead history key.
 func OverheadKey(group string) string { return "overhead:" + group }
+
+// CoresKey is the history key of the cores a unit uses while it runs: an
+// atomic unit's own ID, or a chunk's group, since a group's chunks are cut
+// differently from run to run.
+func CoresKey(id string) string {
+	if group, _, ok := chunkOf(id); ok {
+		return "cores:" + group
+	}
+	return "cores:" + id
+}
+
+// MinCoresWall is the shortest unit, in seconds, whose cores are recorded: a
+// shorter one is mostly its process's start, which says little of what it
+// uses running, and holds a seat too briefly to show in the governor's
+// three-second average.
+const MinCoresWall = 1.0
+
+// expectedCores is what the history says a unit uses while it runs.
+func expectedCores(est Estimates, s run.Spec) float64 {
+	v, ok := est.Get(CoresKey(s.ID))
+	return cores.ExpectedCores(s.Width(), v, ok)
+}
 
 // Estimates is what the history answers.
 type Estimates interface {
@@ -158,6 +187,7 @@ func Build(est Estimates, all []suites.Units, slots int, remeasure bool) (Planne
 			s.Unit = u
 			peak, measured := est.Peak(UnitKey(s.ID))
 			bound(est, &s, peak, measured && !remeasure)
+			s.Cores = expectedCores(est, s)
 			out.Specs = append(out.Specs, s)
 			continue
 		}
@@ -174,6 +204,7 @@ func Build(est Estimates, all []suites.Units, slots int, remeasure bool) (Planne
 		s.Unit = u
 		peak, measured := chunkPeak(est, group, names)
 		bound(est, &s, peak, measured && !remeasure)
+		s.Cores = expectedCores(est, s)
 		out.Specs = append(out.Specs, s)
 	}
 	return out, nil
@@ -243,9 +274,17 @@ func chunkOf(id string) (string, int, bool) {
 func Measurements(results []run.Result) map[string]history.Sample {
 	m := map[string]history.Sample{}
 	overheadSum, overheadN, overheadMax := map[string]float64{}, map[string]int{}, map[string]float64{}
+	// A group's chunks share one cores key: its sample is their mean.
+	coresSum, coresN, coresMax := map[string]float64{}, map[string]int{}, map[string]float64{}
 	for _, r := range results {
 		if r.Outcome != run.Passed {
 			continue
+		}
+		if wall := r.Wall(); wall >= MinCoresWall && r.Usage.CPU > 0 {
+			key, c := CoresKey(r.Spec.ID), r.Usage.CPU/wall
+			coresSum[key] += c
+			coresN[key]++
+			coresMax[key] = max(coresMax[key], c)
 		}
 		group, _, isChunk := chunkOf(r.Spec.ID)
 		if !isChunk {
@@ -261,6 +300,9 @@ func Measurements(results []run.Result) map[string]history.Sample {
 		overheadSum[group] += overhead
 		overheadN[group]++
 		overheadMax[group] = max(overheadMax[group], overhead)
+	}
+	for key, total := range coresSum {
+		m[key] = history.Sample{Seconds: total / float64(coresN[key]), Peak: coresMax[key]}
 	}
 	for group, total := range overheadSum {
 		m[OverheadKey(group)] = history.Sample{Seconds: total / float64(overheadN[group]), Peak: overheadMax[group]}

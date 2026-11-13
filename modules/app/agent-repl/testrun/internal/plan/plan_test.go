@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
@@ -301,6 +302,67 @@ func TestMeasurements(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Measurements = %v, want %v", got, want)
+	}
+}
+
+func TestBuildCostsEachUnitInCoresByItsOwnHistory(t *testing.T) {
+	// Arrange: the heavy unit and the group's chunks were measured, the new
+	// unit never was.
+	heavy, fresh := atomic("heavy", "s"), atomic("fresh", "s")
+	heavy.Slots, fresh.Slots = 2, 2
+	est := estimates{CoresKey("heavy"): 6.1, CoresKey("g#00"): 1.3}
+
+	// Act
+	p, err := Build(est, []suites.Units{{Atomic: []run.Spec{heavy, fresh}, Splits: []suites.Split{split("g", "i", "j")}}}, 4, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := specByID(p)
+	if got["heavy"].Cores != 6.1 {
+		t.Fatalf("heavy costs %v cores; want its history's 6.1", got["heavy"].Cores)
+	}
+	if got["fresh"].Cores != 2*cores.DefaultCoresPerSlot {
+		t.Fatalf("fresh costs %v cores; want the default for its two slots", got["fresh"].Cores)
+	}
+	for id, s := range got {
+		if strings.HasPrefix(id, "g#") && s.Cores != 1.3 {
+			t.Fatalf("chunk %s costs %v cores; want its group's 1.3", id, s.Cores)
+		}
+	}
+}
+
+func TestMeasurementsRecordTheCoresAUnitUsed(t *testing.T) {
+	// Arrange
+	withCPU := func(r run.Result, cpu float64) run.Result {
+		r.Usage.CPU = cpu
+		return r
+	}
+	results := []run.Result{
+		withCPU(result("heavy", run.Passed, 10, nil), 61),
+		withCPU(result("g#00", run.Passed, 4, map[string]float64{"i": 3}), 4),
+		withCPU(result("g#01", run.Passed, 2, map[string]float64{"j": 1}), 4),
+		withCPU(result("brief", run.Passed, 0.5, nil), 1),
+		withCPU(result("failed", run.Failed, 10, nil), 30),
+	}
+
+	// Act
+	got := Measurements(results)
+
+	// Assert: a unit's own, a group's chunks' mean and largest, and none
+	// for a unit too brief or failed.
+	if got[CoresKey("heavy")] != (history.Sample{Seconds: 6.1, Peak: 6.1}) {
+		t.Fatalf("heavy's cores = %+v; want 6.1", got[CoresKey("heavy")])
+	}
+	if got[CoresKey("g#07")] != (history.Sample{Seconds: 1.5, Peak: 2}) {
+		t.Fatalf("g's cores = %+v; want the mean 1.5 and the peak 2", got[CoresKey("g#07")])
+	}
+	if _, ok := got[CoresKey("brief")]; ok {
+		t.Fatalf("a unit under %vs had its cores recorded", MinCoresWall)
+	}
+	if _, ok := got[CoresKey("failed")]; ok {
+		t.Fatal("a failed unit had its cores recorded")
 	}
 }
 

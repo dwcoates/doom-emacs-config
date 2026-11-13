@@ -94,7 +94,9 @@ func TestSelects(t *testing.T) {
 // about the run, and the pool's own waits are run.Runner's and cores.Host's.
 type freeCores struct{}
 
-func (freeCores) Hold(string, int) (func() error, error) { return func() error { return nil }, nil }
+func (freeCores) Hold(string, int, float64) (func() error, error) {
+	return func() error { return nil }, nil
+}
 
 func csvFile(t *testing.T, rows ...string) string {
 	t.Helper()

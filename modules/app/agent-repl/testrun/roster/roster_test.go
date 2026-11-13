@@ -262,10 +262,11 @@ func TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead(t *testing.T) {
 	}
 }
 
-// TestNoUnitIsWiderThanTheGovernorsFirstUnit keeps every unit startable on a
-// busy host: the CPU governor's first-unit allowance (cores.FirstUnitSeats)
-// is the most seats it lets a run take while the host is near its cap, so a
-// wider unit would wait there for good, and every unit behind it with it.
+// TestNoUnitIsWiderThanTheGovernorsFirstUnit keeps every unit startable: for
+// a waiter whose width it cannot read from the ledger (a run of an earlier
+// testrun), the CPU governor lets the widest unit's seats go
+// (cores.FirstUnitSeats), so a wider unit would wait there for good, and
+// every unit behind it with it.
 func TestNoUnitIsWiderThanTheGovernorsFirstUnit(t *testing.T) {
 	for _, s := range Suites {
 		t.Run(s.Name, func(t *testing.T) {

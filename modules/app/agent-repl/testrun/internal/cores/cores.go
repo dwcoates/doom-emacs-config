@@ -1,10 +1,12 @@
 // Package cores is the host's test-CPU budget: every test run on the host,
 // however many overlap, together holds at most the pool of core seats, and
-// the CPU governor (governor.go) holds back what the rest of the host leaves
-// no room for, so the host's total CPU use stays under CapPercent (owner
-// rulings 2026-10-20, 2026-10-23 and 2026-10-26: overlapping runs drove the
-// whole host past 100%, and a fixed share of the cores still let the host
-// pass 90% while the rest of it was busy).
+// the CPU governor (governor.go) admits each unit only while the tests stay
+// within their target, CapPercent of the host, and the whole host within its
+// ceiling, CeilingPercent (owner rulings 2026-10-20, 2026-10-23, 2026-10-26
+// and 2026-11-13: overlapping runs drove the whole host past 100%, a fixed
+// share of the cores still let the host pass 90% while the rest of it was
+// busy, and a cap on the whole host let the owner's other work eat the
+// tests' share).
 //
 // THE BUDGET IS A POOL OF CORE SEATS, ONE PER BUDGETED CORE, SHARED BY EVERY
 // RUN. A unit takes as many seats as it holds core slots (its width) before it
@@ -18,6 +20,7 @@ package cores
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -94,10 +97,10 @@ type Plan struct {
 // Budget(numCPU) seats with every other run on the host, held back by the
 // governor. An ungoverned one (UngovernedEnv) holds the whole host from
 // OWNDIR, a pool no other run shares, so neither another run's seats nor the
-// governor's withheld ones can wait it: one seat per SeatCost cores, since a
-// seat's unit uses that many (governor.go). A seat per core oversubscribed
-// the host by about 2.4 times (load average 38 on 16 cores, 2026-11-12), and
-// a typecheck ran past its time limit.
+// governor's withheld ones can wait it: one seat per UngovernedSeatCores
+// cores (governor.go). A seat per core oversubscribed the host by about 2.4
+// times (load average 38 on 16 cores, 2026-11-12), and a typecheck ran past
+// its time limit.
 func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (Plan, error) {
 	switch v := getenv(UngovernedEnv); v {
 	case "":
@@ -107,9 +110,9 @@ func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (
 		}
 		return Plan{Budget: budget, Dir: sharedDir, Governed: true}, nil
 	case "1":
-		seats := int(float64(numCPU) / SeatCost)
+		seats := int(float64(numCPU) / UngovernedSeatCores)
 		if seats < 1 {
-			return Plan{}, fmt.Errorf("this host has %d cores; an ungoverned run holds one seat per %.0f of them, which is not one seat", numCPU, SeatCost)
+			return Plan{}, fmt.Errorf("this host has %d cores; an ungoverned run holds one seat per %.0f of them, which is not one seat", numCPU, UngovernedSeatCores)
 		}
 		return Plan{Budget: seats, Dir: ownDir}, nil
 	default:
@@ -120,6 +123,7 @@ func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (
 // Logger is what Host says on.
 type Logger interface {
 	Infof(format string, args ...any)
+	Errorf(format string, args ...any)
 }
 
 // Host hands out the host's core seats.
@@ -130,20 +134,37 @@ type Host struct {
 	Log  Logger
 	Now  func() time.Time
 	// WaitingForCPU, when set, is told a unit begins to wait while the CPU
-	// governor holds every unit back, and CPUWaitEnded when it has its seats.
+	// governor holds units back, and CPUWaitEnded when it has its seats.
 	WaitingForCPU func(id string, state CPUState)
 	CPUWaitEnded  func(id string, waited time.Duration)
+	ledger        *ledger
 }
 
 // NewHost is the host's core pool of budget seats under dir, taken at rank.
 func NewHost(dir string, budget, rank int, log Logger) Host {
-	return Host{Pool: seats.Pool{Dir: dir, Prefix: "core", N: budget, What: "core"}, Rank: rank, Log: log, Now: time.Now}
+	return Host{Pool: seats.Pool{Dir: dir, Prefix: "core", N: budget, What: "core"}, Rank: rank, Log: log, Now: time.Now, ledger: &ledger{dir: dir}}
 }
 
-// Hold takes width core seats for unit id, waiting while the host's budget is
-// spent or the CPU governor holds units back, and answers the function that
-// gives them back. A wait says which of the two it is.
-func (h Host) Hold(id string, width int) (func() error, error) {
+// Hold takes width core seats for unit id, which is expected to use cores
+// (ExpectedCores), waiting while the host's budget is spent or the CPU
+// governor holds it back, and answers the function that gives them back. The
+// unit is on the ledger from before it asks until it gives its seats back
+// (ledger.go), and every change wakes the governor. A wait says whether it is
+// for the CPU.
+func (h Host) Hold(id string, width int, cores float64) (func() error, error) {
+	rec := UnitRecord{Unit: id, Rank: h.Rank, Width: width, Cores: cores}
+	path, err := h.ledger.post(rec)
+	if err != nil {
+		return nil, fmt.Errorf("state unit %s on the core ledger: %w", id, err)
+	}
+	h.wake(id)
+	unlist := func(err error) error {
+		if rmErr := os.Remove(path); rmErr != nil {
+			err = errors.Join(err, fmt.Errorf("take unit %s off the core ledger: %w", id, rmErr))
+		}
+		h.wake(id)
+		return err
+	}
 	var start time.Time
 	waited, forCPU := false, false
 	var stateErr error
@@ -157,20 +178,25 @@ func (h Host) Hold(id string, width int) (func() error, error) {
 		}
 		if state.WaitingForCPU {
 			forCPU = true
-			h.Log.Infof("core seats: unit %s is waiting for CPU; the host is %.0f%% busy against the %d%% cap every test and build together is held to", id, state.BusyPercent, state.CapPercent)
+			h.Log.Infof("core seats: unit %s is waiting for CPU; the tests use %.0f%% of the host against their %d%% target and the host is %.0f%% busy against its %d%% ceiling", id, state.TestsPercent, state.CapPercent, state.BusyPercent, state.CeilingPercent)
 			if h.WaitingForCPU != nil {
 				h.WaitingForCPU(id, state)
 			}
 			return
 		}
-		h.Log.Infof("core seats: unit %s waits for %d of the host's %d, held by test runs or promised to a run that outranks this one (rank %d)", id, width, h.Pool.N, h.Rank)
+		h.Log.Infof("core seats: unit %s waits for %d of the host's %d, for the CPU governor to admit it, for seats test runs hold, or behind a run that outranks this one (rank %d)", id, width, h.Pool.N, h.Rank)
 	})
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("hold %d core seat(s) for unit %s: %w", width, id, err), stateErr)
+		return nil, unlist(errors.Join(fmt.Errorf("hold %d core seat(s) for unit %s: %w", width, id, err), stateErr))
 	}
 	if stateErr != nil {
-		return nil, errors.Join(fmt.Errorf("unit %s waited for core seats but could not tell why: %w", id, stateErr), held.Release())
+		return nil, unlist(errors.Join(fmt.Errorf("unit %s waited for core seats but could not tell why: %w", id, stateErr), held.Release()))
 	}
+	rec.Started = h.Now()
+	if err := writeRecord(path, rec); err != nil {
+		return nil, unlist(errors.Join(fmt.Errorf("state unit %s's start on the core ledger: %w", id, err), held.Release()))
+	}
+	h.wake(id)
 	if waited {
 		took := h.Now().Sub(start)
 		h.Log.Infof("core seats: unit %s took %d after %s", id, width, took.Round(time.Millisecond))
@@ -178,5 +204,13 @@ func (h Host) Hold(id string, width int) (func() error, error) {
 			h.CPUWaitEnded(id, took)
 		}
 	}
-	return held.Release, nil
+	return func() error { return unlist(held.Release()) }, nil
+}
+
+// wake wakes the governor. A governor not woken still decides at its next
+// read, so a failure costs the unit up to a Tick and is said, not returned.
+func (h Host) wake(id string) {
+	if err := wakeGovernor(h.Pool.Dir); err != nil {
+		h.Log.Errorf("core seats: unit %s cannot wake the CPU governor, which decides on it at its next read instead: %v", id, err)
+	}
 }

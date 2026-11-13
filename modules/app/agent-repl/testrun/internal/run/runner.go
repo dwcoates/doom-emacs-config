@@ -31,6 +31,10 @@ type Spec struct {
 	// Expected is the expected time Bound was sized from, which a unit that
 	// ran past its bound is reported against.
 	Expected time.Duration
+	// Cores is how many cores the unit is expected to use while it runs
+	// (cores.ExpectedCores: its own measured history, or a default a slot),
+	// which the host's CPU governor admits it by. REQUIRED, positive.
+	Cores float64
 	// Items parses the unit's output into seconds per item, for the history.
 	// Nil for a unit that is not a chunk.
 	Items func(output []byte) (map[string]float64, error)
@@ -120,9 +124,10 @@ type SuiteResult struct {
 func (s SuiteResult) Seconds() float64 { return s.End.Sub(s.Start).Seconds() }
 
 // Cores hands out the host's core seats, shared by every run on the host
-// (cores.Host). Hold blocks while the host's budget is spent.
+// (cores.Host), to a unit of width expected to use cores. Hold blocks while
+// the host's budget is spent or its CPU governor holds the unit back.
 type Cores interface {
-	Hold(id string, width int) (release func() error, err error)
+	Hold(id string, width int, cores float64) (release func() error, err error)
 }
 
 // Runner runs units.
@@ -180,6 +185,9 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	for _, s := range specs {
 		if s.Bound <= 0 {
 			return nil, nil, fmt.Errorf("run: unit %s (%s) has no time limit (bound %v); every unit is bounded", s.ID, s.Suite, s.Bound)
+		}
+		if s.Cores <= 0 {
+			return nil, nil, fmt.Errorf("run: unit %s (%s) has no expected cores (%v); the CPU governor admits every unit by them", s.ID, s.Suite, s.Cores)
 		}
 	}
 	units := make([]sched.Unit, len(specs))
@@ -282,7 +290,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			used += u.Width()
 			holding = true
 			go func() {
-				release, err := r.Cores.Hold(u.ID, u.Width())
+				release, err := r.Cores.Hold(u.ID, u.Width(), byID[u.ID].Cores)
 				granted <- grant{id: u.ID, release: release, err: err}
 			}()
 		}

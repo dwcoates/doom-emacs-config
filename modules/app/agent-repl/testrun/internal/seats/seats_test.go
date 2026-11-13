@@ -437,6 +437,55 @@ func TestTakeNLetsItsLaneGoOnceItHasItsSeats(t *testing.T) {
 	}
 }
 
+func TestWaiting(t *testing.T) {
+	cases := []struct {
+		name string
+		held bool
+		want bool
+	}{
+		{name: "a taker holds the rank's lane", held: true, want: true},
+		{name: "nobody waits at the rank", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := Pool{Dir: t.TempDir(), Prefix: "core", N: 1, What: "test"}
+			if tc.held {
+				lane, err := p.lock(p.lanePath(4), syscall.LOCK_SH)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer lane.Close()
+			}
+
+			// Act
+			got, err := p.Waiting(4)
+
+			// Assert
+			if err != nil || got != tc.want {
+				t.Fatalf("Waiting(4) = %v, %v; want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWaitingNeverHoldsTheLaneItself(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: t.TempDir(), Prefix: "core", N: 1, What: "test"}
+
+	// Act
+	if _, err := p.Waiting(4); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: a taker still takes the lane exclusively at once.
+	lane, err := p.lock(p.lanePath(4), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err != nil {
+		t.Fatalf("the probed lane is held: %v", err)
+	}
+	lane.Close()
+}
+
 func TestHeld(t *testing.T) {
 	cases := []struct {
 		name string

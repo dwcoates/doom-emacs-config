@@ -11,9 +11,11 @@ import (
 // procRecord is what the kernel's BSD record of a process says.
 type procRecord struct {
 	Ppid, Pgid int
-	Status     int8
-	Start      time.Time
-	Comm       string
+	// UID is the process's effective user; the short record leaves it 0.
+	UID    int
+	Status int8
+	Start  time.Time
+	Comm   string
 }
 
 // kernel is the reads List makes, each answering the kernel's errno: ESRCH
