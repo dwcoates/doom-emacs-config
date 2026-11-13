@@ -1427,3 +1427,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Persistent-wifi mode never freezes a container runtime such as Docker, which merge-queue tests need with the lid closed.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): A deploy now delivers a per-user setting added after Emacs started, such as the persistent-wifi hotspot, without a bounce.
 - 2026-11-12 merge-queue-stall-triage (landed in queue bypass mode): Emacs e2e steps move to ERT (25 of 26 retired), and closing panels opened over several windows restores the work layout
+- 2026-11-13 merge-queue-stall-triage (landed in queue bypass mode): Persistent wifi rejoins known networks before the hotspot and never stops retrying; e2e steps move to the daemon, shim and ERT tiers, every e2e step names its seam, and the harness's own tests run in the reusable e2e-kit suite
