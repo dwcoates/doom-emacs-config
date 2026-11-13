@@ -323,6 +323,17 @@ func (f *verbsForwarder) closeWhenOwnedPullRequestsMerged(ctx context.Context, w
 	return verbs.CloseWhenOwnedPullRequestsMerged(ctx, ws)
 }
 
+// letQueueThroughAfterBypassTurn is the turn-end edge's queue resume
+// (workspace.NewBypassTurnEnds), read out of the verbs, which are built after
+// the edges.
+func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a queue bypass holder's turn ended")
+	if err != nil {
+		return err
+	}
+	return verbs.LetQueueThroughAfterBypassTurn(ctx, ws)
+}
+
 // unfoldSubsectionForWork is the turn-start edge's unfold
 // (workspace.SubsectionUnfolds), read out of the verbs, which are built after
 // the edges.

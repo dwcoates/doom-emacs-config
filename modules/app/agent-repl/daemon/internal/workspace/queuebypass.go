@@ -146,13 +146,15 @@ func (c QueueBypassContext) resumesExisting() bool {
 //
 // TAKING IT, IN ORDER: the hold is recorded (the store's key refuses a second
 // holder of the repository, whatever two callers race), the repository's
-// merge queue is HARD-STOPPED so whatever it was running stops at once, and the
-// workspace switches to its bypass conversation, whose start reads the hold
-// and so comes up with the bypass landing (sessionProfile).
+// merge queue is HARD-STOPPED in the holder's name so whatever it was running
+// stops at once, and the workspace switches to its bypass conversation, whose
+// start reads the hold and so comes up with the bypass landing
+// (sessionProfile). The end of the holder's next turn lets the queue through
+// (LetQueueThroughAfterBypassTurn).
 //
 // RELEASING IT is the reverse: the hold is cleared first, so the switch back
-// starts the ordinary conversation with the queue landing, and the queue is
-// resumed last.
+// starts the ordinary conversation with the queue landing, and a paused queue
+// is resumed last.
 //
 // THE SWITCH SWAPS TWO CONVERSATIONS. The one the workspace steps out of is
 // parked with its cache clock (wsm.SwapParkedConversation) and the parked one
@@ -214,7 +216,10 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 	// hangs up mid-way must not leave the hold and the conversation disagreeing.
 	swap := context.WithoutCancel(ctx)
 	scope := &merge.RepositoryScope{ID: standing.RepoID}
-	pauser := merge.Pauser{By: merge.RequestedByUser}
+	// THE STOP THE MODE TAKES IS THE HOLDER'S OWN, so the end of the
+	// holder's next turn lets the queue through
+	// (LetQueueThroughAfterBypassTurn).
+	pauser := merge.Pauser{By: merge.RequestedByAgent, Asker: ws}
 	if want {
 		if err := v.deps.DB.TakeQueueBypass(swap, ws, v.now()); err != nil {
 			if errors.Is(err, wsm.ErrQueueBypassHeld) {
@@ -242,7 +247,12 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 		return want, err
 	}
 	if !want {
-		if err := v.deps.Merge.Unpause(swap, scope); err != nil {
+		// THE QUEUE RUNS BETWEEN THE HOLDER'S TURNS, so a release finding it
+		// running has nothing to resume.
+		var refusal *merge.RefusalError
+		if err := v.deps.Merge.Unpause(swap, scope); errors.As(err, &refusal) && refusal.Arm == merge.ArmNotPaused {
+			log.Info(opQueueBypass, "the repository's merge queue was running when the mode was released, so there was nothing to resume", nil)
+		} else if err != nil {
 			log.Error(opQueueBypass, "the repository's merge queue could not be resumed after the mode was released", dlog.Context{"cause": err.Error()})
 			v.restateQueueBypass(swap, log, standing.RepoID)
 			return false, refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the merge queue could not be resumed: %s", err.Error()), false,
@@ -419,4 +429,46 @@ func (v *verbs) queueBypassChip(ctx context.Context, record wsm.Workspace) (topb
 		chip.HeldBy = holder.Name
 	}
 	return chip, nil
+}
+
+// opBypassTurnEnd is the operation the queue bypass holder's turn-end resume
+// is filed under.
+const opBypassTurnEnd = "daemon.workspace.queue_bypass_turn_end"
+
+// NewBypassTurnEnds builds the runner that lets the merge queue through at
+// the end of each turn of the workspace holding its repository's queue bypass
+// mode, over CARRY, the verbs' LetQueueThroughAfterBypassTurn.
+func NewBypassTurnEnds(carry func(ctx context.Context, ws ids.WorkspaceID) error, log dlog.Logger) *TurnEdgeRunner {
+	return newTurnEdgeRunner(turnEnds, opBypassTurnEnd,
+		"a turn ended after the queue bypass runner stopped, as the daemon stood down; the queue stays as it stands",
+		"could not let the merge queue through at the end of a turn", carry, log)
+}
+
+// LetQueueThroughAfterBypassTurn implements Verbs.
+//
+// THE QUEUE RUNS WHILE THE BYPASS SESSION IS IDLE (owner request,
+// 2026-11-13: the user watches the queue work while bypass mode is on). The
+// holder's agent pauses the queue before it changes anything
+// (metaprompt-queue-bypass.md), and taking the mode stops it in the holder's
+// name, so the main branch the session lands on stands still while it works.
+// At the end of each of the holder's turns the queue is resumed, but only
+// when the pause standing on it is the holder's own: a pause by the user or by
+// another workspace is never lifted here. A workspace that does not hold the
+// mode is nothing to this.
+func (v *verbs) LetQueueThroughAfterBypassTurn(ctx context.Context, ws ids.WorkspaceID) error {
+	standing, err := v.deps.DB.QueueBypass(ctx, ws)
+	if errors.Is(err, wsm.ErrNotFound) {
+		v.deps.Log.Global().Info(opBypassTurnEnd, "the workspace whose turn ended is no longer registered, so it holds no queue bypass mode", dlog.Context{"workspace": string(ws)})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the queue bypass standing of %q: %w", ws, err)
+	}
+	if !standing.Holds {
+		return nil
+	}
+	if _, err := v.deps.Merge.ResumeOwnPause(ctx, merge.RepositoryScope{ID: standing.RepoID}, ws); err != nil {
+		return fmt.Errorf("resume the queue of repository %q: %w", standing.RepoID, err)
+	}
+	return nil
 }

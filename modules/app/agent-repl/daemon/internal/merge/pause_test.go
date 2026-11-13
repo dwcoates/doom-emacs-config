@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/wsm"
 )
@@ -362,3 +363,102 @@ func TestAPauseWhoseRedrawFailsIsRecordedAndThePauseStands(t *testing.T) {
 		t.Fatalf("the queue is not paused, want the pause to stand")
 	}
 }
+
+func TestResumeOwnPauseResumesOnlyThePauseOfTheAskingWorkspace(t *testing.T) {
+	own := &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one", Workspace: theWorkspace}}
+	ownHard := &wsm.MergeQueuePause{At: epochPause, Hard: true, By: own.By}
+	tests := []struct {
+		name        string
+		pause       *wsm.MergeQueuePause
+		wantResumed bool
+	}{
+		{name: "its own pause", pause: own, wantResumed: true},
+		{name: "its own hard stop", pause: ownHard, wantResumed: true},
+		{name: "the user's pause", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}}},
+		{name: "another workspace's pause", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-two", Workspace: otherWorkspace}}},
+		{name: "a workspace pause that names no id", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one"}}},
+		{name: "a running queue"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			seedQueue(h, scopedKey(h), tt.pause != nil)
+			h.db.mu.Lock()
+			h.db.pauses[scopedKey(h)] = tt.pause
+			h.db.mu.Unlock()
+
+			// Act
+			resumed, err := h.o.ResumeOwnPause(context.Background(), RepositoryScope{ID: theRepository}, theWorkspace)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ResumeOwnPause: %v", err)
+			}
+			if resumed != tt.wantResumed {
+				t.Fatalf("resumed = %v, want %v", resumed, tt.wantResumed)
+			}
+			h.db.mu.Lock()
+			defer h.db.mu.Unlock()
+			if wantPaused := tt.pause != nil && !tt.wantResumed; h.db.paused[scopedKey(h)] != wantPaused {
+				t.Fatalf("paused = %v, want %v", h.db.paused[scopedKey(h)], wantPaused)
+			}
+			if _, ok := h.recordFor("info", "daemon.merge.resume_own_pause"); !ok {
+				t.Fatal("no INFO record of the resume's outcome")
+			}
+		})
+	}
+}
+
+func TestResumeOwnPauseRefusesARepositoryTheRegistryDoesNotHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	seedQueue(h, scopedKey(h), true)
+
+	// Act
+	resumed, err := h.o.ResumeOwnPause(context.Background(), RepositoryScope{ID: "no-such-repo"}, theWorkspace)
+
+	// Assert
+	var refused *RefusalError
+	if resumed || !errors.As(err, &refused) || refused.Arm != ArmUnknownRepository {
+		t.Fatalf("ResumeOwnPause = (%v, %v), want the %s refusal", resumed, err, ArmUnknownRepository)
+	}
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if !h.db.paused[scopedKey(h)] {
+		t.Fatal("a refused resume resumed the queue")
+	}
+}
+
+func TestResumeOwnPauseThatCannotReadThePauseLeavesTheQueueAndRecordsWhy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	seedQueue(h, scopedKey(h), true)
+	h.db.mu.Lock()
+	h.db.pausedReadErr = errors.New("db gone")
+	h.db.mu.Unlock()
+
+	// Act
+	resumed, err := h.o.ResumeOwnPause(context.Background(), RepositoryScope{ID: theRepository}, theWorkspace)
+
+	// Assert
+	if resumed || err == nil {
+		t.Fatalf("ResumeOwnPause = (%v, %v), want the read's failure", resumed, err)
+	}
+	rec, ok := h.recordFor("error", "daemon.merge.resume_own_pause")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || !strings.Contains(rec.Context["error"].(string), "db gone") {
+		t.Fatalf("ERROR record = %+v (%v), want one naming the workspace and the cause", rec, ok)
+	}
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if !h.db.paused[scopedKey(h)] {
+		t.Fatal("a resume that could not read the pause resumed the queue")
+	}
+}
+
+// epochPause is the instant a seeded pause record names.
+var epochPause = time.Date(2026, 11, 13, 18, 0, 0, 0, time.UTC)
+
+// scopedKey is the queue key a scope naming the harness's repository resolves
+// to (queueKeyOf).
+func scopedKey(h *harness) wsm.RepoKey { return wsm.RepoKey(h.repoRoot + "/.git") }

@@ -107,13 +107,14 @@ func (s *requestLoggingServer) UpdateQueueBypassMode(
 const ArmRequesterBypassingQueue = "requester_bypassing_queue"
 
 // bypassReminder is what a refused dispatch reminds its workspace to do.
-const bypassReminder = "this workspace holds its repository's queue bypass mode, which hard-stops the merge queue " +
+const bypassReminder = "this workspace holds its repository's queue bypass mode, which pauses the merge queue while it works " +
 	"and exists for this one workspace to fix things itself. It creates no one-shot, no async merge and no child workspace: " +
 	"do the work here and land it on the main branch with land-direct.sh"
 
 // bypassRefusedCreate names the create SPEC asks for that a workspace holding
 // the queue bypass mode may not make, or "" for one it may: a one-shot lands
-// through the stopped queue, and a child is the orchestration the mode skips.
+// through the queue the holder pauses whenever it works, and a child is the
+// orchestration the mode skips.
 func bypassRefusedCreate(spec workspace.CreateSpec) string {
 	switch {
 	case spec.OneShot:
@@ -127,7 +128,7 @@ func bypassRefusedCreate(spec workspace.CreateSpec) string {
 // refuseWhileBypassing answers the refusal for WS dispatching WHAT while WS
 // holds its repository's queue bypass mode (owner ruling, 2026-11-10: a
 // workspace in the mode lands everything directly, so nothing it dispatches
-// may land through the stopped queue), and false when WS holds no such mode.
+// may land through the queue it pauses), and false when WS holds no such mode.
 // A failed read of the standing is the rpc's failure.
 func (s *server) refuseWhileBypassing(ctx context.Context, log dlog.Logger, rpc string, resp proto.Message, ws ids.WorkspaceID, what string) (*connect.Error, bool, error) {
 	standing, err := s.deps.DB.QueueBypass(ctx, ws)

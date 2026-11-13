@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # land-direct.sh — land branches straight on a repository's main branch, for a
 # workspace holding the repository's queue bypass mode
-# (agentrepl.v1.UpdateQueueBypassMode). The queue is already hard-stopped by
-# the mode; this script only lands.
+# (agentrepl.v1.UpdateQueueBypassMode). The workspace's agent has paused the
+# queue before landing (metaprompt-queue-bypass.md); this script only lands.
 #
 # Usage: land-direct.sh REPO PART LINE BRANCH...
 #   Merge each BRANCH, in order, into REPO's main branch in its main worktree

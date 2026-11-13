@@ -2,6 +2,7 @@ package netwatch
 
 import (
 	"encoding/binary"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -129,6 +130,20 @@ func TestClassifyRouteMessagesPassesOverOtherKindsByHeader(t *testing.T) {
 	// Assert.
 	if err != nil || ok {
 		t.Fatalf("classifyRouteMessages = ok %v, err %v; want neither", ok, err)
+	}
+}
+
+func TestARouteMessageTheParserCannotReadIsStillAChange(t *testing.T) {
+	// Arrange: an RTM_ADD whose length passes the header check but is too
+	// short for the parser (macOS sends these at a Wi-Fi rejoin).
+	b := header(8, unix.RTM_ADD)
+
+	// Act.
+	change, ok, err := classifyRouteMessages(b)
+
+	// Assert.
+	if err != nil || !ok || change.Kind != KindUnparsed || !strings.Contains(change.Detail, "type 1, 8 bytes") {
+		t.Fatalf("classifyRouteMessages = (%+v, %v, %v); want an unparsed change naming the message", change, ok, err)
 	}
 }
 

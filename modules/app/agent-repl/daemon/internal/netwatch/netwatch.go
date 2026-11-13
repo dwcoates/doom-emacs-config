@@ -28,11 +28,15 @@ import (
 
 const opWatch = "daemon.netwatch"
 
+// KindUnparsed is an address or route message the platform's parser could not
+// read: a change, though not one the watch can name.
+const KindUnparsed = "route_message_unparsed"
+
 // Change is one network event the operating system reported, for the record.
 type Change struct {
 	// Kind names what changed: "address_added", "address_removed",
-	// "default_route_added", "default_route_removed" or
-	// "default_route_changed".
+	// "default_route_added", "default_route_removed",
+	// "default_route_changed", or KindUnparsed.
 	Kind string
 	// Interface is the interface's index, or its name when the event names
 	// one.

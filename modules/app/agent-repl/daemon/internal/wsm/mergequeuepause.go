@@ -31,7 +31,7 @@ func (p MergeQueuePause) validate() error {
 	case MergeQueuePauserUser:
 		return nil
 	case MergeQueuePauserWorkspace:
-		if p.By.Name == "" {
+		if p.By.Name == "" || p.By.Workspace == "" {
 			return errors.New("wsm: a merge queue pause by a workspace names no workspace")
 		}
 		return nil
@@ -45,6 +45,9 @@ type MergeQueuePauser struct {
 	// Name is the pausing workspace's name as it stood when it paused the
 	// queue; empty for any other kind.
 	Name string
+	// Workspace is the pausing workspace's id; empty for any other kind, and
+	// for a pause written before layout 131.
+	Workspace WorkspaceID
 }
 
 // MergeQueuePauserKind is which kind of asker paused a queue.
@@ -96,4 +99,14 @@ ALTER TABLE merge_queue_repos ADD COLUMN paused_at INTEGER;
 ALTER TABLE merge_queue_repos ADD COLUMN paused_by TEXT;
 ALTER TABLE merge_queue_repos ADD COLUMN paused_by_name TEXT;
 ALTER TABLE merge_queue_repos ADD COLUMN paused_hard INTEGER NOT NULL DEFAULT 0;
+`
+
+// mergeQueuePauserWorkspaceDDL is the layout-131 addition: the id of the
+// workspace that paused a queue, beside its name, so a pause is known as a
+// workspace's own across a rename (the queue bypass holder lets through only
+// its own pause at its turn's end). IT IS ADDITIVE: the previous build's
+// pause writes name no such column, and a workspace pause read back with none
+// is no workspace's own.
+const mergeQueuePauserWorkspaceDDL = `
+ALTER TABLE merge_queue_repos ADD COLUMN paused_by_workspace TEXT;
 `

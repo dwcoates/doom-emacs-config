@@ -2105,6 +2105,38 @@ type fakeMerge struct {
 	// relabeled records every Relabel; relabelErr fails it.
 	relabeled  []ids.WorkspaceID
 	relabelErr error
+	// hardStops records every HardStop's asker; unpaused counts every
+	// Unpause, which answers unpauseErr.
+	hardStops  []merge.Pauser
+	unpaused   int
+	unpauseErr error
+	// ownResumes records every ResumeOwnPause, which answers ownResumeErr.
+	ownResumes   []ownResume
+	ownResumeErr error
+}
+
+// ownResume is one ResumeOwnPause the fake was asked for.
+type ownResume struct {
+	scope merge.RepositoryScope
+	ws    ids.WorkspaceID
+}
+
+// HardStop records the asker.
+func (f *fakeMerge) HardStop(_ context.Context, _ *merge.RepositoryScope, by merge.Pauser) error {
+	f.hardStops = append(f.hardStops, by)
+	return nil
+}
+
+// Unpause counts the resume and answers unpauseErr.
+func (f *fakeMerge) Unpause(context.Context, *merge.RepositoryScope) error {
+	f.unpaused++
+	return f.unpauseErr
+}
+
+// ResumeOwnPause records the resume and answers ownResumeErr.
+func (f *fakeMerge) ResumeOwnPause(_ context.Context, scope merge.RepositoryScope, ws ids.WorkspaceID) (bool, error) {
+	f.ownResumes = append(f.ownResumes, ownResume{scope: scope, ws: ws})
+	return f.ownResumeErr == nil, f.ownResumeErr
 }
 
 // Relabel records the renamed workspace and answers relabelErr.
@@ -4249,6 +4281,22 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 // QueueBypass answers WS's queue bypass standing: the one a test set in
 // bypass, else none, so a session lands through the queue; bypassErr fails
 // the read.
+// TakeQueueBypass marks WS the holder.
+func (f *fakeDB) TakeQueueBypass(_ context.Context, ws ids.WorkspaceID, _ time.Time) error {
+	standing := f.bypass[ws]
+	standing.Holds = true
+	f.bypass[ws] = standing
+	return nil
+}
+
+// ReleaseQueueBypass clears WS's hold.
+func (f *fakeDB) ReleaseQueueBypass(_ context.Context, ws ids.WorkspaceID) error {
+	standing := f.bypass[ws]
+	standing.Holds = false
+	f.bypass[ws] = standing
+	return nil
+}
+
 func (f *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
 	if f.bypassErr != nil {
 		return wsm.QueueBypass{}, f.bypassErr

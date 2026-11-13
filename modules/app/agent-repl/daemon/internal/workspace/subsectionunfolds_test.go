@@ -75,15 +75,15 @@ func TestUnfoldSubsectionForWorkLeavesOtherWorkspacesAlone(t *testing.T) {
 func TestSubsectionUnfoldsOnlyATurnStartMovesIt(t *testing.T) {
 	tests := []struct {
 		name string
-		edge func(*SubsectionUnfolds)
+		edge func(*TurnEdgeRunner)
 		want []ids.WorkspaceID
 	}{
-		{name: "a turn starting", edge: func(s *SubsectionUnfolds) { s.TurnStarted("w1") }, want: []ids.WorkspaceID{"w1"}},
-		{name: "a turn ending", edge: func(s *SubsectionUnfolds) { s.TurnEnded("w1") }},
-		{name: "a turn ending unobserved", edge: func(s *SubsectionUnfolds) { s.TurnEndedUnobserved("w1") }},
-		{name: "an ask opening", edge: func(s *SubsectionUnfolds) { s.NeedsInput("w1") }},
-		{name: "a landing", edge: func(s *SubsectionUnfolds) { s.Landed("w1") }},
-		{name: "a close", edge: func(s *SubsectionUnfolds) { s.Closed(wsm.Workspace{ID: "w1"}) }},
+		{name: "a turn starting", edge: func(s *TurnEdgeRunner) { s.TurnStarted("w1") }, want: []ids.WorkspaceID{"w1"}},
+		{name: "a turn ending", edge: func(s *TurnEdgeRunner) { s.TurnEnded("w1") }},
+		{name: "a turn ending unobserved", edge: func(s *TurnEdgeRunner) { s.TurnEndedUnobserved("w1") }},
+		{name: "an ask opening", edge: func(s *TurnEdgeRunner) { s.NeedsInput("w1") }},
+		{name: "a landing", edge: func(s *TurnEdgeRunner) { s.Landed("w1") }},
+		{name: "a close", edge: func(s *TurnEdgeRunner) { s.Closed(wsm.Workspace{ID: "w1"}) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

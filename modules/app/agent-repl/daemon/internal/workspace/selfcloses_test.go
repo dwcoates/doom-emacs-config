@@ -177,15 +177,15 @@ func TestCloseSelfFails(t *testing.T) {
 func TestSelfClosesCarriesOutEachTurnEnd(t *testing.T) {
 	tests := []struct {
 		name string
-		edge func(s *SelfCloses)
+		edge func(s *TurnEdgeRunner)
 		want []ids.WorkspaceID
 	}{
-		{name: "a turn ending", edge: func(s *SelfCloses) { s.TurnEnded("w1") }, want: []ids.WorkspaceID{"w1"}},
-		{name: "a turn ending unobserved", edge: func(s *SelfCloses) { s.TurnEndedUnobserved("w1") }, want: []ids.WorkspaceID{"w1"}},
-		{name: "a turn starting", edge: func(s *SelfCloses) { s.TurnStarted("w1") }},
-		{name: "an ask opening", edge: func(s *SelfCloses) { s.NeedsInput("w1") }},
-		{name: "a landing", edge: func(s *SelfCloses) { s.Landed("w1") }},
-		{name: "a close", edge: func(s *SelfCloses) { s.Closed(wsm.Workspace{ID: "w1"}) }},
+		{name: "a turn ending", edge: func(s *TurnEdgeRunner) { s.TurnEnded("w1") }, want: []ids.WorkspaceID{"w1"}},
+		{name: "a turn ending unobserved", edge: func(s *TurnEdgeRunner) { s.TurnEndedUnobserved("w1") }, want: []ids.WorkspaceID{"w1"}},
+		{name: "a turn starting", edge: func(s *TurnEdgeRunner) { s.TurnStarted("w1") }},
+		{name: "an ask opening", edge: func(s *TurnEdgeRunner) { s.NeedsInput("w1") }},
+		{name: "a landing", edge: func(s *TurnEdgeRunner) { s.Landed("w1") }},
+		{name: "a close", edge: func(s *TurnEdgeRunner) { s.Closed(wsm.Workspace{ID: "w1"}) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

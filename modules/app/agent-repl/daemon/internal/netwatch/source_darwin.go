@@ -74,7 +74,14 @@ func classifyRouteMessages(b []byte) (Change, bool, error) {
 		}
 		parsed, err := route.ParseRIB(route.RIBTypeRoute, msg)
 		if err != nil {
-			return Change{}, false, fmt.Errorf("parse a routing message of type %d: %w", msg[3], err)
+			// AN ADDRESS OR ROUTE MESSAGE THE PARSER CANNOT READ IS STILL A
+			// CHANGE. macOS sends RTM_ADD messages shorter than the header
+			// x/net/route expects ("message too short", 2026-11-13, at every
+			// Wi-Fi rejoin); ending the watch on one left every wait to its
+			// periodic check. The message is a network change of a kind the
+			// watch cannot name, so it wakes the waiters, with the parser's
+			// cause as its detail for the record.
+			return Change{Kind: KindUnparsed, Detail: fmt.Sprintf("type %d, %d bytes: %v", msg[3], l, err)}, true, nil
 		}
 		for _, m := range parsed {
 			if change, ok := classifyRouteMessage(m); ok {

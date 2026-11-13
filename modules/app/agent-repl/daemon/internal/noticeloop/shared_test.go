@@ -16,10 +16,10 @@ import (
 // ordering and drain-on-exit guarantees cannot drift between them.
 func TestEveryNotifierDeliversThroughTheSharedLoop(t *testing.T) {
 	notifiers := map[string]reflect.Type{
-		"mergenotice.Service":     reflect.TypeOf(mergenotice.Service{}),
-		"workspacenotice.Service": reflect.TypeOf(workspacenotice.Service{}),
-		"workspacesubs.Service":   reflect.TypeOf(workspacesubs.Service{}),
-		"workspace.SelfCloses":    reflect.TypeOf(workspace.SelfCloses{}),
+		"mergenotice.Service":      reflect.TypeOf(mergenotice.Service{}),
+		"workspacenotice.Service":  reflect.TypeOf(workspacenotice.Service{}),
+		"workspacesubs.Service":    reflect.TypeOf(workspacesubs.Service{}),
+		"workspace.TurnEdgeRunner": reflect.TypeOf(workspace.TurnEdgeRunner{}),
 	}
 	for name, typ := range notifiers {
 		t.Run(name, func(t *testing.T) {

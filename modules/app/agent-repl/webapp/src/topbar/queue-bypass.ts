@@ -1,8 +1,9 @@
 /**
  * The queue-bypass chip: the first chip of the strip, left of the
  * remote-control chip, stating whether THIS WORKSPACE holds its repository's
- * queue bypass mode — the merge queue hard-stopped, and every change landed
- * straight on the main branch from the workspace's bypass conversation.
+ * queue bypass mode — every change landed straight on the main branch from
+ * the workspace's bypass conversation, the merge queue paused while it works
+ * and let through at the end of each of its turns.
  *
  * THE SAME LOOK AND FEEL AS THE REMOTE-CONTROL CHIP, ANOTHER SYMBOL. The glyph
  * sits on a disc drawn through the topbar's one disc drawing

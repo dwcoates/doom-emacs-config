@@ -2,10 +2,15 @@
 // section. Take or release a workspace's queue bypass mode.
 //
 // THE MODE IS THE REPOSITORY'S, HELD BY ONE WORKSPACE. While a workspace holds
-// it, the repository's merge queue is HARD-STOPPED (whatever it was running
-// stops at once, and nothing advances), and the workspace lands each change on
-// the main branch itself. Releasing it resumes the queue. A second workspace
-// of the same repository cannot take the mode until the holder releases it.
+// it, the workspace lands each change on the main branch itself, and the
+// repository's merge queue runs only between the holder's turns (owner
+// request, 2026-11-13: the user watches the queue work while the mode is on).
+// Taking the mode HARD-STOPS the queue in the holder's name (whatever it was
+// running stops at once); the holder's agent pauses it before it changes
+// anything; and the end of each of the holder's turns resumes it, when the
+// pause standing on it is the holder's own. Releasing the mode resumes a
+// paused queue. A second workspace of the same repository cannot take the mode
+// until the holder releases it.
 //
 // THE MODE SWITCHES THE WORKSPACE'S CONVERSATION. A workspace keeps two: its
 // ordinary one, whose system prompt carries the merge-queue rules, and its

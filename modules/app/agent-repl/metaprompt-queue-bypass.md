@@ -8,10 +8,22 @@
   - This session's transcript is the bypass queue mode session.
     - An earlier transcript of this workspace that ran before the mode was taken is a non-bypass session, which landed through the merge queue.
     - Context loaded from a non-bypass session is carried out here under bypass queue mode, never under the merge queue rules that session followed.
-- The repository's merge queue is hard-stopped while this workspace holds the mode.
-  - agent-repl stopped it when the mode was taken, and resumes it when the mode is released.
-  - Never pause, resume, evict, or queue anything on it, and never ask about it.
+- The repository's merge queue runs between this workspace's turns while it holds the mode.
+  - The user watches the queue work while the mode is on.
+  - agent-repl hard-stopped it in this workspace's name when the mode was taken.
+  - agent-repl lets it through at the end of each of this workspace's turns, and resumes it when the mode is released.
+  - agent-repl lets through only a pause this workspace made, so a pause by the user or another workspace stands.
 - Every change this workspace makes lands directly on the repository's main branch, bypassing the queue.
+
+### Pause the queue before changing anything
+
+- Before the first change of every prompt, pause the queue: `agent-repld merge-queue pause -repository here`.
+  - A change is any file edit, commit, landing, or deploy.
+  - Pause before the first change, never after it, so no queue landing moves the main branch under this work.
+  - An `already_paused` refusal means the queue stands paused already, so go on and leave that pause as it stands.
+- A prompt that only reads or answers leaves the queue running.
+- Never resume the queue yourself, since agent-repl resumes it when the turn ends.
+- Never evict, move, or queue anything on it, and never ask about it.
 
 ### Land every complete change at once, without asking
 
@@ -23,13 +35,13 @@
   - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose deploy config versions nothing.
   - Exit 1 is a branch that did not merge cleanly; resolve it on the branch and land again.
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
-- Report the landing: the version, and that the queue stays hard-stopped.
+- Report the landing: the version, and that agent-repl lets the queue through when this turn ends.
 
 ### One agent does the work: no new workspace, no async merge, few subagents
 
 - Bypass queue mode exists so this one agent fixes things quickly itself, without orchestration.
 - This workspace never creates a one-shot, never marks one, never queues an async merge, and never creates a child workspace.
-  - A one-shot and an async merge land through the merge queue, which this mode hard-stops, so the work would wait there.
+  - A one-shot and an async merge land through the merge queue, which this workspace pauses whenever it works, so their landings would contend with this session's own.
   - A child is the orchestration the mode exists to skip.
   - The daemon refuses each one with `requester_bypassing_queue`, and its `detail` repeats this reminder.
 - Every rule that would dispatch one (a handed failure's fix, a todo row's fix, work a main workspace splits off) is carried out here, by this workspace itself.
@@ -41,7 +53,7 @@
 
 ### Tests
 
-- Run no gate before each landing: no gate runs while the queue is stopped, and each change lands on its own review.
+- Run no gate before each landing: no gate runs while the queue is paused, and each change lands on its own review.
   - Run only the tests a change adds or changes while writing it, and keep every test it touches compiling.
 - Bypass queue mode never leaves the main branch broken.
   - Once every change planned for this bypass session has landed, run the full suite once on the main branch: `agent-repld test run -every-suite`.

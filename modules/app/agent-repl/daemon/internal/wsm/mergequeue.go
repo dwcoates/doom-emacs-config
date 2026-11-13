@@ -784,16 +784,26 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 		default:
 			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating for %s, which names no repair", id, key, MergeAside(aside))
 		}
+		rank := returnRankOf(MergeAside(aside))
 		back, err := nextSeq(ctx, tx, key)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 1 WHERE repo_key = ? AND workspace_id = ?`,
-			int(returns), int(MergeAsideNone), back, key, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, aside = ?, seq = ?, source_front = 1, return_rank = ? WHERE repo_key = ? AND workspace_id = ?`,
+			int(returns), int(MergeAsideNone), back, rank, key, id); err != nil {
 			return err
 		}
-		query := `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`
-		args := []any{key, int(MergeQueued)}
+		// A RETURNER GOES AHEAD OF EVERY ENTRY OF A LOWER RANK, never ahead of
+		// one of its own or a higher rank (returnRankOf): a merge back from
+		// fixing its tests takes the place after the merge being worked on,
+		// ahead of the conflict returners and the waiting line, and returners
+		// of one rank keep the order they came back in (2026-11-13: a later
+		// conflict return was put ahead of a merge that had fixed its tests).
+		// The candidates are the waiting line and the earlier returners
+		// standing in it; an admitted entry that never stepped aside is a
+		// merge at work, never passed.
+		query := `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND workspace_id <> ? AND return_rank < ? AND (state = ? OR (state = ? AND return_rank > 0))`
+		args := []any{key, id, rank, int(MergeQueued), int(MergeAdmitted)}
 		if len(workedOn) > 0 {
 			query += ` AND workspace_id NOT IN (?` + strings.Repeat(`, ?`, len(workedOn)-1) + `)`
 			for _, ws := range workedOn {
@@ -1111,7 +1121,7 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 	}
 	fields := dlog.Context{"repo": string(key), "paused": pause != nil}
 	var at sql.NullInt64
-	var by, name sql.NullString
+	var by, name, pauser sql.NullString
 	hard := false
 	if pause != nil {
 		if err := pause.validate(); err != nil {
@@ -1122,6 +1132,7 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 		by = sql.NullString{String: pause.By.Kind.column(), Valid: true}
 		if pause.By.Kind == MergeQueuePauserWorkspace {
 			name = sql.NullString{String: pause.By.Name, Valid: true}
+			pauser = sql.NullString{String: string(pause.By.Workspace), Valid: true}
 		}
 		hard = pause.Hard
 		fields["by"] = pause.By.Kind.column()
@@ -1129,10 +1140,11 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_hard) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard) VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET paused = excluded.paused, paused_at = excluded.paused_at,
-			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name, paused_hard = excluded.paused_hard`,
-			key, pause != nil, at, by, name, hard)
+			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name,
+			   paused_by_workspace = excluded.paused_by_workspace, paused_hard = excluded.paused_hard`,
+			key, pause != nil, at, by, name, pauser, hard)
 		return err
 	})
 }
@@ -1160,10 +1172,10 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
 		var paused, hard bool
 		var at sql.NullInt64
-		var by, name sql.NullString
+		var by, name, pauser sql.NullString
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT paused, paused_at, paused_by, paused_by_name, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
-			Scan(&paused, &at, &by, &name, &hard)
+			`SELECT paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
+			Scan(&paused, &at, &by, &name, &pauser, &hard)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1175,10 +1187,37 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 			return &DecodeError{Table: "merge_queue_repos", Row: string(key), Field: "paused_by", Err: err}
 		}
 		pause = &MergeQueuePause{By: MergeQueuePauser{Kind: kind, Name: name.String}, Hard: hard}
+		if kind == MergeQueuePauserWorkspace {
+			pause.By.Workspace = WorkspaceID(pauser.String)
+		}
 		if at.Valid {
 			pause.At = fromNanos(at.Int64)
 		}
 		return nil
 	})
 	return pause, err
+}
+
+// returnRankDDL is the layout-130 addition: merge_queue.return_rank, the rank
+// a merge came back to the line with from repairing out of line
+// (ReturnRemediatedMerge). 0 is an entry that never stepped aside. It is
+// additive: the previous build names no such column and writes 0.
+const returnRankDDL = `
+ALTER TABLE merge_queue ADD COLUMN return_rank INTEGER NOT NULL DEFAULT 0;
+`
+
+// The ranks a returner comes back with: a merge back from fixing its tests
+// had already earned the head, so it outranks one back from resolving
+// conflicts, which outranks the waiting line (0).
+const (
+	returnRankConflicts = 1
+	returnRankTests     = 2
+)
+
+// returnRankOf is the rank a merge that stepped aside for REASON returns with.
+func returnRankOf(reason MergeAside) int {
+	if reason == MergeAsideTests {
+		return returnRankTests
+	}
+	return returnRankConflicts
 }

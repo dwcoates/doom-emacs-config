@@ -38,6 +38,8 @@ import (
 // only one touched. BY is recorded on the pause, with its instant.
 func (o *orchestrator) Pause(ctx context.Context, scope *RepositoryScope, by Pauser) error {
 	const op = "daemon.merge.pause"
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
 	pause, err := o.pauseRecord(ctx, op, by, false)
 	if err != nil {
 		return err
@@ -47,7 +49,44 @@ func (o *orchestrator) Pause(ctx context.Context, scope *RepositoryScope, by Pau
 
 // Unpause resumes admitting merges, scoped exactly as Pause is.
 func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) error {
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
 	return o.setPaused(ctx, scope, nil)
+}
+
+// ResumeOwnPause resumes the ONE queue SCOPE names when the pause standing on
+// it is workspace WS's own, and answers whether it resumed it. A queue that
+// runs, or stands paused by the user, by another workspace, or by a pause
+// written before its pauser's id was kept, is left as it stands.
+func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error) {
+	const op = "daemon.merge.resume_own_pause"
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
+	repo, err := o.queueKeyOf(ctx, op, "a resume of a workspace's own pause", scope)
+	if err != nil {
+		return false, err
+	}
+	pause, err := o.deps.DB.MergeQueuePause(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read whose pause stands on the queue, so it is left as it stands", dlog.Context{
+			"repo": string(repo), "workspace": string(ws), "error": err.Error()})
+		return false, fmt.Errorf("merge: read the pause of %s: %w", repo, err)
+	}
+	if pause == nil || pause.By.Kind != wsm.MergeQueuePauserWorkspace || pause.By.Workspace != ws {
+		fields := dlog.Context{"repo": string(repo), "workspace": string(ws), "paused": pause != nil}
+		if pause != nil {
+			fields["by_kind"] = int(pause.By.Kind)
+			fields["by_name"] = pause.By.Name
+			fields["by_workspace"] = string(pause.By.Workspace)
+		}
+		o.deps.Log.Global().Info(op, "the queue stands no pause of the workspace's own, so it is left as it stands", fields)
+		return false, nil
+	}
+	if err := o.setPaused(ctx, &scope, nil); err != nil {
+		return false, err
+	}
+	o.deps.Log.Global().Info(op, "resumed the queue the workspace had paused", dlog.Context{"repo": string(repo), "workspace": string(ws), "hard": pause.Hard})
+	return true, nil
 }
 
 // pauseRecord is the record a pause BY writes now: who asked, by the asking
@@ -64,7 +103,7 @@ func (o *orchestrator) pauseRecord(ctx context.Context, op string, by Pauser, ha
 			"asker": string(by.Asker), "error": err.Error()})
 		return nil, fmt.Errorf("merge: read the pausing workspace %s: %w", by.Asker, err)
 	}
-	pause.By = wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: ws.Name}
+	pause.By = wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: ws.Name, Workspace: by.Asker}
 	return pause, nil
 }
 
@@ -133,6 +172,8 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 // Every turn is attempted; the failures are answered joined.
 func (o *orchestrator) HardStop(ctx context.Context, scope *RepositoryScope, by Pauser) error {
 	const op = "daemon.merge.hard_stop"
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
 	repos, err := o.pauseScope(ctx, op, scope, true)
 	if err != nil {
 		return err

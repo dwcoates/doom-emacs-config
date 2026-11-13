@@ -278,7 +278,8 @@ func (x *TopbarView) GetRemoteControl() *TopbarRemoteControl {
 // whatever the user last set otherwise. A workspace whose mode is on keeps its
 // shim up between keep-alives, until the idle sweep parks it past its cutoff.
 // THE QUEUE-BYPASS CHIP: whether this workspace lands its changes straight on
-// its repository's main branch with the repository's merge queue hard-stopped.
+// its repository's main branch, with the repository's merge queue paused while
+// it works and let through at the end of each of its turns.
 // While it is on, the workspace runs its BYPASS conversation, whose system
 // prompt carries the bypass directive in place of the merge-queue rules; while
 // it is off, its ordinary conversation. Each keeps its own transcript and its
@@ -401,8 +402,8 @@ func (*TopbarQueueBypass_Off) isTopbarQueueBypass_Mode() {}
 
 func (*TopbarQueueBypass_HeldElsewhere) isTopbarQueueBypass_Mode() {}
 
-// This workspace holds the mode: its repository's queue is hard-stopped, and
-// the chip is drawn lit.
+// This workspace holds the mode: its repository's queue is paused while the
+// workspace works and runs between its turns, and the chip is drawn lit.
 type TopbarQueueBypassOn struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

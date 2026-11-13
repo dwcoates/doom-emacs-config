@@ -382,6 +382,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
 	subsectionUnfolds := workspace.NewSubsectionUnfolds(verbsRef.unfoldSubsectionForWork, log)
+	bypassTurnEnds := workspace.NewBypassTurnEnds(verbsRef.letQueueThroughAfterBypassTurn, log)
 	// A CREATE HELD FOR ITS REQUESTER'S TURN resumes on these latches, which
 	// only the turn-end and close edges release.
 	turnEnds := turnlatch.New()
@@ -394,7 +395,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Clock:  clock.System{},
 		Log:    p.Surfaces,
 	})
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, turnEnds, gathers.Edges())
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, bypassTurnEnds, turnEnds, gathers.Edges())
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -1949,7 +1950,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { pullRequests.Run(ctx, handler) },
 				func(ctx context.Context) { mainSync.Run(ctx, handler) },
 				selfCloses.Run,
-				subsectionUnfolds.Run)
+				subsectionUnfolds.Run,
+				bypassTurnEnds.Run)
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),

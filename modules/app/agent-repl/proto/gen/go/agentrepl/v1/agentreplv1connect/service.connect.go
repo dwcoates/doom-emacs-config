@@ -837,7 +837,8 @@ type AgentReplClient interface {
 	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
 	// Take or release the workspace's queue bypass mode: a personal-account
 	// workspace lands straight on its repository's main branch, with the
-	// repository's merge queue hard-stopped while the mode is held. The topbar's
+	// repository's merge queue paused while the holder works and let through
+	// at the end of each of its turns. The topbar's
 	// queue-bypass chip sends `toggle`.
 	UpdateQueueBypassMode(context.Context, *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
@@ -3143,7 +3144,8 @@ type AgentReplHandler interface {
 	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
 	// Take or release the workspace's queue bypass mode: a personal-account
 	// workspace lands straight on its repository's main branch, with the
-	// repository's merge queue hard-stopped while the mode is held. The topbar's
+	// repository's merge queue paused while the holder works and let through
+	// at the end of each of its turns. The topbar's
 	// queue-bypass chip sends `toggle`.
 	UpdateQueueBypassMode(context.Context, *connect.Request[v1.UpdateQueueBypassModeRequest]) (*connect.Response[v1.UpdateQueueBypassModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
