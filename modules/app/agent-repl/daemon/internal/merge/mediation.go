@@ -135,12 +135,20 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		return
 	}
 	queues, err := o.mediatedQueues(ctx, opMediation)
+	if cutUnder(ctx, err) {
+		o.deps.Log.Global().Info(opMediation, "the mediations were not run: this daemon is stopping; the daemon that serves the queues next runs them", dlog.Context{"cause": err.Error()})
+		return
+	}
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not list the repositories whose mediations are owed", dlog.Context{"error": err.Error()})
 		return
 	}
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
+		if cutUnder(ctx, err) {
+			o.deps.Log.Global().Info(opMediation, "the mediations were not run: this daemon is stopping; the daemon that serves the queues next runs them", dlog.Context{"repo": string(q.key), "cause": err.Error()})
+			return
+		}
 		if err != nil {
 			o.deps.Log.Global().Error(opMediation, "could not read a repository's owed mediation", dlog.Context{"repo": string(q.key), "error": err.Error()})
 			continue

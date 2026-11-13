@@ -263,3 +263,54 @@ func TestTheRosterIsToldTheMediationTheQueueWaitsOn(t *testing.T) {
 		})
 	}
 }
+
+func TestMediateOnAStoppingDaemon(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		cancelled bool
+		wantLevel string
+	}{
+		{name: "a registry read the daemon's stop cut is withdrawn", cancelled: true, wantLevel: "info",
+			arrange: func(h *harness) { h.db.reposErr = context.Canceled }},
+		{name: "a repository's resolve the daemon's stop cut is withdrawn, not passed over", cancelled: true, wantLevel: "info",
+			arrange: func(h *harness) { h.git.commonDirErr = context.Canceled }},
+		{name: "a mediation read the daemon's stop cut is withdrawn", cancelled: true, wantLevel: "info",
+			arrange: func(h *harness) { h.db.mediationErr = context.Canceled }},
+		{name: "a registry read that fails while the daemon runs is an error", wantLevel: "error",
+			arrange: func(h *harness) { h.db.reposErr = errors.New("disk gone") }},
+		{name: "a mediation read that fails while the daemon runs is an error", wantLevel: "error",
+			arrange: func(h *harness) { h.db.mediationErr = errors.New("disk gone") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			owe(t, h)
+			tt.arrange(h)
+			ctx, cancel := context.WithCancel(context.Background())
+			if tt.cancelled {
+				cancel()
+			} else {
+				defer cancel()
+			}
+
+			// Act
+			h.o.Mediate(ctx)
+
+			// Assert
+			if len(h.queue.submissions) != 0 {
+				t.Fatalf("submitted %d prompts, want none", len(h.queue.submissions))
+			}
+			_, errored := h.recordFor("error", opMediation)
+			_, withdrawn := h.recordFor("info", opMediation)
+			_, warned := h.recordFor("warn", opMediation)
+			if tt.wantLevel == "info" && (errored || warned || !withdrawn) {
+				t.Fatalf("error recorded %v, withdrawal recorded %v; want only the withdrawal at INFO", errored, withdrawn)
+			}
+			if tt.wantLevel == "error" && !errored {
+				t.Fatal("no ERROR record of the failed read")
+			}
+		})
+	}
+}

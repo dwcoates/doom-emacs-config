@@ -608,6 +608,11 @@ func (o *orchestrator) registeredQueues(ctx context.Context, op string) ([]regis
 	out := make([]registeredQueue, 0, len(repositories))
 	for _, repository := range repositories {
 		key, err := o.repoKeyFor(ctx, repository.Dir)
+		if cutUnder(ctx, err) {
+			// THE CALLER'S CONTEXT ENDED (the daemon stopping): the
+			// repository is not unresolvable, so the caller is told.
+			return nil, err
+		}
 		if err != nil {
 			o.deps.Log.Global().Warn(op, "could not resolve a registered repository's queue; it is passed over", dlog.Context{
 				"repository": repository.Dir, "error": err.Error()})
