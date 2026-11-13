@@ -317,6 +317,35 @@ func newFakeDB() *fakeDB {
 	}
 }
 
+func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mediations[repo] = &wsm.Mediation{OwedAt: at, Version: version}
+	return nil
+}
+
+func (f *fakeDB) MarkMediationPrompted(_ context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.mediations[repo]
+	if m == nil || !m.OwedAt.Equal(owed) {
+		return false, nil
+	}
+	m.PromptedAt, m.Turn = &at, turn
+	return true, nil
+}
+
+func (f *fakeDB) ReleaseMediation(_ context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.mediations[repo]
+	if m == nil || !m.OwedAt.Equal(owed) {
+		return false, nil
+	}
+	delete(f.mediations, repo)
+	return true, nil
+}
+
 func (f *fakeDB) MediationOf(_ context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2753,6 +2782,11 @@ type harness struct {
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
+	// mediatorsMade names every mediator CreateMediator made, which
+	// createMediatorErr fails, in the repository mediatorRepo.
+	mediatorsMade     []string
+	createMediatorErr error
+	mediatorRepo      wsm.RepoID
 	// standing is the rollout controller's queue standing: serving, and
 	// every workspace served, unless a test says otherwise.
 	standing *fakeStanding
@@ -3300,8 +3334,21 @@ func (h *harness) deps() Deps {
 		},
 		Rollout:  h.rollout,
 		Standing: h.standing,
-		Now:      h.clock,
-		Log:      h.logs,
+		CreateMediator: func(_ context.Context, repoDir, name string) (wsm.Workspace, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.mediatorsMade = append(h.mediatorsMade, name)
+			if h.createMediatorErr != nil {
+				return wsm.Workspace{}, h.createMediatorErr
+			}
+			ws := wsm.Workspace{ID: ids.WorkspaceID("ws-mediator"), Name: name, Repo: h.mediatorRepo}
+			h.db.mu.Lock()
+			h.db.workspaces[ws.ID] = ws
+			h.db.mu.Unlock()
+			return ws, nil
+		},
+		Now: h.clock,
+		Log: h.logs,
 	}
 }
 

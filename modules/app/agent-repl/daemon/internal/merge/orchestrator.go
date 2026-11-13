@@ -89,6 +89,9 @@ type orchestrator struct {
 	// offQueueLanded is which merges off their queues have work on master
 	// already, judged off every lock (offqueuelanded.go).
 	offQueueLanded offQueueLanded
+	// mediating marks the repositories whose mediation round runs now
+	// (Mediate): one round per repository at a time. Guarded by mu.
+	mediating map[wsm.RepoKey]bool
 	// pauseWrites serializes every change of a queue's pause (Pause, HardStop,
 	// Unpause, ResumeOwnPause), so a resume that first reads whose pause
 	// stands never resumes a pause written after its read.
@@ -335,6 +338,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		waitingPass:        map[wsm.RepoKey]bool{},
 		waitingAgain:       map[wsm.RepoKey]bool{},
 		repoLocks:          map[wsm.RepoKey]*repoLock{},
+		mediating:          map[wsm.RepoKey]bool{},
 		kicked:             map[wsm.RepoKey]bool{},
 		syncing:            map[wsm.RepoKey]bool{},
 		displaces:          map[ids.WorkspaceID]bool{},
@@ -432,6 +436,7 @@ func (d Deps) validate() error {
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.Standing != nil, "Standing")
+	check(d.CreateMediator != nil, "CreateMediator")
 	check(d.QueueEvents != nil, "QueueEvents")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")

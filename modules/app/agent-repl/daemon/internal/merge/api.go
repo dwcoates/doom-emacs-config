@@ -258,6 +258,15 @@ type Orchestrator interface {
 	// under those writes, and merged_at, closed and the lease release were
 	// lost to failed transactions.
 	Drain(ctx context.Context)
+	// OweMediations records that the deploy that started AT owes a
+	// mediation in every repository with a deploy mediator (mediation.go).
+	OweMediations(ctx context.Context, at time.Time) error
+	// Mediate runs a mediation round for every mediation owed: a deploy
+	// finished, or a successor took over.
+	Mediate(ctx context.Context)
+	// DecideMediation is mediator WS's decision on the deploy its repository
+	// owes a mediation of.
+	DecideMediation(ctx context.Context, ws ids.WorkspaceID, decision MediationDecision, summary string) error
 	// FollowStanding holds every queue still while this daemon may not
 	// advance it (a handover in flight, or a successor not up yet), and
 	// takes the queues on again when it may, until ctx ends.
@@ -718,6 +727,9 @@ type Deps struct {
 	// Standing is whether this daemon may advance its queues across a
 	// handover, and which workspaces it serves (rollout.Controller).
 	Standing Standing
+	// CreateMediator makes the hidden deploy-mediator workspace NAME of the
+	// repository at REPODIR (workspace.Verbs.CreateMediator).
+	CreateMediator func(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time

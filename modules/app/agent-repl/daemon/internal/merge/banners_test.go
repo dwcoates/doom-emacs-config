@@ -495,3 +495,13 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)
 	}
 }
+
+// bannerRaised reports whether the harness raised a banner of KIND.
+func (h *harness) bannerRaised(kind string) bool {
+	for _, b := range h.banners.seen() {
+		if b.kind == kind {
+			return true
+		}
+	}
+	return false
+}
