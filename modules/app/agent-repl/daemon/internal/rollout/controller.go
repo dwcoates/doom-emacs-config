@@ -234,8 +234,14 @@ type entry struct {
 // success (merge gate, 2026-11-12,
 // TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure).
 type adoptionRun struct {
-	// done closes when the run completes.
+	// done closes when the run completes: at the workspace's ownership, or
+	// at the run's failure (adopt).
 	done chan struct{}
+	// ended closes once the run has returned, its tail (the workspace's
+	// merges, faults, carried replacements, staleness and daemon.addr) done
+	// too. Nothing a participant waits on: a caller that must see the whole
+	// adoption's effects joins it.
+	ended chan struct{}
 	// failed carries the run's failure to its waiters, so a caller that did
 	// not run the adoption still learns why it did not happen. It is written
 	// once, before done closes, and never again.
@@ -244,7 +250,7 @@ type adoptionRun struct {
 
 // newAdoptionRun opens a run whose completion has not settled.
 func newAdoptionRun() *adoptionRun {
-	return &adoptionRun{done: make(chan struct{})}
+	return &adoptionRun{done: make(chan struct{}), ended: make(chan struct{})}
 }
 
 // settled reports whether the run has completed.

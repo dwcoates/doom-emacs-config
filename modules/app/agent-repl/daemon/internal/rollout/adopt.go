@@ -282,8 +282,10 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 		c.unlock()
 		return nil
 	}
+	var run *adoptionRun
 	if armed {
 		e.beginAdoption()
+		run = e.run
 	}
 	c.unlock()
 	err := c.adopt(context.WithoutCancel(ctx), ws, source)
@@ -295,6 +297,7 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 			e.adopting = false
 		}
 		c.unlock()
+		close(run.ended)
 	}
 	return err
 }

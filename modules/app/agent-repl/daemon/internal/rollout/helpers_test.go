@@ -1753,3 +1753,20 @@ var (
 // deployManifest is the manifest a test deploy's handover wrote, twenty
 // seconds before the harness's instant.
 var deployManifest = Manifest{Deploy: true, WrittenAt: instant.Add(-20 * time.Second), DeployStartedAt: deployStart}
+
+// awaitAdoptionEnded waits until WS's current adoption run has returned, its
+// tail included (adoptionRun.ended).
+func (h *harness) awaitAdoptionEnded(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	h.c.mu.Lock()
+	e, ok := h.c.rendezvous[ws]
+	var ended chan struct{}
+	if ok && e.run != nil {
+		ended = e.run.ended
+	}
+	h.c.unlock()
+	if ended == nil {
+		t.Fatalf("no adoption run is armed for %s", ws)
+	}
+	<-ended
+}

@@ -623,6 +623,8 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	if err := h.c.AdoptHost(context.Background(), second); err != nil {
 		t.Fatalf("AdoptHost(second): %v", err)
 	}
+	// The call is answered at ownership; daemon.addr is the adoption's tail.
+	h.awaitAdoptionEnded(t, second)
 	h.mu.Lock()
 	afterSecond := h.addrWrites
 	h.mu.Unlock()
@@ -1315,10 +1317,12 @@ func TestAWorkspaceNeverHandedOverIsOwnedOnceTheSuccessorAdvertises(t *testing.T
 	h := newHarness(t)
 	first, second := joinedWithOneOfTwo(t, h)
 
-	// Act: the one handed-over workspace is adopted, which advertises.
+	// Act: the one handed-over workspace is adopted, which advertises (the
+	// adoption's tail, after the call is answered at ownership).
 	if err := h.c.AdoptHost(context.Background(), first); err != nil {
 		t.Fatalf("AdoptHost: %v", err)
 	}
+	h.awaitAdoptionEnded(t, first)
 
 	// Assert
 	if standing := h.c.Standing(second); standing != StandingOwned {
@@ -1429,6 +1433,9 @@ func TestTheSuccessorBouncesAnAdoptedShimOnAnOlderBuild(t *testing.T) {
 	if err := h.c.AdoptHost(context.Background(), stale); err != nil {
 		t.Fatalf("AdoptHost: %v", err)
 	}
+	// The call is answered at ownership; the staleness judgement is the
+	// adoption's tail.
+	h.awaitAdoptionEnded(t, stale)
 	h.registry.wait()
 
 	// Assert
