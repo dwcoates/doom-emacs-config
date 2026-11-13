@@ -65,17 +65,18 @@ export function inline(escaped: string): string {
     return `\u0000${codeSpans.length - 1}\u0000`;
   });
   // Links: [text](url) — a web URL or a file link (path or bare file name).
-  // A code span in the link text is restored here as plain code: it is
-  // already inside an anchor, so it must not become one of its own below.
+  // A code span in the link text is restored here as plain text: a link is
+  // never drawn as code, and it is already inside an anchor, so it must not
+  // become one of its own below.
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole: string, text: string, url: string) => {
-    if (isWebHref(url)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
+    if (isWebHref(url)) return anchorHtml(url, null, linkTextWithoutCode(text, codeSpans));
     if (!isFileLinkHref(url)) return whole;
     // eslint-disable-next-line no-control-regex -- the code-span sentinel, as below
     const span = /^\u0000(\d+)\u0000$/.exec(text);
     const shown = span === null ? text : codeSpans[Number(span[1])];
-    if (!isPathLinkText(shown)) return anchorHtml(url, null, restoreCodeSpans(text, codeSpans, false));
+    if (!isPathLinkText(shown)) return anchorHtml(url, null, linkTextWithoutCode(text, codeSpans));
     const label = fileLinkLabel(shown);
-    return anchorHtml(url, shown, span === null ? label : `<code>${label}</code>`);
+    return anchorHtml(url, shown, label);
   });
   out = autolinkWebUrls(out);
   // Bold before italic so ** is not consumed as two *.
@@ -98,17 +99,22 @@ export function setInlineMarkdown(el: HTMLElement, text: string): void {
 
 /**
  * Put the code spans `inline` lifted out back into TEXT. With LINK, a span
- * that is wholly a `~/` path (`codeSpanFileHref`) is wrapped in a file-link
- * anchor, as the markdown-it pipeline's `code-span-file-link` rule does.
+ * that is wholly a `~/` path (`codeSpanFileHref`) becomes a file-link
+ * anchor drawn as plain text, as the markdown-it pipeline's `code-span-file-link` rule does.
  */
 function restoreCodeSpans(text: string, codeSpans: readonly string[], link: boolean): string {
   // eslint-disable-next-line no-control-regex -- see `inline`
   return text.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => {
     const code = codeSpans[Number(i)];
-    const html = `<code>${code}</code>`;
     const href = link ? codeSpanFileHref(code) : null;
-    return href === null ? html : anchorHtml(href, href, `<code>${fileLinkLabel(href)}</code>`);
+    return href === null ? `<code>${code}</code>` : anchorHtml(href, href, fileLinkLabel(href));
   });
+}
+
+/** TEXT, a link's text, with the code spans `inline` lifted out put back as plain text: a link is never drawn as code. */
+function linkTextWithoutCode(text: string, codeSpans: readonly string[]): string {
+  // eslint-disable-next-line no-control-regex -- see `inline`
+  return text.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => codeSpans[Number(i)]);
 }
 
 /** The four entities `escapeHtml` writes, each standing for one character. */
@@ -236,8 +242,8 @@ md.core.ruler.after("linkify", "file-linkify", (state) => {
 });
 
 // A CODE SPAN THAT IS WHOLLY A `~/` PATH IS A FILE LINK (`codeSpanFileHref`):
-// the span keeps its code styling inside an anchor whose href is the path. A
-// span already inside a link stays plain code, since anchors cannot nest.
+// the span becomes the text of an anchor whose href is the path. A link is
+// never drawn as code, so a code span inside any link also becomes plain text.
 md.core.ruler.after("file-linkify", "code-span-file-link", (state) => {
   for (const block of state.tokens) {
     if (!block.children) continue;
@@ -245,12 +251,15 @@ md.core.ruler.after("file-linkify", "code-span-file-link", (state) => {
     block.children = block.children.flatMap((token) => {
       if (token.type === "link_open") linkDepth++;
       if (token.type === "link_close") linkDepth--;
-      if (token.type !== "code_inline" || linkDepth > 0) return [token];
+      if (token.type !== "code_inline") return [token];
+      const text = new state.Token("text", "", 0);
+      text.content = token.content;
+      if (linkDepth > 0) return [text];
       const href = codeSpanFileHref(token.content);
       if (href === null) return [token];
       const open = new state.Token("link_open", "a", 1);
       open.attrSet("href", href);
-      return [open, token, new state.Token("link_close", "a", -1)];
+      return [open, text, new state.Token("link_close", "a", -1)];
     });
   }
   return true;
