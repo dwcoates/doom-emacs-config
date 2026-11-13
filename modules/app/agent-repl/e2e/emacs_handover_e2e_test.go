@@ -16,6 +16,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,7 @@ import (
 
 // daemonStopBound is how long the LINK may take to go down after the daemon
 // ACCEPTED an immediate shutdown. It is a different phase from every bound
-// in `emacs_test.go`: nothing about Emacs is being waited on, the wait is
+// in `kit/stack/emacs.go`: nothing about Emacs is being waited on, the wait is
 // the daemon flushing its writes and exiting, the kernel closing the socket,
 // Emacs's own socket seeing EOF and its sentinel running.
 //
@@ -113,17 +114,17 @@ const emHODaemonPIDForm = `(if (and agent-repl--frontend-daemon-process
 // bound is `daemonLinkBound`, which is the layer's named bound for "a daemon
 // Emacs launched became reachable" and is the same wait `EnsureDaemon`
 // makes.
-func emHOAwaitLinkUp(t *testing.T, e *Emacs, what string) {
+func emHOAwaitLinkUp(t *testing.T, e *stack.Emacs, what string) {
 	t.Helper()
-	e.AwaitEvalFor(daemonLinkBound, what, `(and (agent-repl-link-up-p) t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.AwaitEvalFor(stack.DaemonLinkBound, what, `(and (agent-repl-link-up-p) t)`,
+		func(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) })
 }
 
 // emHOAwaitNewDaemon waits until the launcher holds a LIVE daemon process
 // whose pid differs from BEFORE.
-func emHOAwaitNewDaemon(t *testing.T, e *Emacs, before int) {
+func emHOAwaitNewDaemon(t *testing.T, e *stack.Emacs, before int) {
 	t.Helper()
-	e.AwaitEvalFor(daemonLinkBound, "a freshly spawned daemon process", emHODaemonPIDForm,
+	e.AwaitEvalFor(stack.DaemonLinkBound, "a freshly spawned daemon process", emHODaemonPIDForm,
 		func(raw json.RawMessage) bool {
 			var pid int
 			return json.Unmarshal(raw, &pid) == nil && pid > 0 && pid != before
@@ -142,12 +143,12 @@ func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	// Arrange: two registered workspaces, so the assertion is about an
 	// ORDER and not merely about a single row surviving.
 	w, e := emGHIWorld(t)
-	first, firstDir := emGHIRegister(t, e, w.Emacs.box, "repo-rehydrate-one")
-	second, _ := emGHIRegister(t, e, w.Emacs.box, "repo-rehydrate-two")
+	first, firstDir := emGHIRegister(t, e, w.Emacs.Box, "repo-rehydrate-one")
+	second, _ := emGHIRegister(t, e, w.Emacs.Box, "repo-rehydrate-two")
 	emGHISelect(t, e, firstDir, first)
 	before := e.AwaitEval("the tab order to carry both workspaces", emHOTabOrderForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 2 })
-	wantOrder := decodeStrings(before)
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == 2 })
+	wantOrder := stack.DecodeStrings(before)
 
 	pid := e.EvalInt(emHODaemonPIDForm)
 	if pid <= 0 {
@@ -162,8 +163,8 @@ func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	emHOAwaitLinkUp(t, e, "the link to come back on the new daemon")
 
 	// Assert: the tab order is rebuilt from the roster, identically.
-	got := decodeStrings(e.AwaitEval("the tab order to rehydrate", emHOTabOrderForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(wantOrder) }))
+	got := stack.DecodeStrings(e.AwaitEval("the tab order to rehydrate", emHOTabOrderForm,
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == len(wantOrder) }))
 	for i := range wantOrder {
 		if got[i] != wantOrder[i] {
 			t.Fatalf("the rehydrated tab order is %v, want %v: the roster is the only order", got, wantOrder)
@@ -174,7 +175,7 @@ func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 	// bar that drifted from it would be a paint the roster never asked for.
 	names := e.AwaitEval("the tab bar to match the rehydrated order", emHOTabBarNamesForm,
 		func(raw json.RawMessage) bool {
-			drawn := decodeStrings(raw)
+			drawn := stack.DecodeStrings(raw)
 			for _, want := range wantOrder {
 				found := false
 				for _, name := range drawn {
@@ -188,7 +189,7 @@ func testEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 			}
 			return true
 		})
-	if len(decodeStrings(names)) == 0 {
+	if len(stack.DecodeStrings(names)) == 0 {
 		t.Fatalf("the tab bar lists no tabs after rehydration, want %v", wantOrder)
 	}
 
@@ -269,7 +270,7 @@ const emHO40Instrument = `(progn
 func emHO40SectionLabelForm(dir string) string {
 	return `(or (cl-loop for s in (agent-repl-verbs--repo-sections)
                          when (member (plist-get (agent-repl-verbs--section-ref s) :dir)
-                                      (list ` + elispString(dir) + ` (concat ` + elispString(dir) + ` "/.git")))
+                                      (list ` + stack.ElispString(dir) + ` (concat ` + stack.ElispString(dir) + ` "/.git")))
                          return (agent-repl-verbs--section-label s))
                "")`
 }
@@ -277,7 +278,7 @@ func emHO40SectionLabelForm(dir string) string {
 // emHO40AwaitSectionLabel waits until the roster carries DIR's repository
 // section and answers its label — the string the create command's repository
 // picker is answered with.
-func emHO40AwaitSectionLabel(t *testing.T, e *Emacs, dir string) string {
+func emHO40AwaitSectionLabel(t *testing.T, e *stack.Emacs, dir string) string {
 	t.Helper()
 	raw := e.AwaitEval("the roster to carry the daemon's own repository section",
 		emHO40SectionLabelForm(dir),
@@ -295,15 +296,15 @@ func emHO40AwaitSectionLabel(t *testing.T, e *Emacs, dir string) string {
 // emHO40Create runs the ORDINARY create command with only its READERS
 // stubbed, the way scenario 44 stubs its confirmation reader: the command's
 // own call sites are what run, and nothing reaches past the command.
-func emHO40Create(t *testing.T, e *Emacs, label string) {
+func emHO40Create(t *testing.T, e *stack.Emacs, label string) {
 	t.Helper()
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
                         (lambda (prompt &rest _)
-                          (if (string-prefix-p "Model" prompt) "" ` + elispString(label) + `)))
+                          (if (string-prefix-p "Model" prompt) "" ` + stack.ElispString(label) + `)))
                        ((symbol-function 'read-string)
                         (lambda (prompt &rest _)
-                          (cond ((string-prefix-p "Initial prompt" prompt) ` + elispString(emHO40Prompt) + `)
-                                ((string-prefix-p "Name" prompt) ` + elispString(emHO40TriggerName) + `)
+                          (cond ((string-prefix-p "Initial prompt" prompt) ` + stack.ElispString(emHO40Prompt) + `)
+                                ((string-prefix-p "Name" prompt) ` + stack.ElispString(emHO40TriggerName) + `)
                                 (t "")))))
                  (agent-repl-create-workspace-in-repository)
                  t)`)
@@ -343,13 +344,13 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// world whose Emacs — and therefore whose daemon — is given a merge gate
 	// that passes, so a commit landing on its main branch runs the deploy
 	// hook, which rolls the runtime out.
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	selfRepo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "self-repo"))
 	selfRepo.DeploysAsAgentRepl()
 	gate := harness.NewTestAllScript(t, selfRepo.Dir)
 	gate.SetExitCode(0)
 	gate.SetStdout("e2e: passed in 1s\n")
-	w := NewEmacsWorld(t, box, WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+	w := stack.NewEmacsWorld(t, box, stack.WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
 	// Arrange: the landing's ONE DEPLOY finds the daemon stale. The world's
 	// fake build stages what runs; staged with a daemon binary that is not
 	// the running one, the deploy hands the daemon over blue-green, and that
@@ -371,20 +372,20 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// Arrange: the daemon's own checkout is registered too, so the roster
 	// carries the repository section the create command picks from.
 	before := e.EvalStrings(emGHIWorkspaceNamesForm)
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(selfRepo.Dir) + `)`)
+	e.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(selfRepo.Dir) + `)`)
 	label := emHO40AwaitSectionLabel(t, e, selfRepo.Dir)
 	e.AwaitEval("the daemon's own checkout to appear in Emacs's registry",
 		emGHIWorkspaceNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == len(before)+1 })
 
 	// Act: create the trigger workspace on that repository, through the
 	// ordinary command, and let its turn conclude — a merge is enqueued from
 	// idle, never mid-turn.
 	beforeCreate := e.EvalStrings(emGHIWorkspaceNamesForm)
 	emHO40Create(t, e, label)
-	after := decodeStrings(e.AwaitEval("the trigger workspace to appear in Emacs's registry",
+	after := stack.DecodeStrings(e.AwaitEval("the trigger workspace to appear in Emacs's registry",
 		emGHIWorkspaceNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(beforeCreate)+1 }))
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == len(beforeCreate)+1 }))
 	trigger := emHO40AddedName(t, beforeCreate, after)
 	// THE TURN'S END IS THE DAEMON'S RECORD, NOT THE ROW'S DRAWN ARM: a
 	// workspace whose tab is still opening draws `inactive` over every other
@@ -392,10 +393,10 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// about (under a loaded run it outlasted the bound while the turn had long
 	// ended).
 	e.AwaitEval("the trigger workspace's opening turn to conclude",
-		`(and (agent-repl-roster-last-turn-ended-ms `+elispString(trigger)+`) t)`,
+		`(and (agent-repl-roster-last-turn-ended-ms `+stack.ElispString(trigger)+`) t)`,
 		decodeBool)
 
-	triggerDir := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + elispString(trigger) + `) :dir) "")`)
+	triggerDir := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + stack.ElispString(trigger) + `) :dir) "")`)
 	if triggerDir == "" {
 		t.Fatalf("the trigger workspace %q holds no worktree directory, want the daemon-minted one", trigger)
 	}
@@ -406,7 +407,7 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// announces.
 	sha := selfRepo.CommitIn(triggerDir, emHO40SelfMergeTriggerPath, "trigger\n")
 	selfRepo.SetPaths(sha, emHO40SelfMergeTriggerPath)
-	e.Eval(`(agent-repl-finish-workspace ` + elispString(trigger) + `)`)
+	e.Eval(`(agent-repl-finish-workspace ` + stack.ElispString(trigger) + `)`)
 
 	// Assert: a successor was ATTACHED, from the announced address. This is
 	// the half no plain bounce can produce — a `shutdown_announced` without
@@ -447,7 +448,7 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// that only half happened.
 	e.AwaitEvalFor(handoverPromoteBound, "the successor slot to be released by the promotion",
 		`(if agent-repl-link--successor nil t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		func(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) })
 	if got := e.EvalString(`(or (agent-repl-connect-connection-address agent-repl-link--primary) "")`); got != successor {
 		t.Fatalf("the primary link is at %q after the handover, want the successor's %q", got, successor)
 	}
@@ -458,12 +459,12 @@ func testEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	emHOAwaitLinkUp(t, e, "the link to be up on the promoted successor")
 	e.AwaitEvalFor(handoverPromoteBound, "no reconnect loop to be armed after the handover",
 		`(if (timerp agent-repl-link--reconnect-timer) nil t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		func(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) })
 
 	// Assert: the headless workspace TRANSFERRED — it is still Emacs's, on
 	// the promoted connection, which is what "transfers at freeness" means
 	// for a workspace with zero rendezvous participants.
-	if got := e.EvalString(`(or (agent-repl-connect-connection-address (agent-repl-host-conn ` + elispString(headless) + `)) "")`); got != successor {
+	if got := e.EvalString(`(or (agent-repl-connect-connection-address (agent-repl-host-conn ` + stack.ElispString(headless) + `)) "")`); got != successor {
 		t.Fatalf("the headless workspace %q is held on %q after the handover, want the successor's %q", headless, got, successor)
 	}
 }
@@ -502,8 +503,8 @@ func testEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	// walk order is read off Emacs rather than assumed, and the arrangement
 	// fails loudly if it is not the two-workspace shape this test needs.
 	w, e := emGHIWorld(t)
-	one, oneDir := emGHIRegister(t, e, w.Emacs.box, "repo-selection-one")
-	two, twoDir := emGHIRegister(t, e, w.Emacs.box, "repo-selection-two")
+	one, oneDir := emGHIRegister(t, e, w.Emacs.Box, "repo-selection-one")
+	two, twoDir := emGHIRegister(t, e, w.Emacs.Box, "repo-selection-two")
 	// The walk carries every live workspace, including the ones with no
 	// project dir (`main`, `none`), which link-up skips; only the two
 	// registered here can be re-registered, so only their relative order
@@ -538,13 +539,13 @@ func testEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	e.Eval(`(agent-repl-frontend-daemon-stop)`)
 	e.AwaitEvalFor(daemonStopBound, "the link to go down when the daemon exits",
 		`(if (agent-repl-link-up-p) nil t)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		func(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) })
 	e.Eval(`(agent-repl-frontend-daemon-ensure)`)
 	emHOAwaitNewDaemon(t, e, pid)
 	emHOAwaitLinkUp(t, e, "the link to come back on the new daemon")
 	e.AwaitEval("both workspaces to be re-registered on the fresh daemon",
 		emGHIWorkspaceNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 2 })
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == 2 })
 
 	// Assert: the selection is the user's, still. It is read AFTER the
 	// re-registration has settled, which is the window the defect lived in.
@@ -575,11 +576,11 @@ func testEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
 	// other workspace's magit buffer.
 	// The webview buffer's name is Emacs's to compose: a workspace name is
 	// sanitized into it (a main checkout's "main (repo)" among them).
-	webview := decodeString(e.Eval(`(agent-repl--frontend-webview-buffer-name ` + elispString(first) + `)`))
+	webview := decodeString(e.Eval(`(agent-repl--frontend-webview-buffer-name ` + stack.ElispString(first) + `)`))
 	e.AwaitEval("the panel's webview to still be the buffer on screen",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			for _, name := range decodeStrings(raw) {
+			for _, name := range stack.DecodeStrings(raw) {
 				if name == webview {
 					return true
 				}

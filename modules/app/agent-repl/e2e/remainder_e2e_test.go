@@ -27,7 +27,7 @@
 //     bubble of their own).
 //   - proto/src/frontend/v1/topbar.proto: TopbarWarningStrip.warnings — used
 //     by TestDiagnostics to assert a HEALTHY diagnostics push by absence,
-//     mirroring world_test.go's KeepAliveNeverAppearsOnWire-style
+//     mirroring kit/stack/world.go's KeepAliveNeverAppearsOnWire-style
 //     assert-by-absence precedent named in SPEC.md §C #45.
 //   - proto/src/store/v1/endpoint_open_agent_session.proto,
 //     proto/src/store/v1/store.proto (StoreAgentItem/AgentFrame/AgentUpdate/
@@ -124,6 +124,7 @@ import (
 	"testing"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -145,9 +146,9 @@ import (
 // rmNewWorkspace builds one World and registers a fresh fake repository
 // (harness.NewRepo — the scripted fake git, never the real binary) as its
 // workspace.
-func rmNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
+func rmNewWorkspace(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef) {
 	t.Helper()
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	return w, ws
 }
@@ -159,9 +160,9 @@ func rmNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 // is a FILE-PLANE-ONLY fact with no frontend-observable surface, so this is
 // the suite's one legitimate direct store read outside the harness's own
 // GetSidecarCursors durability wait.
-func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *storev1.AgentSessionPage {
+func rmOpenAgentBook(t *testing.T, w *stack.World, agent *conversationv1.AgentId) *storev1.AgentSessionPage {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	page, err := kit.ReadAgentBook(ctx, w.Store.Client, agent)
 	if err != nil {
@@ -194,11 +195,11 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 // Seam: two-plane-episode
 func testPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
 
 	// Assert
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
@@ -233,7 +234,7 @@ func testPlanModeSettlesPlanned(t *testing.T) {
 	w, ws := rmNewWorkspace(t)
 
 	// Act
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
 
 	// Assert
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))

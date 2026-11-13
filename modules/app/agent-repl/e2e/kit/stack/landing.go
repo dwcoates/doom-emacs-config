@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"agentrepl/e2e/kit"
@@ -57,8 +57,8 @@ func landingStateForm(wsForm string) string {
 // arrival on the roster stream and the landing that tab triggers -- rather
 // than a panel's own settling on a frame that already holds the workspace.
 func awaitLanding(e *Emacs, what, wsForm string) {
-	e.t.Helper()
-	e.AwaitEvalFor(emacsVerbBound, what, landingStateForm(wsForm),
+	e.T.Helper()
+	e.AwaitEvalFor(EmacsVerbBound, what, landingStateForm(wsForm),
 		func(raw json.RawMessage) bool {
 			var state string
 			if err := json.Unmarshal(raw, &state); err != nil {
@@ -71,8 +71,8 @@ func awaitLanding(e *Emacs, what, wsForm string) {
 // awaitRegistrationLanding waits out the landing that REGISTERING the
 // directory DIR performs, for a caller that knows the workspace by the
 // directory it handed the daemon rather than by the name the daemon minted.
-func awaitRegistrationLanding(e *Emacs, dir string) {
-	e.t.Helper()
+func AwaitRegistrationLanding(e *Emacs, dir string) {
+	e.T.Helper()
 	awaitLanding(e, "the registration's landing to put the workspace's panel on the frame",
-		`(agent-repl--ws-name-for-dir `+elispString(dir)+`)`)
+		`(agent-repl--ws-name-for-dir `+ElispString(dir)+`)`)
 }

@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -27,13 +28,13 @@ import (
 const emacsThreadPrefix = "chat/"
 
 // truthy reports whether an evaluated form answered non-nil.
-func truthy(raw json.RawMessage) bool { return !isJSONNull(raw) && string(raw) != "false" }
+func truthy(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) && string(raw) != "false" }
 
 // awaitAnswered waits for THREAD's chat view to show an answer saying WORDS,
 // read from the daemon at ADDR.
 func awaitAnswered(t *testing.T, addr string, thread *workspacev1.WorkspaceRef, words string) {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(context.Background(), emacsVerbBound)
+	ctx, cancel := grantedclock.WithBound(context.Background(), stack.EmacsVerbBound)
 	defer cancel()
 	stream, err := harness.DialAt(t, addr).WatchChat(ctx, connect.NewRequest(&agentreplv1.WatchChatRequest{Thread: thread}))
 	if err != nil {
@@ -55,8 +56,8 @@ func awaitAnswered(t *testing.T, addr string, thread *workspacev1.WorkspaceRef, 
 //
 // Seam: Emacs -> daemon -> shim, a chat thread started and answered from the tab bar
 func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
-	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box, WithZettel())
+	box := stack.RequireSandbox(t)
+	w := stack.NewEmacsWorld(t, box, stack.WithZettel())
 	e := w.Emacs
 	e.EnsureDaemon()
 
@@ -78,9 +79,9 @@ func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 	// the row carries it, and its workspace (named by its id) is open and
 	// marked a thread.
 	var threadID string
-	e.AwaitEvalFor(emacsVerbBound, "the named thread's workspace, marked a thread",
+	e.AwaitEvalFor(stack.EmacsVerbBound, "the named thread's workspace, marked a thread",
 		`(let ((row (car (agent-repl-roster-threads))))
-           (and row (equal (plist-get row :name) `+elispString("Why is the sky blue?")+`)
+           (and row (equal (plist-get row :name) `+stack.ElispString("Why is the sky blue?")+`)
                 (agent-repl-roster-thread-p (agent-repl-roster-thread-workspace-name row))
                 (plist-get (plist-get row :thread) :id)))`,
 		func(raw json.RawMessage) bool {
@@ -93,17 +94,17 @@ func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 			var name string
 			return json.Unmarshal(raw, &name) == nil && name == emacsThreadName
 		})
-	if order := decodeStrings(e.Eval(emacsTabOrderForm)); containsString(order, emacsThreadName) {
+	if order := stack.DecodeStrings(e.Eval(emacsTabOrderForm)); containsString(order, emacsThreadName) {
 		t.Fatalf("tab order = %v, want no tab for the thread", order)
 	}
-	threadDir := decodeStrings(e.Eval(`(list (plist-get (plist-get (car (agent-repl-roster-threads)) :thread) :dir))`))[0]
+	threadDir := stack.DecodeStrings(e.Eval(`(list (plist-get (plist-get (car (agent-repl-roster-threads)) :thread) :dir))`))[0]
 	thread := &workspacev1.WorkspaceRef{Id: threadID, Dir: threadDir}
 	awaitAnswered(t, e.DaemonAddr(), thread, "echo: Why is the sky blue?")
 
 	// ---- The tab bar stays while the thread is on screen ----
 	// The wait reads each input of the rule (status.el,
 	// agent-repl--tabbar-target-rows), so a miss names the one that is wrong.
-	e.AwaitEvalFor(emacsVerbBound, "the tab bar kept over the thread's webview",
+	e.AwaitEvalFor(stack.EmacsVerbBound, "the tab bar kept over the thread's webview",
 		`(vector (and (agent-repl--tabbar-webview-shown-p (selected-frame)) t)
                  (and (agent-repl-roster-thread-p (agent-repl--ws-frame-name (selected-frame))) t)
                  (or (frame-parameter nil 'tab-bar-lines) 0))`,
@@ -120,7 +121,7 @@ func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
                           (car (all-completions "" collection)))))
                (call-interactively #'agent-repl-thread-pick)
                t)`)
-	if got := decodeStrings(e.Eval(`(list (agent-repl--ws-current-name))`)); got[0] != emacsThreadName {
+	if got := stack.DecodeStrings(e.Eval(`(list (agent-repl--ws-current-name))`)); got[0] != emacsThreadName {
 		t.Fatalf("after SPC TAB . the frame shows %v, want the thread", got)
 	}
 
@@ -130,8 +131,8 @@ func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 	})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CloseWorkspace = %v, %v", resp, err)
 	}
-	e.AwaitEvalFor(emacsVerbBound, "the archived thread offered to no command",
+	e.AwaitEvalFor(stack.EmacsVerbBound, "the archived thread offered to no command",
 		`(null (agent-repl-roster-threads))`, truthy)
-	e.AwaitEvalFor(emacsVerbBound, "the archived thread's workspace torn down",
-		`(null (agent-repl--ws-by-ref-id `+elispString(threadID)+`))`, truthy)
+	e.AwaitEvalFor(stack.EmacsVerbBound, "the archived thread's workspace torn down",
+		`(null (agent-repl--ws-by-ref-id `+stack.ElispString(threadID)+`))`, truthy)
 }

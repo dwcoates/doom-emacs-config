@@ -16,6 +16,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -38,7 +39,7 @@ func settled(v *frontendv1.ChatView, n int, words string) bool {
 }
 
 // graphOf reads THREAD's nodes from the world's zettel, oldest first.
-func graphOf(t *testing.T, w *World, thread *workspacev1.WorkspaceRef) []*zettelv1.Node {
+func graphOf(t *testing.T, w *stack.World, thread *workspacev1.WorkspaceRef) []*zettelv1.Node {
 	t.Helper()
 	resp, err := w.Zettel.Client.GetThread(w.Ctx(), connect.NewRequest(&zettelv1.GetThreadRequest{Thread: &zettelv1.ThreadId{Id: thread.GetId()}}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -58,7 +59,7 @@ func threadRow(r *frontendv1.WorkspaceRoster, thread *workspacev1.WorkspaceRef) 
 }
 
 // searched answers the threads SearchChats finds for QUERY.
-func searched(t *testing.T, w *World, query string) []string {
+func searched(t *testing.T, w *stack.World, query string) []string {
 	t.Helper()
 	resp, err := w.Client().SearchChats(w.Ctx(), connect.NewRequest(&agentreplv1.SearchChatsRequest{Query: query}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -76,7 +77,7 @@ func searched(t *testing.T, w *World, query string) []string {
 //
 // Seam: daemon -> shim and zettel store, a chat thread from its first question to its close
 func testAChatThreadLivesItsWholeLife(t *testing.T) {
-	w := NewWorld(t, WorldOpts{Zettel: true})
+	w := stack.NewWorld(t, stack.WorldOpts{Zettel: true})
 	ctx := w.Ctx()
 	roster := w.WatchRoster()
 	defer roster.Close()
@@ -111,7 +112,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	// It is long, so the outline draws it abbreviated (checked below, once
 	// the root's branches make it a run of its own).
 	const longFollowUp = "And what color does the sky turn at sunset, and why?"
-	SubmitPrompt(t, w, thread, longFollowUp)
+	stack.SubmitPrompt(t, w, thread, longFollowUp)
 	view = harness.AwaitView(t, ctx, chat, "the follow-up's answer", func(v *frontendv1.ChatView) bool {
 		return settled(v, 2, longFollowUp)
 	})
@@ -129,7 +130,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("SelectChatText: %v", err)
 	}
-	SubmitPrompt(t, w, thread, "Why that word?")
+	stack.SubmitPrompt(t, w, thread, "Why that word?")
 	view = harness.AwaitView(t, ctx, chat, "the highlight's answer, the newest of the root's children", func(v *frontendv1.ChatView) bool {
 		ex := exchangesOf(v)
 		return settled(v, 2, "Why that word?") && ex[1].GetQuestion().GetQuote().GetText() == "sky"
@@ -200,7 +201,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetOpen() != nil
 	})
-	SubmitPrompt(t, w, thread, "Still there?")
+	stack.SubmitPrompt(t, w, thread, "Still there?")
 	harness.AwaitView(t, ctx, chat, "the restored thread's answer", func(v *frontendv1.ChatView) bool {
 		return settled(v, 3, "Still there?")
 	})

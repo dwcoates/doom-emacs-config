@@ -22,6 +22,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -40,7 +41,7 @@ import (
 // same page AwaitTurnEnded consults, exposed here for tests that need to
 // inspect a DIFFERENT row than the turn-ended row itself (the settled
 // response bubble a Concluded terminal's Answer points at).
-func tlOpenRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func tlOpenRows(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -96,12 +97,12 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 // Seam: prompt-round-trip
 func testTurnStartToCompletion(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act
-	turn := driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "Tell me something you find interesting.")
-	row := AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.DriveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "Tell me something you find interesting.")
+	row := stack.AwaitTurnEnded(t, w, ws, turn)
 
 	// Assert
 	ended := row.GetTurnEnded()

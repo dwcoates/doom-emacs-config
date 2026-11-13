@@ -1,6 +1,9 @@
 package e2e
 
-import "testing"
+import (
+	"agentrepl/e2e/kit/stack"
+	"testing"
+)
 
 // testTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon drives a turn in two
 // tests over the shared World: both reach the one daemon process, each
@@ -11,14 +14,14 @@ func testTheSharedWorldGivesEachTestItsOwnViewOfOneDaemon(t *testing.T) {
 	for i := range pids {
 		t.Run("a test", func(t *testing.T) {
 			// Arrange
-			w := SharedWorld(t)
+			w := stack.SharedWorld(t)
 			ws := w.NewWorkspace(t)
 
 			// Act
-			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fail-max-turns")
+			turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fail-max-turns")
 
 			// Assert
-			if row := AwaitTurnEnded(t, w, ws, turn); row.GetTurnEnded().GetErrored().GetMaxTurns() == nil {
+			if row := stack.AwaitTurnEnded(t, w, ws, turn); row.GetTurnEnded().GetErrored().GetMaxTurns() == nil {
 				t.Errorf("turn %s ended %v, want Errored{MaxTurns}", turn.GetValue(), row)
 			}
 			if !w.IsView() {

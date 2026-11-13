@@ -15,6 +15,7 @@ package e2e
 // the GENERATED types, so an assertion reads the wire the fake saw.
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -32,14 +33,14 @@ import (
 	"agent-repld/integration/harness"
 )
 
-var fakeDaemonProgram = &programOnce{name: "fakedaemon", build: func() (string, error) {
-	return goBuildOnce(repo.fakeDaemonDir, filepath.Join(e2eBinDir(), "fakedaemon"))
+var fakeDaemonProgram = &stack.ProgramOnce{Name: "fakedaemon", Build: func() (string, error) {
+	return stack.GoBuildOnce(stack.Repo.FakeDaemonDir, filepath.Join(stack.E2eBinDir(), "fakedaemon"))
 }}
 
 // requireFakeDaemon builds lisp/testsupport/fakedaemon, once per run.
 func requireFakeDaemon(t *testing.T) string {
 	t.Helper()
-	return fakeDaemonProgram.require(t, "the Doom tier runs against the FAKE daemon, which does not build")
+	return fakeDaemonProgram.Require(t, "the Doom tier runs against the FAKE daemon, which does not build")
 }
 
 // fakeDaemonPublishBound is how long the fake may take to publish daemon.addr
@@ -79,7 +80,7 @@ func startDoomFakeDaemon(t *testing.T, stateDir string) *fakeDaemon {
 	path := filepath.Join(stateDir, "daemon.addr")
 	bound := time.NewTimer(fakeDaemonPublishBound)
 	defer bound.Stop()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	for {
 		if body, err := os.ReadFile(path); err == nil && len(bytes.TrimSpace(body)) > 0 {
@@ -124,7 +125,7 @@ func (f *fakeDaemon) post(path string, body any) (json.RawMessage, error) {
 }
 
 func (f *fakeDaemon) do(method, path string, body []byte) (json.RawMessage, error) {
-	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(context.Background(), stack.DefaultTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+f.addr+path, bytes.NewReader(body))
 	if err != nil {
@@ -195,7 +196,7 @@ func (f *fakeDaemon) AwaitCall(method string, count int, bound time.Duration) fa
 	f.t.Helper()
 	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	for {
 		if calls := f.Calls(method); len(calls) >= count {
@@ -212,7 +213,7 @@ func (f *fakeDaemon) AwaitCall(method string, count int, bound time.Duration) fa
 // DoomWorld is one Doom-tier scenario: a booted Doom Emacs linked to a fake
 // daemon.
 type DoomWorld struct {
-	Emacs *Emacs
+	Emacs *stack.Emacs
 	Fake  *fakeDaemon
 	// mu guards the roster the world last authored.
 	mu sync.Mutex
@@ -229,15 +230,15 @@ type DoomWorld struct {
 // while the fake still answers, as with a real daemon. The launcher's daemon
 // command refuses to start anything, so a link that came up by spawning a
 // daemon instead of adopting the fake fails rather than passing on another.
-func NewDoomWorld(t *testing.T, box sandbox) *DoomWorld {
+func NewDoomWorld(t *testing.T, box stack.Sandbox) *DoomWorld {
 	t.Helper()
-	takeEmacsSlot(t)
-	fake := startDoomFakeDaemon(t, emacsStateDir(emacsRoot(box)))
+	stack.TakeEmacsSlot(t)
+	fake := startDoomFakeDaemon(t, stack.EmacsStateDir(stack.EmacsRoot(box)))
 	refuser := filepath.Join(box.Scratch(), "doom-tier-spawns-no-daemon.sh")
 	if err := os.WriteFile(refuser, []byte("#!/bin/sh\necho 'the Doom tier adopts its fake daemon and never spawns one' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("doom: write the refusing daemon command: %v", err)
 	}
-	e := StartEmacs(t, box, EmacsOpts{
+	e := stack.StartEmacs(t, box, stack.EmacsOpts{
 		DaemonBinary: refuser,
 		ExtraEnv:     []string{"AGENT_REPL_FORBID_VENDOR_CALLS=1"},
 		StopDaemon:   fake.Stop,
@@ -341,13 +342,13 @@ type doomWorkspace struct {
 
 // register onboards a fresh repository NAME through the ordinary command,
 // the fake answering with ref ws-NAME, and returns it once it has landed.
-func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspace {
+func (w *DoomWorld) register(t *testing.T, box stack.Sandbox, name string) doomWorkspace {
 	t.Helper()
 	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
 	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
-	before := w.Emacs.EvalStrings(workspaceRegistryNamesForm)
+	before := w.Emacs.EvalStrings(stack.WorkspaceRegistryNamesForm)
 	w.registerAs(t, ws.ID, dir)
-	w.Emacs.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
+	w.Emacs.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(dir) + `)`)
 	return w.land(t, ws, before)
 }
 
@@ -356,11 +357,11 @@ func (w *DoomWorld) register(t *testing.T, box sandbox, name string) doomWorkspa
 // fixed to agent-repl's own repository), answering the repository picker with
 // its first candidate, the model blank and the prompt "hello", the fake answering
 // with ref ws-NAME at a fresh directory, and returns it once it has landed.
-func (w *DoomWorld) create(t *testing.T, box sandbox, name string) doomWorkspace {
+func (w *DoomWorld) create(t *testing.T, box stack.Sandbox, name string) doomWorkspace {
 	t.Helper()
 	dir := harness.NewRepoAt(t, filepath.Join(box.Scratch(), name)).Dir
 	ws := doomWorkspace{ID: "ws-" + name, Dir: dir}
-	before := w.Emacs.EvalStrings(workspaceRegistryNamesForm)
+	before := w.Emacs.EvalStrings(stack.WorkspaceRegistryNamesForm)
 	created, _ := json.Marshal(map[string]any{"success": map[string]any{"workspace": map[string]any{"id": ws.ID, "dir": dir}}})
 	w.Fake.Script("CreateWorkspace", created)
 	w.Emacs.Eval(`(cl-letf (((symbol-function 'completing-read)
@@ -385,16 +386,16 @@ func (w *DoomWorld) land(t *testing.T, ws doomWorkspace, before []string) doomWo
 	ws.Name = filepath.Base(ws.Dir)
 	w.registered = append(w.registered, ws)
 	w.pushRoster(t, ws, w.registered...)
-	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace at "+ws.Dir+" to appear in Emacs's registry", workspaceRegistryNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) > len(before) })
-	for _, n := range decodeStrings(raw) {
+	raw := e.AwaitEvalFor(stack.EmacsVerbBound, "the workspace at "+ws.Dir+" to appear in Emacs's registry", stack.WorkspaceRegistryNamesForm,
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) > len(before) })
+	for _, n := range stack.DecodeStrings(raw) {
 		if !containsString(before, n) {
 			ws.Name = n
 		}
 	}
 	w.registered[len(w.registered)-1] = ws
-	e.AwaitEvalFor(emacsVerbBound, "the fake's ref to attach to "+ws.Name,
-		`(plist-get (agent-repl-host-ref `+elispString(ws.Name)+`) :id)`,
+	e.AwaitEvalFor(stack.EmacsVerbBound, "the fake's ref to attach to "+ws.Name,
+		`(plist-get (agent-repl-host-ref `+stack.ElispString(ws.Name)+`) :id)`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == ws.ID })
 	// The roster named it current, and Emacs follows the roster's current
 	// once its tab is open: settled here, so no later act races the follow.

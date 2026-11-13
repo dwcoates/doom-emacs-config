@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"fmt"
 	"os"
 	"os/exec"
@@ -85,13 +86,13 @@ func startFakeEmacs(t *testing.T, root, bin string, args ...string) (*exec.Cmd, 
 
 // teardownFixture is an Emacs reduced to what teardown needs: the scenario
 // root that identifies its processes.
-func teardownFixture(t *testing.T) (*Emacs, string) {
+func teardownFixture(t *testing.T) (*stack.Emacs, string) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("resolve the scenario root: %v", err)
 	}
-	return &Emacs{t: t, Root: root, reap: []string{root}}, root
+	return &stack.Emacs{T: t, Root: root, Reap: []string{root}}, root
 }
 
 func TestEmacsTeardownWaitsForTheProcessToExit(t *testing.T) {
@@ -109,18 +110,18 @@ func TestEmacsTeardownWaitsForTheProcessToExit(t *testing.T) {
 	// that does not wait returns in microseconds, so the margin is ample.
 	const minimumWait = 250 * time.Millisecond
 	_, _ = startFakeEmacs(t, root, bin, "0.35")
-	if len(e.emacsProcs()) != 1 {
-		t.Fatalf("arrange: want exactly one stand-in emacs before teardown, got %d", len(e.emacsProcs()))
+	if len(e.EmacsProcs()) != 1 {
+		t.Fatalf("arrange: want exactly one stand-in emacs before teardown, got %d", len(e.EmacsProcs()))
 	}
 
 	// Act.
 	started := time.Now()
-	e.awaitEmacsExit(true, e.emacsGroups())
+	e.AwaitEmacsExit(true, e.EmacsGroups())
 	took := time.Since(started)
 
 	// Assert: it returned only after the process was actually gone.
-	if left := e.emacsProcs(); len(left) != 0 {
-		t.Fatalf("awaitEmacsExit returned with %s still alive", pidList(left))
+	if left := e.EmacsProcs(); len(left) != 0 {
+		t.Fatalf("awaitEmacsExit returned with %s still alive", stack.PidList(left))
 	}
 	if took < minimumWait {
 		t.Fatalf("awaitEmacsExit returned after %s, well before the process's own 350ms lifetime: it did not wait",
@@ -153,7 +154,7 @@ func TestEmacsTeardownWaitsForTheGroupOfAnEmacsAlreadyGone(t *testing.T) {
 	}
 	_, exited := startFakeEmacs(t, root, bin, script)
 	child := awaitPIDFile(t, childPID)
-	groups := e.emacsGroups()
+	groups := e.EmacsGroups()
 	if len(groups) != 1 {
 		t.Fatalf("arrange: want the stand-in's one process group, got %v", groups)
 	}
@@ -167,7 +168,7 @@ func TestEmacsTeardownWaitsForTheGroupOfAnEmacsAlreadyGone(t *testing.T) {
 	<-exited
 
 	// Act.
-	e.awaitEmacsExit(true, groups)
+	e.AwaitEmacsExit(true, groups)
 
 	// Assert: the wait held for the child the departed Emacs left behind.
 	if state := liveProcessState(child); state != "" {
@@ -208,18 +209,18 @@ func TestEmacsTeardownEscalatesToTheProcessGroup(t *testing.T) {
 	child := awaitPIDFile(t, childPID)
 
 	// Act.
-	e.awaitEmacsExit(true, e.emacsGroups())
+	e.AwaitEmacsExit(true, e.EmacsGroups())
 
 	// Assert: the leader is gone, and so is the child that only a group
 	// signal could have reached.
-	if left := e.emacsProcs(); len(left) != 0 {
-		t.Fatalf("awaitEmacsExit left %s alive after escalating", pidList(left))
+	if left := e.EmacsProcs(); len(left) != 0 {
+		t.Fatalf("awaitEmacsExit left %s alive after escalating", stack.PidList(left))
 	}
 	if state := liveProcessState(child); state != "" {
 		t.Fatalf("the child in the process group (pid %d) is still running (/proc state %q): the escalation signalled the pid, not the group",
 			child, state)
 	}
-	tried := e.teardownTried()
+	tried := e.TeardownTried()
 	for _, want := range []string{"process group", "terminated", "killed"} {
 		if !strings.Contains(tried, want) {
 			t.Fatalf("teardown recorded %q, which does not name %q", tried, want)
@@ -234,14 +235,14 @@ func TestEmacsTeardownReportsAStrayAsAFailure(t *testing.T) {
 	// recorded what it tried.
 	e, root := teardownFixture(t)
 	var failures []string
-	e.fail = func(format string, args ...any) { failures = append(failures, fmt.Sprintf(format, args...)) }
-	e.noteTeardownStep("emacs exited on (kill-emacs) within 51ms")
+	e.Fail = func(format string, args ...any) { failures = append(failures, fmt.Sprintf(format, args...)) }
+	e.NoteTeardownStep("emacs exited on (kill-emacs) within 51ms")
 	bin := fakeEmacsBinary(t, root, "/bin/sleep")
 	cmd, _ := startFakeEmacs(t, root, bin, "60")
 	pid := cmd.Process.Pid
 
 	// Act.
-	e.reapStrays()
+	e.ReapStrays()
 
 	// Assert: the scenario FAILED for it, the message names the pid and what
 	// teardown had tried, and the process was still reaped.
@@ -254,8 +255,8 @@ func TestEmacsTeardownReportsAStrayAsAFailure(t *testing.T) {
 	if !strings.Contains(failures[0], "emacs exited on (kill-emacs) within 51ms") {
 		t.Fatalf("the failure does not say what teardown had already tried: %s", failures[0])
 	}
-	if left := e.findStrays(); len(left) != 0 {
-		t.Fatalf("reapStrays failed the scenario but left %s running, leaking it into the next one", pidList(left))
+	if left := e.FindStrays(); len(left) != 0 {
+		t.Fatalf("reapStrays failed the scenario but left %s running, leaking it into the next one", stack.PidList(left))
 	}
 }
 
@@ -272,7 +273,7 @@ func liveProcessState(pid int) string {
 	if err != nil || len(raw) == 0 {
 		return ""
 	}
-	state := procField(strconv.Itoa(pid), "stat")
+	state := stack.ProcField(strconv.Itoa(pid), "stat")
 	if state == "Z" {
 		return ""
 	}
@@ -336,18 +337,18 @@ func TestEmacsTeardownWaitsForTheStoppedDaemonToExit(t *testing.T) {
 	e, root := teardownFixture(t)
 	const minimumWait = 250 * time.Millisecond
 	startFakeDaemon(t, root, "0.35")
-	if len(e.findStrays()) != 1 {
-		t.Fatalf("arrange: want exactly one stand-in daemon before teardown, got %d", len(e.findStrays()))
+	if len(e.FindStrays()) != 1 {
+		t.Fatalf("arrange: want exactly one stand-in daemon before teardown, got %d", len(e.FindStrays()))
 	}
 
 	// Act.
 	started := time.Now()
-	e.awaitDaemonExit(true)
+	e.AwaitDaemonExit(true)
 	took := time.Since(started)
 
 	// Assert.
-	if left := e.findStrays(); len(left) != 0 {
-		t.Fatalf("awaitDaemonExit returned with %s still alive", pidList(left))
+	if left := e.FindStrays(); len(left) != 0 {
+		t.Fatalf("awaitDaemonExit returned with %s still alive", stack.PidList(left))
 	}
 	if took < minimumWait {
 		t.Fatalf("awaitDaemonExit returned after %s, well before the daemon's own 350ms exit: it did not wait",
@@ -365,11 +366,11 @@ func TestEmacsTeardownDoesNotWaitOnADaemonNobodyAskedToStop(t *testing.T) {
 
 	// Act.
 	started := time.Now()
-	e.awaitDaemonExit(false)
+	e.AwaitDaemonExit(false)
 	took := time.Since(started)
 
 	// Assert: it returned at once, leaving the reaper to report the stray.
-	if took >= strayPollInterval {
+	if took >= stack.StrayPollInterval {
 		t.Fatalf("awaitDaemonExit took %s for a stop nobody made, want an immediate return",
 			took.Round(time.Millisecond))
 	}
@@ -394,7 +395,7 @@ func awaitFindable(t *testing.T, root string, pid int) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the stand-in pid %d never became visible to the reaper's /proc walk", pid)
 		}
-		time.Sleep(strayPollInterval)
+		time.Sleep(stack.StrayPollInterval)
 	}
 }
 
@@ -420,18 +421,18 @@ func TestEmacsTeardownDoesNotCountASparedProcessAsAStray(t *testing.T) {
 	e, root := teardownFixture(t)
 	bin := fakeEmacsBinary(t, root, "/bin/sleep")
 	cmd, _ := startFakeEmacs(t, root, bin, "60")
-	if len(e.findStrays()) != 1 {
-		t.Fatalf("arrange: want the undeclared process to be found as a stray, got %s", pidList(e.findStrays()))
+	if len(e.FindStrays()) != 1 {
+		t.Fatalf("arrange: want the undeclared process to be found as a stray, got %s", stack.PidList(e.FindStrays()))
 	}
 	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
 
 	// Act.
-	found := e.findStrays()
+	found := e.FindStrays()
 
 	// Assert.
 	if len(found) != 0 {
 		t.Fatalf("findStrays answered %s for a pid declared the test's own; a process the scenario stops itself is never a stray",
-			pidList(found))
+			stack.PidList(found))
 	}
 }
 
@@ -448,7 +449,7 @@ func TestEmacsTeardownDaemonExitDoesNotWaitOutTheBoundOnASparedProcess(t *testin
 
 	// Act.
 	started := time.Now()
-	e.awaitDaemonExit(true)
+	e.AwaitDaemonExit(true)
 	took := time.Since(started)
 
 	// Assert: it returned on the FIRST read rather than on the bound. The
@@ -457,6 +458,6 @@ func TestEmacsTeardownDaemonExitDoesNotWaitOutTheBoundOnASparedProcess(t *testin
 	// waits the bound out fails by five.
 	if took > time.Second {
 		t.Fatalf("awaitDaemonExit took %s with only the test's own process alive (bound %s): it waited out a process that was never the daemon's",
-			took.Round(time.Millisecond), daemonExitBound)
+			took.Round(time.Millisecond), stack.DaemonExitBound)
 	}
 }

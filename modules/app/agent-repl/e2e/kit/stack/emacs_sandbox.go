@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"agentrepl/e2e/kit"
@@ -43,7 +43,7 @@ import (
 // fallback to an unsandboxed run."
 
 // sandbox is the container the Emacs client layer runs inside.
-type sandbox interface {
+type Sandbox interface {
 	// Available reports whether a container-sandboxed Emacs can run here,
 	// and why not when it cannot. The reason is used VERBATIM in the skip.
 	Available() (ok bool, reason string)
@@ -115,7 +115,7 @@ const sandboxEntrypoint = "/sandbox/entrypoint.sh"
 var hostSharedFilesystems = []string{"virtiofs", "fakeowner", "grpcfuse", "fuse.grpcfuse", "osxfs", "fuse.osxfs", "9p"}
 
 // requireSandbox returns the sandbox for one test, or skips loudly.
-func requireSandbox(t *testing.T) sandbox {
+func RequireSandbox(t *testing.T) Sandbox {
 	t.Helper()
 	s := &localSandbox{t: t}
 	ok, reason := s.Available()
@@ -325,7 +325,7 @@ const hostPreflightTimeout = 30 * time.Second
 
 // repoRoot is the checkout root, three levels above the module.
 func repoRoot() string {
-	return filepath.Clean(filepath.Join(repo.repoDir, "..", "..", ".."))
+	return filepath.Clean(filepath.Join(Repo.repoDir, "..", "..", ".."))
 }
 
 // insideSandbox reports whether this process is running in the sandbox. It

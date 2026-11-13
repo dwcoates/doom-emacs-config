@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -26,19 +27,19 @@ import (
 // started, which is every Area A scenario's starting point: each one drives
 // `agent-repl-frontend-daemon-ensure` itself, after arranging the launcher's
 // configuration for the case under test.
-func coldStartWorld(t *testing.T) *EmacsWorld {
+func coldStartWorld(t *testing.T) *stack.EmacsWorld {
 	t.Helper()
-	return NewEmacsWorld(t, requireSandbox(t))
+	return stack.NewEmacsWorld(t, stack.RequireSandbox(t))
 }
 
 // daemonPID reads the launched daemon's OS process id out of Emacs's own
 // process object. Nil (no process) reads back as JSON null and returns 0.
-func daemonPID(e *Emacs) int {
-	e.t.Helper()
+func daemonPID(e *stack.Emacs) int {
+	e.T.Helper()
 	raw := e.Eval(`(and agent-repl--frontend-daemon-process
                         (process-live-p agent-repl--frontend-daemon-process)
                         (process-id agent-repl--frontend-daemon-process))`)
-	if isJSONNull(raw) {
+	if stack.IsJSONNull(raw) {
 		return 0
 	}
 	var pid int

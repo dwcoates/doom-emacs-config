@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 // THE WARM WEBAPP-LAYER DRIVER: one long-lived vitest (webapp/test/
 // webapp-layer/layer-server.mjs) runs every simple area's file, so the layer
@@ -147,7 +147,7 @@ var (
 	wlServerMu  sync.Mutex
 	wlTheServer *wlServer
 	// wlOuterTempDir is the temp directory from before MainAt pointed TMPDIR
-	// at its run root (main_test.go); the driver's own temp dir is made in it.
+	// at its run root (main.go); the driver's own temp dir is made in it.
 	wlOuterTempDir string
 )
 

@@ -5,7 +5,7 @@
 #
 # Usage: ensure-e2e-deps.sh
 #
-# The e2e suite bundles the REAL shim from source (e2e/main_test.go's
+# The e2e suite bundles the REAL shim from source (e2e/kit/stack/main.go's
 # requireShimBundle) and drives the REAL webapp (e2e/webapplayer_e2e_test.go),
 # and both fail loudly when their package's node_modules is absent. Those
 # trees used to appear only as a side effect of an EARLIER suite: the `shim`

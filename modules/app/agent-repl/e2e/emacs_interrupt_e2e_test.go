@@ -18,8 +18,8 @@
 //
 // This file also holds the helpers area G, H and I share. They are
 // area-local by design: EMACS-LAYER-SPEC.md's shared harness
-// (`emacs_test.go`, `emacs_sandbox_test.go`, `world_test.go`,
-// `main_test.go`) is not this file's to grow.
+// (`kit/stack/emacs.go`, `kit/stack/emacs_sandbox.go`, `kit/stack/world.go`,
+// `kit/stack/main.go`) is not this file's to grow.
 package e2e
 
 import (
@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -62,10 +63,10 @@ const emGHIGatedPrompt = "hold here until the gate opens"
 // emGHIWorld brings up the Emacs world and has EMACS spawn the daemon,
 // which is the whole layer's premise: nothing here composes the daemon's
 // argv.
-func emGHIWorld(t *testing.T, options ...EmacsWorldOption) (*EmacsWorld, *Emacs) {
+func emGHIWorld(t *testing.T, options ...stack.EmacsWorldOption) (*stack.EmacsWorld, *stack.Emacs) {
 	t.Helper()
-	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box, options...)
+	box := stack.RequireSandbox(t)
+	w := stack.NewEmacsWorld(t, box, options...)
 	w.Emacs.EnsureDaemon()
 	return w, w.Emacs
 }
@@ -75,17 +76,17 @@ func emGHIWorld(t *testing.T, options ...EmacsWorldOption) (*EmacsWorld, *Emacs)
 //
 // The daemon mints the identity; Emacs only echoes it, so the ref's presence
 // is asserted here rather than assumed by every caller.
-func emGHIRegister(t *testing.T, e *Emacs, box sandbox, dirName string) (string, string) {
+func emGHIRegister(t *testing.T, e *stack.Emacs, box stack.Sandbox, dirName string) (string, string) {
 	t.Helper()
 	repo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), dirName))
 	before := len(e.EvalStrings(emGHIWorkspaceNamesForm))
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repo.Dir) + `)`)
+	e.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(repo.Dir) + `)`)
 	raw := e.AwaitEval(fmt.Sprintf("the workspace for %s to appear in Emacs's registry", dirName),
 		emGHIWorkspaceNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == before+1 })
-	name := emGHINewName(t, decodeStrings(raw), before)
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == before+1 })
+	name := emGHINewName(t, stack.DecodeStrings(raw), before)
 	e.AwaitTrue("the workspace to hold a daemon-minted ref",
-		`(and (agent-repl-host-ref `+elispString(name)+`) t)`)
+		`(and (agent-repl-host-ref `+stack.ElispString(name)+`) t)`)
 	emGHISetSummary(t, e, name)
 	return name, repo.Dir
 }
@@ -95,13 +96,13 @@ func emGHIRegister(t *testing.T, e *Emacs, box sandbox, dirName string) (string,
 // SUMMARY OWES ONE, and every prompt it is sent until then closes with the
 // note asking for it, so a prompt a scenario gates the fake on would never
 // match the gate's text.
-func emGHISetSummary(t *testing.T, e *Emacs, ws string) {
+func emGHISetSummary(t *testing.T, e *stack.Emacs, ws string) {
 	t.Helper()
 	form := fmt.Sprintf(`(and (assq 'success
   (agent-repl-connect-unary-sync (agent-repl-host-conn %[1]s) "SetWorkspaceSummary"
     (json-encode (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (agent-repl-host-ref %[1]s)))
                        (cons 'summary %[2]s)))))
-  t)`, elispString(ws), elispString(harness.SeededSummary))
+  t)`, stack.ElispString(ws), stack.ElispString(harness.SeededSummary))
 	if !e.EvalBool(form) {
 		t.Fatalf("SetWorkspaceSummary for %s answered no success", ws)
 	}
@@ -126,9 +127,9 @@ func emGHINewName(t *testing.T, names []string, before int) string {
 // (`agent-repl-queue-deferred-prompt`, `agent-repl-send`) act on it. The
 // command takes the project root as its documented argument, so no picker is
 // stubbed.
-func emGHISelect(t *testing.T, e *Emacs, dir, ws string) {
+func emGHISelect(t *testing.T, e *stack.Emacs, dir, ws string) {
 	t.Helper()
-	e.Eval(`(agent-repl-switch-to-project ` + elispString(dir) + `)`)
+	e.Eval(`(agent-repl-switch-to-project ` + stack.ElispString(dir) + `)`)
 	e.AwaitEval("the workspace to become current",
 		`(format "%s" (agent-repl--ws-current-name))`,
 		func(raw json.RawMessage) bool {
@@ -139,13 +140,13 @@ func emGHISelect(t *testing.T, e *Emacs, dir, ws string) {
 
 // emGHIOpenPanel opens the agent-repl panel through the ordinary command and
 // waits for its windows.
-func emGHIOpenPanel(t *testing.T, e *Emacs) {
+func emGHIOpenPanel(t *testing.T, e *stack.Emacs) {
 	t.Helper()
 	e.Eval(`(agent-repl-frontend-open-panel)`)
 	e.AwaitEval("the agent-repl panel windows to appear",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			for _, b := range decodeStrings(raw) {
+			for _, b := range stack.DecodeStrings(raw) {
 				if len(b) >= 16 && b[:16] == "*agent-frontend-" {
 					return true
 				}
@@ -171,14 +172,14 @@ func emGHIOpenPanel(t *testing.T, e *Emacs) {
 // (daemon/internal/opentabs), so the wait spans a WebKit page boot. Under the
 // merge gate's parallel load a page whose script started late held the open
 // past DefaultTimeout.
-func emGHISubmit(t *testing.T, e *Emacs, ws, text string) {
+func emGHISubmit(t *testing.T, e *stack.Emacs, ws, text string) {
 	t.Helper()
 	emGHIAwaitArmFor(t, e, emacsTabOpenBound, ws, "the workspace's tab to be open with no turn running before the submit",
 		emGHIOpenStatusForm(ws), emGHISubmittableArms...)
-	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
-	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
+	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + stack.ElispString(ws) + `))`)
+	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + stack.ElispString(ws) + `)
                  (erase-buffer)
-                 (insert ` + elispString(text) + `)
+                 (insert ` + stack.ElispString(text) + `)
                  t)`)
 	if want, got := "agent-repl-send", e.BindingForIn(buffer, "RET"); got != want {
 		t.Fatalf("composer RET resolves to %q, want %q: the Doom `map!' for agent-repl-input-mode-map did not take", got, want)
@@ -190,31 +191,31 @@ func emGHISubmit(t *testing.T, e *Emacs, ws, text string) {
 // vocabulary is the ONE source for a workspace's state, per
 // EMACS-LAYER-SPEC.md's readback table.
 func emGHIStatusForm(ws string) string {
-	return `(format "%s" (agent-repl-roster-status-for-ws ` + elispString(ws) + `))`
+	return `(format "%s" (agent-repl-roster-status-for-ws ` + stack.ElispString(ws) + `))`
 }
 
 // emGHIOpenStatusForm is emGHIStatusForm once WS's tab is in the tab order,
 // which it joins when the daemon answers its open (open-tabs.el), and "" before.
 func emGHIOpenStatusForm(ws string) string {
-	return `(if (seq-some (lambda (n) (equal (format "%s" n) ` + elispString(ws) + `)) agent-repl-roster--tab-order) ` +
+	return `(if (seq-some (lambda (n) (equal (format "%s" n) ` + stack.ElispString(ws) + `)) agent-repl-roster--tab-order) ` +
 		emGHIStatusForm(ws) + ` "")`
 }
 
 // emGHIAwaitStatus waits until WS's roster arm is one of ARMS, within
 // DefaultTimeout.
-func emGHIAwaitStatus(t *testing.T, e *Emacs, ws, what string, arms ...string) string {
+func emGHIAwaitStatus(t *testing.T, e *stack.Emacs, ws, what string, arms ...string) string {
 	t.Helper()
-	return emGHIAwaitStatusFor(t, e, DefaultTimeout, ws, what, arms...)
+	return emGHIAwaitStatusFor(t, e, stack.DefaultTimeout, ws, what, arms...)
 }
 
 // emGHIAwaitStatusFor is emGHIAwaitStatus with an explicit, named bound.
-func emGHIAwaitStatusFor(t *testing.T, e *Emacs, bound time.Duration, ws, what string, arms ...string) string {
+func emGHIAwaitStatusFor(t *testing.T, e *stack.Emacs, bound time.Duration, ws, what string, arms ...string) string {
 	t.Helper()
 	return emGHIAwaitArmFor(t, e, bound, ws, what, emGHIStatusForm(ws), arms...)
 }
 
 // emGHIAwaitArmFor waits, within BOUND, until FORM reads one of ARMS.
-func emGHIAwaitArmFor(t *testing.T, e *Emacs, bound time.Duration, ws, what, form string, arms ...string) string {
+func emGHIAwaitArmFor(t *testing.T, e *stack.Emacs, bound time.Duration, ws, what, form string, arms ...string) string {
 	t.Helper()
 	raw := e.AwaitEvalFor(bound, what, form, func(raw json.RawMessage) bool {
 		var got string
@@ -262,13 +263,13 @@ var (
 // 2026-09-28: Emacs holds no prompt in memory, so the ingress is the ONLY
 // place Emacs itself still holds one (a prompt the daemon did not take).
 func emGHIIngressWaitingForm(ws string) string {
-	return `(agent-repl-held-ingress-waiting ` + elispString(ws) + `)`
+	return `(agent-repl-held-ingress-waiting ` + stack.ElispString(ws) + `)`
 }
 
 // emGHIAssertIngressEmpty reads, without waiting, that none of WS's prompts
 // wait in the ingress. Call it only once the edge that would have written an
 // entry is already behind the test, so "empty now" is the settled answer.
-func emGHIAssertIngressEmpty(t *testing.T, e *Emacs, ws, when string) {
+func emGHIAssertIngressEmpty(t *testing.T, e *stack.Emacs, ws, when string) {
 	t.Helper()
 	if n := e.EvalInt(emGHIIngressWaitingForm(ws)); n != 0 {
 		t.Fatalf("%d of %s's prompts wait in the held-prompt ingress %s, want none", n, ws, when)
@@ -292,7 +293,7 @@ func testEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	// Arrange: a registered workspace with a genuinely live turn. The parked
 	// scenario is what makes "mid-turn" a fact rather than a race.
 	w, e := emGHIWorld(t)
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-forced-restart")
+	ws, dir := emGHIRegister(t, e, w.Emacs.Box, "repo-forced-restart")
 	emGHISelect(t, e, dir, ws)
 	emGHIOpenPanel(t, e)
 	emGHISubmit(t, e, ws, emGHIParkedPrompt)
@@ -301,7 +302,7 @@ func testEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	// Act: `SPC o C-c`. The workspace is passed as the command's documented
 	// argument rather than by faking a key press that would then also have to
 	// satisfy the picker.
-	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
+	e.Eval(`(agent-repl-restart-workspace ` + stack.ElispString(ws) + `)`)
 
 	// Assert: the arm settles on `:interrupted` specifically. Any other
 	// settled arm would say the turn ENDED rather than that it was stopped.
@@ -340,12 +341,12 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	// restart resolves. A gated turn is the one park with two exits — the
 	// gate file releases it into an ORDINARY terminal — so the finish edge
 	// this scenario is about can actually happen.
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	gatePath := filepath.Join(box.Scratch(), "graceful-restart-gate")
 	w, e := emGHIWorld(t,
-		WithEmacsEnv(turnGatePathEnv, gatePath),
-		WithEmacsEnv(turnGateTextEnv, emGHIGatedPrompt))
-	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-graceful-restart")
+		stack.WithEmacsEnv(turnGatePathEnv, gatePath),
+		stack.WithEmacsEnv(turnGateTextEnv, emGHIGatedPrompt))
+	ws, dir := emGHIRegister(t, e, w.Emacs.Box, "repo-graceful-restart")
 	emGHISelect(t, e, dir, ws)
 	emGHIOpenPanel(t, e)
 	emGHISubmit(t, e, ws, emGHIGatedPrompt)
@@ -359,10 +360,10 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	// the ordinary command (`SPC j RET`), then asks for a GRACEFUL restart —
 	// no prefix argument, so the turn is not forced down.
 	const heldText = "the held prompt"
-	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
-	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
+	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + stack.ElispString(ws) + `))`)
+	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + stack.ElispString(ws) + `)
                  (erase-buffer)
-                 (insert ` + elispString(heldText) + `)
+                 (insert ` + stack.ElispString(heldText) + `)
                  t)`)
 	e.Eval(`(agent-repl-queue-deferred-prompt)`)
 
@@ -373,7 +374,7 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 		t.Fatalf("the deferral was submitted as text %q delivery %q, want %q delivered :deferred",
 			sent.Text, sent.Delivery, heldText)
 	}
-	if got := e.EvalString(`(with-current-buffer ` + elispString(buffer) + ` (buffer-string))`); got != "" {
+	if got := e.EvalString(`(with-current-buffer ` + stack.ElispString(buffer) + ` (buffer-string))`); got != "" {
 		t.Fatalf("the composer holds %q after the deferral, want it cleared", got)
 	}
 
@@ -382,7 +383,7 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 		t.Fatalf("the daemon answered the mid-turn deferral %s, want :success: a deferral is held, never refused", arm)
 	}
 
-	e.Eval(`(agent-repl-restart-workspace ` + elispString(ws) + `)`)
+	e.Eval(`(agent-repl-restart-workspace ` + stack.ElispString(ws) + `)`)
 
 	// The restart is immediate: it hard-stops the gated turn itself, so the
 	// gate is never opened. The held deferral must survive that stop.
@@ -396,7 +397,7 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 
 	// Assert: the held prompt SURVIVED the restart: the daemon delivered it
 	// as its own turn, so the conversation's own book in the store holds it.
-	vendor := e.EvalString(`(or (agent-repl-host-vendor-session-id ` + elispString(ws) + `) "")`)
+	vendor := e.EvalString(`(or (agent-repl-host-vendor-session-id ` + stack.ElispString(ws) + `) "")`)
 	if vendor == "" {
 		t.Fatalf("workspace %s names no vendor conversation after the restart, so its book cannot be read", ws)
 	}
@@ -407,11 +408,11 @@ func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 // saying TEXT, failing at DefaultTimeout. The store is read directly and
 // read-only: this Emacs-layer world exposes no daemon client, and a prompt
 // the daemon delivered is a line of its agent's book.
-func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
+func emAwaitBookPrompt(t *testing.T, w *stack.EmacsWorld, agent, text, what string) {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(context.Background(), stack.DefaultTimeout)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	var said []string
 	for {
@@ -433,7 +434,7 @@ func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("await %s: the book of %s never held a prompt saying %q within %s (prompts seen: %q, last error: %v)", what, agent, text, DefaultTimeout, said, err)
+			t.Fatalf("await %s: the book of %s never held a prompt saying %q within %s (prompts seen: %q, last error: %v)", what, agent, text, stack.DefaultTimeout, said, err)
 		case <-ticker.C:
 		}
 	}

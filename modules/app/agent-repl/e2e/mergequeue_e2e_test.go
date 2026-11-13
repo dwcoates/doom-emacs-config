@@ -49,6 +49,7 @@ import (
 	"testing"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -81,7 +82,7 @@ func mqCleanRepo(t *testing.T) (*harness.Repo, *harness.Recorder) {
 
 // mqRepositoryRef registers a repository's main worktree and reads back the
 // daemon-minted RepositoryRef from the roster.
-func mqRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
+func mqRepositoryRef(t *testing.T, w *stack.World, repo *harness.Repo) *workspacev1.RepositoryRef {
 	t.Helper()
 	harness.Register(t, w.Daemon, repo.Dir)
 	roster := w.WatchRoster()
@@ -115,7 +116,7 @@ func mqFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Repos
 // empty initial conversation lets each test drive its own turns explicitly
 // through SubmitPrompt/AwaitTurnEnded rather than racing a prompt the
 // fixture itself queued.
-func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
+func mqCreateTopLevelChild(t *testing.T, w *stack.World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	return mqCreateChildWithHooks(t, w, repoRef, name, nil)
 }
@@ -132,7 +133,7 @@ func mqStrPtr(s string) *string { return &s }
 
 // mqFinish asks for one workspace's deploy and fails the test unless it is
 // enqueued.
-func mqFinish(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func mqFinish(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	resp, err := w.Client().FinishWorkspace(w.Ctx(), connect.NewRequest(harness.FinishRequest(ws)))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -148,7 +149,7 @@ func mqConcluded(row *frontendv1.FeedRow) bool {
 
 // mqOpenFeedRows opens a feed (root when feed is nil, a sub-feed otherwise)
 // and answers its current page's rows plus the token to tail it further.
-func mqOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) ([]*frontendv1.FeedRow, *agentreplv1.FeedWatchToken) {
+func mqOpenFeedRows(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) ([]*frontendv1.FeedRow, *agentreplv1.FeedWatchToken) {
 	t.Helper()
 	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws, Feed: feed}))
 	if err != nil {
@@ -187,7 +188,7 @@ func mqFeedRowText(row *frontendv1.FeedRow) string {
 // its root feed before every merge it enqueues.
 type mqFeedWatch struct {
 	t      *testing.T
-	w      *World
+	w      *stack.World
 	ws     *workspacev1.WorkspaceRef
 	stream *harness.Stream[*frontendv1.FeedRow]
 	seen   []*frontendv1.FeedRow
@@ -195,7 +196,7 @@ type mqFeedWatch struct {
 
 // mqOpenFeedWatch opens a feed (root when feed is nil) and begins tailing it,
 // recording the page's own rows into Rows() immediately.
-func mqOpenFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) *mqFeedWatch {
+func mqOpenFeedWatch(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) *mqFeedWatch {
 	t.Helper()
 	rows, token := mqOpenFeedRows(t, w, ws, feed)
 	fw := &mqFeedWatch{t: t, w: w, ws: ws, stream: w.WatchFeed(token)}
@@ -240,7 +241,7 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 // ---------------------------------------------------------------------------
 
 // mqSaid builds the plain-text UserSaid every raw SubmitPromptRequest in
-// this file sends, mirroring world_test.go's SubmitPrompt helper's own
+// this file sends, mirroring kit/stack/world.go's SubmitPrompt helper's own
 // construction (that helper cannot be reused directly by the tests in this
 // file that must inspect the raw, possibly-refused response instead of
 // failing the test on one).
@@ -331,7 +332,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	repo.DeploysAsAgentRepl()
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
@@ -354,7 +355,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// Act: put a real turn in flight, then admit the merge on the SAME
 	// workspace while it is open.
-	turn := SubmitPrompt(t, w, child, displacedText)
+	turn := stack.SubmitPrompt(t, w, child, displacedText)
 	w.AwaitWorkspaceLogOperationCount(child.GetDir(), harness.OpTurnOpened, 1)
 	harness.CommitWork(t, child.GetDir())
 	mqFinish(t, w, child)
@@ -420,7 +421,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
 		t.Fatalf("opening the turn gate for the resubmitted turn = error %v, want the gate created", err)
 	}
-	AwaitTurnEnded(t, w, child, resubmitTurn)
+	stack.AwaitTurnEnded(t, w, child, resubmitTurn)
 
 	// Assert: the mark is DOWN. A record still marked is one the next boot
 	// would put back a second time.
@@ -523,7 +524,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 func testFanWideCancel(t *testing.T) {
 	// Arrange: a plain registered, opened workspace (no repository/merge
 	// machinery needed for this scenario).
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	w.RequireOpen(t, ws)
 
@@ -532,8 +533,8 @@ func testFanWideCancel(t *testing.T) {
 
 	// Act: drive the scenario's own setup turn to completion — it launches
 	// three detached items and leaves them live, then concludes normally.
-	turn := SubmitPrompt(t, w, ws, "!cancel-all")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!cancel-all")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 	// THE STOP ACTS ON THE LIVE SET THE DAEMON HOLDS, which its session
 	// watcher builds from the main watch's live frames. The feed's turn end is
 	// no witness of that set: a reader's open loads the newest store page,
@@ -542,7 +543,7 @@ func testFanWideCancel(t *testing.T) {
 	// three admitted when the interrupt landed). The footer's chips ARE that
 	// set, so the stop is issued once they show all three, as a person's
 	// would be.
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, footer.Stream, "the footer showing two live agents and a live shell", func(v *frontendv1.FooterView) bool {
 		live := v.GetStrip().GetLiveWork()
@@ -631,7 +632,7 @@ const mqMarkedAction = "run the release checks before landing (e2e-fail-this-tur
 // mqCreateChildWithHooks is mqCreateTopLevelChild with deploy hooks recorded
 // at creation, which is the only ingress that records them for a workspace's
 // own deploys (agentrepl.v1.CreateWorkspaceDeployHooks).
-func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *workspacev1.WorkspaceRef {
+func mqCreateChildWithHooks(t *testing.T, w *stack.World, repoRef *workspacev1.RepositoryRef, name string, hooks *agentreplv1.CreateWorkspaceDeployHooks) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
 		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
@@ -661,7 +662,7 @@ func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.Reposit
 
 // mqSelfRepoWorld mints a world whose repository deploys as agent-repl's own
 // with a merge test gate that passes, so a deploy runs past the gate.
-func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
+func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *stack.World {
 	t.Helper()
 	script := harness.NewTestAllScript(t, repo.Dir)
 	script.SetExitCode(0)
@@ -671,7 +672,7 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	// harness.MergeChainTimeout. Under a full gate the landing's deploy was
 	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
 	repo.DeploysAsAgentRepl()
-	return NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	return stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		Timeout:  harness.MergeChainTimeout,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
 	}})
@@ -782,7 +783,7 @@ func testFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 
 // mqPauseQueue pauses one repository's merge queue: it admits nothing new
 // until resumed, and the pause is durable across daemon bounces.
-func mqPauseQueue(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef) {
+func mqPauseQueue(t *testing.T, w *stack.World, repoRef *workspacev1.RepositoryRef) {
 	t.Helper()
 	resp, err := w.Client().UpdateMergeQueue(w.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 		Requester: harness.User(),

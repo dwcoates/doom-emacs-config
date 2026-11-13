@@ -58,6 +58,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -71,9 +72,9 @@ import (
 // waits until at least n distinct FeedRows carry a non-nil
 // separation.Cleared arm, checking the page first (already-durable history)
 // and falling back to the watch stream — the same page-then-watch shape
-// world_test.go's AwaitTurnEnded already uses for a turn's own terminal.
+// kit/stack/world.go's AwaitTurnEnded already uses for a turn's own terminal.
 // Dedups by FeedId, since a row's upsert key can in principle be re-pushed.
-func awaitClearedSeparations(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, n int) []*frontendv1.FeedRow {
+func awaitClearedSeparations(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, n int) []*frontendv1.FeedRow {
 	t.Helper()
 	return awaitClearedSeparationsWhere(t, w, ws, n, func(*frontendv1.FeedRow) bool { return true })
 }
@@ -88,7 +89,7 @@ func awaitClearedSeparations(t *testing.T, w *World, ws *workspacev1.WorkspaceRe
 // "the divider that is not the one I already have".
 func awaitClearedSeparationsWhere(
 	t *testing.T,
-	w *World,
+	w *stack.World,
 	ws *workspacev1.WorkspaceRef,
 	n int,
 	want func(*frontendv1.FeedRow) bool,
@@ -135,7 +136,7 @@ func awaitClearedSeparationsWhere(
 // session-line text differs from `from` (and is non-empty), and answers the
 // new text. Used to observe a SessionIdentityRotated fact the only way it
 // currently reaches a client — see the file header.
-func awaitTopbarSessionLineChange(t *testing.T, w *World, topbar *harness.Stream[*frontendv1.TopbarView], from string) string {
+func awaitTopbarSessionLineChange(t *testing.T, w *stack.World, topbar *harness.Stream[*frontendv1.TopbarView], from string) string {
 	t.Helper()
 	view := harness.AwaitView(t, w.Ctx(), topbar, "the topbar's session line to change from "+from, func(v *frontendv1.TopbarView) bool {
 		text := v.GetSessionLine().GetText()
@@ -147,7 +148,7 @@ func awaitTopbarSessionLineChange(t *testing.T, w *World, topbar *harness.Stream
 // awaitTopbarSessionLineNonEmpty watches the workspace's topbar until its
 // session-line text is first non-empty (the session-started vendor id, before
 // any rotation), and answers it.
-func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stream[*frontendv1.TopbarView]) string {
+func awaitTopbarSessionLineNonEmpty(t *testing.T, w *stack.World, topbar *harness.Stream[*frontendv1.TopbarView]) string {
 	t.Helper()
 	view := harness.AwaitView(t, w.Ctx(), topbar, "the topbar's session line to become non-empty", func(v *frontendv1.TopbarView) bool {
 		return v.GetSessionLine().GetText() != ""
@@ -164,7 +165,7 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 // Seam: clear-rotation
 func testClearRotatesIdentity(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 
@@ -172,7 +173,7 @@ func testClearRotatesIdentity(t *testing.T) {
 	// itself — the scenario starts the session fresh and rotates its
 	// identity within that same turn, exactly as
 	// session.test.ts's "a /clear rotates the vendor id" case does.
-	turn := SubmitPrompt(t, w, ws, "!rotate")
+	turn := stack.SubmitPrompt(t, w, ws, "!rotate")
 
 	// Assert: the session states its vendor identity, then rotates it.
 	before := awaitTopbarSessionLineNonEmpty(t, w, topbar)
@@ -182,7 +183,7 @@ func testClearRotatesIdentity(t *testing.T) {
 	}
 
 	// Assert: the turn concluded normally (MANIFEST: `... -> success.completed`).
-	row := AwaitTurnEnded(t, w, ws, turn)
+	row := stack.AwaitTurnEnded(t, w, ws, turn)
 	if row.GetTurnEnded().GetConcluded() == nil {
 		t.Fatalf("TurnEnded = %v, want a concluded (success.completed) outcome", row.GetTurnEnded())
 	}
@@ -206,15 +207,15 @@ func testClearRotatesIdentity(t *testing.T) {
 // Seam: shim -> store -> daemon, a second identity rotation composed onto the first
 func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	topbar := w.WatchTopbar(ws)
 
 	// Act: first rotation, same as TestTurns/ClearRotatesIdentity.
-	firstTurn := SubmitPrompt(t, w, ws, "!rotate")
+	firstTurn := stack.SubmitPrompt(t, w, ws, "!rotate")
 	initial := awaitTopbarSessionLineNonEmpty(t, w, topbar)
 	afterFirst := awaitTopbarSessionLineChange(t, w, topbar, initial)
-	if firstRow := AwaitTurnEnded(t, w, ws, firstTurn); firstRow.GetTurnEnded().GetConcluded() == nil {
+	if firstRow := stack.AwaitTurnEnded(t, w, ws, firstTurn); firstRow.GetTurnEnded().GetConcluded() == nil {
 		t.Fatalf("first !rotate TurnEnded = %v, want concluded", firstRow.GetTurnEnded())
 	}
 	firstCleared := awaitClearedSeparations(t, w, ws, 1)
@@ -222,7 +223,7 @@ func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Act: SECOND rotation, submitted on the SAME workspace/session — the
 	// daemon must accept a rotate while it is already running under a
 	// rotated identity, not merely a fresh one.
-	secondTurn := SubmitPrompt(t, w, ws, "!rotate")
+	secondTurn := stack.SubmitPrompt(t, w, ws, "!rotate")
 
 	// Assert: identity composes — the session line changes AGAIN, to a
 	// THIRD distinct value, never back to the pre-rotation identity.
@@ -235,7 +236,7 @@ func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	}
 
 	// Assert: the second turn also concluded normally.
-	if secondRow := AwaitTurnEnded(t, w, ws, secondTurn); secondRow.GetTurnEnded().GetConcluded() == nil {
+	if secondRow := stack.AwaitTurnEnded(t, w, ws, secondTurn); secondRow.GetTurnEnded().GetConcluded() == nil {
 		t.Fatalf("second !rotate TurnEnded = %v, want concluded", secondRow.GetTurnEnded())
 	}
 
@@ -270,7 +271,7 @@ func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 
 // irOpenFeedRows answers the rows the workspace's root feed DELIVERS on a
 // fresh open — which, after a cut, begins at the cut's divider.
-func irOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func irOpenFeedRows(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {

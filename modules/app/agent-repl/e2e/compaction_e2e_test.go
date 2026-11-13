@@ -44,6 +44,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -64,7 +65,7 @@ import (
 // suite does NOT use real git and must stay fast). Answers the workspace ref
 // and the account config root it routes through (always DefaultConfigDir: a
 // fresh harness.NewRepo directory is never under MultiRepoRoot).
-func cpNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
+func cpNewWorkspace(t *testing.T, w *stack.World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
 	ws := w.NewWorkspace(t)
 	w.RequireOpen(t, ws)
@@ -77,7 +78,7 @@ func cpNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) 
 // leaves behind (a row whose own `turn` field is UNSET, per feed.proto's
 // FeedRow.turn doc: "Unset for a row that belongs to no turn (a separation
 // divider)" — so it cannot be found by matching the turn id).
-func cpOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func cpOpenFeedRows(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -116,12 +117,12 @@ func cpFindCompactedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 // change, so it is a durable statement that the step WAS published whatever
 // any reader took. Measured alone, the step stands 2-12ms before the cut
 // publishes idle.
-func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
+func cpDriveObservingInProgress(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	before := w.Store.Cursors(t, ctx)
 	cancel()
-	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
+	baseline := stack.CursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
 
 	// The footer's participant pair must stand for the turn: without a host
 	// and a web stream open the strip reads `agent_repl_fault · severed`.
@@ -130,9 +131,9 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 	defer footer.Close()
 	footer.Drain()
 
-	turn := SubmitPrompt(t, w, ws, prompt)
-	AwaitTurnEnded(t, w, ws, turn)
-	awaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
+	turn := stack.SubmitPrompt(t, w, ws, prompt)
+	stack.AwaitTurnEnded(t, w, ws, turn)
+	stack.AwaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
 
 	// THE SIGNAL REACHING THE FOOTER is the observation, not the compacting
 	// step being drawn. The shim's stream-plane `compacting` and the sidecar's
@@ -158,7 +159,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 // Seam: compaction
 func testCompactionDirected(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "Compacted the conversation."
 
@@ -195,7 +196,7 @@ func testCompactionDirected(t *testing.T) {
 	}
 
 	// Assert: the turn itself concluded normally.
-	ended := turnEndedRow(t, rows, turn)
+	ended := stack.TurnEndedRow(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}

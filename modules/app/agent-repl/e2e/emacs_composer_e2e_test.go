@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -35,8 +36,8 @@ import (
 // registered workspace, and that workspace's panel open — the state every
 // scenario in areas D and E starts from.
 type emacsScenario struct {
-	W *EmacsWorld
-	E *Emacs
+	W *stack.EmacsWorld
+	E *stack.Emacs
 
 	// Name is the workspace name Emacs's own registry holds.
 	Name string
@@ -49,10 +50,10 @@ type emacsScenario struct {
 
 // newEmacsScenario brings the layer up to the point every area-D and area-E
 // scenario begins at, driving only ordinary commands.
-func newEmacsScenario(t *testing.T, options ...EmacsWorldOption) *emacsScenario {
+func newEmacsScenario(t *testing.T, options ...stack.EmacsWorldOption) *emacsScenario {
 	t.Helper()
-	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box, options...)
+	box := stack.RequireSandbox(t)
+	w := stack.NewEmacsWorld(t, box, options...)
 	e := w.Emacs
 
 	// EMACS spawns the daemon, through the module's own launcher.
@@ -75,20 +76,20 @@ func newEmacsScenario(t *testing.T, options ...EmacsWorldOption) *emacsScenario 
 // The name is READ BACK rather than predicted: the DAEMON mints the identity
 // and Emacs echoes it, so a test that composed the name itself would be
 // asserting its own arithmetic.
-func addProjectWorkspace(t *testing.T, e *Emacs, dir string) string {
+func addProjectWorkspace(t *testing.T, e *stack.Emacs, dir string) string {
 	t.Helper()
-	before := decodeStrings(e.Eval(workspaceRegistryNamesForm))
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(dir) + `)`)
-	raw := e.AwaitEvalFor(emacsVerbBound,
+	before := stack.DecodeStrings(e.Eval(stack.WorkspaceRegistryNamesForm))
+	e.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(dir) + `)`)
+	raw := e.AwaitEvalFor(stack.EmacsVerbBound,
 		"the workspace to appear in Emacs's registry",
-		workspaceRegistryNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
-	for _, name := range decodeStrings(raw) {
+		stack.WorkspaceRegistryNamesForm,
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == len(before)+1 })
+	for _, name := range stack.DecodeStrings(raw) {
 		if !contains(before, name) {
 			// Registry publication precedes the landing that selects the new
 			// workspace. Callers open its panel immediately, so wait for the
 			// command's complete user-visible outcome instead of racing that edge.
-			e.AwaitEvalFor(emacsVerbBound,
+			e.AwaitEvalFor(stack.EmacsVerbBound,
 				"the newly registered workspace to become current",
 				`(agent-repl--ws-current-name)`,
 				func(raw json.RawMessage) bool { return decodeString(raw) == name })
@@ -110,17 +111,17 @@ func contains(xs []string, want string) bool {
 
 // awaitInputBuffer waits for the workspace's composer buffer to exist and
 // returns its name.
-func awaitInputBuffer(t *testing.T, e *Emacs, ws string) string {
+func awaitInputBuffer(t *testing.T, e *stack.Emacs, ws string) string {
 	t.Helper()
-	form := `(let ((buf (agent-repl--input-buffer ` + elispString(ws) + `)))
+	form := `(let ((buf (agent-repl--input-buffer ` + stack.ElispString(ws) + `)))
                    (if buf (buffer-name buf) ""))`
-	raw := e.AwaitEvalFor(emacsBootBound, "the composer buffer to appear", form,
+	raw := e.AwaitEvalFor(stack.EmacsBootBound, "the composer buffer to appear", form,
 		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
 	return decodeString(raw)
 }
 
 func decodeString(raw json.RawMessage) string {
-	if isJSONNull(raw) {
+	if stack.IsJSONNull(raw) {
 		return ""
 	}
 	var s string
@@ -145,7 +146,7 @@ const submissionSeparator = "\x1f"
 // hooking `agent-repl-roster-update-functions' — not a reach into an
 // internal. It is the only place scenario 21's claim is observable at all
 // (see this file's header).
-func armSubmissionObserver(t *testing.T, e *Emacs) {
+func armSubmissionObserver(t *testing.T, e *stack.Emacs) {
 	t.Helper()
 	e.Eval(`(progn
              (defvar agent-repl-e2e--sent nil)
@@ -181,11 +182,11 @@ type submission struct {
 
 // awaitSubmissions waits until exactly n submissions have been observed and
 // returns them oldest-first.
-func awaitSubmissions(t *testing.T, e *Emacs, n int, what string) []submission {
+func awaitSubmissions(t *testing.T, e *stack.Emacs, n int, what string) []submission {
 	t.Helper()
 	raw := e.AwaitEval(what, `(reverse agent-repl-e2e--sent)`,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) >= n })
-	lines := decodeStrings(raw)
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) >= n })
+	lines := stack.DecodeStrings(raw)
 	if len(lines) != n {
 		t.Fatalf("observed %d submissions, want exactly %d: %q", len(lines), n, lines)
 	}
@@ -206,7 +207,7 @@ func awaitSubmissions(t *testing.T, e *Emacs, n int, what string) []submission {
 
 // observedSubmissionCount reads the observer's count without waiting, for the
 // negative assertion scenario 23 makes.
-func observedSubmissionCount(e *Emacs) int {
+func observedSubmissionCount(e *stack.Emacs) int {
 	return e.EvalInt(`(length agent-repl-e2e--sent)`)
 }
 
@@ -219,7 +220,7 @@ func observedSubmissionCount(e *Emacs) int {
 // refusal, say) is already done. It depends on the helper
 // `agent-repl-e2e--said-text' that `armSubmissionObserver' defines, so arm
 // that one first.
-func armSubmissionAnswerObserver(t *testing.T, e *Emacs) {
+func armSubmissionAnswerObserver(t *testing.T, e *stack.Emacs) {
 	t.Helper()
 	e.Eval(`(progn
              (defvar agent-repl-e2e--answered nil)
@@ -253,7 +254,7 @@ func armSubmissionAnswerObserver(t *testing.T, e *Emacs) {
 // awaitSubmissionAnswer waits until the daemon's answer to the submission
 // of TEXT has been observed, and returns it (":success", ":error" or
 // ":failure").
-func awaitSubmissionAnswer(t *testing.T, e *Emacs, text, what string) string {
+func awaitSubmissionAnswer(t *testing.T, e *stack.Emacs, text, what string) string {
 	t.Helper()
 	find := func(lines []string) (string, bool) {
 		for _, line := range lines {
@@ -264,33 +265,33 @@ func awaitSubmissionAnswer(t *testing.T, e *Emacs, text, what string) string {
 		return "", false
 	}
 	raw := e.AwaitEval(what, `agent-repl-e2e--answered`, func(raw json.RawMessage) bool {
-		_, ok := find(decodeStrings(raw))
+		_, ok := find(stack.DecodeStrings(raw))
 		return ok
 	})
-	arm, _ := find(decodeStrings(raw))
+	arm, _ := find(stack.DecodeStrings(raw))
 	return arm
 }
 
 // typeIntoComposer puts TEXT in the composer the way a user's typing leaves
 // it: the buffer's whole contents, nothing else.
-func typeIntoComposer(e *Emacs, buffer, text string) {
-	e.Eval(`(with-current-buffer ` + elispString(buffer) + `
+func typeIntoComposer(e *stack.Emacs, buffer, text string) {
+	e.Eval(`(with-current-buffer ` + stack.ElispString(buffer) + `
               (erase-buffer)
-              (insert ` + elispString(text) + `)
+              (insert ` + stack.ElispString(text) + `)
               t)`)
 }
 
 // runInComposer invokes COMMAND as a command, with the composer current —
 // which is where a user invoking it stands.
-func runInComposer(e *Emacs, buffer, command string) {
-	e.Eval(`(with-current-buffer ` + elispString(buffer) + `
+func runInComposer(e *stack.Emacs, buffer, command string) {
+	e.Eval(`(with-current-buffer ` + stack.ElispString(buffer) + `
               (call-interactively #'` + command + `)
               t)`)
 }
 
 // composerText reads the composer's contents back as data.
-func composerText(e *Emacs, buffer string) string {
-	return e.EvalString(`(with-current-buffer ` + elispString(buffer) + ` (buffer-string))`)
+func composerText(e *stack.Emacs, buffer string) string {
+	return e.EvalString(`(with-current-buffer ` + stack.ElispString(buffer) + ` (buffer-string))`)
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +321,7 @@ func composerText(e *Emacs, buffer string) string {
 // module's own `agent-repl--ws-by-ref-id', per the spec's readback table.
 // Area E uses it too, which is why it is a function rather than an inline
 // form.
-func installArmObserver(t *testing.T, e *Emacs) {
+func installArmObserver(t *testing.T, e *stack.Emacs) {
 	t.Helper()
 	e.Eval(`(progn
              (defun agent-repl-e2e--arm-of (ws)
@@ -356,7 +357,7 @@ func connectSession(t *testing.T, s *emacsScenario) {
              (defvar agent-repl-e2e--warm-arms nil)
              (setq agent-repl-e2e--warm-arms nil)
              (defun agent-repl-e2e--record-warm-arm (_roster)
-               (push (agent-repl-e2e--arm-of ` + elispString(s.Name) + `) agent-repl-e2e--warm-arms))
+               (push (agent-repl-e2e--arm-of ` + stack.ElispString(s.Name) + `) agent-repl-e2e--warm-arms))
              (add-hook 'agent-repl-roster-update-functions #'agent-repl-e2e--record-warm-arm)
              t)`)
 	typeIntoComposer(e, s.Input, "bring the session up")

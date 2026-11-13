@@ -32,6 +32,7 @@ import (
 	"connectrpc.com/connect"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -44,7 +45,7 @@ func dpUnforced() *connect.Request[agentreplv1.DeployRequest] {
 }
 
 // dpStaleDaemonWorld is a world whose deploys find the daemon stale.
-func dpStaleDaemonWorld(t *testing.T) *World {
+func dpStaleDaemonWorld(t *testing.T) *stack.World {
 	t.Helper()
 	_, w := adSelfRepoWorld(t)
 	w.StageDeployBuild(harness.DeployStaleDaemon)
@@ -76,7 +77,7 @@ func dpHandingOver(t *testing.T, resp *connect.Response[agentreplv1.DeployRespon
 }
 
 // dpAwaitAnnounced answers the handover's announcement off WatchDaemon.
-func dpAwaitAnnounced(t *testing.T, w *World, stream *harness.Stream[*agentreplv1.WatchDaemonResponse]) *agentreplv1.DaemonShutdownAnnounced {
+func dpAwaitAnnounced(t *testing.T, w *stack.World, stream *harness.Stream[*agentreplv1.WatchDaemonResponse]) *agentreplv1.DaemonShutdownAnnounced {
 	t.Helper()
 	return harness.AwaitView(t, w.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
@@ -154,7 +155,7 @@ func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	ws := w.NewWorkspace(t)
 	initial, feed := dbOpenRootFeed(t, w, ws)
 	defer feed.Close()
-	turn := SubmitPrompt(t, w, ws, "!bash-hold")
+	turn := stack.SubmitPrompt(t, w, ws, "!bash-hold")
 	held := func(row *frontendv1.FeedRow) bool {
 		call := row.GetActivity().GetSimpleToolCall()
 		return call.GetName().GetText() == "Bash" &&
@@ -213,7 +214,7 @@ func testADeployOverARunningTurnHandsItOverAndEndsNothing(t *testing.T) {
 	if stop.Msg.GetSuccess().GetInterruptedTurn() == nil {
 		t.Fatalf("Interrupt(turn) on the successor = %v, want success.interrupted_turn: the handover must have carried the running turn", stop.Msg)
 	}
-	ended := awaitFeedRowOn(t, w, successor, ws, "turn "+turn.GetValue()+" to end on the successor", kit.EndsTurn(turn)).GetTurnEnded()
+	ended := stack.AwaitFeedRowOn(t, w, successor, ws, "turn "+turn.GetValue()+" to end on the successor", kit.EndsTurn(turn)).GetTurnEnded()
 	if ended.GetInterrupted() == nil {
 		t.Fatalf("turn ended = %v, want the user's own interrupt as its only ending", ended)
 	}

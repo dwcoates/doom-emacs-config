@@ -4,6 +4,7 @@ package e2e
 // booted Doom shows, against the fake daemon. Each test boots its own Emacs.
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func testDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 	// Arrange
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 	f := &emacsFindFileFixture{Emacs: w.Emacs}
 	e := w.Emacs
@@ -20,20 +21,20 @@ func testDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 	const wantLine = 4
 
 	// Act
-	e.Eval(`(agent-repl-popup-open ` + elispString(path) + ` 4)`)
+	e.Eval(`(agent-repl-popup-open ` + stack.ElispString(path) + ` 4)`)
 
 	// Assert
 	if side := f.windowSideOf(path); side != "right" {
 		t.Fatalf("the popup window's window-side = %q, want %q", side, "right")
 	}
 	frameWidth := e.EvalInt(`(frame-width)`)
-	popupWidth := e.EvalInt(`(window-total-width (get-buffer-window (get-file-buffer ` + elispString(path) + `) t))`)
+	popupWidth := e.EvalInt(`(window-total-width (get-buffer-window (get-file-buffer ` + stack.ElispString(path) + `) t))`)
 	floor := int(float64(frameWidth) * popupWidthFloorFraction)
 	ceiling := int(float64(frameWidth) * popupWidthCeilingFraction)
 	if popupWidth < floor || popupWidth > ceiling {
 		t.Fatalf("the popup window is %d columns of a %d-column frame, want about half (%d..%d)", popupWidth, frameWidth, floor, ceiling)
 	}
-	if got := e.EvalInt(`(with-current-buffer (get-file-buffer ` + elispString(path) + `) (line-number-at-pos (point)))`); got != wantLine {
+	if got := e.EvalInt(`(with-current-buffer (get-file-buffer ` + stack.ElispString(path) + `) (line-number-at-pos (point)))`); got != wantLine {
 		t.Fatalf("point is on line %d, want %d: the popup's LINE is 1-indexed, as HostOpenInEditor.line is", got, wantLine)
 	}
 }
@@ -45,14 +46,14 @@ func testDoomPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 // daemon/integration's TestSelectWorkspaceStampsCurrentOnTheRoster.
 func testDoomRegisteringAWorkspaceSelectsIt(t *testing.T) {
 	// Arrange
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 
 	// Act
 	ws := w.register(t, box, "repo")
 
 	// Assert
-	call := w.Fake.AwaitCall("SelectWorkspace", 1, emacsVerbBound)
+	call := w.Fake.AwaitCall("SelectWorkspace", 1, stack.EmacsVerbBound)
 	var body struct {
 		Workspace struct {
 			ID string `json:"id"`
@@ -68,7 +69,7 @@ func testDoomRegisteringAWorkspaceSelectsIt(t *testing.T) {
 // module's minor-mode map winning Doom's own numerals in a booted Doom.
 func testDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 	// Arrange: three workspaces, so a direction is observable.
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 	e := w.Emacs
 	f := &emacsWorkspaceFixture{Emacs: e}
@@ -116,7 +117,7 @@ func testDoomWorkspaceNavigationFollowsTheDrawnTabBar(t *testing.T) {
 // module's policy is installed, which only a booted Doom can show.
 func testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 	// Arrange: a registered workspace, then a created one the create selects.
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 	e := w.Emacs
 	f := &emacsWorkspaceFixture{Emacs: e}
@@ -146,7 +147,7 @@ func testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft(t *testing.T) {
 // every close does: only the daemon orders the tabs.
 func testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 	// Arrange
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 	e := w.Emacs
 	w.register(t, box, "repo-0")
@@ -166,7 +167,7 @@ func testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+			return panelBufferCount(stack.DecodeStrings(raw), frontendPrefix, panelPrefix) == 0
 		})
 	if orderAfter := e.EvalStrings(emacsTabOrderForm); strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
 		t.Fatalf("the plain close moved the tab order: %q -> %q; no close reorders the tabs", orderBefore, orderAfter)
@@ -180,7 +181,7 @@ func testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 // variables.
 func testDoomSplashLoadsWithoutTheDashboardModule(t *testing.T) {
 	// Arrange
-	box := requireSandbox(t)
+	box := stack.RequireSandbox(t)
 	w := NewDoomWorld(t, box)
 	e := w.Emacs
 

@@ -116,8 +116,9 @@ var suiteRules = []suiteRule{
 	// -- the Emacs client layer's and the Doom tier's, which runs in it -- and
 	// nothing else's: the containerless cross-system suite never touches them.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
-	// The e2e harness's world-free code, its own module: its own suite, and
-	// both cross-system suites, which import it.
+	// The e2e harness, its own module (the world every scenario builds, and
+	// its world-free helpers): its own suite, and both cross-system suites,
+	// which import it.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/kit/", Suites: []string{"e2e-kit", "e2e", "e2e-emacs", repoScans}},
 	// Both cross-system suites live in e2e/ and share its harness; e2e-kit's
 	// scans read its sources.
@@ -135,7 +136,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
 	// The whole-module scans are their own suite; nothing else reads them.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", repoScans}},
 	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree.
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs", repoScans}},
@@ -151,13 +152,13 @@ var suiteRules = []suiteRule{
 	// sidecar, the lock helper, the test runner and zettel; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", "e2e-emacs", repoScans}},
 	// The TLDR-tree grammars: their consumer, the daemon (which parses every
 	// drawn text with tldr through cgo, internal/prose, and holds its reading
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves
 	// that parse, and the scans that read the Go binding's go.mod. Each later
 	// consumer joins this list as it starts parsing with them.
-	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e-kit", "e2e", "e2e-emacs", repoScans}},
 
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite

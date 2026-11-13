@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"encoding/json"
 	"path/filepath"
 	"strconv"
@@ -26,7 +27,7 @@ import (
 // the frontend dispatch that precedes it. It is the module's boot budget
 // (`emacsBootBound`), which is the launcher's own budget for the daemon the
 // dispatch talks to; a panel cannot legitimately outlast the link it rides.
-const panelSettleBound = emacsBootBound
+const panelSettleBound = stack.EmacsBootBound
 
 // emacsPanelWorld is one world with Emacs up, the daemon spawned by Emacs's
 // own launcher, and `count` workspaces registered against scripted fake-git
@@ -38,11 +39,11 @@ const panelSettleBound = emacsBootBound
 // the registration asked for on the user's behalf.
 //
 // No real git: `harness.NewRepoAt` is the scripted fake, per SPEC.md.
-func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
+func emacsPanelWorld(t *testing.T, count int) (*stack.EmacsWorld, []string) {
 	t.Helper()
 
-	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box)
+	box := stack.RequireSandbox(t)
+	w := stack.NewEmacsWorld(t, box)
 	e := w.Emacs
 	e.EnsureDaemon()
 
@@ -50,13 +51,13 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 	for i := 0; i < count; i++ {
 		dir := filepath.Join(box.Scratch(), "repo-"+strconv.Itoa(i))
 		repository := harness.NewRepoAt(t, dir)
-		e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
+		e.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(repository.Dir) + `)`)
 		want := i + 1
 		raw := e.AwaitEval("the workspace registry to hold the new workspace",
-			workspaceRegistryNamesForm,
-			func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == want })
+			stack.WorkspaceRegistryNamesForm,
+			func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == want })
 		names = registryNames(raw)
-		awaitRegistrationLanding(e, repository.Dir)
+		stack.AwaitRegistrationLanding(e, repository.Dir)
 	}
 	awaitTabsOpen(e, names)
 	// The registry is a hash, so its iteration order says nothing; the
@@ -71,7 +72,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 }
 
 // The landing each registration performs is waited out through
-// `awaitRegistrationLanding` (landing_test.go), the ONE settle every caller
+// `awaitRegistrationLanding` (kit/stack/landing.go), the ONE settle every caller
 // that mints a workspace goes through.
 
 // putTheLandingAway leaves every scenario the same starting frame: the
@@ -84,26 +85,26 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 // keeps the standing one — so the close under test restores the frame as it
 // stood at the LANDING rather than as the scenario arranged it, which is
 // exactly how scenario 18 lost its work window.
-func putTheLandingAway(e *Emacs, current string) {
-	e.t.Helper()
+func putTheLandingAway(e *stack.Emacs, current string) {
+	e.T.Helper()
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
 	e.Eval(`(call-interactively #'agent-repl-simple)`)
 	e.AwaitEvalFor(panelSettleBound, "the landing's panels to go away",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+			return panelBufferCount(stack.DecodeStrings(raw), frontendPrefix, panelPrefix) == 0
 		})
-	if e.EvalBool(`(and (agent-repl--ws-get ` + elispString(current) + ` :fullscreen-config) t)`) {
-		e.t.Fatalf("the close left workspace %q a saved layout; a later open would restore the landing's frame, not the scenario's", current)
+	if e.EvalBool(`(and (agent-repl--ws-get ` + stack.ElispString(current) + ` :fullscreen-config) t)`) {
+		e.T.Fatalf("the close left workspace %q a saved layout; a later open would restore the landing's frame, not the scenario's", current)
 	}
 }
 
-func registryNames(raw json.RawMessage) []string { return decodeStrings(raw) }
+func registryNames(raw json.RawMessage) []string { return stack.DecodeStrings(raw) }
 
 // windowBuffers is the frame's window list, read as DATA: buffer names per
 // window, never `format-mode-line` and never drawn text.
-func windowBuffers(e *Emacs) []string {
-	e.t.Helper()
+func windowBuffers(e *stack.Emacs) []string {
+	e.T.Helper()
 	return e.EvalStrings(`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`)
 }
 
@@ -123,25 +124,25 @@ func panelBufferCount(buffers []string, frontendPrefix, panelPrefix string) int 
 
 // bufferNamePrefixes reads the literal prefix of each panel buffer-name
 // format, so the assertions follow the defcustoms instead of restating them.
-func bufferNamePrefixes(e *Emacs) (frontend, panel string) {
-	e.t.Helper()
+func bufferNamePrefixes(e *stack.Emacs) (frontend, panel string) {
+	e.T.Helper()
 	frontend = e.EvalString(`(car (split-string agent-repl-frontend-buffer-name-format "%"))`)
 	panel = e.EvalString(`(car (split-string agent-repl-panel-buffer-name-format "%"))`)
 	return frontend, panel
 }
 
 // openPanel drives the ordinary command, as a command.
-func openPanel(e *Emacs) {
-	e.t.Helper()
+func openPanel(e *stack.Emacs) {
+	e.T.Helper()
 	e.Eval(`(call-interactively #'agent-repl-frontend-open-panel)`)
 }
 
 // awaitPanelWindows waits until the frame shows at least one panel window.
-func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
-	e.t.Helper()
+func awaitPanelWindows(e *stack.Emacs, frontendPrefix, panelPrefix string) {
+	e.T.Helper()
 	e.AwaitEvalFor(panelSettleBound, "the agent-repl panel windows to appear",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) > 0
+			return panelBufferCount(stack.DecodeStrings(raw), frontendPrefix, panelPrefix) > 0
 		})
 }

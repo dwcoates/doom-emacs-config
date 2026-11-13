@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"agentrepl/e2e/kit"
@@ -239,7 +239,7 @@ const heartbeatInterval = 250 * time.Millisecond
 // 10x rather than 3x, and deliberately: three times a number this small is
 // not a bound, it is a race with the scheduler. That first answer itself is
 // now awaitServer's single probe under HeartbeatBound.
-const emacsBootBound = 500 * time.Millisecond
+const EmacsBootBound = 500 * time.Millisecond
 
 // daemonLinkBound is how long EnsureDaemon may take: the launcher spawning
 // `agent-repld`, the daemon binding its address, and Emacs dialling it.
@@ -255,7 +255,7 @@ const emacsBootBound = 500 * time.Millisecond
 // host's 265ms and sat at 1.17x that maximum, so a full run's cold daemon
 // boot (TestEmacsWorkspaces/EmacsProofOfLife's link took 1.18s granted while its fresh state
 // database was created) failed it with nothing hung. Just over 2x the max.
-const daemonLinkBound = 1800 * time.Millisecond
+const DaemonLinkBound = 1800 * time.Millisecond
 
 // doomBootBound is how long Emacs may take to finish Doom's own
 // initialization and publish the readiness stamp.
@@ -287,7 +287,7 @@ const doomBootBound = 3500 * time.Millisecond
 // two gates at once spends little CPU and keeps waiting (2026-10-15:
 // TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness missed the WALL bound with two merges'
 // suites running); a boot that is slow or spinning spends it and fails.
-const doomBootCPUBound = doomBootBound
+const DoomBootCPUBound = doomBootBound
 
 // doomBootWallCap is the LAST RESORT for a boot that spends no CPU and never
 // stamps -- asleep in a deadlock the CPU budget cannot see -- set far past
@@ -315,8 +315,8 @@ const doomStageBound = 5 * time.Second
 type Emacs struct {
 	// ArtifactPaths are extra files or trees dumpArtifacts preserves on failure.
 	ArtifactPaths []string
-	t             *testing.T
-	box           sandbox
+	T             *testing.T
+	Box           Sandbox
 
 	// Root is the scratch subtree this Emacs owns. Every path below is
 	// under it, so a swept scratch leaves nothing behind.
@@ -388,7 +388,7 @@ type Emacs struct {
 	// process as this scenario's, so reapStrays can hunt down the daemon
 	// and shims Emacs detached from itself. See reapStrays.
 	reapMu sync.Mutex
-	reap   []string
+	Reap   []string
 
 	// evalMax is the longest scenario eval this Emacs has answered, in
 	// nanoseconds. It is what MEASURES evalBound, the same way heartbeatMax
@@ -418,11 +418,11 @@ type Emacs struct {
 	teardownMu    sync.Mutex
 	teardownSteps []string
 
-	// fail is how reapStrays reports a survivor. It is nil in every
+	// Fail is how reapStrays reports a survivor. It is nil in every
 	// scenario, which means e.t.Errorf; the field exists so the teardown
 	// tests can assert that a stray FAILS rather than merely logging, which
 	// nothing can observe through *testing.T itself.
-	fail func(format string, args ...any)
+	Fail func(format string, args ...any)
 
 	// phases are the boot durations this Emacs observed, in the order they
 	// happened. They MEASURE emacsBootBound, doomBootBound and
@@ -464,17 +464,17 @@ func (e *Emacs) reportPhases() {
 	defer e.phasesMu.Unlock()
 	for _, p := range e.phases {
 		if p.wall != 0 {
-			e.t.Logf("emacs phase %s took %s granted of %s wall", p.name, p.took.Round(time.Millisecond), p.wall.Round(time.Millisecond))
+			e.T.Logf("emacs phase %s took %s granted of %s wall", p.name, p.took.Round(time.Millisecond), p.wall.Round(time.Millisecond))
 			continue
 		}
-		e.t.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
+		e.T.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
 	}
 	if max := e.evalMax.Load(); max > 0 {
-		e.t.Logf("emacs phase eval-max took %s granted (bound %s)",
+		e.T.Logf("emacs phase eval-max took %s granted (bound %s)",
 			time.Duration(max).Round(time.Millisecond), evalBound)
 	}
 	if max := e.heartbeatMax.Load(); max > 0 {
-		e.t.Logf("emacs phase heartbeat-probe-max took %s granted (bound %s)",
+		e.T.Logf("emacs phase heartbeat-probe-max took %s granted (bound %s)",
 			time.Duration(max).Round(time.Millisecond), HeartbeatBound)
 	}
 }
@@ -524,22 +524,22 @@ type EmacsOpts struct {
 // workspaceRegistryNamesForm reads the name of every workspace Emacs's
 // registry (`agent-repl--workspaces') holds a project directory for: the ONE
 // spelling every scenario reads the registry with.
-const workspaceRegistryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
+const WorkspaceRegistryNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
 
 // emacsRoot is a scenario's Emacs HOME: its scratch root's `emacs`.
-func emacsRoot(box sandbox) string { return filepath.Join(box.Scratch(), "emacs") }
+func EmacsRoot(box Sandbox) string { return filepath.Join(box.Scratch(), "emacs") }
 
 // emacsStateDir is the agent-repl state root of the Emacs at ROOT, where its
 // daemon publishes daemon.addr: known before Emacs starts, so a daemon the
 // scenario starts itself can bind it first.
-func emacsStateDir(root string) string { return filepath.Join(root, "state") }
+func EmacsStateDir(root string) string { return filepath.Join(root, "state") }
 
 // StartEmacs brings up one sandboxed Emacs with a real tty frame, loads the
 // module's own sources into it, and arms the heartbeat.
 //
 // It does NOT start the daemon: that is `EnsureDaemon`, because EMACS
 // spawning the daemon through its own launcher is the point of this layer.
-func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
+func StartEmacs(t *testing.T, box Sandbox, opts EmacsOpts) *Emacs {
 	t.Helper()
 
 	// The parallelism slot is NewEmacsWorld's to take, and it takes it before
@@ -549,7 +549,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// caller goes through NewEmacsWorld.
 	requireEmacsSlot(t)
 
-	root := emacsRoot(box)
+	root := EmacsRoot(box)
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
 	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
 	// early-init then aborts before any readiness stamp is written.
@@ -560,13 +560,13 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		t.Fatalf("restrict the Emacs root %s: %v", root, err)
 	}
 	e := &Emacs{
-		t:                  t,
-		box:                box,
+		T:                  t,
+		Box:                box,
 		Root:               root,
 		ServerSocket:       filepath.Join(root, "server"),
 		EmacsDir:           filepath.Join(root, ".emacs.d"),
 		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
-		StateDir:           emacsStateDir(root),
+		StateDir:           EmacsStateDir(root),
 		LogFile:            filepath.Join(root, "state", "logs", "doom-agent-repl.log"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
@@ -583,13 +583,13 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	}
 	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
 	// it belongs to this scenario and to nothing else.
-	e.reap = []string{root}
+	e.Reap = []string{root}
 
 	// REGISTERED FIRST, so t.Cleanup's LIFO unwind runs it LAST: the reaper
 	// must observe what is STILL alive after Emacs, its daemon and the
 	// sidecar have all been stopped on purpose, otherwise it would report
 	// processes that were about to exit anyway.
-	t.Cleanup(e.reapStrays)
+	t.Cleanup(e.ReapStrays)
 
 	e.writeSettings(opts)
 	// THE VENDOR STAND-IN THE DAEMON'S OWN CALLS EXEC.
@@ -782,7 +782,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	serverStarted := time.Now()
 	e.awaitServer()
 	e.record("server-answers", time.Since(serverStarted))
-	if err := serverSocketDirConfined(e.EvalString(`server-socket-dir`), e.Root); err != nil {
+	if err := ServerSocketDirConfined(e.EvalString(`server-socket-dir`), e.Root); err != nil {
 		t.Fatal(err)
 	}
 	e.armHeartbeat()
@@ -804,7 +804,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 // `server'; the boot hook asserts the name, and this asserts the directory,
 // which has no other witness: a default-named `server-start' -- Doom's own, a
 // with-editor's, an interactive M-x -- must still land inside this root.
-func serverSocketDirConfined(dir, root string) error {
+func ServerSocketDirConfined(dir, root string) error {
 	if !strings.HasPrefix(dir, root+string(filepath.Separator)) {
 		return fmt.Errorf("`server-socket-dir' is %q, outside this scenario's scratch root %s: "+
 			"a default-named `server-start' would bind a path every scenario in this container "+
@@ -822,7 +822,7 @@ func serverSocketDirConfined(dir, root string) error {
 func (e *Emacs) settingsPath() string { return filepath.Join(e.Root, "e2e-settings.el") }
 
 func (e *Emacs) writeSettings(opts EmacsOpts) {
-	e.t.Helper()
+	e.T.Helper()
 
 	for _, dir := range []string{
 		e.Root,
@@ -834,7 +834,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 		filepath.Join(e.Root, "eval"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			e.t.Fatalf("prepare %s: %v", dir, err)
+			e.T.Fatalf("prepare %s: %v", dir, err)
 		}
 	}
 
@@ -843,7 +843,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 	// the real bin/build-frontend.sh from inside a test.
 	buildScript := filepath.Join(e.Root, "build-noop.sh")
 	if err := os.WriteFile(buildScript, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
-		e.t.Fatalf("write the no-op build script: %v", err)
+		e.T.Fatalf("write the no-op build script: %v", err)
 	}
 
 	// `setq` AHEAD of the `defcustom`s in `lisp/daemon.el` is deliberate and
@@ -927,7 +927,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 	)
 
 	if err := os.WriteFile(e.settingsPath(), []byte(src), 0o644); err != nil {
-		e.t.Fatalf("write e2e-settings.el: %v", err)
+		e.T.Fatalf("write e2e-settings.el: %v", err)
 	}
 }
 
@@ -1008,7 +1008,7 @@ var emacsAdvisedPrimitives = []string{
 // are taken from the sources the scenarios are, and cannot drift from them.
 func scenarioOverriddenFunctions(t *testing.T) []string {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join(repo.e2eDir, "emacs_*_test.go"))
+	files, err := filepath.Glob(filepath.Join(Repo.e2eDir, "emacs_*_test.go"))
 	if err != nil {
 		t.Fatalf("glob the Emacs layer's sources: %v", err)
 	}
@@ -1062,7 +1062,7 @@ var trampolinePrewarm struct {
 // A failure here fails EVERY caller, not only the first: an unwarmed cache is
 // the flake this exists to remove, and a silent fallback to per-scenario
 // compilation would hide it again.
-func prewarmTrampolines(t *testing.T, box sandbox) {
+func prewarmTrampolines(t *testing.T, box Sandbox) {
 	t.Helper()
 	trampolinePrewarm.Do(func() {
 		started := time.Now()
@@ -1115,9 +1115,9 @@ func prewarmTrampolines(t *testing.T, box sandbox) {
 // therefore fails HERE, named, on its first scenario -- instead of returning
 // as a boot-bound flake on a busy machine.
 func (e *Emacs) assertTrampolinesWerePrewarmed() {
-	e.t.Helper()
+	e.T.Helper()
 	if strays := e.strayTrampolines(); len(strays) > 0 {
-		e.t.Fatalf("this boot built %d subr trampoline(s) itself instead of finding one "+
+		e.T.Fatalf("this boot built %d subr trampoline(s) itself instead of finding one "+
 			"already on disk: %s\nAdd the name(s) to emacsAdvisedPrimitives so the prewarm "+
 			"builds them once into %s, rather than every scenario paying a child Emacs "+
 			"inside Doom's %s boot bound.",
@@ -1132,9 +1132,9 @@ func (e *Emacs) assertTrampolinesWerePrewarmed() {
 // the scenarios' redefinitions from their sources (scenarioOverriddenFunctions),
 // so a stray here is a redefinition that scan does not read.
 func (e *Emacs) assertTheScenarioBuiltNoTrampoline() {
-	e.t.Helper()
+	e.T.Helper()
 	if strays := e.strayTrampolines(); len(strays) > 0 {
-		e.t.Errorf("this scenario built %d subr trampoline(s) mid-test instead of finding one "+
+		e.T.Errorf("this scenario built %d subr trampoline(s) mid-test instead of finding one "+
 			"already on disk: %s\nscenarioOverriddenFunctions did not read the form that redefines "+
 			"them; widen kit.ScenarioOverride so the prewarm builds them once into %s.",
 			len(strays), strings.Join(strays, ", "), trampolineCacheDir)
@@ -1144,7 +1144,7 @@ func (e *Emacs) assertTheScenarioBuiltNoTrampoline() {
 // strayTrampolines is every trampoline this Emacs installed that was not on
 // disk before it booted, as "<name> (from <file>)".
 func (e *Emacs) strayTrampolines() []string {
-	e.t.Helper()
+	e.T.Helper()
 	loaded := e.EvalStrings(`(let (r)
   (maphash (lambda (name trampoline)
              (push (format "%s %s" name
@@ -1213,7 +1213,7 @@ const doomReadOnlySubdir = "straight"
 // Doom's layout, not an observation. A boot that fails on a read-only path
 // fails LOUDLY with the pty output, which is what awaitDoom is for.
 func (e *Emacs) stageEmacsDir() {
-	e.t.Helper()
+	e.T.Helper()
 
 	src := os.Getenv("EMACSDIR")
 	if src == "" {
@@ -1221,12 +1221,12 @@ func (e *Emacs) stageEmacsDir() {
 	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		e.t.Fatalf("read the image's Doom install at %s: %v", src, err)
+		e.T.Fatalf("read the image's Doom install at %s: %v", src, err)
 	}
 	// 0o700: Emacs 30 refuses a user-emacs-directory "accessible by others"
 	// and Doom's early-init aborts before any stamp is written.
 	if err := os.MkdirAll(e.EmacsDir, 0o700); err != nil {
-		e.t.Fatalf("prepare %s: %v", e.EmacsDir, err)
+		e.T.Fatalf("prepare %s: %v", e.EmacsDir, err)
 	}
 
 	for _, entry := range entries {
@@ -1234,31 +1234,31 @@ func (e *Emacs) stageEmacsDir() {
 		to := filepath.Join(e.EmacsDir, entry.Name())
 		if entry.Name() != ".local" {
 			if err := os.Symlink(from, to); err != nil {
-				e.t.Fatalf("stage %s: %v", to, err)
+				e.T.Fatalf("stage %s: %v", to, err)
 			}
 			continue
 		}
 		if err := os.MkdirAll(to, 0o755); err != nil {
-			e.t.Fatalf("prepare %s: %v", to, err)
+			e.T.Fatalf("prepare %s: %v", to, err)
 		}
 		local, err := os.ReadDir(from)
 		if err != nil {
-			e.t.Fatalf("read the image's Doom local tree at %s: %v", from, err)
+			e.T.Fatalf("read the image's Doom local tree at %s: %v", from, err)
 		}
 		for _, l := range local {
 			lFrom := filepath.Join(from, l.Name())
 			lTo := filepath.Join(to, l.Name())
 			if l.Name() == doomReadOnlySubdir {
 				if err := os.Symlink(lFrom, lTo); err != nil {
-					e.t.Fatalf("stage %s: %v", lTo, err)
+					e.T.Fatalf("stage %s: %v", lTo, err)
 				}
 				continue
 			}
 			ctx, cancel := grantedclock.WithBound(context.Background(), doomStageBound)
-			out, err := e.box.Exec(ctx, "cp", "-a", lFrom, lTo)
+			out, err := e.Box.Exec(ctx, "cp", "-a", lFrom, lTo)
 			cancel()
 			if err != nil {
-				e.t.Fatalf("stage %s into the scratch: %v\n%s", lFrom, err, out)
+				e.T.Fatalf("stage %s into the scratch: %v\n%s", lFrom, err, out)
 			}
 		}
 	}
@@ -1314,48 +1314,48 @@ func (e *Emacs) rootListing() string {
 // `"ok": false` and the elisp error, which is reported as itself rather than
 // as a socket that never appears.
 func (e *Emacs) awaitDoom() {
-	e.t.Helper()
+	e.T.Helper()
 	stall := time.NewTimer(doomBootBound)
 	defer stall.Stop()
 	wallCap := time.NewTimer(doomBootWallCap)
 	defer wallCap.Stop()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
-	outcome := awaitDoomStamp(doomStampWait{
-		poll:    ticker.C,
-		stalled: stall.C,
-		capped:  wallCap.C,
-		read: func() ([]byte, bool, error) {
+	outcome := AwaitDoomStamp(DoomStampWait{
+		Poll:    ticker.C,
+		Stalled: stall.C,
+		Capped:  wallCap.C,
+		Read: func() ([]byte, bool, error) {
 			body, err := os.ReadFile(e.ReadyStamp)
 			if os.IsNotExist(err) {
 				return nil, false, nil
 			}
 			return body, err == nil, err
 		},
-		exited: e.proc.Exited,
-		cpu:    func() (time.Duration, error) { return emacsCPU(e.emacsPID()) },
-		onStall: func() {
+		Exited: e.proc.Exited,
+		CPU:    func() (time.Duration, error) { return EmacsCPU(e.emacsPID()) },
+		OnStall: func() {
 			// A BOOT PAST THE WALL BOUND IS REPORTED, NOT FAILED: on a host
 			// running two gates at once the boot is starved rather than
 			// slow, and only its CPU says which (doomBootCPUBound).
-			e.t.Logf("Doom has not finished initializing %s in; still waiting on its readiness stamp at %s%s%s",
+			e.T.Logf("Doom has not finished initializing %s in; still waiting on its readiness stamp at %s%s%s",
 				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot())
 		},
 	})
-	switch outcome.kind {
-	case doomStamped:
+	switch outcome.Kind {
+	case DoomStamped:
 		e.acceptDoomStamp(outcome.body)
-	case doomExited:
-		e.t.Fatalf("emacs exited before Doom finished initializing; pty output:\n%s", e.proc.Output())
-	case doomReadFailed:
-		e.t.Fatalf("read the Doom readiness stamp: %v", outcome.err)
-	case doomOverBudget, doomCapped:
+	case DoomExited:
+		e.T.Fatalf("emacs exited before Doom finished initializing; pty output:\n%s", e.proc.Output())
+	case DoomReadFailed:
+		e.T.Fatalf("read the Doom readiness stamp: %v", outcome.err)
+	case DoomOverBudget, DoomCapped:
 		// The kernel's account comes with it, because a boot that misses
 		// its budget writes NOTHING to the pty -- so the pty output alone
 		// reports an empty string and explains nothing. AND THE NATIVE
 		// STACK: such a boot is an Emacs that is ALIVE and has published no
 		// server socket, so only the debugger can say where inside it.
-		e.t.Fatalf("Doom did not finish initializing: %s (no readiness stamp at %s)%s%s%s%s; pty output:\n%s",
+		e.T.Fatalf("Doom did not finish initializing: %s (no readiness stamp at %s)%s%s%s%s; pty output:\n%s",
 			outcome.why(), e.ReadyStamp, e.bootBreadcrumb(), e.rootListing(),
 			e.processSnapshot(), e.nativeBacktrace(), e.proc.Output())
 	}
@@ -1364,10 +1364,10 @@ func (e *Emacs) awaitDoom() {
 // acceptDoomStamp decodes a written readiness stamp and refuses one that says
 // the boot degraded.
 func (e *Emacs) acceptDoomStamp(body []byte) {
-	e.t.Helper()
+	e.T.Helper()
 	var ready DoomReady
 	if err := json.Unmarshal(body, &ready); err != nil {
-		e.t.Fatalf("decode the Doom readiness stamp %q: %v", string(body), err)
+		e.T.Fatalf("decode the Doom readiness stamp %q: %v", string(body), err)
 	}
 	if !ready.OK {
 		// THE ROOT'S OWN CONTENTS COME WITH IT. A boot error names what Emacs
@@ -1379,23 +1379,23 @@ func (e *Emacs) acceptDoomStamp(body []byte) {
 		// the pty, so a failed stamp is routinely accompanied by an EMPTY pty
 		// -- measured -- and the breadcrumb is then the only record of which
 		// boot step the error came out of.
-		e.t.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
+		e.T.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
 			ready.Error, e.bootBreadcrumb(), e.rootListing(), e.proc.Output())
 	}
 	// The whole reason for booting Doom rather than `-Q` is that these are
 	// real. A stamp that says otherwise means the profile silently degraded,
 	// and every keybinding and popup assertion below it would be vacuous.
 	if !ready.Doom {
-		e.t.Fatalf("Doom is not loaded in the e2e Emacs; the stamp reports %+v", ready)
+		e.T.Fatalf("Doom is not loaded in the e2e Emacs; the stamp reports %+v", ready)
 	}
 	if !ready.MapBang {
-		e.t.Fatalf("`map!' is unbound in the e2e Emacs, so no keybinding is real; the stamp reports %+v", ready)
+		e.T.Fatalf("`map!' is unbound in the e2e Emacs, so no keybinding is real; the stamp reports %+v", ready)
 	}
 	if !ready.PopupRule {
-		e.t.Fatalf("`set-popup-rule!' is unbound, so config.el skipped the notes popup rule; the stamp reports %+v", ready)
+		e.T.Fatalf("`set-popup-rule!' is unbound, so config.el skipped the notes popup rule; the stamp reports %+v", ready)
 	}
 	if !ready.AgentRepl {
-		e.t.Fatalf("`:app agent-repl' did not load; the stamp reports %+v", ready)
+		e.T.Fatalf("`:app agent-repl' did not load; the stamp reports %+v", ready)
 	}
 	e.Doom = ready
 }
@@ -1403,36 +1403,36 @@ func (e *Emacs) acceptDoomStamp(body []byte) {
 // doomStampWait is what awaitDoomStamp waits with: the instants it looks
 // again, reports a stall and gives up at, and how it reads the stamp, the
 // process and the process's CPU.
-type doomStampWait struct {
-	poll, stalled, capped <-chan time.Time
-	read                  func() (body []byte, written bool, err error)
-	exited                func() bool
-	cpu                   func() (time.Duration, error)
-	onStall               func()
+type DoomStampWait struct {
+	Poll, Stalled, Capped <-chan time.Time
+	Read                  func() (body []byte, written bool, err error)
+	Exited                func() bool
+	CPU                   func() (time.Duration, error)
+	OnStall               func()
 }
 
 // doomOutcome is how a wait for the readiness stamp ended.
-type doomOutcome struct {
-	kind doomOutcomeKind
+type DoomOutcome struct {
+	Kind DoomOutcomeKind
 	body []byte
 	cpu  time.Duration
 	err  error
 }
 
-type doomOutcomeKind int
+type DoomOutcomeKind int
 
 const (
-	doomStamped doomOutcomeKind = iota
-	doomExited
-	doomReadFailed
-	doomOverBudget
-	doomCapped
+	DoomStamped DoomOutcomeKind = iota
+	DoomExited
+	DoomReadFailed
+	DoomOverBudget
+	DoomCapped
 )
 
 // why says what ended a wait that failed by budget or cap.
-func (o doomOutcome) why() string {
-	if o.kind == doomOverBudget {
-		return fmt.Sprintf("Emacs spent %s of CPU, over the %s a Doom boot is budgeted", o.cpu, doomBootCPUBound)
+func (o DoomOutcome) why() string {
+	if o.Kind == DoomOverBudget {
+		return fmt.Sprintf("Emacs spent %s of CPU, over the %s a Doom boot is budgeted", o.cpu, DoomBootCPUBound)
 	}
 	return fmt.Sprintf("no stamp within the last-resort %s", doomBootWallCap)
 }
@@ -1442,26 +1442,26 @@ func (o doomOutcome) why() string {
 // than doomBootCPUBound, or at doomBootWallCap. Wall time past doomBootBound
 // only reports a stall, once: a boot the host starved has spent little CPU,
 // and failing it would charge the product for the harness's concurrency.
-func awaitDoomStamp(w doomStampWait) doomOutcome {
+func AwaitDoomStamp(w DoomStampWait) DoomOutcome {
 	for {
-		body, written, err := w.read()
+		body, written, err := w.Read()
 		switch {
 		case err != nil:
-			return doomOutcome{kind: doomReadFailed, err: err}
+			return DoomOutcome{Kind: DoomReadFailed, err: err}
 		case written:
-			return doomOutcome{kind: doomStamped, body: body}
-		case w.exited():
-			return doomOutcome{kind: doomExited}
+			return DoomOutcome{Kind: DoomStamped, body: body}
+		case w.Exited():
+			return DoomOutcome{Kind: DoomExited}
 		}
-		if spent, err := w.cpu(); err == nil && spent > doomBootCPUBound {
-			return doomOutcome{kind: doomOverBudget, cpu: spent}
+		if spent, err := w.CPU(); err == nil && spent > DoomBootCPUBound {
+			return DoomOutcome{Kind: DoomOverBudget, cpu: spent}
 		}
 		select {
-		case <-w.capped:
-			return doomOutcome{kind: doomCapped}
-		case <-w.stalled:
-			w.onStall()
-		case <-w.poll:
+		case <-w.Capped:
+			return DoomOutcome{Kind: DoomCapped}
+		case <-w.Stalled:
+			w.OnStall()
+		case <-w.Poll:
 		}
 	}
 }
@@ -1469,7 +1469,7 @@ func awaitDoomStamp(w doomStampWait) doomOutcome {
 // emacsCPU is the CPU process PID and its reaped children have spent (utime,
 // stime, cutime, cstime from /proc/<pid>/stat). A pid not yet known (0) has
 // spent nothing.
-func emacsCPU(pid int) (time.Duration, error) {
+func EmacsCPU(pid int) (time.Duration, error) {
 	if pid == 0 {
 		return 0, nil
 	}
@@ -1477,7 +1477,7 @@ func emacsCPU(pid int) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	ticks, err := statCPUTicks(string(raw))
+	ticks, err := StatCPUTicks(string(raw))
 	if err != nil {
 		return 0, err
 	}
@@ -1491,7 +1491,7 @@ const clockTicksPerSecond = 100
 // statCPUTicks sums fields 14-17 (utime, stime, cutime, cstime) of one
 // /proc/<pid>/stat line. The command field can hold spaces and parentheses,
 // so the fields are counted from the LAST closing parenthesis.
-func statCPUTicks(stat string) (int64, error) {
+func StatCPUTicks(stat string) (int64, error) {
 	end := strings.LastIndexByte(stat, ')')
 	if end < 0 {
 		return 0, fmt.Errorf("a /proc stat line with no command field: %q", stat)
@@ -1535,9 +1535,9 @@ func envPrefix(env []string) []string {
 // 500ms emacsBootBound this used to poll under, while the same run's
 // heartbeat probes peaked at 816ms.
 func (e *Emacs) awaitServer() {
-	e.t.Helper()
+	e.T.Helper()
 	if err := e.probeServer(); err != nil {
-		e.t.Fatal(err)
+		e.T.Fatal(err)
 	}
 }
 
@@ -1665,14 +1665,14 @@ func (e *Emacs) declareWedged(cause string) {
 		// once `breakStall` has unwound the loop it exists to name.
 		snapshot := e.processSnapshot()
 		native := e.nativeBacktrace()
-		e.t.Errorf("EMACS WEDGED: %s%s%s", cause, snapshot, native)
+		e.T.Errorf("EMACS WEDGED: %s%s%s", cause, snapshot, native)
 		e.dumpArtifacts()
 		// LAST, because it waits for Emacs to come back. A wedged Emacs
 		// answers nothing at all -- not the server socket, not a nested eval,
 		// and (measured) not `debug-on-event''s SIGUSR2 either -- so the only
 		// thing that can be recovered is what the profiler armed at boot
 		// already recorded, read out once the stall ends.
-		e.t.Logf("EMACS WEDGED, continued:%s", e.profileWhenStuck())
+		e.T.Logf("EMACS WEDGED, continued:%s", e.profileWhenStuck())
 	})
 }
 
@@ -1691,16 +1691,16 @@ func (e *Emacs) dumpArtifacts() {
 	if dir == "" {
 		scratch, err := os.MkdirTemp("", "emacs-e2e-artifacts-")
 		if err != nil {
-			e.t.Logf("emacs artifacts: no scratch to collect them in (%v); emacs pty output (set %s to preserve full artifacts):\n%s",
+			e.T.Logf("emacs artifacts: no scratch to collect them in (%v); emacs pty output (set %s to preserve full artifacts):\n%s",
 				err, kit.ArtifactsEnv, kit.TailBytes([]byte(e.proc.Output()), artifactTailBytes))
 			return
 		}
 		defer func() {
 			if root := e.artifactRoot; root != "" {
-				kit.TailArtifacts(e.t.Logf, root)
+				kit.TailArtifacts(e.T.Logf, root)
 			}
 			if err := os.RemoveAll(scratch); err != nil {
-				e.t.Logf("emacs artifacts: remove the scratch copy %s: %v", scratch, err)
+				e.T.Logf("emacs artifacts: remove the scratch copy %s: %v", scratch, err)
 			}
 		}()
 		dir = scratch
@@ -1711,10 +1711,10 @@ func (e *Emacs) dumpArtifacts() {
 	}
 	path := filepath.Join(out, "emacs.pty.log")
 	if err := os.WriteFile(path, []byte(e.proc.Output()), 0o644); err != nil {
-		e.t.Logf("write %s: %v", path, err)
+		e.T.Logf("write %s: %v", path, err)
 		return
 	}
-	e.t.Logf("emacs pty output preserved at %s", path)
+	e.T.Logf("emacs pty output preserved at %s", path)
 	e.dumpMessages(out)
 	// The scripted git's fixture file carries every call made against it,
 	// and the state root carries the daemon's own logs: a prompt Emacs is
@@ -1728,10 +1728,10 @@ func (e *Emacs) dumpArtifacts() {
 		}
 		dest := filepath.Join(out, filepath.Base(extra))
 		if err := copyTree(extra, dest); err != nil {
-			e.t.Logf("preserve %s: %v", extra, err)
+			e.T.Logf("preserve %s: %v", extra, err)
 		}
 	}
-	e.preserveWorkspaceElispLogs(out, e.box.Scratch())
+	e.preserveWorkspaceElispLogs(out, e.Box.Scratch())
 }
 
 // preserveWorkspaceElispLogs copies every workspace-scoped ELISP sink this
@@ -1777,7 +1777,7 @@ func (e *Emacs) preserveWorkspaceElispLogs(out string, root string) {
 			// An unreadable subtree is reported and stepped over: one
 			// unreachable directory must not cost the sweep every sink
 			// after it.
-			e.t.Logf("preserve workspace elisp logs: walk %s: %v", path, err)
+			e.T.Logf("preserve workspace elisp logs: walk %s: %v", path, err)
 			return nil
 		}
 		if !entry.IsDir() {
@@ -1794,20 +1794,20 @@ func (e *Emacs) preserveWorkspaceElispLogs(out string, root string) {
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
-			e.t.Logf("preserve workspace elisp logs: relate %s: %v", path, relErr)
+			e.T.Logf("preserve workspace elisp logs: relate %s: %v", path, relErr)
 			return fs.SkipDir
 		}
 		if copyErr := copyTree(path, filepath.Join(out, "workspace-elisp-logs", rel)); copyErr != nil {
-			e.t.Logf("preserve %s: %v", path, copyErr)
+			e.T.Logf("preserve %s: %v", path, copyErr)
 		} else {
 			copied++
 		}
 		return fs.SkipDir
 	})
 	if err != nil {
-		e.t.Logf("preserve workspace elisp logs under %s: %v", root, err)
+		e.T.Logf("preserve workspace elisp logs under %s: %v", root, err)
 	}
-	e.t.Logf("preserved %d workspace elisp sink(s) from %s under %s", copied, root, filepath.Join(out, "workspace-elisp-logs"))
+	e.T.Logf("preserved %d workspace elisp sink(s) from %s under %s", copied, root, filepath.Join(out, "workspace-elisp-logs"))
 }
 
 // messagesTailLines is how much of `*Messages*` a failure carries.
@@ -1842,24 +1842,24 @@ func (e *Emacs) dumpMessages(out string) {
                  (buffer-substring-no-properties (point) end))))`, -messagesTailLines)
 	res, err := e.eval(form)
 	if err != nil {
-		e.t.Logf("emacs could not be asked for its *Messages*: %v", err)
+		e.T.Logf("emacs could not be asked for its *Messages*: %v", err)
 		return
 	}
 	if !res.OK {
-		e.t.Logf("reading emacs's *Messages* signalled in emacs: %s", res.Error)
+		e.T.Logf("reading emacs's *Messages* signalled in emacs: %s", res.Error)
 		return
 	}
 	var text string
 	if unmarshalErr := json.Unmarshal(res.Value, &text); unmarshalErr != nil {
-		e.t.Logf("emacs's *Messages* did not come back as a string: %s", res.Value)
+		e.T.Logf("emacs's *Messages* did not come back as a string: %s", res.Value)
 		return
 	}
 	path := filepath.Join(out, kit.MessagesFile)
 	if writeErr := os.WriteFile(path, []byte(text), 0o644); writeErr != nil {
-		e.t.Logf("write %s: %v", path, writeErr)
+		e.T.Logf("write %s: %v", path, writeErr)
 		return
 	}
-	e.t.Logf("emacs *Messages* tail preserved at %s", path)
+	e.T.Logf("emacs *Messages* tail preserved at %s", path)
 }
 
 // artifactDirName is not unique enough on its own, and this is what makes it
@@ -1876,10 +1876,10 @@ func (e *Emacs) dumpMessages(out string) {
 func (e *Emacs) artifactDir(root string) string {
 	e.artifactDirOnce.Do(func() {
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			e.t.Logf("preserve emacs artifacts under %s: %v", root, err)
+			e.T.Logf("preserve emacs artifacts under %s: %v", root, err)
 			return
 		}
-		base := filepath.Join(root, artifactDirName(e.t.Name()))
+		base := filepath.Join(root, artifactDirName(e.T.Name()))
 		for n := 0; ; n++ {
 			dir := base
 			if n > 0 {
@@ -1893,7 +1893,7 @@ func (e *Emacs) artifactDir(root string) string {
 			if os.IsExist(err) {
 				continue
 			}
-			e.t.Logf("preserve emacs artifacts under %s: %v", dir, err)
+			e.T.Logf("preserve emacs artifacts under %s: %v", dir, err)
 			return
 		}
 	})
@@ -1970,7 +1970,7 @@ func (e *Emacs) stop() {
 	// MEASURED, merge gate 2026-10-16: TestEmacsDaemonLifecycle/EmacsSubmitWithNoDaemonIsRefusedLoudly
 	// recorded `emacs-exit took 1ms` and the reaper then found its
 	// WebKitNetworkProcess and WebKitWebProcess alive.
-	groups := e.emacsGroups()
+	groups := e.EmacsGroups()
 	if !e.isWedged() {
 		e.assertTheScenarioBuiltNoTrampoline()
 		// ONLY A WORLD WITH A DAEMON IS ASKED TO STOP ONE. Several worlds in
@@ -1994,10 +1994,10 @@ func (e *Emacs) stop() {
 			// grace does not end until this Emacs -- its streams' client -- is
 			// gone. It is on its way out exactly as designed, so its exit is
 			// awaited as a teardown-issued stop's is.
-			e.noteTeardownStep("the scenario had already stopped its daemon, so its exit was awaited")
+			e.NoteTeardownStep("the scenario had already stopped its daemon, so its exit was awaited")
 			stopAsked = true
 		default:
-			e.noteTeardownStep("no daemon link was held, so no daemon stop was asked")
+			e.NoteTeardownStep("no daemon link was held, so no daemon stop was asked")
 		}
 
 		// `kill-emacs' never answers by design -- Emacs exits with the client
@@ -2006,14 +2006,14 @@ func (e *Emacs) stop() {
 		_, _, err := e.emacsclient(context.Background(), DefaultTimeout, "(kill-emacs)")
 		var unanswered *unansweredError
 		if errors.As(err, &unanswered) {
-			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
+			e.T.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
 		}
 		asked = true
 	}
 	// AND THEN WAIT FOR IT. Asking is not stopping.
-	e.awaitEmacsExit(asked, groups)
+	e.AwaitEmacsExit(asked, groups)
 	e.proc.Kill()
-	e.awaitDaemonExit(stopAsked)
+	e.AwaitDaemonExit(stopAsked)
 }
 
 // daemonLink is what the teardown's daemon-link question answered.
@@ -2041,12 +2041,12 @@ const (
 func (e *Emacs) daemonLinkState() daemonLink {
 	ctx, cancel := grantedclock.WithBound(context.Background(), teardownStopBound)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	for {
 		out, _, err := e.emacsclient(ctx, teardownStopBound, settleDaemonLinkForm)
 		if err != nil {
-			e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
+			e.T.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
 			return daemonLinkHeld
 		}
 		switch answer := strings.Trim(strings.TrimSpace(out), `"`); answer {
@@ -2057,15 +2057,15 @@ func (e *Emacs) daemonLinkState() daemonLink {
 		case "none":
 			return daemonLinkNone
 		case "pending":
-			e.noteTeardownStep("a daemon spawn or link acceptance was in flight, so its outcome was awaited")
+			e.NoteTeardownStep("a daemon spawn or link acceptance was in flight, so its outcome was awaited")
 		default:
-			e.t.Logf("emacs answered the teardown's daemon-link question with %q", answer)
+			e.T.Logf("emacs answered the teardown's daemon-link question with %q", answer)
 			return daemonLinkHeld
 		}
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			e.t.Logf("a daemon spawn in flight did not settle within %s", teardownStopBound)
+			e.T.Logf("a daemon spawn in flight did not settle within %s", teardownStopBound)
 			return daemonLinkHeld
 		}
 	}
@@ -2110,7 +2110,7 @@ func (e *Emacs) askDaemonToStop() {
 		// exit, and every daemon, shim and shim-lock the reaper then
 		// reports as a stray is downstream of it. Swallowing the error
 		// left the reap looking like an unexplained leak.
-		e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
+		e.T.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
 	}
 	// The OUTCOME, not merely the transport. `agent-repl-frontend-daemon-stop`
 	// answers its callback with an ARM -- `(:arm :accepted)` on acceptance,
@@ -2121,7 +2121,7 @@ func (e *Emacs) askDaemonToStop() {
 	// used to be handed a bare boolean, and reading the arm plist as one
 	// silently reported every healthy teardown as unaccepted.
 	if outcome := strings.TrimSpace(out); !strings.Contains(outcome, daemonStopAcceptedArm) {
-		e.t.Logf("emacs's daemon stop was not accepted: %s", outcome)
+		e.T.Logf("emacs's daemon stop was not accepted: %s", outcome)
 	}
 }
 
@@ -2147,9 +2147,9 @@ func (e *Emacs) askDaemonToStop() {
 // the grace does not end until the standing streams' client -- that Emacs --
 // is gone. The reaper then reported a daemon that was exiting exactly as
 // designed.
-const daemonExitBound = 6 * time.Second
+const DaemonExitBound = 6 * time.Second
 
-// awaitDaemonExit does not return until the daemon and the shims this scenario
+// AwaitDaemonExit does not return until the daemon and the shims this scenario
 // asked Emacs to stop are actually gone, or until their own bound expires.
 //
 // IT IS THE SECOND HALF OF "ASKING IS NOT STOPPING". The teardown asks Emacs
@@ -2164,7 +2164,7 @@ const daemonExitBound = 6 * time.Second
 // Nothing is loosened by waiting here. What is left when the bound expires is
 // still the reaper's to report and still fails the scenario; the wait only
 // stops the reaper from calling a bounded exit a leak.
-func (e *Emacs) awaitDaemonExit(asked bool) {
+func (e *Emacs) AwaitDaemonExit(asked bool) {
 	if !asked {
 		// A wedged Emacs was never asked to stop its daemon, so nothing is on
 		// its way out and there is nothing to wait for. The reaper below still
@@ -2172,19 +2172,19 @@ func (e *Emacs) awaitDaemonExit(asked bool) {
 		return
 	}
 	started := time.Now()
-	left := e.awaitStraysGone(daemonExitBound)
-	e.t.Logf("emacs phase daemon-exit took %s (bound %s)",
-		time.Since(started).Round(time.Millisecond), daemonExitBound)
+	left := e.awaitStraysGone(DaemonExitBound)
+	e.T.Logf("emacs phase daemon-exit took %s (bound %s)",
+		time.Since(started).Round(time.Millisecond), DaemonExitBound)
 	if len(left) == 0 {
-		e.noteTeardownStep(fmt.Sprintf("the daemon and its shims exited on the stop within %s",
+		e.NoteTeardownStep(fmt.Sprintf("the daemon and its shims exited on the stop within %s",
 			time.Since(started).Round(time.Millisecond)))
 		return
 	}
-	e.noteTeardownStep(fmt.Sprintf("waited %s for the stopped daemon to exit, still holding %s",
-		daemonExitBound, pidList(left)))
+	e.NoteTeardownStep(fmt.Sprintf("waited %s for the stopped daemon to exit, still holding %s",
+		DaemonExitBound, PidList(left)))
 }
 
-// awaitEmacsExit does not return until this scenario's Emacs process is
+// AwaitEmacsExit does not return until this scenario's Emacs process is
 // actually gone, or until every escalation has been sent AND waited on.
 //
 // It exists because killing the pty parent is not killing Emacs. `script'
@@ -2208,7 +2208,7 @@ func (e *Emacs) awaitDaemonExit(asked bool) {
 // its /proc entry is gone with it, and the children it left cannot be tied to
 // it by anything else: they carry the scenario's HOME, which says whose
 // scenario they are, and their process group, which says whose EMACS they are.
-func (e *Emacs) awaitEmacsExit(asked bool, groups []int) {
+func (e *Emacs) AwaitEmacsExit(asked bool, groups []int) {
 	started := time.Now()
 	// Logged here rather than through `record'/`reportPhases': t.Cleanup
 	// unwinds LIFO, so reportPhases -- registered last -- has already run by
@@ -2216,7 +2216,7 @@ func (e *Emacs) awaitEmacsExit(asked bool, groups []int) {
 	// same grep reads both, and it is emitted on a PASSING run, because a
 	// passing run is where this bound's numbers come from.
 	defer func() {
-		e.t.Logf("emacs phase emacs-exit took %s (bound %s)",
+		e.T.Logf("emacs phase emacs-exit took %s (bound %s)",
 			time.Since(started).Round(time.Millisecond), emacsExitBound)
 	}()
 
@@ -2228,13 +2228,13 @@ func (e *Emacs) awaitEmacsExit(asked bool, groups []int) {
 
 	if asked {
 		if left := e.awaitGroupsGone(groups, emacsExitBound); len(left) == 0 {
-			e.noteTeardownStep(fmt.Sprintf("emacs and its process group exited on (kill-emacs) within %s",
+			e.NoteTeardownStep(fmt.Sprintf("emacs and its process group exited on (kill-emacs) within %s",
 				time.Since(started).Round(time.Millisecond)))
 			return
 		}
-		e.noteTeardownStep(fmt.Sprintf("waited %s for (kill-emacs) to be honored", emacsExitBound))
-		e.t.Logf("emacs teardown: %s did not exit within %s of (kill-emacs); escalating to process group(s) %v",
-			pidList(e.groupStrays(groups)), emacsExitBound, groups)
+		e.NoteTeardownStep(fmt.Sprintf("waited %s for (kill-emacs) to be honored", emacsExitBound))
+		e.T.Logf("emacs teardown: %s did not exit within %s of (kill-emacs); escalating to process group(s) %v",
+			PidList(e.groupStrays(groups)), emacsExitBound, groups)
 	}
 	// THE GROUP, NOT THE PID, and it is measured rather than assumed to
 	// matter: `script' runs Emacs in a session of its own, so Emacs leads a
@@ -2251,35 +2251,35 @@ func (e *Emacs) awaitEmacsExit(asked bool, groups []int) {
 		for _, g := range groups {
 			e.signalGroup(g, sig)
 		}
-		e.noteTeardownStep(fmt.Sprintf("sent %v to process group(s) %v, holding %s", sig, groups, pidList(live)))
+		e.NoteTeardownStep(fmt.Sprintf("sent %v to process group(s) %v, holding %s", sig, groups, PidList(live)))
 		if left := e.awaitGroupsGone(groups, emacsSignalBound); len(left) == 0 {
 			return
 		}
-		e.noteTeardownStep(fmt.Sprintf("waited %s after %v", emacsSignalBound, sig))
+		e.NoteTeardownStep(fmt.Sprintf("waited %s after %v", emacsSignalBound, sig))
 	}
 	// Anything still alive here is the reaper's to REPORT. Nothing is
 	// swallowed and nothing is retried silently: reapStrays runs last, finds
 	// it, kills it, and fails this scenario with the list of steps above.
 }
 
-// emacsGroups answers the process groups this scenario's Emacsen lead.
+// EmacsGroups answers the process groups this scenario's Emacsen lead.
 //
 // A group that reads back as the test binary's own -- or as init's -- is
 // DROPPED and reported: `script' puts Emacs in a session of its own, so such
 // a reading means the /proc read was wrong, and signalling it would signal
 // the suite.
-func (e *Emacs) emacsGroups() []int {
+func (e *Emacs) EmacsGroups() []int {
 	self := syscall.Getpgrp()
 	var out []int
-	for _, p := range e.emacsProcs() {
+	for _, p := range e.EmacsProcs() {
 		pgid, err := procPGID(p.pid)
 		if err != nil {
-			e.t.Logf("emacs teardown: cannot read the process group of pid %d (%v); it can only be signalled by pid", p.pid, err)
+			e.T.Logf("emacs teardown: cannot read the process group of pid %d (%v); it can only be signalled by pid", p.pid, err)
 			out = append(out, p.pid)
 			continue
 		}
 		if pgid <= 1 || pgid == self {
-			e.t.Logf("emacs teardown: pid %d reports process group %d, which is not a group this scenario owns; it can only be signalled by pid",
+			e.T.Logf("emacs teardown: pid %d reports process group %d, which is not a group this scenario owns; it can only be signalled by pid",
 				p.pid, pgid)
 			out = append(out, p.pid)
 			continue
@@ -2295,7 +2295,7 @@ func (e *Emacs) emacsGroups() []int {
 // the given process groups.
 func (e *Emacs) groupStrays(groups []int) []stray {
 	var out []stray
-	for _, s := range e.findStrays() {
+	for _, s := range e.FindStrays() {
 		pgid, err := procPGID(s.pid)
 		if err != nil {
 			// The process exited between the walk and this read. Not a
@@ -2319,7 +2319,7 @@ func (e *Emacs) awaitGroupsGone(groups []int, bound time.Duration) []stray {
 // "it is already gone".
 func (e *Emacs) signalGroup(pgid int, sig syscall.Signal) {
 	if err := syscall.Kill(-pgid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
-		e.t.Logf("emacs teardown: sending %v to process group %d failed: %v", sig, pgid, err)
+		e.T.Logf("emacs teardown: sending %v to process group %d failed: %v", sig, pgid, err)
 	}
 }
 
@@ -2333,7 +2333,7 @@ func containsInt(list []int, want int) bool {
 	return false
 }
 
-// emacsProcs answers the live processes of this scenario that are Emacs
+// EmacsProcs answers the live processes of this scenario that are Emacs
 // itself, as opposed to the daemon, the shims or anything else the reaper
 // matches on the same paths.
 //
@@ -2341,10 +2341,10 @@ func containsInt(list []int, want int) bool {
 // through `env', which execs, so its argv carries no path at all and only its
 // ENVIRONMENT ties it to this scenario -- which is exactly what findStrays
 // matches on.
-func (e *Emacs) emacsProcs() []stray {
+func (e *Emacs) EmacsProcs() []stray {
 	var out []stray
-	for _, s := range e.findStrays() {
-		if procField(strconv.Itoa(s.pid), "comm") == "emacs" {
+	for _, s := range e.FindStrays() {
+		if ProcField(strconv.Itoa(s.pid), "comm") == "emacs" {
 			out = append(out, s)
 		}
 	}
@@ -2376,7 +2376,7 @@ func procPGID(pid int) (int, error) {
 }
 
 // pidList renders a stray list as pids, for one teardown message.
-func pidList(list []stray) string {
+func PidList(list []stray) string {
 	if len(list) == 0 {
 		return "no process"
 	}
@@ -2387,17 +2387,17 @@ func pidList(list []stray) string {
 	return strings.Join(parts, ", ")
 }
 
-// noteTeardownStep records one thing teardown tried, so a stray the reaper
+// NoteTeardownStep records one thing teardown tried, so a stray the reaper
 // finds afterwards is reported with what had already been done to it rather
 // than as an unexplained survivor.
-func (e *Emacs) noteTeardownStep(step string) {
+func (e *Emacs) NoteTeardownStep(step string) {
 	e.teardownMu.Lock()
 	defer e.teardownMu.Unlock()
 	e.teardownSteps = append(e.teardownSteps, step)
 }
 
-// teardownTried renders those steps for the reaper's failure message.
-func (e *Emacs) teardownTried() string {
+// TeardownTried renders those steps for the reaper's failure message.
+func (e *Emacs) TeardownTried() string {
 	e.teardownMu.Lock()
 	defer e.teardownMu.Unlock()
 	if len(e.teardownSteps) == 0 {
@@ -2430,13 +2430,13 @@ type evalResult struct {
 // wants a hash table's contents maps over it. Returning a buffer, window or
 // process object is a defect in the scenario, not in this helper.
 func (e *Emacs) Eval(form string) json.RawMessage {
-	e.t.Helper()
+	e.T.Helper()
 	res, err := e.eval(form)
 	if err != nil {
-		e.t.Fatalf("eval %s: %v", summarize(form), err)
+		e.T.Fatalf("eval %s: %v", summarize(form), err)
 	}
 	if !res.OK {
-		e.t.Fatalf("eval %s signalled in emacs: %s", summarize(form), res.Error)
+		e.T.Fatalf("eval %s signalled in emacs: %s", summarize(form), res.Error)
 	}
 	return res.Value
 }
@@ -2512,10 +2512,10 @@ func (e *Emacs) emacsclient(ctx context.Context, bound time.Duration, form strin
 	}
 	replies := make(chan reply, 1)
 	go func() {
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
+		out, err := e.Box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
 		replies <- reply{out: out, err: err}
 	}()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	r, answered, span, waitErr := grantedclock.Await(replies, ticker.C, clock, bound)
 	if answered {
@@ -2647,7 +2647,7 @@ func (e *Emacs) emacsPID() int {
 	if e.Doom.PID != 0 {
 		return e.Doom.PID
 	}
-	for _, p := range e.findStrays() {
+	for _, p := range e.FindStrays() {
 		// `argv` is /proc/<pid>/cmdline with NULs turned into spaces, and
 		// this layer starts Emacs as a bare `emacs` with every path in its
 		// environment -- so the whole argv IS the program name. The `script`
@@ -2674,10 +2674,10 @@ func (e *Emacs) writeNativeBacktrace(text string) {
 	}
 	path := filepath.Join(out, kit.NativeBacktraceFile)
 	if err := os.WriteFile(path, []byte(text+"\n"), 0o644); err != nil {
-		e.t.Logf("write %s: %v", path, err)
+		e.T.Logf("write %s: %v", path, err)
 		return
 	}
-	e.t.Logf("emacs native backtrace preserved at %s", path)
+	e.T.Logf("emacs native backtrace preserved at %s", path)
 }
 
 // stackWhenStuck answers what Emacs is standing in, formatted for an error
@@ -2767,12 +2767,12 @@ func (e *Emacs) profileWhenStuck() string {
 // has already failed, and nothing here may replace that failure with another.
 func (e *Emacs) breakStall() {
 	if e.Doom.PID == 0 {
-		e.t.Logf("cannot interrupt the stall: the readiness stamp carried no pid")
+		e.T.Logf("cannot interrupt the stall: the readiness stamp carried no pid")
 		return
 	}
 	for _, sig := range []syscall.Signal{syscall.SIGUSR2, syscall.SIGINT} {
 		if err := syscall.Kill(e.Doom.PID, sig); err != nil {
-			e.t.Logf("cannot send %v to emacs pid %d: %v", sig, e.Doom.PID, err)
+			e.T.Logf("cannot send %v to emacs pid %d: %v", sig, e.Doom.PID, err)
 		}
 	}
 }
@@ -2787,9 +2787,9 @@ func (e *Emacs) wedgeCauseString() string {
 // EvalBool reads a form's value as a boolean. Elisp nil decodes as JSON
 // null, which is how a false reaches here.
 func (e *Emacs) EvalBool(form string) bool {
-	e.t.Helper()
+	e.T.Helper()
 	raw := e.Eval(form)
-	if isJSONNull(raw) {
+	if IsJSONNull(raw) {
 		return false
 	}
 	var b bool
@@ -2803,47 +2803,47 @@ func (e *Emacs) EvalBool(form string) bool {
 
 // EvalString reads a form's value as a string.
 func (e *Emacs) EvalString(form string) string {
-	e.t.Helper()
+	e.T.Helper()
 	raw := e.Eval(form)
-	if isJSONNull(raw) {
+	if IsJSONNull(raw) {
 		return ""
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		e.t.Fatalf("eval %s: want a string, got %s", summarize(form), raw)
+		e.T.Fatalf("eval %s: want a string, got %s", summarize(form), raw)
 	}
 	return s
 }
 
 // EvalInt reads a form's value as an integer.
 func (e *Emacs) EvalInt(form string) int {
-	e.t.Helper()
+	e.T.Helper()
 	raw := e.Eval(form)
-	if isJSONNull(raw) {
-		e.t.Fatalf("eval %s: want an integer, got nil", summarize(form))
+	if IsJSONNull(raw) {
+		e.T.Fatalf("eval %s: want an integer, got nil", summarize(form))
 	}
 	var n int
 	if err := json.Unmarshal(raw, &n); err != nil {
-		e.t.Fatalf("eval %s: want an integer, got %s", summarize(form), raw)
+		e.T.Fatalf("eval %s: want an integer, got %s", summarize(form), raw)
 	}
 	return n
 }
 
 // EvalStrings reads a form's value as a list of strings.
 func (e *Emacs) EvalStrings(form string) []string {
-	e.t.Helper()
+	e.T.Helper()
 	raw := e.Eval(form)
-	if isJSONNull(raw) {
+	if IsJSONNull(raw) {
 		return nil
 	}
 	var xs []string
 	if err := json.Unmarshal(raw, &xs); err != nil {
-		e.t.Fatalf("eval %s: want a list of strings, got %s", summarize(form), raw)
+		e.T.Fatalf("eval %s: want a list of strings, got %s", summarize(form), raw)
 	}
 	return xs
 }
 
-func isJSONNull(raw json.RawMessage) bool {
+func IsJSONNull(raw json.RawMessage) bool {
 	return len(raw) == 0 || string(raw) == "null"
 }
 
@@ -2864,7 +2864,7 @@ func summarize(form string) string {
 // fails as a hang rather than as whatever the scenario happened to be
 // waiting for.
 func (e *Emacs) AwaitEval(what, form string, pred func(json.RawMessage) bool) json.RawMessage {
-	e.t.Helper()
+	e.T.Helper()
 	return e.AwaitEvalFor(DefaultTimeout, what, form, pred)
 }
 
@@ -2872,7 +2872,7 @@ func (e *Emacs) AwaitEval(what, form string, pred func(json.RawMessage) bool) js
 // module AGENTS.md, a per-site bound is a NAMED constant with a stated
 // reason, never an ad hoc duration written at the call site.
 func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(json.RawMessage) bool) json.RawMessage {
-	e.t.Helper()
+	e.T.Helper()
 	// Every satisfied wait is RECORDED as a measured phase, for the same
 	// reason `reportPhases` logs the boot phases on a passing run: a bound
 	// in this layer must be a stated multiple of an OBSERVED healthy
@@ -2885,18 +2885,18 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 	// container gave none of them a CPU is not time they failed to do it in.
 	clock, err := e.startGrantedClock()
 	if err != nil {
-		e.t.Fatalf("await %s: %v", what, err)
+		e.T.Fatalf("await %s: %v", what, err)
 	}
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	var lastValue, satisfied json.RawMessage
 	var lastErr error
 	span, err := grantedclock.PollUntil(ticker.C, clock, bound, func() bool {
 		if e.isWedged() {
-			e.t.Fatalf("await %s: emacs wedged: %s", what, e.wedgeCauseString())
+			e.T.Fatalf("await %s: emacs wedged: %s", what, e.wedgeCauseString())
 		}
 		if e.proc.Exited() {
-			e.t.Fatalf("await %s: emacs exited; pty output:\n%s", what,
+			e.T.Fatalf("await %s: emacs exited; pty output:\n%s", what,
 				kit.TailBytes([]byte(e.proc.Output()), artifactTailBytes))
 		}
 		res, err := e.eval(form)
@@ -2920,19 +2920,19 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 		e.recordGranted("await "+what, span)
 		return satisfied
 	case !errors.Is(err, grantedclock.ErrBoundRunOut):
-		e.t.Fatalf("await %s: %v", what, err)
+		e.T.Fatalf("await %s: %v", what, err)
 	case lastErr != nil:
-		e.t.Fatalf("await %s: never satisfied within %s granted (%s); last attempt failed: %v", what, bound, span, lastErr)
+		e.T.Fatalf("await %s: never satisfied within %s granted (%s); last attempt failed: %v", what, bound, span, lastErr)
 	default:
-		e.t.Fatalf("await %s: never satisfied within %s granted (%s); last value was %s", what, bound, span, lastValue)
+		e.T.Fatalf("await %s: never satisfied within %s granted (%s); last value was %s", what, bound, span, lastValue)
 	}
 	return nil
 }
 
 // AwaitTrue waits for a form to become non-nil, which covers most readbacks.
 func (e *Emacs) AwaitTrue(what, form string) {
-	e.t.Helper()
-	e.AwaitEval(what, form, func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.T.Helper()
+	e.AwaitEval(what, form, func(raw json.RawMessage) bool { return !IsJSONNull(raw) })
 }
 
 // ---------------------------------------------------------------------------
@@ -2968,17 +2968,17 @@ const evilNormalForm = `(when (fboundp 'evil-normal-state) (evil-normal-state))`
 // without running it. An unbound sequence returns "nil", which is what elisp
 // prints for it.
 func (e *Emacs) BindingFor(keys string) string {
-	e.t.Helper()
+	e.T.Helper()
 	return e.EvalString(fmt.Sprintf(`(progn %s (format "%%s" (key-binding (kbd %s) t)))`,
-		evilNormalForm, elispString(keys)))
+		evilNormalForm, ElispString(keys)))
 }
 
 // BindingForIn is BindingFor resolved inside one buffer, which is how a
 // binding defined on a mode map (the composer's, the roster's) is looked up.
 func (e *Emacs) BindingForIn(buffer, keys string) string {
-	e.t.Helper()
+	e.T.Helper()
 	return e.EvalString(fmt.Sprintf(`(with-current-buffer %s %s (format "%%s" (key-binding (kbd %s) t)))`,
-		elispString(buffer), evilNormalForm, elispString(keys)))
+		ElispString(buffer), evilNormalForm, ElispString(keys)))
 }
 
 // Keys presses one key sequence in the SELECTED window, through the real
@@ -2988,13 +2988,13 @@ func (e *Emacs) BindingForIn(buffer, keys string) string {
 // wedge; use BindingFor for those, or stub the prompt for the duration of
 // the press the same way a scenario stubs it for a command.
 func (e *Emacs) Keys(keys string) {
-	e.t.Helper()
+	e.T.Helper()
 	e.Eval(keysForm(keys))
 }
 
 // keysForm is the form that presses one key sequence in normal state.
 func keysForm(keys string) string {
-	return fmt.Sprintf(`(progn %s (execute-kbd-macro (kbd %s)) t)`, evilNormalForm, elispString(keys))
+	return fmt.Sprintf(`(progn %s (execute-kbd-macro (kbd %s)) t)`, evilNormalForm, ElispString(keys))
 }
 
 // answeringYes wraps FORM so that, for its duration, a `y-or-n-p' whose
@@ -3011,7 +3011,7 @@ func answeringYes(prompt, form string) string {
               (if (string-match-p %s (format "%%s" question))
                   t
                 (apply #'agent-repl-e2e--refuse-prompt question args)))))
-  %s)`, elispString(prompt), form)
+  %s)`, ElispString(prompt), form)
 }
 
 // killConfirmPrompt matches the question `agent-repl-kill-workspace' asks
@@ -3021,13 +3021,13 @@ const killConfirmPrompt = "\\`Kill workspace "
 // LeaderAnsweringYes presses a leader sequence whose command asks a
 // `y-or-n-p' matching PROMPT, and answers it yes (answeringYes).
 func (e *Emacs) LeaderAnsweringYes(prompt, keys string) {
-	e.t.Helper()
+	e.T.Helper()
 	e.Eval(answeringYes(prompt, keysForm("SPC "+keys)))
 }
 
 // killWorkspaceForm kills the workspace NAME, confirming the kill.
-func killWorkspaceForm(name string) string {
-	return answeringYes(killConfirmPrompt, `(progn (agent-repl-kill-workspace `+elispString(name)+`) t)`)
+func KillWorkspaceForm(name string) string {
+	return answeringYes(killConfirmPrompt, `(progn (agent-repl-kill-workspace `+ElispString(name)+`) t)`)
 }
 
 // KeysIn presses one key sequence in a named buffer, selecting its window
@@ -3035,7 +3035,7 @@ func killWorkspaceForm(name string) string {
 // buffer of that mode, and a command that acts on the selected window needs
 // that window actually selected.
 func (e *Emacs) KeysIn(buffer, keys string) {
-	e.t.Helper()
+	e.T.Helper()
 	e.Eval(fmt.Sprintf(`(let ((buf (get-buffer %s)))
              (unless buf (error "no buffer named %%s" %s))
              (let ((win (get-buffer-window buf)))
@@ -3044,20 +3044,20 @@ func (e *Emacs) KeysIn(buffer, keys string) {
                %s
                (execute-kbd-macro (kbd %s))
                t))`,
-		elispString(buffer), elispString(buffer), evilNormalForm, elispString(keys)))
+		ElispString(buffer), ElispString(buffer), evilNormalForm, ElispString(keys)))
 }
 
 // Leader presses a leader sequence, i.e. the same one the module's own
 // `map! :leader` forms and the module AGENTS.md write as `SPC TAB C-n`.
 func (e *Emacs) Leader(keys string) {
-	e.t.Helper()
+	e.T.Helper()
 	e.Keys("SPC " + keys)
 }
 
 // LeaderBinding resolves a leader sequence to its command without running
 // it, for the leader bindings whose commands prompt.
 func (e *Emacs) LeaderBinding(keys string) string {
-	e.t.Helper()
+	e.T.Helper()
 	return e.BindingFor("SPC " + keys)
 }
 
@@ -3070,12 +3070,12 @@ func (e *Emacs) LeaderBinding(keys string) string {
 // settles it by inversion: nothing here derives an argv, because the
 // launcher performs the launch.
 func (e *Emacs) EnsureDaemon() {
-	e.t.Helper()
+	e.T.Helper()
 	started := time.Now()
 	e.Eval("(agent-repl-frontend-daemon-ensure)")
-	e.AwaitEvalFor(daemonLinkBound, "emacs to hold a daemon link",
+	e.AwaitEvalFor(DaemonLinkBound, "emacs to hold a daemon link",
 		"(and agent-repl-link--primary t)",
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		func(raw json.RawMessage) bool { return !IsJSONNull(raw) })
 	e.record("daemon-link", time.Since(started))
 }
 
@@ -3084,10 +3084,10 @@ func (e *Emacs) EnsureDaemon() {
 // frame on the Go client dials this, so both clients agree on one address by
 // construction rather than by assumption.
 func (e *Emacs) DaemonAddr() string {
-	e.t.Helper()
+	e.T.Helper()
 	body, err := os.ReadFile(filepath.Join(e.StateDir, "daemon.addr"))
 	if err != nil {
-		e.t.Fatalf("read the daemon address Emacs's launcher published: %v", err)
+		e.T.Fatalf("read the daemon address Emacs's launcher published: %v", err)
 	}
 	// The address is the first line; a "pid=<n>" line may follow it.
 	return harness.AddrLine(string(body))
@@ -3140,9 +3140,9 @@ const strayTermBound = 500 * time.Millisecond
 const strayKillBound = 500 * time.Millisecond
 
 // strayPollInterval is how often the reaper re-reads /proc while waiting.
-const strayPollInterval = 50 * time.Millisecond
+const StrayPollInterval = 50 * time.Millisecond
 
-// reapStrays kills every process whose argv names one of this Emacs's own
+// ReapStrays kills every process whose argv names one of this Emacs's own
 // paths and is still alive after the test's own teardown.
 //
 // Matching is by ARGV, not by process tree: the daemon and the shims are
@@ -3151,12 +3151,12 @@ const strayPollInterval = 50 * time.Millisecond
 // (`--listen <root>/state/sock/...`, `<scratch>/locks/...`). The paths are
 // unique per test -- `os.MkdirTemp` mints them -- so the match cannot reach a
 // process belonging to another test, another suite, or the host.
-func (e *Emacs) reapStrays() {
-	strays := e.findStrays()
+func (e *Emacs) ReapStrays() {
+	strays := e.FindStrays()
 	if len(strays) == 0 {
 		return
 	}
-	tried := e.teardownTried()
+	tried := e.TeardownTried()
 	for _, s := range strays {
 		// A FAILURE, NOT A LOG LINE. Teardown is ordered and every step of
 		// it is waited on, so a process still alive at this point is a
@@ -3170,7 +3170,7 @@ func (e *Emacs) reapStrays() {
 	}
 	if left := e.awaitStraysGone(strayTermBound); len(left) > 0 {
 		for _, s := range left {
-			e.t.Logf("emacs teardown: pid %d ignored SIGTERM; killing it: %s", s.pid, s.argv)
+			e.T.Logf("emacs teardown: pid %d ignored SIGTERM; killing it: %s", s.pid, s.argv)
 			_ = syscall.Kill(s.pid, syscall.SIGKILL)
 		}
 		if stuck := e.awaitStraysGone(strayKillBound); len(stuck) > 0 {
@@ -3185,11 +3185,11 @@ func (e *Emacs) reapStrays() {
 // reportFailure fails the scenario for a teardown guarantee that did not
 // hold.
 func (e *Emacs) reportFailure(format string, args ...any) {
-	if e.fail != nil {
-		e.fail(format, args...)
+	if e.Fail != nil {
+		e.Fail(format, args...)
 		return
 	}
-	e.t.Errorf(format, args...)
+	e.T.Errorf(format, args...)
 }
 
 // stray is one leaked process.
@@ -3209,7 +3209,7 @@ type stray struct {
 // awaitStraysGone polls until no stray remains or the bound expires,
 // answering whatever is left.
 func (e *Emacs) awaitStraysGone(bound time.Duration) []stray {
-	return awaitGone(bound, e.findStrays)
+	return awaitGone(bound, e.FindStrays)
 }
 
 // awaitGone polls one finder until it comes up empty or the bound expires,
@@ -3222,11 +3222,11 @@ func awaitGone(bound time.Duration, find func() []stray) []stray {
 		if len(left) == 0 || time.Now().After(deadline) {
 			return left
 		}
-		time.Sleep(strayPollInterval)
+		time.Sleep(StrayPollInterval)
 	}
 }
 
-// findStrays reads /proc and answers every live process whose argv OR
+// FindStrays reads /proc and answers every live process whose argv OR
 // ENVIRONMENT contains one of this Emacs's reap paths.
 //
 // /proc is read directly rather than shelling out to `ps`: the container's
@@ -3241,7 +3241,7 @@ func awaitGone(bound time.Duration, find func() []stray) []stray {
 // parent it had killed. `HOME=<root>` in /proc/<pid>/environ is what
 // identifies it, and the same read catches the daemon and anything else that
 // took its paths from the environment rather than a flag.
-func (e *Emacs) findStrays() []stray {
+func (e *Emacs) FindStrays() []stray {
 	paths := e.reapPaths()
 	if len(paths) == 0 {
 		return nil
@@ -3250,7 +3250,7 @@ func (e *Emacs) findStrays() []stray {
 	if err != nil {
 		// Not fatal, and not silent: without /proc the reaper cannot run,
 		// and a reader must know the footprint was not bounded.
-		e.t.Logf("emacs teardown: cannot read /proc, so strays were not reaped: %v", err)
+		e.T.Logf("emacs teardown: cannot read /proc, so strays were not reaped: %v", err)
 		return nil
 	}
 	self := os.Getpid()
@@ -3298,8 +3298,8 @@ func (e *Emacs) findStrays() []stray {
 				out = append(out, stray{
 					pid:   pid,
 					argv:  argv,
-					state: procField(entry.Name(), "stat"),
-					wchan: procField(entry.Name(), "wchan"),
+					state: ProcField(entry.Name(), "stat"),
+					wchan: ProcField(entry.Name(), "wchan"),
 				})
 				break
 			}
@@ -3311,7 +3311,7 @@ func (e *Emacs) findStrays() []stray {
 // procField reads one small /proc file for a pid, answering "" when it cannot
 // be read. `stat` is trimmed to the process state letter, which is the field
 // this layer wants out of it.
-func procField(pid, name string) string {
+func ProcField(pid, name string) string {
 	raw, err := os.ReadFile(filepath.Join("/proc", pid, name))
 	if err != nil {
 		return ""
@@ -3334,7 +3334,7 @@ func procField(pid, name string) string {
 // processSnapshot answers what the kernel says about every process of this
 // scenario, for a failure where Emacs itself can no longer be asked.
 func (e *Emacs) processSnapshot() string {
-	found := e.findStrays()
+	found := e.FindStrays()
 	if len(found) == 0 {
 		return ""
 	}
@@ -3362,7 +3362,7 @@ func summarizeArgv(argv string) string {
 func (e *Emacs) reapPaths() []string {
 	e.reapMu.Lock()
 	defer e.reapMu.Unlock()
-	return append([]string(nil), e.reap...)
+	return append([]string(nil), e.Reap...)
 }
 
 // AddReapPath declares one more path whose appearance in a process's argv
@@ -3372,7 +3372,7 @@ func (e *Emacs) reapPaths() []string {
 func (e *Emacs) AddReapPath(p string) {
 	e.reapMu.Lock()
 	defer e.reapMu.Unlock()
-	e.reap = append(e.reap, p)
+	e.Reap = append(e.Reap, p)
 }
 
 // ===========================================================================
@@ -3457,7 +3457,7 @@ var emacsSlotHolders sync.Map // *testing.T -> struct{}
 
 // takeEmacsSlot blocks until this scenario may start an Emacs, and returns it
 // on the test's way out.
-func takeEmacsSlot(t *testing.T) {
+func TakeEmacsSlot(t *testing.T) {
 	t.Helper()
 	gate := emacsSlotGate(t)
 	// Registered BEFORE the slot is taken, so t.Cleanup's LIFO unwind

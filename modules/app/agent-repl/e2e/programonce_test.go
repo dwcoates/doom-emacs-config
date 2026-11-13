@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	"agentrepl/testrun/testenv"
 )
 
@@ -37,7 +38,7 @@ func TestProgramOnce(t *testing.T) {
 			t.Setenv(testenv.Programs, "")
 			t.Setenv(testenv.ProgramsInstrumented, "")
 			builds := 0
-			p := &programOnce{name: "prog", build: func() (string, error) {
+			p := &stack.ProgramOnce{Name: "prog", Build: func() (string, error) {
 				builds++
 				if tt.buildErr != nil {
 					return "", tt.buildErr
@@ -50,7 +51,7 @@ func TestProgramOnce(t *testing.T) {
 			fake := &fakeFatal{}
 			for range tt.calls {
 				fake.failed = ""
-				path = p.require(fake, "the suite needs prog")
+				path = p.Require(fake, "the suite needs prog")
 			}
 
 			// Assert

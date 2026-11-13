@@ -441,7 +441,7 @@ func goLayerOf(name string) string {
 // name that the helper itself prefixes with `!`. Every other prompt this
 // suite submits is a literal string, which the `!`-literal sweep below sees
 // directly, so these three are the whole of what needs dataflow.
-var goBareDriveHelpers = map[string]int{"driveScenarioToCompletion": 4}
+var goBareDriveHelpers = map[string]int{"stack.DriveScenarioToCompletion": 4}
 
 // deriveGoCoverage walks this package's AST.
 func deriveGoCoverage(t *testing.T, r registry, c coverage) {
@@ -617,15 +617,29 @@ func goParamNames(fn *ast.FuncDecl) map[string]int {
 
 // goSinkArg answers the scenario-bearing argument of a call to a known sink.
 func goSinkArg(call *ast.CallExpr, sinks map[string]int) (string, ast.Expr, bool) {
-	ident, ok := call.Fun.(*ast.Ident)
+	name, ok := goCallee(call)
 	if !ok {
 		return "", nil, false
 	}
-	idx, ok := sinks[ident.Name]
+	idx, ok := sinks[name]
 	if !ok || idx >= len(call.Args) {
 		return "", nil, false
 	}
-	return ident.Name, call.Args[idx], true
+	return name, call.Args[idx], true
+}
+
+// goCallee names a call's function as the e2e package spells it: a local
+// function by its name, the harness's (kit/stack) by `stack.Name`.
+func goCallee(call *ast.CallExpr) (string, bool) {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return fun.Name, true
+	case *ast.SelectorExpr:
+		if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "stack" {
+			return "stack." + fun.Sel.Name, true
+		}
+	}
+	return "", false
 }
 
 // goResolveStrings answers the string values an argument can take, or false

@@ -30,12 +30,12 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a daemon change selects the daemon suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
-			want:  []string{"daemon", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -55,7 +55,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "the sandbox image selects only the sandboxed suite",
@@ -105,12 +105,12 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "documentation beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "the owner's configuration beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"config.el", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "the pre-commit hook selects its harness, the installer's and the background scan",
@@ -273,8 +273,8 @@ func TestSelectSuitesMapsTheGrammarToItsConsumers(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/tldr/grammar.js"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e,e2e-emacs" {
-		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e, e2e-emacs and repo-scans", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e-kit,e2e,e2e-emacs" {
+		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e-kit, e2e, e2e-emacs and repo-scans", got.Suites, got.Full)
 	}
 }
 

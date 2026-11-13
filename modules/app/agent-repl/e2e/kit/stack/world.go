@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"context"
@@ -86,7 +86,7 @@ const unownedSpoolWindow = 200 * time.Millisecond
 
 // pollInterval is how often a bounded store-read poll re-checks. It is a poll
 // of a durable surface, never a sleep standing in for a signal.
-const pollInterval = 20 * time.Millisecond
+const PollInterval = 20 * time.Millisecond
 
 // ===========================================================================
 // World: one test's full stack — a real store, a real sidecar, and a real
@@ -746,7 +746,7 @@ type Store struct {
 	exit    *processExit
 	stopped bool
 	// shared is set while the suite's shared World holds this store: no test
-	// may stop or restart it (sharedworld_test.go).
+	// may stop or restart it (sharedworld.go).
 	shared bool
 }
 
@@ -833,7 +833,7 @@ func (s *Store) awaitReady() {
 	s.t.Helper()
 	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	for {
 		if _, err := s.Client.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{})); err == nil {
@@ -942,7 +942,7 @@ type Sidecar struct {
 	exit    *processExit
 	stopped bool
 	// shared is set while the suite's shared World holds this sidecar: no
-	// test may stop or restart it (sharedworld_test.go).
+	// test may stop or restart it (sharedworld.go).
 	shared bool
 }
 
@@ -1243,13 +1243,13 @@ func newIdempotencyKey(t testing.TB) string {
 // turn's FeedTurnEnded row arrives, and answers that row.
 func AwaitTurnEnded(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", kit.EndsTurn(turn))
+	return AwaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", kit.EndsTurn(turn))
 }
 
 // turnEndedRow finds the given turn's terminal row in a feed snapshot, or
 // fails the test loudly — every hook test needs this to confirm hook
 // activity never froze or misclassified the turn's own outcome.
-func turnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
+func TurnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
 	t.Helper()
 	ends := kit.EndsTurn(turn)
 	for _, row := range rows {
@@ -1263,9 +1263,9 @@ func turnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1
 
 // awaitFeedRow opens ws's root feed and answers the first row satisfying
 // pred (awaitFeedRowOn, against the world's own daemon).
-func awaitFeedRow(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func AwaitFeedRow(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRowOn(t, w, w.Client(), ws, what, pred)
+	return AwaitFeedRowOn(t, w, w.Client(), ws, what, pred)
 }
 
 // awaitFeedRowOn opens ws's root feed on CLIENT and answers the first row
@@ -1275,7 +1275,7 @@ func awaitFeedRow(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, what str
 // here), falling back to watching the tail otherwise. CLIENT is the world's
 // own daemon, or a successor a handover moved the workspace to. Bound by the
 // watch stream's own DefaultTimeout via harness.AwaitView; never sleeps.
-func awaitFeedRowOn(t testing.TB, w *World, client agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func AwaitFeedRowOn(t testing.TB, w *World, client agentreplv1connect.AgentReplClient, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	opened, err := client.OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -1311,37 +1311,37 @@ func awaitFeedRowOn(t testing.TB, w *World, client agentreplv1connect.AgentReplC
 // configDir is the account root the workspace routes through
 // (w.DefaultConfigDir or w.MultiRepoConfigDir) — the caller names it because
 // only the caller knows which account root registered the workspace.
-func driveScenarioToCompletion(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, scenario string) *conversationv1.TurnId {
+func DriveScenarioToCompletion(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, scenario string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	before := w.Store.Cursors(t, ctx)
-	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
+	baseline := CursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
 
 	turn := SubmitPrompt(t, w, ws, "!"+scenario)
 	AwaitTurnEnded(t, w, ws, turn)
 
-	awaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
+	AwaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
 	return turn
 }
 
 // driveDocumentedPrompt is driveScenarioToCompletion for the scenarios whose
 // documented invocation is not a bare "!"+scenario (e.g. "!compact [summary]").
-func driveDocumentedPrompt(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
+func DriveDocumentedPrompt(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	before := w.Store.Cursors(t, ctx)
-	baseline := cursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
+	baseline := CursorOffsetsUnder(before, harness.ProjectDir(configDir, ws.GetDir()))
 
 	turn := SubmitPrompt(t, w, ws, prompt)
 	AwaitTurnEnded(t, w, ws, turn)
 
-	awaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
+	AwaitCursorAdvance(t, w, harness.ProjectDir(configDir, ws.GetDir()), baseline)
 	return turn
 }
 
-func cursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[string]int64 {
+func CursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[string]int64 {
 	out := map[string]int64{}
 	for _, c := range cursors {
 		if strings.HasPrefix(c.GetPath(), projectDir) {
@@ -1355,7 +1355,7 @@ func cursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[s
 // projectDir has advanced past its baseline offset (or a cursor under it now
 // exists that did not before) — the store's own durable statement that the
 // sidecar has committed the turn's resulting facts.
-func awaitCursorAdvance(t testing.TB, w *World, projectDir string, baseline map[string]int64) {
+func AwaitCursorAdvance(t testing.TB, w *World, projectDir string, baseline map[string]int64) {
 	t.Helper()
 	awaitCursorAdvanceWithin(t, w, projectDir, baseline, DefaultTimeout)
 }
@@ -1369,7 +1369,7 @@ func awaitCursorAdvance(t testing.TB, w *World, projectDir string, baseline map[
 func awaitCursorAdvanceWithin(t testing.TB, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
 	t.Helper()
 	awaitCursors(t, w, bound, "the sidecar to durably advance a cursor under "+projectDir, func(cursors []*storev1.CursorState) bool {
-		for path, offset := range cursorOffsetsUnder(cursors, projectDir) {
+		for path, offset := range CursorOffsetsUnder(cursors, projectDir) {
 			if offset > baseline[path] {
 				return true
 			}
@@ -1384,7 +1384,7 @@ func awaitCursorAdvanceWithin(t testing.TB, w *World, projectDir string, baselin
 // orders nothing about a file the turn wrote beside its main transcript (a
 // nested subagent's own transcript), so a read of that file's facts waits on
 // that file's cursor, never on awaitCursorAdvance's any-cursor edge.
-func awaitFileIngested(t testing.TB, w *World, path string) {
+func AwaitFileIngested(t testing.TB, w *World, path string) {
 	t.Helper()
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1402,7 +1402,7 @@ func awaitCursors(t testing.TB, w *World, bound time.Duration, what string, done
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), bound)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	for !done(w.Store.Cursors(t, ctx)) {
 		select {

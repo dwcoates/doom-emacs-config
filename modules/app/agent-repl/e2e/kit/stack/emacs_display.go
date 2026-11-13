@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"agentrepl/e2e/kit"
@@ -91,7 +91,7 @@ type xdisplay struct {
 // Teardown is registered here, so a caller that starts Emacs afterwards gets
 // the ordering it needs for free: t.Cleanup unwinds LIFO, so Emacs is torn
 // down BEFORE the display it is drawing on goes away.
-func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
+func startXvfb(t *testing.T, box Sandbox, dir string) *xdisplay {
 	t.Helper()
 	xvfbStartMu.Lock()
 	defer xvfbStartMu.Unlock()
@@ -192,7 +192,7 @@ func (x *xdisplay) awaitDisplay(numPath string) string {
 	x.t.Helper()
 	ctx, cancel := grantedclock.WithBound(context.Background(), xvfbReadyBound)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	for {
 		if x.proc.Exited() {

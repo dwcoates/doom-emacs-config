@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/harness"
@@ -12,7 +13,7 @@ import (
 
 func testNewRepoWorkspaceRegistersTheRepositoryItMinted(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 
 	// Act
 	repo, ws := w.NewRepoWorkspace(t)
@@ -31,7 +32,7 @@ func testNewRepoWorkspaceRegistersTheRepositoryItMinted(t *testing.T) {
 
 func testNewWorkspaceMintsAFreshWorkspaceEachTime(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 
 	// Act
 	first, second := w.NewWorkspace(t), w.NewWorkspace(t)
@@ -44,20 +45,20 @@ func testNewWorkspaceMintsAFreshWorkspaceEachTime(t *testing.T) {
 
 func testRequireOpenOpensARegisteredWorkspace(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act
 	w.RequireOpen(t, ws)
 
 	// Assert: the open spawned the shim, so a turn reaches its end.
-	turn := SubmitPrompt(t, w, ws, "Tell me something you find interesting.")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "Tell me something you find interesting.")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 }
 
 func testRequireOpenFailsTheTestForAWorkspaceTheDaemonDoesNotKnow(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	r := harness.NewRecordingTB(t, "TestOpener")
 	unknown := &workspacev1.WorkspaceRef{Id: "0000000000000000", Dir: t.TempDir()}
 

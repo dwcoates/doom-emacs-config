@@ -1,4 +1,4 @@
-package e2e
+package stack
 
 import (
 	"agentrepl/e2e/kit"
@@ -109,7 +109,7 @@ func TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink(t *testing.T) {
 	out := t.TempDir()
 
 	// Act
-	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
+	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, root)
 
 	// Assert
 	got, err := os.ReadFile(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log"))
@@ -139,7 +139,7 @@ func TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude(t *te
 	out := t.TempDir()
 
 	// Act
-	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
+	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, root)
 
 	// Assert
 	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs")); !os.IsNotExist(err) {
@@ -168,7 +168,7 @@ func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
 	out := t.TempDir()
 
 	// Act
-	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, scratch)
+	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, scratch)
 
 	// Assert
 	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log")); err != nil {
@@ -179,7 +179,7 @@ func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
 // probeSandbox answers Exec with execErr and records each call's argv and
 // deadline; nothing else of the sandbox is reached by probeServer.
 type probeSandbox struct {
-	sandbox
+	Sandbox
 	execErr   error
 	calls     [][]string
 	deadlines []time.Duration
@@ -223,7 +223,7 @@ func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			box := &probeSandbox{execErr: tt.execErr}
-			e := &Emacs{t: t, box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server",
+			e := &Emacs{T: t, Box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server",
 				cpuStall: func() (time.Duration, error) { return 0, nil }}
 
 			// Act
@@ -257,7 +257,7 @@ var killedErr = errors.New("signal: killed")
 // RELEASE set it answers once RELEASE closes, with BLOCK it answers only when
 // its context ends, and otherwise at once with execErr.
 type scriptedSandbox struct {
-	sandbox
+	Sandbox
 	execErr error
 	block   bool
 	release <-chan struct{}
@@ -346,7 +346,7 @@ func TestEmacsclientChargesItsBoundOnlyGrantedTime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			box := tt.box(tt.stall)
-			e := &Emacs{t: t, box: box, ServerSocket: "/s/server", cpuStall: tt.stall.read}
+			e := &Emacs{T: t, Box: box, ServerSocket: "/s/server", cpuStall: tt.stall.read}
 
 			// Act
 			out, _, err := e.emacsclient(context.Background(), 10*time.Millisecond, "(emacs-pid)")

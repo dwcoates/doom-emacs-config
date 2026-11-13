@@ -42,6 +42,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -53,9 +54,9 @@ import (
 
 // ---------------------------------------------------------------------------
 // Helpers local to this file. World/SubmitPrompt/AwaitTurnEnded etc. come
-// from world_test.go; OpenWorkspace/OpenFeed/AnswerPermission/Interrupt/
+// from kit/stack/world.go; OpenWorkspace/OpenFeed/AnswerPermission/Interrupt/
 // UpdateHeldPrompt have no existing wrapper there, so this file calls the
-// daemon's Connect API for them directly, exactly as world_test.go's own
+// daemon's Connect API for them directly, exactly as kit/stack/world.go's own
 // helpers do for the rpcs it already wraps.
 // ---------------------------------------------------------------------------
 
@@ -65,15 +66,15 @@ import (
 // lead ruling, 2026-09-02): every external dependency here is mocked — the
 // scripted fake `git` the harness installs by default, and the fake SDK
 // behind the real shim's `--fake` flag.
-func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
+func pmNewPermissionWorld(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef) {
 	t.Helper()
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	return w, pmNewPermissionWorkspace(t, w)
 }
 
 // pmNewPermissionWorkspace registers and opens a fresh workspace on w, for a
 // test that brings its own World (the shared one).
-func pmNewPermissionWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
+func pmNewPermissionWorkspace(t *testing.T, w *stack.World) *workspacev1.WorkspaceRef {
 	t.Helper()
 	ws := w.NewWorkspace(t)
 	w.RequireOpen(t, ws)
@@ -82,9 +83,9 @@ func pmNewPermissionWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef 
 
 // pmOpenFeedWatch opens the workspace's root feed and answers both the current
 // page and a live tail from exactly where the page ends — the same pattern
-// world_test.go's AwaitTurnEnded uses, generalized so this file's own
+// kit/stack/world.go's AwaitTurnEnded uses, generalized so this file's own
 // predicates are not limited to "turn ended".
-func pmOpenFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) (*frontendv1.FeedPageSuccess, *harness.Stream[*frontendv1.FeedRow]) {
+func pmOpenFeedWatch(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) (*frontendv1.FeedPageSuccess, *harness.Stream[*frontendv1.FeedRow]) {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -103,7 +104,7 @@ func pmOpenFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) (*fro
 // itself changes it (an open ask stays open until answered; a settled row
 // stays settled) — see pmWatchFeedFromNow for the case where the sequence of
 // pushes, not merely the current value, is the fact under test.
-func pmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func pmAwaitFeedRow(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	page, stream := pmOpenFeedWatch(t, w, ws)
 	defer stream.Close()
@@ -155,9 +156,9 @@ func testPermissionAskAnsweredArms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			w := SharedWorld(t)
+			w := stack.SharedWorld(t)
 			ws := pmNewPermissionWorkspace(t, w)
-			turn := SubmitPrompt(t, w, ws, tc.prompt)
+			turn := stack.SubmitPrompt(t, w, ws, tc.prompt)
 			askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 				return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
 			})
@@ -217,7 +218,7 @@ func testPermissionAskAnsweredArms(t *testing.T) {
 
 			// Assert: DENY-AND-CONTINUE — every arm here reaches the
 			// manifest's success.completed terminal.
-			endedRow := AwaitTurnEnded(t, w, ws, turn)
+			endedRow := stack.AwaitTurnEnded(t, w, ws, turn)
 			if endedRow.GetTurnEnded().GetConcluded() == nil {
 				t.Fatalf("turn ended = %v, want concluded (success.completed)", endedRow.GetTurnEnded())
 			}

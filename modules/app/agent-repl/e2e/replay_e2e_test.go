@@ -17,6 +17,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"testing"
 )
 
@@ -27,14 +28,14 @@ import (
 // Seam: store -> daemon, a workspace open's one replay, and no watcher for the turns after it
 func testAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	repo, ws := w.NewRepoWorkspace(t)
 
 	// Act.
-	first := SubmitPrompt(t, w, ws, "say something")
-	AwaitTurnEnded(t, w, ws, first)
-	second := SubmitPrompt(t, w, ws, "say something else")
-	AwaitTurnEnded(t, w, ws, second)
+	first := stack.SubmitPrompt(t, w, ws, "say something")
+	stack.AwaitTurnEnded(t, w, ws, first)
+	second := stack.SubmitPrompt(t, w, ws, "say something else")
+	stack.AwaitTurnEnded(t, w, ws, second)
 
 	// Assert.
 	var openings []any

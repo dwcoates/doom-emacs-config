@@ -31,6 +31,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,8 +56,8 @@ const (
 // emacsFindFileFixture is an Emacs world with the daemon launched by Emacs,
 // and helpers for making files under HOME.
 type emacsFindFileFixture struct {
-	World *EmacsWorld
-	Emacs *Emacs
+	World *stack.EmacsWorld
+	Emacs *stack.Emacs
 }
 
 // repoUnderHome makes a scripted fake-git repository under HOME, which is
@@ -83,8 +84,8 @@ func (f *emacsFindFileFixture) fileIn(t *testing.T, dir, name, body string) stri
 // windowSideOf answers the `window-side' parameter of the window showing
 // PATH, as a string. Read as DATA off the window, never off the modeline.
 func (f *emacsFindFileFixture) windowSideOf(path string) string {
-	f.Emacs.t.Helper()
-	return f.Emacs.EvalString(`(let* ((buf (get-file-buffer ` + elispString(path) + `))
+	f.Emacs.T.Helper()
+	return f.Emacs.EvalString(`(let* ((buf (get-file-buffer ` + stack.ElispString(path) + `))
                                       (win (and buf (get-buffer-window buf t))))
                                  (format "%s" (and win (window-parameter win 'window-side))))`)
 }

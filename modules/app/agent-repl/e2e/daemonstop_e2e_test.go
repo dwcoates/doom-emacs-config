@@ -13,7 +13,7 @@
 //     workspace's two kernel claims with nothing to adopt it; and
 //  2. the Emacs teardown fired the stop and killed Emacs in the same breath,
 //     taking the exchange carrying the request with it (fixed in
-//     emacs_test.go's `daemonStopForm`).
+//     kit/stack/emacs.go's `daemonStopForm`).
 //
 // This file covers (1) against the real thing: the real store, the real
 // sidecar, a real daemon and the real Node shim with its real `shim-lock`
@@ -22,13 +22,12 @@
 package e2e
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -67,7 +66,7 @@ func testHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	// WARN or ERROR for it: the daemon's sweep runs with nothing declared, and
 	// assertNoWarningInAnySystemLog reads the shim's, the store's and the
 	// sidecar's logs too.
-	SubmitPrompt(t, w, ws, "!perm-hold")
+	stack.SubmitPrompt(t, w, ws, "!perm-hold")
 	pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 		return r.GetPermission().GetOpen() != nil
 	})
@@ -87,7 +86,7 @@ func testHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	// and 15ms max across 104 runs of this shape, so a `deadline_exceeded` here
 	// on a shared budget names the wrong step. DefaultTimeout is ~330x the
 	// measured max, which is a failure bound for the stop and nothing else.
-	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -129,7 +128,7 @@ func testHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 // cleanly, and the daemon reads every exit as one it ordered. A bounce that
 // killed the shims and the store from outside instead put `shim died` in the
 // daemon's log and `the store could not be reached` in every shim's.
-func assertNoWarningInAnySystemLog(t *testing.T, w *World) {
+func assertNoWarningInAnySystemLog(t *testing.T, w *stack.World) {
 	t.Helper()
 	pattern := filepath.Join(w.StateDir, "logs", "*.log")
 	paths, err := filepath.Glob(pattern)
@@ -149,79 +148,12 @@ func assertNoWarningInAnySystemLog(t *testing.T, w *World) {
 	}
 }
 
-// conclusionBudgetSpent is what the shim logs, at ERROR, when its teardown
-// waited a tail's whole conclusion budget (`WATCHER_CONCLUSION_BUDGET_MS`, 1s)
-// instead of ending it (agent-shim/claude/shim/src/engine/session.ts).
-//
-// THE STALL IS ASSERTED BY ITS OWN RECORD, NOT BY THE STOP'S WALL TIME. The
-// shim's teardown concludes every open `WatchAgent` tail through its book's
-// head and waits for the tail to serve it. A tail that can never reach that
-// head — the store streams an upsert of an old row at its ORIGINAL pointer, so
-// the newest pointer a tail has served walks BACKWARD — spends the whole
-// budget, and the daemon's stop waits inside it. The shim states exactly that
-// when it happens; a wall-clock bound on the stop stood in for the record and
-// failed on a saturated host whose healthy stop simply ran slow (292ms against
-// a 250ms bound, load average 54, 2026-10-13).
-const conclusionBudgetSpent = "did not end within its conclusion budget"
-
-// conclusionBudgetRecords names every record in LOGSDIR's logs stating that a
-// teardown waited out a conclusion budget.
-func conclusionBudgetRecords(t *testing.T, logsDir string) []string {
-	t.Helper()
-	pattern := filepath.Join(logsDir, "*.log")
-	paths, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatalf("glob %s: %v", pattern, err)
-	}
-	if len(paths) == 0 {
-		t.Fatalf("no log matches %s, so this assertion could pass reading nothing", pattern)
-	}
-	var found []string
-	for _, path := range paths {
-		for _, r := range harness.ReadLog(t, path) {
-			if strings.Contains(r.Message, conclusionBudgetSpent) {
-				found = append(found, fmt.Sprintf("%s: %s %s: %s", filepath.Base(path), r.Level, r.Operation, r.Message))
-			}
-		}
-	}
-	return found
-}
-
 // assertNoConclusionBudgetSpent fails when any of W's system logs records a
 // teardown that waited out a conclusion budget.
-func assertNoConclusionBudgetSpent(t *testing.T, w *World) {
+func assertNoConclusionBudgetSpent(t *testing.T, w *stack.World) {
 	t.Helper()
-	for _, record := range conclusionBudgetRecords(t, filepath.Join(w.StateDir, "logs")) {
+	for _, record := range stack.ConclusionBudgetRecords(t, filepath.Join(w.StateDir, "logs")) {
 		t.Errorf("%s — the shim's teardown rode a conclusion budget rather than ending its tails", record)
-	}
-}
-
-func TestConclusionBudgetRecords(t *testing.T) {
-	cases := []struct {
-		name    string
-		message string
-		want    int
-	}{
-		{name: "a teardown that ended its tails", message: "the session's watches were concluded", want: 0},
-		{name: "a teardown that waited out a budget", message: "the WatchAgent tail on a-1 " + conclusionBudgetSpent, want: 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			dir := t.TempDir()
-			record := fmt.Sprintf(`{"timestamp":"2026-10-13T00:00:00Z","runtime":"shim","level":"error","operation":"shim.engine.session","message":%q}`+"\n", tc.message)
-			if err := os.WriteFile(filepath.Join(dir, "shim.log"), []byte(record), 0o600); err != nil {
-				t.Fatal(err)
-			}
-
-			// Act
-			found := conclusionBudgetRecords(t, dir)
-
-			// Assert
-			if len(found) != tc.want {
-				t.Fatalf("found %v, want %d record(s)", found, tc.want)
-			}
-		})
 	}
 }
 
@@ -243,12 +175,12 @@ func testAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	// WARN or ERROR for it: the daemon's sweep runs with nothing declared, and
 	// assertNoWarningInAnySystemLog reads the shim's, the store's and the
 	// sidecar's logs too.
-	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!prose-streamed")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 
 	// Act: exactly what Emacs sends, on its own bound for the reason the test
 	// above states.
-	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancelStop()
 	started := time.Now()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -292,12 +224,12 @@ func testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, which writes no WARN or
 	// ERROR in any system (TestDaemonLifecycle/AStopAfterACompletedTurnLeavesOnTheStop runs
 	// the same stop and asserts exactly that), so nothing is declared.
-	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!prose-streamed")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 
 	// The host's stop is what runs the teardown, and the teardown's book-head
 	// read is the second of the two one-shot reads.
-	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -322,7 +254,7 @@ func testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 // one record that states the token registry's size — and requires it to be
 // empty. The record's own vocabulary is what it matches on (the operation plus
 // the `outstanding_tokens=` field), never the surrounding prose.
-func assertStoreHeldNoOutstandingTokens(t *testing.T, w *World) {
+func assertStoreHeldNoOutstandingTokens(t *testing.T, w *stack.World) {
 	t.Helper()
 	for _, rec := range harness.ReadLog(t, w.Store.LogPath) {
 		if rec.Operation != "store.shutdown" || !strings.Contains(rec.Message, "outstanding_tokens=") {
@@ -338,7 +270,7 @@ func assertStoreHeldNoOutstandingTokens(t *testing.T, w *World) {
 
 // awaitWorldStraysGone polls until nothing but the test's own spared processes// awaitWorldStraysGone polls until nothing but the test's own spared processes
 // names the world's state root, answering whatever is left at the bound.
-func awaitWorldStraysGone(t *testing.T, w *World, bound time.Duration) []int {
+func awaitWorldStraysGone(t *testing.T, w *stack.World, bound time.Duration) []int {
 	t.Helper()
 	deadline := time.Now().Add(bound)
 	ticker := time.NewTicker(10 * time.Millisecond)

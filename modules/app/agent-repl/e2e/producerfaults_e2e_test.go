@@ -45,6 +45,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -62,7 +63,7 @@ import (
 // Same fixture shape as the compaction area's cpNewWorkspace; duplicated
 // rather than shared because SPEC.md section E forbids an area file from
 // touching another area's file.
-func pfNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
+func pfNewWorkspace(t *testing.T, w *stack.World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
 	ws := w.NewWorkspace(t)
 	return ws, w.DefaultConfigDir
@@ -72,9 +73,9 @@ func pfNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) 
 // every wait here chains at most one real turn through the real stack, so
 // the ordinary per-test budget is the right one and no wait in this file
 // gets a hand-picked longer window.
-func pfAwaitView[V any](t *testing.T, w *World, s *harness.Stream[V], what string, pred func(V) bool) V {
+func pfAwaitView[V any](t *testing.T, w *stack.World, s *harness.Stream[V], what string, pred func(V) bool) V {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, s, what, pred)
 }
@@ -165,7 +166,7 @@ func pfClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarDeg
 // own routing (route.go: `w.log.Error("daemon.sessionwatcher.query_died"...)`),
 // the feed resolver's terminal draw, and the workspace health fault the
 // death opens.
-func pfQueryDiedWarnings(w *World) {
+func pfQueryDiedWarnings(w *stack.World) {
 	w.ExpectWarnings(
 		"daemon.sessionwatcher.query_died",
 		"daemon.feed.query_died",
@@ -190,16 +191,16 @@ func pfQueryDiedWarnings(w *World) {
 // Seam: query-death
 func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	pfQueryDiedWarnings(w)
 	ws, _ := pfNewWorkspace(t, w)
 
 	// Act
-	turn := SubmitPrompt(t, w, ws, "!query-eof")
+	turn := stack.SubmitPrompt(t, w, ws, "!query-eof")
 
 	// Assert: the terminal is specifically the query-died arm, not a plain
 	// conclusion and not a generic vendor failure.
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	ended := stack.AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
 	if ended.GetConcluded() != nil {
 		t.Fatalf("turn ended = %v, want an errored terminal (the query died mid-turn)", ended)
 	}
@@ -236,13 +237,13 @@ func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 // Seam: shim-diagnostics
 func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	w.ExpectWarnings("daemon.health.open_fault")
 	ws, configDir := pfNewWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	defer topbar.Close()
 
-	driveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
+	stack.DriveScenarioToCompletion(t, w, ws, configDir, "fault-converter")
 	openedView := pfAwaitView(t, w, topbar, "an open degraded window from the converter defect", func(v *frontendv1.TopbarView) bool {
 		return pfOpenDegradedWindow(v) != nil
 	})
@@ -252,13 +253,13 @@ func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 	}
 
 	// Act: an ordinary turn in which every message converts.
-	recoverTurn := driveScenarioToCompletion(t, w, ws, configDir, "fault-recover")
+	recoverTurn := stack.DriveScenarioToCompletion(t, w, ws, configDir, "fault-recover")
 
 	// Assert: the recovery turn concluded, and its WELL-FORMED hook drew no
 	// card either — bubbles.go's drawHook: "A succeeded hook draws NOTHING"
 	// (the same fact TestHookSucceeded pins).
 	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, recoverTurn); ended.GetConcluded() == nil {
+	if ended := stack.TurnEndedRow(t, rows, recoverTurn); ended.GetConcluded() == nil {
 		t.Fatalf("recovery turn ended = %v, want a plain conclusion", ended)
 	}
 
@@ -293,15 +294,15 @@ func testConverterRecoveryClosesTheDegradedWindow(t *testing.T) {
 // Seam: two-plane-episode
 func testResidueAttachmentsDrawNoRow(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws, configDir := pfNewWorkspace(t, w)
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "residue")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, configDir, "residue")
 
 	// Assert
 	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
+	if ended := stack.TurnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
 		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
 	}
 	pfAssertOnlyProseRows(t, rows, turn)
@@ -320,17 +321,17 @@ func testResidueAttachmentsDrawNoRow(t *testing.T) {
 // Seam: shim -> daemon, a context-tip attachment reaching no feed row and no footer line
 func testContextTipDrawsNoRow(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws, configDir := pfNewWorkspace(t, w)
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "context-tip")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, configDir, "context-tip")
 
 	// Assert
 	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
+	if ended := stack.TurnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
 		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
 	}
 	pfAssertOnlyProseRows(t, rows, turn)
@@ -353,17 +354,17 @@ func testContextTipDrawsNoRow(t *testing.T) {
 // Seam: shim -> daemon, a tokens-reminder attachment reaching no feed row and no footer line
 func testTokensReminderDrawsNoRow(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws, configDir := pfNewWorkspace(t, w)
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, configDir, "tokens-reminder")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, configDir, "tokens-reminder")
 
 	// Assert
 	rows := openFeedPage(t, w, ws)
-	if ended := turnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
+	if ended := stack.TurnEndedRow(t, rows, turn); ended.GetConcluded() == nil {
 		t.Fatalf("turn ended = %v, want a plain conclusion", ended)
 	}
 	pfAssertOnlyProseRows(t, rows, turn)

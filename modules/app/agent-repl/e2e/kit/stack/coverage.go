@@ -1,10 +1,10 @@
-package e2e
+package stack
 
 // Coverage collection for the systems this suite SPAWNS.
 //
 // The suite's whole subject is four separate processes, so `go test -cover`
 // on this package measures nothing worth having. Coverage therefore comes
-// from instrumented BUILDS (`go build -cover`, main_test.go's goBuildOnce)
+// from instrumented BUILDS (`go build -cover`, main.go's GoBuildOnce)
 // whose processes write counters into a per-binary GOCOVERDIR, plus
 // NODE_V8_COVERAGE for the shim (set on the daemon by harness.StartDaemon and
 // inherited by every shim it spawns). The one knob is

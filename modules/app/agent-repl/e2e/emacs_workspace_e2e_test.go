@@ -39,6 +39,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"agentrepl/protohelpers/rosterwalk"
@@ -60,12 +61,6 @@ import (
 // is to be tightened to a small multiple of the observed healthy maximum the
 // moment an Emacs 29.1+ image produces one.
 
-// emacsVerbBound bounds ONE workspace verb's full round trip: the unary call
-// out of Emacs, the daemon's answer, the roster push back, and Emacs's own
-// reconciliation of it into tabs. It is the suite's default because a verb is
-// the same shape of work as every other awaited daemon answer here.
-const emacsVerbBound = DefaultTimeout
-
 // emacsTabOpenBound bounds a workspace's FIRST open being answered: the
 // daemon answers a tab open only once the workspace's shim has spawned and its
 // webapp page has drawn (open-tabs.el), so the wait spans a node-shim spawn and
@@ -79,13 +74,13 @@ const emacsTabOpenBound = 6 * time.Second
 // emacsTurnBound bounds a fake-SDK turn reaching a given roster arm. The fake
 // vendor answers without network or model latency, so this is the daemon and
 // shim plumbing plus one roster push, not a model call.
-const emacsTurnBound = DefaultTimeout
+const emacsTurnBound = stack.DefaultTimeout
 
 // emacsWedgeProbeBound bounds the single post-teardown liveness probe
 // scenario 13 makes. It is deliberately the SAME bound the heartbeat runs
 // under: the claim is "Emacs still answers the command loop", and a slower
 // answer than the heartbeat tolerates is already a missed heartbeat.
-const emacsWedgeProbeBound = HeartbeatBound
+const emacsWedgeProbeBound = stack.HeartbeatBound
 
 // holdScenario parks a turn IN FLIGHT until an interrupt lands
 // (`agent-shim/claude/shim/src/fake/scenarios/lifecycle.ts', scenario
@@ -104,8 +99,8 @@ const holdScenario = "!hold"
 // seven scenarios act ON a workspace; scenario 8's subject IS the
 // registration, and it asserts the facts this fixture only establishes.
 type emacsWorkspaceFixture struct {
-	World *EmacsWorld
-	Emacs *Emacs
+	World *stack.EmacsWorld
+	Emacs *stack.Emacs
 	Repo  *harness.Repo
 
 	// Name is the workspace name EMACS knows it by, read out of
@@ -116,10 +111,10 @@ type emacsWorkspaceFixture struct {
 	RefID string
 }
 
-func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture {
+func newEmacsWorkspaceFixture(t *testing.T, box stack.Sandbox) *emacsWorkspaceFixture {
 	t.Helper()
 
-	w := NewEmacsWorld(t, box)
+	w := stack.NewEmacsWorld(t, box)
 	e := w.Emacs
 	e.EnsureDaemon()
 
@@ -130,12 +125,12 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 	if want, got := "agent-repl-add-project-workspace", e.LeaderBinding("TAB p"); got != want {
 		t.Fatalf("SPC TAB p resolves to %q, want %q", got, want)
 	}
-	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repo.Dir) + `)`)
+	e.Eval(`(agent-repl-add-project-workspace ` + stack.ElispString(repo.Dir) + `)`)
 
-	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace to appear in Emacs's registry",
-		workspaceRegistryNamesForm,
-		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 1 })
-	name := decodeStrings(raw)[0]
+	raw := e.AwaitEvalFor(stack.EmacsVerbBound, "the workspace to appear in Emacs's registry",
+		stack.WorkspaceRegistryNamesForm,
+		func(raw json.RawMessage) bool { return len(stack.DecodeStrings(raw)) == 1 })
+	name := stack.DecodeStrings(raw)[0]
 
 	f := &emacsWorkspaceFixture{World: w, Emacs: e, Repo: repo, Name: name}
 	f.RefID = f.awaitRefID()
@@ -151,12 +146,12 @@ const emacsTabOrderForm = `(mapcar (lambda (n) (format "%s" n)) agent-repl-roste
 // held out of the order until the daemon answers its `OpenTabs' open
 // (open-tabs.el), so a scenario that reads the order before that reads a
 // workspace that is registered but not yet open.
-func awaitTabsOpen(e *Emacs, names []string) []string {
-	e.t.Helper()
-	return decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tabs %q to be answered open", names),
+func awaitTabsOpen(e *stack.Emacs, names []string) []string {
+	e.T.Helper()
+	return stack.DecodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tabs %q to be answered open", names),
 		emacsTabOrderForm,
 		func(raw json.RawMessage) bool {
-			order := decodeStrings(raw)
+			order := stack.DecodeStrings(raw)
 			for _, name := range names {
 				if !containsString(order, name) {
 					return false
@@ -170,23 +165,23 @@ func awaitTabsOpen(e *Emacs, names []string) []string {
 // open and in that order. Having every name present is not enough after a
 // reorder: the tabs were open in their old order before the reordering
 // roster landed.
-func awaitTabOrder(e *Emacs, want []string) []string {
-	e.t.Helper()
-	return decodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tab order to be %q", want),
+func awaitTabOrder(e *stack.Emacs, want []string) []string {
+	e.T.Helper()
+	return stack.DecodeStrings(e.AwaitEvalFor(emacsTabOpenBound, fmt.Sprintf("the tab order to be %q", want),
 		emacsTabOrderForm,
 		func(raw json.RawMessage) bool {
-			return slices.Equal(decodeStrings(raw), want)
+			return slices.Equal(stack.DecodeStrings(raw), want)
 		}))
 }
 
 // awaitRefID waits for the daemon-minted ref to land in Emacs's host table
 // and answers its id.
 func (f *emacsWorkspaceFixture) awaitRefID() string {
-	f.Emacs.t.Helper()
-	f.Emacs.AwaitEvalFor(emacsVerbBound, "the daemon-minted ref for the workspace",
-		`(plist-get (agent-repl-host-ref `+elispString(f.Name)+`) :id)`,
-		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
-	return f.Emacs.EvalString(`(plist-get (agent-repl-host-ref ` + elispString(f.Name) + `) :id)`)
+	f.Emacs.T.Helper()
+	f.Emacs.AwaitEvalFor(stack.EmacsVerbBound, "the daemon-minted ref for the workspace",
+		`(plist-get (agent-repl-host-ref `+stack.ElispString(f.Name)+`) :id)`,
+		func(raw json.RawMessage) bool { return !stack.IsJSONNull(raw) })
+	return f.Emacs.EvalString(`(plist-get (agent-repl-host-ref ` + stack.ElispString(f.Name) + `) :id)`)
 }
 
 // emacsWSTablineNamesForm reads the names the tab bar DRAWS, in roster order.
@@ -203,26 +198,26 @@ const emacsWSTablineNamesForm = `(agent-repl--ws-tabline-names)`
 // tabNames reads the DRAWN tab names as DATA, never the rendered tab-bar
 // string.
 func (f *emacsWorkspaceFixture) tabNames() []string {
-	f.Emacs.t.Helper()
+	f.Emacs.T.Helper()
 	return f.Emacs.EvalStrings(emacsWSTablineNamesForm)
 }
 
 // rosterTabOrder reads `agent-repl-roster--tab-order', the roster walk order
 // the tab bar follows strictly.
 func (f *emacsWorkspaceFixture) rosterTabOrder() []string {
-	f.Emacs.t.Helper()
+	f.Emacs.T.Helper()
 	return f.Emacs.EvalStrings(emacsTabOrderForm)
 }
 
 // openPanel opens the agent-repl panel through the ordinary command and waits
 // for its buffers to be displayed.
 func (f *emacsWorkspaceFixture) openPanel() {
-	f.Emacs.t.Helper()
+	f.Emacs.T.Helper()
 	f.Emacs.Eval(`(agent-repl-frontend-open-panel)`)
-	f.Emacs.AwaitEvalFor(emacsVerbBound, "the agent-repl panel windows to appear",
+	f.Emacs.AwaitEvalFor(stack.EmacsVerbBound, "the agent-repl panel windows to appear",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
-			for _, b := range decodeStrings(raw) {
+			for _, b := range stack.DecodeStrings(raw) {
 				if hasAnyPrefix(b, "*agent-frontend-", "*agent-panel") {
 					return true
 				}
@@ -246,20 +241,20 @@ func hasAnyPrefix(s string, prefixes ...string) bool {
 // session, and the daemon refuses a submit to a workspace with none
 // (`no_session'), which left a parked turn never in flight.
 func (f *emacsWorkspaceFixture) submitFromComposer(text string) {
-	f.Emacs.t.Helper()
-	emGHISubmit(f.Emacs.t, f.Emacs, f.Name, text)
+	f.Emacs.T.Helper()
+	emGHISubmit(f.Emacs.T, f.Emacs, f.Name, text)
 }
 
 // awaitStatusArm waits for the workspace's roster arm to be one of ARMS.
 // `agent-repl-roster--status-by-id' is the module's own arm table — the ONE
 // source for tab coloring — so this reads the decision, not the paint.
 func (f *emacsWorkspaceFixture) awaitStatusArm(what string, arms ...string) {
-	f.Emacs.t.Helper()
-	form := `(let ((arm (gethash ` + elispString(f.RefID) + ` agent-repl-roster--status-by-id)))
+	f.Emacs.T.Helper()
+	form := `(let ((arm (gethash ` + stack.ElispString(f.RefID) + ` agent-repl-roster--status-by-id)))
                 (and arm (format "%s" arm)))`
 	f.Emacs.AwaitEvalFor(emacsTurnBound, what, form, func(raw json.RawMessage) bool {
 		var got string
-		if isJSONNull(raw) || json.Unmarshal(raw, &got) != nil {
+		if stack.IsJSONNull(raw) || json.Unmarshal(raw, &got) != nil {
 			return false
 		}
 		for _, arm := range arms {
@@ -275,7 +270,7 @@ func (f *emacsWorkspaceFixture) awaitStatusArm(what string, arms ...string) {
 // turn is actually in flight, so a scenario that must act "with work in
 // flight" is synchronized on the work rather than racing it.
 func (f *emacsWorkspaceFixture) parkAHeldTurn() {
-	f.Emacs.t.Helper()
+	f.Emacs.T.Helper()
 	f.openPanel()
 	f.submitFromComposer(holdScenario)
 	f.awaitStatusArm("the held turn to be in flight", ":submitting", ":thinking")
@@ -286,8 +281,8 @@ func (f *emacsWorkspaceFixture) parkAHeldTurn() {
 // cannot make the world's own shutdown wait on an interrupt that is never
 // coming.
 func (f *emacsWorkspaceFixture) releaseHeldWork() {
-	f.Emacs.t.Helper()
-	f.Emacs.Eval(`(ignore-errors ` + killWorkspaceForm(f.Name) + `)`)
+	f.Emacs.T.Helper()
+	f.Emacs.Eval(`(ignore-errors ` + stack.KillWorkspaceForm(f.Name) + `)`)
 }
 
 // ---------------------------------------------------------------------------
@@ -392,16 +387,16 @@ func containsString(xs []string, want string) bool {
 // until Emacs agrees that is where it stands. It is the ARRANGE step for a
 // navigation gesture, never the act under test: the acts below are keypresses.
 func (f *emacsWorkspaceFixture) standOn(ws string) {
-	f.Emacs.t.Helper()
-	f.Emacs.Eval(`(progn (agent-repl--ws-switch ` + elispString(ws) + `) t)`)
+	f.Emacs.T.Helper()
+	f.Emacs.Eval(`(progn (agent-repl--ws-switch ` + stack.ElispString(ws) + `) t)`)
 	f.awaitCurrent(ws, "the arranged workspace to be current")
 }
 
 // awaitCurrent waits for Emacs's own current-workspace name to be WANT, and
 // reports what it was instead when it never is.
 func (f *emacsWorkspaceFixture) awaitCurrent(want, what string) {
-	f.Emacs.t.Helper()
-	f.Emacs.AwaitEvalFor(emacsVerbBound, what,
+	f.Emacs.T.Helper()
+	f.Emacs.AwaitEvalFor(stack.EmacsVerbBound, what,
 		`(format "%s" (agent-repl--ws-current-name))`,
 		func(raw json.RawMessage) bool {
 			var got string
@@ -412,7 +407,7 @@ func (f *emacsWorkspaceFixture) awaitCurrent(want, what string) {
 // pressAndLand presses KEYS and asserts Emacs lands on WANT, naming the drawn
 // bar in the failure so a wrong-direction cycle reads as one.
 func (f *emacsWorkspaceFixture) pressAndLand(keys, want string, order []string) {
-	f.Emacs.t.Helper()
+	f.Emacs.T.Helper()
 	f.Emacs.Keys(keys)
 	f.awaitCurrent(want, "`"+keys+"' to land on "+want+" of the drawn bar "+
 		fmt.Sprint(order))

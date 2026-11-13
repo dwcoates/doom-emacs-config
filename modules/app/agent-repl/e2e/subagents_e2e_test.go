@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -51,7 +52,7 @@ import (
 // openFeed opens the workspace's root feed (feed == nil) or a bubble's own
 // sub-feed (feed != nil), answering the newest page and the token WatchFeed
 // echoes.
-func openFeed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+func openFeed(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
 	t.Helper()
 	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws, Feed: feed}))
 	if err != nil {
@@ -120,7 +121,7 @@ func pageHasResponseText(rows []*frontendv1.FeedRow, text string) bool {
 // row carrying exactly this response text to arrive on the already-open
 // page+stream, checking the page first (the row may already have landed
 // before the watch was opened).
-func awaitResponseText(t *testing.T, w *World, page *frontendv1.FeedPage, stream *harness.Stream[*frontendv1.FeedRow], text string) *frontendv1.FeedRow {
+func awaitResponseText(t *testing.T, w *stack.World, page *frontendv1.FeedPage, stream *harness.Stream[*frontendv1.FeedRow], text string) *frontendv1.FeedRow {
 	t.Helper()
 	if row := findRow(page.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
 		md, ok := responseMarkdown(row.GetActivity())
@@ -128,7 +129,7 @@ func awaitResponseText(t *testing.T, w *World, page *frontendv1.FeedPage, stream
 	}); row != nil {
 		return row
 	}
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, stream, "response text "+text, func(row *frontendv1.FeedRow) bool {
 		md, ok := responseMarkdown(row.GetActivity())
@@ -141,7 +142,7 @@ func awaitResponseText(t *testing.T, w *World, page *frontendv1.FeedPage, stream
 // already-fetched page first (the settle may have already landed before the
 // watch was opened, which is the ordinary case for a SYNC subagent that
 // finishes inside the same turn).
-func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, stream *harness.Stream[*frontendv1.FeedRow], id *frontendv1.FeedId) *frontendv1.FeedSubagent {
+func awaitSubagentSettled(t *testing.T, w *stack.World, page *frontendv1.FeedPage, stream *harness.Stream[*frontendv1.FeedRow], id *frontendv1.FeedId) *frontendv1.FeedSubagent {
 	t.Helper()
 	settled := func(row *frontendv1.FeedRow) *frontendv1.FeedSubagent {
 		if row.GetId().GetValue() != id.GetValue() {
@@ -157,7 +158,7 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 			return b
 		}
 	}
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	var found *frontendv1.FeedSubagent
 	harness.AwaitView(t, ctx, stream, "subagent "+id.GetValue()+" to settle", func(row *frontendv1.FeedRow) bool {
@@ -189,11 +190,11 @@ func awaitSubagentSettled(t *testing.T, w *World, page *frontendv1.FeedPage, str
 // Seam: subagent-frames
 func testSubagentSyncNestedActivity(t *testing.T) {
 	// Arrange.
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
 
 	rootPage, rootToken := openFeed(t, w, ws, nil)
 	rootRows := rootPage.GetSuccess().GetRows()
@@ -292,12 +293,12 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 // Seam: subagent-file
 func testSubagentDetached(t *testing.T) {
 	// Arrange.
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act: the main turn ends on the async-launch ack, well before the
 	// sweep itself completes.
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-detached")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-detached")
 
 	rootPage, rootToken := openFeed(t, w, ws, nil)
 	bubbleRow := findRow(rootPage.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
@@ -362,15 +363,15 @@ func testSubagentDetached(t *testing.T) {
 // Seam: vendor transcript -> sidecar -> daemon, a nested subagent's file-plane-only historical usage
 func testNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 
 	// Act.
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-historical")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-historical")
 
 	// Assert: the ordinary turn concluded normally (prose only on the main
 	// stream — no failure terminal from the odd nested file).
-	row := AwaitTurnEnded(t, w, ws, turn)
+	row := stack.AwaitTurnEnded(t, w, ws, turn)
 	if row.GetTurnEnded().GetConcluded() == nil {
 		t.Errorf("turn ended = %v, want a concluded (success) terminal", row.GetTurnEnded())
 	}
@@ -412,7 +413,7 @@ func testNestedSubagentHistoricalUsage(t *testing.T) {
 // agent's book carries, failing unless there is exactly one: the scenario
 // writes one `.meta.json` and one assistant record, and its book is keyed by
 // the spawning call's tool_use_id that file names.
-func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
+func uhNestedBookUsage(t *testing.T, w *stack.World) *conversationv1.TokenUsage {
 	t.Helper()
 	metas, err := filepath.Glob(filepath.Join(w.DefaultConfigDir, "projects", "*", "*", "subagents", "agent-*.meta.json"))
 	if err != nil || len(metas) != 1 {
@@ -430,7 +431,7 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 	}
 	// The book is written from the nested transcript beside the .meta.json,
 	// which the turn's end orders nothing about: wait for its own cursor.
-	awaitFileIngested(t, w, strings.TrimSuffix(metas[0], ".meta.json")+".jsonl")
+	stack.AwaitFileIngested(t, w, strings.TrimSuffix(metas[0], ".meta.json")+".jsonl")
 	var usages []*conversationv1.TokenUsage
 	for _, line := range rmOpenAgentBook(t, w, &conversationv1.AgentId{Value: meta.ToolUseID}).GetLines() {
 		if u := line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetUsage(); u != nil {
@@ -462,10 +463,10 @@ func uhNestedBookUsage(t *testing.T, w *World) *conversationv1.TokenUsage {
 // Seam: store -> cold-booted daemon, a replayed subagent's settled spawn naming its created agent
 func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	ws := w.NewWorkspace(t)
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
 
 	// Act: crash the daemon and cold-boot a successor, which knows the spawn
 	// only from the store's durable rows.
@@ -510,27 +511,27 @@ func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 // Seam: daemon -> shim, an interjection that interrupts the turn and leaves its detached agent live
 func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 	// Arrange: the held turn, with its detached agent live beneath it.
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	_, rootToken := openFeed(t, w, ws, nil)
 	rootStream := w.WatchFeed(rootToken)
 
-	held := SubmitPrompt(t, w, ws, "!subagent-detached-hold")
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	held := stack.SubmitPrompt(t, w, ws, "!subagent-detached-hold")
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, rootStream, "the held turn's waiting prose", func(row *frontendv1.FeedRow) bool {
 		md, ok := responseMarkdown(row.GetActivity())
 		return ok && row.GetTurn().GetValue() == held.GetValue() && md == "Waiting beside the sweep…"
 	})
-	bubbleRow := awaitFeedRow(t, w, ws, "the live detached-subagent bubble", func(row *frontendv1.FeedRow) bool {
+	bubbleRow := stack.AwaitFeedRow(t, w, ws, "the live detached-subagent bubble", func(row *frontendv1.FeedRow) bool {
 		return row.GetDetachedSubagent().GetSubagent().GetLive() != nil
 	})
 
 	// Act: interject the held turn with an explicit interrupt.
-	SubmitPrompt(t, w, ws, "stop")
+	stack.SubmitPrompt(t, w, ws, "stop")
 
 	// Assert: the held turn ends interrupted...
-	ended := AwaitTurnEnded(t, w, ws, held)
+	ended := stack.AwaitTurnEnded(t, w, ws, held)
 	if ended.GetTurnEnded().GetInterrupted() == nil {
 		t.Fatalf("the held turn's terminal = %v, want turn_ended.interrupted", ended.GetTurnEnded())
 	}
@@ -572,7 +573,7 @@ func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // Seam: shim -> daemon, a detached agent's responses interleaved with the main agent's blocks, each on its own feed
 func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	const (
 		thinking   = "Answering while the sweep runs."
@@ -582,7 +583,7 @@ func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	)
 
 	// Act: the turn ends; the agent's own completion follows it.
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-interleaved")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-interleaved")
 	firstPage, firstToken := openFeed(t, w, ws, nil)
 	bubbleRow := findRow(firstPage.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
 		return row.GetDetachedSubagent() != nil
@@ -654,10 +655,10 @@ func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 // Seam: store -> cold-booted daemon -> new shim, a detached subagent whose process died, not revived as live work
 func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	// Arrange.
-	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	first := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings("daemon.rollout.reconcile")
 	ws := first.NewWorkspace(t)
-	turn := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
+	turn := stack.DriveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")
 	// THE CRASH WAITS FOR THE TURN'S DURABLE CLOSE, as raiseColdGate's does
 	// (coldgate_e2e_test.go): a kill between the feed's turn end and the
 	// queue's close leaves the turn open on disk for the successor to close
@@ -674,7 +675,7 @@ func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	coldGateKillShims(t, first.Daemon)
 	opts := first.SuccessorOpts(t)
 	opts.ExtraArgs = []string{"--default-config-dir", first.DefaultConfigDir}
-	opts.Timeout = AdoptionChainTimeout
+	opts.Timeout = stack.AdoptionChainTimeout
 	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
 
@@ -695,7 +696,7 @@ func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) 
 	defer web.Close()
 	footer := successor.WatchFooter(ws)
 	defer footer.Close()
-	ctx, cancel := grantedclock.WithBound(successor.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(successor.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, footer, "the footer counting no live agent", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 0

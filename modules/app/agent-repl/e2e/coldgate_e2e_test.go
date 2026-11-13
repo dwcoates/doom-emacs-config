@@ -134,6 +134,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -147,10 +148,10 @@ import (
 
 // coldGateChainTimeout bounds every wait in this file. Reused verbatim from
 // HandoverChainTimeout rather than a same-value twin, on that constant's own
-// stated grounds (world_test.go): each wait here chains TWO real shim process
+// stated grounds (kit/stack/world.go): each wait here chains TWO real shim process
 // lifecycles onto one budget — the seeding session, and the resume the gate's
 // answer re-opens — which is exactly the shape that constant is sized for.
-const coldGateChainTimeout = HandoverChainTimeout
+const coldGateChainTimeout = stack.HandoverChainTimeout
 
 // coldSeedContextTokens is the context size the gate must report: the context
 // the `!cold-seed` scenario states on its assistant line, summed the way
@@ -188,13 +189,13 @@ var coldGateWarnings = []string{
 // the gate row exactly as the feed served it, and the footer stream that was
 // open before the gate was raised.
 type coldGate struct {
-	w   *World
+	w   *stack.World
 	ws  *workspacev1.WorkspaceRef
 	row *frontendv1.FeedRow
 	// configDir is the account root the workspace routes through: the FIRST
 	// daemon's, which the successor was launched against.
 	configDir string
-	footer    *FooterWatch
+	footer    *stack.FooterWatch
 }
 
 // raiseColdGate arranges a REAL standing cold gate and asserts the two
@@ -248,11 +249,11 @@ func raiseColdGate(t *testing.T) *coldGate {
 
 	// Arrange: a workspace whose one real turn leaves a context above the
 	// cold-gate floor behind.
-	first := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	first := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	first.ExpectWarnings(coldGateWarnings...)
 	ws := first.NewWorkspace(t)
 
-	seed := driveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "cold-seed")
+	seed := stack.DriveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "cold-seed")
 	// THE CRASH WAITS FOR THE SEED TURN'S DURABLE CLOSE. The feed publishes a
 	// turn's end before the prompt queue stamps its close, so a kill landing
 	// between the two leaves the turn open on disk, and the successor rightly
@@ -303,12 +304,12 @@ func raiseColdGate(t *testing.T) *coldGate {
 	opts.ExtraEnv = append(opts.ExtraEnv, coldGateResumedLaterEnv)
 	// The successor's boot and the resume its bring-up performs are two real
 	// process lifecycles on one budget — the shape AdoptionChainTimeout
-	// documents (world_test.go), reused verbatim rather than the tighter
+	// documents (kit/stack/world.go), reused verbatim rather than the tighter
 	// single-boot DefaultTimeout.
-	opts.Timeout = AdoptionChainTimeout
+	opts.Timeout = stack.AdoptionChainTimeout
 	opts.ExpectWarnings = append([]string{"daemon.rollout.reconcile"}, coldGateWarnings...)
 	successor := harness.StartDaemon(t, opts)
-	w := &World{Daemon: successor, Store: first.Store, Sidecar: first.Sidecar}
+	w := &stack.World{Daemon: successor, Store: first.Store, Sidecar: first.Sidecar}
 
 	// The footer stream is opened BEFORE the mount, so the parked status is
 	// queued in order rather than possibly missed.
@@ -327,7 +328,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 	}
 
 	// Assert: the feed carries the standing gate, with the SHIM's own facts.
-	row := awaitFeedRow(t, w, ws, "the standing cold-gate row", func(r *frontendv1.FeedRow) bool {
+	row := stack.AwaitFeedRow(t, w, ws, "the standing cold-gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
 	standing := row.GetColdGate().GetStanding()
@@ -463,7 +464,7 @@ func awaitPIDsGone(t *testing.T, pids []int, bound time.Duration) {
 }
 
 // awaitColdFooter bounds a footer-stream wait at this area's own budget.
-func awaitColdFooter(t *testing.T, w *World, f *FooterWatch, what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
+func awaitColdFooter(t *testing.T, w *stack.World, f *stack.FooterWatch, what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), coldGateChainTimeout)
 	defer cancel()
@@ -534,7 +535,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 	defer cancel()
 	harness.AwaitSessionServes(t, ctx, host)
 
-	driveScenarioToCompletion(t, g.w, g.ws, g.configDir, "prose-streamed")
+	stack.DriveScenarioToCompletion(t, g.w, g.ws, g.configDir, "prose-streamed")
 }
 
 // ---------------------------------------------------------------------------

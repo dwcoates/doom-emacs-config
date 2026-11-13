@@ -1,8 +1,8 @@
-// zettel_world_test.go — the real zettel service a chat world runs beside its
+// zettel_world.go — the real zettel service a chat world runs beside its
 // daemon (WorldOpts.Zettel): built once per run, started on a socket and a
 // graph database of the world's own, and held to the same guarantee as the
 // store and the sidecar (an exit the test did not ask for fails it).
-package e2e
+package stack
 
 import (
 	"context"
@@ -21,14 +21,14 @@ import (
 	"agent-repld/integration/grantedclock"
 )
 
-var zettelProgram = &programOnce{name: "zettel", build: func() (string, error) {
-	return goBuildCovered(repo.zettelDir, filepath.Join(e2eBinDir(), "zettel"))
+var zettelProgram = &ProgramOnce{Name: "zettel", Build: func() (string, error) {
+	return goBuildCovered(Repo.zettelDir, filepath.Join(E2eBinDir(), "zettel"))
 }}
 
 // requireZettelBinary builds the real zettel, once per run.
 func requireZettelBinary(t testing.TB) string {
 	t.Helper()
-	return zettelProgram.require(t, "a chat world runs against the REAL zettel, which does not build")
+	return zettelProgram.Require(t, "a chat world runs against the REAL zettel, which does not build")
 }
 
 // Zettel is one running zettel service.
@@ -75,7 +75,7 @@ func (z *Zettel) awaitReady() {
 	z.t.Helper()
 	ctx, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(PollInterval)
 	defer ticker.Stop()
 	for {
 		if _, err := z.Client.GetThread(ctx, connect.NewRequest(&zettelv1.GetThreadRequest{Thread: &zettelv1.ThreadId{Id: "readiness"}})); err == nil {

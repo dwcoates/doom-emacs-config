@@ -427,15 +427,26 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
 	// The density report scans every system's logging calls.
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
-	// THE E2E HARNESS'S OWN CODE THAT BUILDS NO WORLD, and its tests (its
-	// scenario runner, its pure helpers, and the scans of the e2e package's
-	// sources). Its own module, which the e2e module replaces, so its tests
-	// run per package and are reused, where in the e2e suite they ran in every
-	// run that selected it.
-	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit", Reuse: &Reuse{Units: map[string][]string{
+	// THE E2E HARNESS and its tests: the world every scenario builds
+	// (stack), its scenario runner, its pure helpers, and the scans of the
+	// e2e package's sources. Its own module, which the e2e module replaces,
+	// so its tests run per package and are reused, where in the e2e suite
+	// they ran in every run that selected it.
+	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit",
+		// THE WORLD'S OWN TESTS (stack) run the e2e suite's TestMain shape,
+		// harness.MainAt, which takes the daemon and its fakes from the
+		// run's programs rather than building them; the rest are the
+		// programs a world spawns.
+		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
+		Reuse: &Reuse{Units: map[string][]string{
 		// The preflight's own tests run the sandbox's preflight script, and
 		// the webapp layer's boot budget is held to its driver's.
 		".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
+		// The world's layout checks each system's tree is where it says (a
+		// file in each stands for its directory), and the trampoline
+		// prewarm's own test reads the Emacs scenarios it serves.
+		"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
+			"agent-shim/claude/shim-sidecar/go.mod", "lisp/testsupport/fakedaemon/go.mod", "daemon/go.mod"},
 		// The scans read the e2e package's sources, and the scenario matrix
 		// the mocked vendor's scenarios, their goldens and the webapp
 		// layer's areas it summarizes.

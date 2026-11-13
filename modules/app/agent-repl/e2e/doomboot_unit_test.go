@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,10 +21,10 @@ type stampScript struct {
 	stalls    int
 }
 
-func (s *stampScript) wait(poll, stalled, capped chan time.Time) doomStampWait {
-	return doomStampWait{
-		poll: poll, stalled: stalled, capped: capped,
-		read: func() ([]byte, bool, error) {
+func (s *stampScript) wait(poll, stalled, capped chan time.Time) stack.DoomStampWait {
+	return stack.DoomStampWait{
+		Poll: poll, Stalled: stalled, Capped: capped,
+		Read: func() ([]byte, bool, error) {
 			s.looks++
 			if s.readErr != nil {
 				return nil, false, s.readErr
@@ -33,12 +34,12 @@ func (s *stampScript) wait(poll, stalled, capped chan time.Time) doomStampWait {
 			}
 			return nil, false, nil
 		},
-		exited: func() bool { return s.exitAt >= 0 && s.looks > s.exitAt },
-		cpu: func() (time.Duration, error) {
+		Exited: func() bool { return s.exitAt >= 0 && s.looks > s.exitAt },
+		CPU: func() (time.Duration, error) {
 			i := min(s.looks-1, len(s.cpu)-1)
 			return s.cpu[i], nil
 		},
-		onStall: func() { s.stalls++ },
+		OnStall: func() { s.stalls++ },
 	}
 }
 
@@ -47,49 +48,49 @@ func TestAwaitDoomStamp(t *testing.T) {
 		name       string
 		script     stampScript
 		fire       func(poll, stalled, capped chan time.Time)
-		wantKind   doomOutcomeKind
+		wantKind   stack.DoomOutcomeKind
 		wantStalls int
 	}{
 		{name: "a stamp already written ends the wait", script: stampScript{writtenAt: 0, exitAt: -1, cpu: []time.Duration{0}},
-			wantKind: doomStamped},
+			wantKind: stack.DoomStamped},
 		{name: "a stamp written after a stall report ends the wait, the stall reported once",
 			script: stampScript{writtenAt: 2, exitAt: -1, cpu: []time.Duration{0}},
 			fire: func(poll, stalled, _ chan time.Time) {
 				stalled <- time.Time{}
 				poll <- time.Time{}
 			},
-			wantKind: doomStamped, wantStalls: 1},
+			wantKind: stack.DoomStamped, wantStalls: 1},
 		{name: "an Emacs that exits before stamping ends the wait", script: stampScript{writtenAt: -1, exitAt: 0, cpu: []time.Duration{0}},
-			wantKind: doomExited},
-		{name: "a boot that spent more CPU than its budget fails", script: stampScript{writtenAt: -1, exitAt: -1, cpu: []time.Duration{doomBootCPUBound + time.Millisecond}},
-			wantKind: doomOverBudget},
-		{name: "a boot exactly at its CPU budget waits on", script: stampScript{writtenAt: 1, exitAt: -1, cpu: []time.Duration{doomBootCPUBound}},
+			wantKind: stack.DoomExited},
+		{name: "a boot that spent more CPU than its budget fails", script: stampScript{writtenAt: -1, exitAt: -1, cpu: []time.Duration{stack.DoomBootCPUBound + time.Millisecond}},
+			wantKind: stack.DoomOverBudget},
+		{name: "a boot exactly at its CPU budget waits on", script: stampScript{writtenAt: 1, exitAt: -1, cpu: []time.Duration{stack.DoomBootCPUBound}},
 			fire:     func(poll, _, _ chan time.Time) { poll <- time.Time{} },
-			wantKind: doomStamped},
+			wantKind: stack.DoomStamped},
 		{name: "a boot that spends no CPU and never stamps ends at the last-resort cap",
 			script:   stampScript{writtenAt: -1, exitAt: -1, cpu: []time.Duration{0}},
 			fire:     func(_, _, capped chan time.Time) { capped <- time.Time{} },
-			wantKind: doomCapped},
+			wantKind: stack.DoomCapped},
 		{name: "a stamp that cannot be read ends the wait", script: stampScript{writtenAt: -1, exitAt: -1, cpu: []time.Duration{0}, readErr: errors.New("permission denied")},
-			wantKind: doomReadFailed},
+			wantKind: stack.DoomReadFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			poll, stalled, capped := make(chan time.Time, 1), make(chan time.Time, 1), make(chan time.Time, 1)
 			w := tt.script.wait(poll, stalled, capped)
-			done := make(chan doomOutcome, 1)
+			done := make(chan stack.DoomOutcome, 1)
 
 			// Act
-			go func() { done <- awaitDoomStamp(w) }()
+			go func() { done <- stack.AwaitDoomStamp(w) }()
 			if tt.fire != nil {
 				tt.fire(poll, stalled, capped)
 			}
 			got := <-done
 
 			// Assert
-			if got.kind != tt.wantKind || tt.script.stalls != tt.wantStalls {
-				t.Fatalf("outcome %v with %d stall reports, want %v with %d", got.kind, tt.script.stalls, tt.wantKind, tt.wantStalls)
+			if got.Kind != tt.wantKind || tt.script.stalls != tt.wantStalls {
+				t.Fatalf("outcome %v with %d stall reports, want %v with %d", got.Kind, tt.script.stalls, tt.wantKind, tt.wantStalls)
 			}
 		})
 	}
@@ -114,7 +115,7 @@ func TestStatCPUTicks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := statCPUTicks(tt.stat)
+			got, err := stack.StatCPUTicks(tt.stat)
 
 			// Assert
 			if tt.wantErr != "" {
@@ -132,7 +133,7 @@ func TestStatCPUTicks(t *testing.T) {
 
 func TestEmacsCPUOfAnUnknownPidIsNothingSpent(t *testing.T) {
 	// Act
-	got, err := emacsCPU(0)
+	got, err := stack.EmacsCPU(0)
 
 	// Assert
 	if got != 0 || err != nil {
@@ -153,7 +154,7 @@ func TestServerSocketDirConfined(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			err := serverSocketDirConfined(tt.dir, "/tmp/x/emacs")
+			err := stack.ServerSocketDirConfined(tt.dir, "/tmp/x/emacs")
 
 			// Assert
 			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
