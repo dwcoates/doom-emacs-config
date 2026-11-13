@@ -834,7 +834,10 @@ failure -- the daemon found the session already quiet -- so it is a calm
 message rather than an error.  `merge_queue_offered' is the quiet
 workspace whose sync merge is queued: the stop raised the merge-queue
 question in the pinned merge bubble, so no rollback is offered and the
-keyboard goes to the feed.  `no_session' (the workspace never had a
+keyboard goes to the feed.  `interrupted_revisions' is a stop that found
+the workspace rewriting final responses from highlighted words: it stopped
+those rewrites and nothing else, so a turn in flight runs on and the next
+press stops it.  `no_session' (the workspace never had a
 session) is a daemon refusal reported through the generic path, likewise as
 a message and never a raised error, so an idle workspace is a no-op with
 feedback either way.
@@ -888,6 +891,12 @@ surfaced loudly by the shared dispatcher."
           ;; nothing else.  No rollback is offered; the keyboard goes to the
           ;; feed, where the question has taken focus.
           (agent-repl-verbs--focus-merge-queue-offer ws))
+         (:interrupted-revisions
+          ;; THE STOP REACHED THE RESPONSE REWRITES FIRST: each rewritten
+          ;; response stands as it was, and a running turn runs on.
+          (let ((count (plist-get (plist-get value :value) :count)))
+            (agent-repl--info ws "elisp.verbs.interrupt-revisions ws=%s count=%S" ws count)
+            (message "agent-repl: response update%s stopped" (if (eql count 1) "" "s"))))
          (:interrupted-detached
           ;; A turn stop confirmed with live agents also ends them; the
           ;; daemon may answer with the fan-wide count rather than the bare
