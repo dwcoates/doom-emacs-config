@@ -32,3 +32,15 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
   - `kit`: harness helpers that build nothing, with their tests.
 - A new harness test goes in `kit/`, beside its subject. It stays here only when it needs a world of real systems (the `TestHarness` steps): a world spawns the real shim, whose installed `node_modules` and built bundle the e2e suite's prebuild provides and a confined `e2e-kit` unit cannot read.
 - The grep gate (`main_test.go`) and `TestNoE2EWaitIsBoundOnWallTime` hold `kit/`'s code to the same rules as this package's.
+
+## The Emacs e2e layer was removed (2026-11-13)
+
+Owner decision, 2026-11-13, taken as a trial: the owner reviews it on 2026-11-20 and may restore the layer.
+
+- What was removed:
+  - the `e2e-emacs` gate suite (`bin/test-e2e-emacs.sh`, `bin/lib-sandbox-suite.sh`) and the runner machinery only it used (`roster.Suite.GoTests` with its `-harness SCRIPT=TestA` selection, `roster.Suite.NeedsWebappDist` with the run's one dist build);
+  - every test it ran: the `TestEmacsWorkspaces` and `TestEmacsDaemonLifecycle` scenarios (7 Emacs seam steps), the `TestDoom` tier (6 steps against the fake daemon) and the `TestEmacsTeardown*` tests;
+  - the Emacs world in `kit/stack` (`EmacsWorld`, `StartEmacs`, the sandbox and its Xvfb display, the emacsclient helpers, the Doom stamp waits, the trampoline prewarm and scenario-override checks) and the kit tests of only that machinery;
+  - the Docker sandbox (`e2e/sandbox/`), its script tests (`e2e/sandboxscripts/`), `EMACS-LAYER-SPEC.md`, the `docker` requirement, and the scenario matrix's Emacs column.
+- Why: the layer made agent-repl require Docker, and its container and Emacsen cost the gate CPU for 7 Emacs seam steps, the Doom tier and the teardown tests. Emacs's own behavior is covered by ERT against the fake daemon (`lisp/testsupport/fakedaemon`); this suite keeps the cross-system seams between the daemon, shim, store, sidecar and webapp. Nothing stays behind a flag: a test either runs in the gate or is deleted.
+- To restore it, revert the removal commits, newest first: `git revert a0733f5eee 06d7d45312 9eeda8a87b` (the guides, then the e2e layer and the sandbox, then the suite and its runner machinery), and rebuild the sandbox image. Those are the hashes the commits had on the branch `merge-queue-stall-triage`; if a landing rewrote them, find them by their subjects (`testrun: the e2e-emacs suite leaves the roster…`, `e2e: remove the Emacs e2e layer…`, `docs: the Emacs e2e layer…`).
