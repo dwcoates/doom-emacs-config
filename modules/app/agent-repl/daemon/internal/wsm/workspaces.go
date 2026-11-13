@@ -403,8 +403,11 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			}
 			out.Hidden, out.HiddenAt = true, &out.CreatedAt
 		}
+		if facts.IntakeCard != nil && !facts.Intake {
+			return fmt.Errorf("wsm: register %s: an intake card is recorded only for an intake workspace", normalized)
+		}
 		if facts.Intake {
-			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt); err != nil {
+			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt, facts.IntakeCard); err != nil {
 				return err
 			}
 		}

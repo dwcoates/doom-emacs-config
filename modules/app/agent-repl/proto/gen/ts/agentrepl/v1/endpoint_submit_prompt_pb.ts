@@ -268,7 +268,8 @@ export type SubmitPromptSuccess = Message<"agentrepl.v1.SubmitPromptSuccess"> & 
      * question stood as it was sent (AskAboutResponse), so the daemon
      * handed the card, quoted, followed by these words, to an ephemeral
      * intake workspace it created for the question in the home repository,
-     * and ended the question. The intake workspace sends this workspace the
+     * or to the workspace already addressing that card's questions
+     * (endpoint_ask_about_response.proto), and ended the question. The intake workspace sends this workspace the
      * answer to an interrogative, and creates a one-shot child of this
      * workspace for an imperative, acknowledging this workspace either way
      * (conversation.v1.PromptOrigin.PROMPT_ORIGIN_AGENT_SENT). Nothing
@@ -303,7 +304,8 @@ export type SubmitPromptQuestionSent = Message<"agentrepl.v1.SubmitPromptQuestio
 
   /**
    * The name of the workspace the question was handed to: the ephemeral
-   * intake workspace created for it.
+   * intake workspace created for it, or the workspace already addressing
+   * the card's questions.
    *
    * @generated from field: string recipient = 2;
    */

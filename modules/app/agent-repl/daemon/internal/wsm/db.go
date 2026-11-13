@@ -783,6 +783,10 @@ type DB interface {
 	RefusePlacement(ctx context.Context, repoDir string, p RegisterPlacement, parent *WorkspaceID, merge bool) error
 	// IsIntake answers whether a workspace is an ephemeral intake workspace.
 	IsIntake(ctx context.Context, id WorkspaceID) (bool, error)
+	// CardAddressees answers what already addresses a feed card's `?`
+	// questions: the open workspace one of its intakes created, and its intake
+	// still open (intake.go).
+	CardAddressees(ctx context.Context, card IntakeCard) (CardAddressees, error)
 	// SetAwaiting marks a workspace awaiting correspondence from another, or
 	// clears the mark with nil (standings.go).
 	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error

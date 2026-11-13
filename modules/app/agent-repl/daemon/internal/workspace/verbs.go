@@ -104,6 +104,10 @@ type verbs struct {
 	// stopped holds the workspaces whose turn the user stopped and whom no
 	// user prompt has followed yet (standings.go TakeBackOneShot).
 	stopped sync.Map
+	// intakeHandoffs makes a card's question handed to its open intake
+	// workspace and that intake's retirement one after the other (intake.go
+	// AskAboutCard, retireIntake).
+	intakeHandoffs sync.Mutex
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED

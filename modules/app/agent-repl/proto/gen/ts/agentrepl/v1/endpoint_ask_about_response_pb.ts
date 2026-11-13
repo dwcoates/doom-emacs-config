@@ -14,6 +14,12 @@
 // or creates, as its child, the one-shot workspace that makes the change
 // asked for; the daemon retires the intake workspace when its turn ends.
 //
+// ONE CARD'S QUESTIONS REACH ONE WORKSPACE (owner request, 2026-11-13): a
+// later question about a card whose earlier question's intake created a
+// workspace that is still open is sent to that workspace, as an agent-sent
+// prompt from this one, and no intake is created; one asked while that
+// intake is still open is sent to the intake.
+//
 // A CARD IS QUOTED BY ONE RULE: a bubble with text (a prompt, a landed
 // response) by its markdown, and every other card by the daemon-resolved row
 // the feed drew it from, as JSON. So a card kind added later is quotable with

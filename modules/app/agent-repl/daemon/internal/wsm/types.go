@@ -418,6 +418,10 @@ type RegisterFacts struct {
 	// (intake.go) born so: its intake_workspaces row is written in the
 	// insert's transaction. It implies Hidden.
 	Intake bool
+	// IntakeCard is the feed card an intake workspace was made for (a `?`
+	// question's), written beside its intake_workspaces row in the insert's
+	// transaction (intake_cards). Set only with Intake.
+	IntakeCard *IntakeCard
 	// Placement files a MINTED workspace into a subsection (or a new one) in
 	// the insert's own transaction. Refused for a child or a merge workspace
 	// (ErrPlacementOnChild, ErrPlacementOnMerge), for an unknown subsection
