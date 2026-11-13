@@ -281,14 +281,12 @@ func (o *orchestrator) mediationTurnEnded(ctx context.Context, q mediatedQueue, 
 // mediatorOf answers Q's mediator workspace, making it when it does not
 // exist (Deps.CreateMediator).
 func (o *orchestrator) mediatorOf(ctx context.Context, q mediatedQueue) (ids.WorkspaceID, error) {
-	workspaces, err := o.deps.DB.ListWorkspaces(ctx)
+	ws, ok, err := o.existingMediator(ctx, q)
 	if err != nil {
-		return "", fmt.Errorf("merge: list the workspaces to find the mediator %s: %w", q.mediator, err)
+		return "", err
 	}
-	for _, ws := range workspaces {
-		if !ws.Closed && ws.Name == q.mediator && ws.Repo == q.repository.ID {
-			return ws.ID, nil
-		}
+	if ok {
+		return ws, nil
 	}
 	made, err := o.deps.CreateMediator(ctx, q.repository.Dir, q.mediator)
 	if err != nil {
@@ -297,6 +295,21 @@ func (o *orchestrator) mediatorOf(ctx context.Context, q mediatedQueue) (ids.Wor
 	o.deps.Log.Global().Info(opMediation, "made the repository's deploy mediator", dlog.Context{
 		"repo": string(q.key), "mediator": q.mediator, "workspace": string(made.ID)})
 	return made.ID, nil
+}
+
+// existingMediator answers Q's open mediator workspace, and false while none
+// is made: the one workspace of Q's repository carrying the mediator's name.
+func (o *orchestrator) existingMediator(ctx context.Context, q mediatedQueue) (ids.WorkspaceID, bool, error) {
+	workspaces, err := o.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("merge: list the workspaces to find the mediator %s: %w", q.mediator, err)
+	}
+	for _, ws := range workspaces {
+		if !ws.Closed && ws.Name == q.mediator && ws.Repo == q.repository.ID {
+			return ws.ID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // mediationVersion is how the brief names M's build.
@@ -370,15 +383,11 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 		if q.key != repo {
 			continue
 		}
-		workspaces, err := o.deps.DB.ListWorkspaces(ctx)
-		if err != nil {
+		ws, ok, err := o.existingMediator(ctx, q)
+		if err != nil || !ok {
 			return nil, err
 		}
-		for _, ws := range workspaces {
-			if !ws.Closed && ws.Name == q.mediator && ws.Repo == q.repository.ID {
-				return &sidebar.QueueMediation{Mediator: ws.ID, Told: m.Prompted()}, nil
-			}
-		}
+		return &sidebar.QueueMediation{Mediator: ws, Told: m.Prompted()}, nil
 	}
 	return nil, nil
 }

@@ -97,10 +97,12 @@ type fakeDB struct {
 	drainOwed map[wsm.RepoKey]bool
 	// mediations is each repository's owed deploy mediation; mediationErr
 	// fails its read.
-	mediations    map[wsm.RepoKey]*wsm.Mediation
-	mediationErr  error
-	drainReadErr  error
-	drainClearErr error
+	mediations   map[wsm.RepoKey]*wsm.Mediation
+	mediationErr error
+	// listWorkspacesErr fails ListWorkspaces.
+	listWorkspacesErr error
+	drainReadErr      error
+	drainClearErr     error
 
 	mu sync.Mutex
 
@@ -482,6 +484,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 func (f *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listWorkspacesErr != nil {
+		return nil, f.listWorkspacesErr
+	}
 	out := make([]wsm.Workspace, 0, len(f.workspaces))
 	for _, ws := range f.workspaces {
 		out = append(out, ws)

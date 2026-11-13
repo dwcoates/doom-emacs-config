@@ -3,6 +3,8 @@ package merge
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,5 +314,65 @@ func TestMediateOnAStoppingDaemon(t *testing.T) {
 				t.Fatal("no ERROR record of the failed read")
 			}
 		})
+	}
+}
+
+func TestExistingMediator(t *testing.T) {
+	tests := []struct {
+		name    string
+		present []wsm.Workspace
+		listErr error
+		wantWS  ids.WorkspaceID
+		wantOK  bool
+		wantErr bool
+	}{
+		{name: "none is made yet"},
+		{name: "the open workspace of the repository carrying the mediator's name", wantWS: "m1", wantOK: true,
+			present: []wsm.Workspace{{ID: "m1", Name: "deploy-mediator", Repo: theRepository}}},
+		{name: "a closed one is not the mediator",
+			present: []wsm.Workspace{{ID: "m1", Name: "deploy-mediator", Repo: theRepository, Closed: true}}},
+		{name: "one of the name in another repository is not the mediator",
+			present: []wsm.Workspace{{ID: "m1", Name: "deploy-mediator", Repo: "elsewhere"}}},
+		{name: "one of another name in the repository is not the mediator",
+			present: []wsm.Workspace{{ID: "m1", Name: "feature", Repo: theRepository}}},
+		{name: "a registry that cannot be read is answered", listErr: errors.New("disk gone"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			for _, ws := range tt.present {
+				h.db.workspaces[ws.ID] = ws
+			}
+			h.db.listWorkspacesErr = tt.listErr
+			queues, err := h.o.mediatedQueues(context.Background(), opMediation)
+			if err != nil || len(queues) != 1 {
+				t.Fatalf("mediatedQueues = %v, %v; want the one mediated queue", queues, err)
+			}
+
+			// Act
+			ws, ok, err := h.o.existingMediator(context.Background(), queues[0])
+
+			// Assert
+			if ws != tt.wantWS || ok != tt.wantOK || (err != nil) != tt.wantErr {
+				t.Fatalf("existingMediator = %q, %v, %v; want %q, %v, error %v", ws, ok, err, tt.wantWS, tt.wantOK, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEveryMediatorLookupGoesThroughExistingMediator(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("mediation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	matches := strings.Count(string(src), "ws.Name == q.mediator")
+
+	// Assert
+	if matches != 1 {
+		t.Fatalf("mediation.go matches a workspace to the mediator's name %d times; want once, in existingMediator", matches)
 	}
 }
