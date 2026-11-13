@@ -1153,14 +1153,13 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
 
 (defun agent-repl-host-report-page-residency (ws residency on-reported)
   "Tell the daemon what Emacs holds of workspace WS\='s page: RESIDENCY.
-RESIDENCY is a `PageResidency' plist
-\(`agent-repl-wire-encode-page-residency').
+RESIDENCY is a `PageResidency' plist (`agent-repl-wire-encode-page-residency').
 ON-REPORTED is called with no argument once the daemon has answered
 success, and the daemon stores whether the page is loaded, which the
 registration after a bounce answers (`agent-repl-host-last-known-page').
 FIRE AND FORGET otherwise: a report that does not land is recorded and
-the next change, or the next link-up, reports again.  Answers nil without calling
-anything when WS has no ref or no connection yet."
+the next change, or the next link-up, reports again.  Answers nil without
+calling anything when WS has no ref or no connection yet."
   (agent-repl-host--send-subject-verb
    ws "page-residency"
    (lambda (conn request &rest args)

@@ -197,7 +197,8 @@ INSTALLED BY NAME, never as a closure, so a hot reload reaches it (see
 
 (defun agent-repl--sidebar-view-on-load (event-type)
   "Replay the desired state when the sidebar's EVENT-TYPE commits a load.
-At the load's finish the sidebar's boot is read (`agent-repl--webview-on-finish').
+At the load's finish the sidebar's boot is read
+\(`agent-repl--webview-on-finish').
 One replay per document, at `load-committed', as the host replays
 \(`agent-repl--webhost-on-load').  A load that strayed off the sidebar's own
 origin is taken back instead."
@@ -213,7 +214,8 @@ origin is taken back instead."
 
 (defun agent-repl--sidebar-view-on-boot (raw)
   "Record the sidebar's RAW boot answer (`agent-repl--webview-record-boot').
-Called BY SYMBOL from the read channel (`agent-repl--frontend-webview-read-script')."
+Called BY SYMBOL from the read channel
+\(`agent-repl--frontend-webview-read-script')."
   (agent-repl--webview-record-boot agent-repl--sidebar-view-central "sidebar" raw))
 
 (defun agent-repl--sidebar-view-take-back (uri)
