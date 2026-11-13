@@ -1,4 +1,4 @@
-package e2e
+package kit
 
 import (
 	"context"
@@ -10,15 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-// A PREFLIGHT EITHER ANSWERS OR IS REPORTED AS NOT ANSWERING, WITHIN A BOUND.
-// It never blocks a test process. These cover that invariant at both layers:
-// the Go probe (`runHostPreflight`) and the script it runs
-// (`sandbox/bin/preflight.sh`).
-//
-// Observed 2026-09-12: a wedged Docker Desktop -- backend alive, socket never
-// answering -- held `docker info` for 9m34s inside the probe's sync.Once, and
-// the whole e2e package died on `go test`'s 10m timeout with no verdict.
 
 // writeScript drops an executable shell script in a temp dir.
 func writeScript(t *testing.T, dir, name, body string) string {
@@ -38,7 +29,7 @@ func TestHostPreflightBoundReportsAScriptThatNeverAnswers(t *testing.T) {
 
 	// Act.
 	start := time.Now()
-	reason := runHostPreflight(script, bound)
+	reason := RunHostPreflight(script, bound)
 	elapsed := time.Since(start)
 
 	// Assert: it answered, it said WHY, and it did so within the bound.
@@ -48,7 +39,7 @@ func TestHostPreflightBoundReportsAScriptThatNeverAnswers(t *testing.T) {
 	// 10x the bound: generous for process teardown on a loaded box, and still
 	// orders of magnitude under the 9m34s hang this test exists to prevent.
 	if elapsed > 10*bound {
-		t.Fatalf("runHostPreflight took %s, want it bounded near %s", elapsed, bound)
+		t.Fatalf("RunHostPreflight took %s, want it bounded near %s", elapsed, bound)
 	}
 }
 
@@ -76,7 +67,7 @@ func TestHostPreflightBoundNamesTheWedgedEngine(t *testing.T) {
 	}()
 
 	// Act.
-	reason := hostPreflightUntil(ctx, script, 300*time.Millisecond)
+	reason := HostPreflightUntil(ctx, script, 300*time.Millisecond)
 
 	// Assert: the partial output is carried, so the reader knows which
 	// engine was being probed when the bound expired.
@@ -93,7 +84,7 @@ func TestHostPreflightQuotesANonZeroExitVerbatim(t *testing.T) {
 		"echo \""+message+"\"\nexit 12\n")
 
 	// Act.
-	reason := runHostPreflight(script, 30*time.Second)
+	reason := RunHostPreflight(script, 30*time.Second)
 
 	// Assert: the script's own actionable message survives unparaphrased.
 	if !strings.Contains(reason, message) {
@@ -108,7 +99,7 @@ func TestHostPreflightIsSilentWhenTheSandboxIsUsable(t *testing.T) {
 		"echo 'agent-repl e2e sandbox READY'\nexit 0\n")
 
 	// Act.
-	reason := runHostPreflight(script, 30*time.Second)
+	reason := RunHostPreflight(script, 30*time.Second)
 
 	// Assert.
 	if reason != "" {
@@ -122,8 +113,7 @@ func TestPreflightScriptExitsFourteenWhenTheRuntimeNeverAnswers(t *testing.T) {
 	// for a Docker engine whose socket never answers. No real docker.
 	dir := t.TempDir()
 	runtime := writeScript(t, dir, "wedged-runtime", "exec sleep 120\n")
-	script := filepath.Join(repoRoot(), sandboxScriptRel)
-	script = filepath.Join(filepath.Dir(script), "preflight.sh")
+	script := sandboxPreflightScript(t)
 	if _, err := os.Stat(script); err != nil {
 		t.Fatalf("preflight.sh not found at %s: %v", script, err)
 	}
@@ -157,7 +147,7 @@ func TestPreflightScriptWedgeMessageSaysToRestartTheEngine(t *testing.T) {
 	// remedy is the one printed.
 	dir := t.TempDir()
 	runtime := writeScript(t, dir, "docker", "exec sleep 120\n")
-	script := filepath.Join(filepath.Dir(filepath.Join(repoRoot(), sandboxScriptRel)), "preflight.sh")
+	script := sandboxPreflightScript(t)
 
 	cmd := exec.Command(script)
 	cmd.Env = append(os.Environ(),
@@ -171,4 +161,30 @@ func TestPreflightScriptWedgeMessageSaysToRestartTheEngine(t *testing.T) {
 	if !strings.Contains(string(out), "Restart Docker Desktop, then re-run.") {
 		t.Fatalf("preflight.sh output = %q, want the restart instruction", out)
 	}
+}
+
+func TestSandboxRunCommandEntersTheE2EModule(t *testing.T) {
+	// Arrange.
+	const pattern = "TestEmacsExample"
+
+	// Act.
+	got := SandboxRunCommand(pattern)
+
+	// Assert.
+	want := SandboxScriptRel + " run --dir e2e go test ./ -run TestEmacsExample -v"
+	if got != want {
+		t.Fatalf("sandbox run command = %q, want %q", got, want)
+	}
+}
+
+// sandboxPreflightScript is the sandbox's preflight.sh, beside its entry
+// point (SandboxScriptRel) in the e2e package's sandbox/bin, one directory
+// above this one, the directory a test runs in.
+func sandboxPreflightScript(t *testing.T) string {
+	t.Helper()
+	script, err := filepath.Abs(filepath.Join("..", "sandbox", "bin", "preflight.sh"))
+	if err != nil {
+		t.Fatalf("resolve preflight.sh: %v", err)
+	}
+	return script
 }

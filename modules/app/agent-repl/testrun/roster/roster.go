@@ -433,6 +433,8 @@ var Suites = []Suite{
 	// run per package and are reused, where in the e2e suite they ran in every
 	// run that selected it.
 	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit", Reuse: &Reuse{Units: map[string][]string{
+		// The preflight's own tests run the sandbox's preflight script.
+		".": {"e2e/sandbox/bin/"},
 		// The scans read the e2e package's sources, and the scenario matrix
 		// the mocked vendor's scenarios, their goldens and the webapp
 		// layer's areas it summarizes.
