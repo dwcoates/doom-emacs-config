@@ -66,11 +66,16 @@ func SettingNames(path string) ([]string, error) {
 // ParseEnvFile reads a Doom env file: comment lines (`;;`) and one
 // parenthesized list of double-quoted NAME=VALUE strings, `\"` and `\\`
 // escaped. A later entry of one name wins, as Doom's own loader lets it.
+//
+// THE LIST IS THE FIRST `(` OUTSIDE A COMMENT. Doom's own header says
+// "(based on your settings for ..." and "(doom-load-envvars-file ...)", so the
+// first `(` in the file is a comment's, and reading from it failed every
+// spawn from a daemon Emacs started (2026-11-13).
 func ParseEnvFile(data []byte) (map[string]string, error) {
 	text := string(data)
-	open := strings.Index(text, "(")
-	if open < 0 {
-		return nil, fmt.Errorf("userenv: the env file holds no list of variables")
+	open, err := listStart(text)
+	if err != nil {
+		return nil, err
 	}
 	out := map[string]string{}
 	for i := open + 1; i < len(text); i++ {
@@ -102,6 +107,28 @@ func ParseEnvFile(data []byte) (map[string]string, error) {
 		}
 	}
 	return nil, fmt.Errorf("userenv: the env file's list never ends")
+}
+
+// listStart answers the index of the env file's list's `(`: past every
+// comment (`;` to the end of its line) and the whitespace between them.
+// Anything else before the list is not a Doom env file.
+func listStart(text string) (int, error) {
+	for i := 0; i < len(text); i++ {
+		switch c := text[i]; {
+		case c == '(':
+			return i, nil
+		case c == ';':
+			end := strings.IndexByte(text[i:], '\n')
+			if end < 0 {
+				return 0, fmt.Errorf("userenv: the env file holds no list of variables")
+			}
+			i += end
+		case c == ' ' || c == '\n' || c == '\t' || c == '\r':
+		default:
+			return 0, fmt.Errorf("userenv: the env file has %q before its list of variables", string(c))
+		}
+	}
+	return 0, fmt.Errorf("userenv: the env file holds no list of variables")
 }
 
 // Refresh is environ with each of names taken from file: set to the file's
