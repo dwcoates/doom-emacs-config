@@ -714,6 +714,30 @@ func TestRunTestsRunsAMainWorkspacesHandCutWorktree(t *testing.T) {
 	}
 }
 
+func TestRunTestsGovernsAHandCutWorktreeByTheMainWorkspacesBypassStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ref := mainTestsWorkspace(t, h)
+	cut := cutWorktree(t, ref.GetDir(), testsDeploy)
+	h.DB.bypass = map[ids.WorkspaceID]wsm.QueueBypass{ids.WorkspaceID(ref.GetId()): {Holds: true}}
+	h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
+
+	// Act
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+		Worktree: &agentreplv1.RunTestsWorktree{Dir: cut}})
+
+	// Assert
+	if len(frames) != 1 || frames[0].GetEvent().GetEnded().GetPassed() == nil {
+		t.Fatalf("frames = %v, want the run's passing end", frames)
+	}
+	if !slices.Equal(h.DB.bypassReads, []ids.WorkspaceID{ids.WorkspaceID(ref.GetId())}) {
+		t.Fatalf("bypass read for %v, want the main workspace %s alone", h.DB.bypassReads, ref.GetId())
+	}
+	if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, "env AGENT_REPL_TEST_NICENESS=1 AGENT_REPL_TEST_UNGOVERNED=1 ") {
+		t.Fatalf("argv = %s, want the bypass holder's ungoverned run", got)
+	}
+}
+
 func TestRunTestsRefusesAWorktreeItsWorkspaceMayNotRunTestsIn(t *testing.T) {
 	cases := []struct {
 		name string
