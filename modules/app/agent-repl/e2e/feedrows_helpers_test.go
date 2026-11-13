@@ -1,9 +1,6 @@
 package e2e
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -36,37 +33,6 @@ func TestEndsTurn(t *testing.T) {
 				t.Fatalf("endsTurn(t1)(%v) = %v, want %v", tc.row, got, tc.want)
 			}
 		})
-	}
-}
-
-// handRolledTurnEnded is the match endsTurn owns, written out by hand.
-var handRolledTurnEnded = regexp.MustCompile(`GetTurn\(\)\.GetValue\(\) == \w+\.GetValue\(\) && \w+\.GetTurnEnded\(\) != nil`)
-
-// TestTurnEndedMatchIsShared fails on any test in this suite that writes the
-// turn-ended match out by hand instead of calling endsTurn, so a divergent
-// copy cannot drift from the one every wait shares.
-func TestTurnEndedMatchIsShared(t *testing.T) {
-	t.Parallel()
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob the suite's sources: %v", err)
-	}
-	var offenders []string
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		n := len(handRolledTurnEnded.FindAll(src, -1))
-		if f == "world_test.go" {
-			n-- // endsTurn's own body
-		}
-		if n > 0 {
-			offenders = append(offenders, f)
-		}
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("hand-rolled turn-ended matches in %v; call endsTurn(turn) instead", offenders)
 	}
 }
 

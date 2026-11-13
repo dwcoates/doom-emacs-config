@@ -1,8 +1,8 @@
 # Fake-SDK scenario coverage matrix — agent-repl
 
 SELF-VERIFYING. Every mechanical fact below is DERIVED and asserted by
-`e2e/scenariomatrix_test.go` (`TestScenarioMatrixMatchesReality`), which runs
-with the e2e suite, spawns nothing, and drives no scenario. This document was
+`e2e/kit/scans/scenariomatrix_test.go` (`TestScenarioMatrixMatchesReality`),
+which runs in the e2e-kit suite, spawns nothing, and drives no scenario. This document was
 hand-maintained until it was caught lying in both directions on the same day
 — twelve `!api-*` rows reading `uncovered` while one file drove every one of
 them, twenty session and tool rows reading `uncovered` with strong tests
@@ -11,7 +11,7 @@ table they summarized. Two agents nearly wrote duplicate tests off it. So it
 is no longer maintained by hand; it is regenerated:
 
 ```bash
-AGENT_REPL_MATRIX_WRITE=1 go test ./e2e -run TestScenarioMatrixMatchesReality
+(cd e2e/kit && AGENT_REPL_MATRIX_WRITE=1 go test ./scans -run TestScenarioMatrixMatchesReality)
 ```
 
 ## What is derived, and from where

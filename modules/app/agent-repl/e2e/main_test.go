@@ -19,6 +19,7 @@ package e2e
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -555,13 +556,30 @@ func runGrepGate(dir string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", dir, err)
 	}
-	var violations []string
+	var paths []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || filepath.Ext(name) != ".go" || !bytes.HasSuffix([]byte(name), []byte("_test.go")) {
 			continue
 		}
-		path := filepath.Join(dir, name)
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	// The harness code that moved out of this package into kit/ (its own
+	// module, so its tests are reused) is held to the same gate, every file.
+	err = filepath.WalkDir(filepath.Join(dir, "kit"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".go" {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk %s: %w", filepath.Join(dir, "kit"), err)
+	}
+	var violations []string
+	for _, path := range paths {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)

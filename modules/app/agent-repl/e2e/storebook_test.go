@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -87,22 +86,5 @@ func TestReadAgentBook(t *testing.T) {
 				t.Fatalf("readAgentBook = (%v, %v), want the success's page", got, err)
 			}
 		})
-	}
-}
-
-// TestEveryBookReadGoesThroughReadAgentBook pins that no test opens a book by
-// hand: the store's success arm and failure arm are read in one place.
-func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
-	for _, name := range []string{"remainder_e2e_test.go", "emacs_interrupt_e2e_test.go", "subagents_e2e_test.go"} {
-		// Act.
-		raw, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-
-		// Assert.
-		if strings.Contains(string(raw), ".OpenAgentSession(") {
-			t.Fatalf("%s opens a store book by hand; use readAgentBook", name)
-		}
 	}
 }

@@ -13,7 +13,7 @@
  * and presses a DOM button and settles, so a stub page is the whole world it
  * requires. It sits beside the layer files it serves and is named
  * `drive.test.ts` rather than `drive.layer.test.ts`, which is the suffix both
- * vitest configs and `e2e/scenariomatrix_test.go` use to mean "the Go world
+ * vitest configs and `e2e/kit/scans/scenariomatrix_test.go` use to mean "the Go world
  * drives this one".
  */
 import { createControl, type Control } from "../../src/control.js";

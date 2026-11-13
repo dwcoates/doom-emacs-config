@@ -63,9 +63,14 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"e2e-emacs"},
 		},
 		{
-			name:  "the e2e harness selects both cross-system suites",
+			name:  "the e2e harness selects both cross-system suites, and the scans of its sources",
 			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
-			want:  []string{"e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+		},
+		{
+			name:  "the e2e harness's world-free kit selects its own suite and both cross-system suites that import it",
+			paths: []string{"modules/app/agent-repl/e2e/kit/scenario/scenario.go"},
+			want:  []string{"e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "the shared sandboxed-suite runner selects the suite it runs, and the tests of it",

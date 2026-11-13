@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -463,38 +462,5 @@ func TestEmacsclientChargesItsBoundOnlyGrantedTime(t *testing.T) {
 				t.Fatalf("Exec calls = %v, want %d of %v", box.calls, tt.wantCalls, want)
 			}
 		})
-	}
-}
-
-// emacsclientExec is a sandbox Exec of emacsclient written out by hand.
-var emacsclientExec = regexp.MustCompile(`\.Exec\([^\n]*"emacsclient"`)
-
-// TestEveryServerCallRidesTheEmacsclientHelper fails a hand-rolled
-// emacsclient Exec anywhere in the layer: such a call would be bounded by its
-// own rule rather than the one the helper decides.
-func TestEveryServerCallRidesTheEmacsclientHelper(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob the layer's sources: %v", err)
-	}
-
-	// Act
-	var sites []string
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		for _, m := range emacsclientExec.FindAll(src, -1) {
-			sites = append(sites, f+": "+string(m))
-		}
-	}
-
-	// Assert
-	// Spelled in two halves so this file's own source is not a match.
-	want := []string{"emacs_test.go: .Exec(ctx, " + `"emacs` + `client"`}
-	if !slices.Equal(sites, want) {
-		t.Fatalf("emacsclient Exec sites = %q, want only the helper's %q", sites, want)
 	}
 }

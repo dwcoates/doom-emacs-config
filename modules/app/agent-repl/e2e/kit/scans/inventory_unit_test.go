@@ -1,122 +1,12 @@
-package e2e
+package scans
 
 import (
+	"agentrepl/e2e/kit"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
-
-// testScenarioFixtureStep and testScenarioOtherFixtureStep are steps no
-// scenario lists: this file's own fixtures, which the source scans below
-// leave out (scenarioUnitFile).
-func testScenarioFixtureStep(*testing.T)      {}
-func testScenarioOtherFixtureStep(*testing.T) {}
-
-// testlowercaseFixture is named like a step whose case name is not capitalized.
-func testlowercaseFixture(*testing.T) {}
-
-// notAStepFixture is a function a scenario may not list.
-func notAStepFixture(*testing.T) {}
-
-func TestStepNameIsTheFunctionNameWithoutItsPrefix(t *testing.T) {
-	tests := []struct {
-		name string
-		step func(*testing.T)
-		want string
-	}{
-		{"one step", testScenarioFixtureStep, "ScenarioFixtureStep"},
-		{"another step", testScenarioOtherFixtureStep, "ScenarioOtherFixtureStep"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := stepName(tt.step)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("stepName = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestStepNameRefusesAFunctionNotNamedAsAStep(t *testing.T) {
-	tests := []struct {
-		name string
-		step func(*testing.T)
-	}{
-		{"a closure", func(*testing.T) {}},
-		{"a function without the prefix", notAStepFixture},
-		{"a case name not capitalized", testlowercaseFixture},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := recoverPanic(func() { stepName(tt.step) })
-
-			// Assert
-			if !strings.Contains(got, "is not a function named testXxx") {
-				t.Fatalf("stepName panicked with %q, want it to refuse the step", got)
-			}
-		})
-	}
-}
-
-// recordingRunner is a stepRunner that records what a scenario asked of it,
-// and fails the steps named in fail.
-type recordingRunner struct {
-	calls []string
-	fail  map[string]bool
-}
-
-func (r *recordingRunner) Helper()   {}
-func (r *recordingRunner) Parallel() { r.calls = append(r.calls, "parallel") }
-func (r *recordingRunner) Run(name string, _ func(*testing.T)) bool {
-	r.calls = append(r.calls, "run "+name)
-	return !r.fail[name]
-}
-
-func TestAScenarioRunsItsStepsInOrderBesideTheOtherScenarios(t *testing.T) {
-	tests := []struct {
-		name string
-		fail map[string]bool
-	}{
-		{"every step passes", nil},
-		{"a failed step leaves the later steps to run", map[string]bool{"ScenarioFixtureStep": true}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			r := &recordingRunner{fail: tt.fail}
-
-			// Act
-			runScenario(r, []func(*testing.T){testScenarioFixtureStep, testScenarioOtherFixtureStep})
-
-			// Assert
-			want := []string{"parallel", "run ScenarioFixtureStep", "run ScenarioOtherFixtureStep"}
-			if !reflect.DeepEqual(r.calls, want) {
-				t.Fatalf("calls = %q, want %q", r.calls, want)
-			}
-		})
-	}
-}
-
-func TestAScenarioWithNoStepsIsRefused(t *testing.T) {
-	// Arrange
-	r := &recordingRunner{}
-
-	// Act
-	got := recoverPanic(func() { runScenario(r, nil) })
-
-	// Assert
-	if !strings.Contains(got, "no steps") {
-		t.Fatalf("runScenario(nil) panicked with %q, want it refused", got)
-	}
-	if len(r.calls) != 0 {
-		t.Fatalf("calls = %q, want none before the refusal", r.calls)
-	}
-}
 
 func TestEveryStepRunsInExactlyOneScenario(t *testing.T) {
 	// Arrange
@@ -131,12 +21,12 @@ func TestEveryStepRunsInExactlyOneScenario(t *testing.T) {
 	}
 
 	// Assert
-	for _, s := range sortedKeys(pkg.steps) {
+	for _, s := range kit.SortedKeys(pkg.steps) {
 		if scenarios := listed[s]; len(scenarios) != 1 {
 			t.Errorf("step %s (%s) is listed by %d scenarios %v, want exactly one: a step no scenario lists never runs", s, pkg.steps[s], len(scenarios), scenarios)
 		}
 	}
-	for _, s := range sortedKeys(listed) {
+	for _, s := range kit.SortedKeys(listed) {
 		if _, ok := pkg.steps[s]; !ok {
 			t.Errorf("scenarios %v list %s, which is not a step: a step is a package-level func testXxx(t *testing.T)", listed[s], s)
 		}
@@ -149,7 +39,7 @@ func TestEveryWorldBuildingTestIsAScenario(t *testing.T) {
 
 	// Act
 	var offenders []string
-	for _, name := range sortedKeys(pkg.tests) {
+	for _, name := range kit.SortedKeys(pkg.tests) {
 		if _, isScenario := pkg.scenarios[name]; isScenario {
 			continue
 		}
@@ -219,7 +109,7 @@ func TestEveryScenarioAndStepNamesItsSeam(t *testing.T) {
 			offenders = append(offenders, fmt.Sprintf("%s (%s) names no seam", name, file))
 		}
 	}
-	for _, scenarioName := range sortedKeys(pkg.scenarios) {
+	for _, scenarioName := range kit.SortedKeys(pkg.scenarios) {
 		if _, exempt := seamExempt[scenarioName]; exempt {
 			continue
 		}
@@ -240,27 +130,9 @@ func TestEverySeamExemptionNamesAScenario(t *testing.T) {
 	pkg := parseE2EPackage(t)
 
 	// Act / Assert
-	for _, name := range sortedKeys(seamExempt) {
+	for _, name := range kit.SortedKeys(seamExempt) {
 		if _, ok := pkg.scenarios[name]; !ok {
 			t.Errorf("seamExempt names %s, which is no scenario: drop the exemption", name)
 		}
 	}
-}
-
-// recoverPanic runs f and answers what it panicked with, or "".
-func recoverPanic(f func()) (msg string) {
-	defer func() {
-		if r := recover(); r != nil {
-			msg = fmtPanic(r)
-		}
-	}()
-	f()
-	return ""
-}
-
-func fmtPanic(r any) string {
-	if s, ok := r.(string); ok {
-		return s
-	}
-	return fmt.Sprint(r)
 }

@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -114,35 +113,5 @@ func TestRestartingASharedServiceIsRefused(t *testing.T) {
 				t.Fatalf("completed=%v failures=%q, want %q", completed, r.Failures(), tt.want)
 			}
 		})
-	}
-}
-
-// TestEveryWorldChecksItsServicesThroughOneHelper pins the extraction: an
-// owned World, the shared World's views and an EmacsWorld all check that
-// their services outlived the test through requireServicesOutlivedTheTest.
-func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
-	// Arrange
-	sites := map[string]string{
-		"world_test.go":       "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
-		"sharedworld_test.go": "t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar, s.world.Zettel) })",
-		"emacs_e2e_test.go":   "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
-	}
-
-	for file, call := range sites {
-		// Act
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
-		}
-
-		// Assert
-		if !strings.Contains(string(body), call) {
-			t.Errorf("%s does not check its services through requireServicesOutlivedTheTest", file)
-		}
-		// The helper itself is the one place that spells the check.
-		want := map[string]int{"world_test.go": 1, "sharedworld_test.go": 0, "emacs_e2e_test.go": 0}[file]
-		if got := strings.Count(string(body), "the store exited before test cleanup"); got != want {
-			t.Errorf("%s spells the service check %d times, want %d: only the helper spells it", file, got, want)
-		}
 	}
 }

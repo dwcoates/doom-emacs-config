@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1027,7 +1028,7 @@ func scenarioOverriddenFunctions(t *testing.T) []string {
 			seen[string(m[1])] = true
 		}
 	}
-	return sortedKeys(seen)
+	return kit.SortedKeys(seen)
 }
 
 // prewarmedFunctions is every function whose trampoline the prewarm builds
@@ -1042,7 +1043,7 @@ func prewarmedFunctions(t *testing.T) []string {
 	for _, name := range scenarioOverriddenFunctions(t) {
 		all[name] = true
 	}
-	return sortedKeys(all)
+	return kit.SortedKeys(all)
 }
 
 // trampolinePrewarmBound bounds the one prewarm. It is nine `call-process'

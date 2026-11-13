@@ -57,7 +57,7 @@ export default defineConfig({
     // THE LAYER EXCLUSION IS BY FILE SUFFIX, NOT BY DIRECTORY. `.layer.test.ts`
     // is already the layer's own name for "a file the Go world drives" — the
     // scenario-matrix check reads the directory by that exact suffix
-    // (e2e/scenariomatrix_test.go, deriveWebappCoverage) — and the directory
+    // (e2e/kit/scans/scenariomatrix_test.go, deriveWebappCoverage) — and the directory
     // also holds the layer's HELPERS (drive.ts, perf.ts, real-daemon.ts),
     // which need no daemon and whose own tests belong in the fast run like any
     // other unit test. Excluding the whole directory left them untestable.

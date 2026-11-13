@@ -6,7 +6,6 @@ import (
 	"agent-repld/integration/harness"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -43,37 +42,6 @@ func testNewWorkspaceMintsAFreshWorkspaceEachTime(t *testing.T) {
 	}
 }
 
-// TestNoTestMintsAWorkspaceByHand pins the extraction: a fresh fake-git
-// workspace is minted through World.NewWorkspace or NewRepoWorkspace, never by
-// pairing harness.NewRepo with harness.Register at the call site.
-func TestNoTestMintsAWorkspaceByHand(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`(\w+) := harness\.NewRepo\(t\)\n\s*(?:ws :=|return) harness\.Register\(t, \w+\.Daemon, (\w+)\.Dir\)`)
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
-	// Act
-	var found []string
-	for _, f := range files {
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		for _, m := range handRolled.FindAllStringSubmatch(string(body), -1) {
-			if m[1] == m[2] && f != "world_test.go" {
-				found = append(found, f)
-			}
-		}
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("files minting a workspace by hand: %s; use World.NewWorkspace or NewRepoWorkspace", strings.Join(found, ", "))
-	}
-}
-
 func testRequireOpenOpensARegisteredWorkspace(t *testing.T) {
 	// Arrange
 	w := SharedWorld(t)
@@ -99,33 +67,5 @@ func testRequireOpenFailsTheTestForAWorkspaceTheDaemonDoesNotKnow(t *testing.T) 
 	// Assert
 	if completed || !strings.Contains(r.Failures(), "OpenWorkspace(0000000000000000)") {
 		t.Fatalf("completed=%v failures=%q, want the open refused and the test failed", completed, r.Failures())
-	}
-}
-
-// TestNoTestRequiresAnOpenByHand pins the extraction: a test that needs its
-// workspace open and nothing else calls World.RequireOpen.
-func TestNoTestRequiresAnOpenByHand(t *testing.T) {
-	// Arrange
-	handRolled := regexp.MustCompile(`OpenWorkspace\(w\.Ctx\(\), [^\n]*\n\s*if err != nil \{\n\s*t\.Fatalf\([^\n]*\n\s*\}\n\s*if \w+\.Msg\.GetSuccess\(\) == nil \{\n\s*t\.Fatalf`)
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
-
-	// Act
-	var found []string
-	for _, f := range files {
-		body, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		if n := len(handRolled.FindAllString(string(body), -1)); n > 0 && !(f == "world_test.go" && n == 1) {
-			found = append(found, f)
-		}
-	}
-
-	// Assert
-	if len(found) > 0 {
-		t.Fatalf("files requiring an open by hand: %s; use World.RequireOpen", strings.Join(found, ", "))
 	}
 }

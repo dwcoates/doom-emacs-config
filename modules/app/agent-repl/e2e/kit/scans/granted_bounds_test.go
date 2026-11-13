@@ -1,6 +1,7 @@
-package e2e
+package scans
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,19 +23,32 @@ import (
 // answering) is the one exception, declared where it is taken by a comment
 // block directly above it that opens `// wall-clock:` and says why.
 // realtest/ drives the owner's real editor on the host, where wall time is the
-// subject, and is not this package.
+// subject, and is not scanned.
 func TestNoE2EWaitIsBoundOnWallTime(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange: the e2e package, and the harness code that moved out of it
+	// into kit/.
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
+	}
+	err = filepath.WalkDir("kit", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".go") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk kit/: %v", err)
 	}
 
 	// Act
 	var offenders []string
 	for _, f := range files {
-		if f == "granted_bounds_test.go" {
+		if f == filepath.Join("kit", "scans", "granted_bounds_test.go") {
 			continue
 		}
 		b, err := os.ReadFile(f)

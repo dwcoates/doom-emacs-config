@@ -842,12 +842,12 @@ nineteen, its own summary counts disagreeing with its own table, and section
 (c) disagreeing with section (a). Two agents nearly wrote duplicate tests off
 it.
 
-So it is now derived and enforced by `e2e/scenariomatrix_test.go`
-(`TestScenarioMatrixMatchesReality`), which runs with the e2e package, spawns
-nothing and drives no scenario:
+So it is now derived and enforced by `e2e/kit/scans/scenariomatrix_test.go`
+(`TestScenarioMatrixMatchesReality`), which reads the e2e package's sources from
+the `e2e-kit` suite, spawns nothing and drives no scenario:
 
 ```bash
-AGENT_REPL_MATRIX_WRITE=1 go test ./e2e -run TestScenarioMatrixMatchesReality
+(cd e2e/kit && AGENT_REPL_MATRIX_WRITE=1 go test ./scans -run TestScenarioMatrixMatchesReality)
 ```
 
 - The canonical scenario list comes from `src/fake/scenarios/*.ts`,
