@@ -85,6 +85,8 @@ func (r *resolver) rung(claim ladder.Claim, s *wsState, log dlog.Logger) *fronte
 			return nil
 		}
 		return r.waiting(s, log)
+	case ladder.DaemonImpaired:
+		return r.daemonImpaired(s, log)
 	case ladder.Thinking:
 		if arm := r.loading(s, log); arm != nil {
 			return arm
@@ -121,10 +123,12 @@ func (r *resolver) idleFamily(s *wsState) *frontendv1.FooterStatus {
 	return r.idle(s)
 }
 
-// agentReplFault resolves the link's step, or a standing agent-repl fault, or
-// nil while agent-repl's own services serve. A link that serves WITH
-// DEGRADATION is not a fault: it is usable, and the degraded rung draws it
-// (owner ruling, 2026-09-28).
+// agentReplFault resolves the link's step, or a standing agent-repl fault of
+// the session's own, or nil while agent-repl's own services serve it. A link
+// that serves WITH DEGRADATION is not a fault: it is usable, and the degraded
+// rung draws it (owner ruling, 2026-09-28). An impaired DAEMON is not this
+// rung's either: it outranks only idle, and daemonImpaired draws it (owner
+// ruling, 2026-11-13).
 //
 // A PARKED SESSION NEVER REACHES HERE. The ladder skips the whole rung while
 // the idle sweep's park stands (resolve/ladder): the sweep put the route down
@@ -221,7 +225,8 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 // and never a fault (owner ruling, 2026-10-13). It stands while the shim is
 // being dialed, or while a turn accepted, a session announced or a bring-up
 // under way awaits a route never seen (ladder.AwaitingBringUp); the
-// agent_repl_fault rung above has already drawn any fault that stands.
+// agent_repl_fault rung above has already drawn any fault of the session's
+// own that stands, and an impaired daemon ranks below this rung.
 func (r *resolver) starting(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	booting := s.linkSeen && s.link == shimclient.LinkDialing ||
 		!s.linkSeen && ladder.AwaitingBringUp(s.linkSeen, s.turn != nil, s.sessionStarted, s.bringingUp)
@@ -234,12 +239,16 @@ func (r *resolver) starting(s *wsState, log dlog.Logger) *frontendv1.FooterStatu
 		Starting: &frontendv1.FooterStatusStarting{Activity: r.startingActivity(s)}}}
 }
 
-// agentReplByFault resolves the agent-repl step a STANDING FAULT claims, where
-// the link state itself claimed none. The bucket is the health package's
-// verdict (THE FAULT PARTITION, internal/health/footer.go), taken as given: no
-// mapping is derived here.
+// agentReplByFault resolves the agent-repl step a STANDING FAULT OF THE
+// SESSION'S OWN claims, where the link state itself claimed none. The bucket
+// is the health package's verdict (THE FAULT PARTITION,
+// internal/health/footer.go), taken as given: no mapping is derived here. A
+// daemon-impaired fault is passed over: it stands on the ladder's
+// daemon_impaired rung, which daemonImpaired draws.
 func (r *resolver) agentReplByFault(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	fault := r.standingFault(s, health.FaultStatusAgentReplFault)
+	fault := r.strongestFault(s, func(f *Fault) bool {
+		return f.Status == string(health.FaultStatusAgentReplFault) && f.SubStatus != health.FaultSubStatusDaemonImpaired
+	})
 	if fault == nil {
 		return nil
 	}
@@ -254,9 +263,6 @@ func (r *resolver) agentReplByFault(s *wsState, log dlog.Logger) *frontendv1.Foo
 	case health.FaultSubStatusSevered:
 		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_Severed{
 			Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}
-	case health.FaultSubStatusDaemonImpaired:
-		arm.Substatus = &frontendv1.FooterStatusAgentReplFault_DaemonImpaired{
-			DaemonImpaired: &frontendv1.FooterSubStatusAgentReplFaultDaemonImpaired{}}
 	default:
 		log.Error("daemon.footer.fault_bucket_unknown",
 			"a standing fault claims the agent-repl fault status with a step this resolver cannot draw",
@@ -272,6 +278,30 @@ func (r *resolver) agentReplByFault(s *wsState, log dlog.Logger) *frontendv1.Foo
 	arm.Activity = r.agentReplFaultActivity(s, log)
 	return &frontendv1.FooterStatus{
 		Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: arm}}
+}
+
+// daemonImpaired resolves the daemon_impaired rung: a standing fault that says
+// the DAEMON ITSELF cannot give the session a service it needs, or nil. It is
+// the ladder's lowest claim above idle (owner ruling, 2026-11-13), so it is
+// drawn only where nothing the session is doing, and nothing wrong with the
+// session itself, claims the strip. It keeps the arm it has always drawn,
+// `agent_repl_fault · daemon_impaired`, which ladder.FooterClaim projects onto
+// this rung.
+func (r *resolver) daemonImpaired(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
+	fault := r.strongestFault(s, func(f *Fault) bool {
+		return f.Status == string(health.FaultStatusAgentReplFault) && f.SubStatus == health.FaultSubStatusDaemonImpaired
+	})
+	if fault == nil {
+		return nil
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch",
+		dlog.Context{"function": "status", "branch": "daemon impaired by standing fault", "kind": fault.Kind})
+	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_AgentReplFault{
+		AgentReplFault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_DaemonImpaired{
+				DaemonImpaired: &frontendv1.FooterSubStatusAgentReplFaultDaemonImpaired{}},
+			Activity: r.agentReplFaultActivity(s, log),
+		}}}
 }
 
 // networkFault resolves the network rung: a standing fault that says this

@@ -25,11 +25,13 @@
 //     whatever the route to the shim is doing, and "the merge pipeline owns
 //     the row while it runs" (the roster's standing ruling). Nothing parks
 //     (owner ruling, 2026-09-29): a merge that gives up FAILS.
-//  2. agent_repl_fault  one of agent-repl's OWN services does not serve the
-//     workspace: the route to the session is severed, dead or failed to
-//     start, or the daemon itself is impaired. SKIPPED WHOLE while the
-//     session is PARKED: the idle sweep put the route down itself and a
-//     prompt brings it back, so a parked session is idle, not broken.
+//  2. agent_repl_fault  one of agent-repl's OWN services does not serve THE
+//     SESSION: the route to it is severed, dead or failed to start, or its
+//     last turn died with agent-repl's machinery. A daemon that is impaired
+//     as a whole is not this rung's: it stands on daemon_impaired, at the
+//     bottom. SKIPPED WHOLE while the session is PARKED: the idle sweep put
+//     the route down itself and a prompt brings it back, so a parked session
+//     is idle, not broken.
 //  3. starting          the session is BOOTING: its shim is being dialed, or a
 //     turn the daemon accepted awaits the bring-up of a route never seen
 //     (AwaitingBringUp). An expected step, never a fault (owner ruling,
@@ -63,18 +65,35 @@
 //     idle (owner ruling, 2026-10-08): a gate is never drawn as working.
 //  11. thinking         a turn is in flight, a context cut included, or a
 //     final response is being updated from words highlighted in it.
-//  12. idle             the foreground is free: a turn end (read or not, a
+//  12. daemon_impaired  the DAEMON ITSELF is impaired: a fault stands that
+//     costs the session something it needs from the daemon (its prompts
+//     directory, its state client, its durable log sink, its own redeploy),
+//     drawn as `agent_repl_fault · daemon_impaired` and the roster's
+//     `daemon_impaired`. It outranks ONLY idle (owner ruling, 2026-11-13:
+//     "daemon impaired should only override the idle status, it shouldn't
+//     override the working status"): a daemon-wide fault stands on every
+//     workspace at once, and a failed deploy's `successor_spawn_failed` drew
+//     every workspace mid-turn as impaired, hiding what each was doing. So
+//     every rung that says what the session is doing or what is wrong with
+//     IT outranks the daemon's own state. Still BLUE, an agent-repl fault,
+//     so it is the one unusable rung ranked below usable ones. SKIPPED while
+//     PARKED, as it was when it stood inside agent_repl_fault: a parked
+//     session draws idle, and the daemon fault stands on the topbar.
+//  13. idle             the foreground is free: a turn end (read or not, a
 //     failed one included), detached work running, a wakeup pending, or
 //     nothing at all.
 //
 // THE FAULT DOMAINS (owner ruling, 2026-10-02; docs/protobuf-design/
 // startup-and-fault-domains.md): agent_repl_fault > network_fault >
 // vendor_fault. The first two are BLUE and close the composer; a vendor fault
-// is TURQUOISE and leaves it open.
+// is TURQUOISE and leaves it open. The precedence is the SESSION's faults':
+// an impaired daemon, though an agent-repl fault, ranks below them all on its
+// own daemon_impaired rung (owner ruling, 2026-11-13).
 //
 // THE COLORS FOLLOW THE RUNGS (owner rulings, 2026-09-28, 2026-10-02 and
 // 2026-10-13): every rung that makes the workspace UNUSABLE —
-// agent_repl_fault, network_fault, closing — is blue; starting is grey;
+// agent_repl_fault, network_fault, closing, and daemon_impaired below the
+// usable rungs — is blue; starting is grey;
 // merging is purple; a usable rung with something wrong — vendor_fault,
 // degraded, and idle's failed turn — is turquoise; a terminal merge, failed
 // or landed, is green.
@@ -101,7 +120,11 @@
 //   - (owner ruling, 2026-09-28) `blocked` moved above the terminal merge
 //     rungs, and a degraded view left the disconnected rung for its own
 //     `degraded` rung below them: an unusable workspace outranks every
-//     usable one.
+//     usable one;
+//   - (owner ruling, 2026-11-13) an impaired daemon left agent_repl_fault
+//     for its own `daemon_impaired` rung just above idle, the one exception
+//     to the rule above: the daemon's own state never hides what a session
+//     is doing.
 //
 // ONE WALKER, NOT TWO FED ALIKE. The roster once walked this ladder over its
 // own facts beside the footer, and a fact fed to only one of them moved that
@@ -138,6 +161,9 @@ const (
 	Waiting Claim = "waiting"
 	// Thinking is a turn in flight.
 	Thinking Claim = "thinking"
+	// DaemonImpaired is the daemon itself unable to give a service the
+	// session needs; it outranks only idle.
+	DaemonImpaired Claim = "daemon_impaired"
 	// Idle is a free foreground.
 	Idle Claim = "idle"
 )
@@ -154,7 +180,7 @@ const Inactive Claim = "inactive"
 // precedence; the package comment explains every position.
 var Order = []Claim{
 	Merging, AgentReplFault, Starting, NetworkFault, Closing, VendorFault,
-	MergeFailed, Merged, Degraded, Waiting, Thinking, Idle,
+	MergeFailed, Merged, Degraded, Waiting, Thinking, DaemonImpaired, Idle,
 }
 
 // AwaitingBringUp reports a workspace whose route has never been seen at all
@@ -204,7 +230,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 			if claim != standing {
 				continue
 			}
-		case AgentReplFault, NetworkFault, Degraded:
+		case AgentReplFault, NetworkFault, Degraded, DaemonImpaired:
 			if parked {
 				continue
 			}

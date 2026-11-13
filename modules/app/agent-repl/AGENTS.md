@@ -2763,7 +2763,13 @@ exactly ONE of three domains, named for whose services are failing.
   (`daemon/internal/resolve/ladder`: `AgentReplFault` above `NetworkFault`
   above `VendorFault`). A vendor that cannot be reached because the machine is
   offline is a network fault, and a network that cannot be judged because the
-  shim is down is an agent-repl fault.
+  shim is down is an agent-repl fault. The one exception is an IMPAIRED
+  DAEMON (`daemon_impaired`): it is an agent-repl fault and stays blue, but
+  it stands on its own ladder rung directly above idle, below every other
+  rung (owner ruling, 2026-11-13: "daemon impaired should only override the
+  idle status, it shouldn't override the working status"). A daemon-wide
+  fault stands on every workspace at once, so it never hides what a session
+  is doing or what is wrong with the session itself.
 - **The shim is the one judge of network versus vendor.** One classifier
   (`shim/src/engine/failures.ts#classifyAgentFailure`, its `network` verdict)
   labels every vendor-start failure: `StartSessionVendorStartRetryable.cause`
@@ -2855,7 +2861,11 @@ The rules that keep this true:
   a bubble.
 - **The status ladder ranks every unusable rung above every usable one**
   (`daemon/internal/resolve/ladder`), so a blue claim is never hidden under a
-  turquoise one.
+  turquoise one, with one exception: an impaired daemon (`daemon_impaired`)
+  outranks only idle (owner ruling, 2026-11-13), so a turn, a gate, a
+  degraded view or a vendor fault is drawn over it, and it is blue only on a
+  workspace that would otherwise read idle. A parked session reads idle under
+  it, as it did when the impaired daemon stood on the agent-repl fault rung.
 - **The sidebar's view state is the daemon's, so the sidebar looks the same
   in every workspace's page** (owner rulings, 2026-10-06). Every section's
   fold (`RosterRepoSection.fold`, `RosterTaskSection.fold`,

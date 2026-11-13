@@ -2222,3 +2222,77 @@ func TestTheFootersParkCarriesTheNextKeepalive(t *testing.T) {
 		})
 	}
 }
+
+// TestAnImpairedDaemonOutranksOnlyIdle is the owner's ruling of 2026-11-13 as
+// a table: "daemon impaired should only override the idle status, it
+// shouldn't override the working status". A daemon-scoped fault that impairs
+// the daemon draws `agent_repl_fault · daemon_impaired` only where the strip
+// would otherwise read idle; everything the session is doing, and everything
+// wrong with the session itself, outranks it.
+func TestAnImpairedDaemonOutranksOnlyIdle(t *testing.T) {
+	tests := []struct {
+		name  string
+		apply func(t *testing.T, h *harness)
+		want  string
+	}{
+		{name: "with nothing else standing it draws daemon impaired", want: "agent_repl_fault/daemon_impaired",
+			apply: func(*testing.T, *harness) {}},
+		{name: "a turn in flight outranks it", want: "working/",
+			apply: func(_ *testing.T, h *harness) { h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt}) }},
+		{name: "a permission gate outranks it", want: "permission/",
+			apply: func(_ *testing.T, h *harness) {
+				h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to run make"))
+			}},
+		{name: "a session's own agent-repl fault outranks it", want: "agent_repl_fault/dead",
+			apply: func(t *testing.T, h *harness) {
+				h.r.OpenFault(testWS, faultOf(t, "shim", health.KindShimDied, false))
+			}},
+		{name: "a network fault outranks it", want: "network_fault/offline",
+			apply: func(t *testing.T, h *harness) {
+				h.r.OpenFault(testWS, faultOf(t, "net", health.KindNetworkUnreachable, false))
+			}},
+		{name: "a vendor fault outranks it", want: "vendor_fault/vendor_retry",
+			apply: func(t *testing.T, h *harness) {
+				h.r.OpenFault(testWS, vendorFaultOf(t, "vendor", health.KindVendorStartRetrying))
+			}},
+		{name: "a parked session reads idle under it", want: "idle/",
+			apply: func(_ *testing.T, h *harness) { h.r.SetParked(testWS, true) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			tt.apply(t, h)
+
+			// Act
+			h.r.OpenFault("", faultOf(t, "impaired", health.KindSuccessorSpawnFailed, true))
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			if got := statusName(status) + "/" + faultStep(status); got != tt.want {
+				t.Fatalf("strip = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestATurnEndUnderAnImpairedDaemonDrawsDaemonImpaired is the other half of
+// the ruling: the daemon fault that a running turn outranked claims the strip
+// the moment the turn ends and the foreground is free.
+func TestATurnEndUnderAnImpairedDaemonDrawsDaemonImpaired(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OpenFault("", faultOf(t, "impaired", health.KindWsmReadOnly, true))
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if got := faultStep(h.view(t).GetStrip().GetStatus()); got != "daemon_impaired" {
+		t.Fatalf("substatus = %q, want daemon_impaired once the turn ends", got)
+	}
+}
