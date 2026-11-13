@@ -127,8 +127,15 @@ func (s *server) mergeQueueStatus(ctx context.Context, ref *workspacev1.Reposito
 // mergeQueueStatusOf renders one queue's status.
 func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus {
 	advance := &agentreplv1.MergeQueueStatusAdvance{State: &agentreplv1.MergeQueueStatusAdvance_Running{Running: &agentreplv1.MergeQueueStatusAdvanceRunning{}}}
-	if status.Queue.Paused {
+	switch {
+	case status.Queue.Paused:
 		advance.State = &agentreplv1.MergeQueueStatusAdvance_Paused{Paused: &agentreplv1.MergeQueueStatusAdvancePaused{}}
+	case status.Mediation != nil:
+		mediating := &agentreplv1.MergeQueueStatusAdvanceMediating{Name: status.Mediation.Name}
+		if status.Mediation.Mediator != "" {
+			mediating.Mediator = &workspacev1.WorkspaceRef{Id: string(status.Mediation.Mediator)}
+		}
+		advance.State = &agentreplv1.MergeQueueStatusAdvance_Mediating{Mediating: mediating}
 	}
 	out := &agentreplv1.MergeQueueStatus{
 		Repository: &workspacev1.RepositoryRef{Id: string(status.Repository.ID), Dir: status.Repository.Dir},

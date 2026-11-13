@@ -144,6 +144,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		o.deps.Log.Global().Error(opMediation, "could not list the repositories whose mediations are owed", dlog.Context{"error": err.Error()})
 		return
 	}
+	o.releaseUnmediated(ctx, queues)
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if cutUnder(ctx, err) {
@@ -163,6 +164,56 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		}
 		owed := *m
 		inflight.Go(func() { o.mediationRound(context.WithoutCancel(ctx), q, owed) })
+	}
+}
+
+// releaseUnmediated releases the mediation every registered repository in
+// ALL owes whose lifecycle config names no mediator now (MEDIATED): nobody
+// can decide it, so it would hold the queue forever. A repository whose
+// config cannot be read was passed over by mediatedQueues, recorded, and is
+// left owed: its mediator may still be named.
+func (o *orchestrator) releaseUnmediated(ctx context.Context, mediated []mediatedQueue) {
+	all, err := o.registeredQueues(ctx, opMediation)
+	if cutUnder(ctx, err) {
+		return
+	}
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not list the repositories to release mediations no mediator decides", dlog.Context{"error": err.Error()})
+		return
+	}
+	named := make(map[wsm.RepoKey]bool, len(mediated))
+	for _, q := range mediated {
+		named[q.key] = true
+	}
+	for _, q := range all {
+		if named[q.key] {
+			continue
+		}
+		if _, err := o.deps.DeployConfig.Load(q.repository.Dir); err != nil {
+			var missing *lifecycleconfig.MissingError
+			if !errors.As(err, &missing) {
+				continue
+			}
+		}
+		m, err := o.deps.DB.MediationOf(ctx, q.key)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not read whether a repository with no mediator owes a mediation", dlog.Context{"repo": string(q.key), "error": err.Error()})
+			continue
+		}
+		if m == nil {
+			continue
+		}
+		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not release a mediation no mediator decides; the queue stays held", dlog.Context{"repo": string(q.key), "error": err.Error()})
+			continue
+		}
+		if released {
+			o.deps.Log.Global().Info(opMediation, "released a mediation owed by a repository whose lifecycle config names no mediator now; its queue advances", dlog.Context{
+				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
+			o.republishMediation(ctx, q.key)
+			o.kick(q.key)
+		}
 	}
 }
 
@@ -229,10 +280,20 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 // mediation was replaced or released meanwhile.
 func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, fields dlog.Context) (ids.TurnID, error) {
 	// EVERY ROUND OPENS ON A COMPACTED CONTEXT (owner request, 2026-11-13).
-	compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
-	if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the mediator's context could not be compacted; the queue stays held", withField(fields, "error", err.Error()))
+	// A mediator that never ran a turn has no context to compact: the vendor
+	// refuses it ("Not enough messages to compact."), so its first round
+	// opens on the empty context it has.
+	conversed, err := o.deps.DB.HasTurns(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether the mediator has a context to compact; the queue stays held", withField(fields, "error", err.Error()))
 		return "", err
+	}
+	if conversed {
+		compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+		if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the mediator's context could not be compacted; the queue stays held", withField(fields, "error", err.Error()))
+			return "", err
+		}
 	}
 	turn := wsm.NewTurnID()
 	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, o.deps.Now(), turn)
@@ -248,7 +309,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		o.deps.Log.Global().Error(opMediation, "the mediation brief could not be submitted; the queue stays held", withField(fields, "error", err.Error()))
 		return "", err
 	}
-	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy, on a compacted context", withField(fields, "turn", string(turn)))
+	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy", withField(withField(fields, "turn", string(turn)), "compacted", conversed))
 	o.republishMediation(ctx, q.key)
 	return turn, nil
 }
@@ -374,10 +435,19 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	return nil
 }
 
-// rosterMediation is the deploy mediation REPO's queue waits on as the
-// roster draws it: nil while it owes none, or while its mediator is not made
-// yet (the round that makes it republishes the queue).
-func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
+// OwedMediation is the deploy mediation a queue waits on.
+type OwedMediation struct {
+	// Name is the mediator's name, as the lifecycle config names it.
+	Name string
+	// Mediator is the mediator workspace, empty while it is not made yet.
+	Mediator ids.WorkspaceID
+	// Told reports that the mediator was told of the deploy.
+	Told bool
+}
+
+// owedMediation is the deploy mediation REPO's queue waits on, nil while it
+// owes none.
+func (o *orchestrator) owedMediation(ctx context.Context, repo wsm.RepoKey) (*OwedMediation, error) {
 	m, err := o.deps.DB.MediationOf(ctx, repo)
 	if err != nil || m == nil {
 		return nil, err
@@ -390,13 +460,26 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 		if q.key != repo {
 			continue
 		}
-		ws, ok, err := o.existingMediator(ctx, q)
-		if err != nil || !ok {
+		ws, _, err := o.existingMediator(ctx, q)
+		if err != nil {
 			return nil, err
 		}
-		return &sidebar.QueueMediation{Mediator: ws, Told: m.Prompted()}, nil
+		return &OwedMediation{Name: q.mediator, Mediator: ws, Told: m.Prompted()}, nil
 	}
+	// OWED IN A REPOSITORY WHOSE CONFIG NAMES NO MEDIATOR NOW: nobody
+	// decides it, and the next sweep (releaseUnmediated) releases it.
 	return nil, nil
+}
+
+// rosterMediation is the deploy mediation REPO's queue waits on as the
+// roster draws it: nil while it owes none, or while its mediator is not made
+// yet (the round that makes it republishes the queue).
+func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
+	owed, err := o.owedMediation(ctx, repo)
+	if err != nil || owed == nil || owed.Mediator == "" {
+		return nil, err
+	}
+	return &sidebar.QueueMediation{Mediator: owed.Mediator, Told: owed.Told}, nil
 }
 
 // republishMediation tells the roster and the queue's subscribers a change

@@ -101,6 +101,8 @@ type fakeDB struct {
 	mediationErr error
 	// listWorkspacesErr fails ListWorkspaces.
 	listWorkspacesErr error
+	// hasTurnsErr fails HasTurns.
+	hasTurnsErr error
 	drainReadErr      error
 	drainClearErr     error
 
@@ -613,6 +615,15 @@ func (f *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	// A CLOSE ENDS THE WORKSPACE'S REQUEST OFF ITS QUEUE (wsm.markClosedInTx).
 	delete(f.offQueue, id)
 	return nil
+}
+
+func (f *fakeDB) HasTurns(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hasTurnsErr != nil {
+		return false, f.hasTurnsErr
+	}
+	return len(f.turns[id]) > 0, nil
 }
 
 func (f *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {

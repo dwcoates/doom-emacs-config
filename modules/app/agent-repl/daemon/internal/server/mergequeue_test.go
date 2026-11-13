@@ -331,3 +331,49 @@ func TestUnsubscribeMergeQueueFailureIsATransportError(t *testing.T) {
 		t.Fatal("UnsubscribeMergeQueue answered a failed unsubscribe without an error")
 	}
 }
+
+func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
+	tests := []struct {
+		name      string
+		paused    bool
+		mediation *merge.OwedMediation
+		want      string
+		wantRef   string
+	}{
+		{name: "a queue neither paused nor owing a mediation runs", want: "running"},
+		{name: "a paused queue is paused", paused: true, want: "paused"},
+		{name: "a queue owing a mediation waits on its mediator", want: "mediating", wantRef: "ws-mediator",
+			mediation: &merge.OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator", Told: true}},
+		{name: "a queue owing a mediation whose mediator is not made yet names no workspace", want: "mediating",
+			mediation: &merge.OwedMediation{Name: "deploy-mediator"}},
+		{name: "a paused queue owing a mediation is paused", paused: true, want: "paused",
+			mediation: &merge.OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			status := merge.QueueStatus{Repository: wsm.Repository{ID: "r1", Dir: "/r"}, Mediation: tt.mediation}
+			status.Queue.Paused = tt.paused
+
+			// Act
+			advance := mergeQueueStatusOf(status).GetAdvance()
+
+			// Assert
+			var got, ref, name string
+			switch state := advance.GetState().(type) {
+			case *agentreplv1.MergeQueueStatusAdvance_Running:
+				got = "running"
+			case *agentreplv1.MergeQueueStatusAdvance_Paused:
+				got = "paused"
+			case *agentreplv1.MergeQueueStatusAdvance_Mediating:
+				got, ref, name = "mediating", state.Mediating.GetMediator().GetId(), state.Mediating.GetName()
+			}
+			if got != tt.want || ref != tt.wantRef {
+				t.Fatalf("advance = %s naming %q, want %s naming %q", got, ref, tt.want, tt.wantRef)
+			}
+			if got == "mediating" && name != "deploy-mediator" {
+				t.Fatalf("mediating names %q, want the mediator's name", name)
+			}
+		})
+	}
+}

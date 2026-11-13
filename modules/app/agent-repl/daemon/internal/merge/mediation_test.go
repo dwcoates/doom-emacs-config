@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,7 +13,9 @@ import (
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/desktopnotify"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
@@ -74,21 +77,66 @@ func TestADeployOwesAMediationOnlyWhereAMediatorIsNamed(t *testing.T) {
 }
 
 func TestARoundCompactsTheMediatorThenTellsItOfTheDeploy(t *testing.T) {
+	compact, brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
+	tests := []struct {
+		name        string
+		conversed   bool
+		wantOrigins []conversationv1.PromptOrigin
+		wantMade    int
+	}{
+		{name: "a mediator made for this round has nothing to compact, so it is only told", wantOrigins: []conversationv1.PromptOrigin{brief}, wantMade: 1},
+		{name: "a mediator that ran a turn is compacted, then told", conversed: true, wantOrigins: []conversationv1.PromptOrigin{compact, brief}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			owe(t, h)
+			if tt.conversed {
+				h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+				h.db.turns["ws-mediator"] = []wsm.Turn{{ID: "turn-before", Workspace: "ws-mediator"}}
+			}
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			subs := h.queue.submissions
+			var origins []conversationv1.PromptOrigin
+			for _, sub := range subs {
+				if sub.WS != "ws-mediator" {
+					t.Fatalf("submitted to %s, want the mediator", sub.WS)
+				}
+				origins = append(origins, sub.Origin)
+			}
+			if fmt.Sprint(origins) != fmt.Sprint(tt.wantOrigins) {
+				t.Fatalf("submitted %v, want %v", origins, tt.wantOrigins)
+			}
+			if len(h.mediatorsMade) != tt.wantMade || h.awaitedTurns[len(h.awaitedTurns)-1] != subs[len(subs)-1].Turn {
+				t.Fatalf("made %v, awaited %v; want %d made and the brief's turn awaited", h.mediatorsMade, h.awaitedTurns, tt.wantMade)
+			}
+		})
+	}
+}
+
+func TestAMediatorWhoseTurnsCannotBeReadIsNotTold(t *testing.T) {
 	// Arrange
 	h := mediated(t)
 	owe(t, h)
+	h.db.hasTurnsErr = errors.New("disk gone")
 
 	// Act
 	h.o.Mediate(context.Background())
 
 	// Assert
-	subs := h.queue.submissions
-	if len(subs) != 2 || subs[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT ||
-		subs[1].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION || subs[0].WS != "ws-mediator" {
-		t.Fatalf("submissions %+v, want the mediator's compaction, then its brief", subs)
+	if len(h.queue.submissions) != 0 {
+		t.Fatalf("submitted %d prompts, want none", len(h.queue.submissions))
 	}
-	if len(h.mediatorsMade) != 1 || h.awaitedTurns[len(h.awaitedTurns)-1] != subs[1].Turn {
-		t.Fatalf("made %v, awaited %v; want the mediator made once and its brief's turn awaited", h.mediatorsMade, h.awaitedTurns)
+	if m, _ := h.db.MediationOf(context.Background(), mediationKey(h)); m == nil || m.Prompted() {
+		t.Fatalf("mediation %+v, want it still owed and untold", m)
+	}
+	if _, ok := h.recordFor("error", opMediation); !ok {
+		t.Fatal("no ERROR record of the unreadable turns")
 	}
 }
 
@@ -394,5 +442,97 @@ func TestEveryMediatorLookupGoesThroughExistingMediator(t *testing.T) {
 	// Assert
 	if matches != 1 {
 		t.Fatalf("mediation.go matches a workspace to the mediator's name %d times; want once, in existingMediator", matches)
+	}
+}
+
+func TestOwedMediation(t *testing.T) {
+	tests := []struct {
+		name string
+		owed bool
+		made bool
+		told bool
+		want *OwedMediation
+	}{
+		{name: "a queue owing none answers none"},
+		{name: "an owed mediation whose mediator is not made names no workspace", owed: true,
+			want: &OwedMediation{Name: "deploy-mediator"}},
+		{name: "an owed mediation names its made mediator", owed: true, made: true,
+			want: &OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator"}},
+		{name: "an owed mediation the mediator was told of is told", owed: true, made: true, told: true,
+			want: &OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator", Told: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			if tt.owed {
+				owe(t, h)
+			}
+			if tt.made {
+				h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+			}
+			if tt.told {
+				if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-told"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, err := h.o.owedMediation(context.Background(), mediationKey(h))
+
+			// Assert
+			if err != nil || fmt.Sprint(got) != fmt.Sprint(tt.want) {
+				t.Fatalf("owedMediation = %+v, %v; want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAMediationNoMediatorDecidesIsReleased(t *testing.T) {
+	tests := []struct {
+		name         string
+		dropMediator func(h *harness)
+		wantReleased bool
+	}{
+		{name: "a config that names no mediator now releases it", wantReleased: true,
+			dropMediator: func(h *harness) { h.config.DeployMediator = nil }},
+		{name: "a repository with no lifecycle config releases it", wantReleased: true,
+			dropMediator: func(h *harness) { h.configErr = &lifecycleconfig.MissingError{Path: "/r/.agent-repl/lifecycle.yaml"} }},
+		{name: "a config that cannot be read leaves it owed",
+			dropMediator: func(h *harness) { h.configErr = errors.New("yaml: broken") }},
+		{name: "a config still naming its mediator leaves it to the mediator",
+			dropMediator: func(h *harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a mediation owed, the mediator made and told.
+			h := mediated(t)
+			owe(t, h)
+			h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+			if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-told"); err != nil {
+				t.Fatal(err)
+			}
+			h.db.turns["ws-mediator"] = []wsm.Turn{{ID: "turn-told", Workspace: "ws-mediator"}}
+			tt.dropMediator(h)
+
+			mediated, err := h.o.mediatedQueues(context.Background(), opMediation)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			h.o.releaseUnmediated(context.Background(), mediated)
+
+			// Assert
+			m, _ := h.db.MediationOf(context.Background(), mediationKey(h))
+			if (m == nil) != tt.wantReleased {
+				t.Fatalf("still owed %+v, want released %v", m, tt.wantReleased)
+			}
+			_, recorded := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "released a mediation owed by a repository whose lifecycle config names no mediator now; its queue advances"})
+			if recorded != tt.wantReleased {
+				t.Fatalf("release recorded %v, want %v", recorded, tt.wantReleased)
+			}
+		})
 	}
 }
