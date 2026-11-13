@@ -100,6 +100,45 @@ func TestAFailingReadIsToldToNobodyAndWhatItMissedIsTold(t *testing.T) {
 	}
 }
 
+func TestRejectedCredentialsAreToldOncePerFailure(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventComment)
+	r.gh.set(pathPull(), &ghclient.Failure{Kind: ghclient.KindUnauthorized, Message: "Bad credentials", Status: 401})
+
+	// Act: two failing polls of one standing failure.
+	r.tick()
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], "GitHub rejected agent-repl's credentials") {
+		t.Fatalf("told = %q, want one notice of the rejected credentials", told)
+	}
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll,
+		Message: "GitHub rejected the credentials; each subscription whose failure began is owed a notice to surface it"}); !ok {
+		t.Fatalf("no record of the rejected credentials: %+v", r.log.Records())
+	}
+}
+
+func TestRecordReadFailureRecordsANoticeItCannotOwe(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	failure := &ghclient.Failure{Kind: ghclient.KindUnauthorized, Message: "Bad credentials", Status: 401}
+
+	// Act
+	r.w.recordReadFailure(context.Background(), opPoll, "pull request", failure, dlog.Context{"pull_request": "o/r#1"},
+		func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, nil },
+		func(ids.WorkspaceID, []string) error { return errors.New("store down") })
+
+	// Assert
+	record, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll,
+		Message: "could not owe a subscriber the notice that GitHub rejected the credentials"})
+	if !ok || record.Context["subscriber"] != string(r.ws) || record.Context["pull_request"] != "o/r#1" {
+		t.Fatalf("no error record naming the subscriber: %+v", r.log.Records())
+	}
+}
+
 // recoverQuietly fails one read of the rig's pull request, then lets the
 // next succeed with nothing new on it.
 func recoverQuietly(r *rig) {
@@ -421,7 +460,8 @@ func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
 
 			// Act
 			r.w.recordReadFailure(context.Background(), opQueuePoll, "merge queue", errors.New("dns"), dlog.Context{"merge_queue": "o/r@main"},
-				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr })
+				func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error) { return []ids.WorkspaceID{r.ws}, tt.recordErr },
+				func(ids.WorkspaceID, []string) error { t.Fatal("a read failure owed a notice"); return nil })
 
 			// Assert
 			if told := r.told(); len(told) != 0 {

@@ -170,7 +170,7 @@ func TestAQueueThatCannotBeReadIsToldToNobody(t *testing.T) {
 	g := r.withGQL()
 	g.setQueue("main", queueJSON(entry(1, "QUEUED")))
 	r.subscribeQueue(t)
-	g.fail["MergeQueue"] = &ghclient.Failure{Kind: ghclient.KindUnauthorized, Method: "POST", Path: "graphql", Status: 401}
+	g.fail["MergeQueue"] = &ghclient.Failure{Kind: ghclient.KindUnreachable, Method: "POST", Path: "graphql", Message: "no route to host"}
 
 	// Act
 	r.tick()
@@ -180,11 +180,29 @@ func TestAQueueThatCannotBeReadIsToldToNobody(t *testing.T) {
 	if told := r.told(); len(told) != 0 {
 		t.Fatalf("told = %v, want nothing: a failed read is no change of the queue", told)
 	}
-	if f := r.queueSub(t).Failing; f == nil || f.Kind != wsm.PullRequestFailureUnauthorized {
-		t.Fatalf("failing = %+v, want unauthorized", f)
+	if f := r.queueSub(t).Failing; f == nil || f.Kind != wsm.PullRequestFailureUnreachable {
+		t.Fatalf("failing = %+v, want unreachable", f)
 	}
 	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opQueuePoll, Message: "the merge queue could not be read; its subscriptions are failing, and no subscriber is told"}); !ok {
 		t.Fatalf("no failure record: %+v", r.log.Records())
+	}
+}
+
+func TestAQueueWhoseCredentialsAreRejectedIsToldOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	g.setQueue("main", queueJSON(entry(1, "QUEUED")))
+	r.subscribeQueue(t)
+	g.fail["MergeQueue"] = &ghclient.Failure{Kind: ghclient.KindUnauthorized, Method: "POST", Path: "graphql", Status: 401}
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	if told := r.told(); len(told) != 1 || !contains(told[0], "GitHub rejected agent-repl's credentials") {
+		t.Fatalf("told = %v, want one notice of the rejected credentials", told)
 	}
 }
 
