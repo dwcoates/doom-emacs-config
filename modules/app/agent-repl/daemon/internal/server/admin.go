@@ -103,6 +103,19 @@ func (s *server) UpdateMergeQueue(
 		})
 	}
 
+	if m := req.Msg.GetMediation(); m != nil {
+		_, mediator := askerOf(req.Msg.GetRequester())
+		decision := merge.MediationApprove
+		if m.GetEscalate() != nil {
+			decision = merge.MediationEscalate
+		}
+		if err := s.deps.Merge.DecideMediation(ctx, mediator, decision, m.GetSummary()); err != nil {
+			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+		}
+		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{Success: &agentreplv1.UpdateMergeQueueSuccess{}}
+		return connect.NewResponse(resp), nil
+	}
+
 	var scope *merge.RepositoryScope
 	var err error
 	if pause := req.Msg.GetPause(); pause != nil {
@@ -185,6 +198,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "move_down"
 	case *agentreplv1.UpdateMergeQueueRequest_MoveTo:
 		return "move_to"
+	case *agentreplv1.UpdateMergeQueueRequest_Mediation:
+		return "mediation"
 	}
 	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
 }

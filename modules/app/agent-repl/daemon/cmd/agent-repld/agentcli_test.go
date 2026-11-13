@@ -3313,3 +3313,58 @@ func TestTheOffQueueVerbsReadOnlyTheMergesOffTheQueues(t *testing.T) {
 		})
 	}
 }
+
+func TestMediationSendsTheDecisionAndItsSummary(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		escalate bool
+	}{
+		{name: "an approval", args: []string{"mediation", "approve", "-summary", "clean"}},
+		{name: "an escalation", args: []string{"mediation", "escalate", "-summary", "page boots regressed"}, escalate: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			m := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation()
+			if (m.GetEscalate() != nil) != tt.escalate || m.GetSummary() != tt.args[3] {
+				t.Fatalf("mediation = %v, want escalate %v with %q", m, tt.escalate, tt.args[3])
+			}
+		})
+	}
+}
+
+func TestMediationRefusesAMalformedCall(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no decision", args: []string{"mediation", "-summary", "x"}, want: "approve or escalate"},
+		{name: "an unknown decision", args: []string{"mediation", "reject", "-summary", "x"}, want: "not \"reject\""},
+		{name: "no summary", args: []string{"mediation", "approve"}, want: "-summary is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.want) {
+				t.Fatalf("exit %d, stderr %q, want a refusal naming %q", code, f.errOut.String(), tt.want)
+			}
+		})
+	}
+}

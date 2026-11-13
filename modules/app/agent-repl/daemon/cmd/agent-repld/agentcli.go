@@ -190,6 +190,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
 		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
+		"mediation":   {usage: "mediation approve|escalate -summary TEXT", run: queueMediation},
 		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
@@ -2256,6 +2257,36 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		}
 		return c.updateMergeQueue(req)
 	}
+}
+
+// queueMediation is the deploy mediator's decision on the deploy its
+// repository owes a mediation of: approve or escalate, with what it found.
+func queueMediation(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 1 {
+		return c.usageFailed("name the decision: approve or escalate")
+	}
+	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
+	switch positionals[0] {
+	case "approve":
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}
+	case "escalate":
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}
+	default:
+		return c.usageFailed("the decision is approve or escalate, not %q", positionals[0])
+	}
+	if strings.TrimSpace(*summary) == "" {
+		return c.usageFailed("-summary is required: what the mediation found")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
 }
 
 // queueSubscribe has the caller told of a merge put in line, a merge leaving

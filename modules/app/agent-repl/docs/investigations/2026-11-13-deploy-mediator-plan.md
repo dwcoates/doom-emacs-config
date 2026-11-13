@@ -65,9 +65,9 @@
   refuses an unknown field, so landing them together breaks the deploy)
 - [x] 2 debt (wsm layout 132, internal/wsm/mediation.go)
 - [x] 3 hold (merge.queueHeld)
-- [ ] 4 driver
-- [ ] 5 decision rpc + CLI
-- [ ] 6 undecided turn end
+- [x] 4 driver (internal/merge/mediation.go, deployprogress.Edges, cmd/agent-repld/mediationhook.go)
+- [x] 5 decision (UpdateMergeQueue mediation arm, `merge-queue mediation`)
+- [x] 6 undecided turn end (mediationTurnEnded)
 - [ ] 7 session landing + metaprompt section
 - [ ] 8 sidebar
 - [ ] full suite, land, deploy

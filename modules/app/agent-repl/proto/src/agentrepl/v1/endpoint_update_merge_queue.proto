@@ -34,6 +34,11 @@ message UpdateMergeQueueRequest {
     // ahead of or behind another waiting merge on the same queue: the
     // sidebar's drag of a waiting merge. (Added 2026-10-27.)
     UpdateMergeQueueMoveTo move_to = 14;
+    // The deploy mediator's decision on the deploy its repository owes a
+    // mediation of (repoconfig.v1.LifecycleConfig.deploy_mediator): the
+    // queue advances either way. Only the mediator may decide, and only
+    // while a mediation is owed. (Added 2026-11-13.)
+    UpdateMergeQueueMediation mediation = 15;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
   // agent (`agent-repld`'s command line). Every action on a queue is recorded
@@ -123,6 +128,23 @@ message UpdateMergeQueueMoveTo {
 }
 
 // THE ARM IS THE OUTCOME.
+// A deploy mediator's decision.
+message UpdateMergeQueueMediation {
+  // REQUIRED. What it decided.
+  oneof decision {
+    // The deploy is sound.
+    UpdateMergeQueueMediationApprove approve = 1;
+    // The deploy is put before the user: something is wrong that the
+    // mediator cannot fix confidently, or whose fix the user should choose.
+    UpdateMergeQueueMediationEscalate escalate = 2;
+  }
+  // REQUIRED, never blank. What it found, in a sentence or two: the
+  // escalation's banner reads it, and every decision is recorded with it.
+  string summary = 3;
+}
+message UpdateMergeQueueMediationApprove {}
+message UpdateMergeQueueMediationEscalate {}
+
 message UpdateMergeQueueResponse {
   oneof result {
     UpdateMergeQueueSuccess success = 1;
@@ -157,6 +179,11 @@ message UpdateMergeQueueError {
     // (pause/resume are per-repository when the ref is set). Empty: the
     // echoed ref is the only identity involved. (Landing 6, 2026-09-01.)
     UpdateMergeQueueUnknownRepository unknown_repository = 8;
+    // A mediation decision from a workspace that is no repository's deploy
+    // mediator.
+    UpdateMergeQueueNotMediator not_mediator = 15;
+    // A mediation decision while the mediator's repository owes none.
+    UpdateMergeQueueNoMediationOwed no_mediation_owed = 16;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -182,3 +209,5 @@ message UpdateMergeQueueNotPaused {}
 message UpdateMergeQueueNoSuchQueuedMerge {}
 // The unknown-repository refusal. Empty on purpose (see the arm).
 message UpdateMergeQueueUnknownRepository {}
+message UpdateMergeQueueNotMediator {}
+message UpdateMergeQueueNoMediationOwed {}
