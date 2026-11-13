@@ -161,6 +161,11 @@ const (
 	argDisconnect  = "/t/wifi-util disconnect"
 	argRadioOff    = "/t/networksetup -setairportpower en0 off"
 	argRadioOn     = "/t/networksetup -setairportpower en0 on"
+	// argRadioPower reads whether the radio is powered.
+	argRadioPower = "/t/networksetup -getairportpower en0"
+	// radioPowered and radioUnpowered are its answers.
+	radioPowered   = "Wi-Fi Power (en0): On\n"
+	radioUnpowered = "Wi-Fi Power (en0): Off\n"
 	// argDisplaySleep puts the display to sleep for the quiet state.
 	argDisplaySleep = "/t/pmset displaysleepnow"
 	// argDisplayWake wakes it.

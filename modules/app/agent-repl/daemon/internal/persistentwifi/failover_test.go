@@ -325,7 +325,7 @@ func TestFailoverScheduleFailureAfterTheScheduleIsSpentGivesUpOnTheNextBeat(t *t
 	// ended after them.
 	var s failoverSchedule
 	at := time.Unix(0, 0)
-	s.due(at)
+	s.lost = at
 	s.failed(at.Add(2 * time.Hour))
 
 	// Act.
@@ -494,5 +494,102 @@ func TestTickAfterAJoinTookRestartsTheScheduleOnTheNextLoss(t *testing.T) {
 	}
 	if len(attempts) != 3 || attempts[2] != 1 {
 		t.Fatalf("join INFO attempts = %v, want the new loss's join counted as its first", attempts)
+	}
+}
+
+// lossRecords answers the failover's records of a loss (recordLossLocked).
+func (h *harness) lossRecords() []map[string]any {
+	var out []map[string]any
+	for _, r := range h.records("info", opFailover) {
+		if r.Message == "Wi-Fi was lost with persistent wifi on" {
+			out = append(out, r.Context)
+		}
+	}
+	return out
+}
+
+func TestTickRecordsWhatTheMachineStoodAtWhenWifiWasLost(t *testing.T) {
+	cases := []struct {
+		name      string
+		ports     string
+		radio     answer
+		wantPower string
+		wantCause string
+	}{
+		{name: "a powered radio", ports: ports, radio: answer{out: radioPowered}, wantPower: "on"},
+		{name: "a radio macOS powered down", ports: ports, radio: answer{out: radioUnpowered}, wantPower: "off"},
+		{name: "a radio power that cannot be read names its cause", ports: ports, radio: answer{out: "denied", code: 1},
+			wantPower: "unreadable", wantCause: "/t/networksetup exited 1: denied"},
+		{name: "a machine with no Wi-Fi interface has no radio to ask", ports: noWifi, wantPower: "no_wifi_interface"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the lid closed into the quiet state, its display asleep, in
+			// Low Power Mode.
+			h := newHarness(t).standing(pmsetIn(true, energyModeLowPower), summary(false, ""))
+			h.r.on(argPorts, answer{out: tc.ports})
+			h.r.on(argRadioPower, tc.radio)
+			h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+			h.c.lid, h.c.quiet, h.c.displayAsleep = lidFact{kind: lidClosed}, true, true
+			h.r.on(argPowerSource, answer{out: onBattery})
+
+			// Act.
+			h.c.tick(context.Background())
+
+			// Assert.
+			losses := h.lossRecords()
+			if len(losses) != 1 {
+				t.Fatalf("loss records = %+v, want one", losses)
+			}
+			got := losses[0]
+			if got["radio_power"] != tc.wantPower || (tc.wantCause != "") != (got["radio_power_cause"] != nil) ||
+				(tc.wantCause != "" && got["radio_power_cause"] != tc.wantCause) {
+				t.Fatalf("loss record radio = (%v, %v), want (%s, %q)", got["radio_power"], got["radio_power_cause"], tc.wantPower, tc.wantCause)
+			}
+			if got["lid"] != "closed" || got["quiet"] != true || got["display_asleep"] != true ||
+				got["energy_mode"] != energyModeLowPower || got["link_active"] != false {
+				t.Fatalf("loss record = %+v, want the closed lid, the quiet state, the asleep display, Low Power Mode and the inactive link", got)
+			}
+		})
+	}
+}
+
+func TestTickRecordsTheLinkSummaryOfTheLoss(t *testing.T) {
+	// Arrange.
+	h := newHarness(t).standing(pmsetOn, summary(false, ""))
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+
+	// Act.
+	h.c.tick(context.Background())
+
+	// Assert.
+	losses := h.lossRecords()
+	if len(losses) != 1 || losses[0]["link_summary"] != strings.TrimSpace(summary(false, "")) || losses[0]["device"] != "en0" {
+		t.Fatalf("loss records = %+v, want ipconfig's summary of en0", losses)
+	}
+}
+
+func TestTickRecordsALossOncePerLoss(t *testing.T) {
+	// Arrange: lost, still lost a retry later, joined, then lost again.
+	h := newHarness(t).standing(pmsetOn, summary(false, ""))
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
+		answer{out: summary(true, "Home")}, answer{out: summary(false, "")})
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+
+	// Act.
+	h.c.tick(context.Background())
+	h.clock.set(5 * time.Second)
+	h.c.tick(context.Background())
+	h.clock.set(10 * time.Second)
+	h.c.tick(context.Background())
+	h.clock.set(15 * time.Second)
+	h.c.tick(context.Background())
+
+	// Assert.
+	if n := len(h.lossRecords()); n != 2 {
+		t.Fatalf("loss records = %d, want one per loss", n)
+	}
+	if n := h.r.count(argRadioPower); n != 2 {
+		t.Fatalf("radio power reads = %d, want one per loss", n)
 	}
 }

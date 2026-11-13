@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -53,6 +54,11 @@ func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 		c.standDownFailoverLocked(rd)
 		return
 	}
+	now := c.clock.Now()
+	if c.failover.lost.IsZero() {
+		c.failover.lost = now
+		c.recordLossLocked(ctx, rd)
+	}
 	if c.cfg.Hotspot == "" {
 		c.recordFailoverCause(errNoHotspot().Error(), func(cause string) {
 			c.log.Error(opFailover, "Wi-Fi was lost with persistent wifi on, and no hotspot is configured to join",
@@ -61,7 +67,6 @@ func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 		return
 	}
 
-	now := c.clock.Now()
 	switch c.failover.due(now) {
 	case failoverWaiting, failoverGivenUp:
 		return
@@ -106,6 +111,32 @@ func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 			dlog.Context{"hotspot": c.cfg.Hotspot, "retry_every": every.String(),
 				"lost_for": failedAt.Sub(c.failover.lost).String(), "attempts": c.failover.attempts})
 	}
+}
+
+// recordLossLocked is THE RECORD OF A LOSS: once per loss, at the beat that
+// first finds Wi-Fi lost with the mode on, it records what the machine stood at
+// when the link dropped, so a loss nobody saw says whether macOS powered the
+// radio down or only disassociated it: the radio's power, the link summary
+// ipconfig gave, the lid, the quiet state, the display and the energy mode. A
+// radio power that cannot be read is named in the record with its cause, since
+// the record is the only place the loss is seen. Caller holds mu.
+func (c *Controller) recordLossLocked(ctx context.Context, rd reading) {
+	fields := dlog.Context{
+		"device": rd.device, "link_active": rd.link.joined, "link_summary": strings.TrimSpace(rd.summary),
+		"lid": c.lid.name(), "quiet": c.quiet, "display_asleep": c.displayAsleep,
+		"display_cause": c.displayCause, "energy_mode": rd.energy,
+	}
+	// A loss is a read Wi-Fi standing (failoverWants), so the interface was
+	// read; only a machine with none has no radio to ask.
+	if rd.device == "" {
+		fields["radio_power"] = "no_wifi_interface"
+	} else if power, err := readRadioPower(ctx, c.runner, c.cfg.Tools, rd.device); err != nil {
+		fields["radio_power"] = "unreadable"
+		fields["radio_power_cause"] = err.Error()
+	} else {
+		fields["radio_power"] = power
+	}
+	c.log.Info(opFailover, "Wi-Fi was lost with persistent wifi on", fields)
 }
 
 // standDownFailoverLocked ends the failover once the mode is off or a network
@@ -160,7 +191,8 @@ func failoverRetryEvery(lost time.Duration) (time.Duration, bool) {
 }
 
 // failoverSchedule is one loss's retries. The zero value is a failover
-// standing down: the next beat that wants it starts the loss and joins at once.
+// standing down: the next beat that wants it starts the loss (failoverLocked
+// sets lost) and joins at once.
 type failoverSchedule struct {
 	// lost is when the failover first found Wi-Fi lost; zero before.
 	lost time.Time
@@ -188,14 +220,12 @@ const (
 	failoverGivenUp
 )
 
-// due answers what a beat at now does, starting the loss on its first beat.
+// due answers what a beat at now does. The loss was started (lost) by the
+// beat that first found it; a loss's first beat has no next and joins at once.
 func (s *failoverSchedule) due(now time.Time) failoverDue {
 	switch {
 	case s.gaveUp:
 		return failoverGivenUp
-	case s.lost.IsZero():
-		s.lost = now
-		return failoverJoin
 	case now.Before(s.next):
 		return failoverWaiting
 	}

@@ -83,6 +83,9 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	h.c = c
 	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
 	h.r.on(argPreferred, answer{out: preferred(hotspot)})
+	// A loss's record reads the radio's power; it is powered unless a test
+	// says otherwise.
+	h.r.on(argRadioPower, answer{out: radioPowered})
 	return h
 }
 

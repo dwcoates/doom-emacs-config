@@ -1,6 +1,9 @@
 package persistentwifi
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestParseMode(t *testing.T) {
 	cases := []struct {
@@ -68,6 +71,40 @@ func TestParseSummary(t *testing.T) {
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("parseSummary() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadRadioPower(t *testing.T) {
+	cases := []struct {
+		name    string
+		answer  answer
+		want    string
+		wantErr string
+	}{
+		{name: "a powered radio is on", answer: answer{out: radioPowered}, want: "on"},
+		{name: "an unpowered radio is off", answer: answer{out: radioUnpowered}, want: "off"},
+		{name: "an answer naming no power state is an error carrying it", answer: answer{out: "en0 is not a Wi-Fi interface.\n"},
+			wantErr: `/t/networksetup -getairportpower en0 named no power state: "en0 is not a Wi-Fi interface."`},
+		{name: "a failed run is an error naming the tool", answer: answer{out: "denied", code: 4},
+			wantErr: "/t/networksetup exited 4: denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := newFakeRunner(t).on(argRadioPower, tc.answer)
+
+			// Act.
+			got, err := readRadioPower(context.Background(), r, tools, "en0")
+
+			// Assert.
+			gotErr := ""
+			if err != nil {
+				gotErr = err.Error()
+			}
+			if got != tc.want || gotErr != tc.wantErr {
+				t.Fatalf("readRadioPower() = (%q, %q), want (%q, %q)", got, gotErr, tc.want, tc.wantErr)
 			}
 		})
 	}
