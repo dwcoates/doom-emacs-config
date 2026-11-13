@@ -1478,9 +1478,13 @@ func TestTheSuccessorChecksEveryLiveShimOnlyOnce(t *testing.T) {
 	first, _ := joinedWithOneOfTwo(t, h)
 
 	// Act: the takeover is announced twice (a retried advertise landing late).
+	// The call is answered at ownership, and the first announcement (the
+	// advertise, and the takeover it runs) is the adoption's tail, so it is
+	// joined before the second is made.
 	if err := h.c.AdoptHost(context.Background(), first); err != nil {
 		t.Fatalf("AdoptHost: %v", err)
 	}
+	h.awaitAdoptionEnded(t, first)
 	h.c.becomeIncumbent(nil)
 	h.registry.wait()
 
