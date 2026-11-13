@@ -100,6 +100,7 @@ func TestDerivedPaths(t *testing.T) {
 		{name: "shim main", got: ShimMain(root), want: filepath.Join(root, "agent-shim", "claude", "shim", "dist", "main.js")},
 		{name: "webapp dist", got: WebappDist(root), want: filepath.Join(root, "webapp", "dist")},
 		{name: "prompts dir", got: PromptsDir(root), want: filepath.Join(root, "prompts")},
+		{name: "requirements manifest", got: RequirementsManifest(root), want: filepath.Join(root, "requirements.json")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

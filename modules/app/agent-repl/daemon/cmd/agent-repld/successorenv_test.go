@@ -5,20 +5,21 @@ import (
 	"path/filepath"
 	"testing"
 
+	"agent-repld/internal/checkout"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/userenv"
 )
 
-// checkoutWithManifest is an agent-repl module root (paths.Checkout) whose
-// requirements manifest declares the hotspot setting.
-func checkoutWithManifest(t *testing.T) string {
+// hotspotManifest is a requirements manifest (paths.RequirementsManifest)
+// that declares the hotspot setting.
+func hotspotManifest(t *testing.T) string {
 	t.Helper()
-	checkout := t.TempDir()
+	manifest := filepath.Join(t.TempDir(), "requirements.json")
 	body := `{"requirements": [{"id": "h", "kind": "env", "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"}]}`
-	if err := os.WriteFile(filepath.Join(checkout, "requirements.json"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(manifest, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return checkout
+	return manifest
 }
 
 func TestSuccessorEnvironRecordsEachSettingItChanges(t *testing.T) {
@@ -33,7 +34,7 @@ func TestSuccessorEnvironRecordsEachSettingItChanges(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	env, err := successorEnviron(checkoutWithManifest(t), log)()
+	env, err := successorEnviron(hotspotManifest(t), log)()
 
 	// Assert
 	if err != nil {
@@ -59,7 +60,7 @@ func TestSuccessorEnvironRecordsAnUnreadableEnvFileAtError(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act
-	env, err := successorEnviron(checkoutWithManifest(t), log)()
+	env, err := successorEnviron(hotspotManifest(t), log)()
 
 	// Assert
 	if err == nil || env != nil {
@@ -84,7 +85,7 @@ func TestSuccessorEnvironReadsTheManifestOfTheRealModuleRoot(t *testing.T) {
 	}
 
 	// Act
-	_, err = successorEnviron(moduleRoot, dlog.NewTestLogger())()
+	_, err = successorEnviron(checkout.RequirementsManifest(moduleRoot), dlog.NewTestLogger())()
 
 	// Assert
 	if err != nil {

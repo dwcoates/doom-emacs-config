@@ -171,6 +171,13 @@ func PromptsDir(root string) string {
 	return filepath.Join(root, "prompts")
 }
 
+// RequirementsManifest is the installer's requirements manifest beneath root:
+// what every per-user setting a spawned daemon refreshes from the env file is
+// declared in (userenv.SettingNames).
+func RequirementsManifest(root string) string {
+	return filepath.Join(root, "requirements.json")
+}
+
 // ShimBuildStamp is the shim bundle's build stamp beneath root: the file the
 // shim's build chain writes next to its compiled entry point. It is the
 // production source of SHIM_BUILD_SHA.
