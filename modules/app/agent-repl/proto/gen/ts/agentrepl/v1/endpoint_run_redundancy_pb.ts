@@ -22,7 +22,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_run_redundancy.proto.
  */
 export const file_agentrepl_v1_endpoint_run_redundancy: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3JlZHVuZGFuY3kucHJvdG8SDGFnZW50cmVwbC52MSJ4ChRSdW5SZWR1bmRhbmN5UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjEKCnJlZHVuZGFuY3kYAiABKAsyHS50ZXN0cnVuLnYxLlJlZHVuZGFuY3lSZXF1ZXN0Ip0BChVSdW5SZWR1bmRhbmN5UmVzcG9uc2USFQoLb3V0cHV0X2xpbmUYASABKAlIABIxCgVlbmRlZBgCIAEoCzIgLmFnZW50cmVwbC52MS5SdW5SZWR1bmRhbmN5RW5kZWRIABIxCgVlcnJvchgDIAEoCzIgLmFnZW50cmVwbC52MS5SdW5SZWR1bmRhbmN5RXJyb3JIAEIHCgVmcmFtZSInChJSdW5SZWR1bmRhbmN5RW5kZWQSEQoJZXhpdF9jb2RlGAEgASgFIuUBChJSdW5SZWR1bmRhbmN5RXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuUnVuUmVkdW5kYW5jeVVua25vd25Xb3Jrc3BhY2VIABI6Cgpub19jb21tYW5kGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJ1blJlZHVuZGFuY3lOb0NvbW1hbmRIABJACg1ydW5uZXJfZmFpbGVkGAMgASgLMicuYWdlbnRyZXBsLnYxLlJ1blJlZHVuZGFuY3lSdW5uZXJGYWlsZWRIAEIHCgVjYXVzZSIfCh1SdW5SZWR1bmRhbmN5VW5rbm93bldvcmtzcGFjZSIYChZSdW5SZWR1bmRhbmN5Tm9Db21tYW5kIisKGVJ1blJlZHVuZGFuY3lSdW5uZXJGYWlsZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_testrun_v1_redundancy, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3JlZHVuZGFuY3kucHJvdG8SDGFnZW50cmVwbC52MSJ4ChRSdW5SZWR1bmRhbmN5UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjEKCnJlZHVuZGFuY3kYAiABKAsyHS50ZXN0cnVuLnYxLlJlZHVuZGFuY3lSZXF1ZXN0Ip0BChVSdW5SZWR1bmRhbmN5UmVzcG9uc2USFQoLb3V0cHV0X2xpbmUYASABKAlIABIxCgVlbmRlZBgCIAEoCzIgLmFnZW50cmVwbC52MS5SdW5SZWR1bmRhbmN5RW5kZWRIABIxCgVlcnJvchgDIAEoCzIgLmFnZW50cmVwbC52MS5SdW5SZWR1bmRhbmN5RXJyb3JIAEIHCgVmcmFtZSInChJSdW5SZWR1bmRhbmN5RW5kZWQSEQoJZXhpdF9jb2RlGAEgASgFIq8CChJSdW5SZWR1bmRhbmN5RXJyb3ISSAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKy5hZ2VudHJlcGwudjEuUnVuUmVkdW5kYW5jeVVua25vd25Xb3Jrc3BhY2VIABI6Cgpub19jb21tYW5kGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJ1blJlZHVuZGFuY3lOb0NvbW1hbmRIABJACg1ydW5uZXJfZmFpbGVkGAMgASgLMicuYWdlbnRyZXBsLnYxLlJ1blJlZHVuZGFuY3lSdW5uZXJGYWlsZWRIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgEIAEoCzIrLmFnZW50cmVwbC52MS5SdW5SZWR1bmRhbmN5VHJhbnNmZXJyaW5nQXdheUgAQgcKBWNhdXNlIjAKHVJ1blJlZHVuZGFuY3lUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHwodUnVuUmVkdW5kYW5jeVVua25vd25Xb3Jrc3BhY2UiGAoWUnVuUmVkdW5kYW5jeU5vQ29tbWFuZCIrChlSdW5SZWR1bmRhbmN5UnVubmVyRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_testrun_v1_redundancy, file_workspace_v1_workspace]);
 
 /**
  * Run one measurement or report from one workspace's worktree.
@@ -156,6 +156,15 @@ export type RunRedundancyError = Message<"agentrepl.v1.RunRedundancyError"> & {
      */
     value: RunRedundancyRunnerFailed;
     case: "runnerFailed";
+  } | {
+    /**
+     * The daemon handed the workspace to a successor mid-handover; the
+     * measurement is the successor's to serve.
+     *
+     * @generated from field: agentrepl.v1.RunRedundancyTransferringAway transferring_away = 4;
+     */
+    value: RunRedundancyTransferringAway;
+    case: "transferringAway";
   } | { case: undefined; value?: undefined };
 };
 
@@ -165,6 +174,28 @@ export type RunRedundancyError = Message<"agentrepl.v1.RunRedundancyError"> & {
  */
 export const RunRedundancyErrorSchema: GenMessage<RunRedundancyError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 3);
+
+/**
+ * The daemon handed the workspace to a successor mid-handover.
+ *
+ * @generated from message agentrepl.v1.RunRedundancyTransferringAway
+ */
+export type RunRedundancyTransferringAway = Message<"agentrepl.v1.RunRedundancyTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, which the caller sends the
+   * measurement to.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RunRedundancyTransferringAway.
+ * Use `create(RunRedundancyTransferringAwaySchema)` to create a new message.
+ */
+export const RunRedundancyTransferringAwaySchema: GenMessage<RunRedundancyTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 4);
 
 /**
  * No workspace the daemon serves is the one named.
@@ -179,7 +210,7 @@ export type RunRedundancyUnknownWorkspace = Message<"agentrepl.v1.RunRedundancyU
  * Use `create(RunRedundancyUnknownWorkspaceSchema)` to create a new message.
  */
 export const RunRedundancyUnknownWorkspaceSchema: GenMessage<RunRedundancyUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 4);
+  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 5);
 
 /**
  * The request names no command.
@@ -194,7 +225,7 @@ export type RunRedundancyNoCommand = Message<"agentrepl.v1.RunRedundancyNoComman
  * Use `create(RunRedundancyNoCommandSchema)` to create a new message.
  */
 export const RunRedundancyNoCommandSchema: GenMessage<RunRedundancyNoCommand> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 5);
+  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 6);
 
 /**
  * The runner could not be started.
@@ -215,5 +246,5 @@ export type RunRedundancyRunnerFailed = Message<"agentrepl.v1.RunRedundancyRunne
  * Use `create(RunRedundancyRunnerFailedSchema)` to create a new message.
  */
 export const RunRedundancyRunnerFailedSchema: GenMessage<RunRedundancyRunnerFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 6);
+  messageDesc(file_agentrepl_v1_endpoint_run_redundancy, 7);
 

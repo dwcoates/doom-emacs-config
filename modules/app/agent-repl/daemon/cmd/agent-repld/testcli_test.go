@@ -102,6 +102,99 @@ func TestTestRunExitsByHowTheRunEnded(t *testing.T) {
 	}
 }
 
+// handedOverFrame is the incumbent's answer for a workspace it handed to the
+// successor at ADDRESS.
+func handedOverFrame(address string) *agentreplv1.RunTestsResponse {
+	return &agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{
+		Cause: &agentreplv1.RunTestsError_TransferringAway{TransferringAway: &agentreplv1.RunTestsTransferringAway{Address: address}}}}}
+}
+
+// runTestCLIAcrossHandover runs `agent-repld test ARGS` with INCUMBENT as the
+// advertised daemon and SUCCESSOR reachable at the address the incumbent's
+// refusal names.
+func runTestCLIAcrossHandover(t *testing.T, incumbent, successor *testRunsDaemon, args ...string) (int, string, string) {
+	t.Helper()
+	servers := map[string]*httptest.Server{}
+	for name, daemon := range map[string]*testRunsDaemon{"incumbent": incumbent, "successor": successor} {
+		_, handler := agentreplv1connect.NewAgentReplHandler(daemon)
+		servers[name] = httptest.NewServer(handler)
+		t.Cleanup(servers[name].Close)
+	}
+	incumbent.frames = []*agentreplv1.RunTestsResponse{handedOverFrame(servers["successor"].URL)}
+	var out, errOut bytes.Buffer
+	deps := cliDeps{
+		address: func(string) (string, error) { return servers["incumbent"].URL, nil },
+		client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
+		},
+		roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
+			return roster(cliRow("ws-caller", "/wt/caller", "caller")), nil
+		},
+		getwd:   func() (string, error) { return "/wt/caller/src", nil },
+		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+	}
+	code := runNoun(context.Background(), testNoun, args, deps, &out, &errOut)
+	return code, out.String(), errOut.String()
+}
+
+func TestTestRunFollowsAHandover(t *testing.T) {
+	cases := []struct {
+		name      string
+		successor []*agentreplv1.RunTestsResponse
+		assert    func(t *testing.T, code int, out, errOut string, successor *testRunsDaemon)
+	}{
+		{
+			name:      "the run is sent to the successor the refusal names",
+			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
+			assert: func(t *testing.T, code int, out, errOut string, successor *testRunsDaemon) {
+				if code != exitSuccess || successor.got.GetWorkspace().GetId() != "ws-caller" {
+					t.Fatalf("exit %d, successor request %v; stdout %q stderr %q", code, successor.got, out, errOut)
+				}
+			},
+		},
+		{
+			name:      "the resend is told to the caller",
+			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
+			assert: func(t *testing.T, _ int, _, errOut string, _ *testRunsDaemon) {
+				if !strings.Contains(errOut, "sending the run to its successor at") {
+					t.Fatalf("stderr = %q, want the resend noted", errOut)
+				}
+			},
+		},
+		{
+			name:      "the incumbent's refusal is not printed",
+			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
+			assert: func(t *testing.T, _ int, out, _ string, _ *testRunsDaemon) {
+				if strings.Contains(out, "transferringAway") || strings.Count(out, "\n") != 1 {
+					t.Fatalf("stdout = %q, want only the successor's frame", out)
+				}
+			},
+		},
+		{
+			name:      "a successor handing over in turn is answered as refused, never chased",
+			successor: []*agentreplv1.RunTestsResponse{handedOverFrame("127.0.0.1:1")},
+			assert: func(t *testing.T, code int, out, _ string, _ *testRunsDaemon) {
+				if code != exitRefused || !strings.Contains(out, "transferringAway") {
+					t.Fatalf("exit %d stdout %q, want the second refusal printed as refused", code, out)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			incumbent := &testRunsDaemon{}
+			successor := &testRunsDaemon{frames: tc.successor}
+
+			// Act
+			code, out, errOut := runTestCLIAcrossHandover(t, incumbent, successor, "run", "-go", "pkg=TestA")
+
+			// Assert
+			tc.assert(t, code, out, errOut, successor)
+		})
+	}
+}
+
 func TestTestRunSendsTheCallingWorkspaceAndItsSelection(t *testing.T) {
 	// Arrange
 	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}

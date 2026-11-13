@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -94,7 +95,10 @@ func (s *server) RunTests(
 	}
 	w, err := s.testWorktreeOf(ctx, rpc, opRunTests, msg.GetWorkspace())
 	var noScript *noTestScriptError
+	var transferred *transferredTestWorkspace
 	switch {
+	case errors.As(err, &transferred):
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_TransferringAway{TransferringAway: &agentreplv1.RunTestsTransferringAway{Address: transferred.address}}})
 	case errors.Is(err, errUnknownTestWorkspace):
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}})
 	case errors.As(err, &noScript):
@@ -288,6 +292,14 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 // serve (testWorktreeOf).
 var errUnknownTestWorkspace = errors.New("no workspace this daemon serves is the one named")
 
+// transferredTestWorkspace is a test run's workspace this daemon handed to the
+// successor at address, mid-handover.
+type transferredTestWorkspace struct{ address string }
+
+func (e *transferredTestWorkspace) Error() string {
+	return "the workspace was handed to the successor at " + e.address
+}
+
 // noTestScriptError is a test run's worktree with no test script to run.
 type noTestScriptError struct{ cause error }
 
@@ -313,11 +325,21 @@ type testWorktree struct {
 // does not serve, a *noTestScriptError for a worktree with no test script, or
 // the resolution's own failure (already answered through failResolution).
 func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *workspacev1.WorkspaceRef) (testWorktree, error) {
-	subject, refused, err := s.resolveRef(ctx, rpc, ref)
+	// THE STANDING IS ANSWERED HERE, not warned by the resolution: a handover's
+	// transfer is a typed arm of both test endpoints, so it is no unlanded one.
+	subject, refused, err := s.resolveRefLogging(ctx, rpc, ref, false)
 	if err != nil {
 		return testWorktree{}, failResolution(s.log, rpc, err)
 	}
+	if refused != nil && refused.Arm == workspace.ArmTransferringAway {
+		address, _ := refused.Fields["address"].(string)
+		s.log.Info(op, "refused a test run for a workspace this daemon handed to its successor; the caller sends it there", dlog.Context{
+			"workspace_id": ref.GetId(), "successor": address})
+		return testWorktree{}, &transferredTestWorkspace{address: address}
+	}
 	if refused != nil {
+		s.log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon does not serve",
+			dlog.Context{"rpc": rpc, "arm": refused.Arm, "workspace": ref.GetId()})
 		s.log.Info(op, "refused a test run for a workspace this daemon does not serve", dlog.Context{
 			"workspace_id": ref.GetId(), "arm": refused.Arm, "reason": refused.Reason})
 		return testWorktree{}, errUnknownTestWorkspace

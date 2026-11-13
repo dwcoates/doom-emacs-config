@@ -54,7 +54,17 @@ message RunRedundancyError {
     RunRedundancyNoCommand no_command = 2;
     // The runner could not be started.
     RunRedundancyRunnerFailed runner_failed = 3;
+    // The daemon handed the workspace to a successor mid-handover; the
+    // measurement is the successor's to serve.
+    RunRedundancyTransferringAway transferring_away = 4;
   }
+}
+
+// The daemon handed the workspace to a successor mid-handover.
+message RunRedundancyTransferringAway {
+  // The successor's `127.0.0.1:<port>`, which the caller sends the
+  // measurement to.
+  string address = 1;
 }
 
 // No workspace the daemon serves is the one named.

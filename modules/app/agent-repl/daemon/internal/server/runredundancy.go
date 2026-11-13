@@ -44,7 +44,10 @@ func (s *server) RunRedundancy(
 	}
 	w, err := s.testWorktreeOf(ctx, rpc, opRunRedundancy, msg.GetWorkspace())
 	var noScript *noTestScriptError
+	var transferred *transferredTestWorkspace
 	switch {
+	case errors.As(err, &transferred):
+		return sendRedundancyError(stream, &agentreplv1.RunRedundancyError{Cause: &agentreplv1.RunRedundancyError_TransferringAway{TransferringAway: &agentreplv1.RunRedundancyTransferringAway{Address: transferred.address}}})
 	case errors.Is(err, errUnknownTestWorkspace):
 		return sendRedundancyError(stream, &agentreplv1.RunRedundancyError{Cause: &agentreplv1.RunRedundancyError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunRedundancyUnknownWorkspace{}}})
 	case errors.As(err, &noScript):

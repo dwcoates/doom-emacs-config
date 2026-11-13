@@ -153,24 +153,48 @@ func testRun(c *cliCall, args []string) int {
 // streamTestRun calls RunTests and prints every frame as it arrives. Every
 // run must pass for the command to: a failed run anywhere in a repeat fails
 // it.
+//
+// A RUN REFUSED AS HANDED OVER IS SENT ONCE MORE, to the successor its refusal
+// names, as every unary verb's call is (newRedirectingClient): during a
+// rolling deploy the advertised daemon is the incumbent until every workspace
+// has moved, and a workspace it already handed over is the successor's
+// (2026-11-13: every test run of a transferred workspace was refused for the
+// whole of a handover that waited on one busy workspace).
 func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
+	code, successor := streamTestRunOn(c, req, true)
+	if successor == "" {
+		return code
+	}
+	c.noted("the daemon is handing over; sending the run to its successor at %s", successor)
+	c.dialAddress(successor)
+	code, _ = streamTestRunOn(c, req, false)
+	return code
+}
+
+// streamTestRunOn is one RunTests call on the command's client. With FOLLOW,
+// a run refused as handed over prints nothing and answers the successor to
+// send it to; without, that refusal is printed and answered as refused.
+func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) (int, string) {
 	stream, err := openDaemonStream(c.ctx, c.client.RunTests, req)
 	if errors.Is(err, errDryRun) {
-		return exitSuccess
+		return exitSuccess, ""
 	}
 	if err != nil {
 		c.failed("the daemon failed the call: %v", err)
-		return exitFailure
+		return exitFailure, ""
 	}
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
 	code, failed := exitFailure, false
 	var aborted *testrunv1.TestRunAborted
 	for stream.Receive() {
 		frame := stream.Msg()
+		if successor := frame.GetError().GetTransferringAway().GetAddress(); follow && successor != "" {
+			return exitRefused, successor
+		}
 		text, err := protojson.Marshal(frame)
 		if err != nil {
 			c.failed("render a frame: %v", err)
-			return exitFailure
+			return exitFailure, ""
 		}
 		fmt.Fprintln(c.out, string(text))
 		switch {
@@ -192,7 +216,7 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 	}
 	if err := stream.Err(); err != nil && !errors.Is(err, io.EOF) {
 		c.failed("the run's stream broke: %v", err)
-		return exitFailure
+		return exitFailure, ""
 	}
 	switch {
 	case aborted != nil:
@@ -200,7 +224,7 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 	case code == exitFailure:
 		c.failed("the run did not report how it ended")
 	}
-	return code
+	return code, ""
 }
 
 // buildSelections turns the flags into a TestRunRequest, every path made

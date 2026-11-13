@@ -107,7 +107,16 @@ message RunTestsError {
     RunTestsWorktreeRefused worktree_refused = 6;
     // An option only the user may ask for was asked for by a workspace.
     RunTestsUserOnlyRefused user_only_refused = 7;
+    // The daemon handed the workspace to a successor mid-handover; the run is
+    // the successor's to serve.
+    RunTestsTransferringAway transferring_away = 8;
   }
+}
+
+// The daemon handed the workspace to a successor mid-handover.
+message RunTestsTransferringAway {
+  // The successor's `127.0.0.1:<port>`, which the caller sends the run to.
+  string address = 1;
 }
 
 // An option only the user may ask for was asked for by a workspace: a fresh

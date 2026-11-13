@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -586,6 +587,46 @@ func TestTestWorktreeOf(t *testing.T) {
 			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: opRunTests}); err != nil && !found {
 				t.Fatalf("records = %+v, want the refusal recorded", log.Records())
 			}
+		})
+	}
+}
+
+func TestATestRunForAWorkspaceHandedToTheSuccessorIsAnsweredAsHandedOver(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, w testWorktree, err error, log *dlog.TestLogger)
+	}{
+		{name: "the refusal names the successor's address", assert: func(t *testing.T, _ testWorktree, err error, _ *dlog.TestLogger) {
+			var transferred *transferredTestWorkspace
+			if !errors.As(err, &transferred) || transferred.address != "127.0.0.1:9999" {
+				t.Fatalf("testWorktreeOf = %v, want the transfer naming the successor", err)
+			}
+		}},
+		{name: "the refusal is recorded at INFO", assert: func(t *testing.T, _ testWorktree, _ error, log *dlog.TestLogger) {
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRunTests,
+				Message: "refused a test run for a workspace this daemon handed to its successor; the caller sends it there"}); !ok {
+				t.Fatalf("records = %+v, want the INFO naming the successor", log.Records())
+			}
+		}},
+		{name: "a typed arm is no unlanded-arm warning", assert: func(t *testing.T, _ testWorktree, _ error, log *dlog.TestLogger) {
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); ok {
+				t.Fatalf("records = %+v, want no warning", log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.Ownership.standing = workspace.StandingTransferringAway
+
+			// Act
+			w, err := h.Server.(*server).testWorktreeOf(context.Background(), "RunTests", opRunTests, ref)
+
+			// Assert
+			tc.assert(t, w, err, log)
 		})
 	}
 }
