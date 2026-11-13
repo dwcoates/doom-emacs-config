@@ -654,7 +654,7 @@ type DB interface {
 	MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error)
 	// MarkMediationPrompted records that the mediator was told of the
 	// mediation owed at OWED.
-	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time) (bool, error)
+	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time, turn TurnID) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the

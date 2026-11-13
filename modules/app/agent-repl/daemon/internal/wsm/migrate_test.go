@@ -779,9 +779,9 @@ func TestTheMigrationAddsTheMergeQueueMediationColumns(t *testing.T) {
 
 	// Assert
 	got := scalar[int](t, handle.(*store),
-		`SELECT count(*) FROM pragma_table_info('merge_queue_repos') WHERE name IN ('mediation_owed_at', 'mediation_prompted_at', 'mediation_version')`)
-	if got != 3 {
-		t.Fatalf("merge_queue_repos holds %d of the mediation columns after the migration, want 3", got)
+		`SELECT count(*) FROM pragma_table_info('merge_queue_repos') WHERE name IN ('mediation_owed_at', 'mediation_prompted_at', 'mediation_version', 'mediation_turn')`)
+	if got != 4 {
+		t.Fatalf("merge_queue_repos holds %d of the mediation columns after the migration, want 4", got)
 	}
 }
 

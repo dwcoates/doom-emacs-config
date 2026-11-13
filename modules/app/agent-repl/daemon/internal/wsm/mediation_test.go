@@ -57,12 +57,12 @@ func TestAMediationIsPromptedOnlyWhileItIsTheOneOwed(t *testing.T) {
 			}
 
 			// Act
-			marked, err := s.MarkMediationPrompted(ctx, repo, tt.owed, instant.Add(time.Second))
+			marked, err := s.MarkMediationPrompted(ctx, repo, tt.owed, instant.Add(time.Second), "turn-1")
 
 			// Assert
 			m, rerr := s.MediationOf(ctx, repo)
-			if err != nil || rerr != nil || marked != tt.want || m.Prompted() != tt.want {
-				t.Fatalf("marked %v, prompted %v (%v, %v); want %v", marked, m.Prompted(), err, rerr, tt.want)
+			if err != nil || rerr != nil || marked != tt.want || m.Prompted() != tt.want || (m.Turn == "turn-1") != tt.want {
+				t.Fatalf("marked %v, prompted %v in %q (%v, %v); want %v", marked, m.Prompted(), m.Turn, err, rerr, tt.want)
 			}
 		})
 	}
@@ -107,7 +107,7 @@ func TestANewerDeployReplacesTheMediationOwedAndOwesItsPrompt(t *testing.T) {
 	if err := s.OweMediation(ctx, repo, instant, "0.1.0"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.MarkMediationPrompted(ctx, repo, instant, instant.Add(time.Second)); err != nil {
+	if _, err := s.MarkMediationPrompted(ctx, repo, instant, instant.Add(time.Second), "turn-1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -118,7 +118,7 @@ func TestANewerDeployReplacesTheMediationOwedAndOwesItsPrompt(t *testing.T) {
 
 	// Assert
 	m, err := s.MediationOf(ctx, repo)
-	if err != nil || !m.OwedAt.Equal(instant.Add(time.Minute)) || m.Version != "0.2.0" || m.Prompted() {
+	if err != nil || !m.OwedAt.Equal(instant.Add(time.Minute)) || m.Version != "0.2.0" || m.Prompted() || m.Turn != "" {
 		t.Fatalf("MediationOf = (%+v, %v), want the newer deploy's, unprompted", m, err)
 	}
 }
