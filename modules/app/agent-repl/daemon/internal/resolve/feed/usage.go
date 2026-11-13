@@ -81,11 +81,25 @@ func (s *wsState) promptArrived(account string, at int64) {
 	s.advanceSince(account, at)
 }
 
-// advanceSince moves ACCOUNT's span start to AT when AT is later.
+// advanceSince moves ACCOUNT's span start to AT when AT is later, and keeps
+// AT among the account's instants either way.
 func (s *wsState) advanceSince(account string, at int64) {
+	s.accountInstants[account] = append(s.accountInstants[account], at)
 	if at > s.accountSinceMs[account] {
 		s.accountSinceMs[account] = at
 	}
+}
+
+// sinceBefore is the latest of ACCOUNT's instants earlier than BOUND, zero
+// when none is.
+func (s *wsState) sinceBefore(account string, bound int64) int64 {
+	var since int64
+	for _, at := range s.accountInstants[account] {
+		if at < bound && at > since {
+			since = at
+		}
+	}
+	return since
 }
 
 // isMainAgent reports whether AGENT's rows are the root feed's: the session's
@@ -177,6 +191,14 @@ func (s *wsState) landStamp(fold *proseState) {
 		return
 	}
 	fold.frozen = true
+	// A SPAN NEVER BEGINS AFTER IT SETTLED. A bubble first drawn after a later
+	// instant reached its account (a handover's replay drawing an older
+	// bubble after the live plane delivered a prompt folded into its turn,
+	// 2026-11-13) took that instant; it takes the latest one before its
+	// settle instead.
+	if fold.settledAtMs > 0 && fold.sinceMs > fold.settledAtMs {
+		fold.sinceMs = s.sinceBefore(fold.account, fold.settledAtMs)
+	}
 	if tally := s.accountTally[fold.account]; tally > s.accountLanded[fold.account] {
 		s.accountLanded[fold.account] = tally
 	}

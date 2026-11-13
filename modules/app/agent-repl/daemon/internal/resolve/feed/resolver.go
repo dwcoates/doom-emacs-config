@@ -466,6 +466,11 @@ type wsState struct {
 	// (usage.go). An account with no known instant has no entry.
 	accountSinceMs  map[string]int64
 	accountOpenedMs map[string]int64
+	// accountInstants is every instant each account's span start moved to,
+	// in arrival order, so a bubble drawn after a later instant arrived (a
+	// replay after a live prompt) can take the instant before its own settle
+	// (landStamp).
+	accountInstants map[string][]int64
 	// agentModel is the model each agent's latest API response named — what a
 	// subagent's card draws after its label (subagentmodel.go).
 	agentModel latestmodel.Ledger
@@ -826,6 +831,7 @@ func newWSState(ws ids.WorkspaceID, born time.Time) *wsState {
 
 		accountSinceMs:  map[string]int64{},
 		accountOpenedMs: map[string]int64{},
+		accountInstants: map[string][]int64{},
 
 		contextReadings: map[string]contextReading{},
 
