@@ -114,24 +114,11 @@ for platform in Darwin Linux; do
     else
         fail "$platform: a normal-priority run is executed under nice -n 19 with the nice-19 marker" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
     fi
-    # --- 1a'. disk I/O: throttled on macOS, untouched on Linux ----------------
-    if [ "$platform" = Darwin ]; then
-        if grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log"; then
-            pass "Darwin: a normal-priority run has its disk I/O throttled, with taskpolicy -d throttle"
-        else
-            fail "Darwin: a normal-priority run has its disk I/O throttled, with taskpolicy -d throttle" "log: $(cat "$d/log")"
-        fi
-        if grep -Eq '^taskpolicy (-[a-z] [a-z]+ )*(-b |-c )' "$d/log"; then
-            fail "Darwin: the run's CPU is never clamped to a lower QoS class" "log: $(cat "$d/log")"
-        else
-            pass "Darwin: the run's CPU is never clamped to a lower QoS class"
-        fi
+    # --- 1a'. neither the CPU nor the disk is demoted ------------------------
+    if grep -q '^taskpolicy' "$d/log"; then
+        fail "$platform: neither the run's CPU nor its disk is demoted (no taskpolicy)" "log: $(cat "$d/log")"
     else
-        if grep -q '^taskpolicy' "$d/log"; then
-            fail "Linux: no taskpolicy is invoked" "log: $(cat "$d/log")"
-        else
-            pass "Linux: no taskpolicy is invoked"
-        fi
+        pass "$platform: neither the run's CPU nor its disk is demoted (no taskpolicy)"
     fi
 
     # --- 1b. already at niceness 19: passes through --------------------------
@@ -299,7 +286,7 @@ fi
 # --- 1m. low-priority.sh demotes the same way, but marks no test run --------
 d="$TMP/h1m"
 SUBJECT="$THIS_DIR/low-priority.sh" run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
+if [ "$RC" -eq 0 ] && grep -q '^nice -n 19 bash -c' "$d/log" && ! grep -q '^taskpolicy' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
     pass "low-priority.sh demotes as the helper does, unmarked, and needs no daemon"
 else
     fail "low-priority.sh demotes as the helper does, unmarked, and needs no daemon" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
