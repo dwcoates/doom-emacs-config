@@ -184,12 +184,19 @@ func (m *Mirror) Run(ctx context.Context) {
 // when the mirror's own context ended it (Stop, or the successor's
 // lifetime), at ERROR otherwise.
 func (m *Mirror) end(ctx context.Context, fields dlog.Context, message string, err error) {
-	if ctx.Err() != nil {
+	switch {
+	case ctx.Err() != nil:
 		m.mu.Lock()
 		reason := m.stopReason
 		m.mu.Unlock()
 		m.deps.Log.Debug(Op, "the mirror's subscription ended with the mirror", dlog.WithCause(dlog.Merge(fields, dlog.Context{"stopped_because": reason}), err))
-	} else {
+	case connect.CodeOf(err) == connect.CodeUnavailable:
+		// THE INCUMBENT IS GONE: its connection was refused or reset. That is
+		// a daemon that died mid-handover, which the takeover recovers and
+		// records itself (2026-11-13, the orphan-recovery tests); for the
+		// mirror it only ends the joining window early.
+		m.deps.Log.Info(Op, "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own", dlog.WithCause(fields, err))
+	default:
 		m.deps.Log.Error(Op, message, dlog.WithCause(fields, err))
 	}
 	m.withdraw()
