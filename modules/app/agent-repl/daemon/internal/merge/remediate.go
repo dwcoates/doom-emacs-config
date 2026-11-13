@@ -635,10 +635,15 @@ func (o *orchestrator) isRemediatingLocked(ws ids.WorkspaceID) bool {
 }
 
 // forgetRemediation withdraws WS's wait on its repairing turn, when one stands.
-// The caller holds o.mu.
+// A registration not yet armed (armRepairs) has no wait to withdraw: armed is
+// set with cancel, and only an armed one is cancelled (2026-11-13: forgetting
+// an unarmed registration called its nil cancel and crashed both daemons of a
+// handover). The caller holds o.mu.
 func (o *orchestrator) forgetRemediationLocked(ws ids.WorkspaceID) {
 	if standing, ok := o.remediating[ws]; ok {
-		standing.cancel()
+		if standing.armed {
+			standing.cancel()
+		}
 		delete(o.remediating, ws)
 	}
 }

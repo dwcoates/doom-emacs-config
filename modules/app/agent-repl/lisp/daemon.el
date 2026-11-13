@@ -94,6 +94,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl-popup-show "popup" (buffer))
+(defvar agent-repl-link-daemon-gone-function)
 (declare-function agent-repl--with-deferred-quit "core")
 (declare-function agent-repl--deferred-quit-arm-audit "core" (context))
 (declare-function agent-repl--deferred-quit-hand-off "core" (context))
@@ -2000,6 +2001,10 @@ the ensure."
               (message "agent-repl: not restarted: the accepted daemon stop never completed")))))))))
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
+;; THE RECONNECT LOOP ASKS THE BOOT CLAIM whether any daemon lives, so a
+;; crashed daemon's leftover `daemon.addr' is not retried forever.
+(setq agent-repl-link-daemon-gone-function
+      (lambda () (eq (agent-repl-daemon--boot-claim-state) 'free)))
 (add-hook 'agent-repl-link-up-functions #'agent-repl-daemon-on-link-up)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-daemon-on-link-down)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl-daemon-on-link-promote)

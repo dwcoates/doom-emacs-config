@@ -1172,3 +1172,59 @@ func (f *fakeFeed) lastMergeOf(ws ids.WorkspaceID) *frontendv1.FeedMerge {
 	}
 	return nil
 }
+
+func TestForgettingARemediationCancelsOnlyAnArmedWait(t *testing.T) {
+	cases := []struct {
+		name       string
+		armed      bool
+		wantCancel bool
+	}{
+		{name: "a registration not yet armed is dropped without a cancel", armed: false, wantCancel: false},
+		{name: "an armed registration's wait is cancelled", armed: true, wantCancel: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			cancelled := false
+			rem := &remediation{repo: "repo", waiting: true}
+			if tc.armed {
+				rem.armed, rem.cancel = true, func() { cancelled = true }
+			}
+			h.o.mu.Lock()
+			h.o.remediating[ids.WorkspaceID("ws-a")] = rem
+			h.o.mu.Unlock()
+
+			// Act
+			h.o.mu.Lock()
+			h.o.forgetRemediationLocked(ids.WorkspaceID("ws-a"))
+			_, still := h.o.remediating[ids.WorkspaceID("ws-a")]
+			h.o.mu.Unlock()
+
+			// Assert
+			if still || cancelled != tc.wantCancel {
+				t.Fatalf("still registered = %t, cancelled = %t; want dropped and cancelled = %t", still, cancelled, tc.wantCancel)
+			}
+		})
+	}
+}
+
+func TestReRegisteringAnUnarmedRemediationReplacesIt(t *testing.T) {
+	// Arrange: a merge recovered as remediating, its wait not armed yet, as an
+	// adoption finds it (2026-11-13: the second registration crashed the
+	// daemon).
+	h := newHarness(t)
+	h.o.registerRemediation(ids.WorkspaceID("ws-a"), &remediation{repo: "repo", waiting: true})
+	again := &remediation{repo: "repo", waiting: true}
+
+	// Act
+	h.o.registerRemediation(ids.WorkspaceID("ws-a"), again)
+
+	// Assert
+	h.o.mu.Lock()
+	got := h.o.remediating[ids.WorkspaceID("ws-a")]
+	h.o.mu.Unlock()
+	if got != again {
+		t.Fatalf("registration = %+v, want the second one", got)
+	}
+}
