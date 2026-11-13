@@ -1121,7 +1121,7 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 	}
 	fields := dlog.Context{"repo": string(key), "paused": pause != nil}
 	var at sql.NullInt64
-	var by, name sql.NullString
+	var by, name, pauser sql.NullString
 	hard := false
 	if pause != nil {
 		if err := pause.validate(); err != nil {
@@ -1132,6 +1132,7 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 		by = sql.NullString{String: pause.By.Kind.column(), Valid: true}
 		if pause.By.Kind == MergeQueuePauserWorkspace {
 			name = sql.NullString{String: pause.By.Name, Valid: true}
+			pauser = sql.NullString{String: string(pause.By.Workspace), Valid: true}
 		}
 		hard = pause.Hard
 		fields["by"] = pause.By.Kind.column()
@@ -1139,10 +1140,11 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_hard) VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard) VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET paused = excluded.paused, paused_at = excluded.paused_at,
-			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name, paused_hard = excluded.paused_hard`,
-			key, pause != nil, at, by, name, hard)
+			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name,
+			   paused_by_workspace = excluded.paused_by_workspace, paused_hard = excluded.paused_hard`,
+			key, pause != nil, at, by, name, pauser, hard)
 		return err
 	})
 }
@@ -1170,10 +1172,10 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
 		var paused, hard bool
 		var at sql.NullInt64
-		var by, name sql.NullString
+		var by, name, pauser sql.NullString
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT paused, paused_at, paused_by, paused_by_name, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
-			Scan(&paused, &at, &by, &name, &hard)
+			`SELECT paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
+			Scan(&paused, &at, &by, &name, &pauser, &hard)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1185,6 +1187,9 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 			return &DecodeError{Table: "merge_queue_repos", Row: string(key), Field: "paused_by", Err: err}
 		}
 		pause = &MergeQueuePause{By: MergeQueuePauser{Kind: kind, Name: name.String}, Hard: hard}
+		if kind == MergeQueuePauserWorkspace {
+			pause.By.Workspace = WorkspaceID(pauser.String)
+		}
 		if at.Valid {
 			pause.At = fromNanos(at.Int64)
 		}

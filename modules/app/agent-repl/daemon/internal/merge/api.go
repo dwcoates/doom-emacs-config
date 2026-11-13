@@ -134,6 +134,11 @@ type Orchestrator interface {
 	HardStop(ctx context.Context, scope *RepositoryScope, by Pauser) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
+	// ResumeOwnPause resumes the one queue SCOPE names only when the pause
+	// standing on it is workspace WS's own, answering whether it did: the
+	// queue bypass holder lets its own pause through at its turn's end, and
+	// never the user's or another workspace's.
+	ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error)
 	// Status answers each registered repository's queue as it stands, its
 	// started merges' steps filled in: the one repository a scope names (an
 	// unknown one refused as unknown_repository), or every registered one for

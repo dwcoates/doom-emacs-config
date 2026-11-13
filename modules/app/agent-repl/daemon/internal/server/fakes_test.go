@@ -139,10 +139,10 @@ type fakeDB struct {
 
 	// bypass is each workspace's queue-bypass standing, and bypassErr fails
 	// its read.
-	bypass    map[ids.WorkspaceID]wsm.QueueBypass
+	bypass map[ids.WorkspaceID]wsm.QueueBypass
 	// bypassReads is every workspace QueueBypass was asked about, in order.
 	bypassReads []ids.WorkspaceID
-	bypassErr error
+	bypassErr   error
 
 	// prSubs are the pull-request subscriptions recorded; prSubscribeErr
 	// and prReplaced answer SubscribePullRequest (pullrequests_test.go).

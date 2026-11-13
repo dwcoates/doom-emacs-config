@@ -727,7 +727,7 @@ func TestAPauseTellsTheRosterItsRecord(t *testing.T) {
 			act: func(h *harness) error {
 				return h.o.Pause(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: theWorkspace})
 			},
-			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one"},
+			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one", Workspace: theWorkspace},
 		},
 		{
 			name:   "a hard stop",

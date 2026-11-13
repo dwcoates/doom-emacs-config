@@ -89,6 +89,10 @@ type orchestrator struct {
 	// offQueueLanded is which merges off their queues have work on master
 	// already, judged off every lock (offqueuelanded.go).
 	offQueueLanded offQueueLanded
+	// pauseWrites serializes every change of a queue's pause (Pause, HardStop,
+	// Unpause, ResumeOwnPause), so a resume that first reads whose pause
+	// stands never resumes a pause written after its read.
+	pauseWrites sync.Mutex
 
 	mu sync.Mutex
 	// facts is every workspace's last published merge facts, which is what

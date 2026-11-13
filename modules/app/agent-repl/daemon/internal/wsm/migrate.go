@@ -246,6 +246,7 @@ var migrations = []migration{
 	// merge workspace left open with no request standing.
 	{To: 129, Name: "off_queue_merges", Kind: MigrationBreaking, DDL: offQueueMergesDDL + adoptOffQueueMergesDML},
 	{To: 130, Name: "merge_queue_return_rank", Kind: MigrationAdditive, DDL: returnRankDDL},
+	{To: 131, Name: "merge_queue_pauser_workspace", Kind: MigrationAdditive, DDL: mergeQueuePauserWorkspaceDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

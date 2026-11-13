@@ -70,7 +70,7 @@ func TestMergeQueuePauseRoundTripsItsRecord(t *testing.T) {
 		pause MergeQueuePause
 	}{
 		{name: "the user's pause", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserUser}}},
-		{name: "a workspace's hard stop", pause: MergeQueuePause{At: instant.Add(time.Minute), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom"}, Hard: true}},
+		{name: "a workspace's hard stop", pause: MergeQueuePause{At: instant.Add(time.Minute), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom", Workspace: "w-doom"}, Hard: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestMergeQueuePauseReplacesTheRecordOfAStandingPause(t *testing.T) {
 	if err := s.SetMergeQueuePaused(context.Background(), repo, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
-	hard := MergeQueuePause{At: instant.Add(time.Hour), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "w"}, Hard: true}
+	hard := MergeQueuePause{At: instant.Add(time.Hour), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "w", Workspace: "w-id"}, Hard: true}
 
 	// Act
 	if err := s.SetMergeQueuePaused(context.Background(), repo, &hard); err != nil {
@@ -189,7 +189,8 @@ func TestSetMergeQueuePausedRefusesAMalformedRecordAndWritesNothing(t *testing.T
 	}{
 		{name: "no instant", pause: MergeQueuePause{By: MergeQueuePauser{Kind: MergeQueuePauserUser}}},
 		{name: "no pauser", pause: MergeQueuePause{At: instant}},
-		{name: "a workspace with no name", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace}}},
+		{name: "a workspace with no name", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Workspace: "w-id"}}},
+		{name: "a workspace with no id", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

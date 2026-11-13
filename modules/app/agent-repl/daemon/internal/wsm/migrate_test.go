@@ -747,6 +747,25 @@ func TestTheMigrationAddsTheMergeQueueReturnRankColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheMergeQueuePauserWorkspaceColumn(t *testing.T) {
+	// Arrange -- a file written before a pause named its workspace's id.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('merge_queue_repos') WHERE name = 'paused_by_workspace'`)
+	if got != 1 {
+		t.Fatalf("merge_queue_repos.paused_by_workspace exists %d times after the migration, want 1", got)
+	}
+}
+
 func TestTheMigrationAddsTheLinkOwnershipColumnAndTheSlackOriginsTable(t *testing.T) {
 	// Arrange -- a file written before links carried ownership or a workspace
 	// recorded the Slack thread it was created for.
