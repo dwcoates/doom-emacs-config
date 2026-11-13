@@ -56,13 +56,13 @@ func (k Key) Short() string {
 // that does not exist is an error: a declared input that is not there is a
 // roster that has drifted from the tree, never something to hash around.
 func ComputeKey(repo string, set *InputSet, facts Facts) (Key, error) {
-	return ComputeKeyCached(repo, set, facts, nil)
+	return ComputeKeyCached(repo, set, facts, nil, nil)
 }
 
 // ComputeKeyCached is ComputeKey reading each file's digest through cache
 // (nil reads every file): the units of one run share most of their inputs,
 // and hashing each shared file once per unit cost a run seconds.
-func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache) (Key, error) {
+func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache, ignored Ignored) (Key, error) {
 	if err := set.Overlap(); err != nil {
 		return Key{}, err
 	}
@@ -74,7 +74,7 @@ func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache)
 	for name, v := range facts.Env {
 		m["@env "+name] = v
 	}
-	h := hasher{repo: repo, generated: set.Generated(), m: m, cache: cache}
+	h := hasher{repo: repo, generated: set.Generated(), ignored: ignored, m: m, cache: cache}
 	for _, p := range set.Files() {
 		if err := h.file(p); err != nil {
 			return Key{}, err
@@ -152,8 +152,11 @@ func (m Manifest) Changed(earlier Manifest) []string {
 type hasher struct {
 	repo      string
 	generated []string
-	m         Manifest
-	cache     *HashCache
+	// ignored is what git ignores in the checkout, which a walk or a listing
+	// never reads (Ignored).
+	ignored Ignored
+	m       Manifest
+	cache   *HashCache
 }
 
 // HashCache holds the digests of the files one phase of a run has read,
@@ -254,7 +257,7 @@ func (h hasher) listing(p string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if h.isGenerated(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
+		if h.skipped(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
 			continue
 		}
 		kind := "f"
@@ -269,6 +272,13 @@ func (h hasher) listing(p string) error {
 	sort.Strings(names)
 	h.m[p+"/"] = "dir " + strings.Join(names, " ")
 	return nil
+}
+
+// skipped reports whether a walk or a listing leaves the repository-relative
+// path rel out: it lies in one of the set's generated subtrees, or git
+// ignores it.
+func (h hasher) skipped(rel string) bool {
+	return h.isGenerated(rel) || h.ignored.Has(rel)
 }
 
 // isGenerated reports whether the repository-relative path rel lies in one of
@@ -324,7 +334,7 @@ func (h hasher) tree(p string) error {
 			return fmt.Errorf("reuse: place %s under %s: %w", abs, h.repo, err)
 		}
 		rel = filepath.ToSlash(rel)
-		if h.isGenerated(rel) {
+		if h.skipped(rel) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

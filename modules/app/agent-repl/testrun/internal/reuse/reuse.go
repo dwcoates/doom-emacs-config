@@ -58,6 +58,9 @@ type Deps struct {
 	ProfileDir string
 	// Probe answers whether a seatbelt sandbox can be applied (ProbeSandbox).
 	Probe func() error
+	// Ignored is what git ignores in the checkout (ExecIgnored): session
+	// state and build output, which no input tree's key reads.
+	Ignored Ignored
 	// Head answers the checkout's branch, commit and whether its files
 	// differ from that commit.
 	Head func() (branch, commit string, dirty bool, err error)

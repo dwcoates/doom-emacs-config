@@ -275,14 +275,14 @@ func TestTheHashCacheReadsAFileOnceUntilItChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := NewHashCache()
-	first, err := ComputeKeyCached(root, set, Facts{}, cache)
+	first, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(t, root, "a.txt", "two, longer")
 
 	// Act
-	second, err := ComputeKeyCached(root, set, Facts{}, cache)
+	second, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
 
 	// Assert
 	if err != nil {
@@ -310,8 +310,8 @@ func TestACachedDigestIsTheFilesOwn(t *testing.T) {
 	cache := NewHashCache()
 
 	// Act
-	cached, err := ComputeKeyCached(root, set, Facts{}, cache)
-	again, err2 := ComputeKeyCached(root, set, Facts{}, cache)
+	cached, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
+	again, err2 := ComputeKeyCached(root, set, Facts{}, cache, nil)
 
 	// Assert
 	plain, err3 := ComputeKey(root, set, Facts{})
@@ -369,5 +369,108 @@ func TestAListingDoesNotHashAConfigsTransientBundle(t *testing.T) {
 	// Assert
 	if err != nil || after.Digest != before.Digest {
 		t.Fatalf("keys %s %s (%v), want a bundle appearing to move nothing", before.Short(), after.Short(), err)
+	}
+}
+
+func TestAnIgnoredPathMovesNoTreesKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(t *testing.T, root string)
+	}{
+		{name: "a file under an ignored directory changes", change: func(t *testing.T, root string) {
+			write(t, root, "prompts/session/emacs.log", "a later session")
+		}},
+		{name: "an ignored file appears", change: func(t *testing.T, root string) {
+			write(t, root, "prompts/binary", "rebuilt")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := writeTree(t, map[string]string{"prompts/p.md": "brief", "prompts/session/emacs.log": "one session"})
+			set := NewInputSet()
+			if err := set.AddTree("prompts"); err != nil {
+				t.Fatal(err)
+			}
+			ignored := Ignored{"prompts/session/", "prompts/binary"}
+			before, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			tt.change(t, root)
+			after, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+
+			// Assert
+			if err != nil || after.Digest != before.Digest {
+				t.Fatalf("keys %s %s (%v), want an ignored path to move nothing", before.Short(), after.Short(), err)
+			}
+		})
+	}
+}
+
+func TestATrackedFileBesideAnIgnoredOneStillMovesTheKey(t *testing.T) {
+	// Arrange
+	root := writeTree(t, map[string]string{"prompts/p.md": "brief", "prompts/session/emacs.log": "one session"})
+	set := NewInputSet()
+	if err := set.AddTree("prompts"); err != nil {
+		t.Fatal(err)
+	}
+	ignored := Ignored{"prompts/session/"}
+	before, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	write(t, root, "prompts/p.md", "a new brief")
+	after, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+
+	// Assert
+	if err != nil || after.Digest == before.Digest {
+		t.Fatalf("keys %s %s (%v), want the tracked change to move the key", before.Short(), after.Short(), err)
+	}
+}
+
+func TestIgnoredHas(t *testing.T) {
+	ignored := Ignored{".claude/emacs/", "daemon/cmd/agent-repld/agent-repld"}
+	tests := []struct {
+		rel  string
+		want bool
+	}{
+		{rel: ".claude/emacs", want: true},
+		{rel: ".claude/emacs/daemon.log", want: true},
+		{rel: ".claude/emacsy", want: false},
+		{rel: ".claude/install.sh", want: false},
+		{rel: "daemon/cmd/agent-repld/agent-repld", want: true},
+		{rel: "daemon/cmd/agent-repld/main.go", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rel, func(t *testing.T) {
+			// Act
+			got := ignored.Has(tt.rel)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Has(%q) = %v, want %v", tt.rel, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseIgnoredReadsEveryNULSeparatedPath(t *testing.T) {
+	// Act
+	got := parseIgnored(".claude/emacs/\x00webapp/dist/\x00daemon/cmd/agent-repld/agent-repld\x00")
+
+	// Assert
+	want := Ignored{".claude/emacs/", "webapp/dist/", "daemon/cmd/agent-repld/agent-repld"}
+	if len(got) != len(want) {
+		t.Fatalf("parseIgnored = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseIgnored = %v, want %v", got, want)
+		}
 	}
 }
