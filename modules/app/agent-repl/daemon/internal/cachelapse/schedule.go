@@ -432,6 +432,17 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 	case err == nil:
 		log.Info(opRestore, "the parked session is back up for its keep-alive", nil)
 	case leaving(ctx, log, opRestore, "restoring the parked session", err):
+	case errors.Is(err, dlog.ErrWorkspaceDirGone):
+		// A SESSION WHOSE WORKTREE IS GONE CAN NEVER BE RESTORED, so its
+		// keep-alive is retired rather than asked again: a landed workspace's
+		// last beat, owed since 2026-10-31 to a worktree reaped with the
+		// landing, was retried every 30s for two weeks, each try an ERROR
+		// here, in the feed and in the footer (2026-11-13,
+		// response-bubble-auto-select). An open workspace whose directory is
+		// gone is settled by the missing-directory step, not here.
+		log.Info(opRestore, "the workspace's directory is gone, so its parked session can never be restored; its keep-alive is retired",
+			dlog.Context{"cause": err.Error()})
+		k.forget(ws)
 	default:
 		log.Error(opRestore, "the parked session could not be restored; it is asked again shortly",
 			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})

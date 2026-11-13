@@ -591,6 +591,47 @@ func TestAFailedRestoreIsAskedAgainShortly(t *testing.T) {
 	}
 }
 
+func TestARestoreWhoseWorktreeIsGoneRetiresTheKeepalive(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "it is not asked again", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, again := h.keeper.restores[ws]; again {
+				t.Fatalf("restore re-armed at %v, want none", h.keeper.restores[ws])
+			}
+		}},
+		{name: "its keep-alive is retired", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat still armed at %v, want it retired", h.keeper.beats[ws])
+			}
+		}},
+		{name: "it is recorded at INFO, never as an error", assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if !h.found(dlog.RecordQuery{Level: "info", Operation: opRestore,
+				Message: "the workspace's directory is gone, so its parked session can never be restored; its keep-alive is retired"}) {
+				t.Fatalf("records = %+v, want the retirement at INFO", h.log.Records())
+			}
+			if h.found(dlog.RecordQuery{Level: "error", Operation: opRestore}) {
+				t.Fatalf("records = %+v, want no ERROR", h.log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, fleet := parkedFleet(t, 1)
+			h.keeper.restoresDue(context.Background())
+			gone := fmt.Errorf("start session for %q: resolve log sink: %w", fleet[0], dlog.ErrWorkspaceDirGone)
+
+			// Act
+			h.keeper.apply(context.Background(), edge{ws: fleet[0], kind: edgeRestored, err: gone, why: "test"})
+
+			// Assert
+			tc.assert(t, h, fleet[0])
+		})
+	}
+}
+
 func TestARestoreOfASessionServedAgainIsDropped(t *testing.T) {
 	// Arrange: a look revived it before its restore's turn.
 	h, _ := parkedFleet(t, 1)
