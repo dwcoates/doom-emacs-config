@@ -162,11 +162,16 @@ type fakeDB struct {
 	closures      map[ids.WorkspaceID]wsm.Closure
 	// offQueue are the requests standing off their queues, by workspace
 	// (wsm/offqueue.go), and offQueueErr fails their reads.
-	offQueue       map[ids.WorkspaceID]wsm.OffQueueMerge
-	offQueueErr    error
-	releasedLeases []wsm.LeaseID
-	policies       map[wsm.LeaseID]wsm.LeasePolicy
-	dropped        []string
+	offQueue    map[ids.WorkspaceID]wsm.OffQueueMerge
+	offQueueErr error
+	// offQueueReads counts OffQueueMerges calls; offQueueHold, when set, is
+	// received from before a read answers, after offQueueEntered is sent to.
+	offQueueReads   int
+	offQueueHold    chan struct{}
+	offQueueEntered chan struct{}
+	releasedLeases  []wsm.LeaseID
+	policies        map[wsm.LeaseID]wsm.LeasePolicy
+	dropped         []string
 	// enqueueErr, when set, fails the next EnqueueMerge.
 	enqueueErr error
 	// queueErr, when set, fails every QueueMerge.
@@ -1102,6 +1107,14 @@ func (f *fakeDB) keepOffQueueLocked(entry wsm.MergeQueueEntry, cause string) {
 func (f *fakeDB) clockNow() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
 
 func (f *fakeDB) OffQueueMerges(context.Context) ([]wsm.OffQueueMerge, error) {
+	f.mu.Lock()
+	f.offQueueReads++
+	hold, entered := f.offQueueHold, f.offQueueEntered
+	f.mu.Unlock()
+	if hold != nil {
+		entered <- struct{}{}
+		<-hold
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.offQueueErr != nil {
