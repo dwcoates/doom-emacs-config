@@ -32,6 +32,11 @@ type offQueueLanded struct {
 	// running and again coalesce kicks: one judgement runs at a time, and a
 	// kick during it runs one more after it.
 	running, again bool
+	// stopped is set by the daemon's exit (stopOffQueueLanded): no judgement
+	// starts after it, so none reads the state client once it closes.
+	stopped bool
+	// idle is closed when the judgement running ends; nil while none runs.
+	idle chan struct{}
 }
 
 // landedFact is one merge's judgement and the two heads it was made at.
@@ -70,12 +75,18 @@ func (o *orchestrator) kickOffQueueLanded() {
 		return
 	}
 	o.offQueueLanded.mu.Lock()
-	if o.offQueueLanded.running {
+	switch {
+	case o.offQueueLanded.stopped:
+		o.offQueueLanded.mu.Unlock()
+		return
+	case o.offQueueLanded.running:
 		o.offQueueLanded.again = true
 		o.offQueueLanded.mu.Unlock()
 		return
 	}
 	o.offQueueLanded.running = true
+	idle := make(chan struct{})
+	o.offQueueLanded.idle = idle
 	o.offQueueLanded.mu.Unlock()
 	o.live.Add(1)
 	inflight.Standing(func() {
@@ -83,15 +94,32 @@ func (o *orchestrator) kickOffQueueLanded() {
 		for {
 			o.refreshOffQueueLanded(context.Background())
 			o.offQueueLanded.mu.Lock()
-			if !o.offQueueLanded.again {
-				o.offQueueLanded.running = false
+			if !o.offQueueLanded.again || o.offQueueLanded.stopped {
+				o.offQueueLanded.running, o.offQueueLanded.again = false, false
+				o.offQueueLanded.idle = nil
 				o.offQueueLanded.mu.Unlock()
+				close(idle)
 				return
 			}
 			o.offQueueLanded.again = false
 			o.offQueueLanded.mu.Unlock()
 		}
 	})
+}
+
+// stopOffQueueLanded stops the judgements for the daemon's exit: none starts
+// after it, and the one running is answered as the channel it closes when it
+// ends (nil when none runs), which the drain waits on before the state client
+// closes under it.
+func (o *orchestrator) stopOffQueueLanded() <-chan struct{} {
+	o.offQueueLanded.mu.Lock()
+	defer o.offQueueLanded.mu.Unlock()
+	o.offQueueLanded.stopped = true
+	o.offQueueLanded.again = false
+	if o.offQueueLanded.idle == nil {
+		return nil
+	}
+	return o.offQueueLanded.idle
 }
 
 // refreshOffQueueLanded judges every merge off its queue and republishes the

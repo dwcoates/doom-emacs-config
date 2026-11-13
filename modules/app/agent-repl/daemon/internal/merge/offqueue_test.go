@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/sidebar"
@@ -712,5 +713,67 @@ func TestThePublishOfMergesOffTheQueueNeverAsksGit(t *testing.T) {
 	// Assert.
 	if after := gitCalls(h, "any_patch_equivalent") + gitCalls(h, "is_ancestor"); after != before {
 		t.Fatalf("the publish asked git %d times, want none", after-before)
+	}
+}
+
+func TestTheDrainWaitsForTheOffQueueJudgementInFlightAndStartsNoOther(t *testing.T) {
+	// Arrange: an asynchronous orchestrator whose judgement's read is held.
+	h := newHarness(t)
+	h.o.async = true
+	h.db.offQueueHold, h.db.offQueueEntered = make(chan struct{}), make(chan struct{}, 1)
+	h.o.kickOffQueueLanded()
+	select {
+	case <-h.db.offQueueEntered:
+	case <-time.After(waitBound):
+		t.Fatal("the judgement never read the merges off their queues")
+	}
+	drained := make(chan struct{})
+
+	// Act
+	go func() { h.o.Drain(context.Background()); close(drained) }()
+
+	// Assert: the drain is held behind the read, then returns once it ends.
+	select {
+	case <-drained:
+		t.Fatal("the drain returned with a judgement still reading the state client")
+	case <-h.db.offQueueEntered:
+		t.Fatal("a second judgement started during the drain")
+	default:
+	}
+	close(h.db.offQueueHold)
+	select {
+	case <-drained:
+	case <-time.After(waitBound):
+		t.Fatal("the drain never returned once the judgement ended")
+	}
+	h.o.kickOffQueueLanded()
+	h.o.live.Wait()
+	h.db.mu.Lock()
+	reads := h.db.offQueueReads
+	h.db.mu.Unlock()
+	if reads != 1 {
+		t.Fatalf("off-queue reads = %d, want the one in flight and none after the drain", reads)
+	}
+}
+
+func TestADrainWhoseOffQueueJudgementOutlivesItsBoundIsAnError(t *testing.T) {
+	// Arrange: a judgement that never ends, and a drain bound already spent.
+	h := newHarness(t)
+	h.o.async = true
+	h.o.drainBound = time.Nanosecond
+	release := make(chan struct{})
+	h.db.offQueueHold, h.db.offQueueEntered = release, make(chan struct{}, 1)
+	h.o.kickOffQueueLanded()
+	<-h.db.offQueueEntered
+
+	// Act
+	h.o.Drain(context.Background())
+
+	// Assert
+	close(release)
+	h.o.live.Wait()
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.drain",
+		Message: "the judgement of the merges off their queues outlived the drain's bound; the state client closes under it"}); !ok {
+		t.Fatalf("records = %+v, want the overrun recorded at error", h.logs.Records())
 	}
 }

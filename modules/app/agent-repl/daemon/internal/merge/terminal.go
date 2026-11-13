@@ -825,6 +825,22 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	bound := o.terminalDrainBound()
 	expired := time.NewTimer(bound)
 	defer expired.Stop()
+	// THE OFF-QUEUE JUDGEMENT IN FLIGHT FINISHES TOO, and none starts after
+	// this: it reads the state client, which closes once the drain returns
+	// (2026-11-13: a judgement kicked during an exit read a closed database).
+	if judged := o.stopOffQueueLanded(); judged != nil {
+		select {
+		case <-judged:
+		case <-expired.C:
+			log.Error(op, "the judgement of the merges off their queues outlived the drain's bound; the state client closes under it",
+				dlog.Context{"bound": bound.String()})
+			return
+		case <-ctx.Done():
+			log.Error(op, "the drain was cancelled while the merges off their queues were being judged; the state client closes under it",
+				dlog.Context{"bound": bound.String()})
+			return
+		}
+	}
 	// THE ADMISSION STEPS ALREADY IN FLIGHT FINISH FIRST. The ones that began
 	// before the drain are a few store reads, and the state client must
 	// outlive them.
