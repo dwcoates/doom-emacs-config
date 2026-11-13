@@ -83,8 +83,7 @@ func firstPromptID(path string) (string, error) {
 		return "", fmt.Errorf("reading the subagent transcript %s: %w", path, err)
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	scanner := transcriptScanner(f)
 	if !scanner.Scan() {
 		if err := scanner.Err(); err != nil {
 			return "", fmt.Errorf("reading the subagent transcript %s: %w", path, err)
@@ -130,8 +129,7 @@ func promptSpawningCalls(parent, prompt string) ([]string, error) {
 		return nil, fmt.Errorf("reading the parent transcript %s: %w", parent, err)
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	scanner := transcriptScanner(f)
 	var calls []string
 	current := ""
 	for scanner.Scan() {
@@ -159,4 +157,12 @@ func promptSpawningCalls(parent, prompt string) ([]string, error) {
 		return nil, fmt.Errorf("reading the parent transcript %s: %w", parent, err)
 	}
 	return calls, nil
+}
+
+// transcriptScanner reads a transcript record by record: one line each, of
+// up to 64 MiB, since a record carries a whole tool result.
+func transcriptScanner(f *os.File) *bufio.Scanner {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024*1024)
+	return scanner
 }
