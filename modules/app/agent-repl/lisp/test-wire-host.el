@@ -490,6 +490,24 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                               :arm)
                    (nth 1 case)))))
 
+(ert-deftest agent-repl-test-wire-host-transferred-reload-page-set-true ()
+  "A transfer notice that reloads the page decodes :reload."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-transferred "{\"reloadPage\":true}")
+                 '(:reload-page :reload))))
+
+(ert-deftest agent-repl-test-wire-host-transferred-reload-page-set-false ()
+  "A transfer notice that loads no page decodes :no-reload."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-transferred "{\"reloadPage\":false}")
+                 '(:reload-page :no-reload))))
+
+(ert-deftest agent-repl-test-wire-host-transferred-reload-page-unset ()
+  "A transfer notice from a daemon predating the decision decodes :unset."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-workspace-transferred "{}")
+                 '(:reload-page :unset))))
+
 (ert-deftest agent-repl-test-wire-host-push-unset-is-a-breach ()
   "A push carrying no arm is a contract breach, not an empty update."
   (should (equal (agent-repl-test-wire-host--breach

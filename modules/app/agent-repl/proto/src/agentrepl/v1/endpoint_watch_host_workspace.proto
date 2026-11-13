@@ -176,7 +176,18 @@ message HostEvaluate {
   string text = 2;
 }
 
-message HostWorkspaceTransferred {}
+message HostWorkspaceTransferred {
+  // WHETHER THE HANDOVER LOADS THE WORKSPACE'S PAGE AT THE SUCCESSOR, decided
+  // by the outgoing daemon from what stood when it announced the stand-down:
+  // true only for a workspace whose page was loaded then (its web stream was
+  // open) and whose sidebar row was not folded away (neither its repository
+  // nor its subsection folded). False: the handover loads no page for it, and
+  // a page the editor holds is dropped rather than reloaded, so its next open
+  // mounts it fresh on the successor (owner ruling, 2026-11-13). UNSET from a
+  // daemon that predates the field: the editor reloads a page it holds, as it
+  // always did.
+  optional bool reload_page = 1;
+}
 message HostWorkspaceTransferWithdrawn {}
 message HostWorkspaceReloadWebapp {
   // THE WEBAPP BUILD A DEPLOY BRINGS, which every page and the host page

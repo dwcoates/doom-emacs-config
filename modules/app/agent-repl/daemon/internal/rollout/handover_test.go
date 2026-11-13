@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2215,4 +2216,214 @@ func TestATakenBackWorkspaceIsOfferedAgainAtDispatchQuiet(t *testing.T) {
 	if len(offers) != 2 || offers[1] != bounce.GateDispatchQuiet {
 		t.Fatalf("offers = %v, want the first transfer and its re-offer, both at dispatch quiet", offers)
 	}
+}
+
+// ---- the rollout order and the page loads (owner ruling, 2026-11-13) -------
+
+// foldRepositoryOf folds the sidebar section of WS's repository.
+func foldRepositoryOf(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
+		t.Fatalf("SetRepositoryFolded: %v", err)
+	}
+}
+
+// foldSubsectionOf files WS in a subsection of its repository and folds it.
+func foldSubsectionOf(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	sub, err := h.db.CreateSubsection(context.Background(), record.Repo, "folded")
+	if err != nil {
+		t.Fatalf("CreateSubsection: %v", err)
+	}
+	if err := h.db.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{ws}, &sub.ID, wsm.AtEnd{}); err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	if err := h.db.SetSubsectionFolded(context.Background(), sub.ID, true); err != nil {
+		t.Fatalf("SetSubsectionFolded: %v", err)
+	}
+}
+
+func TestFoldedRows(t *testing.T) {
+	tests := []struct {
+		name string
+		fold func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		want bool
+	}{
+		{name: "a workspace in an unfolded repository and no subsection is unfolded", fold: func(*testing.T, *harness, ids.WorkspaceID) {}, want: false},
+		{name: "a workspace whose repository is folded is folded", fold: foldRepositoryOf, want: true},
+		{name: "a workspace whose subsection is folded is folded", fold: foldSubsectionOf, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tc.fold(t, h, ws)
+			record, err := h.db.Workspace(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+
+			// Act
+			got, err := h.c.foldedRows(context.Background(), []wsm.Workspace{record})
+
+			// Assert
+			if err != nil || got[ws] != tc.want {
+				t.Fatalf("foldedRows = (%v, %v), want folded %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnfoldedFirst(t *testing.T) {
+	a, b, c, d := wsm.Workspace{ID: "a"}, wsm.Workspace{ID: "b"}, wsm.Workspace{ID: "c"}, wsm.Workspace{ID: "d"}
+	tests := []struct {
+		name   string
+		folded map[ids.WorkspaceID]bool
+		want   []ids.WorkspaceID
+	}{
+		{name: "nothing folded keeps the order", folded: nil, want: []ids.WorkspaceID{"a", "b", "c", "d"}},
+		{name: "the folded follow every unfolded, each group in order", folded: map[ids.WorkspaceID]bool{"a": true, "c": true}, want: []ids.WorkspaceID{"b", "d", "a", "c"}},
+		{name: "everything folded keeps the order", folded: map[ids.WorkspaceID]bool{"a": true, "b": true, "c": true, "d": true}, want: []ids.WorkspaceID{"a", "b", "c", "d"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := unfoldedFirst([]wsm.Workspace{a, b, c, d}, tc.folded)
+
+			// Assert
+			var names []ids.WorkspaceID
+			for _, ws := range got {
+				names = append(names, ws.ID)
+			}
+			if !slices.Equal(names, tc.want) {
+				t.Fatalf("order = %v, want %v", names, tc.want)
+			}
+		})
+	}
+}
+
+func TestAFoldedWorkspaceIsTransferredOnlyOnceEveryUnfoldedTransferHasRun(t *testing.T) {
+	// Arrange: the folded workspace is registered FIRST, so only the fold
+	// puts it second.
+	h := newHarness(t)
+	folded, _ := h.workspace(t)
+	unfolded, _ := h.workspace(t)
+	foldRepositoryOf(t, h, folded)
+	var foldedAskedAtUnfoldedSeal []bool
+	h.registry.onSeal = func(ws ids.WorkspaceID) {
+		if ws != unfolded {
+			return
+		}
+		asked := false
+		for _, call := range h.registry.requests {
+			asked = asked || call.WS == folded
+		}
+		foldedAskedAtUnfoldedSeal = append(foldedAskedAtUnfoldedSeal, asked)
+	}
+
+	// Act
+	handOverUntilWindow(t, h)
+	h.registry.awaitRequest(t, func(c registryCall) bool { return c.WS == folded })
+
+	// Assert
+	h.registry.mu.Lock()
+	defer h.registry.mu.Unlock()
+	if len(foldedAskedAtUnfoldedSeal) != 1 || foldedAskedAtUnfoldedSeal[0] {
+		t.Fatalf("folded asked at the unfolded transfer's seal = %v, want asked only after it", foldedAskedAtUnfoldedSeal)
+	}
+}
+
+func TestAFoldedTransferDoesNotWaitOnAnUnfoldedOneRegisteredBehindItsWork(t *testing.T) {
+	// Arrange: every request is registered unrun, as one behind its work is.
+	h := newHarness(t)
+	folded, _ := h.workspace(t)
+	unfolded, _ := h.workspace(t)
+	foldRepositoryOf(t, h, folded)
+	h.registry.park = true
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	call := h.registry.awaitRequest(t, func(c registryCall) bool { return c.WS == folded })
+
+	// Assert
+	if call.WS != folded || !h.registry.Pending(unfolded) {
+		t.Fatalf("requests %+v, want the folded transfer asked while the unfolded one waits", h.registry.Requests())
+	}
+}
+
+func TestTheTransferNoticeSaysWhetherTheHandoverLoadsThePage(t *testing.T) {
+	tests := []struct {
+		name string
+		web  bool
+		fold func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		want bool
+	}{
+		{name: "a page loaded at the announcement, unfolded, is reloaded", web: true, fold: func(*testing.T, *harness, ids.WorkspaceID) {}, want: true},
+		{name: "no page loaded at the announcement is never loaded", web: false, fold: func(*testing.T, *harness, ids.WorkspaceID) {}, want: false},
+		{name: "a folded workspace's page is never loaded", web: true, fold: foldRepositoryOf, want: false},
+		{name: "a workspace in a folded subsection has its page never loaded", web: true, fold: foldSubsectionOf, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.participants.Set(ws, Participants{Host: true, Web: tc.web})
+			tc.fold(t, h, ws)
+
+			// Act
+			handOverUntilWindow(t, h)
+
+			// Assert
+			var got []bool
+			for _, call := range h.pusher.Calls() {
+				if call.WS == ws && call.Kind == "transferred" {
+					got = append(got, call.ReloadPage)
+				}
+			}
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("transferred reload_page = %v, want [%v]", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAHandoverWhoseFoldsCannotBeReadIsAbandonedBeforeTheAnnouncement(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.db = arrangementFailing{DB: h.db}
+	h.c.deps.DB = h.db
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("HandOver succeeded, want it abandoned")
+	}
+	if !hasRecord(h, opHandover, "error", "could not read which sidebar rows are folded; the handover is abandoned before anything was announced") {
+		t.Fatalf("records = %+v, want the abandonment at ERROR", records(h.log, opHandover))
+	}
+	if len(h.announcer.Sent()) != 0 {
+		t.Fatalf("the stand-down was announced, want nothing announced")
+	}
+}
+
+// arrangementFailing is a state handle whose arrangement read fails.
+type arrangementFailing struct{ wsm.DB }
+
+func (arrangementFailing) ReadArrangement(context.Context) (wsm.Arrangement, error) {
+	return wsm.Arrangement{}, errors.New("the arrangement read failed")
 }

@@ -30,8 +30,13 @@ type handoverPlan struct {
 	workspaces     []wsm.Workspace
 	untransferable []wsm.Workspace
 	snapshot       map[ids.WorkspaceID]Participants
-	forced         bool
-	fields         dlog.Context
+	// folded marks each workspace whose sidebar row was folded away when the
+	// handover was announced: its repository or its subsection folded
+	// (foldedRows). A folded workspace transfers after every unfolded one,
+	// and its page is never loaded by the handover (reloadsPage).
+	folded map[ids.WorkspaceID]bool
+	forced bool
+	fields dlog.Context
 	// restart marks a STOP-THEN-START rollout (Restart): no successor is
 	// listening, so a workspace's serving stands down with no transfer notice
 	// and no adoption window, and the end spawns a replacement and exits.
@@ -272,6 +277,19 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
+	// THE FOLDS ARE READ BEFORE THE ANNOUNCEMENT, as the participants are
+	// snapshotted at it: what the handover loads and in what order it moves
+	// the workspaces are decided from the sidebar as it stood when it began,
+	// never from what it has become by each transfer (owner ruling,
+	// 2026-11-13).
+	folded, err := c.foldedRows(ctx, workspaces)
+	if err != nil {
+		c.log.Error(opHandover, "could not read which sidebar rows are folded; the handover is abandoned before anything was announced",
+			dlog.WithCause(fields, err))
+		c.abandonHandover(ctx, slot, fields, err)
+		return nil, err
+	}
+	workspaces = unfoldedFirst(workspaces, folded)
 	c.fixServed(slot, address, workspaces, untransferable, fields)
 
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
@@ -326,13 +344,62 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		workspaces:     workspaces,
 		untransferable: untransferable,
 		snapshot:       snapshot,
+		folded:         folded,
 		forced:         force,
 		fields:         fields,
 	}, nil
 }
 
+// foldedRows answers, for each of WORKSPACES, whether its sidebar row is
+// folded away: its repository's section folded, or the subsection it is filed
+// in folded (the sidebar arrangement, wsm.ReadArrangement).
+func (c *controller) foldedRows(ctx context.Context, workspaces []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
+	arrangement, err := c.deps.DB.ReadArrangement(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rollout: handover: read the sidebar arrangement: %w", err)
+	}
+	repos := make(map[ids.RepoID]bool, len(arrangement.Repositories))
+	for _, repo := range arrangement.Repositories {
+		repos[repo.ID] = repo.Folded
+	}
+	subsections := make(map[ids.SubsectionID]bool, len(arrangement.Subsections))
+	for _, sub := range arrangement.Subsections {
+		subsections[sub.ID] = sub.Folded
+	}
+	out := make(map[ids.WorkspaceID]bool, len(workspaces))
+	for _, ws := range workspaces {
+		out[ws.ID] = repos[ws.Repo] || (ws.Subsection != nil && subsections[*ws.Subsection])
+	}
+	return out, nil
+}
+
+// unfoldedFirst orders WORKSPACES with every unfolded one before every folded
+// one, each group in the order it came.
+func unfoldedFirst(workspaces []wsm.Workspace, folded map[ids.WorkspaceID]bool) []wsm.Workspace {
+	out := make([]wsm.Workspace, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if !folded[ws.ID] {
+			out = append(out, ws)
+		}
+	}
+	for _, ws := range workspaces {
+		if folded[ws.ID] {
+			out = append(out, ws)
+		}
+	}
+	return out
+}
+
+// reloadsPage reports whether WS's transfer loads its page at the successor:
+// only when its page was loaded when the handover was announced (its web
+// stream was open, the snapshot) and its row was not folded away then.
+func (p *handoverPlan) reloadsPage(ws ids.WorkspaceID) bool {
+	return p.snapshot[ws].Web && !p.folded[ws]
+}
+
 // completeHandover is the UNBOUNDED half: every workspace's transfer is
-// asked of the prompt queue's bounce registry AT ONCE.
+// asked of the prompt queue's bounce registry, every unfolded workspace's at
+// once and then every folded one's.
 //
 // A HANDOVER NEVER WAITS ON WORK (owner ruling, 2026-09-27). Each transfer
 // asks for the DISPATCH-QUIET gate, so the registry takes it the moment no
@@ -357,40 +424,81 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 	fields := plan.fields
 	var windows sync.WaitGroup
 	outcomes := make(chan transferOutcome, len(plan.workspaces))
-	requested := 0
+	// THE UNFOLDED MOVE FIRST (owner ruling, 2026-11-13). The folded ones are
+	// asked for only once every unfolded transfer has RUN, or has been
+	// registered behind work of its own, so no folded transfer competes with
+	// an unfolded one for the successor's adoption.
+	var unfolded, folded []wsm.Workspace
 	for _, ws := range plan.workspaces {
-		ws := ws
-		req := c.timeTransfer(ws.ID, bounce.Request{
-			Reason:       string(ReasonHandoverTransfer),
-			Force:        plan.forced,
-			KeepDraining: true,
-			WaitFor:      bounce.GateDispatchQuiet,
-			Run: func(runCtx context.Context, id ids.WorkspaceID) error {
-				return c.transfer(runCtx, ws, plan, &windows)
-			},
-			Done: func(err error) { outcomes <- transferOutcome{ws: ws.ID, err: err} },
-		})
-		decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, req)
-		if err != nil {
-			c.log.Error(opTransfer, "the bounce registry refused the workspace's transfer; the handover cannot finish while this daemon still serves it",
-				dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
-			continue
+		if plan.folded[ws.ID] {
+			folded = append(folded, ws)
+		} else {
+			unfolded = append(unfolded, ws)
 		}
-		requested++
-		c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace", dlog.Merge(fields, dlog.Context{
-			"workspace":      string(ws.ID),
-			"now":            decision.Now,
-			"forced":         decision.Forced,
-			"turn_in_flight": decision.TurnInFlight,
-			"detached_work":  decision.DetachedWork,
-		}))
 	}
-	refused := len(plan.workspaces) - requested
+	var first sync.WaitGroup
+	requested := 0
+	for _, ws := range unfolded {
+		first.Add(1)
+		if c.requestTransfer(ctx, ws, plan, &windows, outcomes, sync.OnceFunc(first.Done)) {
+			requested++
+		}
+	}
 	c.handoverDone.Add(1)
 	inflight.Standing(func() {
 		defer c.handoverDone.Done()
+		first.Wait()
+		if len(folded) > 0 {
+			c.log.Info(opTransfer, "every unfolded workspace's transfer has run or waits on its work; transferring the folded ones",
+				dlog.Merge(fields, dlog.Context{"unfolded": len(unfolded), "folded": len(folded)}))
+		}
+		for _, ws := range folded {
+			if c.requestTransfer(ctx, ws, plan, &windows, outcomes, func() {}) {
+				requested++
+			}
+		}
+		refused := len(plan.workspaces) - requested
 		c.followHandover(ctx, plan, outcomes, requested, refused, &windows)
 	})
+}
+
+// requestTransfer asks the bounce registry for WS's transfer and answers
+// whether it was taken. SETTLED is called once the transfer has run, or at
+// once when it was refused or registered behind the workspace's own work.
+func (c *controller) requestTransfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, outcomes chan<- transferOutcome, settled func()) bool {
+	fields := plan.fields
+	req := c.timeTransfer(ws.ID, bounce.Request{
+		Reason:       string(ReasonHandoverTransfer),
+		Force:        plan.forced,
+		KeepDraining: true,
+		WaitFor:      bounce.GateDispatchQuiet,
+		Run: func(runCtx context.Context, id ids.WorkspaceID) error {
+			return c.transfer(runCtx, ws, plan, windows)
+		},
+		Done: func(err error) {
+			settled()
+			outcomes <- transferOutcome{ws: ws.ID, err: err}
+		},
+	})
+	decision, err := c.deps.Bounces.RequestBounce(ctx, ws.ID, req)
+	if err != nil {
+		settled()
+		c.log.Error(opTransfer, "the bounce registry refused the workspace's transfer; the handover cannot finish while this daemon still serves it",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
+		return false
+	}
+	if !decision.Now {
+		settled()
+	}
+	c.log.Info(opTransfer, "asked the bounce registry to transfer the workspace", dlog.Merge(fields, dlog.Context{
+		"workspace":      string(ws.ID),
+		"now":            decision.Now,
+		"forced":         decision.Forced,
+		"turn_in_flight": decision.TurnInFlight,
+		"detached_work":  decision.DetachedWork,
+		"folded":         plan.folded[ws.ID],
+	}))
+	return true
 }
 
 // transferOutcome is one transfer's end.
@@ -594,9 +702,11 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	}
 
 	c.recordTransfer(ws.ID, successor)
-	c.deps.Pusher.PushTransferred(ws.ID, successor)
+	reloadPage := plan.reloadsPage(ws.ID)
+	c.deps.Pusher.PushTransferred(ws.ID, successor, reloadPage)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
-		dlog.Merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web}))
+		dlog.Merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web,
+			"reload_page": reloadPage, "page_at_announcement": plan.snapshot[ws.ID].Web, "folded": plan.folded[ws.ID]}))
 	wsLog.Info(opTransfer, "the workspace is the successor's now; any later record from this daemon about it is the predecessor winding down, not the workspace's status",
 		dlog.Merge(plan.fields, fields))
 

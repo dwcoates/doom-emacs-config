@@ -751,8 +751,18 @@ element; the text itself may be empty (a prompt that is an image alone)."
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
 (defun agent-repl-wire-decode-host-workspace-transferred (value)
-  "Decode VALUE as the empty message `HostWorkspaceTransferred'."
-  (agent-repl-wire--decode-empty "HostWorkspaceTransferred" value))
+  "Decode VALUE as `HostWorkspaceTransferred', a plist `(:reload-page R)'.
+`reload_page' is OPTIONAL: R is :reload when the handover loads the
+workspace\='s page at the successor, :no-reload when it loads none, and
+:unset from a daemon that predates the field."
+  (let ((object (agent-repl-wire--object "HostWorkspaceTransferred" value)))
+    (agent-repl-wire--check-keys "HostWorkspaceTransferred" object '(reloadPage))
+    (agent-repl-wire--decoded
+     "HostWorkspaceTransferred"
+     (list :reload-page
+           (cond ((not (agent-repl-wire--present-p object 'reloadPage)) :unset)
+                 ((agent-repl-wire--decode-bool "HostWorkspaceTransferred" 'reloadPage object) :reload)
+                 (t :no-reload))))))
 
 (defun agent-repl-wire-decode-host-workspace-transfer-withdrawn (value)
   "Decode VALUE as the empty message `HostWorkspaceTransferWithdrawn'."
