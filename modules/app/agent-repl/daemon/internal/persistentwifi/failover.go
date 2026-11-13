@@ -30,149 +30,139 @@ func (c *Controller) tick(ctx context.Context) {
 }
 
 // failoverRetryIn answers how long until the Wi-Fi failover's next step is
-// due, and whether one is waiting at all: only after a failed attempt or while
-// the known-network step settles, while the last standing still wants the
-// failover.
+// due, and whether one is waiting at all: while a loss stands in the lid-closed
+// quiet state, its grace or its retry interval running.
 func (c *Controller) failoverRetryIn() (time.Duration, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.failover
-	if s.lost.IsZero() || s.next.IsZero() || c.last == nil || !failoverWants(c.last) {
+	if s.lost.IsZero() || s.next.IsZero() || c.last == nil || !c.quiet || !failoverWants(c.last) {
 		return 0, false
 	}
 	return max(s.next.Sub(c.clock.Now()), 0), true
 }
 
-// failoverLocked is THE WI-FI FAILOVER: while the mode is on, a Wi-Fi
-// interface that is joined to nothing is brought back to a network, the ones
-// macOS already knows first and the configured hotspot second. Each attempt:
+// failoverLocked is THE WI-FI FAILOVER (owner ruling 2026-11-13): while the
+// lid-closed quiet state stands (the lid closed, the mode on), a Wi-Fi
+// interface that has been joined to nothing for failoverLossGrace is brought
+// back to a network: the owner's saved networks by name, in their preference
+// order (rejoinSavedLocked), then the configured hotspot (joinHotspotLocked).
 //
-//  1. cycles the Wi-Fi radio's power (rejoinKnownLocked), which makes macOS
-//     auto-join its preferred networks, the home network among them, whose
-//     name it hides from the daemon; a network joined then ends the failover;
-//  2. otherwise waits knownNetworkSettle for macOS's auto-join, during which a
-//     network change that finds a network joined ends the failover;
-//  3. joins the hotspot (joinHotspotLocked) once the wait passes with nothing
-//     joined, or at once when the radio cannot be cycled.
+// IT NEVER POWER-CYCLES THE RADIO, and it never acts with the lid open. On
+// 2026-11-13 a radio cycle 71ms into an ordinary network switch, with the lid
+// open, cut the owner's connection twice; with the lid open macOS roams on its
+// own and the owner is there to see it. The grace keeps a switch that macOS
+// finishes by itself from being taken for a loss.
 //
-// The first read that finds the mode on and no network starts an attempt at
-// once. A step that does not take is an outcome, never an error: the attempt
-// is made again on the retry schedule (failoverBackoff), which backs off to
-// once a minute after five minutes and never gives up while the loss lasts.
-// Each distinct cause a step cannot take is recorded once per step
-// (knownCause, failoverCause), and the failover's end is recorded when it made
-// an attempt. Caller holds mu.
+// A step that does not take is an outcome, never an error: the attempt is
+// made again on the retry schedule (failoverBackoff), which backs off to once
+// a minute after five minutes and never gives up while the loss lasts. Each
+// distinct cause a step cannot take is recorded once per step (knownCause,
+// failoverCause), and the failover's end is recorded when it made an attempt.
+// Caller holds mu.
 func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
-	if !failoverWants(rd.state) {
+	if !c.quiet || !failoverWants(rd.state) {
 		c.standDownFailoverLocked(rd)
 		return
 	}
 	now := c.clock.Now()
 	if c.failover.lost.IsZero() {
 		c.failover.lost = now
+		c.failover.next = now.Add(failoverLossGrace)
 		c.recordLossLocked(ctx, rd)
+		return
 	}
-
 	if !c.failover.due(now) {
 		return
 	}
-
-	known := knownSettled
-	if !c.failover.settling {
-		c.failover.attempts++
-		var done bool
-		if done, known = c.rejoinKnownLocked(ctx, rd); done {
-			return
-		}
+	c.failover.attempts++
+	if c.rejoinSavedLocked(ctx, rd) {
+		return
 	}
-	c.failover.settling = false
-	c.joinHotspotLocked(ctx, rd, known)
+	c.joinHotspotLocked(ctx, rd)
 }
 
-// knownNetworkSettle is how long after the radio cycle macOS is left to
-// auto-join a network it knows before the hotspot is joined. Measured: on the
-// 2026-11-12 incident the home network rejoined by itself 9s after the lid
-// opened (00:44:01 to 00:44:10 UTC); the wait is two to three times that.
-const knownNetworkSettle = 20 * time.Second
+// failoverLossGrace is how long Wi-Fi must stay lost before the failover acts.
+// Measured: on 2026-11-12 macOS rejoined the home network by itself 9s after
+// the lid opened (00:44:01 to 00:44:10 UTC); the grace is two to three times
+// that, so a network switch macOS completes is never acted on.
+const failoverLossGrace = 20 * time.Second
 
-// The known-network step's outcomes a hotspot join follows, for its record.
-const (
-	// knownSettled: the radio cycled and no network was joined within
-	// knownNetworkSettle.
-	knownSettled = "none_joined_within_settle"
-	// knownRadioFailed: the radio could not be cycled.
-	knownRadioFailed = "radio_cycle_failed"
-	// knownNoInterface: the machine has no Wi-Fi interface to cycle.
-	knownNoInterface = "no_wifi_interface"
-)
-
-// rejoinKnownLocked is the failover's FIRST STEP: cycle the Wi-Fi radio's power
-// so macOS auto-joins the networks it knows. macOS withholds the joined
-// network's name from the daemon (probe.go), so no known network can be named
-// to join; the radio cycle is the one request that makes macOS run its own
-// auto-join over every preferred network, and it is what turning the mode off
-// already does to leave the hotspot (restartRadio). The read after it tells
-// whether a network came back at once; when none did, the failover waits
-// knownNetworkSettle for one (settling) before the hotspot. done answers
-// whether the beat's attempt is over; when it is not, known names why the
-// hotspot is joined now. Caller holds mu.
-func (c *Controller) rejoinKnownLocked(ctx context.Context, rd reading) (done bool, known string) {
+// rejoinSavedLocked is the failover's FIRST STEP: join the owner's saved
+// networks BY NAME, in the preference order `networksetup
+// -listpreferredwirelessnetworks` lists them (readable without the location
+// permission the joined network's name needs), the configured hotspot
+// excepted (the second step joins it). macOS supplies each one's password from
+// the keychain; one out of range fails ("Could not find network") and
+// disconnects nothing. It answers whether a saved network was joined, which
+// ends the failover. Saved network names are the owner's: the records name
+// how many there are and which index was tried, never the name. Caller holds
+// mu.
+func (c *Controller) rejoinSavedLocked(ctx context.Context, rd reading) bool {
 	if rd.device == "" {
-		// No interface, no radio: the hotspot step names the outcome.
-		return false, knownNoInterface
+		// No interface: the hotspot step names the outcome.
+		return false
 	}
-	c.log.Info(opFailover, "Wi-Fi was lost with persistent wifi on; cycling the Wi-Fi radio so macOS rejoins a network it knows",
-		dlog.Context{"device": rd.device, "attempt": c.failover.attempts, "lost_for": c.clock.Now().Sub(c.failover.lost).String()})
-	var failures []string
-	c.restartRadio(ctx, rd.device, &failures)
-	if len(failures) > 0 {
-		c.recordStandingCause(&c.knownCause, strings.Join(failures, "; "), func(cause string) {
-			c.log.Warn(opFailover, "the Wi-Fi radio could not be cycled to rejoin a network macOS knows; the hotspot is joined at once",
+	out, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-listpreferredwirelessnetworks", rd.device)
+	if err != nil {
+		c.recordStandingCause(&c.knownCause, err.Error(), func(cause string) {
+			c.log.Error(opFailover, "the saved Wi-Fi networks could not be read to rejoin one; the hotspot is tried",
 				dlog.Context{"device": rd.device, "cause": cause})
 		})
-		return false, knownRadioFailed
+		return false
 	}
-	after := c.readLocked(ctx)
-	if ctx.Err() != nil {
-		// An abandoned read says nothing about the link (readLocked).
-		return true, ""
+	var saved []string
+	for _, name := range preferredNetworks(out) {
+		if !sameNetwork(name, c.cfg.Hotspot) {
+			saved = append(saved, name)
+		}
 	}
-	if after.state.GetJoined() != nil {
-		c.log.Info(opFailover, "a network macOS knows was joined after the Wi-Fi radio was cycled", dlog.Context{
-			"network_name": after.state.GetJoined().GetNetworkName(), "attempts": c.failover.attempts,
+	for i, name := range saved {
+		joinOut, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-setairportnetwork", rd.device, name)
+		if err != nil || strings.TrimSpace(joinOut) != "" {
+			// `-setairportnetwork` prints nothing on success and a sentence
+			// naming the network on failure, so only the index is kept.
+			c.log.Debug(opFailover, "a saved Wi-Fi network could not be joined", dlog.Context{
+				"device": rd.device, "index": i, "saved": len(saved), "failed": err != nil})
+			continue
+		}
+		after := c.readLocked(ctx)
+		if ctx.Err() != nil {
+			// An abandoned read says nothing about the link (readLocked).
+			return true
+		}
+		if after.state.GetJoined() == nil {
+			continue
+		}
+		c.log.Info(opFailover, "a saved Wi-Fi network was rejoined after Wi-Fi was lost", dlog.Context{
+			"device": rd.device, "index": i, "saved": len(saved), "attempts": c.failover.attempts,
 			"was": c.failoverCause, "lost_for": c.clock.Now().Sub(c.failover.lost).String(),
 		})
 		c.endFailoverLocked()
-		return true, ""
+		return true
 	}
-	fields := dlog.Context{"device": rd.device, "wifi": wifiArm(after.state), "settle": knownNetworkSettle.String()}
-	if power, err := readRadioPower(ctx, c.runner, c.cfg.Tools, rd.device); err != nil {
-		fields["radio_power"] = "unreadable"
-		fields["radio_power_cause"] = err.Error()
-	} else {
-		fields["radio_power"] = power
-	}
-	c.failover.settling = true
-	c.failover.next = c.clock.Now().Add(knownNetworkSettle)
-	c.log.Info(opFailover, "the Wi-Fi radio was cycled and no network is joined yet; the hotspot is joined unless macOS joins a network it knows within the settle", fields)
-	return true, ""
+	c.knownCause = ""
+	c.log.Info(opFailover, "no saved Wi-Fi network could be rejoined; the hotspot is tried", dlog.Context{
+		"device": rd.device, "saved": len(saved), "attempt": c.failover.attempts,
+		"lost_for": c.clock.Now().Sub(c.failover.lost).String(),
+	})
+	return false
 }
 
 // joinHotspotLocked is the failover's SECOND STEP: join the configured
-// hotspot, known naming how the known-network step ended. A join that does not
-// take, or a hotspot that is not configured, schedules the next attempt.
-// Caller holds mu.
-func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading, known string) {
+// hotspot. A join that does not take, or a hotspot that is not configured,
+// schedules the next attempt. Caller holds mu.
+func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading) {
 	if c.cfg.Hotspot == "" {
 		c.failover.failed(c.clock.Now())
 		c.recordFailoverCause(errNoHotspot().Error(), func(cause string) {
-			c.log.Error(opFailover, "Wi-Fi was lost with persistent wifi on, no network macOS knows came back, and no hotspot is configured to join",
-				dlog.Context{"env": EnvHotspot, "known_network": known, "cause": cause})
+			c.log.Error(opFailover, "Wi-Fi was lost with the lid closed, no saved network could be rejoined, and no hotspot is configured to join",
+				dlog.Context{"env": EnvHotspot, "cause": cause})
 		})
 		return
 	}
-	c.log.Info(opFailover, "no network macOS knows came back; joining the hotspot", dlog.Context{
-		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": c.failover.attempts, "known_network": known,
+	c.log.Info(opFailover, "joining the hotspot after Wi-Fi was lost", dlog.Context{
+		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": c.failover.attempts,
 		"lost_for": c.clock.Now().Sub(c.failover.lost).String(),
 	})
 	outcome := c.joinHotspot(ctx, rd)
@@ -194,7 +184,7 @@ func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading, known st
 	c.recordFailoverCause(cause, func(cause string) {
 		c.log.Warn(opFailover, "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule",
 			dlog.Context{"hotspot": c.cfg.Hotspot, "outcome": hotspotArm(outcome), "cause": cause,
-				"known_network": known, "retry_every": every.String()})
+				"retry_every": every.String()})
 	})
 	if backedOff {
 		c.log.Info(opFailover, "the Wi-Fi failover backs off: it is now tried less often",
@@ -237,16 +227,21 @@ func (c *Controller) recordLossLocked(ctx context.Context, rd reading) {
 }
 
 // standDownFailoverLocked ends the failover once the mode is off or a network
-// is joined: its schedule restarts from nothing on the next loss, and its end
-// is recorded when it made an attempt or something stood against it, which is
-// how a network macOS joined by itself during the settle is recorded. Caller
-// holds mu.
+// is joined, or the lid opens: its schedule restarts from nothing on the next
+// loss, its end is recorded when it made an attempt or something stood against
+// it, and a loss that ended within the grace is recorded at DEBUG. Caller holds
+// mu.
 func (c *Controller) standDownFailoverLocked(rd reading) {
-	if c.failoverCause != "" || c.knownCause != "" || c.failover.attempts > 0 {
-		c.log.Info(opFailover, "the Wi-Fi failover stood down: the mode is off or a network is joined",
-			dlog.Context{"wifi": wifiArm(rd.state), "mode": modeArm(rd.state), "network_name": rd.state.GetJoined().GetNetworkName(),
-				"was": c.failoverCause, "was_known": c.knownCause, "awaiting_known_network": c.failover.settling,
-				"attempts": c.failover.attempts})
+	switch {
+	case c.failoverCause != "" || c.knownCause != "" || c.failover.attempts > 0:
+		c.log.Info(opFailover, "the Wi-Fi failover stood down: a network is joined, the lid opened or the mode is off",
+			dlog.Context{"wifi": wifiArm(rd.state), "mode": modeArm(rd.state), "quiet": c.quiet,
+				"network_name": rd.state.GetJoined().GetNetworkName(),
+				"was":          c.failoverCause, "was_saved": c.knownCause, "attempts": c.failover.attempts})
+	case !c.failover.lost.IsZero():
+		c.log.Debug(opFailover, "a Wi-Fi loss ended before the failover's grace, so nothing was done",
+			dlog.Context{"wifi": wifiArm(rd.state), "quiet": c.quiet, "grace": failoverLossGrace.String(),
+				"lost_for": c.clock.Now().Sub(c.failover.lost).String()})
 	}
 	c.endFailoverLocked()
 }
@@ -279,7 +274,7 @@ func failoverWants(s *agentreplv1.PersistentWifiState) bool {
 // one that ends later is tried again failoverRetryAfterBackoff later, for as
 // long as Wi-Fi stays lost with the mode on. It never gives up: a give-up after
 // three hours left the machine offline for hours on 2026-11-12, and an attempt
-// a minute costs one radio cycle and one join.
+// a minute costs a few joins that disconnect nothing.
 var failoverBackoff = []struct{ until, every time.Duration }{
 	{until: 5 * time.Minute, every: 5 * time.Second},
 }
@@ -311,14 +306,10 @@ type failoverSchedule struct {
 	every time.Duration
 	// attempts counts the attempts run since the loss.
 	attempts int
-	// settling is set while the radio was cycled and macOS is left until next
-	// to auto-join a network it knows; the beat it falls due joins the hotspot.
-	settling bool
 }
 
-// due answers whether a beat at now runs the failover's next step. The loss
-// was started (lost) by the beat that first found it; a loss's first beat has
-// no next and attempts at once.
+// due answers whether a beat at now runs the failover's next step. The beat
+// that first found the loss set next to the end of its grace.
 func (s *failoverSchedule) due(now time.Time) bool {
 	return !now.Before(s.next)
 }

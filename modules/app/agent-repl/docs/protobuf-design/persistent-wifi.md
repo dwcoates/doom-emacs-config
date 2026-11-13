@@ -148,7 +148,7 @@ quiet state, not the switch.
     off, so a give-up lasts until then.
   - Each back-off is recorded once at INFO, and the give-up once at WARN.
 
-### 8. The failover rejoins a known network first (2026-11-13, no wire change)
+### 8. The failover rejoins a known network first (2026-11-13, no wire change; SUPERSEDED by section 11)
 
 - WHAT: each failover attempt first cycles the Wi-Fi radio's power
   (`networksetup -setairportpower <device> off`, then `on`), reads the
@@ -237,3 +237,33 @@ quiet state, not the switch.
     booting meanwhile reaches the same answer by state.
   - The sudoers grant gains `powermode 0`, since the mode restored may be
     Automatic (`docs/USER-GUIDE.md`).
+
+### 11. The failover rejoins saved networks by name, lid closed only (2026-11-13, no wire change)
+
+- WHAT: the failover acts only while the lid-closed quiet state stands, and
+  only once Wi-Fi has stayed lost for `failoverLossGrace` (20s). Each attempt
+  joins the owner's saved networks by name, in the preference order
+  `networksetup -listpreferredwirelessnetworks` lists them, with `networksetup
+  -setairportnetwork` (macOS supplies each password from the keychain), and
+  then the configured hotspot, which is never tried twice
+  (`rejoinSavedLocked` and `joinHotspotLocked` in
+  `daemon/internal/persistentwifi/failover.go`). It never power-cycles the
+  radio. Section 8's radio cycle and settle are removed.
+- WHY: at 13:25 on 2026-11-13, with the lid open, the radio cycle ran 71ms into
+  an ordinary network switch and cut the owner's connection twice. The cycle
+  rested on an unverified assumption, that macOS will not rejoin a known
+  network while the lid is closed, and section 8's premise was wrong: the
+  saved networks' names ARE readable without location permission; only the
+  joined network's name is withheld.
+- Consequences:
+  - With the lid open the failover does nothing: macOS roams on its own and
+    the owner is present. A loss that ends within the grace is recorded at
+    DEBUG and acted on not at all.
+  - Saved network names are the owner's: the failover's records name how
+    many there are and which index was tried, never a name.
+  - The loss record (radio power, link summary, lid, quiet state, display,
+    energy mode) stays, now written for a lid-closed loss, so the next one
+    shows whether macOS powered the radio down or only disassociated.
+  - Turning the mode off still leaves the hotspot with `wifi-util disconnect`
+    and a radio restart when that does not take; that is the owner's own
+    request, not the failover.
