@@ -12,29 +12,24 @@
 # owner is using. How many cores overlapping runs hold together is bounded
 # by testrun's host core budget (testrun/internal/cores, owner ruling
 # 2026-10-20), which ranks runs by the niceness this sets.
-# Owner ruling: tests run at background priority, for sure.
+# Owner rulings: tests run at background priority (2026-09-23), which on
+# macOS since 2026-11-13 means a throttled disk and the run's rank, never a
+# demoted CPU: the CPU governor moderates the tests' CPU.
 #
 # WHAT IT DOES, per platform. There is no silent path: every platform either
 # demotes the command or refuses to run it.
 #
-#   Darwin  the UTILITY QoS clamp (`taskpolicy -c utility`, owner ruling
-#           2026-11-13: tests at macOS background priority, so foreground
-#           work always wins at the scheduler), its disk I/O throttled
-#           (`-d throttle`), and `nice`. Measured 2026-11-13 with `ps -M` on
-#           an idle process: nice alone leaves a thread at priority 31, the
-#           same as the owner's own (macOS schedules by QoS, and `nice` moves
-#           nothing here); the utility clamp puts every thread of the run at
-#           20 or below, under the owner's default 31 and user-initiated 37.
-#           The run keeps the performance cores: utility QoS is eligible
-#           for every core (only the background and maintenance classes are
-#           confined to the efficiency cores; not measured under load, which
-#           is never generated here). The background clamp (`-c background` or `-b`, priority
-#           4) was rejected on merit: on Apple silicon it confines a run to
-#           the efficiency cores, 4 of this host's 16, below the tests'
-#           5.6-core target, and `-b` was measured 2026-09-23 failing the
-#           webapp integration suite (56-58 of 1765 passed, its files past
-#           their 1800ms boot-hook bound). The clamp is a ceiling every
-#           child inherits: a thread asking for a higher QoS gets utility.
+#   Darwin  `nice`, and the run's disk I/O throttled (`-d throttle`). The CPU
+#           is NOT demoted (owner ruling 2026-11-13): a test at a lower
+#           scheduler priority than the owner's work runs slower whenever
+#           that work is busy, and trips time limits measured at full speed.
+#           The CPU governor alone moderates the tests (testrun's cores: the
+#           tests average 35% of the host and never push it above 50%).
+#           `nice` demotes nothing on macOS (measured 2026-11-13 with `ps -M`:
+#           a niceness-19 thread sits at 31, the owner's own); it stays as
+#           the run's rank. The utility clamp tried 2026-11-13 killed short
+#           units at their limits, and the background clamp (`-c
+#           background`, `-b`) pins a run to the 4 efficiency cores.
 #   Linux   `nice -n 19` (owner ruling 2026-09-23, "very low"): the CFS
 #           scheduler weights a niceness-19 thread at 15 against a
 #           niceness-0 thread's 1024, so the run yields the CPU to the live
@@ -157,15 +152,13 @@ priority_exec() {
             # niceness above 0 overshoots to 20 (macOS's ceiling); the
             # increment is the distance to the target instead.
             increment=$(( target - niceness ))
-            # ON macOS, THE UTILITY QoS CLAMP AND THROTTLED DISK. The clamp
-            # is what demotes the CPU there (see WHAT IT DOES above); not
-            # `-b`, which pins to the efficiency cores. The disk (owner
-            # ruling 2026-10-06): a full run's hundreds of SQLite files
-            # starved the live store at normal I/O priority (a 111-page
-            # checkpoint took 54 s, its writes 5-7 s). Children inherit both
-            # with the niceness.
+            # ON macOS, THROTTLED DISK, NEVER A DEMOTED CPU (see WHAT IT DOES
+            # above). The disk (owner ruling 2026-10-06): a full run's
+            # hundreds of SQLite files starved the live store at normal I/O
+            # priority (a 111-page checkpoint took 54 s, its writes 5-7 s).
+            # Children inherit it with the niceness.
             if [[ $os == Darwin ]]; then
-                exec taskpolicy -c utility -d throttle nice -n "$increment" "$@"
+                exec taskpolicy -d throttle nice -n "$increment" "$@"
             fi
             exec nice -n "$increment" "$@"
             ;;

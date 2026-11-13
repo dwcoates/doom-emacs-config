@@ -1,6 +1,7 @@
 package rostermirror
 
 import (
+	"connectrpc.com/connect"
 	"context"
 	"errors"
 	"maps"
@@ -345,6 +346,33 @@ func TestAFailedSubscriptionWithdrawsTheMirrorAtError(t *testing.T) {
 				t.Fatalf("error context = %v, want the incumbent and the cause", rec.Context)
 			}
 		})
+	}
+}
+
+func TestAnIncumbentThatIsGoneEndsTheMirrorAtInfo(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := f.run(t, ctx)
+	s.Frames <- rosterFrame(row("ws-a", thinking))
+	f.awaitSunk(t)
+
+	// Act: the incumbent's connection is reset as it dies.
+	s.End(connect.NewError(connect.CodeUnavailable, errors.New("read: connection reset by peer")))
+
+	// Assert
+	if got := f.awaitSunk(t); got != nil {
+		t.Fatalf("after the incumbent went, mirrored = %v, want nothing", got)
+	}
+	f.awaitEnded(t)
+	rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: Op,
+		Message: "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own"})
+	if !ok || rec.Context["incumbent"] != "127.0.0.1:7777" || rec.Context["cause"] == nil {
+		t.Fatalf("records = %v, want the incumbent's departure at INFO with the incumbent and the cause", f.log.Records())
+	}
+	if _, bad := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: Op}); bad {
+		t.Fatalf("records = %v, want no ERROR for an incumbent that is gone", f.log.Records())
 	}
 }
 
