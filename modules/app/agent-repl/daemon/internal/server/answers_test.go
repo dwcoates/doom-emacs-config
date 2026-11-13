@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -117,6 +119,39 @@ func TestInterruptOfAgentsLeavesRevisionsRunning(t *testing.T) {
 	}
 	if len(h.Revisions.stops) != 0 {
 		t.Fatalf("revision stops = %v, want none", h.Revisions.stops)
+	}
+}
+
+// TestInterruptSucceededAnswersTheSuccessItIsGiven pins the one success
+// answer: the response carries exactly the success handed to it.
+func TestInterruptSucceededAnswersTheSuccessItIsGiven(t *testing.T) {
+	// Arrange.
+	success := &agentreplv1.InterruptSuccess{Outcome: &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: &agentreplv1.InterruptNothingRunning{}}}
+
+	// Act.
+	answered, err := interruptSucceeded(&agentreplv1.InterruptResponse{}, success)
+
+	// Assert.
+	if err != nil || answered.Msg.GetSuccess() != success {
+		t.Fatalf("interruptSucceeded() = %v, %v, want the given success", answered.Msg, err)
+	}
+}
+
+// TestInterruptAnswersEverySuccessThroughInterruptSucceeded pins that no
+// Interrupt site hand-builds its success answer.
+func TestInterruptAnswersEverySuccessThroughInterruptSucceeded(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("answers.go")
+	if err != nil {
+		t.Fatalf("read answers.go: %v", err)
+	}
+
+	// Act.
+	sites := strings.Count(string(src), "InterruptResponse_Success{")
+
+	// Assert.
+	if sites != 1 {
+		t.Fatalf("answers.go builds InterruptResponse_Success at %d sites, want only interruptSucceeded", sites)
 	}
 }
 
