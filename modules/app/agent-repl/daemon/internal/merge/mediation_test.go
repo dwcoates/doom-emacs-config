@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -74,21 +75,66 @@ func TestADeployOwesAMediationOnlyWhereAMediatorIsNamed(t *testing.T) {
 }
 
 func TestARoundCompactsTheMediatorThenTellsItOfTheDeploy(t *testing.T) {
+	compact, brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
+	tests := []struct {
+		name        string
+		conversed   bool
+		wantOrigins []conversationv1.PromptOrigin
+		wantMade    int
+	}{
+		{name: "a mediator made for this round has nothing to compact, so it is only told", wantOrigins: []conversationv1.PromptOrigin{brief}, wantMade: 1},
+		{name: "a mediator that ran a turn is compacted, then told", conversed: true, wantOrigins: []conversationv1.PromptOrigin{compact, brief}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			owe(t, h)
+			if tt.conversed {
+				h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+				h.db.turns["ws-mediator"] = []wsm.Turn{{ID: "turn-before", Workspace: "ws-mediator"}}
+			}
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			subs := h.queue.submissions
+			var origins []conversationv1.PromptOrigin
+			for _, sub := range subs {
+				if sub.WS != "ws-mediator" {
+					t.Fatalf("submitted to %s, want the mediator", sub.WS)
+				}
+				origins = append(origins, sub.Origin)
+			}
+			if fmt.Sprint(origins) != fmt.Sprint(tt.wantOrigins) {
+				t.Fatalf("submitted %v, want %v", origins, tt.wantOrigins)
+			}
+			if len(h.mediatorsMade) != tt.wantMade || h.awaitedTurns[len(h.awaitedTurns)-1] != subs[len(subs)-1].Turn {
+				t.Fatalf("made %v, awaited %v; want %d made and the brief's turn awaited", h.mediatorsMade, h.awaitedTurns, tt.wantMade)
+			}
+		})
+	}
+}
+
+func TestAMediatorWhoseTurnsCannotBeReadIsNotTold(t *testing.T) {
 	// Arrange
 	h := mediated(t)
 	owe(t, h)
+	h.db.hasTurnsErr = errors.New("disk gone")
 
 	// Act
 	h.o.Mediate(context.Background())
 
 	// Assert
-	subs := h.queue.submissions
-	if len(subs) != 2 || subs[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT ||
-		subs[1].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION || subs[0].WS != "ws-mediator" {
-		t.Fatalf("submissions %+v, want the mediator's compaction, then its brief", subs)
+	if len(h.queue.submissions) != 0 {
+		t.Fatalf("submitted %d prompts, want none", len(h.queue.submissions))
 	}
-	if len(h.mediatorsMade) != 1 || h.awaitedTurns[len(h.awaitedTurns)-1] != subs[1].Turn {
-		t.Fatalf("made %v, awaited %v; want the mediator made once and its brief's turn awaited", h.mediatorsMade, h.awaitedTurns)
+	if m, _ := h.db.MediationOf(context.Background(), mediationKey(h)); m == nil || m.Prompted() {
+		t.Fatalf("mediation %+v, want it still owed and untold", m)
+	}
+	if _, ok := h.recordFor("error", opMediation); !ok {
+		t.Fatal("no ERROR record of the unreadable turns")
 	}
 }
 

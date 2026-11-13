@@ -229,10 +229,20 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 // mediation was replaced or released meanwhile.
 func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, fields dlog.Context) (ids.TurnID, error) {
 	// EVERY ROUND OPENS ON A COMPACTED CONTEXT (owner request, 2026-11-13).
-	compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
-	if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the mediator's context could not be compacted; the queue stays held", withField(fields, "error", err.Error()))
+	// A mediator that never ran a turn has no context to compact: the vendor
+	// refuses it ("Not enough messages to compact."), so its first round
+	// opens on the empty context it has.
+	conversed, err := o.deps.DB.HasTurns(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether the mediator has a context to compact; the queue stays held", withField(fields, "error", err.Error()))
 		return "", err
+	}
+	if conversed {
+		compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
+		if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the mediator's context could not be compacted; the queue stays held", withField(fields, "error", err.Error()))
+			return "", err
+		}
 	}
 	turn := wsm.NewTurnID()
 	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, o.deps.Now(), turn)
@@ -248,7 +258,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		o.deps.Log.Global().Error(opMediation, "the mediation brief could not be submitted; the queue stays held", withField(fields, "error", err.Error()))
 		return "", err
 	}
-	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy, on a compacted context", withField(fields, "turn", string(turn)))
+	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy", withField(withField(fields, "turn", string(turn)), "compacted", conversed))
 	o.republishMediation(ctx, q.key)
 	return turn, nil
 }
