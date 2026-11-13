@@ -94,7 +94,11 @@ type fakeDB struct {
 	reposErr error
 	// drainOwed is each queue's owed drain, which AdmitMerge sets as the
 	// store's does; drainReadErr and drainClearErr fail its read and clear.
-	drainOwed     map[wsm.RepoKey]bool
+	drainOwed map[wsm.RepoKey]bool
+	// mediations is each repository's owed deploy mediation; mediationErr
+	// fails its read.
+	mediations    map[wsm.RepoKey]*wsm.Mediation
+	mediationErr  error
 	drainReadErr  error
 	drainClearErr error
 
@@ -309,7 +313,17 @@ func newFakeDB() *fakeDB {
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
 		drainOwed:     map[wsm.RepoKey]bool{},
+		mediations:    map[wsm.RepoKey]*wsm.Mediation{},
 	}
+}
+
+func (f *fakeDB) MediationOf(_ context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mediationErr != nil {
+		return nil, f.mediationErr
+	}
+	return f.mediations[repo], nil
 }
 
 func (f *fakeDB) QueueDrainOwed(_ context.Context, repo wsm.RepoKey) (bool, error) {
@@ -2742,9 +2756,9 @@ type harness struct {
 	// standing is the rollout controller's queue standing: serving, and
 	// every workspace served, unless a test says otherwise.
 	standing *fakeStanding
-	stateDir        string
-	targetD         string
-	sourceD         string
+	stateDir string
+	targetD  string
+	sourceD  string
 
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
@@ -3287,7 +3301,7 @@ func (h *harness) deps() Deps {
 		Rollout:  h.rollout,
 		Standing: h.standing,
 		Now:      h.clock,
-		Log:     h.logs,
+		Log:      h.logs,
 	}
 }
 

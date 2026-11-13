@@ -4,18 +4,22 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"agent-repld/internal/wsm"
 )
 
 func TestQueueHeld(t *testing.T) {
 	tests := []struct {
-		name   string
-		paused bool
-		serves bool
-		want   bool
+		name      string
+		paused    bool
+		serves    bool
+		mediation bool
+		want      bool
 	}{
 		{name: "a running queue this daemon serves", serves: true},
 		{name: "a paused queue", paused: true, serves: true, want: true},
 		{name: "a queue a handover holds", want: true},
+		{name: "a queue whose deploy owes a mediation", serves: true, mediation: true, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -23,6 +27,9 @@ func TestQueueHeld(t *testing.T) {
 			h := newHarness(t)
 			seedQueue(h, h.repoKey(), tt.paused)
 			h.standing.serves = tt.serves
+			if tt.mediation {
+				h.db.mediations[h.repoKey()] = &wsm.Mediation{OwedAt: epochPause}
+			}
 
 			// Act
 			got, err := h.o.queueHeld(context.Background(), h.repoKey())
@@ -32,6 +39,22 @@ func TestQueueHeld(t *testing.T) {
 				t.Fatalf("queueHeld = (%v, %v), want %v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestQueueHeldAnswersAnUnreadableMediation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.mediationErr = errors.New("db gone")
+	h.db.mu.Unlock()
+
+	// Act
+	_, err := h.o.queueHeld(context.Background(), h.repoKey())
+
+	// Assert
+	if err == nil {
+		t.Fatal("queueHeld = nil error, want the mediation read's failure")
 	}
 }
 

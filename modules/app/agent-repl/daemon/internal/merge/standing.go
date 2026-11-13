@@ -12,16 +12,25 @@ import (
 const opStanding = "daemon.merge.standing"
 
 // queueHeld reports whether REPO's queue may advance nothing now: it is
-// paused, or this daemon may not advance its queues across a handover
-// (Standing.ServesQueue). It is THE ONE ANSWER every step that advances a
-// queue asks -- an admission, a chain, a resume, a drain, a waiting rebase --
-// so none of them can advance a queue another of them holds.
+// paused, this daemon may not advance its queues across a handover
+// (Standing.ServesQueue), or the repository owes a deploy mediation its
+// mediator has not decided (wsm.Mediation). It is THE ONE ANSWER every step
+// that advances a queue asks -- an admission, a chain, a resume, a drain, a
+// waiting rebase -- so none of them can advance a queue another of them
+// holds.
 func (o *orchestrator) queueHeld(ctx context.Context, repo wsm.RepoKey) (bool, error) {
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return false, err
 	}
-	return paused || !o.deps.Standing.ServesQueue(), nil
+	if paused || !o.deps.Standing.ServesQueue() {
+		return true, nil
+	}
+	mediation, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	return mediation != nil, nil
 }
 
 // FollowStanding implements Orchestrator.

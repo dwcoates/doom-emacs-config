@@ -64,7 +64,7 @@
   deployed: the running daemon reads the worktree's and master's config and
   refuses an unknown field, so landing them together breaks the deploy)
 - [x] 2 debt (wsm layout 132, internal/wsm/mediation.go)
-- [ ] 3 hold
+- [x] 3 hold (merge.queueHeld)
 - [ ] 4 driver
 - [ ] 5 decision rpc + CLI
 - [ ] 6 undecided turn end
