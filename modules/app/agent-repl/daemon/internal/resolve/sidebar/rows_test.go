@@ -2,6 +2,7 @@ package sidebar_test
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
+	"sync"
 	"testing"
 	"time"
 
@@ -1948,5 +1949,102 @@ func TestTheWhenColumnAndTheTurnBoundaryAgreeOnTheRunningTurn(t *testing.T) {
 	}
 	if ended.GetWhen().GetTurnRunning() != nil || ended.GetLastTurnBoundary().GetAtMs() == started.UnixMilli() {
 		t.Fatalf("ended: when = %v, boundary = %v, want neither reading the ended turn as running", ended.GetWhen(), ended.GetLastTurnBoundary())
+	}
+}
+
+// mirroredResolver builds a live resolver whose one workspace stands ready on
+// its own footer, recording every durable status change it reports.
+func mirroredResolver(t *testing.T) (sidebar.Resolver, *dlog.TestSurfaces, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	reports := 0
+	r, surfaces := newResolver(t, sidebar.WithStatusChangeSink(func(ids.WorkspaceID, time.Time) {
+		mu.Lock()
+		defer mu.Unlock()
+		reports++
+	}))
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("arranged status = %q, want ready", got)
+	}
+	mu.Lock()
+	reports = 0
+	mu.Unlock()
+	return r, surfaces, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return reports
+	}
+}
+
+func TestARowNotYetAdoptedDrawsTheIncumbentsArm(t *testing.T) {
+	tests := []struct {
+		name string
+		// mirrors are the successive incumbent arm maps installed.
+		mirrors    []map[ids.WorkspaceID]string
+		wantStatus string
+		// wantDurable is how many status changes reach the durable sink.
+		wantDurable int
+	}{
+		{
+			name:       "a mirrored row draws the incumbent's arm over its own footer",
+			mirrors:    []map[ids.WorkspaceID]string{{theWS: "thinking"}},
+			wantStatus: "thinking",
+		},
+		{
+			name:       "a row the mirror does not name projects its own footer",
+			mirrors:    []map[ids.WorkspaceID]string{{"another-workspace": "thinking"}},
+			wantStatus: "ready",
+		},
+		{
+			name:        "a row adopted after the mirror is its own again",
+			mirrors:     []map[ids.WorkspaceID]string{{theWS: "thinking"}, nil},
+			wantStatus:  "ready",
+			wantDurable: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, surfaces, durable := mirroredResolver(t)
+
+			// Act
+			for _, arms := range tc.mirrors {
+				r.SetIncumbentArms(arms)
+			}
+
+			// Assert
+			if got := statusName(onlyRow(t, r)); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if got := durable(); got != tc.wantDurable {
+				t.Fatalf("durable status changes = %d, want %d: a mirrored arm's move is the incumbent's to keep", got, tc.wantDurable)
+			}
+			if errs := dlog.FilterRecords(surfaces.Records(), dlog.RecordQuery{Level: "error"}); len(errs) != 0 {
+				t.Fatalf("errors = %v, want none: the mirrored arm is the incumbent's own checked claim", errs)
+			}
+		})
+	}
+}
+
+func TestAMirroredArmsMoveIsLoggedAsTheRowsArmChange(t *testing.T) {
+	// Arrange
+	r, surfaces, _ := mirroredResolver(t)
+
+	// Act
+	r.SetIncumbentArms(map[ids.WorkspaceID]string{theWS: "thinking"})
+
+	// Assert
+	var found bool
+	for _, rec := range dlog.FilterRecords(surfaces.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sidebar.status_arm_changed"}) {
+		if rec.Context["arm"] == "thinking" && rec.Context["previous_arm"] == "ready" &&
+			rec.Context["cause"] == "daemon.sidebar.set_incumbent_arms" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no status_arm_changed record for the mirrored move: %v", surfaces.Records())
 	}
 }

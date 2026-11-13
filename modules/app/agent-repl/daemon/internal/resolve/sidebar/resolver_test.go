@@ -886,3 +886,54 @@ func TestAReSelectionPublishesNoNewRoster(t *testing.T) {
 		t.Fatalf("revision = %d, want %d: a re-selection changes no view", got, before)
 	}
 }
+
+func TestSetIncumbentArms(t *testing.T) {
+	tests := []struct {
+		name string
+		// act installs the mirror and answers the roster published after it.
+		act        func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster
+		wantStatus string
+		// wantNewRevision says whether the act published a roster.
+		wantNewRevision bool
+	}{
+		{
+			name: "the caller's later writes to the map reach no render",
+			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
+				arms := map[ids.WorkspaceID]string{theWS: "thinking"}
+				r.SetIncumbentArms(arms)
+				arms[theWS] = "done"
+				r.FooterStatusChanged(theWS)
+				return latest(t, r)
+			},
+			wantStatus:      "thinking",
+			wantNewRevision: true,
+		},
+		{
+			name: "an unchanged mirror publishes nothing",
+			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
+				r.SetIncumbentArms(nil)
+				return latest(t, r)
+			},
+			wantStatus:      "ready",
+			wantNewRevision: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _, _ := mirroredResolver(t)
+			before := latest(t, r).GetRevision()
+
+			// Act
+			roster := tc.act(t, r)
+
+			// Assert
+			if got := statusName(onlyRow(t, r)); got != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tc.wantStatus)
+			}
+			if moved := roster.GetRevision() != before; moved != tc.wantNewRevision {
+				t.Fatalf("revision %d -> %d, want a new roster = %v", before, roster.GetRevision(), tc.wantNewRevision)
+			}
+		})
+	}
+}

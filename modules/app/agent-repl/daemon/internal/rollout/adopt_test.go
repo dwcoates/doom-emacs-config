@@ -9,10 +9,16 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/rostermirror"
+	"agent-repld/internal/rostermirror/rostermirrortest"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/wsm"
 )
@@ -2420,5 +2426,113 @@ func TestAParticipantIsAnsweredOnceTheWorkspaceIsOwnedNotOnceTheAdoptionsTailEnd
 	// Assert: answered while the tail is still held.
 	if err := <-answered; err != nil {
 		t.Fatalf("AdoptHost = %v, want the owned workspace answered adopted", err)
+	}
+}
+
+// joiningMirror is a joining harness whose manifest names WS with a host
+// participant (so it is adopted only when the host calls), and the roster
+// stream its mirror opened on the incumbent.
+func joiningMirror(t *testing.T) (*harness, ids.WorkspaceID, *rostermirrortest.Stream) {
+	t.Helper()
+	h := newHarness(t, func(d *Deps) { d.IncumbentAddress = "127.0.0.1:7788" })
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true})
+	select {
+	case stream := <-h.rosterDials:
+		return h, ws, stream
+	case <-time.After(5 * time.Second):
+		t.Fatal("the joining daemon never subscribed to its incumbent's roster")
+	}
+	return nil, "", nil
+}
+
+// incumbentRoster is a roster push carrying WS's row drawing `thinking`.
+func incumbentRoster(ws ids.WorkspaceID) *agentreplv1.WatchWorkspaceRosterResponse {
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{
+		Roster: &frontendv1.WorkspaceRoster{Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{
+			Row: &frontendv1.RosterRow{
+				Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}},
+				Status:    &frontendv1.RosterRow_Thinking{Thinking: &frontendv1.RosterRowStatusThinking{}},
+			},
+		}}}},
+	}}
+}
+
+// awaitIncumbentArms waits for the mirror to install arms satisfying OK.
+func awaitIncumbentArms(t *testing.T, h *harness, what string, ok func(map[ids.WorkspaceID]string) bool) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case arms := <-h.incumbentArms:
+			if ok(arms) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the mirror never installed %s", what)
+		}
+	}
+}
+
+func TestAJoiningDaemonsRowNotYetAdoptedFollowsTheIncumbentUntilItIsAdopted(t *testing.T) {
+	// Arrange
+	h, ws, stream := joiningMirror(t)
+	stream.Frames <- incumbentRoster(ws)
+	awaitIncumbentArms(t, h, "the incumbent's thinking arm", func(arms map[ids.WorkspaceID]string) bool {
+		return arms[ws] == "thinking"
+	})
+
+	// Act
+	if err := h.c.AdoptHost(context.Background(), ws); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+
+	// Assert
+	awaitIncumbentArms(t, h, "no arm for the adopted workspace", func(arms map[ids.WorkspaceID]string) bool {
+		_, mirrored := arms[ws]
+		return !mirrored
+	})
+}
+
+func TestTheTakeoverStopsTheRosterMirror(t *testing.T) {
+	// Arrange
+	h, ws, stream := joiningMirror(t)
+	stream.Frames <- incumbentRoster(ws)
+	awaitIncumbentArms(t, h, "the incumbent's thinking arm", func(arms map[ids.WorkspaceID]string) bool {
+		return arms[ws] == "thinking"
+	})
+
+	// Act
+	h.c.becomeIncumbent(nil)
+
+	// Assert
+	awaitIncumbentArms(t, h, "an empty mirror", func(arms map[ids.WorkspaceID]string) bool { return len(arms) == 0 })
+	rec, err := h.log.Await(context.Background(), dlog.RecordQuery{Level: "info", Operation: rostermirror.Op,
+		Message: "the mirror stopped; every row is this daemon's own"})
+	if err != nil || rec.Context["stopped_because"] != "the incumbent exited; this daemon took over" {
+		t.Fatalf("stop record = %v (%v), want the takeover named", rec, err)
+	}
+	select {
+	case <-stream.Ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the incumbent's roster stream was left open after the takeover")
+	}
+	h.registry.wait()
+}
+
+func TestADaemonBootedAsTheIncumbentOpensNoRosterMirror(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	arm(t, h, ws, Participants{Host: true})
+
+	// Assert
+	h.c.mu.Lock()
+	mirror := h.c.mirror
+	h.c.mu.Unlock()
+	if mirror != nil {
+		t.Fatal("a daemon given no incumbent opened a roster mirror")
 	}
 }

@@ -1558,6 +1558,25 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   built its successors' environment from a manifest path that did not exist;
   its predecessor spawned it on old code, and the next deploy could not roll
   out from it at all.
+- **A row the successor has not adopted yet draws the incumbent's status.**
+  The one daemon-to-daemon subscription (owner ruling, 2026-11-13; the
+  written exception in `rollout.Join`'s comment): while joining, the
+  successor reads its incumbent's public `WatchWorkspaceRoster`
+  (`internal/rostermirror`) and installs, whole, the status arm of every row
+  whose standing is `not_yet_adopted` (`sidebar.Resolver.SetIncumbentArms`).
+  Such a row draws that arm in place of the projection of its own footer,
+  whose state for a workspace the incumbent still serves is frozen; the arm
+  is the incumbent's own footer's checked claim, and its moves are logged
+  (`daemon.sidebar.status_arm_changed`) but never written durable, the
+  incumbent being the workspace's writer. Adoption (and a create) republishes
+  the mirror without the row; the incumbent's planned ending, the takeover
+  (`Mirror.Stop`) or the successor's own end withdraws it whole. A failed
+  subscription, and a row whose status this build cannot read (an older
+  incumbent's retired arm decodes as an unset oneof), are ERRORs, and the
+  row keeps the successor's own state. Why: Emacs takes its whole roster from
+  the successor during a handover, and a mid-work holdout drew `idle_async`
+  while the incumbent published `thinking` six times (2026-11-13). Covered
+  by `TestADeployHandoverDrawsAMidWorkHoldoutsRowFromTheIncumbent`.
 - **A closed workspace is served by no daemon.** `wsm.MarkClosed` is the
   one close write and clears `serving_instance` and `spawned_shim_pid` in the
   same update, so every close path releases serving. `served` never transfers

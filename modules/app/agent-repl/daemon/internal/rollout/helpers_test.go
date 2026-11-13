@@ -22,6 +22,8 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
+	"agent-repld/internal/rostermirror"
+	"agent-repld/internal/rostermirror/rostermirrortest"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
@@ -1182,7 +1184,12 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 type harness struct {
 	// creates is the create gate a handover closes.
 	creates *creategate.Gate
-	c       *controller
+	// rosterDials receives every incumbent roster stream a joining
+	// controller's mirror opens, and incumbentArms every arm map the mirror
+	// installs (rollout.Deps.DialIncumbentRoster, IncumbentArms).
+	rosterDials   chan *rostermirrortest.Stream
+	incumbentArms chan map[ids.WorkspaceID]string
+	c             *controller
 	// restarts keeps what the controller timed.
 	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
@@ -1345,7 +1352,21 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		creates:       creategate.New(),
 	}
 	h.reports = &fakeReports{registry: h.registry}
+	h.rosterDials = make(chan *rostermirrortest.Stream, 4)
+	h.incumbentArms = make(chan map[ids.WorkspaceID]string, 64)
 	deps := Deps{
+		DialIncumbentRoster: func(ctx context.Context, _ string) (rostermirror.Stream, error) {
+			stream := rostermirrortest.New(ctx)
+			h.rosterDials <- stream
+			return stream, nil
+		},
+		IncumbentArms: func(arms map[ids.WorkspaceID]string) {
+			copied := map[ids.WorkspaceID]string{}
+			for ws, arm := range arms {
+				copied[ws] = arm
+			}
+			h.incumbentArms <- copied
+		},
 		Creates:        h.creates,
 		Reports:        h.reports,
 		Merges:         h.merges,

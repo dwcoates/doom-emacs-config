@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/rostermirror"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/standdown"
@@ -26,12 +27,28 @@ import (
 // Join is the JOINING daemon's half of the handover.
 //
 // It reads the intent manifest (the only thing the outgoing daemon left it —
-// there is NO daemon-to-daemon channel), reconciles every session's disposition
+// there is NO daemon-to-daemon channel for the handover's state: ownership,
+// dispositions, carried work and every write go through the manifest and the
+// serving row, never a call between the daemons), reconciles every session's disposition
 // against the kernel locks, arms the rendezvous from the participants the
 // manifest recorded, and starts adopting every HEADLESS workspace without a
 // participant call. Every adoption still waits for the incumbent's serving
 // release: that durable edge says the workspace passed freeness, its intake is
 // quiesced and its shim is detached.
+//
+// ONE WRITTEN EXCEPTION: THE ROSTER MIRROR (owner ruling, 2026-11-13). While
+// joining, this daemon subscribes to the incumbent's public
+// WatchWorkspaceRoster stream and draws each workspace it has NOT ADOPTED
+// YET from the incumbent's own row (internal/rostermirror,
+// startRosterMirror). Its scope is the joining window and the roster's
+// status only: it reads, never writes, carries no ownership, and ends when
+// the handover does (the incumbent's exit ends the stream and the takeover
+// stops it; an abandoned handover stops this daemon). Why: Emacs takes its
+// whole roster from the successor during a handover, and the successor's own
+// footer state for a workspace the incumbent still serves is frozen, so a
+// mid-work holdout drew `idle_async` while the incumbent published
+// `thinking` six times (2026-11-13, eval-cache-torch-human). Only the daemon
+// serving a workspace can say its status.
 func (c *controller) Join(ctx context.Context) error {
 	// JOINING MODE IS THE FACT, not the manifest. A successor owns NOTHING
 	// until it adopts, and the manifest may not exist yet when it boots: the
@@ -53,6 +70,7 @@ func (c *controller) Join(ctx context.Context) error {
 		lifetime = context.WithoutCancel(ctx)
 	}
 	inflight.Standing(func() { c.awaitIncumbentExit(lifetime) })
+	c.startRosterMirror(lifetime)
 	// THE CARRY FOLLOWER'S WATCH IS TAKEN BEFORE THE MANIFEST IS READ below,
 	// so a transfer that re-states a workspace after that read is reported to
 	// it, and the read itself is the follower's first look. THE FOLLOWER
@@ -909,6 +927,9 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	c.unlock()
 	c.logTransition(opAdopt, ws, "owned", wasOwned, true,
 		dlog.Context{"all_joining_owned": complete})
+	// THE ROW IS THIS DAEMON'S OWN FROM HERE ON: it stops drawing the
+	// incumbent's status.
+	c.mirrorOwnershipChanged()
 
 	c.log.Info(opAdopt, "adopted the workspace", fields)
 
@@ -1232,6 +1253,9 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	}()
 	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
 		dlog.Merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
+	// THE HANDOVER IS OVER, AND THE MIRROR WITH IT: every row is this
+	// daemon's own from the takeover on.
+	c.stopRosterMirror("the incumbent exited; this daemon took over")
 	// THE HANDLE BECOMES A WRITING ONE AT THE TAKEOVER, whatever was handed
 	// over. It used to be promoted only inside a per-workspace adoption, so a
 	// successor handed NOTHING -- an incumbent whose handover listed no
@@ -1620,5 +1644,53 @@ func (c *controller) releaseAdoption(ws ids.WorkspaceID) {
 	c.unlock()
 	if changed {
 		c.logTransition(opJoin, ws, "adoption_claimed", true, false, nil)
+	}
+}
+
+// startRosterMirror starts the joining window's subscription to the
+// incumbent's roster (see Join's exception), for a daemon that was given an
+// incumbent's address. The mirror runs until the handover ends, LIFETIME
+// ending with this daemon.
+func (c *controller) startRosterMirror(lifetime context.Context) {
+	if c.deps.IncumbentAddress == "" {
+		return
+	}
+	mirror, err := rostermirror.New(rostermirror.Deps{
+		Log:       c.log,
+		Incumbent: c.deps.IncumbentAddress,
+		Dial:      c.deps.DialIncumbentRoster,
+		NotYetAdopted: func(ws ids.WorkspaceID) bool {
+			return c.Standing(ws) == StandingNotYetAdopted
+		},
+		Sink: c.deps.IncumbentArms,
+	})
+	if err != nil {
+		// New validated both deps beside IncumbentAddress, so a mirror that
+		// cannot be built is a broken wiring.
+		panic(fmt.Sprintf("rollout: the roster mirror could not be built: %v", err))
+	}
+	c.mu.Lock()
+	c.mirror = mirror
+	c.unlock()
+	inflight.Standing(func() { mirror.Run(lifetime) })
+}
+
+// mirrorOwnershipChanged tells the mirror a workspace's standing moved.
+func (c *controller) mirrorOwnershipChanged() {
+	c.mu.Lock()
+	mirror := c.mirror
+	c.unlock()
+	if mirror != nil {
+		mirror.OwnershipChanged()
+	}
+}
+
+// stopRosterMirror ends the joining window's mirror for REASON.
+func (c *controller) stopRosterMirror(reason string) {
+	c.mu.Lock()
+	mirror := c.mirror
+	c.unlock()
+	if mirror != nil {
+		mirror.Stop(reason)
 	}
 }

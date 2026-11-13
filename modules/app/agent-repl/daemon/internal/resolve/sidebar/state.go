@@ -444,6 +444,10 @@ type rosterState struct {
 	// version is the agent-repl release the rail's header states
 	// (DeployedVersion), nil while none is resolved.
 	version *semver.Version
+	// incumbentArms are the incumbent's own status arms for the workspaces
+	// a joining daemon has not adopted yet (SetIncumbentArms), replaced
+	// WHOLE; nil outside a handover's joining window.
+	incumbentArms map[ids.WorkspaceID]string
 }
 
 // stampedSelection is a select's stamp with the workspace it selected: the

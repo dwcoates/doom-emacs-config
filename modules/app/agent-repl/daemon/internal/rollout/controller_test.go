@@ -292,3 +292,29 @@ func TestBeginAdoptionLeavesAnEntryWithNoRunWithout(t *testing.T) {
 		t.Fatalf("run = %v, adopting = %v, want no run and the latch closed", e.run, e.adopting)
 	}
 }
+
+func TestNewRefusesAJoiningDaemonWithoutItsRosterMirror(t *testing.T) {
+	cases := []struct {
+		name  string
+		strip func(*Deps)
+	}{
+		{"no incumbent roster dial", func(d *Deps) { d.DialIncumbentRoster = nil }},
+		{"no incumbent arms sink", func(d *Deps) { d.IncumbentArms = nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			deps := newHarness(t).c.deps
+			deps.IncumbentAddress = "127.0.0.1:7788"
+			tc.strip(&deps)
+
+			// Act
+			_, err := New(deps)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "roster dial and the arms sink") {
+				t.Fatalf("New = %v, want the joining daemon's missing mirror refused", err)
+			}
+		})
+	}
+}
