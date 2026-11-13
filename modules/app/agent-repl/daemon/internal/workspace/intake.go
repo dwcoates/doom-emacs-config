@@ -65,16 +65,12 @@ func (v *verbs) CreateIntake(ctx context.Context, spec IntakeSpec) (wsm.Workspac
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create the intake workspace %q: %w", spec.Name, err)
 	}
-	created, err := v.Create(ctx, CreateSpec{
-		// AN INTAKE WORKSPACE IS NO EMOJI-ACK WORKSPACE, even one made for an
-		// ack: the kind belongs to the workspace that does the work.
-		Originator:    lifecycleconfig.OriginatorUserOrWorkspace,
-		RepoDir:       spec.RepoDir,
-		InitialPrompt: prompt,
-		Name:          spec.Name,
-		Model:         spec.Model,
-		Intake:        true,
-	})
+	// AN INTAKE WORKSPACE IS NO EMOJI-ACK WORKSPACE, even one made for an
+	// ack: the kind belongs to the workspace that does the work.
+	create := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+	create.RepoDir, create.InitialPrompt, create.Name, create.Model = spec.RepoDir, prompt, spec.Name, spec.Model
+	create.Intake = true
+	created, err := v.Create(ctx, create)
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("create the intake workspace %q: %w", spec.Name, err)
 	}

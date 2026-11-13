@@ -53,15 +53,13 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 	log.Info(opCommandSupport, "creating a support workspace", dlog.Context{
 		"command": command, "repo_dir": repoDir,
 	})
-	created, err := v.Create(ctx, CreateSpec{
-		// A SUPPORT WORKSPACE IS ONE THE USER ASKED FOR, through a command.
-		Originator:    lifecycleconfig.OriginatorUserOrWorkspace,
-		RepoDir:       repoDir,
-		InitialPrompt: prompt,
-		// The name is the daemon's, not the brief's: a slug derived from a
-		// thousand-word brief would name the brief rather than the command.
-		Name: "support-" + command,
-	})
+	// A SUPPORT WORKSPACE IS ONE THE USER ASKED FOR, through a command.
+	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+	spec.RepoDir, spec.InitialPrompt = repoDir, prompt
+	// The name is the daemon's, not the brief's: a slug derived from a
+	// thousand-word brief would name the brief rather than the command.
+	spec.Name = "support-" + command
+	created, err := v.Create(ctx, spec)
 	if err != nil {
 		return wsm.Workspace{}, fmt.Errorf("request command support for %q: %w", command, err)
 	}

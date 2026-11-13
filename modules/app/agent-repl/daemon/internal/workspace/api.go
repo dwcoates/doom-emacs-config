@@ -43,7 +43,9 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// CreateSpec is a creation request, both forms.
+// CreateSpec is a creation request, both forms. Every builder starts from
+// NewCreateSpec, the one way to state who the creator is (originator), and
+// sets the request's other fields on what it answers.
 type CreateSpec struct {
 	// RepoDir is the repository the workspace is cut from.
 	RepoDir string
@@ -110,10 +112,12 @@ type CreateSpec struct {
 	// to act on (agentrepl.v1.CreateWorkspaceSlackOrigin), empty for a create
 	// no Slack message started. The request's validation parsed it.
 	SlackThread string
-	// Originator is who created the workspace (agentrepl.v1.WorkspaceOriginator),
-	// which decides which kind's hooks its stages run. REQUIRED: every creator
-	// states it, and the zero value is no kind.
-	Originator lifecycleconfig.Originator
+	// originator is who created the workspace (agentrepl.v1.WorkspaceOriginator),
+	// which decides which kind's hooks its stages run. REQUIRED, and settable
+	// only by NewCreateSpec: a builder cannot leave it unstated, and the zero
+	// value a bare CreateSpec{} carries is no kind, which validateCreate
+	// refuses.
+	originator lifecycleconfig.Originator
 	// Model is the model the session starts under, empty for the vendor's
 	// default.
 	Model string
@@ -158,6 +162,17 @@ type CreateSpec struct {
 	// refused beside Parent and MergeOf. A create with one adds no filing note
 	// to the first message: the creator already filed the workspace.
 	Placement *CreatePlacement
+}
+
+// NewCreateSpec starts a creation request made by ORIGINATOR: the only way a
+// spec states who its creator is, so no builder can omit it.
+func NewCreateSpec(originator lifecycleconfig.Originator) CreateSpec {
+	return CreateSpec{originator: originator}
+}
+
+// Originator answers who the spec's creator is (NewCreateSpec).
+func (s CreateSpec) Originator() lifecycleconfig.Originator {
+	return s.originator
 }
 
 // CreateStage is one stage a Create passes through between acceptance and its

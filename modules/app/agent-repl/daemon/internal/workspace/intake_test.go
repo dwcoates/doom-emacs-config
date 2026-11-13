@@ -165,7 +165,7 @@ func TestAnIntakeCreateSpecThatContradictsItselfIsRefused(t *testing.T) {
 			// Arrange
 			f, repo := intakeFixture(t)
 			spec := CreateSpec{
-				Originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo,
+				originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo,
 				InitialPrompt: "work it out", Name: "an-intake", Intake: true,
 			}
 			tt.arrange(&spec)

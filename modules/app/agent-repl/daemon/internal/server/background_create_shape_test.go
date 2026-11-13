@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -36,8 +37,11 @@ func TestStartBackgroundCreateReportsOnItsOpAndSurvivesTheCallersContext(t *test
 	callerCtx, callerCancel := context.WithCancel(admitted)
 	bgCtx, cancel := s.backgroundContext(callerCtx)
 
+	spec := workspace.NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
+	spec.RepoDir = "/tmp/repo"
+
 	// Act.
-	ticket := s.startBackgroundCreate(bgCtx, cancel, release, workspace.CreateSpec{RepoDir: "/tmp/repo"}, "op-helper")
+	ticket := s.startBackgroundCreate(bgCtx, cancel, release, spec, "op-helper")
 	<-h.Verbs.createEntered
 	callerCancel()
 	close(h.Verbs.createRelease)

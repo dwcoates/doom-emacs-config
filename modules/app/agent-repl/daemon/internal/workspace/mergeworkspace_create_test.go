@@ -57,7 +57,7 @@ func mergeWorkspaceSpec(t *testing.T, f *fixture, requester ids.WorkspaceID) Cre
 	origin := landedOrigin(requester)
 	origin.ForkHead = "fork-head"
 	return CreateSpec{
-		Originator: lifecycleconfig.OriginatorUserOrWorkspace,
+		originator: lifecycleconfig.OriginatorUserOrWorkspace,
 		RepoDir:    mainWorktree(t, f),
 		BaseRef:    "ABC/sample",
 		Parent:     &requester,
