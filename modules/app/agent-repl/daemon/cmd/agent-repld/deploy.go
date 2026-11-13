@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"agentrepl/logging/buildreport"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deploy"
@@ -280,9 +281,9 @@ func (f *deployClientsForwarder) PushReloadWebappBuild(ws ids.WorkspaceID, build
 	}
 }
 
-func (f *deployClientsForwarder) WebhostBuilds() []string {
+func (f *deployClientsForwarder) WebhostPages() []*agentreplv1.WebhostPage {
 	if target, ok := f.bound(); ok {
-		return target.WebhostBuilds()
+		return target.WebhostPages()
 	}
 	return nil
 }

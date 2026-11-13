@@ -38,6 +38,9 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
            (agent-repl-test-sv--navigated nil)
            (agent-repl-test-sv--xw 'sidebar-xwidget)
            (agent-repl--sidebar-view-url "http://host.localhost:1/?sidebar=1")
+           ;; THE HOST'S RELOAD GENERATION every sidebar load states: not 0,
+           ;; so a load that drops it is told apart from the first.
+           (agent-repl--webhost-reload-generation 2)
            (agent-repl--webhost-log-level nil)
            (records nil))
        (cl-letf (((symbol-function 'agent-repl-sidebar-view-xwidget)
@@ -186,7 +189,7 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
   "A page from an older build than this elisp is reloaded once on its own URL."
   (agent-repl-test-sv--with-sidebar
     (agent-repl--sidebar-view-answered "{\"op\":\"focusMoved\",\"id\":null,\"outcome\":\"unknown-call\",\"notes\":[]}")
-    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:1/?sidebar=1")))))
+    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:1/?sidebar=1&reload=2")))))
 
 (ert-deftest agent-repl-test-sv-a-page-that-still-lacks-a-call-is-an-error ()
   "A page still lacking the call after its reload is an error no reload heals."
@@ -273,7 +276,7 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
   "A load committed off the sidebar's origin is navigated back to its page."
   (agent-repl-test-sv--with-sidebar
     (agent-repl-test-sv--load "load-committed" "https://example.com/")
-    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:1/?sidebar=1")))))
+    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:1/?sidebar=1&reload=2")))))
 
 (ert-deftest agent-repl-test-sv-a-sidebar-that-strays-is-recorded-at-error ()
   "A sidebar that strayed is a page defect, recorded at error."
@@ -293,7 +296,7 @@ Binds `records' to every central log record, as (LEVEL . TEXT), newest first."
   (agent-repl-test-sv--with-sidebar
     (setq agent-repl--sidebar-view-daemon-origin "http://host.localhost:2")
     (agent-repl-sidebar-view-navigate (agent-repl-test-sv--conn "127.0.0.1:3"))
-    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:3/?sidebar=1")))
+    (should (equal agent-repl-test-sv--navigated '("http://host.localhost:3/?sidebar=1&reload=2")))
     (should-not agent-repl--sidebar-view-daemon-origin)))
 
 (ert-deftest agent-repl-test-sv-navigating-without-a-sidebar-loads-nothing ()

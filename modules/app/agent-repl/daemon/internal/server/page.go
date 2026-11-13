@@ -197,10 +197,11 @@ func (s *server) WatchPage(
 	}
 	defer s.detachPage(page)
 	defer close(page.writerGone)
-	// THE WEB VIEW HOST'S BUILD stands for as long as its page stream does:
-	// a deploy reloads a host on an older webapp (deploy.Deployer.webapp).
+	// THE WEB VIEW HOST'S BUILD AND RELOAD GENERATION stand for as long as
+	// its page stream does: a deploy reloads a host on an older webapp, and
+	// judges a host still stale by its generation (deploy/webhost.go).
 	if host := req.Msg.GetWebhost(); host != nil {
-		defer s.holdWebhostBuild(host.GetWebappBuild())()
+		defer s.holdWebhostPage(host)()
 		// A HOST ATTACHING ON ANOTHER WEBAPP than the installed one is
 		// reloaded onto it (deploy/webhost.go): a handover never reloads it.
 		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeHostAttached)

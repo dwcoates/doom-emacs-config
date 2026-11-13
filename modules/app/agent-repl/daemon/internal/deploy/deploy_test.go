@@ -650,7 +650,7 @@ func TestTheWebviewHostOnAnOlderBuildIsReloadedOnce(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.clients.webhosts = tt.hosts
+			h.clients.webhosts = hostPages(tt.hosts...)
 			h.clients.webhostReach = tt.reach
 
 			// Act

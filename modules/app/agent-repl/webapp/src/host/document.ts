@@ -93,6 +93,24 @@ export interface WebhostDocumentDeps {
   webappBuild?: () => string;
 }
 
+/**
+ * THE HOST'S RELOAD GENERATION, as Emacs handed it to this document in its
+ * URL (`reload=<n>`, lisp/webhost.el `agent-repl-webhost-document-url`):
+ * how many times Emacs has reloaded the host since it created it. Undefined
+ * when the URL carries none, which an Emacs older than the parameter loads;
+ * the daemon then cannot judge the document's reload. A parameter that is
+ * not a whole number is Emacs's defect and fails the document's start
+ * loudly, rather than being stated as some other generation.
+ */
+export function readReloadGeneration(search: string): number | undefined {
+  const raw = new URLSearchParams(search).get("reload");
+  if (raw === null) return undefined;
+  if (!/^(0|[1-9][0-9]*)$/.test(raw) || Number(raw) > 0xffffffff) {
+    throw new Error(`webhost document: the reload generation in its URL is not a whole number: ${JSON.stringify(raw)}`);
+  }
+  return Number(raw);
+}
+
 /** A started document: its daemon context and its own failures. */
 export interface StartedWebhostDocument {
   readonly ctx: DaemonContext;
@@ -122,15 +140,18 @@ export function startWebhostDocument(
   const census = (deps.installCensus ?? installLoadCensus)(doc);
   // Text in either document copies and selects exactly as it does in a page.
   installTextAffordances(doc);
-  // THE DOCUMENT STATES ITS BUILD on its page stream: a handover no longer
-  // reloads it, so a deploy that built another reloads it instead.
-  const webhostBuild = (deps.webappBuild ?? (() => readWebappBuild(doc)))();
+  // THE DOCUMENT STATES ITS BUILD AND ITS HOST'S RELOAD GENERATION on its
+  // page stream: a handover no longer reloads it, so a deploy that built
+  // another reloads it instead, and judges a host still stale after that by
+  // its generation (daemon/internal/deploy/webhost.go).
+  const webappBuild = (deps.webappBuild ?? (() => readWebappBuild(doc)))();
+  const reloadGeneration = readReloadGeneration(win.location.search);
   const ctx = createDaemonContext({
     client,
     ticker: createTicker(DEFAULT_TICK_MS, pageQuiet(doc)),
     failures,
     page: connectionId,
-    webhostBuild,
+    webhost: reloadGeneration === undefined ? { webappBuild } : { webappBuild, reloadGeneration },
     // THE ORIGIN THE TRANSPORT READS: the context reopens every standing
     // stream when it moves (rpc/daemon-origin.ts).
     daemon,

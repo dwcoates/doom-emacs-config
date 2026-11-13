@@ -413,11 +413,12 @@ type server struct {
 	// workspace and per stream: what a deploy compares the fresh build to.
 	webBuilds map[ids.WorkspaceID]map[string]string
 	// webStreamSeq names each web stream's entry in webBuilds and
-	// webhostBuilds.
+	// webhostPages.
 	webStreamSeq uint64
-	// webhostBuilds is the webapp build every web view host's page stream
-	// stated (WatchPageRequest.webhost), by stream, while it stands.
-	webhostBuilds map[string]string
+	// webhostPages is what every web view host's page stream stated of
+	// itself (WatchPageRequest.webhost), by the stream's sequence number,
+	// while it stands.
+	webhostPages map[uint64]*agentreplv1.WebhostPage
 	// watchTokens memoizes which workspace and feed each minted watch token
 	// addresses. WatchFeedRequest carries ONLY the token while the feed
 	// resolver's Tail takes the workspace and feed explicitly, so the one mint
@@ -649,7 +650,7 @@ func New(deps Deps) (Server, error) {
 		webReveals:             make(map[ids.WorkspaceID]*webReveal),
 		daemonWatchers:         make(map[*daemonWatcher]struct{}),
 		webBuilds:              make(map[ids.WorkspaceID]map[string]string),
-		webhostBuilds:          make(map[string]string),
+		webhostPages:           make(map[uint64]*agentreplv1.WebhostPage),
 		hostHeld:               make(map[ids.WorkspaceID]int),
 		evals:                  newEditorEvals("eval-" + string(deps.Instance)),
 		evalDeadline:           evaluationDeadline,

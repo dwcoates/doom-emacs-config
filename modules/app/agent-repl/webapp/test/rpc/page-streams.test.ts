@@ -637,12 +637,30 @@ describe("the page's one standing stream", () => {
     await settle();
 
     // Act.
-    const handle = startPageStreams(ctx, "webhost-1", "Web1");
+    const handle = startPageStreams(ctx, "webhost-1", { webappBuild: "Web1" });
     await settle();
 
     // Assert.
     const request = daemon.pageRequests.find((r) => r.page === "webhost-1");
     expect(request?.webhost?.webappBuild).toBe("Web1");
+    expect(request?.webhost?.reloadGeneration).toBeUndefined();
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("states the web view host's reload generation on the host's own stream", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+
+    // Act.
+    const handle = startPageStreams(ctx, "webhost-1", { webappBuild: "Web1", reloadGeneration: 4 });
+    await settle();
+
+    // Assert.
+    const request = daemon.pageRequests.find((r) => r.page === "webhost-1");
+    expect(request?.webhost?.reloadGeneration).toBe(4);
     handle.cancel();
     ctx.quiesce();
   });

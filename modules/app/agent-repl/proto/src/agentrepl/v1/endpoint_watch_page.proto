@@ -72,11 +72,32 @@ message WatchPageRequest {
   optional WebhostPage webhost = 2;
 }
 
-// The web view host's page stream: what it was loaded from.
+// The web view host's page stream: what it was loaded from, and which of the
+// host's loads it is.
 message WebhostPage {
   // The webapp build the host was loaded from (webapp/src/webapp-build.ts).
   // REQUIRED and not empty.
   string webapp_build = 1;
+  // THE HOST'S RELOAD GENERATION: how many times the Emacs that owns the web
+  // view host has reloaded it since it created it, 0 for the host's first
+  // load. The sidebar's document reloads with the host and states the same
+  // generation. Emacs counts the reloads (lisp/webhost.el) and hands each
+  // document its generation in its URL (`reload=<n>`), which the document
+  // states here unchanged.
+  //
+  // WHY: a host's two documents attach together, often in the same
+  // millisecond, and a reload pushed on the first one's attach finds the
+  // second still on the old build. A stale build alone cannot tell "has not
+  // reloaded yet" from "reloaded and ignored the push", so the daemon records,
+  // with each reload it pushes (WatchDaemonResponse.reload_webhost), the
+  // highest generation a stale host stood at. A stale host that attaches at
+  // that generation or below has not reloaded yet; one above it reloaded and
+  // still runs another build, and only that is an error.
+  //
+  // UNSET when the document's loader states no generation (an Emacs that
+  // predates this field loads it with no `reload` parameter): such a host's
+  // reload cannot be judged, and the daemon treats it as not reloaded yet.
+  optional uint32 reload_generation = 2;
 }
 
 // One frame on the page's stream.

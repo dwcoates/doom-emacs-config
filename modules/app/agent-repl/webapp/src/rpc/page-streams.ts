@@ -58,6 +58,7 @@ import {
   SubscribePageRequestSchema,
   SubscribePageResponseSchema,
   WatchPageResponseSchema,
+  type WebhostPageSchema,
   type PageFrame,
   type SubscribePageRequest,
   type WatchPageResponse,
@@ -227,12 +228,17 @@ function newAttachment(): Attachment {
   return attachment;
 }
 
+/** What one of Emacs's own web views states of itself on its page stream. */
+export type WebhostPageInit = MessageInitShape<typeof WebhostPageSchema>;
+
 /**
  * Open this page's one stream and answer the handle every component subscribes
- * through. PAGE is the id this document minted for itself; WEBHOST_BUILD, set
- * by the web view host alone, is the webapp build the host was loaded from.
+ * through. PAGE is the id this document minted for itself; WEBHOST, set by
+ * Emacs's own web views alone, is what the document states of itself: the
+ * webapp build it was loaded from and the host's reload generation
+ * (agentrepl.v1.WebhostPage).
  */
-export function startPageStreams(ctx: PageStreamContext, page: string, webhostBuild?: string): PageStreamsHandle {
+export function startPageStreams(ctx: PageStreamContext, page: string, webhost?: WebhostPageInit): PageStreamsHandle {
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
   const attachedListeners = createListeners();
   let attachment = newAttachment();
@@ -250,7 +256,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
     schema: WatchPageResponseSchema,
     open: (client, signal) => {
       runAttachment = attachment;
-      return client.watchPage(webhostBuild === undefined ? { page } : { page, webhost: { webappBuild: webhostBuild } }, { signal });
+      return client.watchPage(webhost === undefined ? { page } : { page, webhost }, { signal });
     },
     // THE DAEMON'S PLANNED EXIT ENDS THE PAGE WITH `ending`, after every
     // subscription on it has sent its own last frame: the page reopens on the

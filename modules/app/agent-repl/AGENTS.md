@@ -1589,6 +1589,15 @@ How the daemon puts each component into service:
      stale webview `reload_webapp` naming the fresh build. Every page lives in
      Emacs's one host web view, so Emacs reloads the host once per build
      however many workspaces are told (`agent-repl-webhost-reload-onto`).
+     A host still stale after its reload was pushed is judged by its RELOAD
+     GENERATION (`agentrepl.v1.WebhostPage.reload_generation`, owner ruling
+     2026-11-13): Emacs counts the host's loads since it created it and
+     hands each document its generation in its URL (`reload=<n>`,
+     `agent-repl-webhost-document-url`), the document states it on its page
+     stream, and the daemon records the highest generation a stale host
+     stood at when it pushed (`deploy.ReconcileWebhost`). A stale host at or
+     below it has not reloaded yet (its two documents attach together; DEBUG);
+     one above it reloaded and ignored the push, the one ERROR.
 
 EVERY PHASE IS ON THE FOOTER (owner request, 2026-09-27). The deploy states
 each phase through ONE entry point (`internal/deployprogress.Sink`, the footer

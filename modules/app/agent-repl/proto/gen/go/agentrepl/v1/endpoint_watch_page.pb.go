@@ -125,14 +125,35 @@ func (x *WatchPageRequest) GetWebhost() *WebhostPage {
 	return nil
 }
 
-// The web view host's page stream: what it was loaded from.
+// The web view host's page stream: what it was loaded from, and which of the
+// host's loads it is.
 type WebhostPage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The webapp build the host was loaded from (webapp/src/webapp-build.ts).
 	// REQUIRED and not empty.
-	WebappBuild   string `protobuf:"bytes,1,opt,name=webapp_build,json=webappBuild,proto3" json:"webapp_build,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WebappBuild string `protobuf:"bytes,1,opt,name=webapp_build,json=webappBuild,proto3" json:"webapp_build,omitempty"`
+	// THE HOST'S RELOAD GENERATION: how many times the Emacs that owns the web
+	// view host has reloaded it since it created it, 0 for the host's first
+	// load. The sidebar's document reloads with the host and states the same
+	// generation. Emacs counts the reloads (lisp/webhost.el) and hands each
+	// document its generation in its URL (`reload=<n>`), which the document
+	// states here unchanged.
+	//
+	// WHY: a host's two documents attach together, often in the same
+	// millisecond, and a reload pushed on the first one's attach finds the
+	// second still on the old build. A stale build alone cannot tell "has not
+	// reloaded yet" from "reloaded and ignored the push", so the daemon records,
+	// with each reload it pushes (WatchDaemonResponse.reload_webhost), the
+	// highest generation a stale host stood at. A stale host that attaches at
+	// that generation or below has not reloaded yet; one above it reloaded and
+	// still runs another build, and only that is an error.
+	//
+	// UNSET when the document's loader states no generation (an Emacs that
+	// predates this field loads it with no `reload` parameter): such a host's
+	// reload cannot be judged, and the daemon treats it as not reloaded yet.
+	ReloadGeneration *uint32 `protobuf:"varint,2,opt,name=reload_generation,json=reloadGeneration,proto3,oneof" json:"reload_generation,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *WebhostPage) Reset() {
@@ -170,6 +191,13 @@ func (x *WebhostPage) GetWebappBuild() string {
 		return x.WebappBuild
 	}
 	return ""
+}
+
+func (x *WebhostPage) GetReloadGeneration() uint32 {
+	if x != nil && x.ReloadGeneration != nil {
+		return *x.ReloadGeneration
+	}
+	return 0
 }
 
 // One frame on the page's stream.
@@ -1169,9 +1197,11 @@ const file_agentrepl_v1_endpoint_watch_page_proto_rawDesc = "" +
 	"\x04page\x18\x01 \x01(\tR\x04page\x128\n" +
 	"\awebhost\x18\x02 \x01(\v2\x19.agentrepl.v1.WebhostPageH\x00R\awebhost\x88\x01\x01B\n" +
 	"\n" +
-	"\b_webhost\"0\n" +
+	"\b_webhost\"x\n" +
 	"\vWebhostPage\x12!\n" +
-	"\fwebapp_build\x18\x01 \x01(\tR\vwebappBuild\"\xfe\x01\n" +
+	"\fwebapp_build\x18\x01 \x01(\tR\vwebappBuild\x120\n" +
+	"\x11reload_generation\x18\x02 \x01(\rH\x00R\x10reloadGeneration\x88\x01\x01B\x14\n" +
+	"\x12_reload_generation\"\xfe\x01\n" +
 	"\x11WatchPageResponse\x128\n" +
 	"\battached\x18\x01 \x01(\v2\x1a.agentrepl.v1.PageAttachedH\x00R\battached\x12-\n" +
 	"\x04push\x18\x02 \x01(\v2\x17.agentrepl.v1.PageFrameH\x00R\x04push\x12;\n" +
@@ -1320,6 +1350,7 @@ func file_agentrepl_v1_endpoint_watch_page_proto_init() {
 	file_agentrepl_v1_endpoint_watch_chat_proto_init()
 	file_agentrepl_v1_endpoint_watch_workspace_mentions_proto_init()
 	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[0].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[1].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[2].OneofWrappers = []any{
 		(*WatchPageResponse_Attached)(nil),
 		(*WatchPageResponse_Push)(nil),

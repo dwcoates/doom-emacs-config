@@ -31,7 +31,7 @@ import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import type { DaemonOrigin } from "./daemon-origin.js";
-import { startPageStreams, type PageStreams, type PageStreamContext } from "./page-streams.js";
+import { startPageStreams, type PageStreams, type PageStreamContext, type WebhostPageInit } from "./page-streams.js";
 
 /**
  * What talking to the daemon takes, with no workspace in it: the client, the
@@ -147,12 +147,14 @@ export interface DaemonContextInit {
    */
   page: string;
   /**
-   * The webapp build the web view host was loaded from, set by the host's
-   * own context alone: its page stream states it (WatchPageRequest.webhost),
-   * so a deploy that built another reloads the host. Unset on every
+   * What one of Emacs's own web views states of itself, set by their own
+   * contexts alone: the webapp build it was loaded from and the host's
+   * reload generation, which its page stream states (WatchPageRequest.webhost),
+   * so a deploy that built another reloads the host and can tell a host that
+   * has not reloaded yet from one that ignored the reload. Unset on every
    * workspace page, which states its build on WatchWebWorkspace.
    */
-  webhostBuild?: string;
+  webhost?: WebhostPageInit;
   /**
    * The page's stream, for a test that drives ONE component's watch against a
    * scripted client. Production leaves it unset and gets the real one, opened
@@ -267,6 +269,6 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   // this same object, so it is opened once the rest of the context exists and
   // handed back on the finished one.
   const streams: PageStreams =
-    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page, init.webhostBuild);
+    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page, init.webhost);
   return { ...base, streams };
 }

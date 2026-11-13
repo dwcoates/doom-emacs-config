@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"context"
 	"fmt"
 	"os"
@@ -316,16 +317,32 @@ type fakeClients struct {
 	elispBuild   string
 	webappPushes []ids.WorkspaceID
 	webappBuilds []string
-	webhosts     []string
+	webhosts     []*agentreplv1.WebhostPage
 	webhostPush  []string
 	// webhostReach is how many Emacs streams a host reload reaches.
 	webhostReach int
 }
 
-func (c *fakeClients) WebhostBuilds() []string {
+// hostPages are standing web view host page streams on BUILDS, stating no
+// reload generation.
+func hostPages(builds ...string) []*agentreplv1.WebhostPage {
+	var out []*agentreplv1.WebhostPage
+	for _, build := range builds {
+		out = append(out, &agentreplv1.WebhostPage{WebappBuild: build})
+	}
+	return out
+}
+
+// hostPageAt is a standing web view host page stream on BUILD at reload
+// GENERATION.
+func hostPageAt(build string, generation uint32) *agentreplv1.WebhostPage {
+	return &agentreplv1.WebhostPage{WebappBuild: build, ReloadGeneration: &generation}
+}
+
+func (c *fakeClients) WebhostPages() []*agentreplv1.WebhostPage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]string(nil), c.webhosts...)
+	return append([]*agentreplv1.WebhostPage(nil), c.webhosts...)
 }
 
 func (c *fakeClients) PushReloadWebhost(build string) int {
