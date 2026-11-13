@@ -2200,13 +2200,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the eight arms encoded
-here."
+  "UpdateMergeQueueRequest's action oneof has exactly the arms encoded here,
+and `mediation', which only the deploy mediator sends, through the CLI."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
+                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -3333,6 +3333,20 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"unknownRepository\":{}}"))
                    '(:cause (:arm :unknown-repository :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-not-mediator-arm ()
+  "UpdateMergeQueueError's `not_mediator' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"notMediator\":{}}"))
+                   '(:cause (:arm :not-mediator :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-mediation-owed-arm ()
+  "UpdateMergeQueueError's `no_mediation_owed' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"noMediationOwed\":{}}"))
+                   '(:cause (:arm :no-mediation-owed :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-error-feed-not-in-workspace-arm ()
   "SubmitPromptError's `feed_not_in_workspace' arm decodes with everything it
 carries."
@@ -3598,7 +3612,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()

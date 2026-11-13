@@ -3969,6 +3969,16 @@ for that workspace."
 named a RepositoryRef the daemon's registry does not hold."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownRepository" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-not-mediator (json)
+  "Decode UpdateMergeQueueNotMediator from JSON.  Empty: the deciding
+workspace is no repository's deploy mediator."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotMediator" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-no-mediation-owed (json)
+  "Decode UpdateMergeQueueNoMediationOwed from JSON.  Empty: the mediator's
+repository owes no deploy mediation."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoMediationOwed" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -4001,12 +4011,20 @@ named a RepositoryRef the daemon's registry does not hold."
   "Decode UpdateMergeQueueError's `unknown_repository' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-repository json))
 
+(defun agent-repl-wire-decode-update-merge-queue-error-not-mediator (json)
+  "Decode UpdateMergeQueueError's `not_mediator' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-not-mediator json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed (json)
+  "Decode UpdateMergeQueueError's `no_mediation_owed' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-no-mediation-owed json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4017,7 +4035,9 @@ arm this codec does not know is refused as an unknown field."
          (list 'alreadyPaused :already-paused #'agent-repl-wire-decode-update-merge-queue-error-already-paused)
          (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
          (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
-         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository))))))
+         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
+         (list 'notMediator :not-mediator #'agent-repl-wire-decode-update-merge-queue-error-not-mediator)
+         (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."
