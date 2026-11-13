@@ -17,6 +17,9 @@ type QueueStatus struct {
 	// OffQueue are its merges that left the queue without landing and whose
 	// requests still stand, oldest departure first (offqueue.go).
 	OffQueue []OffQueueMember
+	// Mediation is the deploy mediation the queue waits on, nil while it owes
+	// none (owedMediation).
+	Mediation *OwedMediation
 }
 
 // Status implements Orchestrator.
@@ -66,7 +69,12 @@ func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]Qu
 			o.deps.Log.Global().Error(op, "could not read a repository's merges off its queue", dlog.WithCause(dlog.Context{"repository": string(repository.ID)}, err))
 			return nil, fmt.Errorf("merge: reading the merges off the queue of %s: %w", repository.ID, err)
 		}
-		out = append(out, QueueStatus{Repository: repository, Queue: queue, OffQueue: off})
+		mediation, err := o.owedMediation(ctx, key)
+		if err != nil {
+			o.deps.Log.Global().Error(op, "could not read the deploy mediation a repository's queue waits on", dlog.WithCause(dlog.Context{"repository": string(repository.ID)}, err))
+			return nil, fmt.Errorf("merge: reading the mediation of %s: %w", repository.ID, err)
+		}
+		out = append(out, QueueStatus{Repository: repository, Queue: queue, OffQueue: off, Mediation: mediation})
 	}
 	return out, nil
 }

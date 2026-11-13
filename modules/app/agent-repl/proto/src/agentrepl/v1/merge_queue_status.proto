@@ -127,12 +127,25 @@ message MergeQueueStatusAdvance {
     // The queue is paused: merges still join it, but nothing runs until it
     // is resumed.
     MergeQueueStatusAdvancePaused paused = 2;
+    // The queue waits on its deploy mediator to decide the last deploy
+    // (repoconfig.v1.LifecycleConfig.deploy_mediator): merges still join it,
+    // but nothing runs until the mediator approves or escalates the deploy.
+    // A paused queue answers `paused` even while a mediation is owed.
+    MergeQueueStatusAdvanceMediating mediating = 3;
   }
 }
 // Advancing. No fields.
 message MergeQueueStatusAdvanceRunning {}
 // Paused. No fields.
 message MergeQueueStatusAdvancePaused {}
+// Held for the deploy mediator.
+message MergeQueueStatusAdvanceMediating {
+  // The mediator workspace, absent while it is not made yet (the round
+  // that makes it runs once the deploy finished).
+  workspace.v1.WorkspaceRef mediator = 1;
+  // The mediator's name, as the lifecycle config names it.
+  string name = 2;
+}
 
 // One merge in line.
 message MergeQueueStatusEntry {
