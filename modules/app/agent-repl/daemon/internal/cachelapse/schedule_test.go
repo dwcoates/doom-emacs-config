@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -628,6 +629,60 @@ func TestARestoreWhoseWorktreeIsGoneRetiresTheKeepalive(t *testing.T) {
 
 			// Assert
 			tc.assert(t, h, fleet[0])
+		})
+	}
+}
+
+func TestAParkedSessionWhoseDirectoryIsGoneIsNeverArmed(t *testing.T) {
+	const dir = "/worktrees/landed"
+	cases := []struct {
+		name    string
+		statErr error
+		assert  func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "no restore is armed for a gone directory", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if at, armed := h.keeper.restores[ws]; armed {
+				t.Fatalf("restore armed at %v, want none", at)
+			}
+		}},
+		{name: "no beat is armed for a gone directory", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if at, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat armed at %v, want none", at)
+			}
+		}},
+		{name: "a gone directory writes no error", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if h.found(dlog.RecordQuery{Level: "error"}) {
+				t.Fatalf("records = %+v, want no ERROR", h.log.Records())
+			}
+		}},
+		{name: "a stat that cannot tell arms nothing", statErr: fs.ErrPermission, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat armed at %v, want none", h.keeper.beats[ws])
+			}
+		}},
+		{name: "a stat that cannot tell is said at ERROR", statErr: fs.ErrPermission, assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if !h.found(dlog.RecordQuery{Level: "error", Operation: opDrive,
+				Message: "could not tell whether the workspace's directory exists; its keep-alive is not armed"}) {
+				t.Fatalf("records = %+v, want the ERROR", h.log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a parked session owing its beat, whose directory stats as the case says.
+			h := newHarness(t, beatable(visible(), 10*time.Minute))
+			h.serving = false
+			ws := ids.WorkspaceID("ws-landed")
+			rec := beatable(wsm.Workspace{ID: ws, Dir: dir}, KeepaliveInterval)
+			h.db.records[ws] = rec
+			h.db.sessions[ws] = parkedSession(ws)
+			h.statErr = map[string]error{dir: tc.statErr}
+
+			// Act
+			h.keeper.schedule(context.Background(), ws, "the daemon started")
+
+			// Assert
+			tc.assert(t, h, ws)
 		})
 	}
 }

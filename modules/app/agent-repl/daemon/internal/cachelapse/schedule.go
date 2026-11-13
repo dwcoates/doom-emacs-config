@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"slices"
 	"time"
 
@@ -125,6 +126,22 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	}
 	none := func(why string) (beatPlan, bool) {
 		log.Debug(opDrive, "the workspace owes no keep-alive", dlog.Context{"why": why})
+		return beatPlan{}, false
+	}
+	// A WORKSPACE WHOSE DIRECTORY IS GONE OWES NO KEEP-ALIVE: no session can
+	// ever run there again, so a parked one can never be restored for its
+	// beat. Armed, its restore failed on every daemon boot with an ERROR in
+	// the keeper, the feed resolver and the footer each (31 landed
+	// workspaces whose worktrees were reaped with their landing, at the
+	// 2026-11-13 14:42 deploy, one last beat owed each since 2026-10-31).
+	// Only a stat that says "not exist" is gone; any other failure is said.
+	if _, err := k.deps.Stat(record.Dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			k.forget(ws)
+			return none("its directory is gone, so no session can ever run for it")
+		}
+		log.Error(opDrive, "could not tell whether the workspace's directory exists; its keep-alive is not armed",
+			dlog.Context{"dir": record.Dir, "cause": err.Error()})
 		return beatPlan{}, false
 	}
 	// A WORKSPACE IN A MERGE QUEUE IS ALWAYS KEPT WARM (owner ruling,
