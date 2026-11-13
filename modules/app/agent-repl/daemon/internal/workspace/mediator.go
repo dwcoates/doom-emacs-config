@@ -61,20 +61,18 @@ func MediatesFrom(files lifecycleconfig.Files, db wsm.DB) func(ctx context.Conte
 		if err != nil {
 			return false, fmt.Errorf("list the repositories to find %q's: %w", record.Name, err)
 		}
-		for _, repo := range repos {
-			if repo.ID != record.Repo {
-				continue
-			}
-			cfg, err := files.Load(repo.Dir)
-			var missing *lifecycleconfig.MissingError
-			if errors.As(err, &missing) {
-				return false, nil
-			}
-			if err != nil {
-				return false, fmt.Errorf("read the lifecycle config of %s: %w", repo.Dir, err)
-			}
-			return cfg.GetDeployMediator().GetName() == record.Name, nil
+		repo, ok := wsm.RepositoryWithID(repos, record.Repo)
+		if !ok {
+			return false, nil
 		}
-		return false, nil
+		cfg, err := files.Load(repo.Dir)
+		var missing *lifecycleconfig.MissingError
+		if errors.As(err, &missing) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("read the lifecycle config of %s: %w", repo.Dir, err)
+		}
+		return cfg.GetDeployMediator().GetName() == record.Name, nil
 	}
 }

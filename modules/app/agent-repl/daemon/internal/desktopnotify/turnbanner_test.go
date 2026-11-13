@@ -175,7 +175,7 @@ func TestEventTitle(t *testing.T) {
 // notification) or behind its mark through eventTitle.
 func TestEveryEventTitleIsComposedByEventTitle(t *testing.T) {
 	titled := regexp.MustCompile(`Title: (.+?), Body`)
-	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|MergeQueuedTitle\(name\))$`)
+	allowed := regexp.MustCompile(`^(name|eventTitle\(mark, name\)|TurnTitle\(end, name\)|MergeQueuedTitle\(name\)|DeployMediatedTitle\(name\))$`)
 	// Arrange / Act
 	seen := 0
 	for _, file := range sourcescan.Production(t) {

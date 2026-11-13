@@ -135,8 +135,7 @@ func (s *store) mediationWrite(ctx context.Context, op string, repo RepoKey, owe
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		changed = n > 0
+		changed, err = touchedRow(res)
 		return err
 	})
 	return changed, err

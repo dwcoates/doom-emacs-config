@@ -227,6 +227,13 @@ Either kind:
   queue in scope depletes (a merge leaves and none is left in line), that
   notice being its last; subscribe again to follow the next work, and to hear
   a deploy that ends after the depletion.
+- A repository whose `.agent-repl/lifecycle.yaml` names a `deploy_mediator`
+  holds its queue after every deploy until its mediator decides the deploy;
+  the sidebar pins the mediation above the queue's head. Only the mediator
+  decides, with
+  `merge-queue mediation approve|escalate -repository here -summary TEXT`;
+  any other workspace is refused `not_mediator`, and a decision while no
+  deploy owes one is refused `no_mediation_owed`.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.
 
 ### Commandeering the running spot

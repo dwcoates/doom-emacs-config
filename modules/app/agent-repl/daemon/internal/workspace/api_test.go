@@ -63,6 +63,7 @@ func TestEveryCreateSpecBuilderGoesThroughNewCreateSpec(t *testing.T) {
 		"internal/workspace/commandsupport.go:RequestCommandSupport",
 		"internal/workspace/create.go:CreateMergeWorkspace",
 		"internal/workspace/intake.go:CreateIntake",
+		"internal/workspace/mediator.go:mediatorSpec",
 		"internal/workspace/pendingcreates.go:decodeHeldSpec",
 	}
 

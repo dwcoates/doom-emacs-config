@@ -1465,7 +1465,7 @@ them), and t for a hard stop."
 A plist `(:head HEAD :waiting WAITING :paused PAUSED :fixing-tests FIXING
 :resolving-conflicts RESOLVING :awaiting-fixing-tests AWAITING-FIXING
 :awaiting-resolving-conflicts AWAITING-RESOLVING :github GITHUB
-:off-queue OFF-QUEUE)': the
+:off-queue OFF-QUEUE :mediation MEDIATION)': the
 merge at the head (nil only while the line is empty and a merge stands out
 of line or a workspace stands in a GitHub merge queue), the merges waiting
 behind it, the queue's pause
@@ -1476,11 +1476,14 @@ awaiting each slot in the order each is granted it
 standing in a GitHub merge queue
 \(`agent-repl-wire-decode-roster-merge-queue-github-entry'), and the merges
 that left the queue without landing
-\(`agent-repl-wire-decode-roster-merge-queue-off-queue')."
+\(`agent-repl-wire-decode-roster-merge-queue-off-queue'), and the deploy
+mediation the queue waits on, nil while it waits on none
+\(`agent-repl-wire-decode-roster-merge-queue-mediation')."
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
     (agent-repl-wire--check-keys "RosterRepoMergeQueue" object
                                  '(head waiting paused fixingTests resolvingConflicts
-                                        awaitingFixingTests awaitingResolvingConflicts github offQueue))
+                                        awaitingFixingTests awaitingResolvingConflicts github offQueue
+                                        mediation))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1507,7 +1510,30 @@ that left the queue without landing
                     #'agent-repl-wire-decode-roster-merge-queue-github-entry)
            :off-queue (agent-repl-wire--decode-repeated
                        "RosterRepoMergeQueue" 'offQueue object
-                       #'agent-repl-wire-decode-roster-merge-queue-off-queue)))))
+                       #'agent-repl-wire-decode-roster-merge-queue-off-queue)
+           :mediation (agent-repl-wire--decode-optional-message
+                       "RosterRepoMergeQueue" 'mediation object
+                       #'agent-repl-wire-decode-roster-merge-queue-mediation)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-mediation (value)
+  "Decode VALUE as `RosterMergeQueueMediation'.
+A plist `(:subject SUBJECT :standing STANDING)': the deploy mediator the
+queue waits on, and where its mediation stands, `:waiting' (the deploy
+still rolls out, or the mediator is not told yet) or `:checking'.  The
+standing is never unset."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(subject waiting checking))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueMediation"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueMediation" 'subject object
+                     #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :standing (plist-get
+                      (agent-repl-wire--decode-oneof
+                       "RosterMergeQueueMediation" 'standing object
+                       `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueMediationWaiting" v)))
+                         (checking :checking ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueMediationChecking" v)))))
+                      :arm)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-off-queue (value)
   "Decode VALUE as `RosterMergeQueueOffQueue'.

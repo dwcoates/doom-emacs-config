@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
 )
 
@@ -53,6 +54,6 @@ func (h *mediationHook) began() {
 // ended runs the rounds of every mediation owed, off the caller's goroutine.
 func (h *mediationHook) ended() {
 	if o := h.bound("ended"); o != nil {
-		go o.Mediate(h.ctx)
+		inflight.Go(func() { o.Mediate(h.ctx) })
 	}
 }

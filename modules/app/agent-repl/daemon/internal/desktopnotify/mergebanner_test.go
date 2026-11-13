@@ -116,3 +116,13 @@ func TestMergeBannersMediatedPostsTheMediatorsBanner(t *testing.T) {
 		t.Fatalf("posted %+v (kinds %v, workspaces %v), want %+v as %s for ws1", poster.banners, poster.kinds, poster.workspaces, want, KindDeployMediated)
 	}
 }
+
+func TestDeployMediatedTitleLeadsWithTheMediationMark(t *testing.T) {
+	// Act
+	got := DeployMediatedTitle("deploy-mediator")
+
+	// Assert
+	if got != "🩺 deploy-mediator" {
+		t.Fatalf("DeployMediatedTitle = %q, want the mediation mark before the mediator's name", got)
+	}
+}

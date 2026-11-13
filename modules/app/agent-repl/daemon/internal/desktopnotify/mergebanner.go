@@ -84,8 +84,14 @@ func (m *MergeBanners) Resolved(ws ids.WorkspaceID, end MergeEnd, summary string
 // user, over what it said of it.
 func (m *MergeBanners) Mediated(ws ids.WorkspaceID, summary string) {
 	m.poster.Post(ws, KindDeployMediated, func(_ context.Context, name string) Banner {
-		return Banner{Title: eventTitle("🩺", name), Body: summary}
+		return Banner{Title: DeployMediatedTitle(name), Body: summary}
 	})
+}
+
+// DeployMediatedTitle is the title of a deploy its mediator put before the
+// user.
+func DeployMediatedTitle(name string) string {
+	return eventTitle("🩺", name)
 }
 
 // MergeQueuedTitle is a queued merge's banner title.

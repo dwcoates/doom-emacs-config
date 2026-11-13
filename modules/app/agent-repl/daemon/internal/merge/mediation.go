@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
@@ -160,7 +161,8 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			o.mediationRound(context.WithoutCancel(ctx), q, *m)
 			continue
 		}
-		go o.mediationRound(context.WithoutCancel(ctx), q, *m)
+		owed := *m
+		inflight.Go(func() { o.mediationRound(context.WithoutCancel(ctx), q, owed) })
 	}
 }
 
