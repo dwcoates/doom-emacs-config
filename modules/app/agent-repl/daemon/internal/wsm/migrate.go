@@ -245,6 +245,7 @@ var migrations = []migration{
 	// this build holds impossible (offqueue.go). The step also adopts every
 	// merge workspace left open with no request standing.
 	{To: 129, Name: "off_queue_merges", Kind: MigrationBreaking, DDL: offQueueMergesDDL + adoptOffQueueMergesDML},
+	{To: 130, Name: "merge_queue_return_rank", Kind: MigrationAdditive, DDL: returnRankDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

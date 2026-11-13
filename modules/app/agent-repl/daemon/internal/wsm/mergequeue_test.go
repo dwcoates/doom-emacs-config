@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2200,6 +2201,124 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	}
 	if len(got) != 3 || got[0].Workspace != next.ID || got[1].Workspace != failed.ID || got[2].Workspace != last.ID {
 		t.Fatalf("queue = %+v, want the merge being worked on, the returned merge, then the one waiting", got)
+	}
+}
+
+// returnersFixture queues five merges, then admits and steps aside each
+// merge named by ORDER for its reason in ASIDES, and returns the store, the
+// repository, and the merges in their queued order.
+func returnersFixture(t *testing.T, asides map[int]MergeAside, order []int) (*store, RepoKey, []WorkspaceID) {
+	t.Helper()
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	var wss []WorkspaceID
+	for i := 0; i < 5; i++ {
+		ws := testWorkspace(t, s)
+		queued(t, s, repo, ws.ID, instant.Add(time.Duration(i)*time.Minute))
+		wss = append(wss, ws.ID)
+	}
+	for _, i := range order {
+		if err := s.AdmitMerge(ctx, repo, wss[i]); err != nil {
+			t.Fatalf("AdmitMerge: %v", err)
+		}
+		if _, err := s.StepAsideMerge(ctx, repo, wss[i], asides[i]); err != nil {
+			t.Fatalf("StepAsideMerge: %v", err)
+		}
+	}
+	return s, repo, wss
+}
+
+func TestReturnRemediatedMergeOrdersReturnersByRank(t *testing.T) {
+	tests := []struct {
+		name    string
+		asides  map[int]MergeAside
+		returns []int
+		want    []int
+	}{
+		{
+			name:    "a merge back from its tests goes ahead of an earlier conflict returner",
+			asides:  map[int]MergeAside{0: MergeAsideConflicts, 1: MergeAsideTests},
+			returns: []int{0, 1},
+			want:    []int{2, 1, 0, 3, 4},
+		},
+		{
+			name:    "conflict returners keep the order they came back in",
+			asides:  map[int]MergeAside{0: MergeAsideConflicts, 1: MergeAsideConflicts},
+			returns: []int{1, 0},
+			want:    []int{2, 1, 0, 3, 4},
+		},
+		{
+			name:    "test returners keep the order they came back in",
+			asides:  map[int]MergeAside{0: MergeAsideTests, 1: MergeAsideTests},
+			returns: []int{1, 0},
+			want:    []int{2, 1, 0, 3, 4},
+		},
+		{
+			name:    "a conflict returner stands behind an earlier test returner and ahead of the waiting line",
+			asides:  map[int]MergeAside{0: MergeAsideTests, 1: MergeAsideConflicts},
+			returns: []int{0, 1},
+			want:    []int{2, 0, 1, 3, 4},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: merges 0 and 1 step aside in turn, and merge 2 is
+			// being worked on.
+			s, repo, wss := returnersFixture(t, tt.asides, []int{0, 1})
+			ctx := context.Background()
+			if err := s.AdmitMerge(ctx, repo, wss[2]); err != nil {
+				t.Fatalf("AdmitMerge: %v", err)
+			}
+
+			// Act
+			for _, i := range tt.returns {
+				if err := s.ReturnRemediatedMerge(ctx, repo, wss[i], []WorkspaceID{wss[2]}); err != nil {
+					t.Fatalf("ReturnRemediatedMerge: %v", err)
+				}
+			}
+
+			// Assert
+			got, err := s.MergeQueue(ctx, repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+			var order []int
+			for _, e := range got {
+				for i, ws := range wss {
+					if e.Workspace == ws {
+						order = append(order, i)
+					}
+				}
+			}
+			if fmt.Sprint(order) != fmt.Sprint(tt.want) {
+				t.Fatalf("queue order = %v, want %v", order, tt.want)
+			}
+		})
+	}
+}
+
+func TestReturnRemediatedMergeNeverPassesAnAdmittedMergeThatNeverSteppedAside(t *testing.T) {
+	// Arrange: merge 0 steps aside for its tests, merge 1 is admitted and is
+	// not named worked on.
+	s, repo, wss := returnersFixture(t, map[int]MergeAside{0: MergeAsideTests}, []int{0})
+	ctx := context.Background()
+	if err := s.AdmitMerge(ctx, repo, wss[1]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	if err := s.ReturnRemediatedMerge(ctx, repo, wss[0], nil); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if got[0].Workspace != wss[1] || got[1].Workspace != wss[0] {
+		t.Fatalf("queue = %+v, want the admitted merge, then the returner", got)
 	}
 }
 

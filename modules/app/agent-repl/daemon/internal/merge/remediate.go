@@ -173,12 +173,12 @@ var (
 	suspendAsideForTests = suspension{op: opRemediate, cause: errAsideForTests,
 		moved:     "the merge's tests failed; it stepped aside to fix them out of line, and the next merge takes its place",
 		by:        "its step aside to fix its failing tests",
-		resumes:   "it returns to the line once its fixing turn ends, next after the merge being worked on",
+		resumes:   "it returns to the line once its fixing turn ends, next after the merge being worked on and any merge back from fixing its tests before it",
 		gateRerun: "it runs its whole suite again once it heads the queue again"}
 	suspendAsideForConflicts = suspension{op: opRemediate, cause: errAsideForConflicts,
 		moved:     "the merge's rebase conflicted; it stepped aside to resolve the conflicts out of line, and the next merge takes its place",
 		by:        "its step aside to resolve its rebase's conflicts",
-		resumes:   "it returns to the line once its resolving turn ends, next after the merge being worked on",
+		resumes:   "it returns to the line once its resolving turn ends, behind the merge being worked on, every merge back from fixing its tests, and any merge back from resolving its conflicts before it",
 		gateRerun: "it rebases onto the target's tip and runs its whole suite once it heads the queue again"}
 )
 
@@ -463,8 +463,8 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 	}
 }
 
-// returnRemediated puts the remediating merge WS back in REPO's line, next
-// after the merge being worked on, releasing its repair slot to the next
+// returnRemediated puts the remediating merge WS back in REPO's line, ahead
+// of every entry of a lower return rank (wsm.ReturnRemediatedMerge), releasing its repair slot to the next
 // merge awaiting it, whose repair starts at once (armRepairs). A merge that
 // stepped aside from the head has its bubble drawn back in line
 // (drawBackInLine).
@@ -484,7 +484,7 @@ func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID,
 	rem := o.remediating[ws]
 	delete(o.remediating, ws)
 	o.mu.Unlock()
-	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, next after the merge being worked on, and its repair slot passes on",
+	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, ahead of every merge of a lower return rank, and its repair slot passes on",
 		dlog.Context{"workspace": string(ws), "repo": string(repo)})
 	if rem != nil && !rem.waiting {
 		o.drawBackInLine(ctx, ws, repo, rem.doc)
