@@ -17,16 +17,33 @@
 # WHAT IT DOES, per platform. There is no silent path: every platform either
 # demotes the command or refuses to run it.
 #
-#   Darwin  `nice -n 19`: the lowest CPU priority. Owner ruling 2026-09-23,
-#   Linux   "very low" priority. The run keeps the performance cores and
-#           runs at full speed on an idle host, but it always yields the CPU
-#           to the live runtime. `taskpolicy -b` was measured and rejected:
-#           it held a run to the efficiency cores and throttled its I/O, and
-#           the webapp integration suite then passed 56-58 of 1765, its
-#           files failing their 1800ms boot-hook bound.
-#           Disk I/O is NOT demoted on either platform.
+#   Darwin  the UTILITY QoS clamp (`taskpolicy -c utility`, owner ruling
+#           2026-11-13: tests at macOS background priority, so foreground
+#           work always wins at the scheduler), its disk I/O throttled
+#           (`-d throttle`), and `nice`. Measured 2026-11-13 with `ps -M` on
+#           an idle process: nice alone leaves a thread at priority 31, the
+#           same as the owner's own (macOS schedules by QoS, and `nice` moves
+#           nothing here); the utility clamp puts every thread of the run at
+#           20 or below, under the owner's default 31 and user-initiated 37.
+#           The run keeps the performance cores: utility QoS is eligible
+#           for every core (only the background and maintenance classes are
+#           confined to the efficiency cores; not measured under load, which
+#           is never generated here). The background clamp (`-c background` or `-b`, priority
+#           4) was rejected on merit: on Apple silicon it confines a run to
+#           the efficiency cores, 4 of this host's 16, below the tests'
+#           5.6-core target, and `-b` was measured 2026-09-23 failing the
+#           webapp integration suite (56-58 of 1765 passed, its files past
+#           their 1800ms boot-hook bound). The clamp is a ceiling every
+#           child inherits: a thread asking for a higher QoS gets utility.
+#   Linux   `nice -n 19` (owner ruling 2026-09-23, "very low"): the CFS
+#           scheduler weights a niceness-19 thread at 15 against a
+#           niceness-0 thread's 1024, so the run yields the CPU to the live
+#           runtime while keeping every core. Disk I/O is not demoted.
 #   other   REFUSED, exit 78. No suite here has ever run anywhere else, and
 #           a run at normal priority is exactly what this exists to prevent.
+#
+# THE NICENESS IS STILL THE RUN'S RANK on every platform: testrun orders the
+# host's core seats by it (cores.Rank), the merge queue's head at 10.
 #
 # Children inherit the niceness, so wrapping the ROOT of a run is enough:
 # every go test binary, daemon, shim, vitest worker and Emacs a suite starts
@@ -140,15 +157,15 @@ priority_exec() {
             # niceness above 0 overshoots to 20 (macOS's ceiling); the
             # increment is the distance to the target instead.
             increment=$(( target - niceness ))
-            # DISK, TOO, ON macOS (owner ruling 2026-10-06): the CPU demotion
-            # left a run's disk I/O at normal priority, and a full run's
-            # hundreds of SQLite files starved the live store (a 111-page
-            # checkpoint took 54 s, its writes 5-7 s). `taskpolicy -d throttle`
-            # sets the I/O policy ONLY -- not `-b`, which also pins to the
-            # efficiency cores and was rejected 2026-09-23 -- and children
-            # inherit it with the niceness.
+            # ON macOS, THE UTILITY QoS CLAMP AND THROTTLED DISK. The clamp
+            # is what demotes the CPU there (see WHAT IT DOES above); not
+            # `-b`, which pins to the efficiency cores. The disk (owner
+            # ruling 2026-10-06): a full run's hundreds of SQLite files
+            # starved the live store at normal I/O priority (a 111-page
+            # checkpoint took 54 s, its writes 5-7 s). Children inherit both
+            # with the niceness.
             if [[ $os == Darwin ]]; then
-                exec taskpolicy -d throttle nice -n "$increment" "$@"
+                exec taskpolicy -c utility -d throttle nice -n "$increment" "$@"
             fi
             exec nice -n "$increment" "$@"
             ;;

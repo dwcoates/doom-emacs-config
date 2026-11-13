@@ -131,14 +131,26 @@ sidecar, Emacs, webview). `bin/background.sh <cmd>` runs a command and its
 whole process tree at the machine's background priority, and it is the ONE
 helper every test entry point goes through.
 
-- macOS and Linux: `nice -n 19` (owner ruling 2026-09-23, "very low").
-  - The run keeps the performance cores but always yields the CPU to the live
-    runtime.
+- macOS: the UTILITY QoS clamp, `taskpolicy -c utility` (owner ruling
+  2026-11-13, tests at macOS background priority so foreground work always
+  wins at the scheduler), plus `nice` for the run's rank.
+  - `nice` alone demotes nothing on macOS: measured 2026-11-13 with `ps -M`,
+    a niceness-19 thread sits at priority 31, the owner's own. Under the
+    utility clamp every thread of the run is at 20 or below, under the
+    owner's 31 (default) and 37 (user-initiated), and children inherit it.
+  - The run keeps the performance cores: utility QoS is eligible for every
+    core; only the background and maintenance classes are confined to the
+    efficiency cores. (Not measured under load: load generators are
+    off-limits.)
+  - The background clamp (`-c background`, `-b`, priority 4) is rejected: on
+    Apple silicon it confines a run to the efficiency cores, 4 of 16, below
+    the tests' 5.6-core target, and `-b` failed the webapp integration suite
+    (56-58 of 1765 passed, 2026-09-23).
 - macOS also throttles the run's DISK I/O: `taskpolicy -d throttle` (owner
   ruling 2026-10-06), so a full run's SQLite and build traffic waits behind
-  the live store's writes. It sets the I/O policy only; children inherit it.
-  - `taskpolicy -b` was measured and rejected: it pinned runs to the
-    efficiency cores and the webapp integration suite passed 56-58 of 1765.
+  the live store's writes.
+- Linux: `nice -n 19` (owner ruling 2026-09-23, "very low"), which the CFS
+  scheduler honors (weight 15 against 1024); the run keeps every core.
   - Linux is reached only inside the e2e sandbox container.
 - Any other platform: REFUSED with exit 78, never run at normal priority.
 - It is idempotent: a process already at niceness 19 or above (read with
@@ -247,8 +259,8 @@ with each unit admitted by the CPU governor only while the tests stay within
 their 35% target and the host within its 50% ceiling (owner rulings
 2026-10-20, 2026-10-23, 2026-10-30 and 2026-11-13). The budget is
 shared by every test run on the host (below), and the whole run is at
-nice 19, so it always yields the CPU to the owner's live runtime, input
-handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
+background priority (`bin/background.sh`), so it always yields the CPU to
+the owner's live runtime, input handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
 `~/.cache/agent-repl/test-history.<conditions>.json` (one history per set of
 run conditions, e.g. `ramdisk-io-default`, so timings taken at another I/O
