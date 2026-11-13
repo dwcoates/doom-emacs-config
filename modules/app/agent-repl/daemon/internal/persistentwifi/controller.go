@@ -95,7 +95,7 @@ type Controller struct {
 	// re-read.
 	wifiCause, modeCause string
 	// failoverCause is why the failover's hotspot step last could not take; empty
-	// while it has nothing standing against it (failoverLocked).
+	// while it has nothing standing against it (failoverDueLocked).
 	failoverCause string
 	// knownCause is why the failover's saved-network step (the saved list)
 	// last could not take; empty while nothing stands against it.
@@ -108,8 +108,11 @@ type Controller struct {
 	// the durable copy.
 	energyKept string
 	// failover is the Wi-Fi failover's retry schedule since Wi-Fi was lost;
-	// the zero value while the failover stands down (failoverLocked).
+	// the zero value while the failover stands down (failoverDueLocked).
 	failover failoverSchedule
+	// failoverCancel cancels the failover attempt in flight; nil while none
+	// runs (attemptFailover).
+	failoverCancel context.CancelFunc
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
 	lid lidFact
 	// quiet is whether the lid-closed quiet state stands (quiet.go);
@@ -455,10 +458,15 @@ func (c *Controller) WatchLid(ctx context.Context) error {
 // held is taken again idempotently: the decision depends on states, never on
 // transitions.
 func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
+	// THE WAIT FOR THE LOCK IS RECORDED: a lid fact held behind the lock
+	// keeps the quiet state, and every page view it gates, standing after the
+	// lid opened (2026-11-13: six minutes behind a failover attempt).
+	asked := c.clock.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if lid != c.lid {
-		c.log.Info(opLid, "the lid changed", dlog.Context{"was": c.lid.name(), "lid": lid.name()})
+		c.log.Info(opLid, "the lid changed", dlog.Context{"was": c.lid.name(), "lid": lid.name(),
+			"lock_wait_ms": c.clock.Now().Sub(asked).Milliseconds()})
 	}
 	c.lid = lid
 	rd := c.readLocked(ctx)

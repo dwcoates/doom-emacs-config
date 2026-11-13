@@ -15,18 +15,24 @@ const opFailover = "daemon.persistentwifi.failover"
 // tick is one beat of Run: read the standing, then hold the energy mode to
 // the quiet state as it stands (holdEnergyLocked: a Low Power write or a
 // restore that failed is retried; with neither owed nothing is written) and
-// the Wi-Fi failover to the reading. Both run under the one lock, so a beat
-// never acts on a reading an Update changed underneath it.
+// the Wi-Fi failover to the reading. The read and both decisions run under the
+// one lock, so a beat never acts on a reading an Update changed underneath
+// it; a failover attempt that is due then runs OFF the lock
+// (attemptFailover).
 func (c *Controller) tick(ctx context.Context) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	rd := c.readLocked(ctx)
 	if ctx.Err() != nil {
 		// An abandoned read says nothing about either fact (readLocked).
+		c.mu.Unlock()
 		return
 	}
 	c.holdEnergyLocked(ctx, rd.energy, "beat")
-	c.failoverLocked(ctx, rd)
+	attempt, due := c.failoverDueLocked(ctx, rd)
+	c.mu.Unlock()
+	if due {
+		c.attemptFailover(attempt, rd)
+	}
 }
 
 // failoverRetryIn answers how long until the Wi-Fi failover's next step is
@@ -42,11 +48,12 @@ func (c *Controller) failoverRetryIn() (time.Duration, bool) {
 	return max(s.next.Sub(c.clock.Now()), 0), true
 }
 
-// failoverLocked is THE WI-FI FAILOVER (owner ruling 2026-11-13): while the
-// lid-closed quiet state stands (the lid closed, the mode on), a Wi-Fi
-// interface that has been joined to nothing for failoverLossGrace is brought
-// back to a network: the owner's saved networks by name, in their preference
-// order (rejoinSavedLocked), then the configured hotspot (joinHotspotLocked).
+// failoverDueLocked is THE WI-FI FAILOVER's decision (owner ruling
+// 2026-11-13): while the lid-closed quiet state stands (the lid closed, the
+// mode on), a Wi-Fi interface that has been joined to nothing for
+// failoverLossGrace is brought back to a network: the owner's saved networks
+// by name, in their preference order (rejoinSaved), then the configured
+// hotspot (joinHotspotStep). It answers the attempt that is due, if one is.
 //
 // IT NEVER POWER-CYCLES THE RADIO, and it never acts with the lid open. On
 // 2026-11-13 a radio cycle 71ms into an ordinary network switch, with the lid
@@ -60,26 +67,92 @@ func (c *Controller) failoverRetryIn() (time.Duration, bool) {
 // distinct cause a step cannot take is recorded once per step (knownCause,
 // failoverCause), and the failover's end is recorded when it made an attempt.
 // Caller holds mu.
-func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
+func (c *Controller) failoverDueLocked(ctx context.Context, rd reading) (failoverAttempt, bool) {
 	if !c.quiet || !failoverWants(rd.state) {
 		c.standDownFailoverLocked(rd)
-		return
+		return failoverAttempt{}, false
 	}
 	now := c.clock.Now()
 	if c.failover.lost.IsZero() {
 		c.failover.lost = now
 		c.failover.next = now.Add(failoverLossGrace)
 		c.recordLossLocked(ctx, rd)
-		return
+		return failoverAttempt{}, false
 	}
 	if !c.failover.due(now) {
-		return
+		return failoverAttempt{}, false
 	}
 	c.failover.attempts++
-	if c.rejoinSavedLocked(ctx, rd) {
+	attemptCtx, cancel := context.WithCancel(ctx)
+	c.failoverCancel = cancel
+	attempt := failoverAttempt{ctx: attemptCtx, cancel: cancel, number: c.failover.attempts}
+	c.log.Info(opFailover, "a Wi-Fi failover attempt starts", dlog.Context{
+		"device": rd.device, "attempt": attempt.number, "lost_for": now.Sub(c.failover.lost).String()})
+	return attempt, true
+}
+
+// failoverAttempt is one failover attempt in flight: its context, which
+// leaving the quiet state cancels (abandonFailoverLocked), and its number.
+type failoverAttempt struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	number int
+}
+
+// failoverStep is how one failover step ended.
+type failoverStep int
+
+const (
+	// stepJoined: a network was joined, which ends the failover.
+	stepJoined failoverStep = iota + 1
+	// stepNotJoined: nothing was joined; the next step, or the retry, follows.
+	stepNotJoined
+	// stepAbandoned: the quiet state ended or the daemon stood down
+	// mid-attempt; nothing more is joined, and the schedule is left to the
+	// next beat.
+	stepAbandoned
+)
+
+// attemptFailover runs ATTEMPT OFF THE LOCK (2026-11-13: an attempt joining
+// 116 saved networks one by one held the lock for six minutes, and the lid
+// opening waited behind it, so the lid-closed quiet state kept every page
+// view frozen six minutes after the owner opened the lid). Each step takes the
+// lock only to read or record, so a lid fact lands between any two joins; each
+// join first checks that the quiet state still stands (stillWanted); and
+// leaving the quiet state cancels the attempt, which ends the join in flight.
+func (c *Controller) attemptFailover(attempt failoverAttempt, rd reading) {
+	defer attempt.cancel()
+	defer func() {
+		c.mu.Lock()
+		c.failoverCancel = nil
+		c.mu.Unlock()
+	}()
+	if c.rejoinSaved(attempt, rd) != stepNotJoined {
 		return
 	}
-	c.joinHotspotLocked(ctx, rd)
+	c.joinHotspotStep(attempt, rd)
+}
+
+// stillWanted reports whether ATTEMPT may make its next join: the daemon has
+// not stood down, and the quiet state and the mode still stand. An attempt
+// that may not is recorded as abandoned, naming the step it stopped before.
+func (c *Controller) stillWanted(attempt failoverAttempt, step string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if attempt.ctx.Err() == nil && c.quiet && c.last != nil && failoverWants(c.last) {
+		return true
+	}
+	c.log.Info(opFailover, "a Wi-Fi failover attempt was abandoned: the quiet state ended, the mode changed or the daemon stood down", dlog.Context{
+		"attempt": attempt.number, "before": step, "quiet": c.quiet, "lid": c.lid.name()})
+	return false
+}
+
+// abandonFailoverLocked cancels the failover attempt in flight, if one is,
+// ending the join it is running. Caller holds mu.
+func (c *Controller) abandonFailoverLocked() {
+	if c.failoverCancel != nil {
+		c.failoverCancel()
+	}
 }
 
 // failoverLossGrace is how long Wi-Fi must stay lost before the failover acts.
@@ -88,28 +161,37 @@ func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 // that, so a network switch macOS completes is never acted on.
 const failoverLossGrace = 20 * time.Second
 
-// rejoinSavedLocked is the failover's FIRST STEP: join the owner's saved
-// networks BY NAME, in the preference order `networksetup
+// rejoinSaved is the failover's FIRST STEP: join the owner's saved networks
+// BY NAME, in the preference order `networksetup
 // -listpreferredwirelessnetworks` lists them (readable without the location
 // permission the joined network's name needs), the configured hotspot
 // excepted (the second step joins it). macOS supplies each one's password from
 // the keychain; one out of range fails ("Could not find network") and
-// disconnects nothing. It answers whether a saved network was joined, which
-// ends the failover. Saved network names are the owner's: the records name
-// how many there are and which index was tried, never the name. Caller holds
-// mu.
-func (c *Controller) rejoinSavedLocked(ctx context.Context, rd reading) bool {
+// disconnects nothing. A join ends the failover. Saved network names are the
+// owner's: the records name how many there are and which index was tried,
+// never the name. It runs off the lock (attemptFailover).
+func (c *Controller) rejoinSaved(attempt failoverAttempt, rd reading) failoverStep {
+	ctx := attempt.ctx
 	if rd.device == "" {
 		// No interface: the hotspot step names the outcome.
-		return false
+		return stepNotJoined
+	}
+	if !c.stillWanted(attempt, "saved_list") {
+		return stepAbandoned
 	}
 	out, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-listpreferredwirelessnetworks", rd.device)
+	if ctx.Err() != nil {
+		c.stillWanted(attempt, "saved_list")
+		return stepAbandoned
+	}
 	if err != nil {
+		c.mu.Lock()
 		c.recordStandingCause(&c.knownCause, err.Error(), func(cause string) {
 			c.log.Error(opFailover, "the saved Wi-Fi networks could not be read to rejoin one; the hotspot is tried",
 				dlog.Context{"device": rd.device, "cause": cause})
 		})
-		return false
+		c.mu.Unlock()
+		return stepNotJoined
 	}
 	var saved []string
 	for _, name := range preferredNetworks(out) {
@@ -118,6 +200,9 @@ func (c *Controller) rejoinSavedLocked(ctx context.Context, rd reading) bool {
 		}
 	}
 	for i, name := range saved {
+		if !c.stillWanted(attempt, "saved_join") {
+			return stepAbandoned
+		}
 		joinOut, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-setairportnetwork", rd.device, name)
 		if err != nil || strings.TrimSpace(joinOut) != "" {
 			// `-setairportnetwork` prints nothing on success and a sentence
@@ -126,34 +211,43 @@ func (c *Controller) rejoinSavedLocked(ctx context.Context, rd reading) bool {
 				"device": rd.device, "index": i, "saved": len(saved), "failed": err != nil})
 			continue
 		}
+		c.mu.Lock()
 		after := c.readLocked(ctx)
 		if ctx.Err() != nil {
 			// An abandoned read says nothing about the link (readLocked).
-			return true
+			c.mu.Unlock()
+			return stepAbandoned
 		}
 		if after.state.GetJoined() == nil {
+			c.mu.Unlock()
 			continue
 		}
 		c.log.Info(opFailover, "a saved Wi-Fi network was rejoined after Wi-Fi was lost", dlog.Context{
-			"device": rd.device, "index": i, "saved": len(saved), "attempts": c.failover.attempts,
+			"device": rd.device, "index": i, "saved": len(saved), "attempts": attempt.number,
 			"was": c.failoverCause, "lost_for": c.clock.Now().Sub(c.failover.lost).String(),
 		})
 		c.endFailoverLocked()
-		return true
+		c.mu.Unlock()
+		return stepJoined
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.knownCause = ""
 	c.log.Info(opFailover, "no saved Wi-Fi network could be rejoined; the hotspot is tried", dlog.Context{
-		"device": rd.device, "saved": len(saved), "attempt": c.failover.attempts,
+		"device": rd.device, "saved": len(saved), "attempt": attempt.number,
 		"lost_for": c.clock.Now().Sub(c.failover.lost).String(),
 	})
-	return false
+	return stepNotJoined
 }
 
-// joinHotspotLocked is the failover's SECOND STEP: join the configured
+// joinHotspotStep is the failover's SECOND STEP: join the configured
 // hotspot. A join that does not take, or a hotspot that is not configured,
-// schedules the next attempt. Caller holds mu.
-func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading) {
+// schedules the next attempt. It runs off the lock (attemptFailover).
+func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
+	ctx := attempt.ctx
 	if c.cfg.Hotspot == "" {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		c.failover.failed(c.clock.Now())
 		c.recordFailoverCause(errNoHotspot().Error(), func(cause string) {
 			c.log.Error(opFailover, "Wi-Fi was lost with the lid closed, no saved network could be rejoined, and no hotspot is configured to join",
@@ -161,16 +255,24 @@ func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading) {
 		})
 		return
 	}
+	if !c.stillWanted(attempt, "hotspot_join") {
+		return
+	}
 	c.log.Info(opFailover, "joining the hotspot after Wi-Fi was lost", dlog.Context{
-		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": c.failover.attempts,
-		"lost_for": c.clock.Now().Sub(c.failover.lost).String(),
+		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": attempt.number,
 	})
 	outcome := c.joinHotspot(ctx, rd)
+	if ctx.Err() != nil {
+		c.stillWanted(attempt, "hotspot_outcome")
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if joined := outcome.GetJoined(); joined != nil {
 		after := c.readLocked(ctx)
 		c.log.Info(opFailover, "the hotspot was joined after Wi-Fi was lost", dlog.Context{
 			"hotspot": joined.GetNetworkName(), "wifi": wifiArm(after.state), "was": c.failoverCause,
-			"attempts": c.failover.attempts,
+			"attempts": attempt.number,
 		})
 		c.endFailoverLocked()
 		return
@@ -189,7 +291,7 @@ func (c *Controller) joinHotspotLocked(ctx context.Context, rd reading) {
 	if backedOff {
 		c.log.Info(opFailover, "the Wi-Fi failover backs off: it is now tried less often",
 			dlog.Context{"hotspot": c.cfg.Hotspot, "retry_every": every.String(),
-				"lost_for": failedAt.Sub(c.failover.lost).String(), "attempts": c.failover.attempts})
+				"lost_for": failedAt.Sub(c.failover.lost).String(), "attempts": attempt.number})
 	}
 }
 
@@ -295,7 +397,7 @@ func failoverRetryEvery(lost time.Duration) time.Duration {
 }
 
 // failoverSchedule is one loss's retries. The zero value is a failover
-// standing down: the next beat that wants it starts the loss (failoverLocked
+// standing down: the next beat that wants it starts the loss (failoverDueLocked
 // sets lost) and attempts at once.
 type failoverSchedule struct {
 	// lost is when the failover first found Wi-Fi lost; zero before.

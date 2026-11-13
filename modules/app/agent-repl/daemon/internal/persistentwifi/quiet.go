@@ -111,11 +111,15 @@ func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energ
 }
 
 func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
+	// THE VIEWS LIFT FIRST, and a failover attempt in flight is ended: no
+	// page view waits on the display's wake, and no network is joined once
+	// the quiet state is left.
+	c.views.Set(false)
+	c.quiet = false
+	c.abandonFailoverLocked()
 	display := c.wakeDisplayLocked(ctx, trigger)
 	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)
-	c.views.Set(false)
-	c.quiet = false
 	energyStep := c.restoreEnergyLocked(ctx, energy, trigger, true)
 	if c.telemetry != nil {
 		c.telemetry.SetLidQuiet(false)
