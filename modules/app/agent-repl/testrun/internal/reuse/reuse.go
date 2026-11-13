@@ -58,6 +58,12 @@ type Deps struct {
 	ProfileDir string
 	// Probe answers whether a seatbelt sandbox can be applied (ProbeSandbox).
 	Probe func() error
+	// Ignored is what git ignores in the checkout (ExecIgnored): session
+	// state and build output, which no input tree's key reads.
+	Ignored Ignored
+	// Bindings is the generated protobuf code's symbols (ExecBindings),
+	// which every key reads that code by.
+	Bindings *Bindings
 	// Head answers the checkout's branch, commit and whether its files
 	// differ from that commit.
 	Head func() (branch, commit string, dirty bool, err error)
@@ -104,10 +110,15 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	set := NewInputSet()
 	switch s.Kind {
 	case roster.Script, roster.SplitScript:
-		// A script suite's call graph is no tool's to derive: it reads its
-		// script and what its Reuse declares.
+		// A script suite reads its script, the scripts it names
+		// (addScriptGraph) and what its Reuse declares.
 		if err := placeRosterPath(d, set, s.Path, false); err != nil {
 			return nil, err
+		}
+		if len(s.Reuse.Scripts) > 0 {
+			if err := addScriptGraph(d, set, s.Path, s.Reuse.Scripts); err != nil {
+				return nil, fmt.Errorf("reuse: %s's scripts: %w", s.Name, err)
+			}
 		}
 	case roster.GoModule, roster.E2E:
 		dir := roster.Resolve(d.Repo, d.Module, s.Path)
@@ -410,4 +421,9 @@ func staleInstall(repo string, set *InputSet) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// keyEnv is what this run's keys are computed with, through CACHE.
+func (d Deps) keyEnv(cache *HashCache) KeyEnv {
+	return KeyEnv{Cache: cache, Ignored: d.Ignored, Bindings: d.Bindings}
 }

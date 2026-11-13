@@ -2293,7 +2293,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // switched the skill off, and a catalog still listing it means the
         // switch did not take, so the agent can read the rules it bypasses.
         const active = sessionProfile();
-        if (active.kind === "agent" && active.landing === "bypassing_queue" && commands.some((command) => command.name === MERGE_QUEUE_SKILL)) {
+        if (active.kind === "agent" && active.landing !== "through_queue" && commands.some((command) => command.name === MERGE_QUEUE_SKILL)) {
           LOGGER.error(
             { skill: MERGE_QUEUE_SKILL, landing: active.landing, commands: commands.length, detail: `the catalog still lists ${MERGE_QUEUE_SKILL}` },
             "a bypassing session lists the merge-queue skill its start switched off",
@@ -8337,8 +8337,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open.length === 0) return;
     await Promise.all(
       open.map(async (entry) => {
+        let head: conversationv1.HistoryPointer | undefined;
         try {
-          entry.page.concludeThrough(await bookHead(entry.agent));
+          head = await bookHead(entry.agent);
+          entry.page.concludeThrough(head);
         } catch (err) {
           // The head could not be read, so there is no pointer to conclude
           // through; ending the tail now is still better than cutting it later.
@@ -8353,6 +8355,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           entry.ended,
           watcherConclusionBudgetMs,
           `the WatchAgent tail on ${entry.agent.value} did not end within its conclusion budget`,
+          // WHERE THE TAIL STOOD says which side held it: served short of the
+          // head is a consumer not reading, served through it is one that
+          // read everything and did not let the stream end (2026-11-13: 13
+          // tails ran out the budget in the minute after a handover).
+          () => ({ agent: entry.agent.value, concluded_through: head?.value, served_through: entry.page.servedThrough() }),
         );
       }),
     );

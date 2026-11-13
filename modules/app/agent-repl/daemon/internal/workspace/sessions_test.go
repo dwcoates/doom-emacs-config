@@ -694,6 +694,10 @@ type fleetFixture struct {
 	// persistedErr fails every such read.
 	persisted    map[string]string
 	persistedErr error
+	// mediates and mediatesErr answer whether the workspace is its
+	// repository's deploy mediator.
+	mediates    bool
+	mediatesErr error
 	// store is the store's read-only face history is read from.
 	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
@@ -921,6 +925,9 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 	fleet, err := NewFleet(FleetDeps{
 		StoreHistory: f.store,
+		Mediates: func(context.Context, wsm.Workspace) (bool, error) {
+			return f.mediates, f.mediatesErr
+		},
 		PersistedBook: func(dir string) (string, bool, error) {
 			if f.persistedErr != nil {
 				return "", false, f.persistedErr
@@ -1167,6 +1174,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 			deps: FleetDeps{
 				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				Mediates:      noMediator,
 				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -1180,6 +1188,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 			deps: FleetDeps{
 				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				Mediates:      noMediator,
 				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -4576,5 +4585,57 @@ func TestParkedKeepaliveSurfacesAnUnreadableStanding(t *testing.T) {
 	}
 	if !fleetLogged(f, "error", opQueueBypass, "the workspace's queue bypass standing could not be read; its parked conversation is not kept") {
 		t.Fatalf("records = %+v, want the failure at error", f.log.logger.Records())
+	}
+}
+
+// noMediator is a fleet whose repositories name no deploy mediator.
+func noMediator(context.Context, wsm.Workspace) (bool, error) { return false, nil }
+
+func TestTheDeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
+	cases := []struct {
+		name          string
+		mediates      bool
+		wantMediating bool
+	}{
+		{name: "the repository's deploy mediator", mediates: true, wantMediating: true},
+		{name: "any other workspace"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := resumable(f)
+			f.mediates = tc.mediates
+
+			// Act
+			got, err := f.fleet.sessionProfile(context.Background(), dlog.NewTestLogger(), ws)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("sessionProfile: %v", err)
+			}
+			if mediating := got.GetAgent().GetLanding().GetMediating() != nil; mediating != tc.wantMediating {
+				t.Fatalf("mediating = %v, want %v", mediating, tc.wantMediating)
+			}
+		})
+	}
+}
+
+func TestASessionWhoseMediatorStandingCannotBeReadIsNotStarted(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.mediatesErr = errors.New("config unreadable")
+	log := dlog.NewTestLogger()
+
+	// Act
+	_, err := f.fleet.sessionProfile(context.Background(), log, ws)
+
+	// Assert
+	if err == nil {
+		t.Fatal("sessionProfile = nil error, want the unreadable standing")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opBringUp}); !ok {
+		t.Fatalf("no ERROR record of the unreadable standing: %+v", log.Records())
 	}
 }

@@ -247,6 +247,7 @@ var migrations = []migration{
 	{To: 129, Name: "off_queue_merges", Kind: MigrationBreaking, DDL: offQueueMergesDDL + adoptOffQueueMergesDML},
 	{To: 130, Name: "merge_queue_return_rank", Kind: MigrationAdditive, DDL: returnRankDDL},
 	{To: 131, Name: "merge_queue_pauser_workspace", Kind: MigrationAdditive, DDL: mergeQueuePauserWorkspaceDDL},
+	{To: 132, Name: "merge_queue_mediation", Kind: MigrationAdditive, DDL: mediationDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

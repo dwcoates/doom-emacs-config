@@ -100,3 +100,47 @@ func ReportPlacement(log Logger, unplaced []string) bool {
 	}
 	return len(unplaced) == 0
 }
+
+// Ignored is every path git ignores in a checkout, repository-relative: a
+// directory git ignores whole ends in "/", and everything under it is
+// ignored too (2026-11-13: `.claude/emacs/`'s session log links, rewritten at
+// each restart, and the daemon binary a build leaves in `cmd/agent-repld/`
+// re-ran every suite whose input tree held them).
+type Ignored []string
+
+// Has reports whether git ignores the repository-relative path rel.
+func (ig Ignored) Has(rel string) bool {
+	for _, p := range ig {
+		if dir, isDir := strings.CutSuffix(p, "/"); isDir {
+			if rel == dir || strings.HasPrefix(rel, p) {
+				return true
+			}
+			continue
+		}
+		if rel == p {
+			return true
+		}
+	}
+	return false
+}
+
+// ExecIgnored lists what git ignores in the checkout, each ignored directory
+// once as a whole.
+func ExecIgnored(repo string) (Ignored, error) {
+	out, err := gitinfo.Output(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	if err != nil {
+		return nil, fmt.Errorf("reuse: list what %s ignores: %w", repo, err)
+	}
+	return parseIgnored(string(out)), nil
+}
+
+// parseIgnored reads `ls-files -z --directory`'s NUL-separated answer.
+func parseIgnored(out string) Ignored {
+	var ignored Ignored
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			ignored = append(ignored, p)
+		}
+	}
+	return ignored
+}

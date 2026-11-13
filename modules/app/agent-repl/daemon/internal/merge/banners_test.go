@@ -41,6 +41,12 @@ func (b *fakeBanners) Queued(ws ids.WorkspaceID, label string) {
 	b.raised = append(b.raised, raisedBanner{ws: ws, kind: "queued", text: label})
 }
 
+func (b *fakeBanners) Mediated(ws ids.WorkspaceID, summary string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.raised = append(b.raised, raisedBanner{ws: ws, kind: desktopnotify.KindDeployMediated, text: summary})
+}
+
 func (b *fakeBanners) Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string) {
 	told := b.told()
 	b.mu.Lock()
@@ -488,4 +494,14 @@ func TestEveryResolutionIsAnnouncedThroughEnded(t *testing.T) {
 	if handBacks != 2 {
 		t.Errorf("handBack is called at %d sites, want 2: ended and a merge never put in line", handBacks)
 	}
+}
+
+// bannerRaised reports whether the harness raised a banner of KIND.
+func (h *harness) bannerRaised(kind string) bool {
+	for _, b := range h.banners.seen() {
+		if b.kind == kind {
+			return true
+		}
+	}
+	return false
 }

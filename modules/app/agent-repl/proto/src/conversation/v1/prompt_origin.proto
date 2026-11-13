@@ -259,4 +259,9 @@ enum PromptOrigin {
   // path of a file holding it, its size and the exit status when it is long.
   // Its one Emacs send site is `agent-repl-terminal-finished`.
   PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT = 51;
+  // The deploy mediator's brief: a deploy began, and the repository's merge
+  // queue advances nothing until the mediator approves it, escalates it, or
+  // deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
+  // Drawn as the daemon's prompt to its own hidden workspace.
+  PROMPT_ORIGIN_DEPLOY_MEDIATION = 52;
 }

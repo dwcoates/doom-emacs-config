@@ -145,7 +145,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	}
 	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
 	if paused {
-		suspended := o.suspendForPause(ctx, repos)
+		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
 	}
 	redrawn := o.redrawPaused(ctx, op, changed)
@@ -1367,11 +1367,11 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	// promotion of the merge behind a head that ended, and no resume of a
 	// merge a restart or the pause itself suspended; those wait, recorded,
 	// until the queue is resumed.
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	stopped, err := o.queueHeld(ctx, repo)
 	if err != nil {
 		return "", nil, false, err
 	}
-	if paused {
+	if stopped {
 		return "", nil, false, nil
 	}
 	// A MERGE A RESTART INTERRUPTED GOES FIRST: it was already running, and
@@ -1422,8 +1422,10 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	if !found {
 		return "", nil, false, nil
 	}
-	// A WORKSPACE HANDED TO ANOTHER DAEMON HAS ITS MERGES THERE.
-	if o.movedAway(front.Workspace) {
+	// A WORKSPACE HANDED TO ANOTHER DAEMON HAS ITS MERGES THERE, and one
+	// handed to this daemon and not adopted yet has them nowhere until its
+	// adoption kicks this pump.
+	if o.movedAway(front.Workspace) || !o.deps.Standing.ServesWorkspace(front.Workspace) {
 		o.deps.Log.Global().Debug(op, "the queue front's workspace moved to another daemon; it admits the merge there",
 			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil

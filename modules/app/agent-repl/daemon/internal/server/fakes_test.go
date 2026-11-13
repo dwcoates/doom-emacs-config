@@ -1207,6 +1207,9 @@ func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldProm
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
 	merge.Orchestrator
+	// decisions records every DecideMediation, which decideErr answers.
+	decisions  []fakeDecision
+	decideErr  error
 	enqueueErr error
 	pauseErr   error
 	pauseScope *merge.RepositoryScope
@@ -1431,6 +1434,18 @@ func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope, by me
 func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by merge.Pauser) error {
 	f.hardStopScope, f.hardStopped, f.pauser = scope, true, &by
 	return f.pauseErr
+}
+
+// fakeDecision is one DecideMediation the fake was asked for.
+type fakeDecision struct {
+	ws       ids.WorkspaceID
+	decision merge.MediationDecision
+	summary  string
+}
+
+func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, decision merge.MediationDecision, summary string) error {
+	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: decision, summary: summary})
+	return f.decideErr
 }
 
 // fakeDrain answers the schedule verbs and records what it was handed.

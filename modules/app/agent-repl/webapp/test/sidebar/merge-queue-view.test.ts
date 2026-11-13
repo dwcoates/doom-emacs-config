@@ -19,6 +19,7 @@ import {
   RosterMergeQueueGithubEntrySchema,
   RosterMergeQueueOffQueueSchema,
   RosterMergeQueueHeadSchema,
+  RosterMergeQueueMediationSchema,
   RosterMergeQueuePausedSchema,
   RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueStageSchema,
@@ -35,6 +36,7 @@ import {
   drawHeadClock,
   drawRosterMergeQueue,
   drawRosterMergeQueueHead,
+  drawRosterMergeQueueMediation,
   drawQueuedGroupHead,
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
@@ -44,6 +46,7 @@ import {
   MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
+  MERGE_QUEUE_MEDIATION_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
@@ -436,6 +439,55 @@ describe("drawRosterMergeQueue", () => {
     ).toThrow(MalformedView);
   });
 
+});
+
+/** The deploy mediation the queue waits on, its mediator ID, CHECKING once told of the deploy. */
+function mediation(id: string, checking: boolean) {
+  return create(RosterMergeQueueMediationSchema, {
+    subject: queueSubject(id, { name: "deploy-mediator" }),
+    standing: checking ? { case: "checking", value: {} } : { case: "waiting", value: {} },
+  });
+}
+
+describe("drawRosterMergeQueueMediation", () => {
+  it("pins the mediation above the head's card", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation("m1", true), head: mergingHead("w1") }), sc, "queue");
+    expect([...body.children].map((el) => el.getAttribute("data-workspace"))).toEqual(["m1", "w1"]);
+  });
+
+  it("draws a queue holding only the mediation, with no head", () => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation("m1", false) }), sc, "queue");
+    expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_MEDIATION_CLASS}`).length]).toEqual([null, 1]);
+  });
+
+  it("draws the mediator's name and that it is checking the deploy once told of it", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueMediation(mediation("m1", true), sc, "m");
+    expect([line.querySelector(".sb-mq-name")?.textContent, line.querySelector(`.${MERGE_QUEUE_REASON_CLASS}`)?.textContent]).toEqual([
+      "deploy-mediator",
+      "checking deploy",
+    ]);
+  });
+
+  it("draws that the mediation awaits the deploy before it is told of it", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueMediation(mediation("m1", false), sc, "m");
+    expect(line.querySelector(`.${MERGE_QUEUE_REASON_CLASS}`)?.textContent).toBe("awaiting deploy");
+  });
+
+  it("refuses a mediation with no standing as a malformed view", () => {
+    const { sc } = daemon();
+    const u = create(RosterMergeQueueMediationSchema, { subject: queueSubject("m1") });
+    expect(() => drawRosterMergeQueueMediation(u, sc, "m")).toThrow(MalformedView);
+  });
+
+  it("refuses a mediation with no subject as a malformed view", () => {
+    const { sc } = daemon();
+    const u = create(RosterMergeQueueMediationSchema, { standing: { case: "checking", value: {} } });
+    expect(() => drawRosterMergeQueueMediation(u, sc, "m")).toThrow(MalformedView);
+  });
 });
 
 describe("dragging a waiting merge", () => {

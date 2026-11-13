@@ -177,6 +177,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.");
   });
 
+  it("gives the deploy mediator its own section: decide every deploy, and remediate without children", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("mediating", home);
+    // Assert — owner request 2026-11-13.
+    expect(text).toContain("This session is its repository's deploy mediator");
+    expect(text).toContain("It never creates a workspace, a child, a one-shot or an async merge, and never only suggests a fix.");
+    expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();

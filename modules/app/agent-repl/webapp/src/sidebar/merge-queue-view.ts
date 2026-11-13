@@ -35,6 +35,7 @@ import type {
   RosterMergeQueueOffQueue,
   RosterMergeQueueGithubPlace,
   RosterMergeQueueHead,
+  RosterMergeQueueMediation,
   RosterMergeQueuePaused,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
@@ -211,7 +212,12 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
   // THE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
   const repairs = repairsOf(u, path);
-  if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0)) {
+  // THE DEPLOY MEDIATION IS PINNED ABOVE THE HEAD: the queue waits on it
+  // (frontend.v1.RosterRepoMergeQueue.mediation).
+  if (u.mediation !== undefined) {
+    body.appendChild(drawRosterMergeQueueMediation(u.mediation, sc, `${path}.mediation`));
+  }
+  if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0 && u.mediation === undefined)) {
     body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
   }
   for (const repair of repairs) {
@@ -437,6 +443,35 @@ export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): 
   line.append(drawSubjectName(subject, `${u.path}.subject`));
   line.appendChild(drawQueueLabel(u.words, MERGE_QUEUE_REASON_CLASS, u.title));
   line.appendChild(drawClock(sc, msOf(u.sinceMs, `${u.path}.since_ms`)));
+  return line;
+}
+
+/** The class the deploy mediation's line wears. */
+export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
+
+/**
+ * The deploy mediation the queue waits on, pinned above its head: the
+ * mediator's name and where it stands, as a queue label (`checking deploy`
+ * once it was told of the deploy, `awaiting deploy` while the deploy rolls
+ * out). A click selects the mediator.
+ */
+export function drawRosterMergeQueueMediation(u: RosterMergeQueueMediation, sc: SidebarContext, path: string): HTMLElement {
+  const subject = requireMessage(u.subject, `${path}.subject`);
+  const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_MEDIATION_CLASS}`, `${path}.subject`);
+  line.append(drawSubjectName(subject, `${path}.subject`));
+  const standing = requireCase(u.standing, `${path}.standing`);
+  switch (standing.case) {
+    case "checking":
+      line.appendChild(drawQueueLabel("checking deploy", MERGE_QUEUE_REASON_CLASS, "the deploy mediator is checking the last deploy; the queue waits on it"));
+      break;
+    case "waiting":
+      line.appendChild(drawQueueLabel("awaiting deploy", MERGE_QUEUE_REASON_CLASS, "the deploy mediator checks the last deploy once it has rolled out; the queue waits on it"));
+      break;
+    default: {
+      const other: { case: string } = standing;
+      return unreachableArm(`${path}.standing`, other.case);
+    }
+  }
   return line;
 }
 

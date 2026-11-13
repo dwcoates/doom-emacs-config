@@ -766,6 +766,25 @@ func TestTheMigrationAddsTheMergeQueuePauserWorkspaceColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheMergeQueueMediationColumns(t *testing.T) {
+	// Arrange -- a file written before a deploy owed a mediation.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('merge_queue_repos') WHERE name IN ('mediation_owed_at', 'mediation_prompted_at', 'mediation_version', 'mediation_turn')`)
+	if got != 4 {
+		t.Fatalf("merge_queue_repos holds %d of the mediation columns after the migration, want 4", got)
+	}
+}
+
 func TestTheMigrationAddsTheLinkOwnershipColumnAndTheSlackOriginsTable(t *testing.T) {
 	// Arrange -- a file written before links carried ownership or a workspace
 	// recorded the Slack thread it was created for.

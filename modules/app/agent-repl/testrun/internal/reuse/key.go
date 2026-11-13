@@ -56,13 +56,13 @@ func (k Key) Short() string {
 // that does not exist is an error: a declared input that is not there is a
 // roster that has drifted from the tree, never something to hash around.
 func ComputeKey(repo string, set *InputSet, facts Facts) (Key, error) {
-	return ComputeKeyCached(repo, set, facts, nil)
+	return ComputeKeyCached(repo, set, facts, KeyEnv{})
 }
 
 // ComputeKeyCached is ComputeKey reading each file's digest through cache
 // (nil reads every file): the units of one run share most of their inputs,
 // and hashing each shared file once per unit cost a run seconds.
-func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache) (Key, error) {
+func ComputeKeyCached(repo string, set *InputSet, facts Facts, env KeyEnv) (Key, error) {
 	if err := set.Overlap(); err != nil {
 		return Key{}, err
 	}
@@ -74,7 +74,7 @@ func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache)
 	for name, v := range facts.Env {
 		m["@env "+name] = v
 	}
-	h := hasher{repo: repo, generated: set.Generated(), m: m, cache: cache}
+	h := hasher{repo: repo, generated: set.Generated(), ignored: env.Ignored, bindings: env.Bindings, m: m, cache: env.Cache, use: &bindingUse{named: map[int]bool{}}}
 	for _, p := range set.Files() {
 		if err := h.file(p); err != nil {
 			return Key{}, err
@@ -94,6 +94,9 @@ func ComputeKeyCached(repo string, set *InputSet, facts Facts, cache *HashCache)
 		if err := h.tree(p); err != nil {
 			return Key{}, err
 		}
+	}
+	if err := h.addBindings(); err != nil {
+		return Key{}, err
 	}
 	return Key{Digest: m.digest(), Manifest: m.compact()}, nil
 }
@@ -152,8 +155,15 @@ func (m Manifest) Changed(earlier Manifest) []string {
 type hasher struct {
 	repo      string
 	generated []string
-	m         Manifest
-	cache     *HashCache
+	// ignored is what git ignores in the checkout, which a walk or a listing
+	// never reads (Ignored).
+	ignored Ignored
+	// bindings, when set, reads the generated protobuf code by its symbols
+	// (bindings.go), and use is what this key's inputs bound and named.
+	bindings *Bindings
+	use      *bindingUse
+	m        Manifest
+	cache    *HashCache
 }
 
 // HashCache holds the digests of the files one phase of a run has read,
@@ -169,6 +179,22 @@ type HashCache struct {
 type cachedDigest struct {
 	id     string
 	digest string
+	// named, once read (namedRead), is the bindings' symbols the file names.
+	named     namedSymbols
+	namedRead bool
+	// generators, once read, is a generated file's generator lines.
+	generators     []string
+	generatorsRead bool
+}
+
+// KeyEnv is what a key is computed with beyond its set and facts: the
+// phase's digest cache (nil reads every file), what git ignores, and the
+// generated protobuf code's symbols (nil hashes generated code by its
+// bytes).
+type KeyEnv struct {
+	Cache    *HashCache
+	Ignored  Ignored
+	Bindings *Bindings
 }
 
 // NewHashCache is an empty cache.
@@ -227,9 +253,16 @@ func (h hasher) entry(p string, info fs.FileInfo) error {
 			return fmt.Errorf("reuse: read the link %s: %w", p, err)
 		}
 		h.m[p] = "link " + target
+	case info.Mode().IsRegular() && h.bindings != nil && h.bindings.Bound(p):
+		// GENERATED CODE IS READ BY ITS SYMBOLS (addBindings), never by its
+		// bytes.
+		h.use.bound = append(h.use.bound, p)
 	case info.Mode().IsRegular():
 		d, err := h.digest(p, info)
 		if err != nil {
+			return err
+		}
+		if err := h.noteNamed(p, info); err != nil {
 			return err
 		}
 		// The executable bit is part of what a test can observe.
@@ -254,7 +287,7 @@ func (h hasher) listing(p string) error {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if h.isGenerated(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
+		if h.skipped(path.Join(p, e.Name())) || isConfigBundle(e.Name()) {
 			continue
 		}
 		kind := "f"
@@ -269,6 +302,13 @@ func (h hasher) listing(p string) error {
 	sort.Strings(names)
 	h.m[p+"/"] = "dir " + strings.Join(names, " ")
 	return nil
+}
+
+// skipped reports whether a walk or a listing leaves the repository-relative
+// path rel out: it lies in one of the set's generated subtrees, or git
+// ignores it.
+func (h hasher) skipped(rel string) bool {
+	return h.isGenerated(rel) || h.ignored.Has(rel)
 }
 
 // isGenerated reports whether the repository-relative path rel lies in one of
@@ -324,7 +364,7 @@ func (h hasher) tree(p string) error {
 			return fmt.Errorf("reuse: place %s under %s: %w", abs, h.repo, err)
 		}
 		rel = filepath.ToSlash(rel)
-		if h.isGenerated(rel) {
+		if h.skipped(rel) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

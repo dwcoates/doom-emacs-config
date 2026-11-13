@@ -36,44 +36,68 @@ import {
   type AgentPageSession,
   type AgentTailFrame,
 } from "./persistence.js";
-import { isRetryableRead, readWithRetry, type ReadRetryOptions } from "./retry.js";
+import {
+  isRetryableRead,
+  readWithRetry,
+  type ReadRetryOptions,
+} from "./retry.js";
 
-const LOGGER = bindLog({ component: "shim-store-reader", operation: "shim.store.reader" });
+const LOGGER = bindLog({
+  component: "shim-store-reader",
+  operation: "shim.store.reader",
+});
 
 // ---------------------------------------------------------------------------
 // store.v1 → conversation.v1: one function per message (the proto→code mapping)
 // ---------------------------------------------------------------------------
 
 /** The store's pointer as the history pointer the daemon echoes. */
-function toHistoryPointer(pointer: storev1.StoreItemPointer): conversationv1.HistoryPointer {
+function toHistoryPointer(
+  pointer: storev1.StoreItemPointer,
+): conversationv1.HistoryPointer {
   if (pointer.value === "") {
-    throw new PersistenceError("stale_pointer", "the store served an empty item pointer");
+    throw new PersistenceError(
+      "stale_pointer",
+      "the store served an empty item pointer",
+    );
   }
   return create(conversationv1.HistoryPointerSchema, { value: pointer.value });
 }
 
 /** The history pointer back as the store's own, for a request. */
-export function toStorePointer(pointer: conversationv1.HistoryPointer): storev1.StoreItemPointer {
+export function toStorePointer(
+  pointer: conversationv1.HistoryPointer,
+): storev1.StoreItemPointer {
   if (pointer.value === "") {
-    throw new PersistenceError("stale_pointer", "a history pointer is never the empty string");
+    throw new PersistenceError(
+      "stale_pointer",
+      "a history pointer is never the empty string",
+    );
   }
   return create(storev1.StoreItemPointerSchema, { value: pointer.value });
 }
 
 /** One stored line as the history entry it renders. */
 /** An opening, as the store's `OpenAgentSessionRequest.opening` arm. UNSET is the repaint. */
-function toStoreOpening(opening: AgentOpening): storev1.OpenAgentSessionRequest["opening"] {
+function toStoreOpening(
+  opening: AgentOpening,
+): storev1.OpenAgentSessionRequest["opening"] {
   switch (opening.case) {
     case "knownThrough":
       return { case: "knownThrough", value: toStorePointer(opening.value) };
     case "tailOnly":
-      return { case: "tailOnly", value: create(storev1.AgentSessionTailOnlySchema, {}) };
+      return {
+        case: "tailOnly",
+        value: create(storev1.AgentSessionTailOnlySchema, {}),
+      };
     case "repaint":
       return { case: undefined };
   }
 }
 
-export function toHistoryEntry(line: storev1.StorePageLine): conversationv1.HistoryEntry {
+export function toHistoryEntry(
+  line: storev1.StorePageLine,
+): conversationv1.HistoryEntry {
   const item = line.agentItem?.item;
   switch (item?.case) {
     case "agentPrompt":
@@ -113,7 +137,9 @@ export function toHistoryEntry(line: storev1.StorePageLine): conversationv1.Hist
  * own receipt and records that it did. The store states a place on every line
  * it serves, so this is a store that predates places, and it is traced.
  */
-function toHistoryPlace(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt["place"] {
+function toHistoryPlace(
+  line: storev1.StoreLineAt,
+): conversationv1.HistoryEntryAt["place"] {
   switch (line.place.case) {
     case "recordedPlace":
       return { case: "recordedPlace", value: line.place.value };
@@ -136,7 +162,9 @@ function toHistoryPlace(line: storev1.StoreLineAt): conversationv1.HistoryEntryA
  * one stored line identically, and both suites read the shared golden cases in
  * agent-repl/testdata/history-golden.
  */
-export function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
+export function toHistoryEntryAt(
+  line: storev1.StoreLineAt,
+): conversationv1.HistoryEntryAt {
   if (line.at === undefined || line.line === undefined) {
     throw new PersistenceError(
       "store_unavailable",
@@ -173,13 +201,18 @@ const RETIRED_CONTENT = "retired";
  * this: the same pointer with a new fingerprint is new information.
  */
 function lineFingerprint(line: storev1.StoreLineAt): string {
-  const content = line.line === undefined ? new Uint8Array() : toBinary(storev1.StorePageLineSchema, line.line);
+  const content =
+    line.line === undefined
+      ? new Uint8Array()
+      : toBinary(storev1.StorePageLineSchema, line.line);
   return createHash("sha256").update(content).digest("base64");
 }
 
 /** The page's completeness arm, in the history vocabulary. */
 function toHistoryBoundary(
-  boundary: storev1.AgentSessionPage["boundary"] | storev1.ReadAgentPageSuccess["boundary"],
+  boundary:
+    | storev1.AgentSessionPage["boundary"]
+    | storev1.ReadAgentPageSuccess["boundary"],
 ): conversationv1.HistoryPage["boundary"] {
   switch (boundary.case) {
     case "more":
@@ -196,7 +229,10 @@ function toHistoryBoundary(
         }),
       };
     case "floor":
-      return { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) };
+      return {
+        case: "floor",
+        value: create(conversationv1.HistoryFloorSchema, {}),
+      };
     default:
       throw new PersistenceError(
         "store_unavailable",
@@ -235,21 +271,32 @@ function toHistoryPage(
  * guess: the store always sets both, and a reader told nothing would have to
  * choose whether to draw "earlier steps".
  */
-function toHistoryTurnHead(head: storev1.StoreTurnHead): conversationv1.HistoryTurnHead {
+function toHistoryTurnHead(
+  head: storev1.StoreTurnHead,
+): conversationv1.HistoryTurnHead {
   if (head.line === undefined) {
-    throw new PersistenceError("store_unavailable", "the store served a turn head with no prompt line");
+    throw new PersistenceError(
+      "store_unavailable",
+      "the store served a turn head with no prompt line",
+    );
   }
   const entry = toHistoryEntryAt(head.line);
   switch (head.between.case) {
     case "adjacent":
       return create(conversationv1.HistoryTurnHeadSchema, {
         entry,
-        between: { case: "adjacent", value: create(conversationv1.HistoryTurnHeadAdjacentSchema, {}) },
+        between: {
+          case: "adjacent",
+          value: create(conversationv1.HistoryTurnHeadAdjacentSchema, {}),
+        },
       });
     case "stepsBetween":
       return create(conversationv1.HistoryTurnHeadSchema, {
         entry,
-        between: { case: "stepsBetween", value: create(conversationv1.HistoryTurnHeadStepsBetweenSchema, {}) },
+        between: {
+          case: "stepsBetween",
+          value: create(conversationv1.HistoryTurnHeadStepsBetweenSchema, {}),
+        },
       });
     default:
       throw new PersistenceError(
@@ -614,7 +661,8 @@ export function createReader(options: ReaderOptions): Reader {
     // empty book proves nothing either way, so it leaves the belief alone.
     if (opened.newest !== undefined) booksMinted.delete(agent.value);
     const page = toHistoryPage(opened.page);
-    const knownThrough = opening.case === "knownThrough" ? opening.value : undefined;
+    const knownThrough =
+      opening.case === "knownThrough" ? opening.value : undefined;
     /**
      * THE BOOK'S NEWEST LINE AS OF THE OPEN, as the store names it on every
      * open (unset: the book holds none).
@@ -626,9 +674,14 @@ export function createReader(options: ReaderOptions): Reader {
      * a lossless re-open passes as `known_through` (never a repaint, which
      * would replay history nobody asked for), and whether the book was empty.
      */
-    const newest = opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
+    const newest =
+      opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
     LOGGER.debug(
-      { agent: agent.value, opening: opening.case, entries: page.entries.length },
+      {
+        agent: agent.value,
+        opening: opening.case,
+        entries: page.entries.length,
+      },
       "opened an agent's book and pinned its tail",
     );
 
@@ -638,7 +691,9 @@ export function createReader(options: ReaderOptions): Reader {
     // re-opening from the newer pointer would drop it. A tail-only open's mark
     // is the book's newest line as of the open.
     let servedThrough: conversationv1.HistoryPointer | undefined =
-      page.entries[0]?.at ?? knownThrough ?? (opening.case === "tailOnly" ? newest : undefined);
+      page.entries[0]?.at ??
+      knownThrough ??
+      (opening.case === "tailOnly" ? newest : undefined);
     /**
      * EVERY pointer this session has handed the consumer.
      *
@@ -657,10 +712,13 @@ export function createReader(options: ReaderOptions): Reader {
      * membership is the only question it can ask of them.
      */
     const served = new Map<string, string>();
-    if (knownThrough !== undefined) served.set(knownThrough.value, CONTENT_UNKNOWN);
-    if (opening.case === "tailOnly" && newest !== undefined) served.set(newest.value, CONTENT_UNKNOWN);
+    if (knownThrough !== undefined)
+      served.set(knownThrough.value, CONTENT_UNKNOWN);
+    if (opening.case === "tailOnly" && newest !== undefined)
+      served.set(newest.value, CONTENT_UNKNOWN);
     for (const line of opened.page.lines) {
-      if (line.at !== undefined) served.set(line.at.value, lineFingerprint(line));
+      if (line.at !== undefined)
+        served.set(line.at.value, lineFingerprint(line));
     }
     let token: storev1.AgentSessionToken = opened.watch;
     let stopped = false;
@@ -705,7 +763,10 @@ export function createReader(options: ReaderOptions): Reader {
                 case "line": {
                   const entry = toHistoryEntryAt(push.frame.value);
                   if (entry.at !== undefined) {
-                    served.set(entry.at.value, lineFingerprint(push.frame.value));
+                    served.set(
+                      entry.at.value,
+                      lineFingerprint(push.frame.value),
+                    );
                   }
                   frame = { case: "entry", value: entry };
                   break;
@@ -722,7 +783,8 @@ export function createReader(options: ReaderOptions): Reader {
                   // write that takes the row back at the same position is
                   // never withheld by the re-open's already-served check,
                   // whatever its content: the consumer removed it.
-                  if (entry.at !== undefined) served.set(entry.at.value, RETIRED_CONTENT);
+                  if (entry.at !== undefined)
+                    served.set(entry.at.value, RETIRED_CONTENT);
                   LOGGER.logVerbose(
                     { agent: agent.value, pointer: entry.at?.value },
                     "the store retired a line of an agent's book; relaying the retirement to the consumer",
@@ -780,7 +842,8 @@ export function createReader(options: ReaderOptions): Reader {
                   served_through: servedThrough?.value,
                   attempts: barrenEnds,
                   budget: UNASKED_END_BUDGET,
-                  detail: "the store ended each re-opened watch without delivering a line",
+                  detail:
+                    "the store ended each re-opened watch without delivering a line",
                 },
                 "gave up re-opening an agent's tail: the store keeps ending a standing watch nothing asked it to end",
               );
@@ -819,8 +882,18 @@ export function createReader(options: ReaderOptions): Reader {
           // THE RE-OPEN CARRIES THE OPEN'S VOUCHING: a book still empty when
           // the store ended the watch is as absent as it was at the open.
           const mark = servedThrough;
-          const reopened = await onReadRetrySchedule("reopenAgentTail", agent, () =>
-            openSession(agent, mark === undefined ? REPAINT : { case: "knownThrough", value: mark }, false, vouched),
+          const reopened = await onReadRetrySchedule(
+            "reopenAgentTail",
+            agent,
+            () =>
+              openSession(
+                agent,
+                mark === undefined
+                  ? REPAINT
+                  : { case: "knownThrough", value: mark },
+                false,
+                vouched,
+              ),
           );
           if (reopened.watch === undefined) {
             throw new PersistenceError(
@@ -832,7 +905,10 @@ export function createReader(options: ReaderOptions): Reader {
           // store's own page size. A gap wider than one page is WALKED, page by
           // page, down to the mark — the store's own recovery contract — so
           // nothing written while the watch was down is skipped.
-          const caughtUp = reopened.page === undefined ? [] : await walkToMark(agent, reopened.page, mark);
+          const caughtUp =
+            reopened.page === undefined
+              ? []
+              : await walkToMark(agent, reopened.page, mark);
           // A LINE ALREADY SERVED UNCHANGED IS NOT SERVED AGAIN. The re-open's
           // lower bound is the LAST pointer served, which walks backward on an
           // upsert of an old row, so the catch-up page can carry rows the
@@ -841,12 +917,18 @@ export function createReader(options: ReaderOptions): Reader {
           // took them again ended the turn now running with the previous
           // turn's terminal. The bound is kept, so an update to an old row (a
           // new fingerprint at a served pointer) still passes.
-          const fresh: { entry: conversationv1.HistoryEntryAt; fingerprint: string }[] = [];
+          const fresh: {
+            entry: conversationv1.HistoryEntryAt;
+            fingerprint: string;
+          }[] = [];
           let replayed = 0;
           for (const line of [...caughtUp].reverse()) {
             const entry = toHistoryEntryAt(line);
             const fingerprint = lineFingerprint(line);
-            if (entry.at !== undefined && served.get(entry.at.value) === fingerprint) {
+            if (
+              entry.at !== undefined &&
+              served.get(entry.at.value) === fingerprint
+            ) {
               replayed += 1;
               continue;
             }
@@ -883,6 +965,7 @@ export function createReader(options: ReaderOptions): Reader {
       page,
       foundNothing: newest === undefined,
       tail,
+      servedThrough: () => servedThrough?.value,
       concludeThrough: (through) => {
         if (stopped) return;
         concluding = true;
@@ -927,8 +1010,10 @@ export function createReader(options: ReaderOptions): Reader {
      * real book as a REPAINT: its page is entirely news, and a tail-only open
      * would pin the tail past the very rows this wait was for.
      */
-    const innerOpening: AgentOpening = opening.case === "tailOnly" ? REPAINT : opening;
-    const innerMark = opening.case === "knownThrough" ? opening.value : undefined;
+    const innerOpening: AgentOpening =
+      opening.case === "tailOnly" ? REPAINT : opening;
+    const innerMark =
+      opening.case === "knownThrough" ? opening.value : undefined;
     let closed = false;
     let concluded = false;
     let concludeAt: conversationv1.HistoryPointer | undefined;
@@ -956,6 +1041,8 @@ export function createReader(options: ReaderOptions): Reader {
      * cannot answer "have I served the head".
      */
     const served = new Set<string>();
+    /** The pointer of the last entry this tail served, absent before the first. */
+    let lastServed: string | undefined;
 
     /**
      * Whether the consumer has been handed everything the conclusion named.
@@ -998,9 +1085,13 @@ export function createReader(options: ReaderOptions): Reader {
       // so `more` would point a consumer at a page that does not exist.
       page: create(conversationv1.HistoryPageSchema, {
         entries: [],
-        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+        boundary: {
+          case: "floor",
+          value: create(conversationv1.HistoryFloorSchema, {}),
+        },
       }),
       foundNothing: true,
+      servedThrough: () => lastServed,
       tail: {
         async *[Symbol.asyncIterator]() {
           const session = await openWhenWritten();
@@ -1031,7 +1122,10 @@ export function createReader(options: ReaderOptions): Reader {
             throw error;
           }
           for (const entry of [...owed].reverse()) {
-            if (entry.at !== undefined) served.add(entry.at.value);
+            if (entry.at !== undefined) {
+              served.add(entry.at.value);
+              lastServed = entry.at.value;
+            }
             yield { case: "entry", value: entry };
             // THE CONCLUSION IS HONORED BY WHOEVER SERVED THE ROW. These
             // entries never pass through the inner session's tail, so only
@@ -1058,7 +1152,8 @@ export function createReader(options: ReaderOptions): Reader {
                 LOGGER.error(
                   {
                     agent: agent.value,
-                    detail: "the deferred book's inner tail finished with no close and no conclusion",
+                    detail:
+                      "the deferred book's inner tail finished with no close and no conclusion",
                   },
                   "an agent's tail ended without anything asking it to; the consumer's stream ends with the session still live",
                 );
@@ -1070,7 +1165,10 @@ export function createReader(options: ReaderOptions): Reader {
             // session (see its `retired` arm): the consumer has the last word
             // on that pointer, and the store will never serve it again.
             const at = next.value.value.at;
-            if (at !== undefined) served.add(at.value);
+            if (at !== undefined) {
+              served.add(at.value);
+              lastServed = at.value;
+            }
             yield next.value;
             if (settled()) {
               session.close();
@@ -1132,7 +1230,9 @@ export function createReader(options: ReaderOptions): Reader {
     // ON THE READ HALF'S SCHEDULE. This is the open a WatchAgent stands its
     // whole tail on, and a deploy that kickstarts the store under a live
     // shim used to fail it terminally on the first unreachable attempt.
-    return onReadRetrySchedule("openAgentBook", agent, () => openBookNow(agent, opening, vouched));
+    return onReadRetrySchedule("openAgentBook", agent, () =>
+      openBookNow(agent, opening, vouched),
+    );
   };
 
   /**
@@ -1170,9 +1270,17 @@ export function createReader(options: ReaderOptions): Reader {
     // its own reachability) and serves no lines. VOUCHED while the producer
     // vouches, so an announced book with nothing in it is the store's own
     // empty page.
-    const opened = await openSession(agent, opening, true, known !== undefined && known());
+    const opened = await openSession(
+      agent,
+      opening,
+      true,
+      known !== undefined && known(),
+    );
     if (opened.page === undefined) {
-      throw new PersistenceError("store_unavailable", "the store answered a page-only open with no page");
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store answered a page-only open with no page",
+      );
     }
     // A BOOK THE STORE NAMES A NEWEST LINE OF HOLDS ROWS, exactly as on the
     // watched open.
@@ -1192,7 +1300,9 @@ export function createReader(options: ReaderOptions): Reader {
     opening: AgentOpening,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> =>
-    onReadRetrySchedule("readFirstPage", agent, () => readFirstPageOnce(agent, opening, known));
+    onReadRetrySchedule("readFirstPage", agent, () =>
+      readFirstPageOnce(agent, opening, known),
+    );
 
   /**
    * One book's HEAD -- the pointer a repaint would serve first -- as the store
@@ -1215,7 +1325,12 @@ export function createReader(options: ReaderOptions): Reader {
     agent: conversationv1.AgentId,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPointer | undefined> => {
-    const opened = await openSession(agent, { case: "tailOnly" }, true, known !== undefined && known());
+    const opened = await openSession(
+      agent,
+      { case: "tailOnly" },
+      true,
+      known !== undefined && known(),
+    );
     if (opened.newest === undefined) return undefined;
     booksMinted.delete(agent.value);
     return toHistoryPointer(opened.newest);
@@ -1232,7 +1347,10 @@ export function createReader(options: ReaderOptions): Reader {
     after: conversationv1.HistoryPointer,
   ): Promise<storev1.ReadAgentPageSuccess> => {
     // THE PAGE BELOW A SERVED LINE, forwarded as the store spells it.
-    const position: storev1.ReadAgentPageRequest["position"] = { case: "after", value: toStorePointer(after) };
+    const position: storev1.ReadAgentPageRequest["position"] = {
+      case: "after",
+      value: toStorePointer(after),
+    };
     let response: storev1.ReadAgentPageResponse;
     try {
       response = await client.readAgentPage(
@@ -1287,7 +1405,9 @@ export function createReader(options: ReaderOptions): Reader {
    * The pointer a `more` boundary names, to walk on from. A `more` naming none
    * is a store contradicting itself, refused loudly.
    */
-  const walkFrom = (lastItem: storev1.StoreItemPointer | undefined): conversationv1.HistoryPointer => {
+  const walkFrom = (
+    lastItem: storev1.StoreItemPointer | undefined,
+  ): conversationv1.HistoryPointer => {
     if (lastItem === undefined) {
       throw new PersistenceError(
         "store_unavailable",
@@ -1317,8 +1437,10 @@ export function createReader(options: ReaderOptions): Reader {
     let pages = 0;
     while (from !== undefined) {
       const position: conversationv1.HistoryPointer = from;
-      const older: storev1.ReadAgentPageSuccess = await onReadRetrySchedule("walkAgentBook", agent, () =>
-        readStorePageOnce(agent, position),
+      const older: storev1.ReadAgentPageSuccess = await onReadRetrySchedule(
+        "walkAgentBook",
+        agent,
+        () => readStorePageOnce(agent, position),
       );
       pages += 1;
       if (older.lines.length === 0 && older.boundary.case === "more") {
@@ -1340,9 +1462,15 @@ export function createReader(options: ReaderOptions): Reader {
         }
         lines.push(line);
       }
-      from = older.boundary.case === "more" ? walkFrom(older.boundary.value.lastItem) : undefined;
+      from =
+        older.boundary.case === "more"
+          ? walkFrom(older.boundary.value.lastItem)
+          : undefined;
     }
-    LOGGER.debug({ agent: agent.value, pages, lines: lines.length }, "walked an agent's book down to its floor");
+    LOGGER.debug(
+      { agent: agent.value, pages, lines: lines.length },
+      "walked an agent's book down to its floor",
+    );
     return lines;
   };
 
@@ -1353,7 +1481,14 @@ export function createReader(options: ReaderOptions): Reader {
     mark: conversationv1.HistoryPointer | undefined,
   ): Promise<storev1.StoreLineAt[]> =>
     opened.boundary.case === "more"
-      ? [...opened.lines, ...(await walkOlder(agent, walkFrom(opened.boundary.value.lastItem), mark))]
+      ? [
+          ...opened.lines,
+          ...(await walkOlder(
+            agent,
+            walkFrom(opened.boundary.value.lastItem),
+            mark,
+          )),
+        ]
       : [...opened.lines];
 
   /** {@link walkToMark}, from a page already converted to history entries. */
@@ -1370,7 +1505,10 @@ export function createReader(options: ReaderOptions): Reader {
         "the store said older lines remain but named no pointer to walk from",
       );
     }
-    return [...opened.entries, ...(await walkOlder(agent, after, mark)).map(toHistoryEntryAt)];
+    return [
+      ...opened.entries,
+      ...(await walkOlder(agent, after, mark)).map(toHistoryEntryAt),
+    ];
   };
 
   return {
@@ -1383,7 +1521,9 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     readBookHead(agent, known) {
-      return onReadRetrySchedule("readBookHead", agent, () => readBookHeadOnce(agent, known));
+      return onReadRetrySchedule("readBookHead", agent, () =>
+        readBookHeadOnce(agent, known),
+      );
     },
 
     readAgentPage(agent, after) {
@@ -1399,7 +1539,10 @@ export function createReader(options: ReaderOptions): Reader {
       // handle the store holds no row for is refused by the store itself.
       const runValue = work.value;
       if (runValue === "") {
-        throw new PersistenceError("unknown_work", "a detached-work handle is never the empty string");
+        throw new PersistenceError(
+          "unknown_work",
+          "a detached-work handle is never the empty string",
+        );
       }
       // ONE PATH FOR EVERY RUN, and it is the STORE's. A detached shell's output
       // is written by the SIDECAR as deltas — no SDK route carries a byte of it
@@ -1408,9 +1551,14 @@ export function createReader(options: ReaderOptions): Reader {
       // `WatchBashRun` replays every stored row in write order and then follows,
       // which is exactly what a watcher of a growing spool needs, and it is the
       // same path whether this shim wrote the rows or the sidecar did.
-      const run = create(conversationv1.AgentActivityIdSchema, { value: runValue });
+      const run = create(conversationv1.AgentActivityIdSchema, {
+        value: runValue,
+      });
       const abort = new AbortController();
-      LOGGER.debug({ run: runValue, work: work.value, await_first_row: awaitFirstRow }, "following a shell run's stored rows");
+      LOGGER.debug(
+        { run: runValue, work: work.value, await_first_row: awaitFirstRow },
+        "following a shell run's stored rows",
+      );
       let opened = false;
       return {
         async *[Symbol.asyncIterator]() {

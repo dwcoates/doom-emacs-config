@@ -14,6 +14,9 @@ const (
 	// KindMergeResolved is the banner a merge raises as it leaves the queue
 	// for good: landed, failed or abandoned.
 	KindMergeResolved = "merge_resolved"
+	// KindDeployMediated is the banner a deploy mediator raises for the user:
+	// a deploy it escalated, or one it decided nothing about.
+	KindDeployMediated = "deploy_mediated"
 )
 
 // MergeEnd is how a merge left the queue for good.
@@ -75,6 +78,20 @@ func (m *MergeBanners) Resolved(ws ids.WorkspaceID, end MergeEnd, summary string
 	m.poster.Post(ws, KindMergeResolved, func(_ context.Context, name string) Banner {
 		return Banner{Title: eventTitle(mark, name), Body: summary}
 	})
+}
+
+// Mediated posts the banner of a deploy the mediator WS put before the
+// user, over what it said of it.
+func (m *MergeBanners) Mediated(ws ids.WorkspaceID, summary string) {
+	m.poster.Post(ws, KindDeployMediated, func(_ context.Context, name string) Banner {
+		return Banner{Title: DeployMediatedTitle(name), Body: summary}
+	})
+}
+
+// DeployMediatedTitle is the title of a deploy its mediator put before the
+// user.
+func DeployMediatedTitle(name string) string {
+	return eventTitle("🩺", name)
 }
 
 // MergeQueuedTitle is a queued merge's banner title.

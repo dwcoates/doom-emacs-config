@@ -334,6 +334,17 @@ func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws 
 	return verbs.LetQueueThroughAfterBypassTurn(ctx, ws)
 }
 
+// createMediator is the merge queue's making of a deploy mediator
+// (merge.Deps.CreateMediator), read out of the verbs, which are built after
+// the merge orchestrator.
+func (f *verbsForwarder) createMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := f.bound("the merge queue made a deploy mediator")
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return verbs.CreateMediator(ctx, repoDir, name)
+}
+
 // unfoldSubsectionForWork is the turn-start edge's unfold
 // (workspace.SubsectionUnfolds), read out of the verbs, which are built after
 // the edges.

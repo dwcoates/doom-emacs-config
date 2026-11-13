@@ -282,6 +282,9 @@ type MergeQueue struct {
 	// merge leaves the queue. Each row carries the `async_merging` marker
 	// beside its own status arm.
 	AsyncRequesters []ids.WorkspaceID
+	// Mediation is the deploy mediation the queue waits on, nil while no
+	// deploy owes one (frontend.v1.RosterRepoMergeQueue.mediation).
+	Mediation *QueueMediation
 }
 
 // LineWorkspaces answers the workspace each merge in line runs in, front
@@ -486,4 +489,11 @@ func (v VendorStart) String() string {
 	default:
 		return "vendor_start(" + strconv.Itoa(int(v)) + ")"
 	}
+}
+
+// QueueMediation is a deploy mediation a queue waits on: its mediator, and
+// whether the mediator was told of the deploy.
+type QueueMediation struct {
+	Mediator ids.WorkspaceID
+	Told     bool
 }

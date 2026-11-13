@@ -163,6 +163,16 @@ type Controller interface {
 	// ServesIntake's answer: what an intake waits on to start or stop taking
 	// entries, instead of asking again on a timer.
 	IntakeChanged() <-chan struct{}
+	// ServesQueue reports whether THIS daemon's merge queues may advance: no
+	// handover of its own is in flight, and, as a successor, it owns a
+	// workspace it was handed.
+	ServesQueue() bool
+	// QueueChanged answers a channel that closes at the next change of
+	// ServesQueue's answer.
+	QueueChanged() <-chan struct{}
+	// ServesWorkspace reports whether THIS daemon serves WS now: it did not
+	// hand it to a successor, and, as a successor, it finished adopting it.
+	ServesWorkspace(ws ids.WorkspaceID) bool
 	// Join is the JOINING daemon's half: read the intent manifest, reconcile it
 	// against the kernel locks, arm the rendezvous, and adopt every headless
 	// workspace at once. A daemon that is not joining finds no manifest and
@@ -839,9 +849,11 @@ func New(deps Deps) (Controller, error) {
 		staleInFlight: make(map[ids.WorkspaceID]bool),
 		reported:      make(map[ids.WorkspaceID]string),
 		settled:       make(chan struct{}),
-		intakeChanged: make(chan struct{}),
+		intake:        newAnswerLatch(),
+		queue:         newAnswerLatch(),
 	}
-	c.servesIntake = c.servesIntakeLocked()
+	c.intake.answer = c.servesIntakeLocked()
+	c.queue.answer = c.servesQueueLocked()
 	// NO TAKEOVER IS COMING until Join says one is.
 	close(c.settled)
 	c.log.Debug(opNew, "the rollout controller is up", dlog.Context{

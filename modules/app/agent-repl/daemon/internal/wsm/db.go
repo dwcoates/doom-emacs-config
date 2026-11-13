@@ -647,6 +647,16 @@ type DB interface {
 	// ClearQueueDrainOwed records that one repository's queue_drained
 	// scripts have all succeeded.
 	ClearQueueDrainOwed(ctx context.Context, repo RepoKey) error
+	// OweMediation records that one repository owes a mediation of the
+	// deploy that started at AT (mediation.go).
+	OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) error
+	// MediationOf answers the mediation one repository owes, nil for none.
+	MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error)
+	// MarkMediationPrompted records that the mediator was told of the
+	// mediation owed at OWED.
+	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time, turn TurnID) (bool, error)
+	// ReleaseMediation clears the mediation owed at OWED, if it still is.
+	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers
 	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.

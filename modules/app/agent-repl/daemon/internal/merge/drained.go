@@ -87,13 +87,13 @@ func (o *orchestrator) drainDue(ctx context.Context, repo wsm.RepoKey) (string, 
 	}
 	// A PAUSED QUEUE ADVANCES NOTHING, its drain included: resuming it kicks
 	// the pump, which finds the debt then.
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	paused, err := o.queueHeld(ctx, repo)
 	if err != nil {
 		log.Error(opQueueDrained, "could not read whether the repository's queue is paused", withField(fields, "error", err.Error()))
 		return "", nil, false
 	}
 	if paused {
-		log.Debug(opQueueDrained, "the repository owes its drain, but its queue is paused; the drain runs once it resumes", fields)
+		log.Debug(opQueueDrained, "the repository owes its drain, but its queue is held; the drain runs once it is taken on", fields)
 		return "", nil, false
 	}
 	entries, err := o.deps.DB.MergeQueue(ctx, repo)

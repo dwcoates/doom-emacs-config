@@ -270,6 +270,11 @@ const (
 	// path of a file holding it, its size and the exit status when it is long.
 	// Its one Emacs send site is `agent-repl-terminal-finished`.
 	PromptOrigin_PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT PromptOrigin = 51
+	// The deploy mediator's brief: a deploy began, and the repository's merge
+	// queue advances nothing until the mediator approves it, escalates it, or
+	// deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
+	// Drawn as the daemon's prompt to its own hidden workspace.
+	PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION PromptOrigin = 52
 )
 
 // Enum value maps for PromptOrigin.
@@ -326,6 +331,7 @@ var (
 		49: "PROMPT_ORIGIN_FINISH_HOOK",
 		50: "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE",
 		51: "PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT",
+		52: "PROMPT_ORIGIN_DEPLOY_MEDIATION",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -379,6 +385,7 @@ var (
 		"PROMPT_ORIGIN_FINISH_HOOK":                 49,
 		"PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE":   50,
 		"PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT":     51,
+		"PROMPT_ORIGIN_DEPLOY_MEDIATION":            52,
 	}
 )
 
@@ -413,7 +420,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x96\x0f\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xba\x0f\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -466,7 +473,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"'PROMPT_ORIGIN_COMMAND_THREAD_BACKGROUND\x100\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x12+\n" +
 	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x12)\n" +
-	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

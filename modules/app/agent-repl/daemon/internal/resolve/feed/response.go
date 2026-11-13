@@ -225,6 +225,9 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// the instant it just stamped, and a still-arriving frame carries zero.
 	if bubble.Usage != nil {
 		bubble.Usage.AtMs = fold.settledAtMs
+		// The span start as landing left it, which bounds it by the settle
+		// (landStamp).
+		bubble.Usage.StartedAtMs = fold.sinceMs
 	}
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})

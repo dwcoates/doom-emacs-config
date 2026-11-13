@@ -769,8 +769,16 @@ the call is idempotent.  Returns the socket process."
                            (lambda ()
                              (when (process-live-p process)
                                (setq timed-out t)
-                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method=%S address=%S"
-                                                 method address)
+                               ;; WHAT HAD ARRIVED SAYS WHICH SIDE LOST THE
+                               ;; ANSWER: no status is a reply that never
+                               ;; reached this socket, a status with a short
+                               ;; body is one cut mid-way (2026-11-13: 14
+                               ;; handover adoptions timed out though the
+                               ;; daemon had answered them).
+                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method=%S address=%S status=%S received=%d"
+                                                 method address
+                                                 (agent-repl-connect--reader-status reader)
+                                                 (string-bytes body))
                                (delete-process process))))))
       process))))
 

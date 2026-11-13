@@ -194,17 +194,94 @@ func (c *controller) servesIntakeLocked() bool {
 func (c *controller) IntakeChanged() <-chan struct{} {
 	c.mu.Lock()
 	defer c.unlock()
-	return c.intakeChanged
+	return c.intake.changed
 }
 
-// unlock releases mu, first signaling a change of ServesIntake's answer that
-// the critical section made: the one place intake waiters are told, so every
-// mutation of the fields the answer reads tells them.
-func (c *controller) unlock() {
-	if serves := c.servesIntakeLocked(); serves != c.servesIntake {
-		c.servesIntake = serves
-		close(c.intakeChanged)
-		c.intakeChanged = make(chan struct{})
+// ServesQueue implements Controller.
+//
+// THE MERGE QUEUE NEVER ADVANCES ACROSS A HANDOVER (owner ruling,
+// 2026-11-13). The incumbent answers false from the moment it claims the
+// rollout slot, before it spawns anything, so no merge lands while the two
+// daemons trade workspaces; the successor answers true from the moment it
+// owns the first workspace it was handed, which is the moment it is fully
+// up, without waiting for the rest (ServesWorkspace holds each merge to its
+// own workspace's transfer). A handover that is abandoned empties the slot,
+// and the incumbent's queue runs again.
+func (c *controller) ServesQueue() bool {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.servesQueueLocked()
+}
+
+// servesQueueLocked is ServesQueue under the held lock.
+func (c *controller) servesQueueLocked() bool {
+	if c.handover != nil {
+		return false
 	}
+	if !c.joiningMode {
+		return true
+	}
+	if !c.manifestSeen {
+		return false
+	}
+	for ws := range c.joining {
+		if c.owned[ws] {
+			return true
+		}
+	}
+	return len(c.joining) == 0
+}
+
+// QueueChanged implements Controller.
+func (c *controller) QueueChanged() <-chan struct{} {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.queue.changed
+}
+
+// ServesWorkspace implements Controller: false for a workspace this daemon
+// handed to a successor, and, while joining, for one it was handed and has
+// not finished adopting.
+func (c *controller) ServesWorkspace(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.unlock()
+	if _, gone := c.transferred[ws]; gone {
+		return false
+	}
+	if c.joiningMode && c.joining[ws] && !c.owned[ws] {
+		return false
+	}
+	return true
+}
+
+// answerLatch is one standing answer as of the last unlock, and the channel
+// its next change closes.
+type answerLatch struct {
+	answer  bool
+	changed chan struct{}
+}
+
+// newAnswerLatch is a latch whose answer the caller sets before any waiter
+// reads it.
+func newAnswerLatch() answerLatch { return answerLatch{changed: make(chan struct{})} }
+
+// set records ANSWER, closing the channel and arming a fresh one when it
+// changed.
+func (l *answerLatch) set(answer bool) {
+	if answer == l.answer {
+		return
+	}
+	l.answer = answer
+	close(l.changed)
+	l.changed = make(chan struct{})
+}
+
+// unlock releases mu, first signaling a change of ServesIntake's or
+// ServesQueue's answer that the critical section made: the one place their
+// waiters are told, so every mutation of the fields the answers read tells
+// them.
+func (c *controller) unlock() {
+	c.intake.set(c.servesIntakeLocked())
+	c.queue.set(c.servesQueueLocked())
 	c.mu.Unlock()
 }

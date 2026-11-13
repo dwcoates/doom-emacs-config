@@ -1311,6 +1311,17 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 		}
 		return invalid("move_to.place", "a move to a place names the merge it goes beside")
 	}
+	if m := req.GetMediation(); m != nil {
+		if m.GetDecision() == nil {
+			return invalid("mediation.decision", "a mediation names its decision")
+		}
+		if strings.TrimSpace(m.GetSummary()) == "" {
+			return invalid("mediation.summary", "a mediation says what it found")
+		}
+		if req.GetRequester().GetWorkspace() == nil {
+			return invalid("requester", "only a deploy mediator's agent decides a mediation")
+		}
+	}
 	return nil
 }
 

@@ -139,7 +139,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.deps.Log.Global().Error(op, "could not read the queue to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
 	}
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	paused, err := o.queueHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false

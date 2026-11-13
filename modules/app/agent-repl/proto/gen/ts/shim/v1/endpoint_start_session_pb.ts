@@ -32,7 +32,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEi0wEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSKwoFZnJlc2gYASABKAsyGi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkZyZXNoSAASLQoGcmVzdW1lGAIgASgLMhsuc2hpbS52MS5TdGFydFNlc3Npb25SZXN1bWVIABIWCg53b3Jrc3BhY2VfbmFtZRgEIAEoCRIoCgdwcm9maWxlGAUgASgLMhcuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUIICgZzb3VyY2VKBAgDEARSDmhvbGRfa2VlcGFsaXZlInQKDlNlc3Npb25Qcm9maWxlEi0KBWFnZW50GAEgASgLMhwuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50SAASKwoEY2hhdBgCIAEoCzIbLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVDaGF0SABCBgoEa2luZCKDAQoTU2Vzc2lvblByb2ZpbGVBZ2VudBI2CghzdGFuZGluZxgBIAEoCzIkLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudFN0YW5kaW5nEjQKB2xhbmRpbmcYAiABKAsyIy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nIr8BChpTZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZxJICg10aHJvdWdoX3F1ZXVlGAEgASgLMi8uc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZ1Rocm91Z2hRdWV1ZUgAEkwKD2J5cGFzc2luZ19xdWV1ZRgCIAEoCzIxLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdCeXBhc3NpbmdRdWV1ZUgAQgkKB2xhbmRpbmciKAomU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdUaHJvdWdoUXVldWUiKgooU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdCeXBhc3NpbmdRdWV1ZSKzAQobU2Vzc2lvblByb2ZpbGVBZ2VudFN0YW5kaW5nEkMKDm1haW5fd29ya3NwYWNlGAEgASgLMikuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TWFpbldvcmtzcGFjZUgAEkcKEGxpbmtlZF93b3Jrc3BhY2UYAiABKAsyKy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMaW5rZWRXb3Jrc3BhY2VIAEIGCgRraW5kIiIKIFNlc3Npb25Qcm9maWxlQWdlbnRNYWluV29ya3NwYWNlIiQKIlNlc3Npb25Qcm9maWxlQWdlbnRMaW5rZWRXb3Jrc3BhY2UiVAoSU2Vzc2lvblByb2ZpbGVDaGF0Ej4KDXN5c3RlbV9wcm9tcHQYASABKAsyJy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQ2hhdFN5c3RlbVByb21wdCIuCh5TZXNzaW9uUHJvZmlsZUNoYXRTeXN0ZW1Qcm9tcHQSDAoEdGV4dBgBIAEoCSKNAQoRU3RhcnRTZXNzaW9uRnJlc2gSLwoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbEgAiAEBEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlQggKBl9tb2RlbCKJAwoSU3RhcnRTZXNzaW9uUmVzdW1lEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEkYKEGNvbGRfcmVtZWRpYXRpb24YAiABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRSZW1lZGlhdGlvbkgAiAEBEjAKBnJlYmluZBgDIAEoCzIbLnNoaW0udjEuU3RhcnRTZXNzaW9uUmViaW5kSAGIAQESMgoRcm9sbGVkX2JhY2tfdHVybnMYBCADKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkEi8KBW1vZGVsGAUgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAogBARI9Cg1jYXJyeV9zdW1tYXJ5GAYgASgLMiEuc2hpbS52MS5TdGFydFNlc3Npb25DYXJyeVN1bW1hcnlIA4gBAUITChFfY29sZF9yZW1lZGlhdGlvbkIJCgdfcmViaW5kQggKBl9tb2RlbEIQCg5fY2Fycnlfc3VtbWFyeSIUChJTdGFydFNlc3Npb25SZWJpbmQibgoYU3RhcnRTZXNzaW9uQ2FycnlTdW1tYXJ5EhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEjcKCnN1bW1hcml6ZXIYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRDb21wYWN0IioKGlN0YXJ0U2Vzc2lvbkNhcnJpZWRTdW1tYXJ5EgwKBHRleHQYASABKAkiuAEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSAASKwoEYm9vaxgDIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQFCCAoGcmVzdWx0QgcKBV9ib29rIp4BChNTdGFydFNlc3Npb25TdWNjZXNzEjAKB3Nlc3Npb24YASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWQSQQoPY2FycmllZF9zdW1tYXJ5GAIgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25DYXJyaWVkU3VtbWFyeUgAiAEBQhIKEF9jYXJyaWVkX3N1bW1hcnkiuAMKE1N0YXJ0U2Vzc2lvbkZhaWx1cmUSLAoEY29sZBgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZEgAEkUKE3ZlbmRvcl9zdGFydF9mYWlsZWQYAyABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkSAASPgoPdW5rbm93bl9zZXNzaW9uGAQgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbkgAEj4KD2FscmVhZHlfc3RhcnRlZBgFIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWRIABJEChJjb252ZXJzYXRpb25fb3duZWQYBiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkSAASTQoXbG9ja19ob2xkZXJfdW5hdmFpbGFibGUYByABKAsyKi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkxvY2tIb2xkZXJVbmF2YWlsYWJsZUgAEg4KBmRldGFpbBgCIAEoCUIHCgVjYXVzZSL1AQodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQSPgoJcmV0cnlhYmxlGAEgASgLMikuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJldHJ5YWJsZUgAEjwKCHJlamVjdGVkGAIgASgLMiguc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFJlamVjdGVkSAASPgoKY29tcGFjdGlvbhgDIAEoCzIlLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29tcGFjdGlvbkZhaWxlZEgBiAEBQgcKBXJldHJ5Qg0KC19jb21wYWN0aW9uIh4KHFN0YXJ0U2Vzc2lvbkNvbXBhY3Rpb25GYWlsZWQioQEKIFN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmV0cnlhYmxlEjoKB25ldHdvcmsYASABKAsyJy5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0TmV0d29ya0gAEjgKBnZlbmRvchgCIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRWZW5kb3JIAEIHCgVjYXVzZSIgCh5TdGFydFNlc3Npb25WZW5kb3JTdGFydE5ldHdvcmsiHwodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRWZW5kb3IibgofU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZWplY3RlZBI7CgthcGlfZmFpbHVyZRgBIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5BcGlSZXF1ZXN0RmFpbGVkSACIAQFCDgoMX2FwaV9mYWlsdXJlIhwKGlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uIhwKGlN0YXJ0U2Vzc2lvbkFscmVhZHlTdGFydGVkIh8KHVN0YXJ0U2Vzc2lvbkNvbnZlcnNhdGlvbk93bmVkInYKIVN0YXJ0U2Vzc2lvbkxvY2tIb2xkZXJVbmF2YWlsYWJsZRIzCgdmYWlsdXJlGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkxvY2tIb2xkZXJGYWlsdXJlSgQIARACSgQIAhADUgZiaW5hcnlSCG9zX2Vycm9yQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEi0wEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSKwoFZnJlc2gYASABKAsyGi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkZyZXNoSAASLQoGcmVzdW1lGAIgASgLMhsuc2hpbS52MS5TdGFydFNlc3Npb25SZXN1bWVIABIWCg53b3Jrc3BhY2VfbmFtZRgEIAEoCRIoCgdwcm9maWxlGAUgASgLMhcuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUIICgZzb3VyY2VKBAgDEARSDmhvbGRfa2VlcGFsaXZlInQKDlNlc3Npb25Qcm9maWxlEi0KBWFnZW50GAEgASgLMhwuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50SAASKwoEY2hhdBgCIAEoCzIbLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVDaGF0SABCBgoEa2luZCKDAQoTU2Vzc2lvblByb2ZpbGVBZ2VudBI2CghzdGFuZGluZxgBIAEoCzIkLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudFN0YW5kaW5nEjQKB2xhbmRpbmcYAiABKAsyIy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nIoICChpTZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZxJICg10aHJvdWdoX3F1ZXVlGAEgASgLMi8uc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZ1Rocm91Z2hRdWV1ZUgAEkwKD2J5cGFzc2luZ19xdWV1ZRgCIAEoCzIxLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdCeXBhc3NpbmdRdWV1ZUgAEkEKCW1lZGlhdGluZxgDIAEoCzIsLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdNZWRpYXRpbmdIAEIJCgdsYW5kaW5nIigKJlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nVGhyb3VnaFF1ZXVlIioKKFNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nQnlwYXNzaW5nUXVldWUiJQojU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdNZWRpYXRpbmciswEKG1Nlc3Npb25Qcm9maWxlQWdlbnRTdGFuZGluZxJDCg5tYWluX3dvcmtzcGFjZRgBIAEoCzIpLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudE1haW5Xb3Jrc3BhY2VIABJHChBsaW5rZWRfd29ya3NwYWNlGAIgASgLMisuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlSABCBgoEa2luZCIiCiBTZXNzaW9uUHJvZmlsZUFnZW50TWFpbldvcmtzcGFjZSIkCiJTZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlIlQKElNlc3Npb25Qcm9maWxlQ2hhdBI+Cg1zeXN0ZW1fcHJvbXB0GAEgASgLMicuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUNoYXRTeXN0ZW1Qcm9tcHQiLgoeU2Vzc2lvblByb2ZpbGVDaGF0U3lzdGVtUHJvbXB0EgwKBHRleHQYASABKAkijQEKEVN0YXJ0U2Vzc2lvbkZyZXNoEi8KBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAIgBARI9Cg9wZXJtaXNzaW9uX21vZGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uTW9kZUIICgZfbW9kZWwiiQMKElN0YXJ0U2Vzc2lvblJlc3VtZRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRJGChBjb2xkX3JlbWVkaWF0aW9uGAIgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkUmVtZWRpYXRpb25IAIgBARIwCgZyZWJpbmQYAyABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlYmluZEgBiAEBEjIKEXJvbGxlZF9iYWNrX3R1cm5zGAQgAygLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBIvCgVtb2RlbBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsSAKIAQESPQoNY2Fycnlfc3VtbWFyeRgGIAEoCzIhLnNoaW0udjEuU3RhcnRTZXNzaW9uQ2FycnlTdW1tYXJ5SAOIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZEIICgZfbW9kZWxCEAoOX2NhcnJ5X3N1bW1hcnkiFAoSU3RhcnRTZXNzaW9uUmViaW5kIm4KGFN0YXJ0U2Vzc2lvbkNhcnJ5U3VtbWFyeRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRI3CgpzdW1tYXJpemVyGAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdCIqChpTdGFydFNlc3Npb25DYXJyaWVkU3VtbWFyeRIMCgR0ZXh0GAEgASgJIrgBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAEisKBGJvb2sYAyABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBQggKBnJlc3VsdEIHCgVfYm9vayKeAQoTU3RhcnRTZXNzaW9uU3VjY2VzcxIwCgdzZXNzaW9uGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25TdGFydGVkEkEKD2NhcnJpZWRfc3VtbWFyeRgCIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQ2FycmllZFN1bW1hcnlIAIgBAUISChBfY2FycmllZF9zdW1tYXJ5IrgDChNTdGFydFNlc3Npb25GYWlsdXJlEiwKBGNvbGQYASABKAsyHC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRIABJFChN2ZW5kb3Jfc3RhcnRfZmFpbGVkGAMgASgLMiYuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydEZhaWxlZEgAEj4KD3Vua25vd25fc2Vzc2lvbhgEIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb25IABI+Cg9hbHJlYWR5X3N0YXJ0ZWQYBSABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvbkFscmVhZHlTdGFydGVkSAASRAoSY29udmVyc2F0aW9uX293bmVkGAYgASgLMiYuc2hpbS52MS5TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZEgAEk0KF2xvY2tfaG9sZGVyX3VuYXZhaWxhYmxlGAcgASgLMiouc2hpbS52MS5TdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGVIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2Ui9QEKHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkEj4KCXJldHJ5YWJsZRgBIAEoCzIpLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZXRyeWFibGVIABI8CghyZWplY3RlZBgCIAEoCzIoLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZWplY3RlZEgAEj4KCmNvbXBhY3Rpb24YAyABKAsyJS5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbXBhY3Rpb25GYWlsZWRIAYgBAUIHCgVyZXRyeUINCgtfY29tcGFjdGlvbiIeChxTdGFydFNlc3Npb25Db21wYWN0aW9uRmFpbGVkIqEBCiBTdGFydFNlc3Npb25WZW5kb3JTdGFydFJldHJ5YWJsZRI6CgduZXR3b3JrGAEgASgLMicuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydE5ldHdvcmtIABI4CgZ2ZW5kb3IYAiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0VmVuZG9ySABCBwoFY2F1c2UiIAoeU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnROZXR3b3JrIh8KHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0VmVuZG9yIm4KH1N0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmVqZWN0ZWQSOwoLYXBpX2ZhaWx1cmUYASABKAsyIS5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdEZhaWxlZEgAiAEBQg4KDF9hcGlfZmFpbHVyZSIcChpTdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbiIcChpTdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZCIfCh1TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZCJ2CiFTdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -199,6 +199,12 @@ export type SessionProfileAgentLanding = Message<"shim.v1.SessionProfileAgentLan
      */
     value: SessionProfileAgentLandingBypassingQueue;
     case: "bypassingQueue";
+  } | {
+    /**
+     * @generated from field: shim.v1.SessionProfileAgentLandingMediating mediating = 3;
+     */
+    value: SessionProfileAgentLandingMediating;
+    case: "mediating";
   } | { case: undefined; value?: undefined };
 };
 
@@ -244,6 +250,24 @@ export const SessionProfileAgentLandingBypassingQueueSchema: GenMessage<SessionP
   messageDesc(file_shim_v1_endpoint_start_session, 5);
 
 /**
+ * The deploy mediator's landing: the workspace is its repository's deploy
+ * mediator (repoconfig.v1.LifecycleConfig.deploy_mediator). It checks each
+ * deploy, remediates what it can itself, lands each fix on the main branch
+ * directly and deploys it, and decides the deploy through the merge queue.
+ *
+ * @generated from message shim.v1.SessionProfileAgentLandingMediating
+ */
+export type SessionProfileAgentLandingMediating = Message<"shim.v1.SessionProfileAgentLandingMediating"> & {
+};
+
+/**
+ * Describes the message shim.v1.SessionProfileAgentLandingMediating.
+ * Use `create(SessionProfileAgentLandingMediatingSchema)` to create a new message.
+ */
+export const SessionProfileAgentLandingMediatingSchema: GenMessage<SessionProfileAgentLandingMediating> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 6);
+
+/**
  * How the agent's workspace stands within its repository. The set arm IS the
  * standing.
  *
@@ -276,7 +300,7 @@ export type SessionProfileAgentStanding = Message<"shim.v1.SessionProfileAgentSt
  * Use `create(SessionProfileAgentStandingSchema)` to create a new message.
  */
 export const SessionProfileAgentStandingSchema: GenMessage<SessionProfileAgentStanding> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 6);
+  messageDesc(file_shim_v1_endpoint_start_session, 7);
 
 /**
  * The workspace is its repository's main workspace: the main checkout, on
@@ -293,7 +317,7 @@ export type SessionProfileAgentMainWorkspace = Message<"shim.v1.SessionProfileAg
  * Use `create(SessionProfileAgentMainWorkspaceSchema)` to create a new message.
  */
 export const SessionProfileAgentMainWorkspaceSchema: GenMessage<SessionProfileAgentMainWorkspace> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 7);
+  messageDesc(file_shim_v1_endpoint_start_session, 8);
 
 /**
  * The workspace is a linked worktree of its repository: a workspace created
@@ -310,7 +334,7 @@ export type SessionProfileAgentLinkedWorkspace = Message<"shim.v1.SessionProfile
  * Use `create(SessionProfileAgentLinkedWorkspaceSchema)` to create a new message.
  */
 export const SessionProfileAgentLinkedWorkspaceSchema: GenMessage<SessionProfileAgentLinkedWorkspace> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 8);
+  messageDesc(file_shim_v1_endpoint_start_session, 9);
 
 /**
  * A chat session, answering questions in a zettel thread: no filesystem
@@ -335,7 +359,7 @@ export type SessionProfileChat = Message<"shim.v1.SessionProfileChat"> & {
  * Use `create(SessionProfileChatSchema)` to create a new message.
  */
 export const SessionProfileChatSchema: GenMessage<SessionProfileChat> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 9);
+  messageDesc(file_shim_v1_endpoint_start_session, 10);
 
 /**
  * A chat session's system prompt.
@@ -356,7 +380,7 @@ export type SessionProfileChatSystemPrompt = Message<"shim.v1.SessionProfileChat
  * Use `create(SessionProfileChatSystemPromptSchema)` to create a new message.
  */
 export const SessionProfileChatSystemPromptSchema: GenMessage<SessionProfileChatSystemPrompt> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 10);
+  messageDesc(file_shim_v1_endpoint_start_session, 11);
 
 /**
  * A new vendor session. Carries what nothing can recover: the model and the
@@ -388,7 +412,7 @@ export type StartSessionFresh = Message<"shim.v1.StartSessionFresh"> & {
  * Use `create(StartSessionFreshSchema)` to create a new message.
  */
 export const StartSessionFreshSchema: GenMessage<StartSessionFresh> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 11);
+  messageDesc(file_shim_v1_endpoint_start_session, 12);
 
 /**
  * Resume an existing vendor session. Carries the WORKSPACE'S MODEL but NO
@@ -500,7 +524,7 @@ export type StartSessionResume = Message<"shim.v1.StartSessionResume"> & {
  * Use `create(StartSessionResumeSchema)` to create a new message.
  */
 export const StartSessionResumeSchema: GenMessage<StartSessionResume> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 12);
+  messageDesc(file_shim_v1_endpoint_start_session, 13);
 
 /**
  * This resume is a rebind: the workspace's book becomes the resumed
@@ -516,7 +540,7 @@ export type StartSessionRebind = Message<"shim.v1.StartSessionRebind"> & {
  * Use `create(StartSessionRebindSchema)` to create a new message.
  */
 export const StartSessionRebindSchema: GenMessage<StartSessionRebind> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 13);
+  messageDesc(file_shim_v1_endpoint_start_session, 14);
 
 /**
  * The conversation a resume carries a summary of, and how it is summarized.
@@ -546,7 +570,7 @@ export type StartSessionCarrySummary = Message<"shim.v1.StartSessionCarrySummary
  * Use `create(StartSessionCarrySummarySchema)` to create a new message.
  */
 export const StartSessionCarrySummarySchema: GenMessage<StartSessionCarrySummary> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 14);
+  messageDesc(file_shim_v1_endpoint_start_session, 15);
 
 /**
  * The summary a resume carried, as the summarizer wrote it.
@@ -567,7 +591,7 @@ export type StartSessionCarriedSummary = Message<"shim.v1.StartSessionCarriedSum
  * Use `create(StartSessionCarriedSummarySchema)` to create a new message.
  */
 export const StartSessionCarriedSummarySchema: GenMessage<StartSessionCarriedSummary> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 15);
+  messageDesc(file_shim_v1_endpoint_start_session, 16);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -615,7 +639,7 @@ export type StartSessionResponse = Message<"shim.v1.StartSessionResponse"> & {
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 16);
+  messageDesc(file_shim_v1_endpoint_start_session, 17);
 
 /**
  * The session can accept a prompt.
@@ -651,7 +675,7 @@ export type StartSessionSuccess = Message<"shim.v1.StartSessionSuccess"> & {
  * Use `create(StartSessionSuccessSchema)` to create a new message.
  */
 export const StartSessionSuccessSchema: GenMessage<StartSessionSuccess> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 17);
+  messageDesc(file_shim_v1_endpoint_start_session, 18);
 
 /**
  * The session could not be opened as asked. THE ARM IS WHY.
@@ -740,7 +764,7 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
  * Use `create(StartSessionFailureSchema)` to create a new message.
  */
 export const StartSessionFailureSchema: GenMessage<StartSessionFailure> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 18);
+  messageDesc(file_shim_v1_endpoint_start_session, 19);
 
 /**
  * The vendor (the agent binary or its SDK query) did not come up inside a shim
@@ -800,7 +824,7 @@ export type StartSessionVendorStartFailed = Message<"shim.v1.StartSessionVendorS
  * Use `create(StartSessionVendorStartFailedSchema)` to create a new message.
  */
 export const StartSessionVendorStartFailedSchema: GenMessage<StartSessionVendorStartFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 19);
+  messageDesc(file_shim_v1_endpoint_start_session, 20);
 
 /**
  * The failure was the asked-for compaction or summary. Presence is the fact.
@@ -815,7 +839,7 @@ export type StartSessionCompactionFailed = Message<"shim.v1.StartSessionCompacti
  * Use `create(StartSessionCompactionFailedSchema)` to create a new message.
  */
 export const StartSessionCompactionFailedSchema: GenMessage<StartSessionCompactionFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 20);
+  messageDesc(file_shim_v1_endpoint_start_session, 21);
 
 /**
  * The vendor start failed for a reason that can pass: it stayed silent past
@@ -859,7 +883,7 @@ export type StartSessionVendorStartRetryable = Message<"shim.v1.StartSessionVend
  * Use `create(StartSessionVendorStartRetryableSchema)` to create a new message.
  */
 export const StartSessionVendorStartRetryableSchema: GenMessage<StartSessionVendorStartRetryable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 21);
+  messageDesc(file_shim_v1_endpoint_start_session, 22);
 
 /**
  * The network was unreachable.
@@ -874,7 +898,7 @@ export type StartSessionVendorStartNetwork = Message<"shim.v1.StartSessionVendor
  * Use `create(StartSessionVendorStartNetworkSchema)` to create a new message.
  */
 export const StartSessionVendorStartNetworkSchema: GenMessage<StartSessionVendorStartNetwork> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 22);
+  messageDesc(file_shim_v1_endpoint_start_session, 23);
 
 /**
  * The vendor failed transiently.
@@ -889,7 +913,7 @@ export type StartSessionVendorStartVendor = Message<"shim.v1.StartSessionVendorS
  * Use `create(StartSessionVendorStartVendorSchema)` to create a new message.
  */
 export const StartSessionVendorStartVendorSchema: GenMessage<StartSessionVendorStartVendor> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 23);
+  messageDesc(file_shim_v1_endpoint_start_session, 24);
 
 /**
  * The vendor refused the start for a reason that will not pass on its own: a
@@ -922,7 +946,7 @@ export type StartSessionVendorStartRejected = Message<"shim.v1.StartSessionVendo
  * Use `create(StartSessionVendorStartRejectedSchema)` to create a new message.
  */
 export const StartSessionVendorStartRejectedSchema: GenMessage<StartSessionVendorStartRejected> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 24);
+  messageDesc(file_shim_v1_endpoint_start_session, 25);
 
 /**
  * @generated from message shim.v1.StartSessionUnknownSession
@@ -935,7 +959,7 @@ export type StartSessionUnknownSession = Message<"shim.v1.StartSessionUnknownSes
  * Use `create(StartSessionUnknownSessionSchema)` to create a new message.
  */
 export const StartSessionUnknownSessionSchema: GenMessage<StartSessionUnknownSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 25);
+  messageDesc(file_shim_v1_endpoint_start_session, 26);
 
 /**
  * @generated from message shim.v1.StartSessionAlreadyStarted
@@ -948,7 +972,7 @@ export type StartSessionAlreadyStarted = Message<"shim.v1.StartSessionAlreadySta
  * Use `create(StartSessionAlreadyStartedSchema)` to create a new message.
  */
 export const StartSessionAlreadyStartedSchema: GenMessage<StartSessionAlreadyStarted> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 26);
+  messageDesc(file_shim_v1_endpoint_start_session, 27);
 
 /**
  * @generated from message shim.v1.StartSessionConversationOwned
@@ -961,7 +985,7 @@ export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConvers
  * Use `create(StartSessionConversationOwnedSchema)` to create a new message.
  */
 export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 27);
+  messageDesc(file_shim_v1_endpoint_start_session, 28);
 
 /**
  * @generated from message shim.v1.StartSessionLockHolderUnavailable
@@ -980,5 +1004,5 @@ export type StartSessionLockHolderUnavailable = Message<"shim.v1.StartSessionLoc
  * Use `create(StartSessionLockHolderUnavailableSchema)` to create a new message.
  */
 export const StartSessionLockHolderUnavailableSchema: GenMessage<StartSessionLockHolderUnavailable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 28);
+  messageDesc(file_shim_v1_endpoint_start_session, 29);
 

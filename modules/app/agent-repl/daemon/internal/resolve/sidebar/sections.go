@@ -98,6 +98,8 @@ type repoQueue struct {
 	// offQueue are the repository's merges off their queue, oldest departure
 	// first.
 	offQueue []OffQueueEntry
+	// mediation is the deploy mediation the queue waits on, nil for none.
+	mediation *QueueMediation
 }
 
 // listed reports whether the merge queue section lists Q: its line holds a
@@ -105,7 +107,7 @@ type repoQueue struct {
 // repository leaves the section as soon as its line empties and nothing
 // stands out of line). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0 || len(q.offQueue) > 0
+	return len(q.line) > 0 || len(q.remediating) > 0 || len(q.github) > 0 || len(q.offQueue) > 0 || q.mediation != nil
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
@@ -136,6 +138,15 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 			return nil, false
 		}
 		return queueSubject(credited, entry), true
+	}
+	if m := q.mediation; m != nil {
+		if sub, ok := subject(QueueEntry{Workspace: m.Mediator, Credited: m.Mediator}); ok {
+			out.Mediation = &frontendv1.RosterMergeQueueMediation{Subject: sub,
+				Standing: &frontendv1.RosterMergeQueueMediation_Waiting{Waiting: &frontendv1.RosterMergeQueueMediationWaiting{}}}
+			if m.Told {
+				out.Mediation.Standing = &frontendv1.RosterMergeQueueMediation_Checking{Checking: &frontendv1.RosterMergeQueueMediationChecking{}}
+			}
+		}
 	}
 	for _, entry := range q.remediating {
 		sub, ok := subject(entry)
@@ -363,6 +374,21 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, ws.Repo, entry.Workspace)
 			rq := out[ws.Repo]
 			rq.remediating = append(rq.remediating, entry)
+			rq.pause = q.pause
+			out[ws.Repo] = rq
+		}
+		// THE MEDIATION IS THE MEDIATOR'S REPOSITORY'S, whose queue it holds.
+		if q.mediation != nil {
+			ws, ok := byID[q.mediation.Mediator]
+			if !ok {
+				log.Error(op, "a deploy mediation names a mediator the registry does not carry, so it is not drawn", dlog.Context{
+					"repo": string(key), "workspace_id": string(q.mediation.Mediator),
+					"invariant_violation": "a deploy mediation's mediator is a registered workspace"})
+				continue
+			}
+			claim(key, ws.Repo, ws.ID)
+			rq := out[ws.Repo]
+			rq.mediation = q.mediation
 			rq.pause = q.pause
 			out[ws.Repo] = rq
 		}

@@ -96,6 +96,7 @@ message SessionProfileAgentLanding {
   oneof landing {
     SessionProfileAgentLandingThroughQueue through_queue = 1;
     SessionProfileAgentLandingBypassingQueue bypassing_queue = 2;
+    SessionProfileAgentLandingMediating mediating = 3;
   }
 }
 // The ordinary landing: every change reaches the main branch through the
@@ -106,6 +107,11 @@ message SessionProfileAgentLandingThroughQueue {}
 // on the main branch itself, and the queue is let through at the end of each
 // of its turns.
 message SessionProfileAgentLandingBypassingQueue {}
+// The deploy mediator's landing: the workspace is its repository's deploy
+// mediator (repoconfig.v1.LifecycleConfig.deploy_mediator). It checks each
+// deploy, remediates what it can itself, lands each fix on the main branch
+// directly and deploys it, and decides the deploy through the merge queue.
+message SessionProfileAgentLandingMediating {}
 
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.

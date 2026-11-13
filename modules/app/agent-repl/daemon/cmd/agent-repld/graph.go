@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/deployedversion"
+	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
@@ -507,6 +508,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the footer resolver: %w", err)
 	}
+	// A DEPLOY'S EDGES REACH THE DEPLOY MEDIATION: its start owes a
+	// mediation, and its end (here or in a successor) runs the rounds.
+	mediation := &mediationHook{ctx: ctx, now: time.Now, log: log}
+	deployEdges := deployprogress.NewEdges(footerResolver, mediation.began, mediation.ended)
 	// THE DAEMON'S WORKSPACE WARNINGS AND ERRORS REACH THE STRIP through ONE
 	// tee at dlog's workspace-logger emit point, never a hook beside a call
 	// site: every Warn and Error a workspace logger writes is handed to the
@@ -873,6 +878,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
+		Mediates: workspace.MediatesFrom(lifecycleconfig.OnDisk{}, p.DB),
 		// THE STORE'S READ-ONLY FACE, dialled beside the store socket every
 		// shim is handed: the daemon reads every workspace's history there,
 		// and never writes the store.
@@ -1228,7 +1234,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		ShimBuild:       shimBundle.Build,
 		ColdGate:        fleet.RaiseColdGate,
-		Progress:        footerResolver,
+		Progress:        deployEdges,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
@@ -1266,7 +1272,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Runner:     scripts,
 		Store:      p.Opts.storeSocket,
 		Workspace:  fleet.Workspaces,
-		Progress:   footerResolver,
+		Progress:   deployEdges,
 		Faults:     p.DB,
 		Joining:    p.Opts.joining != "",
 		Getenv:     os.Getenv,
@@ -1388,11 +1394,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
 		TurnInFlight:      turnInFlight(fleet),
 		Rollout:           deployer,
+		Standing:          rolloutController,
+		CreateMediator:    verbsRef.createMediator,
 		Log:               p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the merge orchestrator: %w", err)
 	}
+	mediation.bind(mergeOrchestrator)
+
 	// Every merge's test log is aged by the daemon's log retention pass, like
 	// every other log the daemon writes.
 	p.Surfaces.RetainDirectory(merge.LogsDir(p.Layout.Dir()), merge.IsLog)
@@ -1738,6 +1748,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
+		{Name: "merge_queue_standing", Run: mergeOrchestrator.FollowStanding},
 		{Name: "deployed_version", Run: deployedVersion.Run},
 		{Name: "held_prompt_ingress", Run: held.Run},
 		{Name: "shim_log_roll", Run: func(ctx context.Context) error {
@@ -1955,7 +1966,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),
-		SettleBoot:   freshBootSettle(p.Opts.joining != "", rolloutController),
+		SettleBoot:   settleThenMediate(freshBootSettle(p.Opts.joining != "", rolloutController), mediation),
 	}, nil
 }
 
@@ -2551,6 +2562,19 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 		return nil
 	}
 	return controller.SettleBoot
+}
+
+// settleThenMediate is a fresh boot's settle, followed by the rounds of every
+// mediation owed: a round a crash cut short is taken up again. A successor
+// settles nothing here (SETTLE nil); its takeover's deploy end runs them.
+func settleThenMediate(settle func(ctx context.Context), mediation *mediationHook) func(ctx context.Context) {
+	if settle == nil {
+		return nil
+	}
+	return func(ctx context.Context) {
+		settle(ctx)
+		mediation.ended()
+	}
 }
 
 // silentOpenProgress is the progress of an open nobody watches: the main

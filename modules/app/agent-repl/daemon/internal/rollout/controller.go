@@ -49,14 +49,14 @@ type controller struct {
 	log  dlog.Logger
 
 	// mu guards every field below it. It is released ONLY through unlock,
-	// which is where a change of ServesIntake's answer is signaled, so no
-	// mutation can change the answer without its waiters being told.
+	// which is where a change of ServesIntake's or ServesQueue's answer is
+	// signaled, so no mutation can change either without its waiters being
+	// told.
 	mu sync.Mutex
-	// servesIntake is ServesIntake's answer as of the last unlock, and
-	// intakeChanged closes when the next unlock finds it changed
-	// (IntakeChanged).
-	servesIntake  bool
-	intakeChanged chan struct{}
+	// intake and queue are ServesIntake's and ServesQueue's answers as of
+	// the last unlock, each with the channel its next change closes.
+	intake answerLatch
+	queue  answerLatch
 	// rendezvous is the per-workspace adopt ledger, armed either by this
 	// daemon's own announcement (the outgoing side, so ExpectedParticipants can
 	// answer) or by the intent manifest read at Join (the incoming side).

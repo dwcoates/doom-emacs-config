@@ -412,3 +412,162 @@ func TestFixServedRecordsTheServedSet(t *testing.T) {
 		t.Fatal("no record of the fixed served set")
 	}
 }
+
+func TestServesQueue(t *testing.T) {
+	head, rest := ids.WorkspaceID("ws-head"), ids.WorkspaceID("ws-rest")
+	tests := []struct {
+		name         string
+		joiningMode  bool
+		manifestSeen bool
+		owned        []ids.WorkspaceID
+		handingOver  bool
+		want         bool
+	}{
+		{name: "an incumbent with no handover in flight serves", want: true},
+		{name: "an incumbent whose handover has begun does not", handingOver: true},
+		{name: "a successor that has not read the manifest does not", joiningMode: true},
+		{name: "a successor that owns nothing yet does not", joiningMode: true, manifestSeen: true},
+		{name: "a successor that owns one workspace serves, the rest still moving", joiningMode: true, manifestSeen: true, owned: []ids.WorkspaceID{head}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.joiningMode, h.c.manifestSeen = tc.joiningMode, tc.manifestSeen
+			if tc.joiningMode {
+				h.c.joining = map[ids.WorkspaceID]bool{head: true, rest: true}
+				h.c.owned = map[ids.WorkspaceID]bool{}
+				for _, ws := range tc.owned {
+					h.c.owned[ws] = true
+				}
+			}
+			h.c.mu.Unlock()
+			if tc.handingOver {
+				if _, err := h.c.claimHandover(); err != nil {
+					t.Fatalf("claimHandover: %v", err)
+				}
+			}
+
+			// Act
+			got := h.c.ServesQueue()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("ServesQueue = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestQueueChangedClosesWhenServesQueueChanges(t *testing.T) {
+	tests := []struct {
+		name       string
+		change     func(t *testing.T, h *harness)
+		wantClosed bool
+	}{
+		{name: "a handover claimed holds the queue and says so", wantClosed: true, change: func(t *testing.T, h *harness) {
+			if _, err := h.c.claimHandover(); err != nil {
+				t.Fatalf("claimHandover: %v", err)
+			}
+		}},
+		{name: "a lock taken and released without a change says nothing", change: func(_ *testing.T, h *harness) {
+			h.c.mu.Lock()
+			h.c.unlock()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			changed := h.c.QueueChanged()
+
+			// Act
+			tc.change(t, h)
+
+			// Assert
+			closed := false
+			select {
+			case <-changed:
+				closed = true
+			default:
+			}
+			if closed != tc.wantClosed {
+				t.Fatalf("QueueChanged closed = %v, want %v", closed, tc.wantClosed)
+			}
+		})
+	}
+}
+
+func TestServesWorkspace(t *testing.T) {
+	ws := ids.WorkspaceID("ws-1")
+	tests := []struct {
+		name        string
+		transferred bool
+		joining     bool
+		owned       bool
+		want        bool
+	}{
+		{name: "a workspace this daemon holds is served", want: true},
+		{name: "a workspace handed to a successor is not", transferred: true},
+		{name: "a workspace handed here and not adopted yet is not", joining: true},
+		{name: "a workspace handed here and adopted is served", joining: true, owned: true, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.c.mu.Lock()
+			if tc.transferred {
+				h.c.transferred = map[ids.WorkspaceID]string{ws: "successor"}
+			}
+			if tc.joining {
+				h.c.joiningMode, h.c.manifestSeen = true, true
+				h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+				h.c.owned = map[ids.WorkspaceID]bool{ws: tc.owned}
+			}
+			h.c.mu.Unlock()
+
+			// Act
+			got := h.c.ServesWorkspace(ws)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("ServesWorkspace = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnAnswerLatchClosesOnlyOnAChange(t *testing.T) {
+	tests := []struct {
+		name       string
+		start, to  bool
+		wantClosed bool
+	}{
+		{name: "a changed answer closes the edge", start: false, to: true, wantClosed: true},
+		{name: "an unchanged answer leaves it open", start: true, to: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			l := newAnswerLatch()
+			l.answer = tc.start
+			edge := l.changed
+
+			// Act
+			l.set(tc.to)
+
+			// Assert
+			closed := false
+			select {
+			case <-edge:
+				closed = true
+			default:
+			}
+			if closed != tc.wantClosed || l.answer != tc.to {
+				t.Fatalf("closed %v, answer %v; want closed %v, answer %v", closed, l.answer, tc.wantClosed, tc.to)
+			}
+		})
+	}
+}

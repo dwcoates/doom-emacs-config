@@ -94,9 +94,15 @@ type fakeDB struct {
 	reposErr error
 	// drainOwed is each queue's owed drain, which AdmitMerge sets as the
 	// store's does; drainReadErr and drainClearErr fail its read and clear.
-	drainOwed     map[wsm.RepoKey]bool
-	drainReadErr  error
-	drainClearErr error
+	drainOwed map[wsm.RepoKey]bool
+	// mediations is each repository's owed deploy mediation; mediationErr
+	// fails its read.
+	mediations   map[wsm.RepoKey]*wsm.Mediation
+	mediationErr error
+	// listWorkspacesErr fails ListWorkspaces.
+	listWorkspacesErr error
+	drainReadErr      error
+	drainClearErr     error
 
 	mu sync.Mutex
 
@@ -309,7 +315,46 @@ func newFakeDB() *fakeDB {
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
 		drainOwed:     map[wsm.RepoKey]bool{},
+		mediations:    map[wsm.RepoKey]*wsm.Mediation{},
 	}
+}
+
+func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mediations[repo] = &wsm.Mediation{OwedAt: at, Version: version}
+	return nil
+}
+
+func (f *fakeDB) MarkMediationPrompted(_ context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.mediations[repo]
+	if m == nil || !m.OwedAt.Equal(owed) {
+		return false, nil
+	}
+	m.PromptedAt, m.Turn = &at, turn
+	return true, nil
+}
+
+func (f *fakeDB) ReleaseMediation(_ context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.mediations[repo]
+	if m == nil || !m.OwedAt.Equal(owed) {
+		return false, nil
+	}
+	delete(f.mediations, repo)
+	return true, nil
+}
+
+func (f *fakeDB) MediationOf(_ context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mediationErr != nil {
+		return nil, f.mediationErr
+	}
+	return f.mediations[repo], nil
 }
 
 func (f *fakeDB) QueueDrainOwed(_ context.Context, repo wsm.RepoKey) (bool, error) {
@@ -439,6 +484,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 func (f *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listWorkspacesErr != nil {
+		return nil, f.listWorkspacesErr
+	}
 	out := make([]wsm.Workspace, 0, len(f.workspaces))
 	for _, ws := range f.workspaces {
 		out = append(out, ws)
@@ -2739,9 +2787,17 @@ type harness struct {
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
-	stateDir        string
-	targetD         string
-	sourceD         string
+	// mediatorsMade names every mediator CreateMediator made, which
+	// createMediatorErr fails, in the repository mediatorRepo.
+	mediatorsMade     []string
+	createMediatorErr error
+	mediatorRepo      wsm.RepoID
+	// standing is the rollout controller's queue standing: serving, and
+	// every workspace served, unless a test says otherwise.
+	standing *fakeStanding
+	stateDir string
+	targetD  string
+	sourceD  string
 
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
@@ -3129,6 +3185,7 @@ func newHarness(t *testing.T) *harness {
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
+	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
@@ -3280,9 +3337,23 @@ func (h *harness) deps() Deps {
 			h.interrupted = append(h.interrupted, ws)
 			return h.interruptRunning, h.interruptErr
 		},
-		Rollout: h.rollout,
-		Now:     h.clock,
-		Log:     h.logs,
+		Rollout:  h.rollout,
+		Standing: h.standing,
+		CreateMediator: func(_ context.Context, repoDir, name string) (wsm.Workspace, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.mediatorsMade = append(h.mediatorsMade, name)
+			if h.createMediatorErr != nil {
+				return wsm.Workspace{}, h.createMediatorErr
+			}
+			ws := wsm.Workspace{ID: ids.WorkspaceID("ws-mediator"), Name: name, Repo: h.mediatorRepo}
+			h.db.mu.Lock()
+			h.db.workspaces[ws.ID] = ws
+			h.db.mu.Unlock()
+			return ws, nil
+		},
+		Now: h.clock,
+		Log: h.logs,
 	}
 }
 
@@ -4009,4 +4080,51 @@ func (h *harness) asyncRequestOf(ws ids.WorkspaceID) (wsm.AsyncMergeRequest, boo
 		return wsm.AsyncMergeRequest{}, false
 	}
 	return requests[0], true
+}
+
+// fakeStanding is the rollout controller's queue standing: whether the queue
+// may advance, the edge its change closes, and the workspaces not served.
+type fakeStanding struct {
+	mu        sync.Mutex
+	serves    bool
+	changed   chan struct{}
+	notServed map[ids.WorkspaceID]bool
+}
+
+func newFakeStanding() *fakeStanding {
+	return &fakeStanding{serves: true, changed: make(chan struct{}), notServed: map[ids.WorkspaceID]bool{}}
+}
+
+func (f *fakeStanding) ServesQueue() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.serves
+}
+
+func (f *fakeStanding) QueueChanged() <-chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.changed
+}
+
+func (f *fakeStanding) ServesWorkspace(ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.notServed[ws]
+}
+
+// set moves the queue standing to SERVES, closing the change edge.
+func (f *fakeStanding) set(serves bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.serves = serves
+	close(f.changed)
+	f.changed = make(chan struct{})
+}
+
+// serve marks WS served or not.
+func (f *fakeStanding) serve(ws ids.WorkspaceID, served bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notServed[ws] = !served
 }

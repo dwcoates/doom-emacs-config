@@ -203,6 +203,14 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Remediating = remediating
+	mediation, err := o.rosterMediation(ctx, repo)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read the deploy mediation the queue waits on, so the roster is not told the queue",
+			"the mediation's read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	queue.Mediation = mediation
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)

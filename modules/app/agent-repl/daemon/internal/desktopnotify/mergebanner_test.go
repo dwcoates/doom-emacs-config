@@ -102,3 +102,27 @@ func TestMergeEndString(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeBannersMediatedPostsTheMediatorsBanner(t *testing.T) {
+	// Arrange
+	m, poster := newMergeBanners()
+
+	// Act
+	m.Mediated("ws1", "the deploy's page boots regressed")
+
+	// Assert
+	want := Banner{Title: "🩺 my-ws", Body: "the deploy's page boots regressed"}
+	if len(poster.banners) != 1 || poster.banners[0] != want || poster.kinds[0] != KindDeployMediated || poster.workspaces[0] != "ws1" {
+		t.Fatalf("posted %+v (kinds %v, workspaces %v), want %+v as %s for ws1", poster.banners, poster.kinds, poster.workspaces, want, KindDeployMediated)
+	}
+}
+
+func TestDeployMediatedTitleLeadsWithTheMediationMark(t *testing.T) {
+	// Act
+	got := DeployMediatedTitle("deploy-mediator")
+
+	// Assert
+	if got != "🩺 deploy-mediator" {
+		t.Fatalf("DeployMediatedTitle = %q, want the mediation mark before the mediator's name", got)
+	}
+}

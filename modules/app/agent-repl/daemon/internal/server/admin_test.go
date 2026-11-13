@@ -1017,3 +1017,79 @@ func TestUpdateMergeQueueRecordsWhoAsked(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateMergeQueueHandsTheMediatorsDecisionOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision *agentreplv1.UpdateMergeQueueMediation
+		want     merge.MediationDecision
+	}{
+		{name: "an approval", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}, want: merge.MediationApprove},
+		{name: "an escalation", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}}, want: merge.MediationEscalate},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: agent(), Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: tt.decision}}))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateMergeQueue = (%v, %v), want success", resp, err)
+			}
+			if len(h.Merge.decisions) != 1 || h.Merge.decisions[0].decision != tt.want || h.Merge.decisions[0].ws != "ws-asker" || h.Merge.decisions[0].summary != "clean" {
+				t.Fatalf("decisions = %+v, want the asker's %v with its summary", h.Merge.decisions, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.decideErr = &merge.RefusalError{Arm: merge.ArmNotMediator, Reason: "no mediator"}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Requester: agent(), Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}}}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetNotMediator() == nil {
+		t.Fatalf("UpdateMergeQueue = (%v, %v), want the not_mediator arm", resp, err)
+	}
+}
+
+func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester *agentreplv1.WorkspaceRequester
+		mediation *agentreplv1.UpdateMergeQueueMediation
+	}{
+		{name: "no decision", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x"}},
+		{name: "a blank summary", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: " ",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}},
+		{name: "the user deciding", requester: userRequester(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: tt.requester, Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: tt.mediation}}))
+
+			// Assert.
+			if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", got)
+			}
+		})
+	}
+}

@@ -532,6 +532,26 @@ func TestStampSpan(t *testing.T) {
 			want: []span{{10_000, 0}},
 		},
 		{
+			name: "a bubble drawn after a later prompt reached its turn spans from before its settle",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.deliverFoldedPromptAt("turn-2", "turn-1", "also this", placeAt(30_000))
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 20_000))
+			},
+			want: []span{{10_000, 20_000}},
+		},
+		{
+			name: "a bubble with no instant before its settle states no start",
+			act: func(h *harness) {
+				h.deliverPrompt("turn-1", "do the thing")
+				h.deliverFoldedPromptAt("turn-2", "turn-1", "also this", placeAt(30_000))
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 20_000))
+			},
+			want: []span{{0, 20_000}},
+		},
+		{
 			name: "a settle restated by the other plane keeps the first span",
 			act: func(h *harness) {
 				h.deliverPromptAt("turn-1", "do the thing", 10_000)

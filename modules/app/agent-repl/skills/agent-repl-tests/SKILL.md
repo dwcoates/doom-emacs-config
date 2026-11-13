@@ -176,6 +176,10 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 - Reuse is per UNIT: a Go package (unit or integration, a tagged pass named `<package>[<tags>]`), a vitest test file, an ERT test file, a suite-wide check (`vet`, `typecheck`), or a whole script or e2e suite.
   - A unit's inputs are derived by the tools, never kept by hand: a Go package's from `go list -deps -test` (every package its test binary links, their testdata and embedded files, go.mod, go.sum), a vitest file's from its import graph, an ERT file's from what it and the helpers load.
   - A run skips every unit whose inputs an earlier green run on the host passed it on, from any workspace: a unit's key is its inputs' bytes, never a checkout path, branch or workspace.
+  - Two inputs are not read by their bytes:
+    - What git ignores (session state, build output) is never part of a key.
+    - Generated protobuf code (`proto/gen/`) is read by its symbols: a unit's key holds the fingerprint of every message, enum and service its other inputs name, closed over what each holds, so a comment-only `.proto` edit re-runs nothing and a changed symbol re-runs only the units that name it (`testrun/internal/reuse/bindings.go`).
+  - A script suite with `Reuse.Scripts` reads its script and, transitively, every script of those directories one it reads names, never a whole directory.
   - A unit that passed is recorded though its suite failed, so the rerun after a fix runs only the failed units and those whose inputs the fix touched.
 - Each unit runs confined to exactly the inputs its key covers. A test failing with "Operation not permitted" on a checkout file reads an undeclared input.
   - Declare it for that unit in `Reuse.Units["<unit>"]`, or in `Reuse.Inputs` only when every unit of the suite reads it. Never widen a profile.

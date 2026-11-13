@@ -417,9 +417,9 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	ws := lease.Workspace
 	// A PAUSED QUEUE RESUMES NOTHING (pumpOnce), so the record below says the
 	// merge stays suspended rather than that it resumes: the pause's own
-	// take-back (suspendForPause) and a boot under a pause both land here. It
+	// take-back (suspendHeld) and a boot under a pause both land here. It
 	// is read before anything is taken, so a read that fails takes nothing.
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	paused, err := o.queueHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue of a merge taken back is paused", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "error": err.Error()})

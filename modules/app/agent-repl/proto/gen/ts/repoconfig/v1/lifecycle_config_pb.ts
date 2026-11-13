@@ -73,7 +73,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file repoconfig/v1/lifecycle_config.proto.
  */
 export const file_repoconfig_v1_lifecycle_config: GenFile = /*@__PURE__*/
-  fileDesc("CiRyZXBvY29uZmlnL3YxL2xpZmVjeWNsZV9jb25maWcucHJvdG8SDXJlcG9jb25maWcudjEi9gMKD0xpZmVjeWNsZUNvbmZpZxI5CghjcmVhdGlvbhgGIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gAiAEBEjcKBmZpbmlzaBgHIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gBiAEBEjcKCnByZV9kZXBsb3kYASABKAsyIy5yZXBvY29uZmlnLnYxLkRlcGxveVByZURlcGxveVN0YWdlEjgKBmRlcGxveRgJIAEoCzIjLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlRGVwbG95U3RhZ2VIAogBARI8Cgtwb3N0X2RlcGxveRgKIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gDiAEBEj4KCmNvbmN1cnJlbnQYBCABKAsyJS5yZXBvY29uZmlnLnYxLkRlcGxveUNvbmN1cnJlbnRTdGFnZXNIBIgBARIwCg1xdWV1ZV9kcmFpbmVkGAUgAygLMhkucmVwb2NvbmZpZy52MS5Ib29rU2NyaXB0QgsKCV9jcmVhdGlvbkIJCgdfZmluaXNoQgkKB19kZXBsb3lCDgoMX3Bvc3RfZGVwbG95Qg0KC19jb25jdXJyZW50SgQIAhADSgQIAxAEIrUBChNMaWZlY3ljbGVTdGFnZUhvb2tzEjgKCWVtb2ppX2FjaxgBIAEoCzIgLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlSG9va0xpc3RIAIgBARJAChF1c2VyX29yX3dvcmtzcGFjZRgCIAEoCzIgLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlSG9va0xpc3RIAYgBAUIMCgpfZW1vamlfYWNrQhQKEl91c2VyX29yX3dvcmtzcGFjZSI8ChFMaWZlY3ljbGVIb29rTGlzdBInCgVob29rcxgBIAMoCzIYLnJlcG9jb25maWcudjEuSG9va0VudHJ5IqYBChRMaWZlY3ljbGVEZXBsb3lTdGFnZRIwCgllbW9qaV9hY2sYASABKAsyGC5yZXBvY29uZmlnLnYxLkhvb2tFbnRyeUgAiAEBEjgKEXVzZXJfb3Jfd29ya3NwYWNlGAIgASgLMhgucmVwb2NvbmZpZy52MS5Ib29rRW50cnlIAYgBAUIMCgpfZW1vamlfYWNrQhQKEl91c2VyX29yX3dvcmtzcGFjZSKOAgoURGVwbG95UHJlRGVwbG95U3RhZ2USOAoJZW1vamlfYWNrGAMgASgLMiAucmVwb2NvbmZpZy52MS5MaWZlY3ljbGVIb29rTGlzdEgAiAEBEkAKEXVzZXJfb3Jfd29ya3NwYWNlGAQgASgLMiAucmVwb2NvbmZpZy52MS5MaWZlY3ljbGVIb29rTGlzdEgBiAEBEjkKC2xvY2FsX21lcmdlGAIgASgLMh8ucmVwb2NvbmZpZy52MS5EZXBsb3lMb2NhbE1lcmdlSAKIAQFCDAoKX2Vtb2ppX2Fja0IUChJfdXNlcl9vcl93b3Jrc3BhY2VCDgoMX2xvY2FsX21lcmdlSgQIARACUgVob29rcyK6AQoWRGVwbG95Q29uY3VycmVudFN0YWdlcxJNChJ0aHJvdWdoX3ByZV9kZXBsb3kYASABKAsyLy5yZXBvY29uZmlnLnYxLkRlcGxveUNvbmN1cnJlbnRUaHJvdWdoUHJlRGVwbG95SAASRgoOdGhyb3VnaF9kZXBsb3kYAiABKAsyLC5yZXBvY29uZmlnLnYxLkRlcGxveUNvbmN1cnJlbnRUaHJvdWdoRGVwbG95SABCCQoHdGhyb3VnaCIiCiBEZXBsb3lDb25jdXJyZW50VGhyb3VnaFByZURlcGxveSIfCh1EZXBsb3lDb25jdXJyZW50VGhyb3VnaERlcGxveSKSAQoQRGVwbG95TG9jYWxNZXJnZRIzCgV0ZXN0cxgBIAEoCzIkLnJlcG9jb25maWcudjEuRGVwbG95TG9jYWxNZXJnZVRlc3RzEjkKC3ZlcnNpb25fdGFnGAIgASgLMh8ucmVwb2NvbmZpZy52MS5EZXBsb3lWZXJzaW9uVGFnSACIAQFCDgoMX3ZlcnNpb25fdGFnImcKFURlcGxveUxvY2FsTWVyZ2VUZXN0cxJGChFhZ2VudF9yZXBsX3N1aXRlcxgBIAEoCzIpLnJlcG9jb25maWcudjEuRGVwbG95VGVzdHNBZ2VudFJlcGxTdWl0ZXNIAEIGCgRraW5kIjEKGkRlcGxveVRlc3RzQWdlbnRSZXBsU3VpdGVzEhMKC3NjcmlwdF9wYXRoGAEgASgJIhIKEERlcGxveVZlcnNpb25UYWciXAoJSG9va0VudHJ5EiEKBGhvb2sYASABKAsyEy5yZXBvY29uZmlnLnYxLkhvb2sSLAoIcnVuc19mb3IYAiABKAsyGi5yZXBvY29uZmlnLnYxLkhvb2tSdW5zRm9yIpcBCgRIb29rEisKBnNjcmlwdBgBIAEoCzIZLnJlcG9jb25maWcudjEuSG9va1NjcmlwdEgAEisKBnByb21wdBgCIAEoCzIZLnJlcG9jb25maWcudjEuSG9va1Byb21wdEgAEi0KB2J1aWx0aW4YAyABKAsyGi5yZXBvY29uZmlnLnYxLkhvb2tCdWlsdEluSABCBgoEaG9vayIzCgpIb29rU2NyaXB0EgwKBHBhdGgYASABKAkSFwoPdGltZW91dF9zZWNvbmRzGAIgASgNIhoKCkhvb2tQcm9tcHQSDAoEdGV4dBgBIAEoCSINCgtIb29rQnVpbHRJbiKBAQoLSG9va1J1bnNGb3ISLgoEbWFpbhgBIAEoCzIeLnJlcG9jb25maWcudjEuSG9va1J1bnNGb3JNYWluSAASOQoKYW55X3RhcmdldBgCIAEoCzIjLnJlcG9jb25maWcudjEuSG9va1J1bnNGb3JBbnlUYXJnZXRIAEIHCgVzY29wZSIRCg9Ib29rUnVuc0Zvck1haW4iFgoUSG9va1J1bnNGb3JBbnlUYXJnZXRCLFoqYWdlbnRyZXBsL3Byb3RvL3JlcG9jb25maWcvdjE7cmVwb2NvbmZpZ3YxYgZwcm90bzM");
+  fileDesc("CiRyZXBvY29uZmlnL3YxL2xpZmVjeWNsZV9jb25maWcucHJvdG8SDXJlcG9jb25maWcudjEixwQKD0xpZmVjeWNsZUNvbmZpZxI5CghjcmVhdGlvbhgGIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gAiAEBEjcKBmZpbmlzaBgHIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gBiAEBEjcKCnByZV9kZXBsb3kYASABKAsyIy5yZXBvY29uZmlnLnYxLkRlcGxveVByZURlcGxveVN0YWdlEjgKBmRlcGxveRgJIAEoCzIjLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlRGVwbG95U3RhZ2VIAogBARI8Cgtwb3N0X2RlcGxveRgKIAEoCzIiLnJlcG9jb25maWcudjEuTGlmZWN5Y2xlU3RhZ2VIb29rc0gDiAEBEj4KCmNvbmN1cnJlbnQYBCABKAsyJS5yZXBvY29uZmlnLnYxLkRlcGxveUNvbmN1cnJlbnRTdGFnZXNIBIgBARIwCg1xdWV1ZV9kcmFpbmVkGAUgAygLMhkucmVwb2NvbmZpZy52MS5Ib29rU2NyaXB0EjsKD2RlcGxveV9tZWRpYXRvchgLIAEoCzIdLnJlcG9jb25maWcudjEuRGVwbG95TWVkaWF0b3JIBYgBAUILCglfY3JlYXRpb25CCQoHX2ZpbmlzaEIJCgdfZGVwbG95Qg4KDF9wb3N0X2RlcGxveUINCgtfY29uY3VycmVudEISChBfZGVwbG95X21lZGlhdG9ySgQIAhADSgQIAxAEIh4KDkRlcGxveU1lZGlhdG9yEgwKBG5hbWUYASABKAkitQEKE0xpZmVjeWNsZVN0YWdlSG9va3MSOAoJZW1vamlfYWNrGAEgASgLMiAucmVwb2NvbmZpZy52MS5MaWZlY3ljbGVIb29rTGlzdEgAiAEBEkAKEXVzZXJfb3Jfd29ya3NwYWNlGAIgASgLMiAucmVwb2NvbmZpZy52MS5MaWZlY3ljbGVIb29rTGlzdEgBiAEBQgwKCl9lbW9qaV9hY2tCFAoSX3VzZXJfb3Jfd29ya3NwYWNlIjwKEUxpZmVjeWNsZUhvb2tMaXN0EicKBWhvb2tzGAEgAygLMhgucmVwb2NvbmZpZy52MS5Ib29rRW50cnkipgEKFExpZmVjeWNsZURlcGxveVN0YWdlEjAKCWVtb2ppX2FjaxgBIAEoCzIYLnJlcG9jb25maWcudjEuSG9va0VudHJ5SACIAQESOAoRdXNlcl9vcl93b3Jrc3BhY2UYAiABKAsyGC5yZXBvY29uZmlnLnYxLkhvb2tFbnRyeUgBiAEBQgwKCl9lbW9qaV9hY2tCFAoSX3VzZXJfb3Jfd29ya3NwYWNlIo4CChREZXBsb3lQcmVEZXBsb3lTdGFnZRI4CgllbW9qaV9hY2sYAyABKAsyIC5yZXBvY29uZmlnLnYxLkxpZmVjeWNsZUhvb2tMaXN0SACIAQESQAoRdXNlcl9vcl93b3Jrc3BhY2UYBCABKAsyIC5yZXBvY29uZmlnLnYxLkxpZmVjeWNsZUhvb2tMaXN0SAGIAQESOQoLbG9jYWxfbWVyZ2UYAiABKAsyHy5yZXBvY29uZmlnLnYxLkRlcGxveUxvY2FsTWVyZ2VIAogBAUIMCgpfZW1vamlfYWNrQhQKEl91c2VyX29yX3dvcmtzcGFjZUIOCgxfbG9jYWxfbWVyZ2VKBAgBEAJSBWhvb2tzIroBChZEZXBsb3lDb25jdXJyZW50U3RhZ2VzEk0KEnRocm91Z2hfcHJlX2RlcGxveRgBIAEoCzIvLnJlcG9jb25maWcudjEuRGVwbG95Q29uY3VycmVudFRocm91Z2hQcmVEZXBsb3lIABJGCg50aHJvdWdoX2RlcGxveRgCIAEoCzIsLnJlcG9jb25maWcudjEuRGVwbG95Q29uY3VycmVudFRocm91Z2hEZXBsb3lIAEIJCgd0aHJvdWdoIiIKIERlcGxveUNvbmN1cnJlbnRUaHJvdWdoUHJlRGVwbG95Ih8KHURlcGxveUNvbmN1cnJlbnRUaHJvdWdoRGVwbG95IpIBChBEZXBsb3lMb2NhbE1lcmdlEjMKBXRlc3RzGAEgASgLMiQucmVwb2NvbmZpZy52MS5EZXBsb3lMb2NhbE1lcmdlVGVzdHMSOQoLdmVyc2lvbl90YWcYAiABKAsyHy5yZXBvY29uZmlnLnYxLkRlcGxveVZlcnNpb25UYWdIAIgBAUIOCgxfdmVyc2lvbl90YWciZwoVRGVwbG95TG9jYWxNZXJnZVRlc3RzEkYKEWFnZW50X3JlcGxfc3VpdGVzGAEgASgLMikucmVwb2NvbmZpZy52MS5EZXBsb3lUZXN0c0FnZW50UmVwbFN1aXRlc0gAQgYKBGtpbmQiMQoaRGVwbG95VGVzdHNBZ2VudFJlcGxTdWl0ZXMSEwoLc2NyaXB0X3BhdGgYASABKAkiEgoQRGVwbG95VmVyc2lvblRhZyJcCglIb29rRW50cnkSIQoEaG9vaxgBIAEoCzITLnJlcG9jb25maWcudjEuSG9vaxIsCghydW5zX2ZvchgCIAEoCzIaLnJlcG9jb25maWcudjEuSG9va1J1bnNGb3IilwEKBEhvb2sSKwoGc2NyaXB0GAEgASgLMhkucmVwb2NvbmZpZy52MS5Ib29rU2NyaXB0SAASKwoGcHJvbXB0GAIgASgLMhkucmVwb2NvbmZpZy52MS5Ib29rUHJvbXB0SAASLQoHYnVpbHRpbhgDIAEoCzIaLnJlcG9jb25maWcudjEuSG9va0J1aWx0SW5IAEIGCgRob29rIjMKCkhvb2tTY3JpcHQSDAoEcGF0aBgBIAEoCRIXCg90aW1lb3V0X3NlY29uZHMYAiABKA0iGgoKSG9va1Byb21wdBIMCgR0ZXh0GAEgASgJIg0KC0hvb2tCdWlsdEluIoEBCgtIb29rUnVuc0ZvchIuCgRtYWluGAEgASgLMh4ucmVwb2NvbmZpZy52MS5Ib29rUnVuc0Zvck1haW5IABI5CgphbnlfdGFyZ2V0GAIgASgLMiMucmVwb2NvbmZpZy52MS5Ib29rUnVuc0ZvckFueVRhcmdldEgAQgcKBXNjb3BlIhEKD0hvb2tSdW5zRm9yTWFpbiIWChRIb29rUnVuc0ZvckFueVRhcmdldEIsWiphZ2VudHJlcGwvcHJvdG8vcmVwb2NvbmZpZy92MTtyZXBvY29uZmlndjFiBnByb3RvMw");
 
 /**
  * A repository's lifecycle: the whole of `.agent-repl/lifecycle.yaml`.
@@ -176,6 +176,18 @@ export type LifecycleConfig = Message<"repoconfig.v1.LifecycleConfig"> & {
    * @generated from field: repeated repoconfig.v1.HookScript queue_drained = 5;
    */
   queueDrained: HookScript[];
+
+  /**
+   * The repository's DEPLOY MEDIATOR: a hidden session of the daemon's that
+   * checks every deploy before the queue may advance past it -- the deploy
+   * window's errors, warnings and latency regressions -- and approves it,
+   * escalates it to the user, or remediates it itself and deploys again
+   * (docs/investigations/2026-11-13-deploy-mediator-plan.md). UNSET: the
+   * repository has no mediator, and a deploy holds nothing.
+   *
+   * @generated from field: optional repoconfig.v1.DeployMediator deploy_mediator = 11;
+   */
+  deployMediator?: DeployMediator | undefined;
 };
 
 /**
@@ -184,6 +196,28 @@ export type LifecycleConfig = Message<"repoconfig.v1.LifecycleConfig"> & {
  */
 export const LifecycleConfigSchema: GenMessage<LifecycleConfig> = /*@__PURE__*/
   messageDesc(file_repoconfig_v1_lifecycle_config, 0);
+
+/**
+ * A repository's deploy mediator.
+ *
+ * @generated from message repoconfig.v1.DeployMediator
+ */
+export type DeployMediator = Message<"repoconfig.v1.DeployMediator"> & {
+  /**
+   * REQUIRED. The mediator workspace's name, unique among the daemon's
+   * workspaces (agent-repl's: `deploy-mediator`).
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message repoconfig.v1.DeployMediator.
+ * Use `create(DeployMediatorSchema)` to create a new message.
+ */
+export const DeployMediatorSchema: GenMessage<DeployMediator> = /*@__PURE__*/
+  messageDesc(file_repoconfig_v1_lifecycle_config, 1);
 
 /**
  * A workspace stage's hooks, one list per kind of workspace. Each kind runs
@@ -214,7 +248,7 @@ export type LifecycleStageHooks = Message<"repoconfig.v1.LifecycleStageHooks"> &
  * Use `create(LifecycleStageHooksSchema)` to create a new message.
  */
 export const LifecycleStageHooksSchema: GenMessage<LifecycleStageHooks> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 1);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 2);
 
 /**
  * One kind's hooks for a stage, run in order. A failed hook stops the stage
@@ -237,7 +271,7 @@ export type LifecycleHookList = Message<"repoconfig.v1.LifecycleHookList"> & {
  * Use `create(LifecycleHookListSchema)` to create a new message.
  */
 export const LifecycleHookListSchema: GenMessage<LifecycleHookList> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 2);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 3);
 
 /**
  * The deploy stage: one hook per kind of workspace, chosen as a
@@ -267,7 +301,7 @@ export type LifecycleDeployStage = Message<"repoconfig.v1.LifecycleDeployStage">
  * Use `create(LifecycleDeployStageSchema)` to create a new message.
  */
 export const LifecycleDeployStageSchema: GenMessage<LifecycleDeployStage> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 3);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 4);
 
 /**
  * The first deploy stage: each kind's hooks, then the built-in local merge.
@@ -311,7 +345,7 @@ export type DeployPreDeployStage = Message<"repoconfig.v1.DeployPreDeployStage">
  * Use `create(DeployPreDeployStageSchema)` to create a new message.
  */
 export const DeployPreDeployStageSchema: GenMessage<DeployPreDeployStage> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 4);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 5);
 
 /**
  * THE CONCURRENT STAGES ARE A LEADING RUN, and the arm is the stage it runs
@@ -361,7 +395,7 @@ export type DeployConcurrentStages = Message<"repoconfig.v1.DeployConcurrentStag
  * Use `create(DeployConcurrentStagesSchema)` to create a new message.
  */
 export const DeployConcurrentStagesSchema: GenMessage<DeployConcurrentStages> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 5);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 6);
 
 /**
  * The concurrent run is pre_deploy alone. DELIBERATELY EMPTY: the arm is the
@@ -377,7 +411,7 @@ export type DeployConcurrentThroughPreDeploy = Message<"repoconfig.v1.DeployConc
  * Use `create(DeployConcurrentThroughPreDeploySchema)` to create a new message.
  */
 export const DeployConcurrentThroughPreDeploySchema: GenMessage<DeployConcurrentThroughPreDeploy> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 6);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 7);
 
 /**
  * The concurrent run is pre_deploy and deploy. DELIBERATELY EMPTY: the arm is
@@ -393,7 +427,7 @@ export type DeployConcurrentThroughDeploy = Message<"repoconfig.v1.DeployConcurr
  * Use `create(DeployConcurrentThroughDeploySchema)` to create a new message.
  */
 export const DeployConcurrentThroughDeploySchema: GenMessage<DeployConcurrentThroughDeploy> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 7);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 8);
 
 /**
  * THE BUILT-IN LOCAL MERGE. Its steps are the daemon's own code, in this
@@ -432,7 +466,7 @@ export type DeployLocalMerge = Message<"repoconfig.v1.DeployLocalMerge"> & {
  * Use `create(DeployLocalMergeSchema)` to create a new message.
  */
 export const DeployLocalMergeSchema: GenMessage<DeployLocalMerge> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 8);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 9);
 
 /**
  * Which test step the local merge runs. THE ARM IS THE STEP KIND: each is
@@ -462,7 +496,7 @@ export type DeployLocalMergeTests = Message<"repoconfig.v1.DeployLocalMergeTests
  * Use `create(DeployLocalMergeTestsSchema)` to create a new message.
  */
 export const DeployLocalMergeTestsSchema: GenMessage<DeployLocalMergeTests> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 9);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 10);
 
 /**
  * agent-repl's test runner: the suites a change touches are selected from the
@@ -488,7 +522,7 @@ export type DeployTestsAgentReplSuites = Message<"repoconfig.v1.DeployTestsAgent
  * Use `create(DeployTestsAgentReplSuitesSchema)` to create a new message.
  */
 export const DeployTestsAgentReplSuitesSchema: GenMessage<DeployTestsAgentReplSuites> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 10);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 11);
 
 /**
  * The repository versions its landings. No fields: which increment a landing
@@ -504,7 +538,7 @@ export type DeployVersionTag = Message<"repoconfig.v1.DeployVersionTag"> & {
  * Use `create(DeployVersionTagSchema)` to create a new message.
  */
 export const DeployVersionTagSchema: GenMessage<DeployVersionTag> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 11);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 12);
 
 /**
  * One hook of a stage, and which workspaces of its kind it runs for.
@@ -534,7 +568,7 @@ export type HookEntry = Message<"repoconfig.v1.HookEntry"> & {
  * Use `create(HookEntrySchema)` to create a new message.
  */
 export const HookEntrySchema: GenMessage<HookEntry> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 12);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 13);
 
 /**
  * A hook: a script the daemon runs, a prompt it sends to the workspace the
@@ -589,7 +623,7 @@ export type Hook = Message<"repoconfig.v1.Hook"> & {
  * Use `create(HookSchema)` to create a new message.
  */
 export const HookSchema: GenMessage<Hook> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 13);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 14);
 
 /**
  * A script hook. The daemon runs it with bash, with the repository's MAIN
@@ -638,7 +672,7 @@ export type HookScript = Message<"repoconfig.v1.HookScript"> & {
  * Use `create(HookScriptSchema)` to create a new message.
  */
 export const HookScriptSchema: GenMessage<HookScript> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 14);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 15);
 
 /**
  * A prompt hook. In the creation stage its text is appended to the initial
@@ -668,7 +702,7 @@ export type HookPrompt = Message<"repoconfig.v1.HookPrompt"> & {
  * Use `create(HookPromptSchema)` to create a new message.
  */
 export const HookPromptSchema: GenMessage<HookPrompt> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 15);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 16);
 
 /**
  * The stage's built-in emoji-ack default, run where this hook stands.
@@ -684,7 +718,7 @@ export type HookBuiltIn = Message<"repoconfig.v1.HookBuiltIn"> & {
  * Use `create(HookBuiltInSchema)` to create a new message.
  */
 export const HookBuiltInSchema: GenMessage<HookBuiltIn> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 16);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 17);
 
 /**
  * Which landing targets a hook runs for. THE ARM IS THE SCOPE.
@@ -723,7 +757,7 @@ export type HookRunsFor = Message<"repoconfig.v1.HookRunsFor"> & {
  * Use `create(HookRunsForSchema)` to create a new message.
  */
 export const HookRunsForSchema: GenMessage<HookRunsFor> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 17);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 18);
 
 /**
  * The hook runs only for the repository's main branch. DELIBERATELY EMPTY:
@@ -739,7 +773,7 @@ export type HookRunsForMain = Message<"repoconfig.v1.HookRunsForMain"> & {
  * Use `create(HookRunsForMainSchema)` to create a new message.
  */
 export const HookRunsForMainSchema: GenMessage<HookRunsForMain> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 18);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 19);
 
 /**
  * The hook runs whatever the target. DELIBERATELY EMPTY: the arm is the scope.
@@ -754,5 +788,5 @@ export type HookRunsForAnyTarget = Message<"repoconfig.v1.HookRunsForAnyTarget">
  * Use `create(HookRunsForAnyTargetSchema)` to create a new message.
  */
 export const HookRunsForAnyTargetSchema: GenMessage<HookRunsForAnyTarget> = /*@__PURE__*/
-  messageDesc(file_repoconfig_v1_lifecycle_config, 19);
+  messageDesc(file_repoconfig_v1_lifecycle_config, 20);
 

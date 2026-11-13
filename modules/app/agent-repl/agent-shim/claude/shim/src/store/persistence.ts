@@ -225,6 +225,13 @@ export interface AgentPageSession {
    * Idempotent.
    */
   concludeThrough(through?: conversationv1.HistoryPointer): void;
+  /**
+   * The pointer of the last entry the tail served its consumer, absent before
+   * the first: set beside the pointer a conclusion named, it says whether a
+   * tail that did not end in time was still being served or had served
+   * everything and was waiting on its consumer.
+   */
+  servedThrough(): string | undefined;
   /** Stop following. Idempotent. */
   close(): void;
 }

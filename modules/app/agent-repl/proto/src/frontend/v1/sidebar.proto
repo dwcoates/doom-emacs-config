@@ -1063,7 +1063,28 @@ message RosterRepoMergeQueue {
   // itself and one that discards it. A queue whose line is empty and that
   // holds only these is still listed, with no head.
   repeated RosterMergeQueueOffQueue off_queue = 11;
+  // The DEPLOY MEDIATION the queue waits on, pinned above its head: the
+  // repository's deploy mediator, checking a deploy before the queue may
+  // move past it (repoconfig.v1.LifecycleConfig.deploy_mediator). UNSET
+  // while no deploy owes one. A queue whose deploy owes one is listed even
+  // with nothing in line. (Added 2026-11-13.)
+  optional RosterMergeQueueMediation mediation = 12;
 }
+
+// A deploy mediation the queue waits on.
+message RosterMergeQueueMediation {
+  // The mediator workspace. A click selects it.
+  RosterMergeQueueSubject subject = 1;
+  // REQUIRED. Where the mediation stands.
+  oneof standing {
+    // The deploy is still rolling out, or the mediator is not yet told.
+    RosterMergeQueueMediationWaiting waiting = 2;
+    // The mediator is checking the deploy, or remediating it.
+    RosterMergeQueueMediationChecking checking = 3;
+  }
+}
+message RosterMergeQueueMediationWaiting {}
+message RosterMergeQueueMediationChecking {}
 
 // ONE MERGE OFF ITS QUEUE, drawn as a row:
 //

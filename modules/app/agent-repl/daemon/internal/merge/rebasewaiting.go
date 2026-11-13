@@ -90,13 +90,13 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		o.deps.Log.Global().Error(op, "could not read the queue to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
 	}
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	paused, err := o.queueHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
 	}
 	if paused {
-		o.deps.Log.Global().Info(op, "the queue is paused; its waiting merges are not rebased", dlog.Context{"repo": string(repo)})
+		o.deps.Log.Global().Info(op, "the queue is held (paused, or a handover is in flight); its waiting merges are not rebased", dlog.Context{"repo": string(repo)})
 		return
 	}
 	line := inLine(stored)
@@ -107,7 +107,7 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		if o.isDraining() {
 			return
 		}
-		if entry.State != wsm.MergeQueued {
+		if entry.State != wsm.MergeQueued || !o.deps.Standing.ServesWorkspace(entry.Workspace) {
 			continue
 		}
 		o.rebaseWaitingMember(ctx, repo, entry)
