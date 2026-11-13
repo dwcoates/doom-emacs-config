@@ -494,6 +494,10 @@ func (c *fakeClient) StartSession(context.Context, *shimv1.StartSessionRequest) 
 	panic("sessionwatcher must not call StartSession")
 }
 
+func (c *fakeClient) SummarizeConversation(context.Context, *shimv1.SummarizeConversationRequest) (*shimv1.SummarizeConversationResponse, error) {
+	panic("sessionwatcher must not call SummarizeConversation")
+}
+
 func (c *fakeClient) SetSessionModel(context.Context, *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error) {
 	panic("sessionwatcher must not call SetSessionModel")
 }

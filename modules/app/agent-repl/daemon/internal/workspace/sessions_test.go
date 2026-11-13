@@ -85,6 +85,16 @@ type fakeClient struct {
 	// detached counts Detach calls: the link let go, the process left running.
 	detached int
 
+	// summaries is every SummarizeConversation asked. summarizeResponse
+	// scripts the answer (nil answers a compact `compacted` and a carry
+	// `carried` with fakeCarriedSummary), summarizeErr fails the call, and a
+	// non-nil summarizeHold holds it until the hold closes or the call's
+	// context ends.
+	summaries         []*shimv1.SummarizeConversationRequest
+	summarizeResponse *shimv1.SummarizeConversationResponse
+	summarizeErr      error
+	summarizeHold     chan struct{}
+
 	requests []*shimv1.StartSessionRequest
 	// responses, when set, are answered one per StartSession, in order, before
 	// `response` answers every call after them.
@@ -211,6 +221,33 @@ func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
 		return shimclient.ExitInfo{}, false
 	}
 	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL", At: c.reapedAt}, true
+}
+
+// fakeCarriedSummary is the summary text the fake answers every carry with.
+const fakeCarriedSummary = "the fake's summary of the carried conversation"
+
+func (c *fakeClient) SummarizeConversation(ctx context.Context, req *shimv1.SummarizeConversationRequest) (*shimv1.SummarizeConversationResponse, error) {
+	c.summaries = append(c.summaries, req)
+	if c.summarizeHold != nil {
+		select {
+		case <-c.summarizeHold:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if c.summarizeErr != nil {
+		return nil, c.summarizeErr
+	}
+	if c.summarizeResponse != nil {
+		return c.summarizeResponse, nil
+	}
+	success := &shimv1.SummarizeConversationSuccess{
+		Use: &shimv1.SummarizeConversationSuccess_Compacted{Compacted: &shimv1.SummarizeConversationCompacted{TokensBefore: 596_848, TokensAfter: 2_100}},
+	}
+	if req.GetCarry() != nil {
+		success.Use = &shimv1.SummarizeConversationSuccess_Carried{Carried: &shimv1.SummarizeConversationCarried{Text: fakeCarriedSummary}}
+	}
+	return &shimv1.SummarizeConversationResponse{Result: &shimv1.SummarizeConversationResponse_Success{Success: success}}, nil
 }
 
 func (c *fakeClient) StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
@@ -4631,5 +4668,55 @@ func TestASessionWhoseDeployCheckRoleCannotBeReadIsNotStarted(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opBringUp, Message: "whether the workspace is a deploy intake could not be read; the session was not started"}); !ok {
 		t.Fatalf("no ERROR record of the unreadable role: %+v", log.Records())
+	}
+}
+
+// TestVendorStartLabel pins the one reading of a vendor query's failure that
+// both a start's own opening and its summarizer are labeled by: the shim's
+// retry verdict and cause, the sign-in a rejected credential offers, and the
+// compaction marker the caller states.
+func TestVendorStartLabel(t *testing.T) {
+	signIn := &shimv1.StartSessionVendorStartFailed{Retry: &shimv1.StartSessionVendorStartFailed_Rejected{Rejected: &shimv1.StartSessionVendorStartRejected{
+		ApiFailure: &conversationv1.ApiRequestFailed{Message: "OAuth session expired",
+			Kind: &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}}},
+	}}}
+	tests := []struct {
+		name       string
+		vendor     *shimv1.StartSessionVendorStartFailed
+		compaction bool
+		want       startLabel
+	}{
+		{name: "a transient vendor failure is retryable", vendor: retryableVendorStart(),
+			want: startLabel{retryable: true, vendor: true, cause: "why"}},
+		{name: "a network failure is retryable on the network", vendor: offlineVendorStart(),
+			want: startLabel{retryable: true, network: true, cause: "why"}},
+		{name: "a rejection is not retried", vendor: rejectedVendorStart(),
+			want: startLabel{vendor: true, cause: "why"}},
+		{name: "a rejected credential offers the sign-in", vendor: signIn,
+			want: startLabel{vendor: true, cause: "why", signIn: "OAuth session expired"}},
+		{name: "a label naming neither arm is read as a rejection", vendor: &shimv1.StartSessionVendorStartFailed{},
+			want: startLabel{vendor: true, cause: "why"}},
+		{name: "a summarizer's failure is marked as the compaction", vendor: rejectedVendorStart(), compaction: true,
+			want: startLabel{vendor: true, cause: "why", compaction: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			err := vendorStartLabel(log, ids.WorkspaceID("w1"), tt.vendor, "why", tt.compaction)
+
+			// Assert.
+			var label *startLabel
+			if !errors.As(err, &label) {
+				t.Fatalf("err = %v, want a startLabel", err)
+			}
+			got := *label
+			got.err = nil
+			if got != tt.want {
+				t.Fatalf("label = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

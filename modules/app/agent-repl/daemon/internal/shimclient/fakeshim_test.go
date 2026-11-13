@@ -33,6 +33,7 @@ type fakeShim struct {
 	opened chan struct{}
 
 	// answers a test scripts.
+	summarizeResp       *shimv1.SummarizeConversationResponse
 	startSessionResp    *shimv1.StartSessionResponse
 	startTurnResp       *shimv1.StartTurnResponse
 	killTurnResp        *shimv1.KillTurnResponse
@@ -235,6 +236,14 @@ func (f *fakeShim) StartSession(_ context.Context, req *connect.Request[shimv1.S
 		return connect.NewResponse(f.startSessionResp), nil
 	}
 	return connect.NewResponse(&shimv1.StartSessionResponse{}), nil
+}
+
+func (f *fakeShim) SummarizeConversation(_ context.Context, _ *connect.Request[shimv1.SummarizeConversationRequest]) (*connect.Response[shimv1.SummarizeConversationResponse], error) {
+	f.record("SummarizeConversation")
+	if f.summarizeResp != nil {
+		return connect.NewResponse(f.summarizeResp), nil
+	}
+	return connect.NewResponse(&shimv1.SummarizeConversationResponse{}), nil
 }
 
 func (f *fakeShim) WatchSession(ctx context.Context, _ *connect.Request[shimv1.WatchSessionRequest], stream *connect.ServerStream[shimv1.WatchSessionResponse]) error {

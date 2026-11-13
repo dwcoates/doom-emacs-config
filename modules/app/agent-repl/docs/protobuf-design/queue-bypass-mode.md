@@ -116,6 +116,13 @@ switched off. Designed autonomously (owner request, 2026-11-10).
   rather than `switch_failed`. The retry arm labels it as for any failure.
 - `shim.v1.StartSessionResume.cold_remediation`'s comment now states what the
   shim always did: a set remediation is carried out warm or cold.
+- SUPERSEDED 2026-11-13 (`2026-11-13-summarize-conversation.md`): the three
+  fields above are retired. The owed compaction and the owed summary are
+  asked of `shim.v1.Shim.SummarizeConversation` before the StartSession, under
+  their own bound, because a summarizer inside StartSession made the start's
+  60s bound cover a summary that grows with the conversation. The daemon
+  still marks such a failure as the compaction, so the switch still answers
+  `compaction_failed`.
 - Implementation (2026-11-11), across the systems that produce or consume
   the change:
   - wsm (layout 123): the binding records the start work it owes

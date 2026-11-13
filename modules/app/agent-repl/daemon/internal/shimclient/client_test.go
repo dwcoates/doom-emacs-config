@@ -2471,3 +2471,33 @@ func TestEveryWatchBashOpenIsExpected(t *testing.T) {
 		t.Fatal("the WatchBash open did not carry expected")
 	}
 }
+
+func TestSummarizeConversationReachesTheShim(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       *shimv1.SummarizeConversationRequest
+		wantCalls int
+	}{
+		{name: "a valid request reaches the shim", req: validSummarizeConversationRequest(), wantCalls: 1},
+		{name: "an invalid request never does", req: &shimv1.SummarizeConversationRequest{}, wantCalls: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			client := adoptReady(t, f, dir, uds)
+
+			// Act.
+			_, err := client.SummarizeConversation(context.Background(), tt.req)
+
+			// Assert.
+			if (err == nil) != (tt.wantCalls == 1) {
+				t.Fatalf("SummarizeConversation() error = %v, want an error exactly when the request is invalid", err)
+			}
+			if got := f.count("SummarizeConversation"); got != tt.wantCalls {
+				t.Fatalf("SummarizeConversation calls = %d, want %d", got, tt.wantCalls)
+			}
+		})
+	}
+}

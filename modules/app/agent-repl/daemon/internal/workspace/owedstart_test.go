@@ -29,12 +29,6 @@ func owing(f *fleetFixture, owed wsm.OwedStartWork) ids.WorkspaceID {
 	return ws
 }
 
-// withCarriedSummary is RESPONSE answering TEXT as the summary it carried.
-func withCarriedSummary(response *shimv1.StartSessionResponse, text string) *shimv1.StartSessionResponse {
-	response.GetSuccess().CarriedSummary = &shimv1.StartSessionCarriedSummary{Text: text}
-	return response
-}
-
 func TestDefaultSummarizerIsTheColdGatesFirstChoice(t *testing.T) {
 	// Arrange.
 	served, _ := coldCompactMenu()
@@ -76,18 +70,16 @@ func TestCarryOwedStartWork(t *testing.T) {
 			wantCarried: &wsm.OwedStartWork{Compact: true},
 		},
 		{
-			name: "an owed summary is the resume's carry_summary",
-			owed: &wsm.OwedStartWork{SummaryOf: "queue-1"},
-			want: &shimv1.StartSessionResume{VendorSessionId: "vendor-1",
-				CarrySummary: &shimv1.StartSessionCarrySummary{VendorSessionId: "queue-1", Summarizer: wantSummarizer}},
+			name:        "an owed summary rides no request, and is answered as owed",
+			owed:        &wsm.OwedStartWork{SummaryOf: "queue-1"},
+			want:        &shimv1.StartSessionResume{VendorSessionId: "vendor-1"},
 			wantCarried: &wsm.OwedStartWork{SummaryOf: "queue-1"},
 		},
 		{
 			name:        "an owed summary keeps the remediation the resume carried",
 			owed:        &wsm.OwedStartWork{SummaryOf: "queue-1"},
 			remediation: pay,
-			want: &shimv1.StartSessionResume{VendorSessionId: "vendor-1", ColdRemediation: pay,
-				CarrySummary: &shimv1.StartSessionCarrySummary{VendorSessionId: "queue-1", Summarizer: wantSummarizer}},
+			want:        &shimv1.StartSessionResume{VendorSessionId: "vendor-1", ColdRemediation: pay},
 			wantCarried: &wsm.OwedStartWork{SummaryOf: "queue-1"},
 		},
 	}
@@ -185,13 +177,9 @@ func TestSettleOwedStartWork(t *testing.T) {
 			if tt.carried != nil {
 				f.db.owedWork = map[ids.WorkspaceID]wsm.OwedStartWork{ws: *tt.carried}
 			}
-			response := startedResponse("vendor-1")
-			if tt.summary != "" {
-				withCarriedSummary(response, tt.summary)
-			}
 
 			// Act.
-			err := f.fleet.settleOwedStartWork(context.Background(), f.log.logger, ws, tt.carried, response.GetSuccess())
+			err := f.fleet.settleOwedStartWork(context.Background(), f.log.logger, ws, tt.carried, tt.summary)
 
 			// Assert.
 			if err != nil {
@@ -216,15 +204,15 @@ func TestSettleOwedStartWorkRefuses(t *testing.T) {
 		message string
 	}{
 		{
-			name:    "a summary asked for and not answered",
+			name:    "a summary owed and not summarized",
 			carried: &wsm.OwedStartWork{SummaryOf: "queue-1"},
-			message: "the start's carried summary disagrees with what it asked for; the session's start is refused",
+			message: "the start's carried summary disagrees with what it owed; the session's start is refused",
 		},
 		{
-			name:    "a summary answered for a compaction",
+			name:    "a summary for a start that owed a compaction",
 			carried: &wsm.OwedStartWork{Compact: true},
 			summary: "unasked",
-			message: "the start's carried summary disagrees with what it asked for; the session's start is refused",
+			message: "the start's carried summary disagrees with what it owed; the session's start is refused",
 		},
 		{
 			name:    "a settlement the store refuses",
@@ -240,13 +228,9 @@ func TestSettleOwedStartWorkRefuses(t *testing.T) {
 			ws := resumable(f)
 			f.db.owedWork = map[ids.WorkspaceID]wsm.OwedStartWork{ws: *tt.carried}
 			f.db.settleErr = tt.dbErr
-			response := startedResponse("vendor-1")
-			if tt.summary != "" {
-				withCarriedSummary(response, tt.summary)
-			}
 
 			// Act.
-			err := f.fleet.settleOwedStartWork(context.Background(), f.log.logger, ws, tt.carried, response.GetSuccess())
+			err := f.fleet.settleOwedStartWork(context.Background(), f.log.logger, ws, tt.carried, tt.summary)
 
 			// Assert.
 			if err == nil {
@@ -268,14 +252,14 @@ func TestSettleOwedStartWorkRefuses(t *testing.T) {
 	}
 }
 
-// TestAStartCarriesAndSettlesTheOwedWork asserts the bring-up's StartSession
-// is the builder's request with the owed work carried, and that its answer
-// settles it.
-func TestAStartCarriesAndSettlesTheOwedWork(t *testing.T) {
+// TestAStartSummarizesAndSettlesTheOwedWork asserts the bring-up asks the
+// owed summary of SummarizeConversation before its StartSession, which carries
+// none of it, and settles the work with the summary it answered.
+func TestAStartSummarizesAndSettlesTheOwedWork(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := owing(f, wsm.OwedStartWork{SummaryOf: "queue-1"})
-	f.client.response = withCarriedSummary(startedResponse("vendor-1"), "the queue did X")
+	f.client.response = startedResponse("vendor-1")
 
 	// Act.
 	err := f.fleet.Start(context.Background(), ws)
@@ -284,13 +268,14 @@ func TestAStartCarriesAndSettlesTheOwedWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if len(f.client.requests) != 1 {
-		t.Fatalf("StartSession requests = %v, want exactly one", f.client.requests)
+	if len(f.client.summaries) != 1 || f.client.summaries[0].GetCarry().GetVendorSessionId() != "queue-1" ||
+		!proto.Equal(f.client.summaries[0].GetSummarizer(), wantSummarizer) {
+		t.Fatalf("SummarizeConversation requests = %v, want one carry of queue-1 on the default summarizer", f.client.summaries)
 	}
-	if got := f.client.requests[0].GetResume().GetCarrySummary(); !proto.Equal(got, &shimv1.StartSessionCarrySummary{VendorSessionId: "queue-1", Summarizer: wantSummarizer}) {
-		t.Fatalf("carry_summary = %v, want the owed summary", got)
+	if len(f.client.requests) != 1 || f.client.requests[0].GetResume().GetColdRemediation() != nil {
+		t.Fatalf("StartSession requests = %v, want exactly one, naming no remediation", f.client.requests)
 	}
-	if _, owed := f.db.owedWork[ws]; owed || f.db.contextSummaries[ws] != "the queue did X" {
+	if _, owed := f.db.owedWork[ws]; owed || f.db.contextSummaries[ws] != fakeCarriedSummary {
 		t.Fatalf("owed = %+v, summaries = %+v, want the work settled with its summary kept", f.db.owedWork, f.db.contextSummaries)
 	}
 }
@@ -309,11 +294,11 @@ func TestCompactionFailure(t *testing.T) {
 			// Arrange.
 			f := newFleetFixture(t)
 			ws := owing(f, wsm.OwedStartWork{Compact: true})
-			label := rejectedVendorStart()
 			if tt.compaction {
-				label.Compaction = &shimv1.StartSessionCompactionFailed{}
+				f.client.summarizeResponse = summarizerRefusal(rejectedVendorStart(), "the summarizer failed")
+			} else {
+				f.client.response = vendorRefusal(rejectedVendorStart(), "the summarizer failed")
 			}
-			f.client.response = vendorRefusal(label, "the summarizer failed")
 
 			// Act.
 			err := f.fleet.Start(context.Background(), ws)
