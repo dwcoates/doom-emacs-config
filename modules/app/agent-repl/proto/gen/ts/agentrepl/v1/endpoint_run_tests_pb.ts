@@ -36,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_run_tests.proto.
  */
 export const file_agentrepl_v1_endpoint_run_tests: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEiwAIKD1J1blRlc3RzUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEicKA3J1bhgCIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1blJlcXVlc3QSDAoEcnVucxgDIAEoDRIdChVzdG9wX2F0X2ZpcnN0X2ZhaWx1cmUYBCABKAgSLwoIY3B1X2xvYWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkEjMKCXJlcXVlc3RlchgGIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISMAoId29ya3RyZWUYByABKAsyHi5hZ2VudHJlcGwudjEuUnVuVGVzdHNXb3JrdHJlZRIQCghnb3Zlcm5lZBgIIAEoCCIfChBSdW5UZXN0c1dvcmt0cmVlEgsKA2RpchgBIAEoCSIgCg9SdW5UZXN0c0NwdUxvYWQSDQoFbG9vcHMYASABKA0igQEKEFJ1blRlc3RzUmVzcG9uc2USKQoFZXZlbnQYASABKAsyGC50ZXN0cnVuLnYxLlRlc3RSdW5FdmVudEgAEiwKBWVycm9yGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJ1blRlc3RzRXJyb3JIABILCgNydW4YAyABKA1CBwoFZnJhbWUijAMKDVJ1blRlc3RzRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuUnVuVGVzdHNVbmtub3duV29ya3NwYWNlSAASOQoMbm9fc2VsZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLlJ1blRlc3RzTm9TZWxlY3Rpb25IABI7Cg1ydW5uZXJfZmFpbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLlJ1blRlc3RzUnVubmVyRmFpbGVkSAASQAoQY3B1X2xvYWRfcmVmdXNlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5SdW5UZXN0c0NwdUxvYWRSZWZ1c2VkSAASMAoHaW52YWxpZBgFIAEoCzIdLmFnZW50cmVwbC52MS5SdW5UZXN0c0ludmFsaWRIABJBChB3b3JrdHJlZV9yZWZ1c2VkGAYgASgLMiUuYWdlbnRyZXBsLnYxLlJ1blRlc3RzV29ya3RyZWVSZWZ1c2VkSABCBwoFY2F1c2UiKQoXUnVuVGVzdHNXb3JrdHJlZVJlZnVzZWQSDgoGZGV0YWlsGAEgASgJIhgKFlJ1blRlc3RzQ3B1TG9hZFJlZnVzZWQiIQoPUnVuVGVzdHNJbnZhbGlkEg4KBmRldGFpbBgBIAEoCSIaChhSdW5UZXN0c1Vua25vd25Xb3Jrc3BhY2UiFQoTUnVuVGVzdHNOb1NlbGVjdGlvbiI5ChRSdW5UZXN0c1J1bm5lckZhaWxlZBIRCglleGl0X2NvZGUYASABKAUSDgoGZGV0YWlsGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEiwAIKD1J1blRlc3RzUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEicKA3J1bhgCIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1blJlcXVlc3QSDAoEcnVucxgDIAEoDRIdChVzdG9wX2F0X2ZpcnN0X2ZhaWx1cmUYBCABKAgSLwoIY3B1X2xvYWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkEjMKCXJlcXVlc3RlchgGIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISMAoId29ya3RyZWUYByABKAsyHi5hZ2VudHJlcGwudjEuUnVuVGVzdHNXb3JrdHJlZRIQCghnb3Zlcm5lZBgIIAEoCCIfChBSdW5UZXN0c1dvcmt0cmVlEgsKA2RpchgBIAEoCSIgCg9SdW5UZXN0c0NwdUxvYWQSDQoFbG9vcHMYASABKA0igQEKEFJ1blRlc3RzUmVzcG9uc2USKQoFZXZlbnQYASABKAsyGC50ZXN0cnVuLnYxLlRlc3RSdW5FdmVudEgAEiwKBWVycm9yGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJ1blRlc3RzRXJyb3JIABILCgNydW4YAyABKA1CBwoFZnJhbWUi0AMKDVJ1blRlc3RzRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuUnVuVGVzdHNVbmtub3duV29ya3NwYWNlSAASOQoMbm9fc2VsZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLlJ1blRlc3RzTm9TZWxlY3Rpb25IABI7Cg1ydW5uZXJfZmFpbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLlJ1blRlc3RzUnVubmVyRmFpbGVkSAASQAoQY3B1X2xvYWRfcmVmdXNlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5SdW5UZXN0c0NwdUxvYWRSZWZ1c2VkSAASMAoHaW52YWxpZBgFIAEoCzIdLmFnZW50cmVwbC52MS5SdW5UZXN0c0ludmFsaWRIABJBChB3b3JrdHJlZV9yZWZ1c2VkGAYgASgLMiUuYWdlbnRyZXBsLnYxLlJ1blRlc3RzV29ya3RyZWVSZWZ1c2VkSAASQgoRdXNlcl9vbmx5X3JlZnVzZWQYByABKAsyJS5hZ2VudHJlcGwudjEuUnVuVGVzdHNVc2VyT25seVJlZnVzZWRIAEIHCgVjYXVzZSIqChdSdW5UZXN0c1VzZXJPbmx5UmVmdXNlZBIPCgdvcHRpb25zGAEgAygJIikKF1J1blRlc3RzV29ya3RyZWVSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSIYChZSdW5UZXN0c0NwdUxvYWRSZWZ1c2VkIiEKD1J1blRlc3RzSW52YWxpZBIOCgZkZXRhaWwYASABKAkiGgoYUnVuVGVzdHNVbmtub3duV29ya3NwYWNlIhUKE1J1blRlc3RzTm9TZWxlY3Rpb24iOQoUUnVuVGVzdHNSdW5uZXJGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEg4KBmRldGFpbBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_topology, file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
 
 /**
  * Run the selected tests from one workspace's worktree.
@@ -107,7 +107,8 @@ export type RunTestsRequest = Message<"agentrepl.v1.RunTestsRequest"> & {
    * Run under the CPU governance the merge queue's gate runs under (the core
    * cap and the background priority) even when the workspace holds its
    * repository's queue bypass mode, whose runs are otherwise ungoverned: for
-   * measuring what a selection costs the way the gate pays it.
+   * measuring what a selection costs the way the gate pays it. THE USER'S
+   * ALONE: refused (`user_only_refused`) unless `requester` is the user.
    *
    * @generated from field: bool governed = 8;
    */
@@ -270,6 +271,14 @@ export type RunTestsError = Message<"agentrepl.v1.RunTestsError"> & {
      */
     value: RunTestsWorktreeRefused;
     case: "worktreeRefused";
+  } | {
+    /**
+     * An option only the user may ask for was asked for by a workspace.
+     *
+     * @generated from field: agentrepl.v1.RunTestsUserOnlyRefused user_only_refused = 7;
+     */
+    value: RunTestsUserOnlyRefused;
+    case: "userOnlyRefused";
   } | { case: undefined; value?: undefined };
 };
 
@@ -279,6 +288,31 @@ export type RunTestsError = Message<"agentrepl.v1.RunTestsError"> & {
  */
 export const RunTestsErrorSchema: GenMessage<RunTestsError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_run_tests, 4);
+
+/**
+ * An option only the user may ask for was asked for by a workspace: a fresh
+ * run (`TestRunRequest.no_reuse`) or a governed bypass run (`governed`). Both
+ * measure the TESTS themselves, so they run only at the user's explicit
+ * request, never as part of an agent's ordinary work.
+ *
+ * @generated from message agentrepl.v1.RunTestsUserOnlyRefused
+ */
+export type RunTestsUserOnlyRefused = Message<"agentrepl.v1.RunTestsUserOnlyRefused"> & {
+  /**
+   * The options refused, as the command line names them ("-no-reuse",
+   * "-governed").
+   *
+   * @generated from field: repeated string options = 1;
+   */
+  options: string[];
+};
+
+/**
+ * Describes the message agentrepl.v1.RunTestsUserOnlyRefused.
+ * Use `create(RunTestsUserOnlyRefusedSchema)` to create a new message.
+ */
+export const RunTestsUserOnlyRefusedSchema: GenMessage<RunTestsUserOnlyRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 5);
 
 /**
  * The worktree named is not one the workspace may run tests in.
@@ -300,7 +334,7 @@ export type RunTestsWorktreeRefused = Message<"agentrepl.v1.RunTestsWorktreeRefu
  * Use `create(RunTestsWorktreeRefusedSchema)` to create a new message.
  */
 export const RunTestsWorktreeRefusedSchema: GenMessage<RunTestsWorktreeRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 5);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 6);
 
 /**
  * CPU load was asked for by someone other than the user.
@@ -315,7 +349,7 @@ export type RunTestsCpuLoadRefused = Message<"agentrepl.v1.RunTestsCpuLoadRefuse
  * Use `create(RunTestsCpuLoadRefusedSchema)` to create a new message.
  */
 export const RunTestsCpuLoadRefusedSchema: GenMessage<RunTestsCpuLoadRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 6);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 7);
 
 /**
  * The request's options contradict each other.
@@ -336,7 +370,7 @@ export type RunTestsInvalid = Message<"agentrepl.v1.RunTestsInvalid"> & {
  * Use `create(RunTestsInvalidSchema)` to create a new message.
  */
 export const RunTestsInvalidSchema: GenMessage<RunTestsInvalid> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 7);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 8);
 
 /**
  * No workspace the daemon serves is the one named.
@@ -351,7 +385,7 @@ export type RunTestsUnknownWorkspace = Message<"agentrepl.v1.RunTestsUnknownWork
  * Use `create(RunTestsUnknownWorkspaceSchema)` to create a new message.
  */
 export const RunTestsUnknownWorkspaceSchema: GenMessage<RunTestsUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 8);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 9);
 
 /**
  * The request named no test.
@@ -366,7 +400,7 @@ export type RunTestsNoSelection = Message<"agentrepl.v1.RunTestsNoSelection"> & 
  * Use `create(RunTestsNoSelectionSchema)` to create a new message.
  */
 export const RunTestsNoSelectionSchema: GenMessage<RunTestsNoSelection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 9);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 10);
 
 /**
  * The runner could not be started, or ended without reporting its end.
@@ -394,5 +428,5 @@ export type RunTestsRunnerFailed = Message<"agentrepl.v1.RunTestsRunnerFailed"> 
  * Use `create(RunTestsRunnerFailedSchema)` to create a new message.
  */
 export const RunTestsRunnerFailedSchema: GenMessage<RunTestsRunnerFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_run_tests, 10);
+  messageDesc(file_agentrepl_v1_endpoint_run_tests, 11);
 

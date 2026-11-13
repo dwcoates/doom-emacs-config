@@ -55,7 +55,8 @@ message RunTestsRequest {
   // Run under the CPU governance the merge queue's gate runs under (the core
   // cap and the background priority) even when the workspace holds its
   // repository's queue bypass mode, whose runs are otherwise ungoverned: for
-  // measuring what a selection costs the way the gate pays it.
+  // measuring what a selection costs the way the gate pays it. THE USER'S
+  // ALONE: refused (`user_only_refused`) unless `requester` is the user.
   bool governed = 8;
 }
 
@@ -104,7 +105,19 @@ message RunTestsError {
     RunTestsInvalid invalid = 5;
     // The worktree named is not one the workspace may run tests in.
     RunTestsWorktreeRefused worktree_refused = 6;
+    // An option only the user may ask for was asked for by a workspace.
+    RunTestsUserOnlyRefused user_only_refused = 7;
   }
+}
+
+// An option only the user may ask for was asked for by a workspace: a fresh
+// run (`TestRunRequest.no_reuse`) or a governed bypass run (`governed`). Both
+// measure the TESTS themselves, so they run only at the user's explicit
+// request, never as part of an agent's ordinary work.
+message RunTestsUserOnlyRefused {
+  // The options refused, as the command line names them ("-no-reuse",
+  // "-governed").
+  repeated string options = 1;
 }
 
 // The worktree named is not one the workspace may run tests in.

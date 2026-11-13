@@ -65,7 +65,8 @@ type TestRunRequest struct {
 	// Run every selected unit even when an earlier pass of its exact inputs
 	// would let it be reused: a fresh run, for measuring what the selection
 	// costs with nothing skipped. A narrower selection than whole units never
-	// reuses anyway, so this matters for suites and whole files.
+	// reuses anyway, so this matters for suites and whole files. The daemon
+	// passes it only at the user's request (agentrepl.v1.RunTestsUserOnlyRefused).
 	NoReuse       bool `protobuf:"varint,5,opt,name=no_reuse,json=noReuse,proto3" json:"no_reuse,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

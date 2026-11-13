@@ -221,6 +221,25 @@ func TestRunTestsRefuses(t *testing.T) {
 		{name: "CPU load a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{Loops: 4}, Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetCpuLoadRefused() != nil }},
+		{name: "a fresh run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			run := oneHarness()
+			run.NoReuse = true
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-no-reuse"})
+		}},
+		{name: "a governed run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), Governed: true, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-governed"})
+		}},
+		{name: "a fresh governed run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			run := oneHarness()
+			run.NoReuse = true
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Governed: true, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-no-reuse", "-governed"})
+		}},
 		{name: "a workspace the daemon does not serve", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/nowhere"}, Run: oneHarness(), Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetUnknownWorkspace() != nil }},
@@ -452,7 +471,7 @@ func TestRunTestsRunsABypassHoldersRunUngovernedAtTheBestTestPriority(t *testing
 			h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
 
 			// Act
-			runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(), Governed: tt.governed})
+			runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: userRequester(), Governed: tt.governed})
 
 			// Assert
 			if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, tt.want) {
