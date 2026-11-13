@@ -8,7 +8,6 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -259,10 +258,7 @@ func (s *server) submitQuestion(
 // asker's, so a resent submission is not delivered twice.
 func (s *server) cardQuestionSend(subject resolved, req *agentreplv1.SubmitPromptRequest, question string) workspace.CardQuestionSend {
 	return func(ctx context.Context, to wsm.Workspace) (*agentreplv1.SubmitPromptError, error) {
-		resp, err := s.SubmitPrompt(ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-			Workspace: to.Ref(), Said: feed.SaidText(question), IdempotencyKey: req.GetIdempotencyKey() + ":card-question",
-			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: subject.Record.Ref(), AsUser: true,
-		}))
+		resp, err := s.SubmitPrompt(ctx, connect.NewRequest(agentSentPrompt(to, subject.Record.Ref(), feed.SaidText(question), req.GetIdempotencyKey()+":card-question", true)))
 		if err != nil {
 			return nil, err
 		}

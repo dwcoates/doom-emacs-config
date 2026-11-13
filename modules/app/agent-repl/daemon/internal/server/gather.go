@@ -9,6 +9,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/gather"
 	"agent-repld/internal/ids"
@@ -37,10 +38,7 @@ func (s *server) GatherWorkspaces(
 	msg := req.Msg
 	caller := msg.GetCaller()
 	submit := func(ctx context.Context, target wsm.Workspace, key string) (ids.TurnID, *agentreplv1.SubmitPromptError, error) {
-		resp, err := s.SubmitPrompt(ctx, connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-			Workspace: target.Ref(), Said: msg.GetSaid(), IdempotencyKey: key,
-			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: caller, AsUser: msg.GetAsUser(),
-		}))
+		resp, err := s.SubmitPrompt(ctx, connect.NewRequest(agentSentPrompt(target, caller, msg.GetSaid(), key, msg.GetAsUser())))
 		if err != nil {
 			return "", nil, err
 		}
@@ -79,6 +77,18 @@ func (s *server) GetGatherStatus(
 		return nil, gatherFailure(err)
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// agentSentPrompt is the SubmitPrompt request a prompt SENDER's agent sends
+// TO carries: SAID under KEY, of origin PROMPT_ORIGIN_AGENT_SENT, the user's
+// own send when AS_USER. Every prompt the daemon sends on a workspace's behalf
+// (a gather's, a card question's) is built here, so each meets exactly the
+// refusals `workspace prompt` meets.
+func agentSentPrompt(to wsm.Workspace, sender *workspacev1.WorkspaceRef, said *conversationv1.UserSaid, key string, asUser bool) *agentreplv1.SubmitPromptRequest {
+	return &agentreplv1.SubmitPromptRequest{
+		Workspace: to.Ref(), Said: said, IdempotencyKey: key,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, SentBy: sender, AsUser: asUser,
+	}
 }
 
 // gatherFailure answers a failure the gather service already recorded: a
