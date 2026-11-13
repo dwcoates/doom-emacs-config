@@ -126,6 +126,10 @@ type store struct {
 	// which holds mu exclusively while it writes them, sees every one.
 	heldMu    sync.Mutex
 	heldUsage map[string]AccountUsage
+	// heldStatusChanges are the status change instants a READ-ONLY handle was
+	// asked to record, latest per workspace, written at the promotion
+	// (SetStatusChangedAt), under heldMu as heldUsage is.
+	heldStatusChanges map[WorkspaceID]time.Time
 
 	// conns accounts for every operation's use of the one connection
 	// (conn.go); now is its clock, time.Now outside a test.
@@ -539,6 +543,7 @@ func (s *store) Promote(ctx context.Context) error {
 	// STILL UNDER THE EXCLUSIVE LOCK, so a usage write that arrives now
 	// waits and lands after the held one it supersedes, never before it.
 	s.writeHeldUsageLocked(ctx)
+	s.writeHeldStatusChangesLocked(ctx)
 	return nil
 }
 
