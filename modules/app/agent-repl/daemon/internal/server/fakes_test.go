@@ -1208,8 +1208,8 @@ func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldProm
 type fakeMerge struct {
 	merge.Orchestrator
 	// decisions records every DecideMediation, which decideErr answers.
-	decisions []fakeDecision
-	decideErr error
+	decisions  []fakeDecision
+	decideErr  error
 	enqueueErr error
 	pauseErr   error
 	pauseScope *merge.RepositoryScope
