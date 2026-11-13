@@ -23,8 +23,11 @@ import (
 
 // Git is the leaf's whole surface.
 type Git interface {
-	// DefaultBranch reports the repository's default branch.
+	// DefaultBranch reports the repository's primary branch.
 	DefaultBranch(ctx context.Context, repoDir string) (string, error)
+	// RefreshPrimaryBranch re-reads the origin remote's primary branch from
+	// the remote, so DefaultBranch answers it.
+	RefreshPrimaryBranch(ctx context.Context, repoDir string) error
 	// ResolveRef resolves a ref to a full sha.
 	ResolveRef(ctx context.Context, repoDir, ref string) (string, error)
 	// BranchExists reports whether a LOCAL branch by that name exists. It is

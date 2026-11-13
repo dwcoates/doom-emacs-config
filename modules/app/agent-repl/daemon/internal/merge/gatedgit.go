@@ -121,6 +121,14 @@ func (g *gatedGit) DefaultBranch(ctx context.Context, repoDir string) (string, e
 	return g.inner.DefaultBranch(ctx, repoDir)
 }
 
+func (g *gatedGit) RefreshPrimaryBranch(ctx context.Context, repoDir string) error {
+	if err := g.enter("RefreshPrimaryBranch"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.RefreshPrimaryBranch(ctx, repoDir)
+}
+
 func (g *gatedGit) ResolveRef(ctx context.Context, repoDir, ref string) (string, error) {
 	if err := g.enter("ResolveRef"); err != nil {
 		return "", err

@@ -1562,6 +1562,9 @@ func (g *fakeGit) hold(call string) (entered, release chan struct{}) {
 	return g.holds.arm(call)
 }
 
+// RefreshPrimaryBranch refreshes nothing: the fake's primary branch is fixed.
+func (g *fakeGit) RefreshPrimaryBranch(context.Context, string) error { return nil }
+
 func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	g.record("default_branch")
 	return g.defaultBranch, nil

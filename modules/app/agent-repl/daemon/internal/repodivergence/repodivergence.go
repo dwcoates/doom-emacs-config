@@ -86,6 +86,7 @@ func (Failed) isMeasure()     {}
 
 // Git is the part of the git leaf a measurement uses.
 type Git interface {
+	RefreshPrimaryBranch(ctx context.Context, repoDir string) error
 	DefaultBranch(ctx context.Context, repoDir string) (string, error)
 	Upstream(ctx context.Context, repoDir, branch string) (gitclient.Upstream, bool, error)
 	FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error)
@@ -200,6 +201,12 @@ func (m *Measurer) measure(parent context.Context, repo wsm.Repository) (measure
 		return Failed{Reason: reason}, false
 	}
 
+	// THE PRIMARY BRANCH IS RE-READ FROM THE REMOTE first: a remote that
+	// moved it (pgngen, 2026-11-13: `master` to `staging`) left the cached
+	// one naming a branch the remote no longer has.
+	if err := m.deps.Git.RefreshPrimaryBranch(ctx, repo.Dir); err != nil {
+		return fail("reading the primary branch from the remote", err)
+	}
 	branch, err := m.deps.Git.DefaultBranch(ctx, repo.Dir)
 	if err != nil {
 		return fail("resolving the primary branch", err)
