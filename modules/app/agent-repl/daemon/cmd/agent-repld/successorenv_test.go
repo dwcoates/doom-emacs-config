@@ -9,17 +9,13 @@ import (
 	"agent-repld/internal/userenv"
 )
 
-// checkoutWithManifest is a checkout whose agent-repl requirements manifest
-// declares the hotspot setting.
+// checkoutWithManifest is an agent-repl module root (paths.Checkout) whose
+// requirements manifest declares the hotspot setting.
 func checkoutWithManifest(t *testing.T) string {
 	t.Helper()
 	checkout := t.TempDir()
-	dir := filepath.Join(checkout, "modules", "app", "agent-repl")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	body := `{"requirements": [{"id": "h", "kind": "env", "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"}]}`
-	if err := os.WriteFile(filepath.Join(dir, "requirements.json"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(checkout, "requirements.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return checkout
@@ -72,5 +68,26 @@ func TestSuccessorEnvironRecordsAnUnreadableEnvFileAtError(t *testing.T) {
 	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opSuccessorEnv})
 	if !ok || rec.Context["env_file"] != gone || rec.Context["cause"] == "" {
 		t.Fatalf("record = %+v (found %v), want the failure at ERROR naming the env file and its cause", rec, ok)
+	}
+}
+
+func TestSuccessorEnvironReadsTheManifestOfTheRealModuleRoot(t *testing.T) {
+	// Arrange: this package sits at <module root>/daemon/cmd/agent-repld, and
+	// the module root is what paths.Checkout names.
+	moduleRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(userenv.EnvFile, filepath.Join(t.TempDir(), "env"))
+	if err := os.WriteFile(os.Getenv(userenv.EnvFile), []byte(`()`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err = successorEnviron(moduleRoot, dlog.NewTestLogger())()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("successorEnviron over the real module root = %v, want the manifest read", err)
 	}
 }
