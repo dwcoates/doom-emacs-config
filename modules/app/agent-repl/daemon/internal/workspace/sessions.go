@@ -2930,8 +2930,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// "no transcript exists" is remediated differently from every
 			// other StartSession refusal.
 			// NOT RETRYABLE: the transcript will not reappear by asking again.
-			return nil, labeled(refuse(log, "OpenWorkspace", ArmUnknownSession,
-				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false),
+			return nil, labeled(unknownSessionRefusal(log, src.VendorSessionID, failure.GetDetail()),
 				false, false, failure.GetDetail())
 		}
 		if vendor := failure.GetVendorStartFailed(); vendor != nil {
@@ -2976,9 +2975,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 // AGAIN CAN HELP, and the daemon never re-derives it from `detail`; a frame
 // with neither arm is malformed and is treated as a rejection, loudly.
 func vendorStartLabel(log dlog.Logger, ws ids.WorkspaceID, vendor *shimv1.StartSessionVendorStartFailed, detail string, compaction bool) error {
-	refusal := refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
-		fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, detail), false,
-		map[string]any{"detail": detail})
+	refusal := vendorStartRefusal(log, ws, detail)
 	switch retry := vendor.GetRetry().(type) {
 	case *shimv1.StartSessionVendorStartFailed_Retryable:
 		// WHOSE FAILURE IT WAS is the shim's to say too: an unreachable
@@ -3011,6 +3008,25 @@ func vendorStartLabel(log dlog.Logger, ws ids.WorkspaceID, vendor *shimv1.StartS
 		})
 		return markCompaction(labeled(refusal, false, true, detail), compaction)
 	}
+}
+
+// vendorStartRefusal is the OpenWorkspace refusal of workspace WS's vendor
+// query that did not come up, carrying the shim's own account, DETAIL, typed:
+// the one spelling of it, whether the opening, its summarizer or the
+// summarizer's bound failed.
+func vendorStartRefusal(log dlog.Logger, ws ids.WorkspaceID, detail string) *Refusal {
+	return refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
+		fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, detail), false,
+		map[string]any{"detail": detail})
+}
+
+// unknownSessionRefusal is the OpenWorkspace refusal of a conversation,
+// VENDORSESSIONID, the shim has no transcript for, with the shim's account,
+// DETAIL: the one spelling of it, whether the start or a summary before it
+// found the transcript missing.
+func unknownSessionRefusal(log dlog.Logger, vendorSessionID, detail string) *Refusal {
+	return refuse(log, "OpenWorkspace", ArmUnknownSession,
+		fmt.Sprintf("the shim has no transcript for conversation %q: %s", vendorSessionID, detail), false)
 }
 
 // raiseColdGate publishes the gate's row and the footer's parked status, and

@@ -97,10 +97,7 @@ func (f *Fleet) summarize(ctx context.Context, log dlog.Logger, ws ids.Workspace
 				dlog.WithCause(fields, err))
 			detail := fmt.Sprintf("the summary of %q did not complete within %s (expected at most %s)",
 				fields["vendor_session_id"], f.summarizeBound, summarizeExpected)
-			refusal := refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
-				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, detail), false,
-				map[string]any{"detail": detail})
-			return nil, markCompaction(labeled(fmt.Errorf("%w: %w", refusal, err), false, true, detail), true)
+			return nil, markCompaction(labeled(fmt.Errorf("%w: %w", vendorStartRefusal(log, ws, detail), err), false, true, detail), true)
 		}
 		if errors.Is(err, shimclient.ErrStandDownOrdered) {
 			log.Info(opSummarize, "the SummarizeConversation call ended in a stand-down this daemon ordered", dlog.WithCause(fields, err))
@@ -130,8 +127,8 @@ func (f *Fleet) summarize(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return nil, vendorStartLabel(log, ws, cause.SummarizerFailed, failure.GetDetail(), true)
 	case *shimv1.SummarizeConversationFailure_UnknownSession:
 		log.Error(opSummarize, "the conversation to summarize has no transcript; the start is refused", fields)
-		return nil, markCompaction(labeled(refuse(log, "OpenWorkspace", ArmUnknownSession,
-			fmt.Sprintf("the shim has no transcript for conversation %q: %s", fields["vendor_session_id"], failure.GetDetail()), false),
+		vendorSessionID, _ := fields["vendor_session_id"].(string)
+		return nil, markCompaction(labeled(unknownSessionRefusal(log, vendorSessionID, failure.GetDetail()),
 			false, false, failure.GetDetail()), true)
 	case *shimv1.SummarizeConversationFailure_AlreadyStarted:
 		err := fmt.Errorf("summarize before the start for %q: the shim refused already_started: %s", ws, failure.GetDetail())

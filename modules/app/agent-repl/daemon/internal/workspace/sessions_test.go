@@ -4720,3 +4720,53 @@ func TestVendorStartLabel(t *testing.T) {
 		})
 	}
 }
+
+// TestStartAndSummaryRefusalsShareOneSpelling pins the two refusals a start
+// and the summary before it both answer: each is built by its one helper,
+// so the same account reads the same whichever call found it.
+func TestStartAndSummaryRefusalsShareOneSpelling(t *testing.T) {
+	tests := []struct {
+		name      string
+		build     func(dlog.Logger) *Refusal
+		wantArm   string
+		wantWords string
+	}{
+		{name: "a vendor query that did not come up", build: func(log dlog.Logger) *Refusal { return vendorStartRefusal(log, "w1", "why") },
+			wantArm: ArmVendorStartFailed, wantWords: `the vendor failed to start for workspace "w1": why`},
+		{name: "a conversation with no transcript", build: func(log dlog.Logger) *Refusal { return unknownSessionRefusal(log, "vendor-1", "why") },
+			wantArm: ArmUnknownSession, wantWords: `the shim has no transcript for conversation "vendor-1": why`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			refusal := tt.build(dlog.NewTestLogger())
+
+			// Assert.
+			if refusal.Rpc != "OpenWorkspace" || refusal.Arm != tt.wantArm || refusal.Reason != tt.wantWords || refusal.NotFound {
+				t.Fatalf("refusal = %+v, want OpenWorkspace %s %q", refusal, tt.wantArm, tt.wantWords)
+			}
+		})
+	}
+}
+
+// TestASummaryAndAStartRefuseAMissingTranscriptAlike asserts the two call
+// sites answer one refusal for one account, so neither spells its own.
+func TestASummaryAndAStartRefuseAMissingTranscriptAlike(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.client.summarizeResponse = &shimv1.SummarizeConversationResponse{Result: &shimv1.SummarizeConversationResponse_Failure{Failure: &shimv1.SummarizeConversationFailure{
+		Cause: &shimv1.SummarizeConversationFailure_UnknownSession{UnknownSession: &shimv1.StartSessionUnknownSession{}}, Detail: "no transcript"}}}
+
+	// Act.
+	_, err := f.fleet.summarizeBeforeStart(context.Background(), f.log.logger, ws, f.client, compactStart(), nil)
+
+	// Assert.
+	var got *Refusal
+	if !errors.As(err, &got) {
+		t.Fatalf("err = %v, want a Refusal", err)
+	}
+	if want := unknownSessionRefusal(dlog.NewTestLogger(), "vendor-1", "no transcript"); got.Arm != want.Arm || got.Reason != want.Reason {
+		t.Fatalf("refusal = %+v, want the shared spelling %+v", got, want)
+	}
+}
