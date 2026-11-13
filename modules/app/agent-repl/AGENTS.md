@@ -138,9 +138,10 @@ helper every test entry point goes through.
   speed: the utility clamp (`taskpolicy -c utility`) tried 2026-11-13 killed
   short units at their limits. `nice` stays as the run's rank; it demotes
   nothing on macOS (a niceness-19 thread sits at 31, the owner's own).
-- macOS also throttles the run's DISK I/O: `taskpolicy -d throttle` (owner
-  ruling 2026-10-06), so a full run's SQLite and build traffic waits behind
-  the live store's writes.
+- The disk is not demoted either (owner ruling 2026-11-13): the throttle of
+  2026-10-06 (a full run's SQLite on the SSD starved the live store) predates
+  the run's RAM disk, where tests now write, and a throttled tier made test
+  time depend on the owner's disk use.
 - Linux: `nice -n 19` (owner ruling 2026-09-23, "very low"), which the CFS
   scheduler honors (weight 15 against 1024); the run keeps every core.
   - Linux is reached only inside the e2e sandbox container.
@@ -663,14 +664,13 @@ unreachable from a live process.
     (2026-10-23), which every run now logs at release (`RAM disk use: peak`).
     A RAM disk holds at most its size in memory, and tends toward all of it.
   - ITS UNITS RUN AT THE DEFAULT I/O TIER (`taskpolicy -d default`, owner
-    ruling 2026-10-14), not the throttle tier `bin/background.sh` gives the
-    run: a throttled tier stalls every read of build caches, sources and
-    binaries from the SSD whenever the live runtime touches it (the e2e
-    prebuild 4.7s at default, 11.8s at throttle, 23.0s at utility), and the
-    starved units miss their timing bounds. The units' own state is on the
-    RAM disk, which contends with nothing of the owner's, and the live store
-    measured unaffected. A run that fell back to `/tmp` keeps the throttle
-    tier.
+    ruling 2026-10-14), as the whole run has since 2026-11-13: a throttled
+    tier stalls every read of build caches, sources and binaries from the
+    SSD whenever the live runtime touches it (the e2e prebuild 4.7s at
+    default, 11.8s at throttle, 23.0s at utility), and the starved units
+    miss their timing bounds. The units' own state is on the RAM disk, which
+    contends with nothing of the owner's, and the live store measured
+    unaffected.
   - MOUNTED NOBROWSE, which keeps Spotlight off it: mounted plainly, mds
     opened an index store on every run's volume and took part in its
     unmount (macOS 26.2); a `.metadata_never_index` did not stop it.

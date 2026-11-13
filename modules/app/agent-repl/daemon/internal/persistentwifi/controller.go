@@ -97,7 +97,7 @@ type Controller struct {
 	// failoverCause is why the failover's hotspot step last could not take; empty
 	// while it has nothing standing against it (failoverLocked).
 	failoverCause string
-	// knownCause is why the failover's known-network step (the radio cycle)
+	// knownCause is why the failover's saved-network step (the saved list)
 	// last could not take; empty while nothing stands against it.
 	knownCause string
 	// energyCause is why the energy step last failed; empty while nothing

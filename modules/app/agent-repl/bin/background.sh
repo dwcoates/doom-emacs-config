@@ -13,23 +13,23 @@
 # by testrun's host core budget (testrun/internal/cores, owner ruling
 # 2026-10-20), which ranks runs by the niceness this sets.
 # Owner rulings: tests run at background priority (2026-09-23), which on
-# macOS since 2026-11-13 means a throttled disk and the run's rank, never a
-# demoted CPU: the CPU governor moderates the tests' CPU.
+# macOS since 2026-11-13 means the run's rank alone, never a demoted CPU or
+# disk: the CPU governor moderates the tests' load.
 #
 # WHAT IT DOES, per platform. There is no silent path: every platform either
 # demotes the command or refuses to run it.
 #
-#   Darwin  `nice`, and the run's disk I/O throttled (`-d throttle`). The CPU
-#           is NOT demoted (owner ruling 2026-11-13): a test at a lower
-#           scheduler priority than the owner's work runs slower whenever
-#           that work is busy, and trips time limits measured at full speed.
-#           The CPU governor alone moderates the tests (testrun's cores: the
-#           tests average 35% of the host and never push it above 50%).
-#           `nice` demotes nothing on macOS (measured 2026-11-13 with `ps -M`:
-#           a niceness-19 thread sits at 31, the owner's own); it stays as
-#           the run's rank. The utility clamp tried 2026-11-13 killed short
-#           units at their limits, and the background clamp (`-c
-#           background`, `-b`) pins a run to the 4 efficiency cores.
+#   Darwin  `nice` alone, as the run's rank: neither the CPU nor the disk is
+#           demoted (owner rulings 2026-11-13). A test at a lower CPU or
+#           disk priority than the owner's work runs slower whenever that
+#           work is busy, and trips time limits measured at full speed; the
+#           utility CPU clamp tried that day killed short units. The CPU
+#           governor alone moderates the tests (testrun's cores: the tests
+#           average 35% of the host and never push it above 50%), and their
+#           writes land on the run's RAM disk, not the SSD the live store
+#           uses (the disk throttle of 2026-10-06 predates it). `nice`
+#           demotes nothing on macOS (measured 2026-11-13 with `ps -M`: a
+#           niceness-19 thread sits at 31, the owner's own).
 #   Linux   `nice -n 19` (owner ruling 2026-09-23, "very low"): the CFS
 #           scheduler weights a niceness-19 thread at 15 against a
 #           niceness-0 thread's 1024, so the run yields the CPU to the live
@@ -152,14 +152,8 @@ priority_exec() {
             # niceness above 0 overshoots to 20 (macOS's ceiling); the
             # increment is the distance to the target instead.
             increment=$(( target - niceness ))
-            # ON macOS, THROTTLED DISK, NEVER A DEMOTED CPU (see WHAT IT DOES
-            # above). The disk (owner ruling 2026-10-06): a full run's
-            # hundreds of SQLite files starved the live store at normal I/O
-            # priority (a 111-page checkpoint took 54 s, its writes 5-7 s).
-            # Children inherit it with the niceness.
-            if [[ $os == Darwin ]]; then
-                exec taskpolicy -d throttle nice -n "$increment" "$@"
-            fi
+            # NEITHER THE CPU NOR THE DISK IS DEMOTED (see WHAT IT DOES
+            # above): the niceness is the run's rank alone.
             exec nice -n "$increment" "$@"
             ;;
         *)
