@@ -1104,6 +1104,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freezer:        freezer,
 		Views:          viewGate,
 		Telemetry:      p.Metrics,
+		EnergyRecord:   energyRecord(p.Layout.Dir()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the persistent-wifi controller: %w", err)

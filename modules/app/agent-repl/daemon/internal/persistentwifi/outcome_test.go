@@ -16,8 +16,8 @@ func TestOutcomeArmNamesTheSetArm(t *testing.T) {
 			Outcome: &agentreplv1.UpdatePersistentWifiModeHotspot_NotOnHotspot{NotOnHotspot: &agentreplv1.UpdatePersistentWifiModeHotspotNotOnHotspot{}},
 		}), "not_on_hotspot"},
 		{"an energy mode outcome", energyModeArm(&agentreplv1.UpdatePersistentWifiModeEnergyMode{
-			Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_HighPower{HighPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeHighPower{}},
-		}), "high_power"},
+			Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_Restored{Restored: &agentreplv1.UpdatePersistentWifiModeEnergyModeRestored{PowerMode: "2"}},
+		}), "restored"},
 		{"a display outcome", displayArm(&agentreplv1.UpdatePersistentWifiModeDisplay{
 			Outcome: &agentreplv1.UpdatePersistentWifiModeDisplay_Slept{Slept: &agentreplv1.UpdatePersistentWifiModeDisplaySlept{}},
 		}), "slept"},

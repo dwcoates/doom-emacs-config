@@ -34,17 +34,13 @@ type harness struct {
 	// viewMoves are the quiet gate's transitions, as a follower heard them.
 	viewMoves []bool
 	telemetry *fakeQuietTelemetry
+	energy    *fakeEnergyStore
 }
 
 // withLid stands the lid as heard, without a read: the state an Update then
 // finds.
 func (h *harness) withLid(kind lidKind) *harness {
 	h.c.lid = lidFact{kind: kind}
-	if kind == lidClosed {
-		// A closed lid asks the power source; unless a test scripts another, the
-		// machine is on battery, where the energy mode stays low.
-		h.r.on(argPowerSource, answer{out: onBattery})
-	}
 	return h
 }
 
@@ -58,8 +54,9 @@ func newHarness(t *testing.T) *harness {
 // otherwise.
 func newHarnessFor(t *testing.T, configured string) *harness {
 	t.Helper()
+	r := newFakeRunner(t)
 	h := &harness{
-		r: newFakeRunner(t), log: dlog.NewTestLogger(), clock: newFakeClock(),
+		r: r, log: dlog.NewTestLogger(), clock: newFakeClock(), energy: &fakeEnergyStore{r: r},
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
 		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(),
 		freezer: &fakeFreezer{}, views: viewquiet.New(nil), telemetry: &fakeQuietTelemetry{},
@@ -69,7 +66,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	c, err := New(Deps{
 		Config: Config{Tools: tools, Hotspot: configured},
 		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LegacyLidDims: h.dims,
-		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry,
+		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
 		Exists: func(p string) bool { return h.exists[p] },
 		OnChange: func(s *agentreplv1.PersistentWifiState) {
@@ -121,7 +118,7 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
 		return Deps{Config: Config{Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
 			Lid: newFakeLidWatcher(), LegacyLidDims: &fakeLidDims{},
-			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil),
+			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil), EnergyRecord: &fakeEnergyStore{},
 			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}
 	}
 	cases := []struct {
@@ -137,6 +134,7 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no view gate", break_: func(d *Deps) { d.Views = nil }},
 		{name: "no network change signal", break_: func(d *Deps) { d.NetworkChanged = nil }},
 		{name: "no power change signal", break_: func(d *Deps) { d.PowerChanges = nil }},
+		{name: "no store of the recorded energy mode", break_: func(d *Deps) { d.EnergyRecord = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -388,7 +386,7 @@ func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndSleepsTheDisplay
 	// Arrange.
 	h := newHarness(t).withLid(lidClosed)
 	h.r.on(argDisplaySleep, answer{})
-	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
+	h.r.on(argPmsetRead, answer{out: pmsetIn(false, energyModeHighPower)}, answer{out: pmsetIn(true, energyModeLowPower)})
 	h.r.on(argPorts, answer{out: ports})
 	h.r.on(argSummary, answer{out: summary(true, "Home")}, answer{out: summary(true, hotspot)})
 	h.r.on(argJoin, answer{})
@@ -410,46 +408,66 @@ func TestUpdateOnWithTheLidClosedJoinsTheHotspotDisablesSleepAndSleepsTheDisplay
 	}
 	calls := h.r.ran()
 	join, power, energy, dim := slices.Index(calls, argJoin), slices.Index(calls, argPower("disablesleep", "1")),
-		slices.Index(calls, argEnergy(true)), slices.Index(calls, argDisplaySleep)
+		slices.Index(calls, argLowPower), slices.Index(calls, argDisplaySleep)
 	if !(join < power && power < energy && energy < dim) {
 		t.Fatalf("step order = %v, want hotspot, power, energy mode, display", calls)
 	}
 }
 
-func TestUpdateSetsTheEnergyModeForTheDirection(t *testing.T) {
+func TestUpdateMovesTheEnergyModeOnlyWithTheQuietState(t *testing.T) {
 	cases := []struct {
-		name   string
-		action string
-		pmset  string
-		want   func(*agentreplv1.UpdatePersistentWifiModeEnergyMode) bool
-		arm    string
+		name     string
+		action   string
+		pmset    string
+		lid      lidKind
+		quiet    bool // the quiet state stands, High Power Mode recorded
+		arm      string
+		wantArgv string // the one powermode write, empty for none
+		wantKept string
 	}{
-		{name: "on is low power", action: "on", pmset: pmsetOff, arm: "low_power",
-			want: func(e *agentreplv1.UpdatePersistentWifiModeEnergyMode) bool { return e.GetLowPower() != nil }},
-		{name: "off is high power", action: "off", pmset: pmsetOn, arm: "high_power",
-			want: func(e *agentreplv1.UpdatePersistentWifiModeEnergyMode) bool { return e.GetHighPower() != nil }},
+		{name: "on with the lid open leaves the user's mode", action: "on", pmset: pmsetIn(false, energyModeHighPower),
+			lid: lidOpen, arm: "unchanged"},
+		{name: "on with the lid closed records and lowers", action: "on", pmset: pmsetIn(false, energyModeHighPower),
+			lid: lidClosed, arm: "low_power", wantArgv: argLowPower, wantKept: energyModeHighPower},
+		{name: "off with the quiet state standing restores", action: "off", pmset: pmsetIn(true, energyModeLowPower),
+			lid: lidClosed, quiet: true, arm: "restored", wantArgv: argPowerMode(energyModeHighPower)},
+		{name: "off with no quiet state leaves the user's mode", action: "off", pmset: pmsetIn(true, energyModeHighPower),
+			lid: lidOpen, arm: "unchanged"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			on := tc.action == "on"
-			h := newHarness(t).standing(tc.pmset, summary(true, "Home"))
+			h := newHarness(t).standing(tc.pmset, summary(true, "Home")).withLid(tc.lid)
 			h.r.on(argJoin, answer{})
+			h.r.on(argDisplaySleep, answer{})
+			h.r.on(argDisplayWake, answer{})
+			h.r.on(argPowerMode(energyModeHighPower), answer{})
 			value := "0"
-			if on {
+			if tc.action == "on" {
 				value = "1"
 			}
 			scriptPower(h.r, value)
+			if tc.quiet {
+				h.c.quiet = true
+				h.energy.rec = &EnergyRecord{Mode: energyModeHighPower}
+			}
 
 			// Act.
 			resp := h.c.Update(context.Background(), update(tc.action))
 
 			// Assert.
-			if resp.GetSuccess() == nil || !tc.want(resp.GetSuccess().GetEnergyMode()) {
-				t.Fatalf("Update() = %v, want energy mode %s", resp, tc.arm)
+			if got := energyModeArm(resp.GetSuccess().GetEnergyMode()); got != tc.arm {
+				t.Fatalf("energy mode = %s, want %s", got, tc.arm)
 			}
-			if h.r.count(argEnergy(on)) != 1 {
-				t.Fatalf("calls = %v, want one %q", h.r.ran(), argEnergy(on))
+			if r := resp.GetSuccess().GetEnergyMode().GetRestored(); tc.arm == "restored" && r.GetPowerMode() != energyModeHighPower {
+				t.Fatalf("restored = %v, want High Power Mode", r)
+			}
+			writes := powerModeWrites(h)
+			if tc.wantArgv == "" && writes != 0 || tc.wantArgv != "" && (writes != 1 || h.r.count(tc.wantArgv) != 1) {
+				t.Fatalf("calls = %v, want the one powermode write %q", h.r.ran(), tc.wantArgv)
+			}
+			if h.energy.kept() != tc.wantKept {
+				t.Fatalf("record = %q, want %q", h.energy.kept(), tc.wantKept)
 			}
 			infos := h.records("info", opUpdate)
 			if len(infos) != 1 || infos[0].Context["energy_mode_outcome"] != tc.arm {
@@ -464,10 +482,11 @@ func TestUpdateSetsTheEnergyModeForTheDirection(t *testing.T) {
 
 func TestUpdateReportsAFailedEnergyModeWithoutFailingTheRequest(t *testing.T) {
 	// Arrange.
-	h := newHarness(t).standing(pmsetOff, summary(true, hotspot))
-	h.r.on(argPmsetRead, answer{out: pmsetOff}, answer{out: pmsetOn})
+	h := newHarness(t).standing(pmsetOff, summary(true, hotspot)).withLid(lidClosed)
+	h.r.on(argPmsetRead, answer{out: pmsetIn(false, energyModeHighPower)}, answer{out: pmsetIn(true, energyModeHighPower)})
+	h.r.on(argDisplaySleep, answer{})
 	scriptPower(h.r, "1")
-	h.r.on(argEnergy(true), answer{out: "sudo: a password is required", code: 1})
+	h.r.on(argLowPower, answer{out: "sudo: a password is required", code: 1})
 
 	// Act.
 	resp := h.c.Update(context.Background(), update("on"))
@@ -481,12 +500,16 @@ func TestUpdateReportsAFailedEnergyModeWithoutFailingTheRequest(t *testing.T) {
 	if failed == nil || !strings.HasPrefix(failed.GetDetail(), "pmset -a powermode 1: ") {
 		t.Fatalf("energy mode = %v, want failed naming the invocation", s.GetEnergyMode())
 	}
-	if s.GetDisplay().GetUnchanged() == nil || modeArm(s.GetState()) != "on" {
-		t.Fatalf("display = %v, mode = %s, want the display step still run (unchanged) and on", s.GetDisplay(), modeArm(s.GetState()))
+	if s.GetDisplay().GetSlept() == nil || modeArm(s.GetState()) != "on" {
+		t.Fatalf("display = %v, mode = %s, want the display step still run (slept) and on", s.GetDisplay(), modeArm(s.GetState()))
 	}
 	warns := h.records("warn", opUpdate)
 	if len(warns) != 1 || warns[0].Context["cause"] != failed.GetDetail() || warns[0].Context["on"] != true {
 		t.Fatalf("update WARN records = %+v, want one carrying the energy mode cause", warns)
+	}
+	errs := h.records(dlog.LevelError, opEnergy)
+	if len(errs) != 1 || errs[0].Context["trigger"] != "update" {
+		t.Fatalf("energy ERROR records = %+v, want the refusal once", errs)
 	}
 }
 
@@ -697,7 +720,7 @@ func TestUpdateAnswersARefusedPowerStepAsAnErrorAndSkipsTheDisplay(t *testing.T)
 	if refused == nil {
 		t.Fatalf("Update() = %v, want power_settings_refused", resp)
 	}
-	if h.r.count(argDisplaySleep)+h.r.count(argEnergy(true))+h.r.count(argPower("networkoversleep", "1")) != 0 {
+	if h.r.count(argDisplaySleep)+h.r.count(argLowPower)+h.r.count(argPower("networkoversleep", "1")) != 0 {
 		t.Fatalf("a step ran after the refusal: %v", h.r.ran())
 	}
 	errs := h.records("error", opUpdate)

@@ -708,7 +708,6 @@ func TestTickRecordsWhatTheMachineStoodAtWhenWifiWasLost(t *testing.T) {
 			h.r.on(argRadioPower, tc.radio)
 			h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
 			h.c.lid, h.c.quiet, h.c.displayAsleep = lidFact{kind: lidClosed}, true, true
-			h.r.on(argPowerSource, answer{out: onBattery})
 
 			// Act.
 			h.c.tick(context.Background())

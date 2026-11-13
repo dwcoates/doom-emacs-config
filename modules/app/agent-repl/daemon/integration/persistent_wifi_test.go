@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -10,7 +11,22 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/persistentwifi"
 )
+
+// recordedEnergyMode answers the energy mode d's quiet state recorded, empty
+// when none is kept.
+func recordedEnergyMode(t *testing.T, d *harness.Daemon) string {
+	t.Helper()
+	rec, ok, err := persistentwifi.EnergyFileStore{Path: filepath.Join(d.StateDir, "persistent-wifi", persistentwifi.EnergyRecordFile)}.Load()
+	if err != nil {
+		t.Fatalf("read the recorded energy mode: %v", err)
+	}
+	if !ok {
+		return ""
+	}
+	return rec.Mode
+}
 
 // ==========================================================================
 // Persistent wifi mode. The daemon reads the machine's standing before it
@@ -50,8 +66,11 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	}
 	success := resp.Msg.GetSuccess()
 	if success.GetState().GetOn() == nil || success.GetHotspot().GetJoined().GetNetworkName() != harness.FakeHotspot ||
-		success.GetEnergyMode().GetLowPower() == nil || success.GetDisplay().GetUnchanged() == nil {
-		t.Fatalf("response = %v, want on, the hotspot joined, low power and the display left alone with the lid open", resp.Msg)
+		success.GetEnergyMode().GetUnchanged() == nil || success.GetDisplay().GetUnchanged() == nil {
+		t.Fatalf("response = %v, want on, the hotspot joined, and the energy mode and the display left alone with the lid open", resp.Msg)
+	}
+	if got := harness.FakeEnergyModeIn(t, d.HostToolsDir); got != harness.FakeEnergyMode {
+		t.Fatalf("energy mode = %s, want the user's own %s with the lid open", got, harness.FakeEnergyMode)
 	}
 	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
 		t.Fatalf("brightness = %s, want the user's own %s with the lid open", got, harness.FakeBrightness)
@@ -97,6 +116,9 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 	if got := harness.FakeBrightnessLevel(t, d.HostToolsDir); got != harness.FakeBrightness {
 		t.Fatalf("brightness with the lid closed = %s, want the user's own %s", got, harness.FakeBrightness)
 	}
+	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != "1" || kept != harness.FakeEnergyMode {
+		t.Fatalf("energy mode with the lid closed = %s, recorded %q, want Low Power Mode with the user's %s recorded", got, kept, harness.FakeEnergyMode)
+	}
 
 	// Act: open it.
 	d.Lid.Open()
@@ -110,6 +132,9 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 	})
 	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
 		t.Fatalf("display after opening = %s, want awake", got)
+	}
+	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
+		t.Fatalf("energy mode after opening = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
 	}
 }
 
@@ -129,8 +154,8 @@ func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	on, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
 		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
 	}))
-	if err != nil || on.Msg.GetSuccess().GetDisplay().GetSlept() == nil {
-		t.Fatalf("UpdatePersistentWifiMode(on) = %v, %v, want the display slept for the closed lid", on, err)
+	if err != nil || on.Msg.GetSuccess().GetDisplay().GetSlept() == nil || on.Msg.GetSuccess().GetEnergyMode().GetLowPower() == nil {
+		t.Fatalf("UpdatePersistentWifiMode(on) = %v, %v, want the display slept and Low Power Mode set for the closed lid", on, err)
 	}
 
 	// Act.
@@ -141,8 +166,12 @@ func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	}))
 
 	// Assert.
-	if err != nil || off.Msg.GetSuccess().GetDisplay().GetWoke() == nil || off.Msg.GetSuccess().GetState().GetQuiet() != nil {
-		t.Fatalf("UpdatePersistentWifiMode(off) = %v, %v, want the display woken and no quiet state", off, err)
+	if err != nil || off.Msg.GetSuccess().GetDisplay().GetWoke() == nil || off.Msg.GetSuccess().GetState().GetQuiet() != nil ||
+		off.Msg.GetSuccess().GetEnergyMode().GetRestored().GetPowerMode() != harness.FakeEnergyMode {
+		t.Fatalf("UpdatePersistentWifiMode(off) = %v, %v, want the display woken, no quiet state and the user's energy mode restored", off, err)
+	}
+	if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
+		t.Fatalf("energy mode = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
 	}
 	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
 		t.Fatalf("display = %s, want awake", got)

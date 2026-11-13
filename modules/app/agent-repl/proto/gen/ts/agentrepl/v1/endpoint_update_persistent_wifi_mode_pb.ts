@@ -9,9 +9,11 @@
 //   2. the power settings — sleep disabled (on) or enabled (off), together
 //      with network-over-sleep and wake-on-network — the one step that
 //      decides whether the change happened at all;
-//   3. the energy mode — low power (on) or high power (off) — once the
-//      machine is known to stay awake, so a lid-closed machine draws as
-//      little as it can and an open one runs at full speed again;
+//   3. the energy mode — moved only where the change moves the lid-closed
+//      quiet state: put in Low Power Mode when turning on with the lid closed
+//      (the mode in use recorded first), restored to that recorded mode when
+//      turning off leaves the quiet state, and left alone otherwise, so the
+//      user's own choice with the lid open is never overridden;
 //   4. the display — LAST, and only where the change moves it: put to sleep
 //      when turning on with the lid closed, woken when turning off with the
 //      display asleep for the quiet state (UpdatePersistentWifiModeDisplay).
@@ -34,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_persistent_wifi_mode.proto.
  */
 export const file_agentrepl_v1_endpoint_update_persistent_wifi_mode: GenFile = /*@__PURE__*/
-  fileDesc("CjdhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3BlcnNpc3RlbnRfd2lmaV9tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEi3QEKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVJlcXVlc3QSNgoCb24YASABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT25IABI4CgNvZmYYAiABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAASPgoGdG9nZ2xlGAMgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVRvZ2dsZUgAQggKBmFjdGlvbiIcChpVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiIAoeVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlVG9nZ2xlIqwBCiBVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVSZXNwb25zZRJACgdzdWNjZXNzGAEgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVN1Y2Nlc3NIABI8CgVlcnJvchgCIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFcnJvckgAQggKBnJlc3VsdCKaAgofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlU3VjY2VzcxIwCgVzdGF0ZRgBIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVN0YXRlEj4KB2hvdHNwb3QYAiABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBI+CgdkaXNwbGF5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoLZW5lcmd5X21vZGUYBCABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZSLhBAofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBJFCgZqb2luZWQYASABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEpvaW5lZEgAElQKDmFscmVhZHlfam9pbmVkGAIgASgLMjouYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3RBbHJlYWR5Sm9pbmVkSAASQQoEbGVmdBgDIAEoCzIxLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90TGVmdEgAElMKDm5vdF9vbl9ob3RzcG90GAQgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3RIABJcChJuZXR3b3JrX3VucmVhZGFibGUYBSABKAsyPi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlSAASWQoRbm9fd2lmaV9pbnRlcmZhY2UYBiABKAsyPC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5vV2lmaUludGVyZmFjZUgAEkUKBmZhaWxlZBgHIAEoCzIzLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90RmFpbGVkSABCCQoHb3V0Y29tZSI9CiVVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90Sm9pbmVkEhQKDG5ldHdvcmtfbmFtZRgBIAEoCSJECixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90QWxyZWFkeUpvaW5lZBIUCgxuZXR3b3JrX25hbWUYASABKAkiOwojVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdExlZnQSFAoMbmV0d29ya19uYW1lGAEgASgJIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3QiMgowVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlIjAKLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb1dpZmlJbnRlcmZhY2UiTQolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEZhaWxlZBIUCgxuZXR3b3JrX25hbWUYASABKAkSDgoGZGV0YWlsGAIgASgJIpkCCiJVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlEk0KCWxvd19wb3dlchgBIAEoCzI4LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlTG93UG93ZXJIABJPCgpoaWdoX3Bvd2VyGAIgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXJIABJICgZmYWlsZWQYAyABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZEgAQgkKB291dGNvbWUiLAoqVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUxvd1Bvd2VyIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVIaWdoUG93ZXIiOgooVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZBIOCgZkZXRhaWwYASABKAki+gIKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoGZmFpbGVkGAQgASgLMjMuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlGYWlsZWRIABJLCgl1bmNoYW5nZWQYBSABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVVuY2hhbmdlZEgAEkMKBXNsZXB0GAYgASgLMjIuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlTbGVwdEgAEkEKBHdva2UYByABKAsyMS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVdva2VIAEIJCgdvdXRjb21lSgQIARACSgQIAhADSgQIAxAEUgZkaW1tZWRSCHJlc3RvcmVkUgx0b29sX21pc3NpbmciJgokVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVNsZXB0IiUKI1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlXb2tlIioKKFVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXlVbmNoYW5nZWQiNwolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheUZhaWxlZBIOCgZkZXRhaWwYASABKAki1wEKHVVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVycm9yElwKFnBvd2VyX3NldHRpbmdzX3JlZnVzZWQYASABKAsyOi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlUG93ZXJTZXR0aW5nc1JlZnVzZWRIABJPCg9tb2RlX3VucmVhZGFibGUYAiABKAsyNC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGVIAEIHCgVjYXVzZSI+CixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVQb3dlclNldHRpbmdzUmVmdXNlZBIOCgZkZXRhaWwYASABKAkiOAomVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlTW9kZVVucmVhZGFibGUSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_persistent_wifi]);
+  fileDesc("CjdhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3BlcnNpc3RlbnRfd2lmaV9tb2RlLnByb3RvEgxhZ2VudHJlcGwudjEi3QEKH1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVJlcXVlc3QSNgoCb24YASABKAsyKC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT25IABI4CgNvZmYYAiABKAsyKS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlT2ZmSAASPgoGdG9nZ2xlGAMgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVRvZ2dsZUgAQggKBmFjdGlvbiIcChpVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPbiIdChtVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVPZmYiIAoeVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlVG9nZ2xlIqwBCiBVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVSZXNwb25zZRJACgdzdWNjZXNzGAEgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVN1Y2Nlc3NIABI8CgVlcnJvchgCIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFcnJvckgAQggKBnJlc3VsdCKaAgofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlU3VjY2VzcxIwCgVzdGF0ZRgBIAEoCzIhLmFnZW50cmVwbC52MS5QZXJzaXN0ZW50V2lmaVN0YXRlEj4KB2hvdHNwb3QYAiABKAsyLS5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBI+CgdkaXNwbGF5GAMgASgLMi0uYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZURpc3BsYXkSRQoLZW5lcmd5X21vZGUYBCABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZSLhBAofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdBJFCgZqb2luZWQYASABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEpvaW5lZEgAElQKDmFscmVhZHlfam9pbmVkGAIgASgLMjouYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3RBbHJlYWR5Sm9pbmVkSAASQQoEbGVmdBgDIAEoCzIxLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90TGVmdEgAElMKDm5vdF9vbl9ob3RzcG90GAQgASgLMjkuYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3RIABJcChJuZXR3b3JrX3VucmVhZGFibGUYBSABKAsyPi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlSAASWQoRbm9fd2lmaV9pbnRlcmZhY2UYBiABKAsyPC5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5vV2lmaUludGVyZmFjZUgAEkUKBmZhaWxlZBgHIAEoCzIzLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90RmFpbGVkSABCCQoHb3V0Y29tZSI9CiVVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90Sm9pbmVkEhQKDG5ldHdvcmtfbmFtZRgBIAEoCSJECixVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVIb3RzcG90QWxyZWFkeUpvaW5lZBIUCgxuZXR3b3JrX25hbWUYASABKAkiOwojVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdExlZnQSFAoMbmV0d29ya19uYW1lGAEgASgJIi0KK1VwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb3RPbkhvdHNwb3QiMgowVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdE5ldHdvcmtVbnJlYWRhYmxlIjAKLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUhvdHNwb3ROb1dpZmlJbnRlcmZhY2UiTQolVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlSG90c3BvdEZhaWxlZBIUCgxuZXR3b3JrX25hbWUYASABKAkSDgoGZGV0YWlsGAIgASgJIvgCCiJVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlEk0KCWxvd19wb3dlchgBIAEoCzI4LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlTG93UG93ZXJIABJICgZmYWlsZWQYAyABKAsyNi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZUZhaWxlZEgAEkwKCHJlc3RvcmVkGAQgASgLMjguYWdlbnRyZXBsLnYxLlVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZUVuZXJneU1vZGVSZXN0b3JlZEgAEk4KCXVuY2hhbmdlZBgFIAEoCzI5LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlVW5jaGFuZ2VkSABCCQoHb3V0Y29tZUoECAIQA1IKaGlnaF9wb3dlciIsCipVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlTG93UG93ZXIiQAoqVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZVJlc3RvcmVkEhIKCnBvd2VyX21vZGUYASABKAkiLQorVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRW5lcmd5TW9kZVVuY2hhbmdlZCI6CihVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVFbmVyZ3lNb2RlRmFpbGVkEg4KBmRldGFpbBgBIAEoCSL6AgofVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheRJFCgZmYWlsZWQYBCABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheUZhaWxlZEgAEksKCXVuY2hhbmdlZBgFIAEoCzI2LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5VW5jaGFuZ2VkSAASQwoFc2xlcHQYBiABKAsyMi5hZ2VudHJlcGwudjEuVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVNsZXB0SAASQQoEd29rZRgHIAEoCzIxLmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5V29rZUgAQgkKB291dGNvbWVKBAgBEAJKBAgCEANKBAgDEARSBmRpbW1lZFIIcmVzdG9yZWRSDHRvb2xfbWlzc2luZyImCiRVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5U2xlcHQiJQojVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVdva2UiKgooVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRGlzcGxheVVuY2hhbmdlZCI3CiVVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVEaXNwbGF5RmFpbGVkEg4KBmRldGFpbBgBIAEoCSLXAQodVXBkYXRlUGVyc2lzdGVudFdpZmlNb2RlRXJyb3ISXAoWcG93ZXJfc2V0dGluZ3NfcmVmdXNlZBgBIAEoCzI6LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVQb3dlclNldHRpbmdzUmVmdXNlZEgAEk8KD21vZGVfdW5yZWFkYWJsZRgCIAEoCzI0LmFnZW50cmVwbC52MS5VcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVNb2RlVW5yZWFkYWJsZUgAQgcKBWNhdXNlIj4KLFVwZGF0ZVBlcnNpc3RlbnRXaWZpTW9kZVBvd2VyU2V0dGluZ3NSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSI4CiZVcGRhdGVQZXJzaXN0ZW50V2lmaU1vZGVNb2RlVW5yZWFkYWJsZRIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_persistent_wifi]);
 
 /**
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeRequest
@@ -413,9 +415,18 @@ export const UpdatePersistentWifiModeHotspotFailedSchema: GenMessage<UpdatePersi
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 13);
 
 /**
- * The energy mode step's outcome: macOS's Low Power Mode and High Power Mode
- * (`pmset -a powermode 1` and `2`), set for battery and power adapter alike.
- * THE ARM IS THE OUTCOME, and none of these is a failure of the request.
+ * The energy mode step's outcome: macOS's energy mode (`pmset -a powermode`:
+ * 1 Low Power Mode, 2 High Power Mode, 0 Automatic), set for battery and
+ * power adapter alike. THE ARM IS THE OUTCOME, and none of these is a failure
+ * of the request.
+ *
+ * THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE, NOT THE SWITCH (owner
+ * ruling, 2026-11-13). Entering the quiet state records the energy mode in
+ * use and puts the machine in Low Power Mode; leaving it restores the
+ * recorded mode. So the step acts only where the change itself moves the
+ * quiet state: turning on with the lid closed lowers, turning off while the
+ * quiet state stands restores, and every other change leaves the energy mode
+ * as it is.
  *
  * @generated from message agentrepl.v1.UpdatePersistentWifiModeEnergyMode
  */
@@ -425,7 +436,8 @@ export type UpdatePersistentWifiModeEnergyMode = Message<"agentrepl.v1.UpdatePer
    */
   outcome: {
     /**
-     * Turning on: the machine was put in Low Power Mode.
+     * Turning on with the lid closed: the energy mode in use was recorded
+     * and the machine was put in Low Power Mode.
      *
      * @generated from field: agentrepl.v1.UpdatePersistentWifiModeEnergyModeLowPower low_power = 1;
      */
@@ -433,21 +445,33 @@ export type UpdatePersistentWifiModeEnergyMode = Message<"agentrepl.v1.UpdatePer
     case: "lowPower";
   } | {
     /**
-     * Turning off: the machine was put in High Power Mode.
-     *
-     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPower high_power = 2;
-     */
-    value: UpdatePersistentWifiModeEnergyModeHighPower;
-    case: "highPower";
-  } | {
-    /**
-     * The energy mode change was refused or failed; the machine's energy
-     * mode is as it was.
+     * The energy mode change was refused or failed, or its record could not
+     * be kept or read; the machine's energy mode is as it was, and the
+     * daemon tries again on its next beat.
      *
      * @generated from field: agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed failed = 3;
      */
     value: UpdatePersistentWifiModeEnergyModeFailed;
     case: "failed";
+  } | {
+    /**
+     * Turning off left the quiet state: the energy mode recorded on entering
+     * it was restored.
+     *
+     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored restored = 4;
+     */
+    value: UpdatePersistentWifiModeEnergyModeRestored;
+    case: "restored";
+  } | {
+    /**
+     * Nothing to move: turning on with the lid open (or not heard), turning
+     * off with no quiet state standing, the machine already in the mode due,
+     * a machine that names no energy mode, or no mode recorded to restore.
+     *
+     * @generated from field: agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged unchanged = 5;
+     */
+    value: UpdatePersistentWifiModeEnergyModeUnchanged;
+    case: "unchanged";
   } | { case: undefined; value?: undefined };
 };
 
@@ -474,19 +498,41 @@ export const UpdatePersistentWifiModeEnergyModeLowPowerSchema: GenMessage<Update
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 15);
 
 /**
- * High Power Mode.
+ * The recorded energy mode was restored.
  *
- * @generated from message agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPower
+ * @generated from message agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored
  */
-export type UpdatePersistentWifiModeEnergyModeHighPower = Message<"agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPower"> & {
+export type UpdatePersistentWifiModeEnergyModeRestored = Message<"agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored"> & {
+  /**
+   * The `pmset` powermode value restored, verbatim: "1" Low Power Mode, "2"
+   * High Power Mode, "0" Automatic.
+   *
+   * @generated from field: string power_mode = 1;
+   */
+  powerMode: string;
 };
 
 /**
- * Describes the message agentrepl.v1.UpdatePersistentWifiModeEnergyModeHighPower.
- * Use `create(UpdatePersistentWifiModeEnergyModeHighPowerSchema)` to create a new message.
+ * Describes the message agentrepl.v1.UpdatePersistentWifiModeEnergyModeRestored.
+ * Use `create(UpdatePersistentWifiModeEnergyModeRestoredSchema)` to create a new message.
  */
-export const UpdatePersistentWifiModeEnergyModeHighPowerSchema: GenMessage<UpdatePersistentWifiModeEnergyModeHighPower> = /*@__PURE__*/
+export const UpdatePersistentWifiModeEnergyModeRestoredSchema: GenMessage<UpdatePersistentWifiModeEnergyModeRestored> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 16);
+
+/**
+ * The change left the energy mode as it was.
+ *
+ * @generated from message agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged
+ */
+export type UpdatePersistentWifiModeEnergyModeUnchanged = Message<"agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdatePersistentWifiModeEnergyModeUnchanged.
+ * Use `create(UpdatePersistentWifiModeEnergyModeUnchangedSchema)` to create a new message.
+ */
+export const UpdatePersistentWifiModeEnergyModeUnchangedSchema: GenMessage<UpdatePersistentWifiModeEnergyModeUnchanged> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 17);
 
 /**
  * The energy mode change failed.
@@ -495,7 +541,7 @@ export const UpdatePersistentWifiModeEnergyModeHighPowerSchema: GenMessage<Updat
  */
 export type UpdatePersistentWifiModeEnergyModeFailed = Message<"agentrepl.v1.UpdatePersistentWifiModeEnergyModeFailed"> & {
   /**
-   * The refusal or failure, verbatim from sudo or pmset.
+   * The refusal or failure, verbatim from sudo, pmset or the record's file.
    *
    * @generated from field: string detail = 1;
    */
@@ -507,7 +553,7 @@ export type UpdatePersistentWifiModeEnergyModeFailed = Message<"agentrepl.v1.Upd
  * Use `create(UpdatePersistentWifiModeEnergyModeFailedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeEnergyModeFailedSchema: GenMessage<UpdatePersistentWifiModeEnergyModeFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 17);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 18);
 
 /**
  * The display step's outcome. THE ARM IS THE OUTCOME, and none of these is a
@@ -568,7 +614,7 @@ export type UpdatePersistentWifiModeDisplay = Message<"agentrepl.v1.UpdatePersis
  * Use `create(UpdatePersistentWifiModeDisplaySchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplaySchema: GenMessage<UpdatePersistentWifiModeDisplay> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 18);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 19);
 
 /**
  * The display was put to sleep for the closed lid.
@@ -583,7 +629,7 @@ export type UpdatePersistentWifiModeDisplaySlept = Message<"agentrepl.v1.UpdateP
  * Use `create(UpdatePersistentWifiModeDisplaySleptSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplaySleptSchema: GenMessage<UpdatePersistentWifiModeDisplaySlept> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 19);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 20);
 
 /**
  * The display was woken from the quiet state's sleep, at the brightness it had.
@@ -598,7 +644,7 @@ export type UpdatePersistentWifiModeDisplayWoke = Message<"agentrepl.v1.UpdatePe
  * Use `create(UpdatePersistentWifiModeDisplayWokeSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplayWokeSchema: GenMessage<UpdatePersistentWifiModeDisplayWoke> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 20);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 21);
 
 /**
  * The change left the display as it was.
@@ -613,7 +659,7 @@ export type UpdatePersistentWifiModeDisplayUnchanged = Message<"agentrepl.v1.Upd
  * Use `create(UpdatePersistentWifiModeDisplayUnchangedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplayUnchangedSchema: GenMessage<UpdatePersistentWifiModeDisplayUnchanged> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 21);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 22);
 
 /**
  * The display tool failed.
@@ -634,7 +680,7 @@ export type UpdatePersistentWifiModeDisplayFailed = Message<"agentrepl.v1.Update
  * Use `create(UpdatePersistentWifiModeDisplayFailedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeDisplayFailedSchema: GenMessage<UpdatePersistentWifiModeDisplayFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 22);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 23);
 
 /**
  * The power step did not take effect, so the mode is as it was. The hotspot
@@ -673,7 +719,7 @@ export type UpdatePersistentWifiModeError = Message<"agentrepl.v1.UpdatePersiste
  * Use `create(UpdatePersistentWifiModeErrorSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeErrorSchema: GenMessage<UpdatePersistentWifiModeError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 23);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 24);
 
 /**
  * The power settings change was refused.
@@ -694,7 +740,7 @@ export type UpdatePersistentWifiModePowerSettingsRefused = Message<"agentrepl.v1
  * Use `create(UpdatePersistentWifiModePowerSettingsRefusedSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModePowerSettingsRefusedSchema: GenMessage<UpdatePersistentWifiModePowerSettingsRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 24);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 25);
 
 /**
  * The current mode could not be read.
@@ -715,5 +761,5 @@ export type UpdatePersistentWifiModeModeUnreadable = Message<"agentrepl.v1.Updat
  * Use `create(UpdatePersistentWifiModeModeUnreadableSchema)` to create a new message.
  */
 export const UpdatePersistentWifiModeModeUnreadableSchema: GenMessage<UpdatePersistentWifiModeModeUnreadable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 25);
+  messageDesc(file_agentrepl_v1_endpoint_update_persistent_wifi_mode, 26);
 

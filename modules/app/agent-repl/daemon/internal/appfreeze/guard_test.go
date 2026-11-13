@@ -17,11 +17,14 @@ func TestRunGuard(t *testing.T) {
 		return &memStore{rec: &Record{Apps: []RecordedApp{{Name: "Slack", PIDs: []int{200, 201}}}}}
 	}
 	tests := []struct {
-		name       string
-		goneErr    error
-		owned      bool
-		ownErr     error
-		store      *memStore
+		name    string
+		goneErr error
+		owned   bool
+		ownErr  error
+		store   *memStore
+		// restore names an AlsoRestore, failing with restoreErr.
+		restore    bool
+		restoreErr error
 		wantEvents []string
 		wantErr    bool
 		wantErrors int
@@ -41,6 +44,16 @@ func TestRunGuard(t *testing.T) {
 		{name: "a set that cannot be cleared is recorded", owned: true,
 			store:      func() *memStore { m := kept(); m.clearErr = errors.New("locked"); return m }(),
 			wantEvents: []string{"own", "cont:200", "cont:201", "clear-failed", "release"}, wantErr: true, wantErrors: 1},
+		{name: "the rest of the quiet state is restored after the hold is released", owned: true, store: kept(), restore: true,
+			wantEvents: []string{"own", "cont:200", "cont:201", "clear", "release", "restore"}},
+		{name: "the rest is restored though nothing was frozen", owned: true, store: &memStore{}, restore: true,
+			wantEvents: []string{"own", "release", "restore"}},
+		{name: "the rest is restored though the thaw failed", owned: true, store: &memStore{loadErr: errors.New("corrupt")}, restore: true,
+			wantEvents: []string{"own", "release", "restore"}, wantErr: true, wantErrors: 1},
+		{name: "a failed restore is answered", owned: true, store: &memStore{}, restore: true, restoreErr: errors.New("refused"),
+			wantEvents: []string{"own", "release", "restore"}, wantErr: true},
+		{name: "a living daemon's quiet state is not restored", owned: false, store: kept(), restore: true,
+			wantEvents: []string{"own"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -48,6 +61,13 @@ func TestRunGuard(t *testing.T) {
 			var events []string
 			tt.store.events = &events
 			log := dlog.NewTestLogger()
+			var also func() error
+			if tt.restore {
+				also = func() error {
+					events = append(events, "restore")
+					return tt.restoreErr
+				}
+			}
 
 			// Act
 			err := RunGuard(GuardDeps{
@@ -59,9 +79,10 @@ func TestRunGuard(t *testing.T) {
 					}
 					return func() { events = append(events, "release") }, true, nil
 				},
-				Store:  tt.store,
-				Signal: signalLog(&events, nil),
-				Log:    log,
+				Store:       tt.store,
+				Signal:      signalLog(&events, nil),
+				Log:         log,
+				AlsoRestore: also,
 			})
 
 			// Assert

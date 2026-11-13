@@ -118,9 +118,9 @@ const (
 	ports    = "Hardware Port: Ethernet\nDevice: en5\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: aa\n"
 	noWifi   = "Hardware Port: Ethernet\nDevice: en5\n"
 	hotspot  = "Test Hotspot"
-	// onAC and onBattery are `pmset -g ps`'s answers.
-	onAC      = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true\n"
-	onBattery = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t80%; discharging; 4:00 remaining present: true\n"
+	// energyModeHighPower is `pmset`'s High Power Mode, a mode the user may
+	// choose.
+	energyModeHighPower = "2"
 )
 
 // pmsetIn is `pmset -g` for a mode on or off and an energy mode in use (empty
@@ -151,16 +151,14 @@ func summary(active bool, ssid string) string {
 
 // Argv keys of every tool call.
 const (
-	argPmsetRead = "/t/pmset -g"
-	// argPowerSource reads what the machine draws from.
-	argPowerSource = "/t/pmset -g ps"
-	argPorts       = "/t/networksetup -listallhardwareports"
-	argSummary     = "/t/ipconfig getsummary en0"
-	argJoin        = "/t/networksetup -setairportnetwork en0 " + hotspot
-	argPreferred   = "/t/networksetup -listpreferredwirelessnetworks en0"
-	argDisconnect  = "/t/wifi-util disconnect"
-	argRadioOff    = "/t/networksetup -setairportpower en0 off"
-	argRadioOn     = "/t/networksetup -setairportpower en0 on"
+	argPmsetRead  = "/t/pmset -g"
+	argPorts      = "/t/networksetup -listallhardwareports"
+	argSummary    = "/t/ipconfig getsummary en0"
+	argJoin       = "/t/networksetup -setairportnetwork en0 " + hotspot
+	argPreferred  = "/t/networksetup -listpreferredwirelessnetworks en0"
+	argDisconnect = "/t/wifi-util disconnect"
+	argRadioOff   = "/t/networksetup -setairportpower en0 off"
+	argRadioOn    = "/t/networksetup -setairportpower en0 on"
 	// argRadioPower reads whether the radio is powered.
 	argRadioPower = "/t/networksetup -getairportpower en0"
 	// radioPowered and radioUnpowered are its answers.
@@ -189,22 +187,78 @@ func argPower(setting, value string) string {
 	return "/t/sudo -n /t/pmset -a " + setting + " " + value
 }
 
-// argEnergy is the energy mode step's `sudo -n pmset -a powermode <mode>`
-// call for a mode turned on (Low Power Mode) or off (High Power Mode).
-func argEnergy(on bool) string {
-	if on {
-		return argPower("powermode", energyModeLowPower)
-	}
-	return argPower("powermode", energyModeHighPower)
-}
+// argPowerMode is the energy step's `sudo -n pmset -a powermode <mode>` call.
+func argPowerMode(mode string) string { return argPower("powermode", mode) }
+
+// argLowPower is the quiet state's Low Power Mode write.
+var argLowPower = argPowerMode(energyModeLowPower)
 
 // scriptPower answers every privileged write of a change turning the mode to
-// value -- each power setting and the energy mode -- with success.
+// value -- each power setting, and the Low Power Mode a closed lid's quiet
+// state sets -- with success.
 func scriptPower(r *fakeRunner, value string) {
 	for _, s := range powerSettings {
 		r.on(argPower(s, value), answer{})
 	}
-	r.on(argEnergy(value == "1"), answer{})
+	r.on(argLowPower, answer{})
+}
+
+// fakeEnergyStore is the recorded energy mode in memory, with an error for
+// each operation. Each Save and Clear notes how many tool runs preceded it,
+// so a test orders it against the runner's calls.
+type fakeEnergyStore struct {
+	mu                       sync.Mutex
+	r                        *fakeRunner
+	rec                      *EnergyRecord
+	loadErr, saveErr, clrErr error
+	saves, clears            int
+	savedAfter, clearedAfter []int
+}
+
+func (f *fakeEnergyStore) Load() (EnergyRecord, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.loadErr != nil {
+		return EnergyRecord{}, false, f.loadErr
+	}
+	if f.rec == nil {
+		return EnergyRecord{}, false, nil
+	}
+	return *f.rec, true, nil
+}
+
+func (f *fakeEnergyStore) Save(r EnergyRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.savedAfter = append(f.savedAfter, len(f.r.ran()))
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	f.saves++
+	f.rec = &r
+	return nil
+}
+
+func (f *fakeEnergyStore) Clear() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clearedAfter = append(f.clearedAfter, len(f.r.ran()))
+	if f.clrErr != nil {
+		return f.clrErr
+	}
+	f.clears++
+	f.rec = nil
+	return nil
+}
+
+// kept answers the recorded mode, empty when none is kept.
+func (f *fakeEnergyStore) kept() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.rec == nil {
+		return ""
+	}
+	return f.rec.Mode
 }
 
 // fakeLidDims is an earlier build's kept lid dim: a level, and an error for
