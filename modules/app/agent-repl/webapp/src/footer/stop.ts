@@ -286,6 +286,12 @@ export function drawInterruptSuccess(success: InterruptSuccess, path: string): H
       note.textContent =
         outcome.value.count === 1n ? "stopped 1 agent" : `stopped ${outcome.value.count} agents`;
       break;
+    case "interruptedRevisions":
+      // The stop reached the workspace's response rewrites first; a running
+      // turn runs on, and the next press stops it.
+      note.textContent =
+        outcome.value.count === 1n ? "stopped the response update" : `stopped ${outcome.value.count} response updates`;
+      break;
     case "nothingRunning":
       note.textContent = "nothing running";
       break;
