@@ -40,12 +40,14 @@ type VisibilityReader interface {
 	WorkspaceReader
 }
 
-// folds answers which workspaces a fold keeps off the tab bar: the TAB BAR'S
+// Folds answers which workspaces a fold keeps off the tab bar: the TAB BAR'S
 // OWN STATEMENT of a folded tab (sidebar.Tabs), so a collapsed repository
 // section and a collapsed subsection withhold exactly the workspaces whose
 // tabs they fold, and what the daemon runs never disagrees with what the bar
-// draws. A workspace with no tab (closed, a thread) is folded by nothing.
-func folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]bool, error) {
+// draws. A workspace with no tab (closed, a thread) is folded by nothing. A
+// handover orders its transfers and decides its page loads by it too
+// (rollout.foldedRows).
+func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]bool, error) {
 	arrangement, err := repos.ReadArrangement(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
@@ -97,7 +99,7 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, p
 	if len(pending) == 0 {
 		return nil, nil, nil
 	}
-	folded, err := folds(ctx, repos, log)
+	folded, err := Folds(ctx, repos, log)
 	if err != nil {
 		return nil, nil, err
 	}
