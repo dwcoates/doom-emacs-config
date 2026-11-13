@@ -654,7 +654,9 @@ var daemonUnitInputs = map[string][]string{
 	"internal/vocab":           {"daemon/", "proto/vocab/"},
 	// The agent CLI's tests check every command a skill or a daemon brief
 	// names, and that each API skill links the front door.
-	"cmd/agent-repld": {"skills/", "prompts/", "bin/agent-repld"},
+	// Its successor-environment test reads the real module root's requirements
+	// manifest, the path paths.Checkout names.
+	"cmd/agent-repld": {"skills/", "prompts/", "bin/agent-repld", "requirements.json"},
 	// gitclient pins the markers the merge queue's hook spells.
 	"internal/gitclient": {"/.githooks/reference-transaction"},
 	// lifecycleconfig pins the repository's own lifecycle config to the
@@ -669,10 +671,12 @@ var daemonUnitInputs = map[string][]string{
 	// The integration pass boots the daemon on the briefs, the vocabulary and
 	// the repository's lifecycle config, and the daemon half of every
 	// mocked-vendor scenario (integration/scenariogoldens_test.go) reads the
-	// shim's goldens and keeps its own feed.json beside them.
+	// shim's goldens and keeps its own feed.json beside them. Every daemon it
+	// boots reads the module's requirements manifest (requireManifest), which
+	// the pinned checkout links in.
 	"integration[integration]": {"daemon/", "prompts/", "proto/vocab/", "skills/", "bin/agent-repld",
 		"/.githooks/reference-transaction", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh",
-		"bin/push-release.sh", "bin/hooks/", "testdata/scenario-goldens/"},
+		"bin/push-release.sh", "bin/hooks/", "testdata/scenario-goldens/", "requirements.json"},
 }
 
 // AlwaysRunRegions are the parts of the repository that only suites which
