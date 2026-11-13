@@ -20,7 +20,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a webapp change selects the webapp suite, the build harness and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx"},
-			want:  []string{"build-frontend-harness", "webapp", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"build-frontend-harness", "webapp", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "a brief change selects the daemon suite that composes and pins it, and the end-to-end suites",
@@ -80,7 +80,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim", "sidecar", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"shim", "sidecar", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
 		},
 		{
 			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
@@ -378,7 +378,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e,e2e-emacs" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e-kit,e2e,e2e-emacs" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

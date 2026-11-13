@@ -133,12 +133,14 @@ var suiteRules = []suiteRule{
 	// prose suite writes it from its inputs and fails while it is stale, and
 	// the webapp's tests draw from it.
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/test/fixtures/", Suites: []string{"daemon", "webapp", repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
+	// e2e-kit reads the webapp layer's areas (its scenario matrix) and its driver's boot budget.
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e-kit", "e2e", "e2e-emacs", repoScans}},
 	// The whole-module scans are their own suite; nothing else reads them.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", repoScans}},
-	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
+	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree,
+	// and e2e-kit's scenario matrix reads its scenarios and its AGENTS.md.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e-kit", "e2e", "e2e-emacs", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs", repoScans}},
 	// zettel, the knowledge graph service: its own suite.

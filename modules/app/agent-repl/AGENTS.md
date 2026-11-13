@@ -1319,10 +1319,12 @@ like an improvement still needs that conversation. Code:
       integration harness), `e2e` and `e2e-emacs`;
     - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
       each with `e2e` and `e2e-emacs`, and the shim also `sidecar`, whose
-      mocked vendor is the shim's fake mode;
+      mocked vendor is the shim's fake mode, and `e2e-kit`, whose scenario
+      matrix reads the mocked vendor's scenarios;
     - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
       spawn the real lock helper, and `e2e` and `e2e-emacs`;
-    - `webapp/`: `webapp`, `build-frontend-harness`, `e2e` and `e2e-emacs`;
+    - `webapp/`: `webapp`, `build-frontend-harness`, `e2e-kit` (whose scenario
+      matrix reads the webapp layer's areas), `e2e` and `e2e-emacs`;
     - the module's `bin/`: every `bin/` harness;
   - a change to something several systems share fans out to its consumers and
     the end-to-end suites:
