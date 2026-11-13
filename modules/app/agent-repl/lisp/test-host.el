@@ -5894,3 +5894,220 @@ no walk."
           (agent-repl-host-on-link-up conn))
         ;; Assert
         (should (equal recorded '(("/tmp/ws-1" :failed "boom") ("/tmp/ws-1" :failed "boom"))))))))
+
+;;;; ---- The call gate: a workspace's calls wait for its adopt's answer ----
+
+(defvar agent-repl-test-host--gated nil
+  "Calls the gate sent or failed, oldest first: (METHOD :sent CONN) or (METHOD :failed DETAIL).")
+
+(defun agent-repl-test-host--gate (conn method &optional ws-ref send)
+  "Pass METHOD's call naming WS-REF (the harness's ref by default) on CONN through the gate.
+SEND, when given, replaces the recording send."
+  (agent-repl-host-gate-call
+   conn method (list :workspace (or ws-ref (agent-repl-test-host--ref)))
+   (or send
+       (lambda (target)
+         (setq agent-repl-test-host--gated
+               (append agent-repl-test-host--gated (list (list method :sent target))))))
+   (lambda (detail)
+     (setq agent-repl-test-host--gated
+           (append agent-repl-test-host--gated (list (list method :failed detail)))))))
+
+(defmacro agent-repl-test-host--mid-adopt (&rest body)
+  "Run BODY with ws-1 transferred to a successor whose adopt is unanswered.
+OLD and SUCCESSOR are bound to the two daemons\\=' connections."
+  (declare (indent 0))
+  `(agent-repl-test-host--with-harness
+     (let ((agent-repl-test-host--gated nil)
+           (successor (agent-repl-connect-open "127.0.0.1:9100"))
+           (old (agent-repl-connect-open "127.0.0.1:9001")))
+       (setq agent-repl-test-host--successor successor
+             agent-repl-test-host--adopt-answer (list :held))
+       (agent-repl-test-host--subscribe "ws-1" old)
+       (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+       ,@body)))
+
+(defun agent-repl-test-host--answer-adopt-failure (detail)
+  "Answer the OLDEST held call, the adopt, with the transport failure DETAIL."
+  (let ((call (pop agent-repl-test-host--held)))
+    (funcall (cdr call) detail)))
+
+(ert-deftest agent-repl-test-host-call-gate-holds-a-call-while-its-adopt-is-unanswered ()
+  "THE DEFECT: calls about a workspace reached the successor before its adopt was answered.
+The 2026-11-13 14:42 deploy lost ReportPageResidency, ReportPageUnloading,
+MarkWorkspaceViewed and SelectWorkspace that way, each refused
+`not_yet_adopted'."
+  (agent-repl-test-host--mid-adopt
+    ;; Act
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Assert
+    (should (null agent-repl-test-host--gated))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.call-held ws=ws-1 method=MarkWorkspaceViewed held=1"))))
+
+(ert-deftest agent-repl-test-host-call-gate-holds-without-waiting ()
+  "A held call returns at once and blocks on nothing, so the editor keeps working."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (let ((waited nil))
+      (cl-letf (((symbol-function 'accept-process-output)
+                 (lambda (&rest _) (push :accept-process-output waited) nil))
+                ((symbol-function 'sleep-for)
+                 (lambda (&rest _) (push :sleep-for waited) nil))
+                ((symbol-function 'sit-for)
+                 (lambda (&rest _) (push :sit-for waited) t)))
+        ;; Act
+        (agent-repl-test-host--gate successor "SelectWorkspace")
+        (agent-repl-test-host--gate successor "ReportPageResidency"))
+      ;; Assert
+      (should (null waited))
+      (should (= 2 (length (plist-get (agent-repl-host--entry "ws-1") :held-calls)))))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-in-order-on-the-adopt-reply ()
+  "The adopt's success sends every held call, oldest first, to the successor."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "ReportPageResidency")
+    (agent-repl-test-host--gate successor "ReportPageUnloading")
+    (agent-repl-test-host--gate successor "SelectWorkspace")
+    ;; Act
+    (agent-repl-test-host--answer-held (list :arm :success :value nil))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated
+                   (list (list "ReportPageResidency" :sent successor)
+                         (list "ReportPageUnloading" :sent successor)
+                         (list "SelectWorkspace" :sent successor))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=3 outcome=adopted"))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-after-a-failed-adopt ()
+  "An adopt that fails or times out still sends the held calls, at the daemon WS is put back on."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-test-host--answer-adopt-failure (list :kind :timeout :message "no answer"))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.adopt-failed ws=ws-1"))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=failed"))
+    (should (null (plist-get (agent-repl-host--entry "ws-1") :held-calls)))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-after-a-refused-adopt ()
+  "A refused adopt sends the held calls to the daemon that still serves WS."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "SelectWorkspace")
+    ;; Act
+    (agent-repl-test-host--answer-held (list :arm :error :value nil))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "SelectWorkspace" :sent old))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=refused"))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-at-once-for-a-workspace-not-mid-adopt ()
+  "With no adopt outstanding, a call goes out at once on the connection it names."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-host--gated nil)
+          (conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (agent-repl-test-host--gate conn "MarkWorkspaceViewed")
+      ;; Assert
+      (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent conn)))))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-at-once-a-call-to-another-daemon ()
+  "Only a call addressed to the daemon the adopt is on is held."
+  (agent-repl-test-host--mid-adopt
+    ;; Act
+    (agent-repl-test-host--gate old "MarkWorkspaceViewed")
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-at-once-a-call-about-another-workspace ()
+  "A call naming a workspace that is not mid-adopt goes out at once."
+  (agent-repl-test-host--mid-adopt
+    ;; Act
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed"
+                                (agent-repl-test-host--ref "id-2" "/tmp/ws-2"))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent successor))))))
+
+(ert-deftest agent-repl-test-host-call-gate-never-holds-the-adopt-itself ()
+  "The adopt is what ends the hold, so it is never held behind it."
+  (agent-repl-test-host--mid-adopt
+    ;; Act
+    (agent-repl-test-host--gate successor "AdoptHostWorkspace")
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "AdoptHostWorkspace" :sent successor))))))
+
+(ert-deftest agent-repl-test-host-call-gate-fails-a-held-call-with-no-daemon-to-go-to ()
+  "A held call that finds no connection answers its own ON-FAILURE, at ERROR."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    (cl-letf (((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) nil)))
+      ;; Act
+      (agent-repl-test-host--answer-held (list :arm :success :value nil)))
+    ;; Assert
+    (should (equal (mapcar #'cadr agent-repl-test-host--gated) '(:failed)))
+    (should (eq (plist-get (nth 2 (car agent-repl-test-host--gated)) :kind) :transport))
+    (should (agent-repl-test-host--logged-p
+             :error "elisp.host.held-call-unsent ws=ws-1 method=MarkWorkspaceViewed outcome=adopted reason=no-connection"))))
+
+(ert-deftest agent-repl-test-host-call-gate-fails-a-held-call-whose-send-signals-and-sends-the-rest ()
+  "A held send that signals a transport error fails that call alone."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "SelectWorkspace" nil
+                                (lambda (_target)
+                                  (signal 'agent-repl-connect-error
+                                          (list (list :kind :transport :message "closed")))))
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-test-host--answer-held (list :arm :success :value nil))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated
+                   (list (list "SelectWorkspace" :failed (list :kind :transport :message "closed"))
+                         (list "MarkWorkspaceViewed" :sent successor))))
+    (should (agent-repl-test-host--logged-p :error "elisp.host.held-call-unsent ws=ws-1 method=SelectWorkspace"))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-when-a-register-walk-supersedes-the-adopt ()
+  "A newer walk that is not an adopt drops the adopt's answer, so the hold ends with it."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-host--begin-walk "ws-1" successor :register "test")
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent successor))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=superseded"))))
+
+(ert-deftest agent-repl-test-host-call-gate-keeps-holding-across-a-newer-adopt-onto-the-same-daemon ()
+  "A retried adopt onto the same successor keeps the calls held for its answer."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-host--begin-walk "ws-1" successor :adopt "test")
+    ;; Assert
+    (should (null agent-repl-test-host--gated))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-when-the-transfer-is-withdrawn ()
+  "A withdrawn transfer puts WS back, and its held calls go there."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+    ;; Assert
+    (should (equal agent-repl-test-host--gated (list (list "MarkWorkspaceViewed" :sent old))))))
+
+(ert-deftest agent-repl-test-host-call-gate-sends-held-calls-before-the-workspace-is-forgotten ()
+  "A held call is the user's, and is never dropped with its workspace."
+  (agent-repl-test-host--mid-adopt
+    ;; Arrange
+    (agent-repl-test-host--gate successor "MarkWorkspaceViewed")
+    ;; Act
+    (agent-repl-host-forget "ws-1")
+    ;; Assert
+    (should (equal (mapcar #'car agent-repl-test-host--gated) '("MarkWorkspaceViewed")))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=1 outcome=forgotten"))))

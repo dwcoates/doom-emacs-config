@@ -784,3 +784,88 @@ missing here or there is a broken seam.")
 (provide 'test-rpc)
 
 ;;; test-rpc.el ends here
+
+;;;; ---- Tests: the call gate ----
+
+(ert-deftest agent-repl-test-rpc-every-unary-verb-passes-the-call-gate ()
+  "Every async unary verb hands its call to host.el's gate, naming its method and request."
+  ;; Arrange
+  (let ((gated nil) (sent nil))
+    (agent-repl-test-rpc--with-logs
+      (dolist (row agent-repl-test-rpc--verbs)
+        (cl-destructuring-bind (method fn encoder decoder) row
+          (cl-letf (((symbol-function 'agent-repl-host-gate-call)
+                     (lambda (_conn gated-method request _send _fail)
+                       (push (cons method (list gated-method request)) gated)))
+                    ((symbol-function 'agent-repl-connect-unary)
+                     (lambda (&rest _) (push method sent)))
+                    ((symbol-function encoder) (lambda (_request) nil))
+                    ((symbol-function decoder) (lambda (_alist) nil)))
+            ;; Act
+            (funcall fn 'conn (list :workspace (list :id method)))))))
+    ;; Assert
+    (should (null sent))
+    (should (= (length gated) (length agent-repl-test-rpc--verbs)))
+    (should (cl-every (lambda (entry)
+                        (and (equal (car entry) (nth 1 entry))
+                             (equal (plist-get (plist-get (nth 2 entry) :workspace) :id) (car entry))))
+                      gated))))
+
+(ert-deftest agent-repl-test-rpc-only-the-gates-send-reaches-the-unary-transport ()
+  "No elisp source but rpc.el\\='s transport half calls the async unary transport.
+A call site that reached `agent-repl-connect-unary' itself would skip the
+call gate, and its call about a workspace mid-adopt would reach a daemon
+that has not adopted it."
+  ;; Arrange
+  (let ((callers nil))
+    ;; Act
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (member (file-name-nondirectory file) '("connect.el")))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (while (re-search-forward "(agent-repl-connect-unary[ \n]" nil t)
+            (push (cons (file-name-nondirectory file)
+                        (save-excursion
+                          (beginning-of-defun)
+                          (buffer-substring-no-properties (point) (line-end-position))))
+                  callers)))))
+    ;; Assert
+    (should (equal callers
+                   '(("rpc.el" . "(defun agent-repl-rpc--send-unary (conn method json decoder log-scope"))))))
+
+(ert-deftest agent-repl-test-rpc-a-call-is-sent-on-the-connection-the-gate-names ()
+  "The gate may send a held call on another daemon; the transport gets that one."
+  ;; Arrange
+  (let ((transport-conn nil))
+    (agent-repl-test-rpc--with-logs
+      (cl-letf (((symbol-function 'agent-repl-host-gate-call)
+                 (lambda (_conn _method _request send _fail) (funcall send 'named-conn)))
+                ((symbol-function 'agent-repl-connect-unary)
+                 (lambda (conn &rest _) (setq transport-conn conn)))
+                ((symbol-function 'agent-repl-wire-encode-mark-workspace-viewed-request)
+                 (lambda (_request) nil)))
+        ;; Act
+        (agent-repl-rpc-mark-workspace-viewed 'asked-conn '(:workspace (:id "w")))))
+    ;; Assert
+    (should (eq transport-conn 'named-conn))))
+
+(ert-deftest agent-repl-test-rpc-a-call-the-gate-fails-answers-on-failure ()
+  "A held call the gate cannot send reaches the caller's ON-FAILURE, recorded."
+  ;; Arrange
+  (let ((failed nil))
+    (agent-repl-test-rpc--with-logs
+      (cl-letf (((symbol-function 'agent-repl-host-gate-call)
+                 (lambda (_conn _method _request _send fail)
+                   (funcall fail (list :kind :transport :message "no daemon"))))
+                ((symbol-function 'agent-repl-connect-unary)
+                 (lambda (&rest _) (error "the transport must not be reached")))
+                ((symbol-function 'agent-repl-wire-encode-mark-workspace-viewed-request)
+                 (lambda (_request) nil)))
+        ;; Act
+        (agent-repl-rpc-mark-workspace-viewed 'conn '(:workspace (:id "w"))
+                                              :on-failure (lambda (detail) (setq failed detail))))
+      ;; Assert
+      (should (equal failed (list :kind :transport :message "no daemon")))
+      (should (agent-repl-test-rpc--logs-matching 'warn "elisp.rpc.transport-failure")))))
