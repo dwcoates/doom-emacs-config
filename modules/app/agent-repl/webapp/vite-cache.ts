@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
  * by every config in this package (the build config and all three test
  * projects), because four copies of a path is four chances to drift.
  *
+ * THE E2E SANDBOX CONTAINER named below was removed on 2026-11-13 with the
+ * Emacs e2e layer; what follows is kept as the record of why the cache moved.
+ *
  * WHY IT IS NOT THE DEFAULT. Vite's default `cacheDir` is
  * `node_modules/.vite`, and that default assumes `node_modules` is a writable
  * directory this package owns. Here it is a SYMLINK to a shared tree in both

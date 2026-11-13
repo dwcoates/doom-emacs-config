@@ -47,7 +47,6 @@ or absolute, inside the workspace's worktree):
 -ert FILE=test-a,test-b        those ert-deftests; a FILE with no directory (test-x.el) is the one in lisp/, from any directory
 -harness SCRIPT                the whole shell harness
 -harness SCRIPT=group1,group2  those groups of a harness that lists groups
--harness SCRIPT=TestA,TestB/s  those Go tests of a sandboxed suite (bin/test-e2e-emacs.sh); TestB/s is one scenario step
 -suite NAME                    one roster suite, whole
 -every-suite                   the whole roster (the merge queue's gate)
 ```
@@ -125,8 +124,8 @@ hold it:
    so the governor cannot count or hold it back.
 2. **Use exactly the cores its width says.** Pin it (Go: `GOMAXPROCS`, `-p`,
    `-parallel`; vitest `--maxWorkers=1`), or give the roster entry the
-   measured width (`Slots`) and cap the unit to it on its own command line,
-   as `e2e-emacs` does with `docker --cpus`. The run summary's "it is not
+   measured width (`Slots`) and cap the unit to it on its own command line.
+   The run summary's "it is not
    pinned to its width" line names a unit that uses more; fix that before
    landing. Measured 2026-10-26: `daemon:integration` units holding 2 seats
    used up to 4.5 cores.

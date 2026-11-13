@@ -42,11 +42,11 @@ workspace's session reachable from claude.ai. These files are living documents.
 
 ## Tests NEVER run real git or a real vendor
 
-Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, e2e-emacs, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
+Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
 
 ## A system's integration tests run that system alone; every other system is a mock
 
-Owner rule, 2026-10-14. A system's unit and integration tests run exactly one real agent-repl system: the one under test. Every other system it talks to (daemon, shim, store, sidecar, webapp, Emacs), and every external dependency (git, the vendor), is a mock of that system. Only the e2e layers (`e2e/`, `e2e-emacs`) run several real systems together.
+Owner rule, 2026-10-14. A system's unit and integration tests run exactly one real agent-repl system: the one under test. Every other system it talks to (daemon, shim, store, sidecar, webapp, Emacs), and every external dependency (git, the vendor), is a mock of that system. Only the e2e suite (`e2e/`) runs several real systems together.
 
 - Why: a system's suite then depends only on that system's own source, its mocks and the shared contracts (`proto/`, the shared Go modules). A change confined to one system can be shown, from the paths it touches, to leave every other system's unit and integration suites unaffected, so a run may skip them. One real peer system inside an integration suite breaks that proof for the whole suite.
 - Each test directory's own `AGENTS.md` names the mocks it uses for each peer.
@@ -74,10 +74,10 @@ Owner rule, 2026-10-14. A test lives at the cheapest tier whose fakes still let 
 
 ### An e2e test proves a seam between real systems, and nothing else
 
-- An e2e test (`e2e/`, `e2e-emacs`) is warranted only when its assertion needs several real agent-repl systems running together: a contract, an ordering or a handover that crosses a seam between two real processes.
+- An e2e test (`e2e/`) is warranted only when its assertion needs several real agent-repl systems running together: a contract, an ordering or a handover that crosses a seam between two real processes.
 - A test names its seam in its doc comment (`Seam: <producer> -> <consumer>, <what crosses>`). A test that cannot name one does not belong in `e2e/`.
 - A behavior that one system computes alone is proven in that system's own tiers above. That covers a refusal the daemon formats, a row the daemon projects from frames, what the webapp draws for a view, an Emacs-local command and the fake vendor's own output.
-- What only a booted Doom shows -- a `map!` leader binding, a popup's placement, persp-mode's workspace recycling -- is Emacs's own behavior too: it is proven in the Doom tier (`TestDoom*` in `e2e/doomtier_test.go`), a sandboxed Doom Emacs against the fake daemon, never in a `TestEmacs*` full-stack world. The Doom tier runs in `e2e-emacs`'s container, which saves it a second container start.
+- Emacs's own behavior is proven in ERT against the fake daemon (`lisp/testsupport/fakedaemon`). No e2e layer drives Emacs: the Emacs e2e layer and its Doom tier, which proved what only a booted Doom shows (a `map!` leader binding, a popup's placement, persp-mode's workspace recycling), were removed on 2026-11-13 (`e2e/AGENTS.md`, "The Emacs e2e layer was removed").
 - A behavior that crosses systems is covered three ways:
   - the producer's tier proves what the producer emits;
   - the consumer's tier proves what the consumer does with it;
@@ -216,8 +216,7 @@ skill's.
   the shim's builds the bundle and lock helper its files spawn first, as its
   `pretest:integration` always did).
   The store's and the sidecar's `integration` packages are untagged and were
-  always in their suites; the webapp-layer and the Emacs layer run in `e2e`
-  and `e2e-emacs`. `test:webkit` is the one suite outside the roster.
+  always in their suites; the webapp layer runs in `e2e`. `test:webkit` is the one suite outside the roster.
 - The repository's own harnesses are suites too: `install-harness`
   (`.claude/test-install.sh`) and `workspace-cli-harness` /
   `workspace-open-cli-harness` (`bin/test-agent_repl_workspace{,_open}.sh` at
@@ -265,14 +264,9 @@ dependency chain first. Parallelism belongs to this scheduler:
 - e2e and integration packages build their shared binaries once in a prebuild
   unit, then every test chunk consumes those exact binaries;
 - slow shell harnesses expose `--list` / `--only` groups and per-group timing.
-- a sandboxed suite (`e2e-emacs`) runs whole as one unit, in one container; its
-  roster entry's `GoTests` names its Go tests, so a run that names some of them
-  (`-harness bin/test-e2e-emacs.sh=TestA,TestB`) hands its script exactly those.
 - a unit that cannot be pinned to one core holds a WIDTH of slots and caps
-  itself to exactly that many cores. `e2e-emacs` is four slots wide (the VM its
-  Emacs parallelism bound was measured on); testrun hands the width over in
-  `AGENT_REPL_UNIT_SLOTS`, and the sandbox applies it as `docker run --cpus`
-  and `GOMAXPROCS` inside the container. A vitest suite's typecheck is two
+  itself to exactly that many cores; testrun hands the width over in
+  `AGENT_REPL_UNIT_SLOTS`. A vitest suite's typecheck is two
   slots wide, because `tsc` measured 1.5-1.75 cores and cannot be pinned.
   The run's "not pinned to its width" line judges reaped CPU against the
   width. It cannot see CPU spent in a VM or by an unreaped descendant, and
@@ -743,7 +737,7 @@ Why `unit-wall-sum` and not the alternatives:
   - It includes every stretch in which the suite's next unit waited for a slot another suite held.
   - The first `--record` under testrun recorded `store` at 89.7s against a 0.8s history while the whole run halved.
 - CPU time misses everything a test waits on, such as timers, sockets and I/O.
-  - It also misses every process the unit does not reap, such as the Docker VM behind `e2e-emacs` and daemonized children.
+  - It also misses every process the unit does not reap, such as a VM and daemonized children.
   - A test that starts waiting 5s longer would never register.
 - Summed unit wall time is the slot time the suite itself occupies.
   - It is what the planner budgets, and it moves when the suite's own tests get slower.
@@ -1313,30 +1307,27 @@ like an improvement still needs that conversation. Code:
     system's own suites run every other system as a mock ("A system's
     integration tests run that system alone"), so only the end-to-end suites
     test the systems together:
-    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
-      `e2e-emacs`;
+    - Emacs elisp (`lisp/` and the module-root `.el` files): `ert`;
     - `daemon/`: `daemon`, `e2e-kit` (the e2e world is built on the daemon's
-      integration harness), `e2e` and `e2e-emacs`;
+      integration harness) and `e2e`;
     - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
-      each with `e2e` and `e2e-emacs`, and the shim also `sidecar`, whose
+      each with `e2e`, and the shim also `sidecar`, whose
       mocked vendor is the shim's fake mode, and `e2e-kit`, whose scenario
       matrix reads the mocked vendor's scenarios;
     - `agent-shim/shim-lock/`: `lock`, plus `shim`, whose integration tests
-      spawn the real lock helper, and `e2e` and `e2e-emacs`;
+      spawn the real lock helper, and `e2e`;
     - `webapp/`: `webapp`, `build-frontend-harness`, `e2e-kit` (whose scenario
-      matrix reads the webapp layer's areas), `e2e` and `e2e-emacs`;
+      matrix reads the webapp layer's areas) and `e2e`;
     - the module's `bin/`: every `bin/` harness;
   - a change to something several systems share fans out to its consumers and
     the end-to-end suites:
     - `proto/` (the contract and its Go helpers): every suite;
     - `agent-shim/logging/`: `logging`, `logging-density`, and every consumer
       of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
-      (`shim`, `webapp`, `build-frontend-harness`), with `e2e-kit`, `e2e` and
-      `e2e-emacs`;
-    - `e2e/`: `e2e`, `e2e-emacs` and `e2e-kit` (whose scans read the e2e
-      package's sources), and `e2e/sandbox/` only `e2e-emacs`; `e2e/kit/`, the
-      e2e harness's world-free code in a module of its own, `e2e-kit`, `e2e`
-      and `e2e-emacs`;
+      (`shim`, `webapp`, `build-frontend-harness`), with `e2e-kit` and `e2e`;
+    - `e2e/`: `e2e` and `e2e-kit` (whose scans read the e2e package's
+      sources); `e2e/kit/`, the e2e harness's world-free code in a module of
+      its own, `e2e-kit` and `e2e`;
   - two tests keep the map honest: every local module a Go suite's `go.mod`
     replaces, and every tree a Vitest suite imports outside itself, must select
     that suite. They and the mock-rule source scan are the `repo-scans` suite
@@ -1344,13 +1335,13 @@ like an improvement still needs that conversation. Code:
     other systems' trees), which a change to any system selects;
   - the runner itself (`testrun/`, `bin/test-all.sh` and the two report
     scripts it delegates to) runs every suite;
-  - the briefs (`prompts/`) run `daemon`, `e2e` and `e2e-emacs`: the daemon
+  - the briefs (`prompts/`) run `daemon` and `e2e`: the daemon
     composes every merge and repair prompt from them and its suite pins their
     placeholders;
   - documentation runs nothing: the module's `docs/` and `plans/`, and every
     Markdown file at the module root, except `metaprompt.md` and its two
     landing sections (`metaprompt-merge-queue.md`, `metaprompt-queue-bypass.md`),
-    which the shim's own suite reads back and so run `shim`, `e2e` and `e2e-emacs`;
+    which the shim's own suite reads back and so run `shim`, `sidecar` and `e2e`;
   - outside the module, the paths a roster harness reads run exactly the
     suites that read them: the git hooks, the `.claude` scripts and the
     repository's `bin/` (each one's harness, plus `background-harness`,

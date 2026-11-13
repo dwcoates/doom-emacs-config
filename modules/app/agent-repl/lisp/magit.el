@@ -389,7 +389,7 @@ sixteen: magit then asked \"<dir> is a repository.  Create another in
 <dir>? \" of the same directory twice, nothing could answer, the reader
 entered a recursive edit and Emacs stopped answering its server socket
 entirely — a permanent stall whose only witness was a native backtrace
-(see e2e/EMACS-LAYER-SPEC.md).
+(e2e/EMACS-LAYER-SPEC.md, removed with that layer on 2026-11-13).
 
 `magit-status-setup-buffer' has no prompt in it, so the question cannot
 be asked at all; a directory that is genuinely not a repository signals
