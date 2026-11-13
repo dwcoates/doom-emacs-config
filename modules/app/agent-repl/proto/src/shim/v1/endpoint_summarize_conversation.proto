@@ -1,0 +1,145 @@
+// endpoint_summarize_conversation.proto — SummarizeConversation: summarize a
+// conversation of this shim's workspace with the cold gate's one summarizer,
+// BEFORE the StartSession that needs the summary. SESSION section.
+//
+// A SUMMARY IS ITS OWN OPERATION, NEVER PART OF A START. A summarizer's time
+// grows with the conversation it reads (tens of seconds for a few hundred
+// thousand tokens, and past a minute for the largest), while StartSession's
+// time is a vendor opening. Asked as one call, the start's bound had to cover
+// both, and a large conversation's summary outran it. Asked as two, each call
+// is bounded by what it does: the caller bounds this one by the summarizer's
+// measured time and StartSession by the opening's.
+//
+// THE PHASES RIDE THE SESSION STREAM. A `compact` narrates
+// conversation.v1.SessionCompactionProgress on WatchSession exactly as the
+// cold gate always has: `summarizing` when the summarizer is asked, then
+// `summarized` or `failed` here, and `resuming` and `started` from the
+// StartSession that follows. A `carry` narrates nothing; its answer is the
+// summary.
+//
+// ASKED ONLY BEFORE StartSession. A shim whose session has started refuses it
+// `already_started`: a summary the live session's own query has not read is
+// a cut the session never sees. A shim holding a parked conversation's bridge
+// refuses a `compact` the same way, because the bridge's vendor process holds
+// that conversation open, and serves a `carry`, which writes nothing.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/session.proto";
+import "conversation/v1/turn.proto";
+import "shim/v1/endpoint_start_session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// One summary, and what it is for.
+message SummarizeConversationRequest {
+  // THE WORKSPACE'S NAME, as StartSessionRequest.workspace_name states it.
+  // REQUIRED: the summarizer is a query like any other, and every query the
+  // shim opens states the name in its system prompt.
+  string workspace_name = 1;
+  // The profile the summarized conversation's session runs under, as
+  // StartSessionRequest.profile states it. REQUIRED: the prompt cache is
+  // keyed on the system prompt, so a summarizer under another profile reads
+  // the whole conversation cold.
+  SessionProfile profile = 2;
+  // The model that writes the summary and what it summarizes: the cold gate's
+  // compaction choice, imported whole. Both its model and its scope are
+  // REQUIRED.
+  conversation.v1.SessionColdCompact summarizer = 3;
+  // What the summary is for. The set arm is the use; exactly one is set.
+  oneof use {
+    // Compact the conversation the next StartSession resumes: the summary is
+    // appended to its transcript as a compaction boundary, and the resume
+    // reads from it.
+    SummarizeConversationCompact compact = 4;
+    // Summarize another conversation of the workspace for the daemon to
+    // deliver into the session it starts: nothing is written to either
+    // transcript.
+    SummarizeConversationCarry carry = 5;
+  }
+}
+
+// The conversation to compact before it is resumed.
+//
+// PRODUCER OBLIGATION FOR THE CALLER: the StartSession that follows a
+// `compacted` answer names `cold_remediation.compact` for the SAME vendor
+// session id on the SAME shim, which is how the resume knows it reads a
+// compacted conversation. A StartSession naming `compact` that no compaction
+// on this shim preceded is a caller defect the shim fails loudly on.
+message SummarizeConversationCompact {
+  // The vendor's id for the conversation, as the StartSession that resumes it
+  // will name it. REQUIRED.
+  string vendor_session_id = 1;
+  // EVERY TURN OF THE WORKSPACE THAT WAS ROLLED BACK, exactly as
+  // StartSessionResume.rolled_back_turns states them: the summary is of the
+  // live conversation, so a dropped turn still at the transcript's tail is
+  // neither summarized nor chained under. Empty for a workspace never rolled
+  // back.
+  repeated conversation.v1.TurnId rolled_back_turns = 2;
+}
+
+// Another conversation of the workspace to summarize, on an ephemeral fork
+// that writes nothing to either transcript.
+message SummarizeConversationCarry {
+  // The vendor's id for the summarized conversation, whose transcript sits in
+  // the same account root as the workspace's. REQUIRED.
+  string vendor_session_id = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SummarizeConversationResponse {
+  oneof result {
+    SummarizeConversationSuccess success = 1;
+    SummarizeConversationFailure failure = 2;
+  }
+}
+
+// The summary was written. The set arm is the use the request named: a
+// `compact` request answers `compacted`, a `carry` request `carried`.
+message SummarizeConversationSuccess {
+  oneof use {
+    // The conversation's transcript now ends on the summary's compaction
+    // boundary.
+    SummarizeConversationCompacted compacted = 1;
+    // The summary of the carried conversation.
+    SummarizeConversationCarried carried = 2;
+  }
+}
+
+// The compaction's figures, for the caller's record. The same figures ride
+// the session stream's `summarized` phase.
+message SummarizeConversationCompacted {
+  // The conversation's context before the compaction, in tokens.
+  int64 tokens_before = 1;
+  // The summary's own output tokens: what remains in context after the
+  // compaction.
+  int64 tokens_after = 2;
+}
+
+// The summary a `carry` asked for, as the summarizer wrote it.
+message SummarizeConversationCarried {
+  // The summary text, verbatim. Never empty.
+  string text = 1;
+}
+
+// The summary could not be written. THE ARM IS WHY.
+message SummarizeConversationFailure {
+  oneof cause {
+    // The summarizer's query failed, or its summary could not be written to
+    // the transcript. Labeled exactly as a vendor start's failure is: whether
+    // asking again can help, whose failure a retryable one was, and the API's
+    // refusal when a rejection was one.
+    StartSessionVendorStartFailed summarizer_failed = 1;
+    // The named conversation has no transcript in this workspace. NOT
+    // RETRYABLE: the transcript will not reappear by asking again.
+    StartSessionUnknownSession unknown_session = 2;
+    // This shim's session has started, or a `compact` was asked of a shim
+    // holding a parked conversation's bridge. A defect in the caller, which
+    // summarizes on a shim before starting its session.
+    StartSessionAlreadyStarted already_started = 3;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 4;
+}

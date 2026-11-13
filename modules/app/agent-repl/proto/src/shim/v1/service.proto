@@ -30,6 +30,7 @@ import "shim/v1/endpoint_send_keepalive.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
 import "shim/v1/endpoint_stop_bash.proto";
+import "shim/v1/endpoint_summarize_conversation.proto";
 import "shim/v1/endpoint_watch_agent.proto";
 import "shim/v1/endpoint_update_agent.proto";
 import "shim/v1/endpoint_get_workflow.proto";
@@ -55,6 +56,11 @@ service Shim {
   // remediation is named; the shim begins its keep-alive cadence before
   // answering.
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  // SUMMARIZE, before the start: compact the conversation the next
+  // StartSession resumes, or summarize another conversation for the daemon to
+  // carry into it. Its own call, so the start's bound never covers a
+  // summarizer whose time grows with the conversation it reads.
+  rpc SummarizeConversation(SummarizeConversationRequest) returns (SummarizeConversationResponse);
   // ATTACH: the standing stream of session-level facts as they manifest
   // upstream. The facts fixed at start are StartSession's. The shim's own
   // health and the session's context usage RIDE THIS STREAM as pushed arms

@@ -22,7 +22,7 @@ import type { AgentModel, ApiRequestFailed } from "../../conversation/v1/api_pb"
 import { file_conversation_v1_api } from "../../conversation/v1/api_pb";
 import type { AgentPermissionMode } from "../../conversation/v1/permission_pb";
 import { file_conversation_v1_permission } from "../../conversation/v1/permission_pb";
-import type { LockHolderFailure, SessionCold, SessionColdCompact, SessionColdRemediation, SessionStarted } from "../../conversation/v1/session_pb";
+import type { LockHolderFailure, SessionCold, SessionColdRemediation, SessionStarted } from "../../conversation/v1/session_pb";
 import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
 import type { TurnId } from "../../conversation/v1/turn_pb";
 import { file_conversation_v1_turn } from "../../conversation/v1/turn_pb";
@@ -32,7 +32,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEi0wEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSKwoFZnJlc2gYASABKAsyGi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkZyZXNoSAASLQoGcmVzdW1lGAIgASgLMhsuc2hpbS52MS5TdGFydFNlc3Npb25SZXN1bWVIABIWCg53b3Jrc3BhY2VfbmFtZRgEIAEoCRIoCgdwcm9maWxlGAUgASgLMhcuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUIICgZzb3VyY2VKBAgDEARSDmhvbGRfa2VlcGFsaXZlInQKDlNlc3Npb25Qcm9maWxlEi0KBWFnZW50GAEgASgLMhwuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50SAASKwoEY2hhdBgCIAEoCzIbLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVDaGF0SABCBgoEa2luZCKDAQoTU2Vzc2lvblByb2ZpbGVBZ2VudBI2CghzdGFuZGluZxgBIAEoCzIkLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudFN0YW5kaW5nEjQKB2xhbmRpbmcYAiABKAsyIy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nIpoCChpTZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZxJICg10aHJvdWdoX3F1ZXVlGAEgASgLMi8uc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZ1Rocm91Z2hRdWV1ZUgAEkwKD2J5cGFzc2luZ19xdWV1ZRgCIAEoCzIxLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdCeXBhc3NpbmdRdWV1ZUgAEkgKDWRlcGxveV9pbnRha2UYBCABKAsyLy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nRGVwbG95SW50YWtlSABCCQoHbGFuZGluZ0oECAMQBFIJbWVkaWF0aW5nIigKJlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nVGhyb3VnaFF1ZXVlIioKKFNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nQnlwYXNzaW5nUXVldWUiKAomU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdEZXBsb3lJbnRha2UiswEKG1Nlc3Npb25Qcm9maWxlQWdlbnRTdGFuZGluZxJDCg5tYWluX3dvcmtzcGFjZRgBIAEoCzIpLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudE1haW5Xb3Jrc3BhY2VIABJHChBsaW5rZWRfd29ya3NwYWNlGAIgASgLMisuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlSABCBgoEa2luZCIiCiBTZXNzaW9uUHJvZmlsZUFnZW50TWFpbldvcmtzcGFjZSIkCiJTZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlIlQKElNlc3Npb25Qcm9maWxlQ2hhdBI+Cg1zeXN0ZW1fcHJvbXB0GAEgASgLMicuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUNoYXRTeXN0ZW1Qcm9tcHQiLgoeU2Vzc2lvblByb2ZpbGVDaGF0U3lzdGVtUHJvbXB0EgwKBHRleHQYASABKAkijQEKEVN0YXJ0U2Vzc2lvbkZyZXNoEi8KBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAIgBARI9Cg9wZXJtaXNzaW9uX21vZGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uTW9kZUIICgZfbW9kZWwiiQMKElN0YXJ0U2Vzc2lvblJlc3VtZRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRJGChBjb2xkX3JlbWVkaWF0aW9uGAIgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkUmVtZWRpYXRpb25IAIgBARIwCgZyZWJpbmQYAyABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlYmluZEgBiAEBEjIKEXJvbGxlZF9iYWNrX3R1cm5zGAQgAygLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBIvCgVtb2RlbBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsSAKIAQESPQoNY2Fycnlfc3VtbWFyeRgGIAEoCzIhLnNoaW0udjEuU3RhcnRTZXNzaW9uQ2FycnlTdW1tYXJ5SAOIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZEIICgZfbW9kZWxCEAoOX2NhcnJ5X3N1bW1hcnkiFAoSU3RhcnRTZXNzaW9uUmViaW5kIm4KGFN0YXJ0U2Vzc2lvbkNhcnJ5U3VtbWFyeRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRI3CgpzdW1tYXJpemVyGAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdCIqChpTdGFydFNlc3Npb25DYXJyaWVkU3VtbWFyeRIMCgR0ZXh0GAEgASgJIrgBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAEisKBGJvb2sYAyABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBQggKBnJlc3VsdEIHCgVfYm9vayKeAQoTU3RhcnRTZXNzaW9uU3VjY2VzcxIwCgdzZXNzaW9uGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25TdGFydGVkEkEKD2NhcnJpZWRfc3VtbWFyeRgCIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uQ2FycmllZFN1bW1hcnlIAIgBAUISChBfY2FycmllZF9zdW1tYXJ5IrgDChNTdGFydFNlc3Npb25GYWlsdXJlEiwKBGNvbGQYASABKAsyHC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRIABJFChN2ZW5kb3Jfc3RhcnRfZmFpbGVkGAMgASgLMiYuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydEZhaWxlZEgAEj4KD3Vua25vd25fc2Vzc2lvbhgEIAEoCzIjLnNoaW0udjEuU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb25IABI+Cg9hbHJlYWR5X3N0YXJ0ZWQYBSABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvbkFscmVhZHlTdGFydGVkSAASRAoSY29udmVyc2F0aW9uX293bmVkGAYgASgLMiYuc2hpbS52MS5TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZEgAEk0KF2xvY2tfaG9sZGVyX3VuYXZhaWxhYmxlGAcgASgLMiouc2hpbS52MS5TdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGVIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2Ui9QEKHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0RmFpbGVkEj4KCXJldHJ5YWJsZRgBIAEoCzIpLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZXRyeWFibGVIABI8CghyZWplY3RlZBgCIAEoCzIoLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZWplY3RlZEgAEj4KCmNvbXBhY3Rpb24YAyABKAsyJS5zaGltLnYxLlN0YXJ0U2Vzc2lvbkNvbXBhY3Rpb25GYWlsZWRIAYgBAUIHCgVyZXRyeUINCgtfY29tcGFjdGlvbiIeChxTdGFydFNlc3Npb25Db21wYWN0aW9uRmFpbGVkIqEBCiBTdGFydFNlc3Npb25WZW5kb3JTdGFydFJldHJ5YWJsZRI6CgduZXR3b3JrGAEgASgLMicuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydE5ldHdvcmtIABI4CgZ2ZW5kb3IYAiABKAsyJi5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0VmVuZG9ySABCBwoFY2F1c2UiIAoeU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnROZXR3b3JrIh8KHVN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0VmVuZG9yIm4KH1N0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmVqZWN0ZWQSOwoLYXBpX2ZhaWx1cmUYASABKAsyIS5jb252ZXJzYXRpb24udjEuQXBpUmVxdWVzdEZhaWxlZEgAiAEBQg4KDF9hcGlfZmFpbHVyZSIcChpTdGFydFNlc3Npb25Vbmtub3duU2Vzc2lvbiIcChpTdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZCIfCh1TdGFydFNlc3Npb25Db252ZXJzYXRpb25Pd25lZCJ2CiFTdGFydFNlc3Npb25Mb2NrSG9sZGVyVW5hdmFpbGFibGUSMwoHZmFpbHVyZRgDIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5Mb2NrSG9sZGVyRmFpbHVyZUoECAEQAkoECAIQA1IGYmluYXJ5Ughvc19lcnJvckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEi0wEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSKwoFZnJlc2gYASABKAsyGi5zaGltLnYxLlN0YXJ0U2Vzc2lvbkZyZXNoSAASLQoGcmVzdW1lGAIgASgLMhsuc2hpbS52MS5TdGFydFNlc3Npb25SZXN1bWVIABIWCg53b3Jrc3BhY2VfbmFtZRgEIAEoCRIoCgdwcm9maWxlGAUgASgLMhcuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUIICgZzb3VyY2VKBAgDEARSDmhvbGRfa2VlcGFsaXZlInQKDlNlc3Npb25Qcm9maWxlEi0KBWFnZW50GAEgASgLMhwuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50SAASKwoEY2hhdBgCIAEoCzIbLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVDaGF0SABCBgoEa2luZCKDAQoTU2Vzc2lvblByb2ZpbGVBZ2VudBI2CghzdGFuZGluZxgBIAEoCzIkLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudFN0YW5kaW5nEjQKB2xhbmRpbmcYAiABKAsyIy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nIpoCChpTZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZxJICg10aHJvdWdoX3F1ZXVlGAEgASgLMi8uc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGFuZGluZ1Rocm91Z2hRdWV1ZUgAEkwKD2J5cGFzc2luZ19xdWV1ZRgCIAEoCzIxLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdCeXBhc3NpbmdRdWV1ZUgAEkgKDWRlcGxveV9pbnRha2UYBCABKAsyLy5zaGltLnYxLlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nRGVwbG95SW50YWtlSABCCQoHbGFuZGluZ0oECAMQBFIJbWVkaWF0aW5nIigKJlNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nVGhyb3VnaFF1ZXVlIioKKFNlc3Npb25Qcm9maWxlQWdlbnRMYW5kaW5nQnlwYXNzaW5nUXVldWUiKAomU2Vzc2lvblByb2ZpbGVBZ2VudExhbmRpbmdEZXBsb3lJbnRha2UiswEKG1Nlc3Npb25Qcm9maWxlQWdlbnRTdGFuZGluZxJDCg5tYWluX3dvcmtzcGFjZRgBIAEoCzIpLnNoaW0udjEuU2Vzc2lvblByb2ZpbGVBZ2VudE1haW5Xb3Jrc3BhY2VIABJHChBsaW5rZWRfd29ya3NwYWNlGAIgASgLMisuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlSABCBgoEa2luZCIiCiBTZXNzaW9uUHJvZmlsZUFnZW50TWFpbldvcmtzcGFjZSIkCiJTZXNzaW9uUHJvZmlsZUFnZW50TGlua2VkV29ya3NwYWNlIlQKElNlc3Npb25Qcm9maWxlQ2hhdBI+Cg1zeXN0ZW1fcHJvbXB0GAEgASgLMicuc2hpbS52MS5TZXNzaW9uUHJvZmlsZUNoYXRTeXN0ZW1Qcm9tcHQiLgoeU2Vzc2lvblByb2ZpbGVDaGF0U3lzdGVtUHJvbXB0EgwKBHRleHQYASABKAkijQEKEVN0YXJ0U2Vzc2lvbkZyZXNoEi8KBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWxIAIgBARI9Cg9wZXJtaXNzaW9uX21vZGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uTW9kZUIICgZfbW9kZWwizQIKElN0YXJ0U2Vzc2lvblJlc3VtZRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRJGChBjb2xkX3JlbWVkaWF0aW9uGAIgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkUmVtZWRpYXRpb25IAIgBARIwCgZyZWJpbmQYAyABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlYmluZEgBiAEBEjIKEXJvbGxlZF9iYWNrX3R1cm5zGAQgAygLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZBIvCgVtb2RlbBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsSAKIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb25CCQoHX3JlYmluZEIICgZfbW9kZWxKBAgGEAdSDWNhcnJ5X3N1bW1hcnkiFAoSU3RhcnRTZXNzaW9uUmViaW5kIrgBChRTdGFydFNlc3Npb25SZXNwb25zZRIvCgdzdWNjZXNzGAEgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25TdWNjZXNzSAASLwoHZmFpbHVyZRgCIAEoCzIcLnNoaW0udjEuU3RhcnRTZXNzaW9uRmFpbHVyZUgAEisKBGJvb2sYAyABKAsyGC5jb252ZXJzYXRpb24udjEuQWdlbnRJZEgBiAEBQggKBnJlc3VsdEIHCgVfYm9vayJeChNTdGFydFNlc3Npb25TdWNjZXNzEjAKB3Nlc3Npb24YASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRKBAgCEANSD2NhcnJpZWRfc3VtbWFyeSK4AwoTU3RhcnRTZXNzaW9uRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRQoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgDIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWRIABI+Cg91bmtub3duX3Nlc3Npb24YBCABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uSAASPgoPYWxyZWFkeV9zdGFydGVkGAUgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZEgAEkQKEmNvbnZlcnNhdGlvbl9vd25lZBgGIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRIABJNChdsb2NrX2hvbGRlcl91bmF2YWlsYWJsZRgHIAEoCzIqLnNoaW0udjEuU3RhcnRTZXNzaW9uTG9ja0hvbGRlclVuYXZhaWxhYmxlSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlIrgBCh1TdGFydFNlc3Npb25WZW5kb3JTdGFydEZhaWxlZBI+CglyZXRyeWFibGUYASABKAsyKS5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmV0cnlhYmxlSAASPAoIcmVqZWN0ZWQYAiABKAsyKC5zaGltLnYxLlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0UmVqZWN0ZWRIAEIHCgVyZXRyeUoECAMQBFIKY29tcGFjdGlvbiKhAQogU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRSZXRyeWFibGUSOgoHbmV0d29yaxgBIAEoCzInLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnROZXR3b3JrSAASOAoGdmVuZG9yGAIgASgLMiYuc2hpbS52MS5TdGFydFNlc3Npb25WZW5kb3JTdGFydFZlbmRvckgAQgcKBWNhdXNlIiAKHlN0YXJ0U2Vzc2lvblZlbmRvclN0YXJ0TmV0d29yayIfCh1TdGFydFNlc3Npb25WZW5kb3JTdGFydFZlbmRvciJuCh9TdGFydFNlc3Npb25WZW5kb3JTdGFydFJlamVjdGVkEjsKC2FwaV9mYWlsdXJlGAEgASgLMiEuY29udmVyc2F0aW9uLnYxLkFwaVJlcXVlc3RGYWlsZWRIAIgBAUIOCgxfYXBpX2ZhaWx1cmUiHAoaU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb24iHAoaU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWQiHwodU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWQidgohU3RhcnRTZXNzaW9uTG9ja0hvbGRlclVuYXZhaWxhYmxlEjMKB2ZhaWx1cmUYAyABKAsyIi5jb252ZXJzYXRpb24udjEuTG9ja0hvbGRlckZhaWx1cmVKBAgBEAJKBAgCEANSBmJpbmFyeVIIb3NfZXJyb3JCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session, file_conversation_v1_turn]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -438,8 +438,14 @@ export type StartSessionResume = Message<"shim.v1.StartSessionResume"> & {
    * the retry that follows a `cold` failure, and on the start of a
    * conversation that OWES a compaction (a queue-bypass switch that chose a
    * compacted fork of the ordinary conversation). A SET REMEDIATION IS
-   * CARRIED OUT WHETHER OR NOT THE CONTEXT IS COLD: `compact` compacts a warm
-   * context too, which is what the owed compaction relies on.
+   * CARRIED OUT WHETHER OR NOT THE CONTEXT IS COLD.
+   *
+   * `compact` NAMES A COMPACTION ALREADY MADE, never one to make: the
+   * conversation was compacted by the SummarizeConversation that preceded
+   * this start on the same shim, and the start resumes it from its summary.
+   * StartSession itself never summarizes, so its time is a vendor opening's
+   * and nothing else. A `compact` that no compaction of this conversation on
+   * this shim preceded is a caller defect the shim fails loudly on.
    *
    * @generated from field: optional conversation.v1.SessionColdRemediation cold_remediation = 2;
    */
@@ -504,21 +510,6 @@ export type StartSessionResume = Message<"shim.v1.StartSessionResume"> & {
    * @generated from field: optional conversation.v1.AgentModel model = 5;
    */
   model?: AgentModel | undefined;
-
-  /**
-   * A SUMMARY OF ANOTHER CONVERSATION THIS RESUME CARRIES (a queue-bypass
-   * switch that chose the parked bypass conversation plus a compacted summary
-   * of the ordinary one). The shim summarizes the named conversation with the
-   * cold gate's own summarizer, on an ephemeral fork that writes nothing to
-   * either transcript, and answers the summary on the success
-   * (StartSessionSuccess.carried_summary); the daemon delivers it into the
-   * resumed conversation. A summary that does not complete fails the start
-   * as vendor_start_failed with its `compaction` marker set. UNSET on every
-   * other resume.
-   *
-   * @generated from field: optional shim.v1.StartSessionCarrySummary carry_summary = 6;
-   */
-  carrySummary?: StartSessionCarrySummary | undefined;
 };
 
 /**
@@ -543,57 +534,6 @@ export type StartSessionRebind = Message<"shim.v1.StartSessionRebind"> & {
  */
 export const StartSessionRebindSchema: GenMessage<StartSessionRebind> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_session, 14);
-
-/**
- * The conversation a resume carries a summary of, and how it is summarized.
- *
- * @generated from message shim.v1.StartSessionCarrySummary
- */
-export type StartSessionCarrySummary = Message<"shim.v1.StartSessionCarrySummary"> & {
-  /**
-   * The vendor's id for the summarized conversation: another conversation of
-   * the same workspace, whose transcript sits in the same account root.
-   *
-   * @generated from field: string vendor_session_id = 1;
-   */
-  vendorSessionId: string;
-
-  /**
-   * The summarizer's model and scope: the cold gate's compaction choice,
-   * imported whole. Both are required.
-   *
-   * @generated from field: conversation.v1.SessionColdCompact summarizer = 2;
-   */
-  summarizer?: SessionColdCompact | undefined;
-};
-
-/**
- * Describes the message shim.v1.StartSessionCarrySummary.
- * Use `create(StartSessionCarrySummarySchema)` to create a new message.
- */
-export const StartSessionCarrySummarySchema: GenMessage<StartSessionCarrySummary> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 15);
-
-/**
- * The summary a resume carried, as the summarizer wrote it.
- *
- * @generated from message shim.v1.StartSessionCarriedSummary
- */
-export type StartSessionCarriedSummary = Message<"shim.v1.StartSessionCarriedSummary"> & {
-  /**
-   * The summary text, verbatim. Never empty.
-   *
-   * @generated from field: string text = 1;
-   */
-  text: string;
-};
-
-/**
- * Describes the message shim.v1.StartSessionCarriedSummary.
- * Use `create(StartSessionCarriedSummarySchema)` to create a new message.
- */
-export const StartSessionCarriedSummarySchema: GenMessage<StartSessionCarriedSummary> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 16);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -641,7 +581,7 @@ export type StartSessionResponse = Message<"shim.v1.StartSessionResponse"> & {
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 17);
+  messageDesc(file_shim_v1_endpoint_start_session, 15);
 
 /**
  * The session can accept a prompt.
@@ -662,14 +602,6 @@ export type StartSessionSuccess = Message<"shim.v1.StartSessionSuccess"> & {
    * @generated from field: conversation.v1.SessionStarted session = 1;
    */
   session?: SessionStarted | undefined;
-
-  /**
-   * The summary the resume's carry_summary asked for. SET exactly when the
-   * request set carry_summary, and UNSET otherwise.
-   *
-   * @generated from field: optional shim.v1.StartSessionCarriedSummary carried_summary = 2;
-   */
-  carriedSummary?: StartSessionCarriedSummary | undefined;
 };
 
 /**
@@ -677,7 +609,7 @@ export type StartSessionSuccess = Message<"shim.v1.StartSessionSuccess"> & {
  * Use `create(StartSessionSuccessSchema)` to create a new message.
  */
 export const StartSessionSuccessSchema: GenMessage<StartSessionSuccess> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 18);
+  messageDesc(file_shim_v1_endpoint_start_session, 16);
 
 /**
  * The session could not be opened as asked. THE ARM IS WHY.
@@ -766,7 +698,7 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
  * Use `create(StartSessionFailureSchema)` to create a new message.
  */
 export const StartSessionFailureSchema: GenMessage<StartSessionFailure> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 19);
+  messageDesc(file_shim_v1_endpoint_start_session, 17);
 
 /**
  * The vendor (the agent binary or its SDK query) did not come up inside a shim
@@ -809,16 +741,6 @@ export type StartSessionVendorStartFailed = Message<"shim.v1.StartSessionVendorS
     value: StartSessionVendorStartRejected;
     case: "rejected";
   } | { case: undefined; value?: undefined };
-
-  /**
-   * SET WHEN THE FAILURE WAS THE COMPACTION OR SUMMARY THE START WAS ASKED
-   * FOR (cold_remediation's `compact`, or carry_summary), rather than the
-   * vendor's opening itself. Presence is the fact; the retry arm above
-   * labels it as for any other failure, and `detail` carries its account.
-   *
-   * @generated from field: optional shim.v1.StartSessionCompactionFailed compaction = 3;
-   */
-  compaction?: StartSessionCompactionFailed | undefined;
 };
 
 /**
@@ -826,22 +748,7 @@ export type StartSessionVendorStartFailed = Message<"shim.v1.StartSessionVendorS
  * Use `create(StartSessionVendorStartFailedSchema)` to create a new message.
  */
 export const StartSessionVendorStartFailedSchema: GenMessage<StartSessionVendorStartFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 20);
-
-/**
- * The failure was the asked-for compaction or summary. Presence is the fact.
- *
- * @generated from message shim.v1.StartSessionCompactionFailed
- */
-export type StartSessionCompactionFailed = Message<"shim.v1.StartSessionCompactionFailed"> & {
-};
-
-/**
- * Describes the message shim.v1.StartSessionCompactionFailed.
- * Use `create(StartSessionCompactionFailedSchema)` to create a new message.
- */
-export const StartSessionCompactionFailedSchema: GenMessage<StartSessionCompactionFailed> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 21);
+  messageDesc(file_shim_v1_endpoint_start_session, 18);
 
 /**
  * The vendor start failed for a reason that can pass: it stayed silent past
@@ -885,7 +792,7 @@ export type StartSessionVendorStartRetryable = Message<"shim.v1.StartSessionVend
  * Use `create(StartSessionVendorStartRetryableSchema)` to create a new message.
  */
 export const StartSessionVendorStartRetryableSchema: GenMessage<StartSessionVendorStartRetryable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 22);
+  messageDesc(file_shim_v1_endpoint_start_session, 19);
 
 /**
  * The network was unreachable.
@@ -900,7 +807,7 @@ export type StartSessionVendorStartNetwork = Message<"shim.v1.StartSessionVendor
  * Use `create(StartSessionVendorStartNetworkSchema)` to create a new message.
  */
 export const StartSessionVendorStartNetworkSchema: GenMessage<StartSessionVendorStartNetwork> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 23);
+  messageDesc(file_shim_v1_endpoint_start_session, 20);
 
 /**
  * The vendor failed transiently.
@@ -915,7 +822,7 @@ export type StartSessionVendorStartVendor = Message<"shim.v1.StartSessionVendorS
  * Use `create(StartSessionVendorStartVendorSchema)` to create a new message.
  */
 export const StartSessionVendorStartVendorSchema: GenMessage<StartSessionVendorStartVendor> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 24);
+  messageDesc(file_shim_v1_endpoint_start_session, 21);
 
 /**
  * The vendor refused the start for a reason that will not pass on its own: a
@@ -948,7 +855,7 @@ export type StartSessionVendorStartRejected = Message<"shim.v1.StartSessionVendo
  * Use `create(StartSessionVendorStartRejectedSchema)` to create a new message.
  */
 export const StartSessionVendorStartRejectedSchema: GenMessage<StartSessionVendorStartRejected> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 25);
+  messageDesc(file_shim_v1_endpoint_start_session, 22);
 
 /**
  * @generated from message shim.v1.StartSessionUnknownSession
@@ -961,7 +868,7 @@ export type StartSessionUnknownSession = Message<"shim.v1.StartSessionUnknownSes
  * Use `create(StartSessionUnknownSessionSchema)` to create a new message.
  */
 export const StartSessionUnknownSessionSchema: GenMessage<StartSessionUnknownSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 26);
+  messageDesc(file_shim_v1_endpoint_start_session, 23);
 
 /**
  * @generated from message shim.v1.StartSessionAlreadyStarted
@@ -974,7 +881,7 @@ export type StartSessionAlreadyStarted = Message<"shim.v1.StartSessionAlreadySta
  * Use `create(StartSessionAlreadyStartedSchema)` to create a new message.
  */
 export const StartSessionAlreadyStartedSchema: GenMessage<StartSessionAlreadyStarted> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 27);
+  messageDesc(file_shim_v1_endpoint_start_session, 24);
 
 /**
  * @generated from message shim.v1.StartSessionConversationOwned
@@ -987,7 +894,7 @@ export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConvers
  * Use `create(StartSessionConversationOwnedSchema)` to create a new message.
  */
 export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 28);
+  messageDesc(file_shim_v1_endpoint_start_session, 25);
 
 /**
  * @generated from message shim.v1.StartSessionLockHolderUnavailable
@@ -1006,5 +913,5 @@ export type StartSessionLockHolderUnavailable = Message<"shim.v1.StartSessionLoc
  * Use `create(StartSessionLockHolderUnavailableSchema)` to create a new message.
  */
 export const StartSessionLockHolderUnavailableSchema: GenMessage<StartSessionLockHolderUnavailable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_start_session, 29);
+  messageDesc(file_shim_v1_endpoint_start_session, 26);
 

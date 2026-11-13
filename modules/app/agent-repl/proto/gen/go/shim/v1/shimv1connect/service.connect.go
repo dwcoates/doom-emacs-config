@@ -41,6 +41,9 @@ const (
 const (
 	// ShimStartSessionProcedure is the fully-qualified name of the Shim's StartSession RPC.
 	ShimStartSessionProcedure = "/shim.v1.Shim/StartSession"
+	// ShimSummarizeConversationProcedure is the fully-qualified name of the Shim's
+	// SummarizeConversation RPC.
+	ShimSummarizeConversationProcedure = "/shim.v1.Shim/SummarizeConversation"
 	// ShimWatchSessionProcedure is the fully-qualified name of the Shim's WatchSession RPC.
 	ShimWatchSessionProcedure = "/shim.v1.Shim/WatchSession"
 	// ShimSetSessionModelProcedure is the fully-qualified name of the Shim's SetSessionModel RPC.
@@ -107,6 +110,7 @@ const (
 var (
 	shimServiceDescriptor                        = v1.File_shim_v1_service_proto.Services().ByName("Shim")
 	shimStartSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("StartSession")
+	shimSummarizeConversationMethodDescriptor    = shimServiceDescriptor.Methods().ByName("SummarizeConversation")
 	shimWatchSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("WatchSession")
 	shimSetSessionModelMethodDescriptor          = shimServiceDescriptor.Methods().ByName("SetSessionModel")
 	shimSetSessionEffortMethodDescriptor         = shimServiceDescriptor.Methods().ByName("SetSessionEffort")
@@ -144,6 +148,11 @@ type ShimClient interface {
 	// remediation is named; the shim begins its keep-alive cadence before
 	// answering.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
+	// SUMMARIZE, before the start: compact the conversation the next
+	// StartSession resumes, or summarize another conversation for the daemon to
+	// carry into it. Its own call, so the start's bound never covers a
+	// summarizer whose time grows with the conversation it reads.
+	SummarizeConversation(context.Context, *connect.Request[v1.SummarizeConversationRequest]) (*connect.Response[v1.SummarizeConversationResponse], error)
 	// ATTACH: the standing stream of session-level facts as they manifest
 	// upstream. The facts fixed at start are StartSession's. The shim's own
 	// health and the session's context usage RIDE THIS STREAM as pushed arms
@@ -259,6 +268,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimStartSessionProcedure,
 			connect.WithSchema(shimStartSessionMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		summarizeConversation: connect.NewClient[v1.SummarizeConversationRequest, v1.SummarizeConversationResponse](
+			httpClient,
+			baseURL+ShimSummarizeConversationProcedure,
+			connect.WithSchema(shimSummarizeConversationMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		watchSession: connect.NewClient[v1.WatchSessionRequest, v1.WatchSessionResponse](
@@ -435,6 +450,7 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 // shimClient implements ShimClient.
 type shimClient struct {
 	startSession             *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
+	summarizeConversation    *connect.Client[v1.SummarizeConversationRequest, v1.SummarizeConversationResponse]
 	watchSession             *connect.Client[v1.WatchSessionRequest, v1.WatchSessionResponse]
 	setSessionModel          *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 	setSessionEffort         *connect.Client[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse]
@@ -468,6 +484,11 @@ type shimClient struct {
 // StartSession calls shim.v1.Shim.StartSession.
 func (c *shimClient) StartSession(ctx context.Context, req *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error) {
 	return c.startSession.CallUnary(ctx, req)
+}
+
+// SummarizeConversation calls shim.v1.Shim.SummarizeConversation.
+func (c *shimClient) SummarizeConversation(ctx context.Context, req *connect.Request[v1.SummarizeConversationRequest]) (*connect.Response[v1.SummarizeConversationResponse], error) {
+	return c.summarizeConversation.CallUnary(ctx, req)
 }
 
 // WatchSession calls shim.v1.Shim.WatchSession.
@@ -617,6 +638,11 @@ type ShimHandler interface {
 	// remediation is named; the shim begins its keep-alive cadence before
 	// answering.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
+	// SUMMARIZE, before the start: compact the conversation the next
+	// StartSession resumes, or summarize another conversation for the daemon to
+	// carry into it. Its own call, so the start's bound never covers a
+	// summarizer whose time grows with the conversation it reads.
+	SummarizeConversation(context.Context, *connect.Request[v1.SummarizeConversationRequest]) (*connect.Response[v1.SummarizeConversationResponse], error)
 	// ATTACH: the standing stream of session-level facts as they manifest
 	// upstream. The facts fixed at start are StartSession's. The shim's own
 	// health and the session's context usage RIDE THIS STREAM as pushed arms
@@ -728,6 +754,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimStartSessionProcedure,
 		svc.StartSession,
 		connect.WithSchema(shimStartSessionMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimSummarizeConversationHandler := connect.NewUnaryHandler(
+		ShimSummarizeConversationProcedure,
+		svc.SummarizeConversation,
+		connect.WithSchema(shimSummarizeConversationMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimWatchSessionHandler := connect.NewServerStreamHandler(
@@ -902,6 +934,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		switch r.URL.Path {
 		case ShimStartSessionProcedure:
 			shimStartSessionHandler.ServeHTTP(w, r)
+		case ShimSummarizeConversationProcedure:
+			shimSummarizeConversationHandler.ServeHTTP(w, r)
 		case ShimWatchSessionProcedure:
 			shimWatchSessionHandler.ServeHTTP(w, r)
 		case ShimSetSessionModelProcedure:
@@ -969,6 +1003,10 @@ type UnimplementedShimHandler struct{}
 
 func (UnimplementedShimHandler) StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.StartSession is not implemented"))
+}
+
+func (UnimplementedShimHandler) SummarizeConversation(context.Context, *connect.Request[v1.SummarizeConversationRequest]) (*connect.Response[v1.SummarizeConversationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SummarizeConversation is not implemented"))
 }
 
 func (UnimplementedShimHandler) WatchSession(context.Context, *connect.Request[v1.WatchSessionRequest], *connect.ServerStream[v1.WatchSessionResponse]) error {
