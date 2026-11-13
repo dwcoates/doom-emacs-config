@@ -86,6 +86,10 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	// A loss's record reads the radio's power; it is powered unless a test
 	// says otherwise.
 	h.r.on(argRadioPower, answer{out: radioPowered})
+	// The failover's radio cycle and a leave's radio restart take unless a
+	// test says otherwise.
+	h.r.on(argRadioOff, answer{})
+	h.r.on(argRadioOn, answer{})
 	return h
 }
 

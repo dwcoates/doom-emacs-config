@@ -144,3 +144,33 @@ that every protobuf decision be made without their input (2026-10-01).
   - The schedule restarts from nothing once a network is joined or the mode is
     off, so a give-up lasts until then.
   - Each back-off is recorded once at INFO, and the give-up once at WARN.
+
+### 8. The failover rejoins a known network first (2026-11-13, no wire change)
+
+- WHAT: each failover attempt first cycles the Wi-Fi radio's power
+  (`networksetup -setairportpower <device> off`, then `on`), reads the
+  standing, and when no network is joined waits `knownNetworkSettle` (20s)
+  for macOS's own auto-join before joining the hotspot
+  (`rejoinKnownLocked` and `joinHotspotLocked` in
+  `daemon/internal/persistentwifi/failover.go`). A radio that cannot be
+  cycled, or a machine with no Wi-Fi interface, goes straight to the hotspot.
+  The first read that finds Wi-Fi lost also records the radio's power
+  (`networksetup -getairportpower`), the link summary, the lid, the quiet
+  state, the display and the energy mode, once per loss.
+- WHY: on 2026-11-12 Wi-Fi dropped with the lid closed, the failover tried
+  only the hotspot, which an idle iPhone does not advertise, and the machine
+  stayed offline for about 2.5 hours until the lid opened; the home network
+  then rejoined by itself 9s later. macOS withholds the joined network's name
+  (section 1), so no known network can be named to join; the radio cycle is
+  the one request that makes macOS run its auto-join over every preferred
+  network, and it is already how turning the mode off leaves the hotspot.
+- Consequences:
+  - The settle is two to three times the measured 9s rejoin. A network change
+    that finds a network joined during the settle ends the failover, recorded
+    at INFO with `awaiting_known_network`.
+  - Each step's distinct cause is recorded once: a refused radio cycle at WARN
+    (`knownCause`), a hotspot that cannot be joined at WARN, an unconfigured
+    hotspot at ERROR. Without a hotspot the radio cycle still runs on the
+    retry schedule.
+  - The failover's outcomes stay records, never wire: the standing it
+    publishes is the existing `PersistentWifiState`, so no proto arm was added.

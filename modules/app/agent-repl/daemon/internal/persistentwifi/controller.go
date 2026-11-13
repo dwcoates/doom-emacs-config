@@ -32,7 +32,7 @@ type Deps struct {
 	Config Config
 	// Runner runs every host tool. REQUIRED.
 	Runner Runner
-	// Clock stamps the reads and paces the hotspot failover's retries.
+	// Clock stamps the reads and paces the Wi-Fi failover's retries.
 	// REQUIRED.
 	Clock clock.Clock
 	// NetworkChanged answers a channel closed at the host's next network
@@ -90,13 +90,16 @@ type Controller struct {
 	// fact, so a failure that persists is recorded once rather than on every
 	// re-read.
 	wifiCause, modeCause string
-	// failoverCause is why the hotspot failover last could not take; empty
+	// failoverCause is why the failover's hotspot step last could not take; empty
 	// while it has nothing standing against it (failoverLocked).
 	failoverCause string
+	// knownCause is why the failover's known-network step (the radio cycle)
+	// last could not take; empty while nothing stands against it.
+	knownCause string
 	// energyCause is why the energy mode last could not follow the lid and the
 	// power source; empty while nothing stands against it (reconcileEnergyLocked).
 	energyCause string
-	// failover is the hotspot failover's retry schedule since Wi-Fi was lost;
+	// failover is the Wi-Fi failover's retry schedule since Wi-Fi was lost;
 	// the zero value while the failover stands down (failoverLocked).
 	failover failoverSchedule
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
@@ -157,7 +160,7 @@ func (c *Controller) Topic() *publish.Topic[*agentreplv1.PersistentWifiState] { 
 
 // Refresh reads the standing once and publishes it. The composition root calls
 // it before anything is served, so no stream or topbar is ever drawn from a
-// standing nobody read. It only reads: the hotspot failover is Run's, so the
+// standing nobody read. It only reads: the Wi-Fi failover is Run's, so the
 // boot never waits on a Wi-Fi join. It also undoes a lid dim an earlier build
 // left in force (restoreLegacyDimLocked).
 func (c *Controller) Refresh(ctx context.Context) {
@@ -168,12 +171,13 @@ func (c *Controller) Refresh(ctx context.Context) {
 }
 
 // Run re-reads the standing on every change the host reports until ctx ends,
-// and on each read holds the hotspot failover to what it read (tick): with the
-// mode on and no network joined, the hotspot is joined.
+// and on each read holds the Wi-Fi failover to what it read (tick): with the
+// mode on and no network joined, a network macOS knows is rejoined, else the
+// hotspot is joined.
 //
 // THE WATCHES ARE TAKEN FIRST, then the standing read once, so a change
 // between Refresh and the watches is never missed. Between changes nothing
-// runs, save the hotspot failover's own retry when one is due: that schedule
+// runs, save the Wi-Fi failover's own retry when one is due: that schedule
 // (failoverBackoff) is the failover's design, and its timer is armed only
 // while a failed join waits for its next try.
 //

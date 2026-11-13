@@ -15,8 +15,9 @@
 // joined to a network, and whether sleep is disabled. The controller re-reads
 // both on a fixed cadence and after every change, and publishes the standing
 // on one topic that the daemon-level stream and the topbar both take. While
-// the mode is on, every re-read that finds no network joined joins the hotspot
-// (failover.go).
+// the mode is on, every re-read that finds no network joined starts the Wi-Fi
+// failover (failover.go): the radio is cycled so macOS rejoins a network it
+// knows, and the hotspot is joined when none comes back.
 //
 // EVERY HOST TOOL RUNS THROUGH ONE INJECTED RUNNER, by absolute path, so a
 // unit test scripts every answer and no test ever touches the real machine's

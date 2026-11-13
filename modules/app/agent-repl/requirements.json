@@ -447,7 +447,7 @@
     {
       "id": "persistent-wifi-hotspot",
       "kind": "env",
-      "why": "names the phone hotspot persistent-wifi mode joins when Wi-Fi is lost with the lid closed; without it nothing reconnects and every agent stops until the lid opens",
+      "why": "names the phone hotspot persistent-wifi mode joins when Wi-Fi is lost with the lid closed and no network macOS knows comes back; without it only the known networks are tried, and when none returns every agent stops until the lid opens",
       "profile": "run",
       "optional": false,
       "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT",

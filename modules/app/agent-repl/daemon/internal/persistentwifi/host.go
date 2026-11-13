@@ -19,7 +19,7 @@ import (
 //
 // Each change reads the standing at once, so a change made outside agent-repl
 // reaches the topbar as it happens rather than within a cadence, and a lost
-// network is answered by the hotspot failover the moment it is lost.
+// network is answered by the Wi-Fi failover the moment it is lost.
 
 // PowerPrefsDir is where macOS keeps the power settings `pmset` writes.
 const PowerPrefsDir = "/Library/Preferences"
