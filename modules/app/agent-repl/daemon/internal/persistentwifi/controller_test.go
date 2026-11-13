@@ -26,11 +26,11 @@ type harness struct {
 	published chan *agentreplv1.PersistentWifiState
 	network   *fakeNetwork
 	power     *fakePower
-	exists  map[string]bool
-	dims    *fakeLidDims
-	lid     *fakeLidWatcher
-	freezer *fakeFreezer
-	views   *viewquiet.Gate
+	exists    map[string]bool
+	dims      *fakeLidDims
+	lid       *fakeLidWatcher
+	freezer   *fakeFreezer
+	views     *viewquiet.Gate
 	// viewMoves are the quiet gate's transitions, as a follower heard them.
 	viewMoves []bool
 	telemetry *fakeQuietTelemetry
