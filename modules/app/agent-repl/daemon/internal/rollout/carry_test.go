@@ -208,6 +208,80 @@ func TestAMidWorkAdoptionWhoseShimNeverReAnnouncesIsRefusedAndLetGo(t *testing.T
 	}
 }
 
+func TestTheSuccessorsRefusalMarkerNamesWhyItRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness, ws ids.WorkspaceID)
+		want    refusalKind
+	}{
+		{
+			name: "a shim that reported no build is refused as incompatible",
+			arrange: func(h *harness, ws ids.WorkspaceID) {
+				carryFor(t, h, ws, Carry{MidWork: true, ShimBuild: ""})
+			},
+			want: refusalIncompatible,
+		},
+		{
+			name: "a shim whose facts never arrived is refused as late",
+			arrange: func(h *harness, ws ids.WorkspaceID) {
+				h.fleet.factsErr[ws] = context.DeadlineExceeded
+				carryFor(t, h, ws, Carry{MidWork: true, ShimBuild: "installed-build"})
+			},
+			want: refusalFactsLate,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tc.arrange(h, ws)
+			arm(t, h, ws, Participants{Host: true})
+
+			// Act
+			_ = h.c.AdoptHost(context.Background(), ws)
+
+			// Assert
+			got, err := h.c.readRefusal(ws)
+			if err != nil || got.Kind != tc.want {
+				t.Fatalf("refusal = (%+v, %v), want kind %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadRefusal(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		want    refusalKind
+		wantErr bool
+	}{
+		{name: "an incompatible refusal reads back", body: `{"kind":"incompatible","why":"w"}`, want: refusalIncompatible},
+		{name: "a late-facts refusal reads back", body: `{"kind":"facts_late","why":"w"}`, want: refusalFactsLate},
+		{name: "a marker that is not JSON is an error", body: "the shim reported no build\n", wantErr: true},
+		{name: "a marker naming no known kind is an error", body: `{"kind":"other","why":"w"}`, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if err := writeAtomically(h.c.carryDir(), h.c.refusalPath(ws), "refused-*", []byte(tc.body)); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			// Act
+			got, err := h.c.readRefusal(ws)
+
+			// Assert
+			if (err != nil) != tc.wantErr || got.Kind != tc.want {
+				t.Fatalf("readRefusal = (%+v, %v), want kind %q error %v", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestAMidWorkAdoptionAwaitsTheAdoptedFactsBeforeDrainingTheIntake(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -421,7 +495,7 @@ func TestAStandingRefusalRefusesAnotherAdoptionAttempt(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.c.writeRefusal(ws, "an earlier attempt refused it"); err != nil {
+	if err := h.c.writeRefusal(ws, refusal{Kind: refusalIncompatible, Why: "an earlier attempt refused it"}); err != nil {
 		t.Fatalf("writeRefusal: %v", err)
 	}
 	arm(t, h, ws, Participants{Host: true})
@@ -807,7 +881,7 @@ func TestAMidWorkMoveHasNotLandedUntilTheSuccessorConsumesTheCarry(t *testing.T)
 // refuses a mid-work adoption before its claim.
 func refusedBySuccessor(t *testing.T, h *harness, ws ids.WorkspaceID) {
 	t.Helper()
-	if err := h.c.writeRefusal(ws, "the shim reported no build"); err != nil {
+	if err := h.c.writeRefusal(ws, refusal{Kind: refusalIncompatible, Why: "the shim reported no build"}); err != nil {
 		t.Fatalf("writeRefusal: %v", err)
 	}
 }
@@ -837,6 +911,65 @@ func TestARefusedMidWorkAdoptionIsAskedAgainAtFreeness(t *testing.T) {
 	}
 }
 
+// isDispatchQuietTransfer matches a re-offer's transfer request.
+func isDispatchQuietTransfer(c registryCall) bool {
+	return c.Req.Reason == string(ReasonHandoverTransfer) && c.Req.WaitFor == bounce.GateDispatchQuiet
+}
+
+// A WORKSPACE REFUSED FOR LATE FACTS IS OFFERED AGAIN MID-WORK: offered at
+// freeness, one whose detached work runs for hours held the handover open for
+// as long (2026-11-13, eval-cache-torch-human).
+func TestARefusalForLateFactsIsOfferedAgainMidWork(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	handOverUntilWindow(t, h)
+	if err := h.c.writeRefusal(ws, refusal{Kind: refusalFactsLate, Why: "the facts came too late"}); err != nil {
+		t.Fatalf("writeRefusal: %v", err)
+	}
+	// The re-offer's pacing delay is one adoption window.
+	h.clock.awaitArmed(t, adoptionWindow)
+
+	// Act
+	h.clock.Fire(adoptionWindow)
+	forWS := func(c registryCall) bool { return c.WS == ws && isDispatchQuietTransfer(c) }
+	h.registry.awaitRequest(t, forWS) // the handover's first transfer
+	call := h.registry.awaitRequest(t, forWS)
+
+	// Assert
+	if call.Req.Force || !call.Req.KeepDraining {
+		t.Fatalf("re-offer = %+v, want an unforced kept-draining transfer at dispatch quiet", call)
+	}
+	for _, c := range h.registry.Requests() {
+		if c.WS == ws && isFreenessTransfer(c) {
+			t.Fatalf("requests = %+v, want no transfer at freeness", h.registry.Requests())
+		}
+	}
+}
+
+func TestAnUnreadableRefusalIsStatedAndTransferredAgainAtFreeness(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	handOverUntilWindow(t, h)
+
+	// Act
+	if err := writeAtomically(h.c.carryDir(), h.c.refusalPath(ws), "refused-*", []byte("not a refusal")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	call := h.registry.awaitRequest(t, isFreenessTransfer)
+
+	// Assert
+	if call.WS != ws {
+		t.Fatalf("request = %+v, want the refused workspace transferred at freeness", call)
+	}
+	if !hasRecord(h, opAdoption, "error", "could not read why the successor refused the mid-work adoption; the workspace is transferred again at freeness") {
+		t.Fatalf("records = %+v, want the unreadable refusal at ERROR", records(h.log, opAdoption))
+	}
+}
+
 // TestARefusalWrittenBeforeTheWindowOpensIsTakenBack covers a refusal on
 // disk before the incumbent watches for one: no change is ever reported for
 // it, so the window must look once after its watch stands, rather than wait
@@ -847,7 +980,7 @@ func TestARefusalWrittenBeforeTheWindowOpensIsTakenBack(t *testing.T) {
 	ws, _ := h.workspace(t)
 	h.freeness.SetFree(ws, false)
 	h.registry.onSeal = func(sealed ids.WorkspaceID) {
-		if err := h.c.writeRefusal(sealed, "the shim reported no build"); err != nil {
+		if err := h.c.writeRefusal(sealed, refusal{Kind: refusalIncompatible, Why: "the shim reported no build"}); err != nil {
 			t.Errorf("writeRefusal: %v", err)
 		}
 	}

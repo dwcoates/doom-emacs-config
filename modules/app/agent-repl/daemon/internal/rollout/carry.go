@@ -258,15 +258,72 @@ func (c *controller) removeCarry(ws ids.WorkspaceID) error {
 	return nil
 }
 
+// refusalKind is why a successor refused a mid-work adoption, which decides
+// how the incumbent offers the workspace again (timeAdoption).
+type refusalKind string
+
+const (
+	// refusalIncompatible is a shim no mid-work adoption can be made of
+	// (midWorkCompatible): the workspace is offered again at freeness, the one
+	// gate that is never unsafe for it.
+	refusalIncompatible refusalKind = "incompatible"
+	// refusalFactsLate is an adopted shim whose session facts did not reach
+	// the successor within its bound. Nothing about the shim forbids a mid-work
+	// adoption, so the workspace is offered again mid-work, paced and bounded
+	// as a workspace taken back whole is (reoffer). Offered at freeness
+	// instead, a workspace whose detached work runs for hours held the
+	// handover open for as long (2026-11-13, eval-cache-torch-human: a
+	// background shell four hours in, the incumbent never exiting).
+	refusalFactsLate refusalKind = "facts_late"
+)
+
+// next says how the incumbent offers a workspace refused this way again.
+func (k refusalKind) next() string {
+	if k == refusalFactsLate {
+		return "offers it again mid-work"
+	}
+	return "transfers it at freeness"
+}
+
+// refusal is the marker a successor writes beside the carry when it refuses a
+// mid-work adoption.
+type refusal struct {
+	Kind refusalKind `json:"kind"`
+	Why  string      `json:"why"`
+}
+
 // writeRefusal records a successor's refusal of a mid-work adoption, which is
 // how the incumbent -- with no channel to it -- learns to take the workspace
-// back and transfer it at freeness.
-func (c *controller) writeRefusal(ws ids.WorkspaceID, why string) error {
-	if err := writeAtomically(c.carryDir(), c.refusalPath(ws), "refused-*", []byte(why+"\n")); err != nil {
+// back and how to offer it again.
+func (c *controller) writeRefusal(ws ids.WorkspaceID, r refusal) error {
+	body, err := json.Marshal(r)
+	if err != nil {
+		c.log.Error(opCarry, "could not encode the refused mid-work adoption", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+		return fmt.Errorf("rollout: encode the refusal of %q: %w", ws, err)
+	}
+	if err := writeAtomically(c.carryDir(), c.refusalPath(ws), "refused-*", body); err != nil {
 		c.log.Error(opCarry, "could not record the refused mid-work adoption", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
 		return fmt.Errorf("rollout: record the refusal of %q: %w", ws, err)
 	}
 	return nil
+}
+
+// readRefusal reads the successor's refusal of ws's mid-work adoption.
+func (c *controller) readRefusal(ws ids.WorkspaceID) (refusal, error) {
+	body, err := os.ReadFile(c.refusalPath(ws))
+	if err != nil {
+		return refusal{}, fmt.Errorf("rollout: read the refusal of %q: %w", ws, err)
+	}
+	var r refusal
+	if err := json.Unmarshal(body, &r); err != nil {
+		return refusal{}, fmt.Errorf("rollout: decode the refusal of %q: %w", ws, err)
+	}
+	switch r.Kind {
+	case refusalIncompatible, refusalFactsLate:
+		return r, nil
+	default:
+		return refusal{}, fmt.Errorf("rollout: the refusal of %q names no known kind (%q)", ws, r.Kind)
+	}
 }
 
 // refusedMidWork reports whether the successor refused this workspace's
@@ -474,15 +531,16 @@ func (c *controller) takeCarry(ws ids.WorkspaceID, outgoing ids.InstanceID, fiel
 // refuseMidWork refuses, before any claim, a mid-work adoption this daemon
 // cannot make safely. The row stays unowned for the incumbent's take-back.
 func (c *controller) refuseMidWork(ws ids.WorkspaceID, why string, fields dlog.Context) error {
-	return errors.Join(fmt.Errorf("rollout: adopt %q: %s: %w", ws, why, ErrMidWorkRefused), c.recordRefusal(ws, why, fields))
+	r := refusal{Kind: refusalIncompatible, Why: why}
+	return errors.Join(fmt.Errorf("rollout: adopt %q: %s: %w", ws, why, ErrMidWorkRefused), c.recordRefusal(ws, r, fields))
 }
 
 // recordRefusal states a refused mid-work adoption and writes the marker the
 // incumbent takes the workspace back on.
-func (c *controller) recordRefusal(ws ids.WorkspaceID, why string, fields dlog.Context) error {
-	c.log.Info(opAdopt, "refused the mid-work adoption; the incumbent takes the workspace back and transfers it at freeness",
-		dlog.Merge(fields, dlog.Context{"why": why}))
-	return c.writeRefusal(ws, why)
+func (c *controller) recordRefusal(ws ids.WorkspaceID, r refusal, fields dlog.Context) error {
+	c.log.Info(opAdopt, "refused the mid-work adoption; the incumbent takes the workspace back and "+r.Kind.next(),
+		dlog.Merge(fields, dlog.Context{"why": r.Why, "kind": string(r.Kind)}))
+	return c.writeRefusal(ws, r)
 }
 
 // refuseAdopted refuses a mid-work adoption AFTER the claim and the dial: the
@@ -499,7 +557,7 @@ func (c *controller) refuseAdopted(ctx context.Context, ws ids.WorkspaceID, why 
 		c.log.Error(opAdopt, "could not give back the serving row of a refused mid-work adoption", dlog.WithCause(fields, err))
 		failures = append(failures, fmt.Errorf("rollout: adopt %q: give back serving: %w", ws, err))
 	}
-	if err := c.recordRefusal(ws, why, fields); err != nil {
+	if err := c.recordRefusal(ws, refusal{Kind: refusalFactsLate, Why: why}, fields); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)

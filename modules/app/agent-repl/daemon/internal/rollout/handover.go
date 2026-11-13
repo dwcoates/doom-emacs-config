@@ -828,6 +828,8 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 		return false
 	case adoptionRefused:
 		return c.offerAgain(ctx, ws, plan, windows, bounce.GateFreeness, fields)
+	case adoptionRefusedLate:
+		return c.reoffer(ctx, ws, plan, windows, reofferAfterLateFacts, fields)
 	case adoptionExpired:
 		return c.reoffer(ctx, ws, plan, windows, reofferAfterExpiry, fields)
 	case adoptionTakenBack:
@@ -841,6 +843,7 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 const (
 	reofferAfterExpiry         = "the workspace was taken back after its adoption window expired; it is offered to the successor again"
 	reofferAfterFailedTransfer = "the workspace's transfer failed with the workspace whole here; it is offered to the successor again"
+	reofferAfterLateFacts      = "the successor refused the mid-work adoption because the adopted shim's facts came too late; the workspace is offered to the successor again mid-work"
 )
 
 // reoffer sends a workspace taken back whole -- its adoption window expired,
@@ -973,9 +976,14 @@ const (
 	// adoptionExpired is an expired window the workspace was cleanly taken
 	// back on; it is offered to the successor again (reoffer).
 	adoptionExpired
-	// adoptionRefused is a mid-work adoption the successor refused; the
-	// workspace was taken back to be transferred again at freeness.
+	// adoptionRefused is a mid-work adoption the successor refused because
+	// the shim cannot be adopted mid-work; the workspace was taken back to be
+	// transferred again at freeness.
 	adoptionRefused
+	// adoptionRefusedLate is a mid-work adoption the successor refused
+	// because the adopted shim's facts came too late; the workspace was taken
+	// back to be offered again mid-work (reoffer).
+	adoptionRefusedLate
 )
 
 // landed is adoptionState's answer, further requiring that the successor has
@@ -1114,7 +1122,17 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 // successor refused. The successor gave the serving row back before it wrote
 // its refusal, so this daemon's claim is the one that stands.
 func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, detached bool, move *sealedMove, fields dlog.Context) adoptionOutcome {
-	c.log.Info(opAdoption, "the successor refused to adopt the workspace mid-work; taking it back to transfer it at freeness", fields)
+	// THE KIND IS READ BEFORE THE TAKE-BACK, which retires the marker. A
+	// marker that cannot be read is stated at ERROR and offered again at
+	// freeness, the gate that is never unsafe whatever the refusal was.
+	kind := refusalIncompatible
+	if r, err := c.readRefusal(ws); err != nil {
+		c.log.Error(opAdoption, "could not read why the successor refused the mid-work adoption; the workspace is transferred again at freeness", dlog.WithCause(fields, err))
+	} else {
+		kind = r.Kind
+	}
+	fields = dlog.Merge(fields, dlog.Context{"refusal": string(kind)})
+	c.log.Info(opAdoption, "the successor refused to adopt the workspace mid-work; taking it back, and it "+kind.next(), fields)
 	reclaimed, err := c.reclaim(ctx, ws, lease, detached, true, move, fields)
 	switch {
 	case !reclaimed && err == nil:
@@ -1128,6 +1146,9 @@ func (c *controller) takeBackRefused(ctx context.Context, ws ids.WorkspaceID, le
 		// over a take-back that did not finish would move what is not whole.
 		c.log.Error(opAdoption, "the refused workspace was taken back, but not cleanly; it is not transferred again", dlog.WithCause(fields, err))
 		return adoptionTakenBack
+	}
+	if kind == refusalFactsLate {
+		return adoptionRefusedLate
 	}
 	return adoptionRefused
 }
