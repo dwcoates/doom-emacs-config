@@ -403,6 +403,9 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
+	// CreateMediator makes the hidden deploy mediator NAME of the repository
+	// at REPODIR, on the mediator's model and effort (mediator.go).
+	CreateMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.
