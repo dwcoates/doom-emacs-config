@@ -115,6 +115,9 @@ var suiteRules = []suiteRule{
 	// The sandbox image and its runner are the sandboxed suite's precondition
 	// -- the Emacs client layer's and the Doom tier's, which runs in it -- and
 	// nothing else's: the containerless cross-system suite never touches them.
+	// Its bin/ also holds the preflight script whose bound and messages
+	// e2e-kit's root package tests.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/bin/", Suites: []string{"e2e-kit", "e2e-emacs"}},
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
 	// The e2e harness, its own module (the world every scenario builds, and
 	// its world-free helpers): its own suite, and both cross-system suites,

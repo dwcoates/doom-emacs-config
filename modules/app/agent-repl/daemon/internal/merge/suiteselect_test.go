@@ -63,6 +63,11 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"e2e-emacs"},
 		},
 		{
+			name:  "the sandbox's scripts select the sandboxed suite and the harness tests of its preflight",
+			paths: []string{"modules/app/agent-repl/e2e/sandbox/bin/preflight.sh"},
+			want:  []string{"e2e-kit", "e2e-emacs"},
+		},
+		{
 			name:  "the e2e harness selects both cross-system suites, and the scans of its sources",
 			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
 			want:  []string{"e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
