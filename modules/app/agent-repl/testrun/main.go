@@ -45,6 +45,7 @@ import (
 	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
+	"agentrepl/testrun/internal/proctable"
 	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/redundancy"
@@ -394,13 +395,13 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		return 1
 	}
 	if plan.Governed {
-		log.Infof("core budget: up to %d of the host's %d cores (%d%%), shared by every test run on the host through %s and held back by the CPU governor while the host is busy; this run ranks %d", slots, runtime.NumCPU(), cores.CapPercent, cores.DefaultDir, rank)
+		log.Infof("core budget: up to %d seats of the host's %d cores, shared by every test run on the host through %s; the CPU governor holds the tests to an average of %d%% of the host and the host to %d%%; this run ranks %d", slots, runtime.NumCPU(), cores.DefaultDir, cores.CapPercent, cores.CeilingPercent, rank)
 	} else {
 		if err := os.MkdirAll(plan.Dir, 0o755); err != nil {
 			log.Errorf("create the ungoverned run's own core pool %s: %v", plan.Dir, err)
 			return 1
 		}
-		log.Infof("core budget: the whole host, %d seats for its %d cores at %.0f cores a seat, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, runtime.NumCPU(), cores.SeatCost, plan.Dir, cores.UngovernedEnv, rank)
+		log.Infof("core budget: the whole host, %d seats for its %d cores at %.0f cores a seat, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, runtime.NumCPU(), cores.UngovernedSeatCores, plan.Dir, cores.UngovernedEnv, rank)
 	}
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {
@@ -433,7 +434,15 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	governorCtx, stopGovernor := context.WithCancel(ctx)
 	defer stopGovernor()
 	if plan.Governed {
-		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Ticks: ticker.C, Log: log}).Run(governorCtx)
+		// The tests' own CPU: every process carrying the mark this run, and
+		// every other, sets on its units (cores.TestsCPU).
+		marked, err := proctable.NewMarked(cores.NestedEnv)
+		if err != nil {
+			log.Errorf("read the tests' own CPU for the CPU governor: %v", err)
+			return 1
+		}
+		testsCPU := &cores.TestsCPU{Scan: marked.Scan}
+		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	}
 	return cli.Run(ctx, cli.Deps{
 		Events:      emitter,

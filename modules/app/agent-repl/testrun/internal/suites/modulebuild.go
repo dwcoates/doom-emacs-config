@@ -8,8 +8,8 @@ import (
 	"agentrepl/testrun/internal/run"
 )
 
-// BuildSlots is a module build's width, the widest unit the governor admits
-// first (cores.FirstUnitSeats): the build's go command is pinned to it by
+// BuildSlots is a module build's width, the widest unit's
+// (cores.FirstUnitSeats): the build's go command is pinned to it by
 // WidePinnedEnv.
 const BuildSlots = 2
 

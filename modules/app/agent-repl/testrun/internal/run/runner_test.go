@@ -124,6 +124,8 @@ type fakeCores struct {
 	held       int
 	peak       int
 	released   []string
+	// cores is each held unit's expected cores, as Hold was told them.
+	cores map[string]float64
 	// waiting, when set, receives a unit's ID when its hold must wait.
 	waiting chan string
 }
@@ -134,12 +136,16 @@ func newCores(free int) *fakeCores {
 	return c
 }
 
-func (c *fakeCores) Hold(id string, width int) (func() error, error) {
+func (c *fakeCores) Hold(id string, width int, cores float64) (func() error, error) {
 	if err := c.holdErr[id]; err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.cores == nil {
+		c.cores = map[string]float64{}
+	}
+	c.cores[id] = cores
 	if c.free < width && c.waiting != nil {
 		c.waiting <- id
 	}
@@ -178,7 +184,7 @@ func newRunnerOn(slots int, c *fakeCores, e *fakeExec) (*Runner, *bytes.Buffer, 
 }
 
 func spec(id, suite string, deps ...string) Spec {
-	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}, Bound: time.Minute, Expected: 20 * time.Second}
+	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}, Bound: time.Minute, Expected: 20 * time.Second, Cores: 1}
 }
 
 // never is a timer that never fires: no unit reaches its time limit.
@@ -1034,6 +1040,44 @@ func TestRunRefusesAUnitWithoutATimeLimit(t *testing.T) {
 	}
 	if len(e.started) != 0 {
 		t.Fatalf("started = %v, want nothing run", e.started)
+	}
+}
+
+func TestRunRefusesAUnitWithoutExpectedCores(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"a": {}}}
+	r, _, _ := newRunner(1, e)
+	uncosted := spec("a", "s")
+	uncosted.Cores = 0
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{uncosted})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "unit a (s) has no expected cores") {
+		t.Fatalf("Run = %v, want the uncosted unit refused", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started = %v, want nothing run", e.started)
+	}
+}
+
+func TestRunHoldsEachUnitsCoresByItsExpectedCores(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"heavy": {}, "light": {}}}
+	c := newCores(1 << 20)
+	r, _, _ := newRunnerOn(1, c, e)
+	heavy, light := spec("heavy", "s"), spec("light", "s")
+	heavy.Cores, light.Cores = 6.1, 1.1
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{heavy, light}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if c.cores["heavy"] != 6.1 || c.cores["light"] != 1.1 {
+		t.Fatalf("holds were told %v; want heavy 6.1 and light 1.1", c.cores)
 	}
 }
 

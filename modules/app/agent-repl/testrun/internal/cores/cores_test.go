@@ -1,10 +1,14 @@
 package cores
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"agentrepl/testrun/internal/seats"
 )
@@ -25,6 +29,10 @@ func (l *recLog) Infof(format string, args ...any) {
 	if l.waits != nil && strings.Contains(line, " wait") {
 		l.waits <- struct{}{}
 	}
+}
+
+func (l *recLog) Errorf(format string, args ...any) {
+	l.Infof("ERROR "+format, args...)
 }
 
 func (l *recLog) text() string {
@@ -104,7 +112,7 @@ func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 	h := NewHost(t.TempDir(), 3, 19, log)
 
 	// Act
-	release, err := h.Hold("u1", 2)
+	release, err := h.Hold("u1", 2, 1)
 
 	// Assert
 	if err != nil {
@@ -124,11 +132,137 @@ func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 	}
 }
 
+func TestHoldStatesTheUnitOnTheLedgerUntilItGivesItsSeatsBack(t *testing.T) {
+	// Arrange
+	h := NewHost(t.TempDir(), 3, 12, &recLog{})
+	before := time.Now()
+
+	// Act
+	release, err := h.Hold("u1", 2, 1.4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := readLedger(h.Pool.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := readLedger(h.Pool.Dir)
+
+	// Assert
+	if len(held) != 1 || held[0].Unit != "u1" || held[0].Rank != 12 || held[0].Width != 2 || held[0].Cores != 1.4 || held[0].Started.Before(before) {
+		t.Fatalf("ledger while held = %+v; want u1 at rank 12, two wide, 1.4 cores, started", held)
+	}
+	if err != nil || len(after) != 0 {
+		t.Fatalf("ledger after release = %+v, %v; want it empty", after, err)
+	}
+}
+
+func TestHoldStatesTheUnitWhileItWaits(t *testing.T) {
+	// Arrange: another unit holds the only seat.
+	log := &recLog{waits: make(chan struct{}, 1)}
+	h := NewHost(t.TempDir(), 1, 19, log)
+	other, err := h.Hold("other", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		release, err := h.Hold("u1", 1, 3)
+		if err == nil {
+			err = release()
+		}
+		done <- err
+	}()
+	<-log.waits
+
+	// Act
+	recs, err := readLedger(h.Pool.Dir)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := 0
+	for _, r := range recs {
+		if r.Unit == "u1" && r.Started.IsZero() && r.Cores == 3 {
+			waiting++
+		}
+	}
+	if waiting != 1 {
+		t.Fatalf("ledger = %+v; want u1 waiting at 3 cores", recs)
+	}
+	if err := other(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHoldThatFailsTakesTheUnitOffTheLedger(t *testing.T) {
+	// Arrange: a unit wider than the pool.
+	h := NewHost(t.TempDir(), 1, 19, &recLog{})
+
+	// Act
+	_, err := h.Hold("wide", 2, 4)
+
+	// Assert
+	recs, lerr := readLedger(h.Pool.Dir)
+	if err == nil || lerr != nil || len(recs) != 0 {
+		t.Fatalf("Hold = %v; ledger %+v, %v; want the hold refused and nothing left on the ledger", err, recs, lerr)
+	}
+}
+
+func TestHoldWakesTheGovernorAtEachChange(t *testing.T) {
+	// Arrange: the governor's wake FIFO, read without blocking, so each
+	// read answers every wake written before it.
+	h := NewHost(t.TempDir(), 1, 19, &recLog{})
+	path := filepath.Join(h.Pool.Dir, WakeFile)
+	if err := syscall.Mkfifo(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(fd)
+	wakes := func() int {
+		buf := make([]byte, 16)
+		n, err := syscall.Read(fd, buf)
+		if errors.Is(err, syscall.EAGAIN) {
+			return 0
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Act
+	release, err := h.Hold("u1", 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asked := wakes()
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	ended := wakes()
+
+	// Assert: once on asking, once on starting, once on letting go.
+	if asked != 2 || ended != 1 {
+		t.Fatalf("wakes = %d while held, %d on release; want 2 and 1", asked, ended)
+	}
+}
+
 func TestHoldWaitsForAnotherRunsSeatAndSaysSo(t *testing.T) {
 	// Arrange: another run's unit holds the host's only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
 	h := NewHost(t.TempDir(), 1, 19, log)
-	other, err := h.Hold("other", 1)
+	other, err := h.Hold("other", 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +272,7 @@ func TestHoldWaitsForAnotherRunsSeatAndSaysSo(t *testing.T) {
 	}
 	done := make(chan held, 1)
 	go func() {
-		r, err := h.Hold("u1", 1)
+		r, err := h.Hold("u1", 1, 1)
 		done <- held{r, err}
 	}()
 
@@ -157,7 +291,7 @@ func TestHoldWaitsForAnotherRunsSeatAndSaysSo(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"core seats: unit u1 waits for 1 of the host's 1, held by test runs or promised to a run that outranks this one (rank 19)",
+		"core seats: unit u1 waits for 1 of the host's 1, for the CPU governor to admit it, for seats test runs hold, or behind a run that outranks this one (rank 19)",
 		"core seats: unit u1 took 1 after",
 	}
 	for _, w := range want {
@@ -172,7 +306,7 @@ func TestHoldRefusesAUnitWiderThanTheHostsBudget(t *testing.T) {
 	h := NewHost(t.TempDir(), 2, 19, &recLog{})
 
 	// Act
-	release, err := h.Hold("wide", 3)
+	release, err := h.Hold("wide", 3, 1)
 
 	// Assert
 	if err == nil || release != nil || !strings.Contains(err.Error(), "hold 3 core seat(s) for unit wide") {
@@ -219,7 +353,7 @@ func TestHoldTakesSeatsAtTheRunsRank(t *testing.T) {
 	h := NewHost(t.TempDir(), 1, -1, &recLog{})
 
 	// Act
-	release, err := h.Hold("u1", 1)
+	release, err := h.Hold("u1", 1, 1)
 
 	// Assert
 	if err == nil || release != nil || !strings.Contains(err.Error(), "at rank -1") {
@@ -237,7 +371,7 @@ func TestPlanForGivesEachRunItsBudgetPoolAndGovernor(t *testing.T) {
 	}{
 		{name: "an ordinary run shares the host's governed pool", numCPU: 16,
 			want: Plan{Budget: 16 * CapPercent / 100, Dir: "/shared", Governed: true}},
-		{name: "a bypass holder's run holds the whole host from its own pool, ungoverned, a seat per SeatCost cores", ungoverned: "1", numCPU: 16,
+		{name: "a bypass holder's run holds the whole host from its own pool, ungoverned, a seat per UngovernedSeatCores cores", ungoverned: "1", numCPU: 16,
 			want: Plan{Budget: 8, Dir: "/own"}},
 		{name: "an ungoverned run on a host of one core is refused", ungoverned: "1", numCPU: 1,
 			wantErr: "which is not one seat"},

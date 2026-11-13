@@ -109,11 +109,16 @@ Example, run from `modules/app/agent-repl`:
 
 ## Every test obeys the host CPU governor
 
-Owner rulings, 2026-10-26 and 2026-10-30: tests together may only bring the host's TOTAL CPU
-use up to 35%. The governor (`testrun/internal/cores`, `cores.Governor`)
-only admits units: a unit starts once it holds its core seats, and while the
-host is at the cap no unit of any run starts ("waiting for CPU"). A running
-unit is never paused. The mechanics are in `modules/app/agent-repl/AGENTS.md`,
+Owner ruling, 2026-11-13: the tests together average 35% of the host's
+cores (`cores.CapPercent`), their own share that other load does not eat, and
+never bring the whole host above 50% (`cores.CeilingPercent`). The governor
+(`testrun/internal/cores`) measures the tests' CPU apart from the host (every
+process carrying `cores.NestedEnv`), averages the last 3 one-second reads, and
+admits a unit when tests + its cores fit the target and other + tests + its
+cores fit the ceiling. A unit costs its own history (`plan.CoresKey`), else 2
+cores per slot. It admits, never pauses. On macOS tests run under
+`taskpolicy -c utility` (nice alone changed no scheduler priority; the
+background clamp confines them to the 4 efficiency cores). The mechanics are in `modules/app/agent-repl/AGENTS.md`,
 "THE HOST'S TOTAL CPU IS CAPPED" and "A UNIT'S WIDTH MUST BE THE CORES IT
 USES"; read those for how it works, not restated here.
 

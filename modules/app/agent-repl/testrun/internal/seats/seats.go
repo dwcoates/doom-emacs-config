@@ -260,6 +260,22 @@ func (p Pool) TakeN(n, rank int, waiting func()) (Held, error) {
 	}
 }
 
+// Waiting reports whether a taker of rank waits for seats right now: whether
+// its rank's lane is held. It probes with a lock it lets go at once.
+func (p Pool) Waiting(rank int) (bool, error) {
+	f, err := p.lock(p.lanePath(rank), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := f.Close(); err != nil {
+		return false, fmt.Errorf("close the %s seats' lane %s: %w", p.What, p.lanePath(rank), err)
+	}
+	return false, nil
+}
+
 // awaitLaneEmpty waits, on the kernel's lock, until no taker waits at rank:
 // every taker that waits holds its rank's lane shared, so an exclusive hold
 // of it is granted only once the last has its seats or gave up.
