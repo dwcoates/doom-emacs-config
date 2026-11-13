@@ -107,10 +107,15 @@ func SuiteInputs(d Deps, s roster.Suite) (*InputSet, error) {
 	set := NewInputSet()
 	switch s.Kind {
 	case roster.Script, roster.SplitScript:
-		// A script suite's call graph is no tool's to derive: it reads its
-		// script and what its Reuse declares.
+		// A script suite reads its script, the scripts it names
+		// (addScriptGraph) and what its Reuse declares.
 		if err := placeRosterPath(d, set, s.Path, false); err != nil {
 			return nil, err
+		}
+		if len(s.Reuse.Scripts) > 0 {
+			if err := addScriptGraph(d, set, s.Path, s.Reuse.Scripts); err != nil {
+				return nil, fmt.Errorf("reuse: %s's scripts: %w", s.Name, err)
+			}
 		}
 	case roster.GoModule, roster.E2E:
 		dir := roster.Resolve(d.Repo, d.Module, s.Path)

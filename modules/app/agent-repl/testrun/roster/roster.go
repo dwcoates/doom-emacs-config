@@ -161,6 +161,12 @@ type Reuse struct {
 	// runs whenever its suite runs, under the suite's own envelope, and is
 	// never recorded.
 	Never map[string]string
+	// Scripts are the directories a script suite's scripts come from: the
+	// suite reads its script and, transitively, every script of these
+	// directories one it reads NAMES, plus each directory's listing
+	// (reuse.addScriptGraph). A change to a script it never names runs it
+	// not, and a read of one it does not name is refused by its profile.
+	Scripts []string
 }
 
 // Parallel is how a wait-bound Go package's chunks overlap their tests.
@@ -235,43 +241,43 @@ func LookupProgram(name string) (Program, bool) {
 // Suites is the roster. Order is report order only; the scheduler decides run
 // order.
 var Suites = []Suite{
-	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true, Reuse: harness(append(fakeGitFixture, "lisp/test-agent-repl.el", "test_time.csv", "testrun/")...)},
+	{Name: "orchestrator-harness", Kind: Script, Path: "bin/test-test-all.sh", Harness: true, Reuse: scripts(fakeGitScripts, "lisp/test-agent-repl.el", "test_time.csv", "testrun/")},
 	{Name: "logging-density-harness", Kind: Script, Path: "bin/test-report-logging-density.sh", Harness: true, Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	{Name: "build-frontend-harness", Kind: SplitScript, Path: "bin/test-build-frontend.sh", Harness: true,
-		Reuse: harness("bin/", "daemon/internal/checkout/checkout.go")},
+		Reuse: scripts(moduleScripts, "daemon/internal/checkout/checkout.go")},
 	{Name: "background-harness", Kind: Script, Path: "bin/test-background.sh", Harness: true,
 		NeverReused: "it walks the whole module for every script and test that must run at background priority"},
-	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: harness("bin/")},
+	{Name: "e2e-perf-harness", Kind: Script, Path: "bin/test-e2e-perf.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "cpu-load-harness", Kind: Script, Path: "bin/test-with-cpu-load.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true, NeverReused: "it walks the whole module for every requirements.json, so no input set short of the checkout covers it"},
-	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
-	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
-	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: harness(fakeGitFixture...)},
-	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true, Reuse: harness("bin/", "lisp/elisp-build.el")},
-	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true, Reuse: harness("bin/")},
-	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: harness("bin/", "proto/vocab/")},
-	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: harness("skills/agent-repl-metrics/", "bin/", "proto/vocab/latencies.json")},
-	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: harness("skills/gns-auth-renew/", "bin/")},
+	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
+	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
+	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
+	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true, Reuse: scripts(moduleScripts, "lisp/elisp-build.el")},
+	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "test-split-harness", Kind: Script, Path: "bin/test-lib-test-split.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "logs-harness", Kind: Script, Path: "bin/test-logs.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "deploy-hook-probe-harness", Kind: Script, Path: "bin/test-deploy-hook-probe.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "profile-agent-repl-harness", Kind: Script, Path: "bin/test-profile-agent-repl.sh", Harness: true, Reuse: scripts(moduleScripts, "proto/vocab/")},
+	{Name: "metrics-skill-harness", Kind: Script, Path: "skills/agent-repl-metrics/test-run.sh", Reuse: scripts(moduleScripts, "skills/agent-repl-metrics/", "proto/vocab/latencies.json")},
+	{Name: "gns-auth-renew-skill-harness", Kind: Script, Path: "skills/gns-auth-renew/test-run.sh", Reuse: scripts(moduleScripts, "skills/gns-auth-renew/")},
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
-	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: harness("bin/", "e2e/realtest/")},
-	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: harness("scripts/", "bin/")},
-	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: harness("scripts/", "bin/")},
-	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: harness("scripts/", "bin/")},
-	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh", Reuse: harness(append(fakeGitFixture, "lisp/test-agent-repl.el")...)},
-	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: harness(fakeGitFixture...)},
-	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: harness(fakeGitFixture...)},
+	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: scripts(moduleScripts, "e2e/realtest/")},
+	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
+	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
+	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
+	{Name: "precommit-harness", Kind: Script, Path: "/.githooks/test-pre-commit.sh", Reuse: scripts(fakeGitScripts)},
+	{Name: "safe-test-run-harness", Kind: Script, Path: "/.claude/test-safe-test-run.sh", Reuse: scripts(fakeGitScripts, "lisp/test-agent-repl.el")},
+	{Name: "merge-queue-hook-harness", Kind: Script, Path: "/.githooks/test-reference-transaction.sh", Reuse: scripts(fakeGitScripts)},
+	{Name: "release-tag-hook-harness", Kind: Script, Path: "/.githooks/test-pre-push.sh", Reuse: scripts(fakeGitScripts)},
+	{Name: "install-harness", Kind: Script, Path: "/.claude/test-install.sh", Reuse: scripts(fakeGitScripts)},
+	{Name: "workspace-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace.sh", Reuse: scripts(fakeGitScripts)},
+	{Name: "workspace-open-cli-harness", Kind: Script, Path: "/bin/test-agent_repl_workspace_open.sh", Reuse: scripts(fakeGitScripts)},
 	{Name: "ert", Kind: ERT, Path: "lisp", Reuse: &Reuse{Units: map[string][]string{
 		// What a test file reads from the suite's directory as data.
 		"test-threads.el":      {"lisp/open-chats.agent-repl-chats"},
@@ -440,11 +446,19 @@ var Suites = []Suite{
 // reads its script and paths.
 func harness(paths ...string) *Reuse { return &Reuse{Inputs: paths} }
 
-// fakeGitFixture is what a harness built on bin/lib-fake-git-fixture.sh or
-// bin/lib-worktrees.sh reads: the module's scripts, the repository's own
-// checked-in hooks it installs into each fixture, and its .claude and bin
-// scripts it runs there.
-var fakeGitFixture = []string{"bin/", "scripts/", "/.githooks/", "/.claude/", "/bin/"}
+// scripts is the Reuse of a script suite whose scripts come from DIRS
+// (Reuse.Scripts) and which reads PATHS beyond them.
+func scripts(dirs []string, paths ...string) *Reuse { return &Reuse{Scripts: dirs, Inputs: paths} }
+
+// moduleScripts is where most harnesses' scripts come from: the module's
+// bin/.
+var moduleScripts = []string{"bin/"}
+
+// fakeGitScripts are the script directories a harness built on
+// bin/lib-fake-git-fixture.sh or bin/lib-worktrees.sh reaches: the module's
+// scripts, the repository's checked-in hooks it installs into each fixture,
+// and its .claude and bin scripts it runs there.
+var fakeGitScripts = []string{"bin/", "scripts/", "/.githooks/", "/.claude/", "/bin/"}
 
 // loggingDensityInputs are the trees the logging-density report scans: every
 // system's logging calls.
