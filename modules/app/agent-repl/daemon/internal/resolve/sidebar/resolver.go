@@ -74,6 +74,18 @@ type resolver struct {
 	// factsOnly is set for the span of a renderFacts: row derives its facts
 	// and builds no row.
 	factsOnly bool
+	// batchCauses names, for the span of a combined commit's render, the
+	// operation that last changed each workspace in the batch.
+	batchCauses map[ids.WorkspaceID]string
+
+	// The combined commit (combine.go): mutations wait in queue, and the one
+	// leader applies and publishes them together.
+	qmu       sync.Mutex
+	queue     []*mutation
+	combining bool
+	// onQueued is the tests' one look at the queue: told its depth each time
+	// a change joins it, under qmu. nil outside a test.
+	onQueued func(depth int)
 }
 
 // resultChange is one workspace's changed last turn result.
@@ -196,12 +208,44 @@ func (r *resolver) mutate(operation, message string, ctx dlog.Context, log dlog.
 // APPLY answers false it changed nothing, and nothing is rendered,
 // published or recorded.
 func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlog.Logger, apply func() bool) {
+	r.commit(&mutation{
+		operation: operation, message: message, ctx: ctx, log: log,
+		apply: func(dlog.Logger) bool { return apply() },
+	})
+}
+
+// applyBatch applies every mutation of one combined commit (combine.go) under
+// the lock, and resolves and publishes the roster ONCE for all of them. It
+// answers what the caller reports off the lock.
+func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 	r.mu.Lock()
-	if !apply() {
+	var last *mutation
+	causes := map[ids.WorkspaceID]string{}
+	for _, m := range batch {
+		if m.scoped {
+			// THE WORKSPACE'S OWN SINK, resolved under the lock that reads the
+			// registry it is looked up in.
+			m.log = r.logFor(m.ws)
+		}
+		m.changed = m.apply(m.log)
+		if !m.changed {
+			continue
+		}
+		last = m
+		if m.scoped {
+			causes[m.ws] = m.operation
+		}
+	}
+	if last == nil {
 		r.mu.Unlock()
-		return
+		return batchOutcome{}
 	}
 	ready := r.state.regSeen
+	// A COMBINED RENDER NAMES EACH ROW'S OWN CAUSE: the last operation of the
+	// batch that changed that workspace, and the batch's last operation for a
+	// row no workspace-scoped change in it touched.
+	r.batchCauses = causes
+	defer func() { r.batchCauses = nil }()
 	// THE QUIET STATE STOPS THE ROSTER, NEVER ITS FACTS: the rows' facts are
 	// derived by a render that builds no row (renderFacts), so every status
 	// arm move and turn result still reaches its durable sink, and the roster
@@ -210,13 +254,13 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 	// published now or left stale for the resync, never lost between them.
 	quiet := ready && r.quiet.Quiet()
 	if quiet {
-		r.renderFacts(log, operation)
+		r.renderFacts(last.log, last.operation)
 		r.quietStale = true
 		r.quiet.Skipped(QuietViewName)
 	}
 	var roster *frontendv1.WorkspaceRoster
 	if ready && !quiet {
-		roster = r.render(log, operation)
+		roster = r.render(last.log, last.operation)
 		// EVERY RESOLVED ROSTER TAKES THE NEXT REVISION, under the lock that
 		// rendered it, so the revision orders rosters exactly as they were
 		// resolved (frontend.v1 WorkspaceRoster.revision). A render identical
@@ -229,9 +273,14 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 			r.last = roster
 		}
 	}
-	changes := r.pendingResults
+	out := batchOutcome{
+		applied:       true,
+		ready:         ready,
+		quiet:         quiet,
+		results:       r.pendingResults,
+		statusChanges: r.pendingStatusChanges,
+	}
 	r.pendingResults = nil
-	statusChanges := r.pendingStatusChanges
 	r.pendingStatusChanges = nil
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
@@ -243,25 +292,39 @@ func (r *resolver) mutateIf(operation, message string, ctx dlog.Context, log dlo
 		r.topic.Publish(roster)
 	}
 	r.mu.Unlock()
-	for _, change := range changes {
+	return out
+}
+
+// report hands a combined commit's results and status changes to their
+// sinks, off the lock, and records each applied mutation as mutate always
+// has.
+func (r *resolver) report(batch []*mutation, out batchOutcome) {
+	for _, change := range out.results {
 		r.results(change.ws, change.result)
 	}
-	for _, change := range statusChanges {
+	for _, change := range out.statusChanges {
 		r.statusChanges(change.ws, change.at)
 	}
-
-	if ctx == nil {
-		ctx = dlog.Context{}
-	}
-	if !ready {
-		log.Debug(operation, "the roster took a fact before any registry and published nothing", ctx)
+	if !out.applied {
 		return
 	}
-	if quiet {
-		log.Debug(operation, "the roster took a fact while the lid is closed and quiet; its facts are derived and the roster waits for the lid to open", ctx)
-		return
+	for _, m := range batch {
+		if !m.changed {
+			continue
+		}
+		ctx := m.ctx
+		if ctx == nil {
+			ctx = dlog.Context{}
+		}
+		switch {
+		case !out.ready:
+			m.log.Debug(m.operation, "the roster took a fact before any registry and published nothing", ctx)
+		case out.quiet:
+			m.log.Debug(m.operation, "the roster took a fact while the lid is closed and quiet; its facts are derived and the roster waits for the lid to open", ctx)
+		default:
+			m.log.Debug(m.operation, m.message, ctx)
+		}
 	}
-	log.Debug(operation, message, ctx)
 }
 
 // QuietViewName names the roster in the quiet gate's records and counters.
@@ -301,14 +364,17 @@ func (r *resolver) mutateWorkspace(ws ids.WorkspaceID, operation, message string
 // transition of its own: apply is handed the workspace's log sink, and runs
 // under the same lock as the render it precedes.
 func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger)) {
-	r.mu.Lock()
-	log := r.logFor(ws)
-	r.mu.Unlock()
 	if ctx == nil {
 		ctx = dlog.Context{}
 	}
 	ctx["workspace_id"] = string(ws)
-	r.mutate(operation, message, ctx, log, func() { apply(r.state.workspace(ws), log) })
+	r.commit(&mutation{
+		operation: operation, message: message, ctx: ctx, ws: ws, scoped: true,
+		apply: func(log dlog.Logger) bool {
+			apply(r.state.workspace(ws), log)
+			return true
+		},
+	})
 }
 
 // render builds the WHOLE roster: every grouping, the hoisted merged section
@@ -327,6 +393,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		sessions: r.state.sessions(),
 		selected: r.state.selected,
 		cause:    cause,
+		causes:   r.batchCauses,
 		children: childrenOf(r.state.reg.Workspaces),
 	}
 
