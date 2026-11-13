@@ -293,6 +293,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("without asking me any questions or for permission");
   });
 
+  it("requires a pull request outside the workspace's repository to be cited as repo-name#number on every mention", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("always cited as `<repo-name>#<pr-number>`, never as a bare `#<pr-number>`");
+    expect(text).toContain("even when an earlier mention already spelled out the repository");
+  });
+
   it("ends every response tree with a summary branch holding a 3-5 node TLDR branch, followed only by the questions branch", () => {
     // Arrange
     const home = homeOnThisRepository();

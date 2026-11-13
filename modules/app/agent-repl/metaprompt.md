@@ -487,6 +487,10 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - This covers every communication: chat, analyses, reports, plans, and PR descriptions.
   - A number may only supplement the name, in a link or a parenthetical.
   - A long title may be shortened to a clearly recognizable form of the name.
+- A pull request outside the workspace's own repository is always cited as `<repo-name>#<pr-number>`, never as a bare `#<pr-number>`.
+  - This holds on every mention, even when an earlier mention already spelled out the repository.
+  - It applies in the link text or parenthetical that carries the number (e.g. `[Fix the cache key (other-repo#412)](https://github.com/ORG/other-repo/pull/412)`).
+  - It governs the response and every other communication: chat, analyses, reports, plans, and PR descriptions.
 
 ### Fenced code blocks for anything longer than one statement
 
