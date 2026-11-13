@@ -2384,3 +2384,46 @@ func mustSetCurrent(t *testing.T, s *store, id WorkspaceID, at time.Time) {
 		t.Fatalf("SetCurrent: %v", err)
 	}
 }
+
+func TestOptionalWorkspaceID(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		want    WorkspaceID // "" for nil
+		wantErr bool
+	}{
+		{name: "a selected id", query: `SELECT 'w-1'`, want: "w-1"},
+		{name: "no row is nil", query: `SELECT id FROM workspaces WHERE 0`},
+		{name: "a broken query fails", query: `SELECT id FROM no_such_table`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+
+			// Act
+			got, err := optionalWorkspaceID(context.Background(), s.db(), tt.query)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, want failure %v", err, tt.wantErr)
+			}
+			switch {
+			case tt.want == "" && got != nil:
+				t.Fatalf("got %q, want nil", *got)
+			case tt.want != "" && (got == nil || *got != tt.want):
+				t.Fatalf("got %v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptionalWorkspaceIDIsTheOneOptionalIDRead(t *testing.T) {
+	// Act
+	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`var id WorkspaceID\s+err :=[^\n]*QueryRowContext`))
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "workspaces.go" {
+		t.Fatalf("a lone workspace id that may be absent is read at %v, want only optionalWorkspaceID in workspaces.go", sites)
+	}
+}

@@ -80,32 +80,19 @@ type CardAddressees struct {
 func (s *store) CardAddressees(ctx context.Context, card IntakeCard) (CardAddressees, error) {
 	var out CardAddressees
 	err := s.read(ctx, "daemon.wsm.card_addressees", dlog.Context{"asker": string(card.Asker), "row": card.Row}, func(ctx context.Context) error {
-		work, err := newestWorkspace(ctx, s.q(ctx), `SELECT w.id FROM workspaces w JOIN intake_cards c ON w.requested_by = c.workspace_id
+		work, err := optionalWorkspaceID(ctx, s.q(ctx), `SELECT w.id FROM workspaces w JOIN intake_cards c ON w.requested_by = c.workspace_id
 WHERE c.asker_id = ? AND c.row_value = ? AND w.closed = 0 AND w.id NOT IN (SELECT workspace_id FROM intake_workspaces)
 ORDER BY w.created_at DESC, w.id DESC LIMIT 1`, card.Asker, card.Row)
 		if err != nil {
 			return err
 		}
-		intake, err := newestWorkspace(ctx, s.q(ctx), `SELECT w.id FROM workspaces w JOIN intake_cards c ON w.id = c.workspace_id
+		intake, err := optionalWorkspaceID(ctx, s.q(ctx), `SELECT w.id FROM workspaces w JOIN intake_cards c ON w.id = c.workspace_id
 WHERE c.asker_id = ? AND c.row_value = ? AND w.closed = 0
 ORDER BY w.created_at DESC, w.id DESC LIMIT 1`, card.Asker, card.Row)
 		out = CardAddressees{Work: work, OpenIntake: intake}
 		return err
 	})
 	return out, err
-}
-
-// newestWorkspace answers the one workspace id QUERY selects, nil for none.
-func newestWorkspace(ctx context.Context, q connQuerier, query string, args ...any) (*WorkspaceID, error) {
-	var id WorkspaceID
-	err := q.QueryRowContext(ctx, query, args...).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &id, nil
 }
 
 // IsIntake answers whether workspace ID is an ephemeral intake workspace.
