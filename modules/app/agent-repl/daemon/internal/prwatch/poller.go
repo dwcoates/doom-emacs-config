@@ -366,6 +366,9 @@ func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err 
 	w.recordReadFailure(ctx, opPoll, "pull request", err, fields,
 		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
 			return w.deps.Store.RecordPullRequestReadFailure(ctx, pr, f)
+		},
+		func(subscriber ids.WorkspaceID, sentences []string) error {
+			return w.deps.Store.OwePullRequestNotice(ctx, subscriber, pr, sentences)
 		})
 }
 
@@ -378,17 +381,37 @@ func (w *Watcher) recordFailure(ctx context.Context, pr wsm.PullRequestKey, err 
 // health, never a notice: telling it woke every subscriber on each outage
 // with nothing to act on, and the noise had subscribers end their
 // subscriptions (2026-11-05), which then missed a review that mattered.
+//
+// THE ONE EXCEPTION IS A REJECTED CREDENTIAL (owner ruling, 2026-11-13): it
+// never heals by waiting, and only the user can renew it, so each
+// subscription whose failure BEGINS with it is owed one brief sentence
+// through OWE, for its workspace to surface to the user. A failure that
+// stands is not told again.
 func (w *Watcher) recordReadFailure(ctx context.Context, op, subject string, err error, fields dlog.Context,
-	record func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error)) {
+	record func(wsm.PullRequestFailure) ([]ids.WorkspaceID, error),
+	owe func(subscriber ids.WorkspaceID, sentences []string) error) {
 	f := failureOf(err, w.deps.Clock.Now())
 	began, rerr := record(f)
 	if rerr != nil {
 		w.deps.Log.Error(op, "could not record the "+subject+"'s failed read", dlog.WithCause(dlog.Merge(fields, dlog.Context{"read_error": err.Error()}), rerr))
 		return
 	}
+	if f.Kind == wsm.PullRequestFailureUnauthorized {
+		for _, subscriber := range began {
+			if oerr := owe(subscriber, []string{credentialRejectedSentence}); oerr != nil {
+				w.deps.Log.Error(op, "could not owe a subscriber the notice that GitHub rejected the credentials", dlog.WithCause(dlog.Merge(fields, dlog.Context{"subscriber": string(subscriber)}), oerr))
+			}
+		}
+		w.deps.Log.Info(op, "GitHub rejected the credentials; each subscription whose failure began is owed a notice to surface it", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
+		return
+	}
 	// The leaf recorded a GitHub failure itself; this records what it cost.
 	w.deps.Log.Info(op, "the "+subject+" could not be read; its subscriptions are failing, and no subscriber is told", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "began": len(began), "cause": err.Error()}))
 }
+
+// credentialRejectedSentence is the one sentence a subscriber is owed when
+// GitHub rejects agent-repl's credentials.
+const credentialRejectedSentence = "GitHub rejected agent-repl's credentials (401 Bad credentials), so this is no longer followed until the user renews the GitHub token; tell the user in one sentence."
 
 // failureOf is a read's error as the store records it.
 func failureOf(err error, now time.Time) wsm.PullRequestFailure {

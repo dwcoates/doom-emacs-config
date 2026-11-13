@@ -578,6 +578,86 @@ func TestAMetaFileWithNoToolUseIdHoldsTheTranscript(t *testing.T) {
 	}
 }
 
+// skillSpawn writes a subagent transcript whose meta names no spawning call
+// (the vendor's shape for a rejected Skill fork), and a parent transcript
+// whose prompt p-1 carries the assistant's spawning calls CALLS.
+func skillSpawn(t *testing.T, base string, calls ...string) {
+	t.Helper()
+	sess := filepath.Join(base, "config-a/projects/proj/sess-1")
+	writeRaw(t, filepath.Join(sess, "subagents/agent-abc.jsonl"),
+		[]byte(`{"type":"user","promptId":"p-1","message":{"role":"user","content":"review"}}`+"\n"))
+	writeRaw(t, filepath.Join(sess, "subagents/agent-abc.meta.json"),
+		[]byte(`{"agentType":"general-purpose","spawnDepth":1,"requestShape":"foreground"}`))
+	blocks := ""
+	for i, id := range calls {
+		if i > 0 {
+			blocks += ","
+		}
+		blocks += `{"type":"tool_use","id":"` + id + `","name":"Skill","input":{}}`
+	}
+	writeRaw(t, sess+".jsonl", []byte(
+		`{"type":"user","promptId":"p-0","message":{"role":"user","content":"earlier"}}`+"\n"+
+			`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_earlier","name":"Skill","input":{}}]}}`+"\n"+
+			`{"type":"user","promptId":"p-1","message":{"role":"user","content":"review now"}}`+"\n"+
+			`{"type":"assistant","message":{"content":[`+blocks+`]}}`+"\n"))
+}
+
+func TestAMetaNamingNoCallIsAttributedToItsPromptsOneSpawningCall(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	skillSpawn(t, base, "toolu_skill")
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.MetaMissing || got.AgentID != "toolu_skill" || got.Meta.ToolUseID != "toolu_skill" {
+		t.Fatalf("target = held %v, agent %q, meta call %q; want it attributed to toolu_skill", got.MetaMissing, got.AgentID, got.Meta.ToolUseID)
+	}
+}
+
+func TestAMetaNamingNoCallSkipsACallASiblingClaims(t *testing.T) {
+	// Arrange: the prompt spawned two calls, one of them a sibling's.
+	d, base, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	skillSpawn(t, base, "toolu_sibling", "toolu_skill")
+	writeRaw(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-def.meta.json"),
+		[]byte(`{"agentType":"general-purpose","toolUseId":"toolu_sibling","spawnDepth":1}`))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.MetaMissing || got.AgentID != "toolu_skill" {
+		t.Fatalf("target = held %v, agent %q; want toolu_skill, the call no sibling claims", got.MetaMissing, got.AgentID)
+	}
+}
+
+func TestAMetaNamingNoCallIsHeldLoudlyWhenThePromptNamesNoSingleCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		calls []string
+	}{
+		{name: "no call in the prompt"},
+		{name: "two unclaimed calls in the prompt", calls: []string{"toolu_a", "toolu_b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+			skillSpawn(t, base, tt.calls...)
+
+			// Act.
+			got := find(t, d.Scan(), "agent-abc.jsonl")
+
+			// Assert.
+			if !got.MetaMissing || got.AgentID != "" {
+				t.Fatalf("target = held %v, agent %q; want it held with no identity", got.MetaMissing, got.AgentID)
+			}
+			requireOnceIn(t, parseLogLines(t, *logs), "discover-meta", "error")
+		})
+	}
+}
+
 func TestAnUnparsableMetaFileHoldsTheTranscriptLoudly(t *testing.T) {
 	// Arrange. Unlike a missing file this one will not fix itself, so it is an
 	// ERROR rather than the ordinary held warning.

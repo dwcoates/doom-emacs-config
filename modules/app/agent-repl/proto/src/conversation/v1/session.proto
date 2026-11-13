@@ -78,6 +78,15 @@ message SessionStarted {
   // scheduled wakeup, or idle, without waiting for the next change. UNSET only
   // for a shim whose contract predates SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL.
   optional SessionVendorActivity vendor_activity = 12;
+  // The session's MAIN agent: the id every frame of its stream carries (the
+  // cross-plane minting rule on AgentId). UNSET only for a shim whose build
+  // predates the field, whose daemon names the main agent from its main
+  // watch as before. A daemon that attaches
+  // learns from it which agent's rows are the root feed's BEFORE it routes the
+  // live work above, whose owners it is compared with (2026-11-13: a handover
+  // routed a subagent's frames before the main watch named the main agent,
+  // and nothing was drawn for them).
+  AgentId main_agent = 13;
 
   // Tag 8 is RETIRED: the vendor handshake block is deferred.
 

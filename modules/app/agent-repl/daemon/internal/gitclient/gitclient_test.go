@@ -77,149 +77,142 @@ func TestDefaultBranchReadsOriginHeadForTheRightRef(t *testing.T) {
 	fake.assertSubject(0, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
 }
 
-func TestDefaultBranchUsesConfiguredInitDefaultBranch(t *testing.T) {
-	// Arrange: no origin/HEAD; the configured name exists locally, and so does
-	// `main` — the configured name must win.
+func TestDefaultBranchAsksTheRemoteWhenOriginHeadIsUnset(t *testing.T) {
+	// Arrange: no cached origin/HEAD; the remote names `staging`.
 	git, _ := newTestClient(t)
-	newFakeGit(t,
-		fails(1, "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref\n", "symbolic-ref"),
-		ok("development\n", "config", "--get", "init.defaultBranch"),
-		ok("", "show-ref", "--verify", "--quiet", "refs/heads/development"),
-		ok("", "show-ref", "--verify", "--quiet", "refs/heads/main"),
+	fake := newFakeGit(t,
+		fails(1, "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref\n", "symbolic-ref", "--short"),
+		ok("git@github.com:o/r.git\n", "remote", "get-url", "origin"),
+		ok("ref: refs/heads/staging\tHEAD\nf467\tHEAD\n", "ls-remote"),
+		ok("", "symbolic-ref", "refs/remotes/origin/HEAD"),
 	)
 
 	// Act.
 	branch, err := git.DefaultBranch(context.Background(), "/repo")
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("DefaultBranch: %v", err)
+	if err != nil || branch != "staging" {
+		t.Fatalf("DefaultBranch = (%q, %v), want staging from the remote", branch, err)
 	}
-	if branch != "development" {
-		t.Fatalf("DefaultBranch = %q, want %q", branch, "development")
-	}
+	fake.assertSubject(2, "ls-remote", "--symref", "origin", "HEAD")
+	fake.assertSubject(3, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/staging")
 }
 
-func TestDefaultBranchIgnoresConfiguredBranchThatDoesNotExist(t *testing.T) {
-	// Arrange: init.defaultBranch names a branch this repository never made.
-	// Naming it would hand the caller a ref every later command fails on.
+func TestDefaultBranchWithNoOriginIsTheMainWorktreesBranch(t *testing.T) {
+	// Arrange: no origin remote; the main worktree is on `trunk`, a linked one
+	// on `feature`.
 	git, _ := newTestClient(t)
-	newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		ok("never-created\n", "config", "--get", "init.defaultBranch"),
-		fails(1, "", "show-ref", "--verify", "--quiet", "refs/heads/never-created"),
-		ok("", "show-ref", "--verify", "--quiet", "refs/heads/main"),
+	fake := newFakeGit(t,
+		fails(1, "", "symbolic-ref"),
+		fails(2, "error: No such remote 'origin'\n", "remote", "get-url", "origin"),
+		ok("worktree /repo\nHEAD abc\nbranch refs/heads/trunk\n\nworktree /wt\nHEAD def\nbranch refs/heads/feature\n", "worktree", "list"),
 	)
 
 	// Act.
 	branch, err := git.DefaultBranch(context.Background(), "/repo")
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("DefaultBranch: %v", err)
+	if err != nil || branch != "trunk" {
+		t.Fatalf("DefaultBranch = (%q, %v), want the main worktree's trunk", branch, err)
 	}
-	if branch != "main" {
-		t.Fatalf("DefaultBranch = %q, want %q", branch, "main")
+	fake.assertNever("ls-remote")
+}
+
+func TestDefaultBranchFails(t *testing.T) {
+	tests := []struct {
+		name     string
+		fixtures []gitFixture
+		wantOp   string
+	}{
+		{name: "a remote whose HEAD names no branch", fixtures: []gitFixture{
+			fails(1, "", "symbolic-ref"),
+			ok("", "remote", "get-url", "origin"),
+			ok("f467\tHEAD\n", "ls-remote"),
+		}, wantOp: "daemon.gitclient.default_branch"},
+		{name: "a remote that cannot be reached", fixtures: []gitFixture{
+			fails(1, "", "symbolic-ref"),
+			ok("", "remote", "get-url", "origin"),
+			fails(128, "fatal: unable to access\n", "ls-remote"),
+		}, wantOp: "daemon.gitclient.default_branch"},
+		{name: "no origin and a detached main worktree", fixtures: []gitFixture{
+			fails(1, "", "symbolic-ref"),
+			fails(2, "", "remote", "get-url", "origin"),
+			ok("worktree /repo\nHEAD abc\ndetached\n", "worktree", "list"),
+		}, wantOp: "daemon.gitclient.default_branch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tt.fixtures...)
+
+			// Act.
+			branch, err := git.DefaultBranch(context.Background(), "/repo")
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("DefaultBranch = %q, want a loud failure", branch)
+			}
+			if _, found := recordFor(surfaces.records(), "error", tt.wantOp); !found {
+				t.Fatalf("no ERROR record under %s", tt.wantOp)
+			}
+		})
 	}
 }
 
-func TestDefaultBranchFallsBackToMain(t *testing.T) {
+func TestRefreshPrimaryBranchRecordsWhatTheRemoteNames(t *testing.T) {
+	// Arrange: a cached origin/HEAD naming master; the remote moved to staging.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t,
+		ok("", "remote", "get-url", "origin"),
+		ok("ref: refs/heads/staging\tHEAD\nf467\tHEAD\n", "ls-remote"),
+		ok("", "symbolic-ref", "refs/remotes/origin/HEAD"),
+	)
+
+	// Act.
+	err := git.RefreshPrimaryBranch(context.Background(), "/repo")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RefreshPrimaryBranch: %v", err)
+	}
+	fake.assertSubject(2, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/staging")
+}
+
+func TestRefreshPrimaryBranchWithNoOriginAsksNothing(t *testing.T) {
 	// Arrange.
 	git, _ := newTestClient(t)
-	newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		fails(1, "", "config", "--get", "init.defaultBranch"),
-		ok("", "show-ref", "--verify", "--quiet", "refs/heads/main"),
-	)
+	fake := newFakeGit(t, fails(2, "", "remote", "get-url", "origin"))
 
 	// Act.
-	branch, err := git.DefaultBranch(context.Background(), "/repo")
+	err := git.RefreshPrimaryBranch(context.Background(), "/repo")
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("DefaultBranch: %v", err)
+		t.Fatalf("RefreshPrimaryBranch: %v", err)
 	}
-	if branch != "main" {
-		t.Fatalf("DefaultBranch = %q, want %q", branch, "main")
-	}
+	fake.assertNever("ls-remote")
+	fake.assertNever("symbolic-ref")
 }
 
-func TestDefaultBranchFallsBackToMaster(t *testing.T) {
-	// Arrange: only `master` exists, so the last candidate is the answer.
-	git, _ := newTestClient(t)
-	newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		fails(1, "", "config", "--get", "init.defaultBranch"),
-		fails(1, "", "show-ref", "--verify", "--quiet", "refs/heads/main"),
-		ok("", "show-ref", "--verify", "--quiet", "refs/heads/master"),
-	)
-
-	// Act.
-	branch, err := git.DefaultBranch(context.Background(), "/repo")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("DefaultBranch: %v", err)
-	}
-	if branch != "master" {
-		t.Fatalf("DefaultBranch = %q, want %q", branch, "master")
-	}
-}
-
-func TestDefaultBranchFailsWhenNothingMatches(t *testing.T) {
-	// Arrange: no origin/HEAD, no configured name, no main, no master. The
-	// daemon must never invent one.
-	git, _ := newTestClient(t)
-	newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		fails(1, "", "config"),
-		fails(1, "", "show-ref"),
-	)
-
-	// Act.
-	branch, err := git.DefaultBranch(context.Background(), "/repo")
-
-	// Assert.
-	if err == nil {
-		t.Fatalf("DefaultBranch = %q, want a loud failure", branch)
-	}
-}
-
-func TestDefaultBranchFailureIsLoggedAtError(t *testing.T) {
+func TestRefreshPrimaryBranchSurfacesARemoteItCannotReach(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
 	newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		fails(1, "", "config"),
-		fails(1, "", "show-ref"),
+		ok("", "remote", "get-url", "origin"),
+		fails(128, "fatal: unable to access\n", "ls-remote"),
 	)
 
 	// Act.
-	_, _ = git.DefaultBranch(context.Background(), "/repo")
+	err := git.RefreshPrimaryBranch(context.Background(), "/repo")
 
 	// Assert.
-	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.default_branch"); !found {
-		t.Fatalf("an undeterminable default branch must be logged at ERROR")
+	if err == nil {
+		t.Fatal("RefreshPrimaryBranch = nil, want the unreachable remote")
 	}
-}
-
-func TestDefaultBranchVerifiesCandidatesUnderRefsHeadsOnly(t *testing.T) {
-	// Arrange: `refs/heads/<name>` with --verify is exact, so a TAG named
-	// `main` can never be mistaken for the branch.
-	git, _ := newTestClient(t)
-	fake := newFakeGit(t,
-		fails(1, "no origin/HEAD\n", "symbolic-ref"),
-		fails(1, "", "config"),
-		ok("", "show-ref"),
-	)
-
-	// Act.
-	if _, err := git.DefaultBranch(context.Background(), "/repo"); err != nil {
-		t.Fatalf("DefaultBranch: %v", err)
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.refresh_primary_branch"); !found {
+		t.Fatal("no ERROR record of the unreachable remote")
 	}
-
-	// Assert.
-	fake.assertSubject(2, "show-ref", "--verify", "--quiet", "refs/heads/main")
 }
 
 // --- BranchExists -------------------------------------------------------

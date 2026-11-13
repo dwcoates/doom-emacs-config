@@ -39,69 +39,124 @@ type client struct {
 	log dlog.Surfaces
 }
 
-// DefaultBranch reports the repository's default branch, in a FIXED order of
-// evidence, strongest first:
+// DefaultBranch reports the repository's PRIMARY branch, from what states it
+// rather than from a guess (owner ruling, 2026-11-13: pgngen's remote moved
+// its primary branch to `staging`, and a guessed `master` failed every fetch):
 //
-//  1. `symbolic-ref --short refs/remotes/origin/HEAD` — the local ref a clone
-//     writes to record the remote's default branch. It is the only source that
-//     states the answer rather than guessing it, so it wins outright.
-//  2. `init.defaultBranch` from config, when a local branch by that name
-//     exists. The configured name is what THIS repository was initialized to
-//     use, so it outranks any hardcoded guess.
-//  3. A local branch named `main`.
-//  4. A local branch named `master`.
+//  1. `symbolic-ref --short refs/remotes/origin/HEAD`: the remote's primary
+//     branch as last read from the remote. RefreshPrimaryBranch keeps it
+//     current.
+//  2. With that unset and an `origin` remote, the remote is asked
+//     (refreshOrigin), which records its answer as 1.
+//  3. With no `origin` remote, the branch the repository's main worktree has
+//     checked out: no remote states a primary branch, and the main checkout
+//     is the one that sits on it.
 //
-// Every candidate below the first must EXIST as a local branch: naming a
-// branch the repository does not have would hand the caller a ref that every
-// later operation fails on. When nothing matches, the answer is a loud
-// failure — the daemon never invents a default branch.
+// Anything else is a loud failure: the daemon never invents a primary branch.
 func (c *client) DefaultBranch(ctx context.Context, repoDir string) (string, error) {
 	const operation = "daemon.gitclient.default_branch"
-
-	in, err := c.runRaw(ctx, operation, repoDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	branch, ok, err := c.originHead(ctx, operation, repoDir)
+	if err != nil || ok {
+		return branch, err
+	}
+	hasOrigin, err := c.hasOrigin(ctx, operation, repoDir)
 	if err != nil {
 		return "", err
 	}
-	if in.exitCode == 0 {
-		// `origin/main` -> `main`. The remote-tracking ref names the branch
-		// under its remote; the caller wants the branch.
-		branch := strings.TrimRight(in.stdout, "\n")
-		if _, name, found := strings.Cut(branch, "/"); found {
+	if hasOrigin {
+		return c.refreshOrigin(ctx, operation, repoDir)
+	}
+	return c.mainWorktreeBranch(ctx, operation, repoDir)
+}
+
+// RefreshPrimaryBranch reads the `origin` remote's primary branch from the
+// remote itself and records it as refs/remotes/origin/HEAD, which
+// DefaultBranch reads. A repository with no `origin` remote has nothing to
+// refresh. It goes to the network.
+func (c *client) RefreshPrimaryBranch(ctx context.Context, repoDir string) error {
+	const operation = "daemon.gitclient.refresh_primary_branch"
+	hasOrigin, err := c.hasOrigin(ctx, operation, repoDir)
+	if err != nil || !hasOrigin {
+		return err
+	}
+	_, err = c.refreshOrigin(ctx, operation, repoDir)
+	return err
+}
+
+// refreshOrigin asks the `origin` remote which branch its HEAD names
+// (`ls-remote --symref origin HEAD`), records it as
+// refs/remotes/origin/HEAD, and answers it. A remote whose HEAD names no
+// branch is a loud failure.
+func (c *client) refreshOrigin(ctx context.Context, operation, repoDir string) (string, error) {
+	out, err := c.run(ctx, operation, repoDir, "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	branch := ""
+	for _, line := range strings.Split(out, "\n") {
+		ref, rest, found := strings.Cut(line, "\t")
+		if !found || strings.TrimSpace(rest) != "HEAD" {
+			continue
+		}
+		if name, ok := strings.CutPrefix(ref, "ref: refs/heads/"); ok {
 			branch = name
 		}
-		if branch != "" {
-			return branch, nil
-		}
 	}
+	if branch == "" {
+		cause := fmt.Errorf("gitclient: origin of %s states no primary branch (ls-remote answered %q)", repoDir, out)
+		c.log.Global().Error(operation, "the remote states no primary branch", dlog.Context{"dir": repoDir, "cause": cause.Error()})
+		return "", cause
+	}
+	if _, err := c.run(ctx, operation, repoDir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+branch); err != nil {
+		return "", err
+	}
+	return branch, nil
+}
 
-	candidates := make([]string, 0, 3)
-	configured, err := c.runRaw(ctx, operation, repoDir, "config", "--get", "init.defaultBranch")
+// originHead reads refs/remotes/origin/HEAD, answering the branch it names
+// with the remote stripped, and false when it is unset.
+func (c *client) originHead(ctx context.Context, operation, repoDir string) (string, bool, error) {
+	in, err := c.runRaw(ctx, operation, repoDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err != nil || in.exitCode != 0 {
+		return "", false, err
+	}
+	// `origin/main` -> `main`. The remote-tracking ref names the branch
+	// under its remote; the caller wants the branch.
+	branch := strings.TrimRight(in.stdout, "\n")
+	if _, name, found := strings.Cut(branch, "/"); found {
+		branch = name
+	}
+	return branch, branch != "", nil
+}
+
+// hasOrigin reports whether the repository has a remote named `origin`.
+func (c *client) hasOrigin(ctx context.Context, operation, repoDir string) (bool, error) {
+	in, err := c.runRaw(ctx, operation, repoDir, "remote", "get-url", "origin")
+	if err != nil {
+		return false, err
+	}
+	return in.exitCode == 0, nil
+}
+
+// mainWorktreeBranch answers the branch the repository's main worktree has
+// checked out: the first entry `worktree list --porcelain` lists. A main
+// worktree on a detached head names no branch, which is a loud failure.
+func (c *client) mainWorktreeBranch(ctx context.Context, operation, repoDir string) (string, error) {
+	out, err := c.run(ctx, operation, repoDir, "worktree", "list", "--porcelain")
 	if err != nil {
 		return "", err
 	}
-	if configured.exitCode == 0 {
-		if name := strings.TrimRight(configured.stdout, "\n"); name != "" {
-			candidates = append(candidates, name)
+	first, _, _ := strings.Cut(out, "\n\n")
+	for _, line := range strings.Split(first, "\n") {
+		if ref, ok := strings.CutPrefix(line, "branch "); ok {
+			if name, ok := strings.CutPrefix(ref, "refs/heads/"); ok && name != "" {
+				return name, nil
+			}
 		}
 	}
-	candidates = append(candidates, "main", "master")
-
-	for _, name := range candidates {
-		exists, err := c.branchExists(ctx, operation, repoDir, name)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return name, nil
-		}
-	}
-
-	c.log.Global().Error(operation, "no default branch could be determined", dlog.Context{
-		"dir":        repoDir,
-		"candidates": candidates,
-	})
-	return "", fmt.Errorf("gitclient: no default branch in %s: refs/remotes/origin/HEAD is unset and none of %s exists locally",
-		repoDir, strings.Join(candidates, ", "))
+	cause := fmt.Errorf("gitclient: %s has no origin remote and its main worktree has no branch checked out", repoDir)
+	c.log.Global().Error(operation, "no primary branch could be determined", dlog.Context{"dir": repoDir, "cause": cause.Error()})
+	return "", cause
 }
 
 // branchExists reports whether a LOCAL branch by that name exists. `show-ref

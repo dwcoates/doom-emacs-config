@@ -160,6 +160,74 @@ func TestSymbolicRefAnswersTheScriptedOriginHead(t *testing.T) {
 	}
 }
 
+func TestSymbolicRefRecordsTheOriginHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, "/", []string{"-C", dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/staging"})
+
+	// Assert.
+	if got.Exit != 0 || repo.OriginHead != "origin/staging" {
+		t.Fatalf("symbolic-ref = %+v, origin head %q; want origin/staging recorded", got, repo.OriginHead)
+	}
+}
+
+func TestRemoteGetURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		origin   bool
+		wantExit int
+	}{
+		{name: "a repository with an origin", origin: true},
+		{name: "a repository with none", wantExit: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, repo, dir := world(t)
+			if tt.origin {
+				repo.RemoteHeads = map[string]string{}
+			}
+
+			// Act.
+			got := Run(s, "/", []string{"-C", dir, "remote", "get-url", "origin"})
+
+			// Assert.
+			if got.Exit != tt.wantExit {
+				t.Fatalf("remote get-url = %+v, want exit %d", got, tt.wantExit)
+			}
+		})
+	}
+}
+
+func TestLsRemoteNamesOriginsPrimaryBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		originHead string
+		want       string
+	}{
+		{name: "the branch origin/HEAD records", originHead: "origin/staging", want: "ref: refs/heads/staging\tHEAD"},
+		{name: "the default branch while none is recorded", want: "ref: refs/heads/" + "main" + "\tHEAD"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, repo, dir := world(t)
+			repo.RemoteHeads = map[string]string{}
+			repo.OriginHead = tt.originHead
+
+			// Act.
+			got := Run(s, "/", []string{"-C", dir, "ls-remote", "--symref", "origin", "HEAD"})
+
+			// Assert.
+			if got.Exit != 0 || !strings.HasPrefix(got.Stdout, tt.want+"\n") {
+				t.Fatalf("ls-remote = %+v, want it to open %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigAnswersTheDefaultBranch(t *testing.T) {
 	// Arrange.
 	s, _, dir := world(t)

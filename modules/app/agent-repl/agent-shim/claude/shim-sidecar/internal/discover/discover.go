@@ -483,12 +483,23 @@ func (d *Discoverer) withMeta(target Target) Target {
 		// this wave — and holding it for an id the vendor never writes held
 		// every workflow agent forever.
 		if target.RunID == "" {
-			// The same shape OUTSIDE a workflow directory names nothing at all:
-			// there is no run to attribute it to and no spawning call either.
-			// Loud, like an unreadable meta and unlike an absent one: a meta
-			// that is THERE and names no agent will not fix itself.
-			return d.holdTranscript(target, holdMetaNamesNoCall, "error",
-				"transcript held: %s states no toolUseId and this transcript is not under a workflow run, so nothing names its agent", target.MetaPath)
+			// The same shape OUTSIDE a workflow directory is a subagent whose
+			// meta the vendor wrote without its spawning call; the parent
+			// transcript names the call (spawningCall). One it cannot name is
+			// loud, like an unreadable meta: it will not fix itself.
+			call, err := spawningCall(target.Path)
+			if err != nil {
+				return d.holdTranscript(target, holdMetaNamesNoCall, "error",
+					"transcript held: %s states no toolUseId, this transcript is not under a workflow run, and the parent transcript names no single spawning call for it: %v", target.MetaPath, err)
+			}
+			meta.Shape, meta.ToolUseID = ShapeSubagent, call
+			target.Meta = meta
+			target.AgentID = call
+			d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+			d.log.With(logging.Context{
+				Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID,
+			}).LogVerbose("subagent attributed to its spawning call %s, read from the parent transcript because its meta names none", call)
+			return target
 		}
 		target.Meta = meta
 		d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)

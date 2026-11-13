@@ -1523,6 +1523,54 @@ func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
 	}
 }
 
+// TestAReannouncementNamesTheMainAgentBeforeItsLiveWorkIsRouted covers the
+// handover race of 2026-11-13: the subagent the facts name live was routed
+// before the main watch named the main agent, so it had no feed.
+func TestAReannouncementNamesTheMainAgentBeforeItsLiveWorkIsRouted(t *testing.T) {
+	// Arrange: a pure attach, whose facts name the main agent and a live
+	// subagent.
+	h := newHarnessAttachingPurely(t)
+	started := sessionStarted("turn-7", createdWork("toolu_live", subagentWork("toolu_live")))
+	started.MainAgent = &conversationv1.AgentId{Value: "main-1"}
+
+	// Act.
+	h.sendSessionStarted(t, started)
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert: the views were told the main agent from the facts, before any
+	// other naming.
+	namings := h.rec.mainNamings()
+	if len(namings) == 0 || !slices.Contains(namings, "feed:main-1") {
+		t.Fatalf("main-agent namings = %v, want the feed told main-1 from the facts", namings)
+	}
+	h.w.mu.Lock()
+	defer h.w.mu.Unlock()
+	if h.w.mainAgent.GetValue() != "main-1" {
+		t.Fatalf("main agent = %q, want main-1", h.w.mainAgent.GetValue())
+	}
+}
+
+// TestAReannouncementFromAShimThatNamesNoMainAgentLeavesItUnnamed covers a
+// shim whose build predates the field: the main watch names the agent as
+// before.
+func TestAReannouncementFromAShimThatNamesNoMainAgentLeavesItUnnamed(t *testing.T) {
+	// Arrange.
+	h := newHarnessAttachingPurely(t)
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-7"))
+	h.sendSessionUpdate(t, compactingUpdate())
+	h.rec.until(t, "footer.OnSessionUpdate")
+
+	// Assert.
+	h.w.mu.Lock()
+	defer h.w.mu.Unlock()
+	if h.w.mainAgent != nil {
+		t.Fatalf("main agent = %q, want none named by facts that name none", h.w.mainAgent.GetValue())
+	}
+}
+
 // TestSessionFactsNeverReopenAnEndedTurn covers the session facts taking the
 // same guarded edge the queue's turn opening does: a turn whose end this
 // watcher already handed to every observer is not stood back up in flight by

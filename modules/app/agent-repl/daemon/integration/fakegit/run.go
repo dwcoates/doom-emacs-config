@@ -137,6 +137,10 @@ func answer(s *State, cwd string, args []string) Result {
 		return rerere(wt, subject)
 	case "fetch":
 		return fetch(repo, subject)
+	case "remote":
+		return remote(repo, subject)
+	case "ls-remote":
+		return lsRemote(repo, subject)
 	case "for-each-ref":
 		return forEachRef(repo, subject)
 	case "tag":
@@ -186,10 +190,59 @@ func symbolicRef(repo *Repo, wt *Worktree, subject []string) Result {
 		}
 		return Result{Stdout: "refs/heads/" + wt.Branch + "\n"}
 	}
+	// `symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/<branch>`
+	// records the remote's primary branch.
+	if len(subject) == 3 && subject[1] == "refs/remotes/origin/HEAD" {
+		branch, ok := strings.CutPrefix(subject[2], "refs/remotes/origin/")
+		if !ok || branch == "" {
+			return Result{Stderr: fmt.Sprintf("fatal: fakegit: origin/HEAD set to %q, not a branch of origin\n", subject[2]), Exit: 128}
+		}
+		repo.OriginHead = "origin/" + branch
+		return Result{}
+	}
 	if repo.OriginHead == "" {
 		return Result{Stderr: "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref\n", Exit: 128}
 	}
 	return Result{Stdout: repo.OriginHead + "\n"}
+}
+
+// hasOrigin reports whether the fixture repository has an `origin` remote:
+// one whose primary branch or whose branches the fixture states.
+func hasOrigin(repo *Repo) bool {
+	return repo.OriginHead != "" || repo.RemoteHeads != nil
+}
+
+// remote answers `remote get-url origin`: a URL for a repository with an
+// origin, and real git's "No such remote" otherwise.
+func remote(repo *Repo, subject []string) Result {
+	if len(subject) == 3 && subject[1] == "get-url" {
+		if subject[2] != "origin" || !hasOrigin(repo) {
+			return Result{Stderr: fmt.Sprintf("error: No such remote '%s'\n", subject[2]), Exit: 2}
+		}
+		return Result{Stdout: "git@fakegit:" + filepath.Base(repo.Dir) + ".git\n"}
+	}
+	return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
+}
+
+// lsRemote answers `ls-remote --symref origin HEAD`: origin's HEAD names its
+// primary branch, the one origin/HEAD records or else the repository's
+// default.
+func lsRemote(repo *Repo, subject []string) Result {
+	if len(subject) != 4 || subject[1] != "--symref" || subject[3] != "HEAD" {
+		return Result{Stderr: fmt.Sprintf("fatal: fakegit has no fixture for `git %s`\n", strings.Join(subject, " ")), Exit: 128}
+	}
+	if subject[2] != "origin" || !hasOrigin(repo) {
+		return Result{Stderr: fmt.Sprintf("fatal: '%s' does not appear to be a git repository\n", subject[2]), Exit: 128}
+	}
+	branch := strings.TrimPrefix(repo.OriginHead, "origin/")
+	if branch == "" {
+		branch = repo.DefaultBranch
+	}
+	head := repo.RemoteHeads[branch]
+	if head == "" {
+		head = repo.BranchHeads[branch]
+	}
+	return Result{Stdout: "ref: refs/heads/" + branch + "\tHEAD\n" + head + "\tHEAD\n"}
 }
 
 func config(s *State, repo *Repo, subject []string) Result {

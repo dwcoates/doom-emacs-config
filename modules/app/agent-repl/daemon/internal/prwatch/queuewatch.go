@@ -289,6 +289,9 @@ func (w *Watcher) recordQueueFailure(ctx context.Context, key wsm.GithubMergeQue
 	w.recordReadFailure(ctx, opQueuePoll, "merge queue", err, fields,
 		func(f wsm.PullRequestFailure) ([]ids.WorkspaceID, error) {
 			return w.deps.Store.RecordGithubMergeQueueReadFailure(ctx, key, f)
+		},
+		func(subscriber ids.WorkspaceID, sentences []string) error {
+			return w.deps.Store.OweGithubMergeQueueNotice(ctx, subscriber, key, sentences)
 		})
 }
 

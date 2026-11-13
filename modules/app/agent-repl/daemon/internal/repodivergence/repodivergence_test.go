@@ -27,6 +27,7 @@ type fakeGit struct {
 	mu    sync.Mutex
 	calls []string
 
+	refreshErr  error
 	branch      string
 	branchErr   error
 	upstream    gitclient.Upstream
@@ -44,6 +45,14 @@ func (g *fakeGit) record(call string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, call)
+}
+
+func (g *fakeGit) RefreshPrimaryBranch(ctx context.Context, dir string) error {
+	g.record("refresh_primary_branch " + dir)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return g.refreshErr
 }
 
 func (g *fakeGit) DefaultBranch(ctx context.Context, dir string) (string, error) {
@@ -211,6 +220,7 @@ func TestATrackedBranchIsFetchedThenCounted(t *testing.T) {
 
 	// Assert.
 	want := []string{
+		"refresh_primary_branch /src/a",
 		"default_branch /src/a",
 		"upstream /src/a master",
 		"fetch_branch /src/a origin master",
@@ -238,6 +248,7 @@ func TestAnUpstreamOfAnotherNameFetchesTheRemotesOwnBranch(t *testing.T) {
 
 	// Assert.
 	want := []string{
+		"refresh_primary_branch /src/a",
 		"default_branch /src/a",
 		"upstream /src/a master",
 		"fetch_branch /src/a origin main",
@@ -279,16 +290,18 @@ func TestAFailedStepIsAFailedMeasureAndStopsTheRepository(t *testing.T) {
 		wantCalls  int
 		wantStep   string
 	}{
+		{name: "the remote's primary branch", breakGit: func(g *fakeGit) { g.refreshErr = errScripted },
+			wantReason: "reading the primary branch from the remote failed: scripted failure", wantCalls: 1, wantStep: "reading the primary branch from the remote"},
 		{name: "primary branch", breakGit: func(g *fakeGit) { g.branchErr = errScripted },
-			wantReason: "resolving the primary branch failed: scripted failure", wantCalls: 1, wantStep: "resolving the primary branch"},
+			wantReason: "resolving the primary branch failed: scripted failure", wantCalls: 2, wantStep: "resolving the primary branch"},
 		{name: "upstream", breakGit: func(g *fakeGit) { g.upstreamErr = errScripted },
-			wantReason: "reading master's upstream failed: scripted failure", wantCalls: 2, wantStep: "reading master's upstream"},
+			wantReason: "reading master's upstream failed: scripted failure", wantCalls: 3, wantStep: "reading master's upstream"},
 		{name: "fetch", breakGit: func(g *fakeGit) { g.fetchErr = errScripted },
-			wantReason: "fetching origin/master failed: scripted failure", wantCalls: 3, wantStep: "fetching origin/master"},
+			wantReason: "fetching origin/master failed: scripted failure", wantCalls: 4, wantStep: "fetching origin/master"},
 		{name: "count", breakGit: func(g *fakeGit) { g.countErr = errScripted },
-			wantReason: "counting master against origin/master failed: scripted failure", wantCalls: 4, wantStep: "counting master against origin/master"},
+			wantReason: "counting master against origin/master failed: scripted failure", wantCalls: 5, wantStep: "counting master against origin/master"},
 		{name: "a step that runs out of time", breakGit: func(g *fakeGit) { g.fetchErr = context.DeadlineExceeded },
-			wantReason: "fetching origin/master did not finish within 2m0s", wantCalls: 3, wantStep: "fetching origin/master"},
+			wantReason: "fetching origin/master did not finish within 2m0s", wantCalls: 4, wantStep: "fetching origin/master"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
