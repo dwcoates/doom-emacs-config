@@ -3,6 +3,7 @@ package rollout
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sourcescan"
@@ -567,6 +568,48 @@ func TestAnAnswerLatchClosesOnlyOnAChange(t *testing.T) {
 			}
 			if closed != tc.wantClosed || l.answer != tc.to {
 				t.Fatalf("closed %v, answer %v; want closed %v, answer %v", closed, l.answer, tc.wantClosed, tc.to)
+			}
+		})
+	}
+}
+
+func TestArmingTheManifestKeepsAJoiningQueueHeldWithoutAFlip(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions []ManifestSession
+		want     bool
+	}{
+		{name: "a manifest naming workspaces holds the queue until one is adopted",
+			sessions: []ManifestSession{{Workspace: "ws-head"}, {Workspace: "ws-rest"}}},
+		{name: "a manifest naming none serves the queue at once", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a joining successor that has not read the manifest.
+			h := newHarness(t)
+			h.c.mu.Lock()
+			h.c.joiningMode = true
+			h.c.unlock()
+			changed := h.c.QueueChanged()
+
+			// Act
+			h.c.armSessions(ids.InstanceID("daemon-outgoing"), time.Now(), tc.sessions)
+
+			// Assert
+			closed := false
+			select {
+			case <-changed:
+				closed = true
+			default:
+			}
+			if h.c.ServesQueue() != tc.want || closed != tc.want {
+				t.Fatalf("ServesQueue = %v, QueueChanged closed = %v; want both %v", h.c.ServesQueue(), closed, tc.want)
+			}
+			h.c.mu.Lock()
+			seen := h.c.manifestSeen
+			h.c.mu.Unlock()
+			if !seen {
+				t.Fatal("arming the manifest's sessions did not mark the manifest seen")
 			}
 		})
 	}
