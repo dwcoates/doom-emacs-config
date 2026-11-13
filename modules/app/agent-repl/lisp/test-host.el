@@ -2647,6 +2647,54 @@ HELD, and recording every page it drops in `agent-repl-test-host--effects'."
     (should (member '(:removed "ws-1" t) agent-repl-test-host--effects))
     (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=dropped"))))
 
+(ert-deftest agent-repl-test-host-transferred-tells-the-daemon-before-it-drops-the-page ()
+  "The page of a workspace that stays open goes only once the daemon is told.
+Dropped unannounced, its page stream's end is drawn as a broken link."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--unloading-answer (list :held))
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--effects nil)
+    (agent-repl-test-host--with-page nil t
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page :no-reload)))
+      (let ((before (assq :removed agent-repl-test-host--effects)))
+        ;; Act
+        (agent-repl-test-host--answer-held (list :arm :success :value nil))
+        ;; Assert
+        (should (assoc "ReportPageUnloading" agent-repl-test-host--calls))
+        (should-not before)
+        (should (member '(:removed "ws-1" t) agent-repl-test-host--effects))))))
+
+(ert-deftest agent-repl-test-host-transferred-keeps-the-page-a-refused-report-leaves ()
+  "A report the daemon refuses keeps the page, recorded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--unloading-answer (list :response (list :arm :error :value nil)))
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :no-reload nil t)
+    ;; Assert
+    (should-not (assq :removed agent-repl-test-host--effects))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=kept reason=not-reported"))))
+
+(ert-deftest agent-repl-test-host-transferred-reloads-a-page-that-came-on-screen-while-told ()
+  "A page the user switched to while the report was in flight is theirs: it is reloaded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--unloading-answer (list :held))
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--effects nil)
+    (agent-repl-test-host--with-page nil t
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page :no-reload))))
+    (agent-repl-test-host--with-page t t
+      ;; Act
+      (agent-repl-test-host--answer-held (list :arm :success :value nil))
+      ;; Assert
+      (should-not (assq :removed agent-repl-test-host--effects))
+      (should (member '(:reload . "ws-1") agent-repl-test-host--effects))
+      (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=kept reason=changed")))))
+
 (ert-deftest agent-repl-test-host-transferred-reloads-the-shown-page-whatever-it-is-told ()
   "The page on screen is the user's: a :no-reload notice still reloads it."
   (agent-repl-test-host--with-harness

@@ -718,6 +718,7 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-shown-p "webhost" (ws))
+(declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-note-switch "webhost" (ws))
@@ -2270,8 +2271,16 @@ handover.  Its `transferred' push says which (`:handover-page'):
 
 - :no-reload: nothing is loaded.  A page the host still holds would be
   left on the departing daemon, so it is dropped instead, and the next
-  open mounts it fresh on the successor.  THE PAGE ON SCREEN IS THE ONE
-  EXCEPTION: it is the user\='s, not the handover\='s, and is reloaded.
+  open mounts it fresh on the successor.  THE DROP IS ANNOUNCED
+  \=(`agent-repl-page-drop-announced'): the workspace stays open, so the
+  daemon is told first, or its page stream\='s end is drawn as a broken
+  link.  The report is about a workspace whose adopt is unanswered, so it
+  is held and sent from the adopt\='s answer (`agent-repl-host-gate-call'),
+  and the page goes once it is answered and the page is still held and
+  not on screen.  A page the report leaves kept stays as it is, and one
+  that came on screen meanwhile is reloaded.  THE PAGE ON SCREEN IS THE
+  ONE EXCEPTION: it is the user\='s, not the handover\='s, and is
+  reloaded.
 - :reload, :unset (a daemon predating the decision), or no transfer
   decision at all: the page is reloaded when the host holds one
   \=(`agent-repl-frontend-reload-webview'), which never loads one it
@@ -2284,8 +2293,19 @@ handover.  Its `transferred' push says which (`:handover-page'):
       (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
       (agent-repl-frontend-reload-webview ws))
      ((agent-repl-webhost-has-page-p ws)
-      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws)
-      (agent-repl-webhost-remove ws t)
+      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropping" ws)
+      (agent-repl-page-drop-announced
+       ws
+       (lambda () (and (agent-repl-webhost-has-page-p ws)
+                       (not (agent-repl-webhost-shown-p ws))))
+       (lambda ()
+         (agent-repl-webhost-remove ws t)
+         (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws))
+       (lambda (why)
+         (agent-repl--info ws "elisp.host.handover-page ws=%s action=kept reason=%s" ws why)
+         (when (agent-repl-webhost-shown-p ws)
+           (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
+           (agent-repl-frontend-reload-webview ws))))
       nil)
      (t
       (agent-repl--log ws "elisp.host.handover-page ws=%s action=none" ws)
