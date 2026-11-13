@@ -30,12 +30,12 @@ func (c *Controller) tick(ctx context.Context) {
 // failoverRetryIn answers how long until the Wi-Fi failover's next step is
 // due, and whether one is waiting at all: only after a failed attempt or while
 // the known-network step settles, while the last standing still wants the
-// failover and it has not given up.
+// failover.
 func (c *Controller) failoverRetryIn() (time.Duration, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := c.failover
-	if s.lost.IsZero() || s.gaveUp || s.next.IsZero() || c.last == nil || !failoverWants(c.last) {
+	if s.lost.IsZero() || s.next.IsZero() || c.last == nil || !failoverWants(c.last) {
 		return 0, false
 	}
 	return max(s.next.Sub(c.clock.Now()), 0), true
@@ -55,10 +55,11 @@ func (c *Controller) failoverRetryIn() (time.Duration, bool) {
 //
 // The first read that finds the mode on and no network starts an attempt at
 // once. A step that does not take is an outcome, never an error: the attempt
-// is made again on the retry schedule (failoverBackoff), which backs off the
-// longer Wi-Fi stays lost and gives up after three hours. Each distinct cause
-// a step cannot take is recorded once per step (knownCause, failoverCause),
-// and the failover's end is recorded when it made an attempt. Caller holds mu.
+// is made again on the retry schedule (failoverBackoff), which backs off to
+// once a minute after five minutes and never gives up while the loss lasts.
+// Each distinct cause a step cannot take is recorded once per step
+// (knownCause, failoverCause), and the failover's end is recorded when it made
+// an attempt. Caller holds mu.
 func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 	if !failoverWants(rd.state) {
 		c.standDownFailoverLocked(rd)
@@ -70,15 +71,7 @@ func (c *Controller) failoverLocked(ctx context.Context, rd reading) {
 		c.recordLossLocked(ctx, rd)
 	}
 
-	switch c.failover.due(now) {
-	case failoverWaiting, failoverGivenUp:
-		return
-	case failoverExhausted:
-		c.failover.gaveUp = true
-		c.log.Warn(opFailover, "the Wi-Fi failover gave up: Wi-Fi stayed lost and no network could be joined for three hours; "+
-			"it resumes once a network is joined or the mode is turned off and on",
-			dlog.Context{"hotspot": c.cfg.Hotspot, "lost_for": now.Sub(c.failover.lost).String(),
-				"attempts": c.failover.attempts, "cause": c.failoverCause})
+	if !c.failover.due(now) {
 		return
 	}
 
@@ -247,11 +240,11 @@ func (c *Controller) recordLossLocked(ctx context.Context, rd reading) {
 // how a network macOS joined by itself during the settle is recorded. Caller
 // holds mu.
 func (c *Controller) standDownFailoverLocked(rd reading) {
-	if c.failoverCause != "" || c.knownCause != "" || c.failover.gaveUp || c.failover.attempts > 0 {
+	if c.failoverCause != "" || c.knownCause != "" || c.failover.attempts > 0 {
 		c.log.Info(opFailover, "the Wi-Fi failover stood down: the mode is off or a network is joined",
 			dlog.Context{"wifi": wifiArm(rd.state), "mode": modeArm(rd.state), "network_name": rd.state.GetJoined().GetNetworkName(),
 				"was": c.failoverCause, "was_known": c.knownCause, "awaiting_known_network": c.failover.settling,
-				"gave_up": c.failover.gaveUp, "attempts": c.failover.attempts})
+				"attempts": c.failover.attempts})
 	}
 	c.endFailoverLocked()
 }
@@ -280,82 +273,58 @@ func failoverWants(s *agentreplv1.PersistentWifiState) bool {
 }
 
 // failoverBackoff is the Wi-Fi failover's retry schedule: a failed attempt that
-// ends less than `until` after Wi-Fi was lost is tried again `every` later.
-// A join is never started once the last `until` has passed since the loss.
+// ends less than `until` after Wi-Fi was lost is tried again `every` later, and
+// one that ends later is tried again failoverRetryAfterBackoff later, for as
+// long as Wi-Fi stays lost with the mode on. It never gives up: a give-up after
+// three hours left the machine offline for hours on 2026-11-12, and an attempt
+// a minute costs one radio cycle and one join.
 var failoverBackoff = []struct{ until, every time.Duration }{
 	{until: 5 * time.Minute, every: 5 * time.Second},
-	{until: 30 * time.Minute, every: time.Minute},
-	{until: 3 * time.Hour, every: time.Hour},
 }
 
-// failoverRetryEvery answers how long after a failed join that ended `lost`
-// after Wi-Fi was lost the next join waits; false once the schedule is spent.
-func failoverRetryEvery(lost time.Duration) (time.Duration, bool) {
+// failoverRetryAfterBackoff is the retry interval once every tier of
+// failoverBackoff has passed.
+const failoverRetryAfterBackoff = time.Minute
+
+// failoverRetryEvery answers how long after a failed attempt that ended `lost`
+// after Wi-Fi was lost the next attempt waits.
+func failoverRetryEvery(lost time.Duration) time.Duration {
 	for _, tier := range failoverBackoff {
 		if lost < tier.until {
-			return tier.every, true
+			return tier.every
 		}
 	}
-	return 0, false
+	return failoverRetryAfterBackoff
 }
 
 // failoverSchedule is one loss's retries. The zero value is a failover
 // standing down: the next beat that wants it starts the loss (failoverLocked
-// sets lost) and joins at once.
+// sets lost) and attempts at once.
 type failoverSchedule struct {
 	// lost is when the failover first found Wi-Fi lost; zero before.
 	lost time.Time
-	// next is the earliest instant the next join may start.
+	// next is the earliest instant the next step may start.
 	next time.Time
 	// every is the retry interval the last failure set.
 	every time.Duration
-	// attempts counts the joins run since the loss.
+	// attempts counts the attempts run since the loss.
 	attempts int
-	// gaveUp is set once the schedule is spent and the give-up recorded.
-	gaveUp bool
 	// settling is set while the radio was cycled and macOS is left until next
 	// to auto-join a network it knows; the beat it falls due joins the hotspot.
 	settling bool
 }
 
-// failoverDue is what a beat that wants the failover does.
-type failoverDue int
-
-const (
-	// failoverJoin runs a join now.
-	failoverJoin failoverDue = iota
-	// failoverWaiting runs nothing: the next join is not due yet.
-	failoverWaiting
-	// failoverExhausted runs nothing and gives up: the schedule just ran out.
-	failoverExhausted
-	// failoverGivenUp runs nothing: the give-up was already recorded.
-	failoverGivenUp
-)
-
-// due answers what a beat at now does. The loss was started (lost) by the
-// beat that first found it; a loss's first beat has no next and joins at once.
-func (s *failoverSchedule) due(now time.Time) failoverDue {
-	switch {
-	case s.gaveUp:
-		return failoverGivenUp
-	case now.Before(s.next):
-		return failoverWaiting
-	}
-	if _, ok := failoverRetryEvery(now.Sub(s.lost)); !ok {
-		return failoverExhausted
-	}
-	return failoverJoin
+// due answers whether a beat at now runs the failover's next step. The loss
+// was started (lost) by the beat that first found it; a loss's first beat has
+// no next and attempts at once.
+func (s *failoverSchedule) due(now time.Time) bool {
+	return !now.Before(s.next)
 }
 
-// failed schedules the join after one that failed at `at`, answering the
-// retry interval and whether it grew. A failure that ends after the schedule
-// is spent makes the next beat due at once, and that beat gives up (due).
+// failed schedules the attempt after one that failed at `at`, answering the
+// retry interval and whether it grew.
 func (s *failoverSchedule) failed(at time.Time) (time.Duration, bool) {
-	every, ok := failoverRetryEvery(at.Sub(s.lost))
-	if !ok {
-		s.next = at
-		return s.every, false
-	}
+	every := failoverRetryEvery(at.Sub(s.lost))
 	backedOff := s.every != 0 && every != s.every
 	s.every = every
 	s.next = at.Add(every)

@@ -480,7 +480,6 @@ func TestFailoverRetryInAnswersWhatIsWaiting(t *testing.T) {
 	}{
 		{name: "a failed join waits for its next try", last: lost, schedule: waiting, wantWait: 5 * time.Second, wantOK: true},
 		{name: "nothing was lost", last: lost, schedule: failoverSchedule{}, wantOK: false},
-		{name: "the failover gave up", last: lost, schedule: failoverSchedule{lost: time.Unix(0, 0), next: time.Unix(5, 0), gaveUp: true}, wantOK: false},
 		{name: "a network is joined again", last: joined, schedule: waiting, wantOK: false},
 		{name: "nothing was read yet", last: nil, schedule: waiting, wantOK: false},
 	}
@@ -519,44 +518,24 @@ func TestFailoverRetryEveryBacksOffWithTheTimeLost(t *testing.T) {
 		name  string
 		lost  time.Duration
 		every time.Duration
-		ok    bool
 	}{
-		{name: "at the loss", lost: 0, every: 5 * time.Second, ok: true},
-		{name: "just short of five minutes", lost: 5*time.Minute - time.Second, every: 5 * time.Second, ok: true},
-		{name: "at five minutes", lost: 5 * time.Minute, every: time.Minute, ok: true},
-		{name: "just short of thirty minutes", lost: 30*time.Minute - time.Second, every: time.Minute, ok: true},
-		{name: "at thirty minutes", lost: 30 * time.Minute, every: time.Hour, ok: true},
-		{name: "just short of three hours", lost: 3*time.Hour - time.Second, every: time.Hour, ok: true},
-		{name: "at three hours", lost: 3 * time.Hour, ok: false},
+		{name: "at the loss", lost: 0, every: 5 * time.Second},
+		{name: "just short of five minutes", lost: 5*time.Minute - time.Second, every: 5 * time.Second},
+		{name: "at five minutes", lost: 5 * time.Minute, every: time.Minute},
+		{name: "at thirty minutes", lost: 30 * time.Minute, every: time.Minute},
+		{name: "at three hours", lost: 3 * time.Hour, every: time.Minute},
+		{name: "a day on", lost: 24 * time.Hour, every: time.Minute},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			every, ok := failoverRetryEvery(tc.lost)
+			every := failoverRetryEvery(tc.lost)
 
 			// Assert.
-			if every != tc.every || ok != tc.ok {
-				t.Fatalf("failoverRetryEvery(%s) = (%s, %t), want (%s, %t)", tc.lost, every, ok, tc.every, tc.ok)
+			if every != tc.every {
+				t.Fatalf("failoverRetryEvery(%s) = %s, want %s", tc.lost, every, tc.every)
 			}
 		})
-	}
-}
-
-func TestFailoverScheduleFailureAfterTheScheduleIsSpentGivesUpOnTheNextBeat(t *testing.T) {
-	// Arrange: a loss whose last join started inside the three hours and
-	// ended after them.
-	var s failoverSchedule
-	at := time.Unix(0, 0)
-	s.lost = at
-	s.failed(at.Add(2 * time.Hour))
-
-	// Act.
-	s.failed(at.Add(3*time.Hour + time.Second))
-	got := s.due(at.Add(3*time.Hour + 5*time.Second))
-
-	// Assert.
-	if got != failoverExhausted {
-		t.Fatalf("due = %d, want failoverExhausted at once rather than another hour's wait", got)
 	}
 }
 
@@ -571,8 +550,8 @@ func TestTickWaitsForTheRetryInterval(t *testing.T) {
 		{name: "the first tier's beat at five seconds", failAt: knownNetworkSettle, beatAt: knownNetworkSettle + 5*time.Second, attempts: 2},
 		{name: "the second tier's beat before a minute", failAt: 5 * time.Minute, beatAt: 5*time.Minute + 55*time.Second, attempts: 2},
 		{name: "the second tier's beat at a minute", failAt: 5 * time.Minute, beatAt: 6 * time.Minute, attempts: 3},
-		{name: "the third tier's beat before an hour", failAt: 30 * time.Minute, beatAt: 89 * time.Minute, attempts: 2},
-		{name: "the third tier's beat at an hour", failAt: 30 * time.Minute, beatAt: 90 * time.Minute, attempts: 3},
+		{name: "a beat before a minute three hours on", failAt: 3 * time.Hour, beatAt: 3*time.Hour + 59*time.Second, attempts: 2},
+		{name: "a beat at a minute three hours on", failAt: 3 * time.Hour, beatAt: 3*time.Hour + time.Minute, attempts: 3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -607,68 +586,37 @@ func TestTickRecordsEachBackOffOnce(t *testing.T) {
 	h.failAttemptAt(5*time.Minute - knownNetworkSettle)
 	h.failAttemptAt(6 * time.Minute)
 	h.failAttemptAt(30*time.Minute - knownNetworkSettle)
+	h.failAttemptAt(3 * time.Hour)
 
 	// Assert.
 	var backOffs []string
 	for _, r := range h.failoverRecords("info", msgBackOff) {
 		backOffs = append(backOffs, r["retry_every"].(string))
 	}
-	if len(backOffs) != 2 || backOffs[0] != "1m0s" || backOffs[1] != "1h0m0s" {
-		t.Fatalf("back-off INFO intervals = %v, want [1m0s 1h0m0s]", backOffs)
+	if len(backOffs) != 1 || backOffs[0] != "1m0s" {
+		t.Fatalf("back-off INFO intervals = %v, want [1m0s]: no tier after the minute", backOffs)
 	}
 }
 
-func TestTickGivesUpAfterThreeHoursAndRecordsItOnce(t *testing.T) {
-	// Arrange.
+func TestTickKeepsTryingEveryMinuteForAsLongAsWifiStaysLost(t *testing.T) {
+	// Arrange: attempts failing past five minutes, then hours later.
 	h := newHarness(t).standing(pmsetOn, summary(false, ""))
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
 	h.failAttemptAt(0)
-	h.failAttemptAt(2*time.Hour + 30*time.Minute)
+	h.failAttemptAt(5*time.Minute - knownNetworkSettle)
+	h.failAttemptAt(10 * time.Hour)
 
 	// Act.
-	h.tickAt(3*time.Hour + 30*time.Minute + knownNetworkSettle)
-	h.tickAt(5 * time.Hour)
+	h.tickAt(10*time.Hour + knownNetworkSettle + time.Minute - time.Second)
+	waitingBefore := h.r.count(argRadioOff)
+	h.tickAt(10*time.Hour + knownNetworkSettle + time.Minute)
 
 	// Assert.
-	if n := h.r.count(argRadioOff); n != 2 {
-		t.Fatalf("attempts = %d, want none once three hours have passed", n)
+	if waitingBefore != 3 || h.r.count(argRadioOff) != 4 {
+		t.Fatalf("attempts = (%d before the minute, %d at it), want (3, 4): one a minute ten hours on", waitingBefore, h.r.count(argRadioOff))
 	}
-	var gaveUp []map[string]any
-	for _, r := range h.records("warn", opFailover) {
-		if _, ok := r.Context["lost_for"]; ok {
-			gaveUp = append(gaveUp, r.Context)
-		}
-	}
-	if len(gaveUp) != 1 {
-		t.Fatalf("give-up WARN records = %+v, want one", gaveUp)
-	}
-	if gaveUp[0]["lost_for"] != "3h30m20s" || gaveUp[0]["attempts"] != 2 ||
-		gaveUp[0]["cause"] != "Could not find network Test Hotspot." {
-		t.Fatalf("give-up WARN context = %+v, want the time lost, the attempts and the last cause", gaveUp[0])
-	}
-}
-
-func TestTickAfterAGiveUpRestartsTheScheduleOnceANetworkWasJoined(t *testing.T) {
-	// Arrange: a failover that gave up, then a network joined, then lost.
-	h := newHarness(t).standing(pmsetOn, summary(false, ""))
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
-		answer{out: summary(false, "")}, answer{out: summary(false, "")},
-		answer{out: summary(true, "Home")}, answer{out: summary(false, "")})
-	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
-	h.failAttemptAt(0)
-	h.tickAt(3 * time.Hour)
-	h.tickAt(3*time.Hour + 5*time.Second)
-
-	// Act.
-	h.tickAt(3*time.Hour + 10*time.Second)
-
-	// Assert.
-	if n := h.r.count(argRadioOff); n != 2 {
-		t.Fatalf("attempts = %d, want the loss's first and the new loss's at once", n)
-	}
-	down := h.failoverRecords("info", msgStoodDown)
-	if len(down) != 1 || down[0]["gave_up"] != true || down[0]["wifi"] != "joined" {
-		t.Fatalf("stand-down records = %+v, want one naming the give-up", down)
+	if n := len(h.records("warn", opFailover)); n != 1 {
+		t.Fatalf("failover WARN records = %d, want the one hotspot cause and no give-up", n)
 	}
 }
 

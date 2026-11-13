@@ -174,3 +174,17 @@ that every protobuf decision be made without their input (2026-10-01).
     retry schedule.
   - The failover's outcomes stay records, never wire: the standing it
     publishes is the existing `PersistentWifiState`, so no proto arm was added.
+
+### 9. The failover never gives up (2026-11-13, no wire change)
+
+- WHAT: `failoverBackoff` keeps its five-second tier for the first five
+  minutes, then retries every minute for as long as Wi-Fi stays lost with the
+  mode on. The hourly tier and the three-hour give-up of section 7 are gone.
+- WHY: on 2026-11-12 the machine stayed offline for about 2.5 hours with the
+  lid closed, past the point the hourly tier retried at all usefully; an
+  attempt a minute costs one radio cycle and one join, which is cheap against
+  hours of lost agent work.
+- Consequences:
+  - Supersedes section 7's hourly tier and give-up; its back-off record is
+    kept (INFO, once, at the step to a minute), and a hotspot cause is still
+    warned once per distinct cause.
