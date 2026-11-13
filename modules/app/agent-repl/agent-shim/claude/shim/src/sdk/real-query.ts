@@ -447,11 +447,12 @@ export function profileOptions(
         allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
         settingSources: ["user", "project", "local"],
         hooks: agentReplHooks(),
-        // A BYPASSING SESSION NEVER LOADS THE MERGE-QUEUE SKILL: its rules are
-        // the ones the workspace bypasses, and `off` hides the skill from the
-        // listing and the Skill tool both. The session's own catalog is
-        // checked for it (engine/session.ts, pushCommandCatalog).
-        ...(spec.profile.landing === "bypassing_queue"
+        // A SESSION THAT LANDS DIRECTLY NEVER LOADS THE MERGE-QUEUE SKILL
+        // (bypass, and the deploy mediator): its rules are the ones the
+        // workspace lands around, and `off` hides the skill from the listing
+        // and the Skill tool both. The session's own catalog is checked for
+        // it (engine/session.ts, pushCommandCatalog).
+        ...(spec.profile.landing !== "through_queue"
           ? { settings: { skillOverrides: { [MERGE_QUEUE_SKILL]: "off" } } }
           : {}),
       };

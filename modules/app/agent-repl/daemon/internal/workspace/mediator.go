@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -49,4 +50,31 @@ func (v *verbs) CreateMediator(ctx context.Context, repoDir, name string) (wsm.W
 	}
 	v.deps.Log.Global().Info(opMediator, "made the deploy mediator", fields)
 	return made, nil
+}
+
+// MediatesFrom answers whether a workspace is its repository's deploy
+// mediator: its repository's lifecycle config, read through FILES, names it.
+// A repository with no lifecycle config names none.
+func MediatesFrom(files lifecycleconfig.Files, db wsm.DB) func(ctx context.Context, record wsm.Workspace) (bool, error) {
+	return func(ctx context.Context, record wsm.Workspace) (bool, error) {
+		repos, err := db.ListRepositories(ctx)
+		if err != nil {
+			return false, fmt.Errorf("list the repositories to find %q's: %w", record.Name, err)
+		}
+		for _, repo := range repos {
+			if repo.ID != record.Repo {
+				continue
+			}
+			cfg, err := files.Load(repo.Dir)
+			var missing *lifecycleconfig.MissingError
+			if errors.As(err, &missing) {
+				return false, nil
+			}
+			if err != nil {
+				return false, fmt.Errorf("read the lifecycle config of %s: %w", repo.Dir, err)
+			}
+			return cfg.GetDeployMediator().GetName() == record.Name, nil
+		}
+		return false, nil
+	}
 }

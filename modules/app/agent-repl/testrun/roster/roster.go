@@ -385,7 +385,7 @@ var Suites = []Suite{
 			// with the logging module it imports,
 			// the metaprompt its suite reads back, and the scripts its npm
 			// hooks run. What it imports is each file's import graph.
-			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "testdata/",
+			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
@@ -721,7 +721,7 @@ var AlwaysRunRegions = []string{
 	// The Doom module files the ERT suite loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
-	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "logging-contract.md",
+	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
 	// bin/ each have their harness.

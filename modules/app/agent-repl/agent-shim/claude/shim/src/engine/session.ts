@@ -2293,7 +2293,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // switched the skill off, and a catalog still listing it means the
         // switch did not take, so the agent can read the rules it bypasses.
         const active = sessionProfile();
-        if (active.kind === "agent" && active.landing === "bypassing_queue" && commands.some((command) => command.name === MERGE_QUEUE_SKILL)) {
+        if (active.kind === "agent" && active.landing !== "through_queue" && commands.some((command) => command.name === MERGE_QUEUE_SKILL)) {
           LOGGER.error(
             { skill: MERGE_QUEUE_SKILL, landing: active.landing, commands: commands.length, detail: `the catalog still lists ${MERGE_QUEUE_SKILL}` },
             "a bypassing session lists the merge-queue skill its start switched off",
