@@ -27,7 +27,7 @@ import (
 // so every failure line is read inside the unit that printed it. Each kind of
 // suite prints its failures its own way, and each is read by its own pattern:
 //
-//	Go (GoModule, E2E, GoTests)    "--- FAIL: TestName (1.23s)"      go test -v
+//	Go (GoModule, E2E)             "--- FAIL: TestName (1.23s)"      go test -v
 //	ERT                            "FAILED  3/40  name (0.1 sec) at test-x.el:12"
 //	vitest                         " FAIL  test/x.test.ts > describe > name"
 //	script harnesses               "FAIL - what failed" / "  FAIL: what failed"
@@ -196,14 +196,6 @@ func readUnit(found *failingTests, unit, suiteName string, lines []string, modul
 	named := false
 	switch {
 	case !known:
-	case suite.GoTests != nil:
-		// A sandboxed suite's harness reruns its failing tests alone
-		// (roster.Suite.GoTests), each by its deepest failing path: a failed
-		// step of an e2e scenario reruns just that step.
-		script := filepath.Join(module, suite.Path)
-		named = readGoUnit(s, lines, suiteName, func(names []string) []string {
-			return []string{selectionFlag("harness", script, deepest(names))}
-		})
 	case suite.Kind == roster.GoModule || suite.Kind == roster.E2E:
 		rel, _, ok := goUnitPackage(unit, suiteName)
 		if ok {

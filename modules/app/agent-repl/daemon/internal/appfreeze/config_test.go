@@ -54,7 +54,7 @@ func TestAppsFromEnv(t *testing.T) {
 }
 
 func TestTheDefaultListLeavesDockerAlone(t *testing.T) {
-	// Act and assert: the e2e-emacs gate suite needs Docker with the lid closed.
+	// Act and assert: Docker is left alone (owner ruling, 2026-11-12; see DefaultApps).
 	for _, app := range DefaultApps {
 		if app == "Docker" {
 			t.Fatal("DefaultApps names Docker")

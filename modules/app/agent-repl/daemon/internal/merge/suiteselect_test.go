@@ -20,22 +20,22 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a webapp change selects the webapp suite, the build harness and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx"},
-			want:  []string{"build-frontend-harness", "webapp", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"build-frontend-harness", "webapp", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "a brief change selects the daemon suite that composes and pins it, and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/prompts/merge-test-failure-resolve.md"},
-			want:  []string{"daemon", "e2e", "e2e-emacs"},
+			want:  []string{"daemon", "e2e"},
 		},
 		{
 			name:  "a daemon change selects the daemon suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
-			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -43,54 +43,39 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  append(append([]string(nil), scriptHarnessSuites...), "repo-scans"),
 		},
 		{
-			name:  "module-root elisp selects ert, the Emacs layer, which carries the Doom tier",
+			name:  "module-root elisp selects ert",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert"},
 		},
 		{
-			name:  "lisp/ selects ert, the Emacs layer, which carries the Doom tier, and the repo scans, which read its wire decoders",
+			name:  "lisp/ selects ert and the repo scans, which read its wire decoders",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "repo-scans", "e2e-emacs"},
+			want:  []string{"ert", "repo-scans"},
 		},
 		{
 			name:  "several regions union their selections",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
-			name:  "the sandbox image selects only the sandboxed suite",
-			paths: []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"},
-			want:  []string{"e2e-emacs"},
-		},
-		{
-			name:  "the sandbox's scripts select the sandboxed suite and the harness tests of its preflight",
-			paths: []string{"modules/app/agent-repl/e2e/sandbox/bin/preflight.sh"},
-			want:  []string{"e2e-kit", "e2e-emacs"},
-		},
-		{
-			name:  "the e2e harness selects both cross-system suites, and the scans of its sources",
+			name:  "the e2e harness selects the cross-system suite, and the scans of its sources",
 			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
-			want:  []string{"e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"e2e-kit", "e2e", "repo-scans"},
 		},
 		{
-			name:  "the e2e harness's world-free kit selects its own suite and both cross-system suites that import it",
+			name:  "the e2e harness's world-free kit selects its own suite and the cross-system suite that imports it",
 			paths: []string{"modules/app/agent-repl/e2e/kit/scenario/scenario.go"},
-			want:  []string{"e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
-		},
-		{
-			name:  "the shared sandboxed-suite runner selects the suite it runs, and the tests of it",
-			paths: []string{"modules/app/agent-repl/bin/lib-sandbox-suite.sh"},
-			want:  []string{"e2e", "e2e-emacs"},
+			want:  []string{"e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim", "sidecar", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"shim", "sidecar", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim-sidecar/main.go"},
-			want:  []string{"sidecar", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"sidecar", "e2e", "repo-scans"},
 		},
 		{
 			name:  "zettel selects its own suite and the scans",
@@ -100,22 +85,22 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a store change selects the store suite and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/shim-store/main.go"},
-			want:  []string{"store", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"store", "e2e", "repo-scans"},
 		},
 		{
 			name:  "the committed metaprompt selects the shim suite that reads it back, and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/metaprompt.md"},
-			want:  []string{"shim", "sidecar", "e2e", "e2e-emacs"},
+			want:  []string{"shim", "sidecar", "e2e"},
 		},
 		{
 			name:  "documentation beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"modules/app/agent-repl/docs/USER-GUIDE.md", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "the owner's configuration beside a daemon change adds nothing to the daemon's selection",
 			paths: []string{"config.el", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"daemon", "e2e-kit", "e2e", "e2e-emacs", "repo-scans"},
+			want:  []string{"daemon", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "the pre-commit hook selects its harness, the installer's and the background scan",
@@ -263,7 +248,7 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/shim-lock/main.go"})
 
 	// Assert.
-	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "sidecar", "e2e", "e2e-emacs", "repo-scans"})), ",")
+	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "sidecar", "e2e", "repo-scans"})), ",")
 	if got.Full || strings.Join(got.Suites, ",") != want {
 		t.Fatalf("shim-lock selected %v (full=%v), want %s", got.Suites, got.Full, want)
 	}
@@ -278,8 +263,8 @@ func TestSelectSuitesMapsTheGrammarToItsConsumers(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/tldr/grammar.js"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e-kit,e2e,e2e-emacs" {
-		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e-kit, e2e, e2e-emacs and repo-scans", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e-kit,e2e" {
+		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e-kit, e2e and repo-scans", got.Suites, got.Full)
 	}
 }
 
@@ -383,7 +368,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e-kit,e2e,e2e-emacs" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e-kit,e2e" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

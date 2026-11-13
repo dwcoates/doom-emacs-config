@@ -80,7 +80,7 @@ type PlanCases struct {
 // SuiteKind names a roster entry's kind for the plan.
 func SuiteKind(s roster.Suite) string {
 	switch {
-	case s.Kind == roster.E2E || s.Name == "e2e-emacs":
+	case s.Kind == roster.E2E:
 		return "e2e"
 	case s.Kind == roster.Script || s.Kind == roster.SplitScript:
 		return "harness"

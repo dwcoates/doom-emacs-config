@@ -32,13 +32,16 @@ const NoApps = "none"
 
 // DefaultApps is the list frozen when EnvApps is unset: the applications that
 // draw for a screen nobody sees with the lid closed. Docker is not on it: the
-// e2e-emacs gate suite needs it while the lid is closed.
+// e2e-emacs gate suite needed it while the lid is closed (that suite was
+// removed 2026-11-13, a trial the owner reviews on 2026-11-20; until then
+// this stands as ruled).
 var DefaultApps = []string{"Slack", "Google Chrome", "Spotify", "WhatsApp", "Activity Monitor"}
 
 // neverFrozen are the bundles no entry may name: the editor agent-repl runs
 // in, every terminal, agent-repl's own applications, and every container
-// runtime, since the merge queue's e2e-emacs gate runs in a container while
-// the lid is closed (owner ruling, 2026-11-12). A process of one is never
+// runtime, since the merge queue's e2e-emacs gate ran in a container while
+// the lid was closed (owner ruling, 2026-11-12; the suite was removed
+// 2026-11-13, and the ruling stands until the owner's 2026-11-20 review). A process of one is never
 // frozen, so an entry naming one is refused outright.
 var neverFrozen = []string{
 	"Emacs", "Zettel",

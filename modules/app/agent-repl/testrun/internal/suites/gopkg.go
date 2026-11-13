@@ -225,14 +225,10 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 	}, nil
 }
 
-// GoTopLevelTests lists everything `go test` runs at top level in the package
-// in dir under the default build context: Test and Fuzz functions, and the
-// examples that carry an output comment. Name order.
-func GoTopLevelTests(dir string) ([]string, error) {
-	return GoTopLevelTestsTagged(dir, "")
-}
-
-// GoTopLevelTestsTagged is GoTopLevelTests under build TAGS (comma-separated).
+// GoTopLevelTestsTagged lists everything `go test` runs at top level in the
+// package in dir under the default build context plus build TAGS
+// (comma-separated, "" for none): Test and Fuzz functions, and the examples
+// that carry an output comment. Name order.
 func GoTopLevelTestsTagged(dir, tags string) ([]string, error) {
 	ctx := build.Default
 	if tags != "" {

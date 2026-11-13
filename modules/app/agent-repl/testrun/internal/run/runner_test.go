@@ -622,7 +622,7 @@ func TestRunHoldsAWideUnitsWholeWidth(t *testing.T) {
 	// Arrange: a two-slot unit and three one-slot units on three slots, every
 	// unit holding until released, so they would all overlap if allowed to.
 	release := make(chan struct{})
-	wide := spec("w", "e2e-emacs")
+	wide := spec("w", "wide")
 	wide.Est, wide.Slots = 10, 2
 	specs := []Spec{wide, spec("a", "s"), spec("b", "s"), spec("c", "s")}
 	scripts := map[string]script{}
@@ -659,7 +659,7 @@ func TestRunHoldsAWideUnitsWholeWidth(t *testing.T) {
 
 func TestRunRefusesAUnitWiderThanItsSlots(t *testing.T) {
 	// Arrange
-	wide := spec("w", "e2e-emacs")
+	wide := spec("w", "wide")
 	wide.Slots = 3
 	e := &fakeExec{}
 	r, _, _ := newRunner(2, e)
@@ -792,7 +792,7 @@ func TestRunNeverHoldsMoreThanTheHostsFreeCores(t *testing.T) {
 
 func TestRunHoldsAWideUnitsWidthInHostCores(t *testing.T) {
 	// Arrange
-	wide := spec("w", "e2e-emacs")
+	wide := spec("w", "wide")
 	wide.Slots = 2
 	e := &fakeExec{scripts: map[string]script{}}
 	c := newCores(2)
