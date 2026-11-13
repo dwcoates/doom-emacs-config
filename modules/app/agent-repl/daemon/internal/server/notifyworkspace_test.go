@@ -100,7 +100,9 @@ func TestNotifyWorkspaceIsRefused(t *testing.T) {
 		check     func(*agentreplv1.NotifyWorkspaceError) bool
 	}{
 		{name: "an unknown workspace", arrange: func(*harness) {}, workspace: &workspacev1.WorkspaceRef{Id: "nope", Dir: "/nope"},
-			check: func(e *agentreplv1.NotifyWorkspaceError) bool { return e.GetUnknownWorkspace().GetWorkspace().GetId() == "nope" }},
+			check: func(e *agentreplv1.NotifyWorkspaceError) bool {
+				return e.GetUnknownWorkspace().GetWorkspace().GetId() == "nope"
+			}},
 		{name: "a ref whose dir disagrees", arrange: func(*harness) {}, workspace: &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: "/elsewhere"},
 			check: func(e *agentreplv1.NotifyWorkspaceError) bool {
 				return e.GetWorkspaceRefMismatch().GetRegistryDir() == testWorkspaceDir

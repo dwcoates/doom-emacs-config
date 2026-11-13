@@ -2598,4 +2598,3 @@ func TestALandingWhoseOwnedPullRequestsCannotBeReadLeavesTheWorkspaceOpen(t *tes
 		t.Fatal("the failed read was not recorded at error")
 	}
 }
-

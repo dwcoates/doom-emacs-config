@@ -3,8 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
-	"slices"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 

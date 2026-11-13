@@ -777,12 +777,12 @@ type fleetFixture struct {
 	topbarRemote []bool
 	// signIns is every workspace the fleet asked the topbar to open the login
 	// for.
-	signIns []ids.WorkspaceID
-	log          *fakeSurfaces
-	watcher      *fakeWatcher
-	links        *recordingLinkSink
-	probeState   sessionlock.State
-	probeErr     error
+	signIns    []ids.WorkspaceID
+	log        *fakeSurfaces
+	watcher    *fakeWatcher
+	links      *recordingLinkSink
+	probeState sessionlock.State
+	probeErr   error
 	// socketState and socketErr script the shim-socket listener probe, which
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State

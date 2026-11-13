@@ -243,7 +243,6 @@ func TestPlanForGivesEachRunItsBudgetPoolAndGovernor(t *testing.T) {
 			wantErr: "which is not one seat"},
 		{name: "a marker that is not 1 is refused", ungoverned: "yes", numCPU: 16,
 			wantErr: `AGENT_REPL_TEST_UNGOVERNED="yes" is not the "1"`},
-
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

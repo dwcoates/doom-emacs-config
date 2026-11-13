@@ -19,7 +19,6 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-
 // submission is one recorded Submit call.
 type submission struct {
 	WS       ids.WorkspaceID
@@ -155,12 +154,12 @@ func (w *world) ingress() Ingress {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))
 		},
-		Serves:      func() bool { return w.serves },
-		Log:         w.log,
-		Remove:      w.remove,
+		Serves:        func() bool { return w.serves },
+		Log:           w.log,
+		Remove:        w.remove,
 		IntakeChanged: func() <-chan struct{} { return nil },
 		FleetChanges:  func(context.Context) (<-chan struct{}, func()) { return nil, func() {} },
-		SubmitBound: w.submitBound,
+		SubmitBound:   w.submitBound,
 	})
 	if err != nil {
 		w.t.Fatalf("New = %v", err)
