@@ -92,6 +92,9 @@ type controller struct {
 	// is a WRITE: it is held here and written the moment the handle is
 	// promoted, so the record is deferred rather than lost.
 	pendingDispositions []pendingDisposition
+	// dispositionUnlanded latches that a deferred disposition failed to be
+	// written, so the manifest is kept for the next boot (flushDispositions).
+	dispositionUnlanded bool
 	// successor is the address of the daemon taking over, empty while no
 	// handover is in flight.
 	successor string

@@ -680,7 +680,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.log.Error(opAdopt, "the state handle could not be promoted to writing", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
 	}
-	c.flushDispositions(ctx)
+	c.flushDispositions(ctx, ws)
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not read the workspace being adopted", dlog.WithCause(fields, err))

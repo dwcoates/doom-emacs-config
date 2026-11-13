@@ -534,33 +534,63 @@ type pendingDisposition struct {
 	d       Disposition
 }
 
-// flushDispositions writes the dispositions reconciled while the handle was
-// read-only. The successor calls it the moment its handle is promoted, so the
-// bounce accounting is deferred by exactly the read-only window and by nothing
-// else.
-func (c *controller) flushDispositions(ctx context.Context) {
+// flushDispositions writes WS's dispositions reconciled while the handle was
+// read-only. ws's adoption calls it the moment its handle is promoted, before
+// its attach edge, so ws's bounce accounting is deferred by exactly the
+// read-only window and by nothing else.
+//
+// AN ADOPTION WRITES ITS OWN WORKSPACE'S ACCOUNTING AND NOTHING ELSE. The
+// flush once took every deferred disposition into whichever adoption
+// promoted first, so that one adoption wrote the whole manifest's accounting,
+// one fault at a time, before it could claim its own row: at the 2026-11-13
+// 14:42 deploy the adoption of keepalive-warmth-cap read its carry 5ms after
+// the flush's last write, ten seconds after its participant had called,
+// which then timed out on Emacs's 10s AdoptHostWorkspace deadline. Each
+// deferred entry is its own workspace's, and every workspace the manifest
+// names is adopted here (by its rendezvous or the straggler pass), so each is
+// written by its own adoption.
+//
+// The manifest is retired once no deferred disposition is left and none
+// failed to land; a failed one keeps it, for the next boot to account again.
+func (c *controller) flushDispositions(ctx context.Context, ws ids.WorkspaceID) {
 	c.mu.Lock()
-	pending := c.pendingDispositions
-	c.pendingDispositions = nil
+	var mine []pendingDisposition
+	rest := c.pendingDispositions[:0:0]
+	for _, p := range c.pendingDispositions {
+		if p.session.Workspace == ws {
+			mine = append(mine, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	c.pendingDispositions = rest
 	c.unlock()
-	for _, p := range pending {
+	if len(mine) == 0 {
+		return
+	}
+	for _, p := range mine {
 		c.logTransition(opReconcile, p.session.Workspace, "disposition_deferred", true, false,
 			dlog.Context{"disposition": string(p.d.Kind)})
 	}
 	landed := true
-	for _, p := range pending {
+	for _, p := range mine {
 		if !c.recordDisposition(ctx, p.session, p.d) {
 			landed = false
 		}
 	}
-	if len(pending) > 0 {
-		c.log.Debug(opReconcile, "wrote the bounce dispositions deferred by the read-only window",
-			dlog.Context{"dispositions": len(pending), "recorded": landed})
-		// THE DEFERRED ACCOUNTING IS WHAT KEPT THE MANIFEST: once it is
-		// written, the manifest has been consumed.
-		if landed {
-			c.retireManifest("the dispositions deferred by the read-only window are recorded")
-		}
+	c.mu.Lock()
+	if !landed {
+		c.dispositionUnlanded = true
+	}
+	left := len(c.pendingDispositions)
+	retire := left == 0 && !c.dispositionUnlanded
+	c.unlock()
+	c.log.Debug(opReconcile, "wrote the workspace's bounce dispositions deferred by the read-only window",
+		dlog.Context{"workspace": string(ws), "dispositions": len(mine), "recorded": landed, "still_deferred": left})
+	// THE DEFERRED ACCOUNTING IS WHAT KEPT THE MANIFEST: once all of it is
+	// written, the manifest has been consumed.
+	if retire {
+		c.retireManifest("the dispositions deferred by the read-only window are recorded")
 	}
 }
 
@@ -573,8 +603,13 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 	// A READ-ONLY HANDLE IS NOT A FAILURE HERE, it is the joining successor's
 	// ordinary state: the incumbent is still the sole writer. The accounting
 	// is HELD, not dropped, and flushDispositions writes it at the promotion.
+	// THE READ-ONLY CHECK AND THE DEFERRAL ARE ONE STEP under the
+	// controller's lock, and an adoption promotes BEFORE it takes its
+	// workspace's deferred entries under the same lock: an entry is either
+	// deferred before its adoption takes it, or written here on a handle
+	// already promoted. None is deferred after its own adoption has looked.
+	c.mu.Lock()
 	if c.deps.DB.ReadOnly() {
-		c.mu.Lock()
 		before := len(c.pendingDispositions)
 		c.pendingDispositions = append(c.pendingDispositions, pendingDisposition{session: session, d: d})
 		after := len(c.pendingDispositions)
@@ -585,6 +620,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 			dlog.Context{"workspace": string(ws), "disposition": string(d.Kind)})
 		return false
 	}
+	c.unlock()
 	fields := dlog.Context{
 		"workspace":   string(ws),
 		"intent":      string(d.Intent),
