@@ -414,7 +414,7 @@ func (s *store) placeWorkspaces(ctx context.Context, op string, ws []WorkspaceID
 			}
 		}
 		var err error
-		expanded, err = placeFamilies(ctx, tx, ws, into, at)
+		expanded, err = placeFamilies(ctx, tx, ws, into, at, byAgent)
 		return err
 	})
 	if err == nil && expanded {
@@ -427,11 +427,13 @@ func (s *store) placeWorkspaces(ctx context.Context, op string, ws []WorkspaceID
 // agent filing a workspace and an agent creating a subsection with its
 // members all write through.
 //
-// A PLACED WORKSPACE IS NEVER HIDDEN BY ITS SUBSECTION'S FOLD (owner request,
-// 2026-10-31): placing into a collapsed subsection expands it
-// (expandSubsection), answering whether it did. The repository's own fold is
-// the user's alone and is left as it is.
-func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor) (bool, error) {
+// AN AGENT'S PLACEMENT IS NEVER HIDDEN BY ITS SUBSECTION'S FOLD (owner
+// request, 2026-10-31): with EXPAND, placing into a collapsed subsection
+// expands it (expandSubsection), answering whether it did. THE USER'S OWN DROP
+// KEEPS A FOLDED SUBSECTION FOLDED (owner request, 2026-11-13), so a drag
+// passes false. The repository's own fold is the user's alone and is left as
+// it is.
+func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor, expand bool) (bool, error) {
 	// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
 	// its root, and so its every ancestor and descendant.
 	ws, err := familyRoots(ctx, tx, ws)
@@ -489,6 +491,9 @@ func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *Subs
 	walk[k].members = slices.Insert(slices.Clone(members), j, ws...)
 	if err := writeWalk(ctx, tx, walk); err != nil {
 		return false, err
+	}
+	if !expand {
+		return false, nil
 	}
 	return expandSubsection(ctx, tx, *into)
 }

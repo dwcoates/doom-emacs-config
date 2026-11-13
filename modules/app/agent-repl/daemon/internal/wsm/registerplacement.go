@@ -232,7 +232,7 @@ func (s *store) RefusePlacement(ctx context.Context, repoDir string, p RegisterP
 // a drag and an agent's subsection create write through.
 func applyPlacement(ctx context.Context, tx *sql.Tx, id WorkspaceID, r resolvedPlacement) error {
 	if r.create == nil {
-		_, err := placeFamilies(ctx, tx, []WorkspaceID{id}, r.into, AtEnd{})
+		_, err := placeFamilies(ctx, tx, []WorkspaceID{id}, r.into, AtEnd{}, true)
 		return err
 	}
 	return fileIntoNewAgentSubsection(ctx, tx, r.create, append(append([]WorkspaceID{}, r.gather...), id))
