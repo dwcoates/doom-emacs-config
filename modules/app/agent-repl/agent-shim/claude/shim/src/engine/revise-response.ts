@@ -78,7 +78,10 @@ export async function reviseResponse(
   const asked = await askSideQuery(
     (prompt, controller) => {
       // THE CALL'S LIFETIME IS THE REVISION'S: a caller that goes away aborts
-      // the side query, and nothing is written.
+      // the side query, and nothing is written. A caller already gone by the
+      // time the query is built aborts it at once, since its abort event has
+      // already fired.
+      if (signal?.aborted === true) controller.abort();
       signal?.addEventListener("abort", () => controller.abort(), { once: true });
       return deps.build({ parentSessionId, upTo: cut.upTo }, prompt, controller);
     },
@@ -86,6 +89,19 @@ export async function reviseResponse(
     // every prompt the shim sends is.
     saidContent(instruction),
   );
+  // A CALLER THAT WENT AWAY (a turn stop stopped the revision) GETS NOTHING
+  // WRITTEN, whatever the side query answered: the abort and this check run
+  // on one thread, so no revision lands after the caller stopped it.
+  if (signal?.aborted === true) {
+    LOGGER.info(
+      { ...context, vendor_session_id: parentSessionId, outcome: asked.kind },
+      "the caller stopped the revision; no revision was written",
+    );
+    return refused({
+      case: "vendorFailed",
+      value: create(shimv1.ReviseResponseVendorFailedSchema, { detail: "the caller stopped the revision" }),
+    });
+  }
   const failed = (detail: string): shimv1.ReviseResponseResponse => {
     LOGGER.error({ ...context, vendor_session_id: parentSessionId, outcome: asked.kind, cause: detail }, "the revising side query failed; no revision was written");
     return refused({ case: "vendorFailed", value: create(shimv1.ReviseResponseVendorFailedSchema, { detail }) });
