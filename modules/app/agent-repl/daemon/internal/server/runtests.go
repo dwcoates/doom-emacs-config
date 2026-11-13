@@ -385,7 +385,9 @@ func (s *server) handCutWorktreeOf(ctx context.Context, own testWorktree, dir st
 	if err := linkedWorktreeOf(dir, own.dir); err != nil {
 		return handCutWorktree{}, err.Error(), nil
 	}
-	cut := testWorktree{log: own.log.With(dlog.Context{"worktree": dir}), dir: dir, name: filepath.Base(dir)}
+	// The run is still the main workspace's: its bypass standing decides the
+	// run's governance, so the cut worktree carries its id.
+	cut := testWorktree{log: own.log.With(dlog.Context{"worktree": dir}), dir: dir, name: filepath.Base(dir), id: own.id}
 	if cut.script, err = testScriptOf(dir); err != nil {
 		own.log.Error(opRunTests, "a test run's hand-cut worktree has no test script to run", dlog.WithCause(dlog.Context{"worktree": dir}, err))
 		return handCutWorktree{err: &noTestScriptError{cause: err}}, "", nil

@@ -140,6 +140,8 @@ type fakeDB struct {
 	// bypass is each workspace's queue-bypass standing, and bypassErr fails
 	// its read.
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
+	// bypassReads is every workspace QueueBypass was asked about, in order.
+	bypassReads []ids.WorkspaceID
 	bypassErr error
 
 	// prSubs are the pull-request subscriptions recorded; prSubscribeErr
@@ -3090,8 +3092,13 @@ func (f *fakeVerbs) CreateIntake(_ context.Context, spec workspace.IntakeSpec) (
 
 // QueueBypass answers the standing the test set, none by default.
 func (d *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
+	d.bypassReads = append(d.bypassReads, ws)
 	if d.bypassErr != nil {
 		return wsm.QueueBypass{}, d.bypassErr
+	}
+	if ws == "" {
+		// The store answers no workspace for the empty id, as wsm does.
+		return wsm.QueueBypass{}, fmt.Errorf("wsm: workspace %s: %w", ws, wsm.ErrNotFound)
 	}
 	return d.bypass[ws], nil
 }

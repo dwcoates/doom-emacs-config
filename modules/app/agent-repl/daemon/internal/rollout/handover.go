@@ -12,6 +12,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -351,24 +352,17 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 }
 
 // foldedRows answers, for each of WORKSPACES, whether its sidebar row is
-// folded away: its repository's section folded, or the subsection it is filed
-// in folded (the sidebar arrangement, wsm.ReadArrangement).
+// folded away: the one statement of a fold, the tab bar's (bringup.Folds), so
+// what a handover moves last and loads no page for is exactly what the bar
+// folds and the daemon withholds.
 func (c *controller) foldedRows(ctx context.Context, workspaces []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
-	arrangement, err := c.deps.DB.ReadArrangement(ctx)
+	folds, err := bringup.Folds(ctx, c.deps.DB, c.log)
 	if err != nil {
-		return nil, fmt.Errorf("rollout: handover: read the sidebar arrangement: %w", err)
-	}
-	repos := make(map[ids.RepoID]bool, len(arrangement.Repositories))
-	for _, repo := range arrangement.Repositories {
-		repos[repo.ID] = repo.Folded
-	}
-	subsections := make(map[ids.SubsectionID]bool, len(arrangement.Subsections))
-	for _, sub := range arrangement.Subsections {
-		subsections[sub.ID] = sub.Folded
+		return nil, fmt.Errorf("rollout: handover: %w", err)
 	}
 	out := make(map[ids.WorkspaceID]bool, len(workspaces))
 	for _, ws := range workspaces {
-		out[ws.ID] = repos[ws.Repo] || (ws.Subsection != nil && subsections[*ws.Subsection])
+		out[ws.ID] = folds[ws.ID]
 	}
 	return out, nil
 }
