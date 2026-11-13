@@ -21,8 +21,21 @@ type rowContext struct {
 	selected *ids.WorkspaceID
 	// cause is the operation whose fact is being rendered.
 	cause string
+	// causes names a combined commit's own cause per workspace it changed
+	// (causeOf); nil outside one.
+	causes map[ids.WorkspaceID]string
 	// children are each workspace's children, by parent (childrenOf).
 	children map[ids.WorkspaceID][]wsm.Workspace
+}
+
+// causeOf is the operation a row's status arm change is attributed to: the
+// last change to that workspace in the combined commit being rendered, else
+// the commit's own cause.
+func (rc rowContext) causeOf(ws ids.WorkspaceID) string {
+	if cause, ok := rc.causes[ws]; ok {
+		return cause
+	}
+	return rc.cause
 }
 
 // rowRepository names REC's repository as its section is headed
@@ -64,7 +77,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	wasViewed := s.lastArmSeen && s.viewedOn(s.lastArm)
 	previousArm, armChanged := s.noteArm(armName)
 	if armChanged {
-		r.logArmChange(rec.ID, armName, previousArm, rc.cause)
+		r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 		r.noteStatusChange(rec.ID, s)
 	}
 	if r.factsOnly {

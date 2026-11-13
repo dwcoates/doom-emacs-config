@@ -354,6 +354,67 @@ func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayIsPointedOnwardAtOnce(t
 	}
 }
 
+func TestAnAdoptCallOnTheDaemonStillServingTheWorkspaceItIsHandingOver(t *testing.T) {
+	calls := []struct {
+		name string
+		call func(c *controller, ctx context.Context, ws ids.WorkspaceID) error
+		op   string
+	}{
+		{"the page", (*controller).AdoptWeb, opAdoptWeb},
+		{"the host", (*controller).AdoptHost, opAdoptHost},
+	}
+	// arrange arms the outgoing daemon's own entry, as its announcement
+	// arms it, for a workspace not transferred yet (a busy one, waiting on
+	// its freeness).
+	arrange := func(t *testing.T) (*harness, ids.WorkspaceID, *entry) {
+		h := newHarness(t)
+		ws, _ := h.workspace(t)
+		e := &entry{servedHere: true, expected: Participants{Host: true, Web: true}, run: newAdoptionRun()}
+		h.c.mu.Lock()
+		h.c.rendezvous[ws] = e
+		h.c.mu.Unlock()
+		return h, ws, e
+	}
+	for _, call := range calls {
+		t.Run(call.name+" is answered as an ordinary boot here", func(t *testing.T) {
+			// Arrange
+			h, ws, _ := arrange(t)
+
+			// Act
+			err := call.call(h.c, context.Background(), ws)
+
+			// Assert
+			if !errors.Is(err, ErrNoTransferAnnounced) {
+				t.Fatalf("answered %v, want ErrNoTransferAnnounced", err)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+				Level: dlog.LevelInfo, Operation: call.op,
+				Message: "this daemon still serves the workspace it is handing over; the caller is served here until the transfer, which its streams are told of",
+			}); !ok {
+				t.Fatalf("records = %+v, want the INFO naming the workspace served here", h.log.Records())
+			}
+		})
+		t.Run(call.name+" starts no adoption on the outgoing daemon", func(t *testing.T) {
+			// Arrange
+			h, ws, e := arrange(t)
+
+			// Act
+			_ = call.call(h.c, context.Background(), ws)
+
+			// Assert
+			h.c.mu.Lock()
+			claimed, filled := e.adoptionClaimed, e.hostCalled || e.webCalled
+			h.c.mu.Unlock()
+			if claimed || filled {
+				t.Fatalf("entry claimed=%v filled=%v, want neither", claimed, filled)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Operation: opAdopt}); ok {
+				t.Fatalf("records = %+v, want no adoption recorded", h.log.Records())
+			}
+		})
+	}
+}
+
 func TestAnAdoptCallOnTheDaemonThatHandedTheWorkspaceAwayFillsNoParticipantSlot(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

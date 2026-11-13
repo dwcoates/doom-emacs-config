@@ -89,9 +89,9 @@ func (f *serverForwarder) Dropped() int {
 	return f.dropped
 }
 
-func (f *serverForwarder) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
+func (f *serverForwarder) PushTransferred(ws ids.WorkspaceID, successorAddress string, reloadPage bool) {
 	if target, ok := f.bound(); ok {
-		target.PushTransferred(ws, successorAddress)
+		target.PushTransferred(ws, successorAddress, reloadPage)
 	}
 }
 

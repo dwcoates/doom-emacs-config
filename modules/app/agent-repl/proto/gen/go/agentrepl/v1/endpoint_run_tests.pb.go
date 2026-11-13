@@ -370,6 +370,7 @@ type RunTestsError struct {
 	//	*RunTestsError_Invalid
 	//	*RunTestsError_WorktreeRefused
 	//	*RunTestsError_UserOnlyRefused
+	//	*RunTestsError_TransferringAway
 	Cause         isRunTestsError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -475,6 +476,15 @@ func (x *RunTestsError) GetUserOnlyRefused() *RunTestsUserOnlyRefused {
 	return nil
 }
 
+func (x *RunTestsError) GetTransferringAway() *RunTestsTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*RunTestsError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
 type isRunTestsError_Cause interface {
 	isRunTestsError_Cause()
 }
@@ -514,6 +524,12 @@ type RunTestsError_UserOnlyRefused struct {
 	UserOnlyRefused *RunTestsUserOnlyRefused `protobuf:"bytes,7,opt,name=user_only_refused,json=userOnlyRefused,proto3,oneof"`
 }
 
+type RunTestsError_TransferringAway struct {
+	// The daemon handed the workspace to a successor mid-handover; the run is
+	// the successor's to serve.
+	TransferringAway *RunTestsTransferringAway `protobuf:"bytes,8,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
 func (*RunTestsError_UnknownWorkspace) isRunTestsError_Cause() {}
 
 func (*RunTestsError_NoSelection) isRunTestsError_Cause() {}
@@ -527,6 +543,54 @@ func (*RunTestsError_Invalid) isRunTestsError_Cause() {}
 func (*RunTestsError_WorktreeRefused) isRunTestsError_Cause() {}
 
 func (*RunTestsError_UserOnlyRefused) isRunTestsError_Cause() {}
+
+func (*RunTestsError_TransferringAway) isRunTestsError_Cause() {}
+
+// The daemon handed the workspace to a successor mid-handover.
+type RunTestsTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, which the caller sends the run to.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunTestsTransferringAway) Reset() {
+	*x = RunTestsTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunTestsTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunTestsTransferringAway) ProtoMessage() {}
+
+func (x *RunTestsTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunTestsTransferringAway.ProtoReflect.Descriptor instead.
+func (*RunTestsTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RunTestsTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
 
 // An option only the user may ask for was asked for by a workspace: a fresh
 // run (`TestRunRequest.no_reuse`) or a governed bypass run (`governed`). Both
@@ -543,7 +607,7 @@ type RunTestsUserOnlyRefused struct {
 
 func (x *RunTestsUserOnlyRefused) Reset() {
 	*x = RunTestsUserOnlyRefused{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -555,7 +619,7 @@ func (x *RunTestsUserOnlyRefused) String() string {
 func (*RunTestsUserOnlyRefused) ProtoMessage() {}
 
 func (x *RunTestsUserOnlyRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -568,7 +632,7 @@ func (x *RunTestsUserOnlyRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsUserOnlyRefused.ProtoReflect.Descriptor instead.
 func (*RunTestsUserOnlyRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RunTestsUserOnlyRefused) GetOptions() []string {
@@ -590,7 +654,7 @@ type RunTestsWorktreeRefused struct {
 
 func (x *RunTestsWorktreeRefused) Reset() {
 	*x = RunTestsWorktreeRefused{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +666,7 @@ func (x *RunTestsWorktreeRefused) String() string {
 func (*RunTestsWorktreeRefused) ProtoMessage() {}
 
 func (x *RunTestsWorktreeRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +679,7 @@ func (x *RunTestsWorktreeRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsWorktreeRefused.ProtoReflect.Descriptor instead.
 func (*RunTestsWorktreeRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RunTestsWorktreeRefused) GetDetail() string {
@@ -634,7 +698,7 @@ type RunTestsCpuLoadRefused struct {
 
 func (x *RunTestsCpuLoadRefused) Reset() {
 	*x = RunTestsCpuLoadRefused{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +710,7 @@ func (x *RunTestsCpuLoadRefused) String() string {
 func (*RunTestsCpuLoadRefused) ProtoMessage() {}
 
 func (x *RunTestsCpuLoadRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +723,7 @@ func (x *RunTestsCpuLoadRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsCpuLoadRefused.ProtoReflect.Descriptor instead.
 func (*RunTestsCpuLoadRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{8}
 }
 
 // The request's options contradict each other.
@@ -673,7 +737,7 @@ type RunTestsInvalid struct {
 
 func (x *RunTestsInvalid) Reset() {
 	*x = RunTestsInvalid{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -685,7 +749,7 @@ func (x *RunTestsInvalid) String() string {
 func (*RunTestsInvalid) ProtoMessage() {}
 
 func (x *RunTestsInvalid) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -698,7 +762,7 @@ func (x *RunTestsInvalid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsInvalid.ProtoReflect.Descriptor instead.
 func (*RunTestsInvalid) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RunTestsInvalid) GetDetail() string {
@@ -717,7 +781,7 @@ type RunTestsUnknownWorkspace struct {
 
 func (x *RunTestsUnknownWorkspace) Reset() {
 	*x = RunTestsUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -729,7 +793,7 @@ func (x *RunTestsUnknownWorkspace) String() string {
 func (*RunTestsUnknownWorkspace) ProtoMessage() {}
 
 func (x *RunTestsUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +806,7 @@ func (x *RunTestsUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*RunTestsUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{10}
 }
 
 // The request named no test.
@@ -754,7 +818,7 @@ type RunTestsNoSelection struct {
 
 func (x *RunTestsNoSelection) Reset() {
 	*x = RunTestsNoSelection{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -766,7 +830,7 @@ func (x *RunTestsNoSelection) String() string {
 func (*RunTestsNoSelection) ProtoMessage() {}
 
 func (x *RunTestsNoSelection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -779,7 +843,7 @@ func (x *RunTestsNoSelection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsNoSelection.ProtoReflect.Descriptor instead.
 func (*RunTestsNoSelection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{11}
 }
 
 // The runner could not be started, or ended without reporting its end.
@@ -795,7 +859,7 @@ type RunTestsRunnerFailed struct {
 
 func (x *RunTestsRunnerFailed) Reset() {
 	*x = RunTestsRunnerFailed{}
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -807,7 +871,7 @@ func (x *RunTestsRunnerFailed) String() string {
 func (*RunTestsRunnerFailed) ProtoMessage() {}
 
 func (x *RunTestsRunnerFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_run_tests_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -820,7 +884,7 @@ func (x *RunTestsRunnerFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunTestsRunnerFailed.ProtoReflect.Descriptor instead.
 func (*RunTestsRunnerFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RunTestsRunnerFailed) GetExitCode() int32 {
@@ -859,7 +923,7 @@ const file_agentrepl_v1_endpoint_run_tests_proto_rawDesc = "" +
 	"\x05event\x18\x01 \x01(\v2\x18.testrun.v1.TestRunEventH\x00R\x05event\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.agentrepl.v1.RunTestsErrorH\x00R\x05error\x12\x10\n" +
 	"\x03run\x18\x03 \x01(\rR\x03runB\a\n" +
-	"\x05frame\"\xb8\x04\n" +
+	"\x05frame\"\x8f\x05\n" +
 	"\rRunTestsError\x12U\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.RunTestsUnknownWorkspaceH\x00R\x10unknownWorkspace\x12F\n" +
 	"\fno_selection\x18\x02 \x01(\v2!.agentrepl.v1.RunTestsNoSelectionH\x00R\vnoSelection\x12I\n" +
@@ -867,8 +931,11 @@ const file_agentrepl_v1_endpoint_run_tests_proto_rawDesc = "" +
 	"\x10cpu_load_refused\x18\x04 \x01(\v2$.agentrepl.v1.RunTestsCpuLoadRefusedH\x00R\x0ecpuLoadRefused\x129\n" +
 	"\ainvalid\x18\x05 \x01(\v2\x1d.agentrepl.v1.RunTestsInvalidH\x00R\ainvalid\x12R\n" +
 	"\x10worktree_refused\x18\x06 \x01(\v2%.agentrepl.v1.RunTestsWorktreeRefusedH\x00R\x0fworktreeRefused\x12S\n" +
-	"\x11user_only_refused\x18\a \x01(\v2%.agentrepl.v1.RunTestsUserOnlyRefusedH\x00R\x0fuserOnlyRefusedB\a\n" +
-	"\x05cause\"3\n" +
+	"\x11user_only_refused\x18\a \x01(\v2%.agentrepl.v1.RunTestsUserOnlyRefusedH\x00R\x0fuserOnlyRefused\x12U\n" +
+	"\x11transferring_away\x18\b \x01(\v2&.agentrepl.v1.RunTestsTransferringAwayH\x00R\x10transferringAwayB\a\n" +
+	"\x05cause\"4\n" +
+	"\x18RunTestsTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"3\n" +
 	"\x17RunTestsUserOnlyRefused\x12\x18\n" +
 	"\aoptions\x18\x01 \x03(\tR\aoptions\"1\n" +
 	"\x17RunTestsWorktreeRefused\x12\x16\n" +
@@ -894,45 +961,47 @@ func file_agentrepl_v1_endpoint_run_tests_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_run_tests_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_run_tests_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_agentrepl_v1_endpoint_run_tests_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_endpoint_run_tests_proto_goTypes = []any{
 	(*RunTestsRequest)(nil),          // 0: agentrepl.v1.RunTestsRequest
 	(*RunTestsWorktree)(nil),         // 1: agentrepl.v1.RunTestsWorktree
 	(*RunTestsCpuLoad)(nil),          // 2: agentrepl.v1.RunTestsCpuLoad
 	(*RunTestsResponse)(nil),         // 3: agentrepl.v1.RunTestsResponse
 	(*RunTestsError)(nil),            // 4: agentrepl.v1.RunTestsError
-	(*RunTestsUserOnlyRefused)(nil),  // 5: agentrepl.v1.RunTestsUserOnlyRefused
-	(*RunTestsWorktreeRefused)(nil),  // 6: agentrepl.v1.RunTestsWorktreeRefused
-	(*RunTestsCpuLoadRefused)(nil),   // 7: agentrepl.v1.RunTestsCpuLoadRefused
-	(*RunTestsInvalid)(nil),          // 8: agentrepl.v1.RunTestsInvalid
-	(*RunTestsUnknownWorkspace)(nil), // 9: agentrepl.v1.RunTestsUnknownWorkspace
-	(*RunTestsNoSelection)(nil),      // 10: agentrepl.v1.RunTestsNoSelection
-	(*RunTestsRunnerFailed)(nil),     // 11: agentrepl.v1.RunTestsRunnerFailed
-	(*v1.WorkspaceRef)(nil),          // 12: workspace.v1.WorkspaceRef
-	(*v11.TestRunRequest)(nil),       // 13: testrun.v1.TestRunRequest
-	(*WorkspaceRequester)(nil),       // 14: agentrepl.v1.WorkspaceRequester
-	(*v11.TestRunEvent)(nil),         // 15: testrun.v1.TestRunEvent
+	(*RunTestsTransferringAway)(nil), // 5: agentrepl.v1.RunTestsTransferringAway
+	(*RunTestsUserOnlyRefused)(nil),  // 6: agentrepl.v1.RunTestsUserOnlyRefused
+	(*RunTestsWorktreeRefused)(nil),  // 7: agentrepl.v1.RunTestsWorktreeRefused
+	(*RunTestsCpuLoadRefused)(nil),   // 8: agentrepl.v1.RunTestsCpuLoadRefused
+	(*RunTestsInvalid)(nil),          // 9: agentrepl.v1.RunTestsInvalid
+	(*RunTestsUnknownWorkspace)(nil), // 10: agentrepl.v1.RunTestsUnknownWorkspace
+	(*RunTestsNoSelection)(nil),      // 11: agentrepl.v1.RunTestsNoSelection
+	(*RunTestsRunnerFailed)(nil),     // 12: agentrepl.v1.RunTestsRunnerFailed
+	(*v1.WorkspaceRef)(nil),          // 13: workspace.v1.WorkspaceRef
+	(*v11.TestRunRequest)(nil),       // 14: testrun.v1.TestRunRequest
+	(*WorkspaceRequester)(nil),       // 15: agentrepl.v1.WorkspaceRequester
+	(*v11.TestRunEvent)(nil),         // 16: testrun.v1.TestRunEvent
 }
 var file_agentrepl_v1_endpoint_run_tests_proto_depIdxs = []int32{
-	12, // 0: agentrepl.v1.RunTestsRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	13, // 1: agentrepl.v1.RunTestsRequest.run:type_name -> testrun.v1.TestRunRequest
+	13, // 0: agentrepl.v1.RunTestsRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 1: agentrepl.v1.RunTestsRequest.run:type_name -> testrun.v1.TestRunRequest
 	2,  // 2: agentrepl.v1.RunTestsRequest.cpu_load:type_name -> agentrepl.v1.RunTestsCpuLoad
-	14, // 3: agentrepl.v1.RunTestsRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	15, // 3: agentrepl.v1.RunTestsRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
 	1,  // 4: agentrepl.v1.RunTestsRequest.worktree:type_name -> agentrepl.v1.RunTestsWorktree
-	15, // 5: agentrepl.v1.RunTestsResponse.event:type_name -> testrun.v1.TestRunEvent
+	16, // 5: agentrepl.v1.RunTestsResponse.event:type_name -> testrun.v1.TestRunEvent
 	4,  // 6: agentrepl.v1.RunTestsResponse.error:type_name -> agentrepl.v1.RunTestsError
-	9,  // 7: agentrepl.v1.RunTestsError.unknown_workspace:type_name -> agentrepl.v1.RunTestsUnknownWorkspace
-	10, // 8: agentrepl.v1.RunTestsError.no_selection:type_name -> agentrepl.v1.RunTestsNoSelection
-	11, // 9: agentrepl.v1.RunTestsError.runner_failed:type_name -> agentrepl.v1.RunTestsRunnerFailed
-	7,  // 10: agentrepl.v1.RunTestsError.cpu_load_refused:type_name -> agentrepl.v1.RunTestsCpuLoadRefused
-	8,  // 11: agentrepl.v1.RunTestsError.invalid:type_name -> agentrepl.v1.RunTestsInvalid
-	6,  // 12: agentrepl.v1.RunTestsError.worktree_refused:type_name -> agentrepl.v1.RunTestsWorktreeRefused
-	5,  // 13: agentrepl.v1.RunTestsError.user_only_refused:type_name -> agentrepl.v1.RunTestsUserOnlyRefused
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	10, // 7: agentrepl.v1.RunTestsError.unknown_workspace:type_name -> agentrepl.v1.RunTestsUnknownWorkspace
+	11, // 8: agentrepl.v1.RunTestsError.no_selection:type_name -> agentrepl.v1.RunTestsNoSelection
+	12, // 9: agentrepl.v1.RunTestsError.runner_failed:type_name -> agentrepl.v1.RunTestsRunnerFailed
+	8,  // 10: agentrepl.v1.RunTestsError.cpu_load_refused:type_name -> agentrepl.v1.RunTestsCpuLoadRefused
+	9,  // 11: agentrepl.v1.RunTestsError.invalid:type_name -> agentrepl.v1.RunTestsInvalid
+	7,  // 12: agentrepl.v1.RunTestsError.worktree_refused:type_name -> agentrepl.v1.RunTestsWorktreeRefused
+	6,  // 13: agentrepl.v1.RunTestsError.user_only_refused:type_name -> agentrepl.v1.RunTestsUserOnlyRefused
+	5,  // 14: agentrepl.v1.RunTestsError.transferring_away:type_name -> agentrepl.v1.RunTestsTransferringAway
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_run_tests_proto_init() }
@@ -953,6 +1022,7 @@ func file_agentrepl_v1_endpoint_run_tests_proto_init() {
 		(*RunTestsError_Invalid)(nil),
 		(*RunTestsError_WorktreeRefused)(nil),
 		(*RunTestsError_UserOnlyRefused)(nil),
+		(*RunTestsError_TransferringAway)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -960,7 +1030,7 @@ func file_agentrepl_v1_endpoint_run_tests_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_run_tests_proto_rawDesc), len(file_agentrepl_v1_endpoint_run_tests_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

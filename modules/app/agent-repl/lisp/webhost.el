@@ -699,6 +699,11 @@ unloaded page's workspace still shows its gate at the composer's height
     (agent-repl--info ws "elisp.webhost.page-removed ws=%s id=%s" ws id)
     (agent-repl--webhost-call "remove" id)))
 
+(defun agent-repl-webhost-shown-p (ws)
+  "Non-nil when WS\='s page is the one the host shows."
+  (let ((id (agent-repl--webhost-id ws)))
+    (and id (equal id agent-repl--webhost-shown))))
+
 (defun agent-repl-webhost-has-page-p (ws)
   "Non-nil when the host is meant to hold WS's page."
   (let ((id (agent-repl--webhost-id ws)))

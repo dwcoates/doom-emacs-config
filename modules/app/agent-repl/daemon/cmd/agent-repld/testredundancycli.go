@@ -72,19 +72,38 @@ func testRedundancy(c *cliCall, args []string) int {
 	if err := rf.finish(set, canonicalDir(ref.GetDir()), canonicalDir(cwd)); err != nil {
 		return c.usageFailed("%v", err)
 	}
-	stream, err := openDaemonStream(c.ctx, c.client.RunRedundancy, &agentreplv1.RunRedundancyRequest{Workspace: ref, Redundancy: rf.req})
+	req := &agentreplv1.RunRedundancyRequest{Workspace: ref, Redundancy: rf.req}
+	// A MEASUREMENT REFUSED AS HANDED OVER IS SENT ONCE MORE, to the successor
+	// its refusal names, as a test run is (streamTestRun).
+	code, successor := streamRedundancyOn(c, req, true)
+	if successor == "" {
+		return code
+	}
+	c.noted("the daemon is handing over; sending the measurement to its successor at %s", successor)
+	c.dialAddress(successor)
+	code, _ = streamRedundancyOn(c, req, false)
+	return code
+}
+
+// streamRedundancyOn is one RunRedundancy call on the command's client. With
+// FOLLOW, a measurement refused as handed over prints nothing and answers the
+// successor to send it to; without, that refusal is printed as refused.
+func streamRedundancyOn(c *cliCall, req *agentreplv1.RunRedundancyRequest, follow bool) (int, string) {
+	stream, err := openDaemonStream(c.ctx, c.client.RunRedundancy, req)
 	if errors.Is(err, errDryRun) {
-		return exitSuccess
+		return exitSuccess, ""
 	}
 	if err != nil {
 		c.failed("the daemon failed the call: %v", err)
-		return exitFailure
+		return exitFailure, ""
 	}
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
 	code, ended := exitFailure, false
 	for stream.Receive() {
 		frame := stream.Msg()
 		switch {
+		case follow && frame.GetError().GetTransferringAway().GetAddress() != "":
+			return exitRefused, frame.GetError().GetTransferringAway().GetAddress()
 		case frame.GetError() != nil:
 			ended = true
 			text, _ := protojson.Marshal(frame) //nolint:errcheck // a generated message always renders
@@ -105,12 +124,12 @@ func testRedundancy(c *cliCall, args []string) int {
 	}
 	if err := stream.Err(); err != nil && !errors.Is(err, io.EOF) {
 		c.failed("the measurement's stream broke: %v", err)
-		return exitFailure
+		return exitFailure, ""
 	}
 	if !ended {
 		c.failed("the measurement did not report how it ended")
 	}
-	return code
+	return code, ""
 }
 
 // redundancyFlagsFor binds the named adapter's flags to fs.

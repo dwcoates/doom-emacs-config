@@ -249,6 +249,7 @@ type RunRedundancyError struct {
 	//	*RunRedundancyError_UnknownWorkspace
 	//	*RunRedundancyError_NoCommand
 	//	*RunRedundancyError_RunnerFailed
+	//	*RunRedundancyError_TransferringAway
 	Cause         isRunRedundancyError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -318,6 +319,15 @@ func (x *RunRedundancyError) GetRunnerFailed() *RunRedundancyRunnerFailed {
 	return nil
 }
 
+func (x *RunRedundancyError) GetTransferringAway() *RunRedundancyTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*RunRedundancyError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
 type isRunRedundancyError_Cause interface {
 	isRunRedundancyError_Cause()
 }
@@ -337,11 +347,66 @@ type RunRedundancyError_RunnerFailed struct {
 	RunnerFailed *RunRedundancyRunnerFailed `protobuf:"bytes,3,opt,name=runner_failed,json=runnerFailed,proto3,oneof"`
 }
 
+type RunRedundancyError_TransferringAway struct {
+	// The daemon handed the workspace to a successor mid-handover; the
+	// measurement is the successor's to serve.
+	TransferringAway *RunRedundancyTransferringAway `protobuf:"bytes,4,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
 func (*RunRedundancyError_UnknownWorkspace) isRunRedundancyError_Cause() {}
 
 func (*RunRedundancyError_NoCommand) isRunRedundancyError_Cause() {}
 
 func (*RunRedundancyError_RunnerFailed) isRunRedundancyError_Cause() {}
+
+func (*RunRedundancyError_TransferringAway) isRunRedundancyError_Cause() {}
+
+// The daemon handed the workspace to a successor mid-handover.
+type RunRedundancyTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, which the caller sends the
+	// measurement to.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunRedundancyTransferringAway) Reset() {
+	*x = RunRedundancyTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunRedundancyTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunRedundancyTransferringAway) ProtoMessage() {}
+
+func (x *RunRedundancyTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunRedundancyTransferringAway.ProtoReflect.Descriptor instead.
+func (*RunRedundancyTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RunRedundancyTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
 
 // No workspace the daemon serves is the one named.
 type RunRedundancyUnknownWorkspace struct {
@@ -352,7 +417,7 @@ type RunRedundancyUnknownWorkspace struct {
 
 func (x *RunRedundancyUnknownWorkspace) Reset() {
 	*x = RunRedundancyUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -364,7 +429,7 @@ func (x *RunRedundancyUnknownWorkspace) String() string {
 func (*RunRedundancyUnknownWorkspace) ProtoMessage() {}
 
 func (x *RunRedundancyUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -377,7 +442,7 @@ func (x *RunRedundancyUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRedundancyUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*RunRedundancyUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{5}
 }
 
 // The request names no command.
@@ -389,7 +454,7 @@ type RunRedundancyNoCommand struct {
 
 func (x *RunRedundancyNoCommand) Reset() {
 	*x = RunRedundancyNoCommand{}
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -401,7 +466,7 @@ func (x *RunRedundancyNoCommand) String() string {
 func (*RunRedundancyNoCommand) ProtoMessage() {}
 
 func (x *RunRedundancyNoCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -414,7 +479,7 @@ func (x *RunRedundancyNoCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRedundancyNoCommand.ProtoReflect.Descriptor instead.
 func (*RunRedundancyNoCommand) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{6}
 }
 
 // The runner could not be started.
@@ -428,7 +493,7 @@ type RunRedundancyRunnerFailed struct {
 
 func (x *RunRedundancyRunnerFailed) Reset() {
 	*x = RunRedundancyRunnerFailed{}
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -440,7 +505,7 @@ func (x *RunRedundancyRunnerFailed) String() string {
 func (*RunRedundancyRunnerFailed) ProtoMessage() {}
 
 func (x *RunRedundancyRunnerFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -453,7 +518,7 @@ func (x *RunRedundancyRunnerFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunRedundancyRunnerFailed.ProtoReflect.Descriptor instead.
 func (*RunRedundancyRunnerFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RunRedundancyRunnerFailed) GetDetail() string {
@@ -480,13 +545,16 @@ const file_agentrepl_v1_endpoint_run_redundancy_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\v2 .agentrepl.v1.RunRedundancyErrorH\x00R\x05errorB\a\n" +
 	"\x05frame\"1\n" +
 	"\x12RunRedundancyEnded\x12\x1b\n" +
-	"\texit_code\x18\x01 \x01(\x05R\bexitCode\"\x90\x02\n" +
+	"\texit_code\x18\x01 \x01(\x05R\bexitCode\"\xec\x02\n" +
 	"\x12RunRedundancyError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.RunRedundancyUnknownWorkspaceH\x00R\x10unknownWorkspace\x12E\n" +
 	"\n" +
 	"no_command\x18\x02 \x01(\v2$.agentrepl.v1.RunRedundancyNoCommandH\x00R\tnoCommand\x12N\n" +
-	"\rrunner_failed\x18\x03 \x01(\v2'.agentrepl.v1.RunRedundancyRunnerFailedH\x00R\frunnerFailedB\a\n" +
-	"\x05cause\"\x1f\n" +
+	"\rrunner_failed\x18\x03 \x01(\v2'.agentrepl.v1.RunRedundancyRunnerFailedH\x00R\frunnerFailed\x12Z\n" +
+	"\x11transferring_away\x18\x04 \x01(\v2+.agentrepl.v1.RunRedundancyTransferringAwayH\x00R\x10transferringAwayB\a\n" +
+	"\x05cause\"9\n" +
+	"\x1dRunRedundancyTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
 	"\x1dRunRedundancyUnknownWorkspace\"\x18\n" +
 	"\x16RunRedundancyNoCommand\"3\n" +
 	"\x19RunRedundancyRunnerFailed\x12\x16\n" +
@@ -504,31 +572,33 @@ func file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_run_redundancy_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_run_redundancy_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_run_redundancy_proto_goTypes = []any{
 	(*RunRedundancyRequest)(nil),          // 0: agentrepl.v1.RunRedundancyRequest
 	(*RunRedundancyResponse)(nil),         // 1: agentrepl.v1.RunRedundancyResponse
 	(*RunRedundancyEnded)(nil),            // 2: agentrepl.v1.RunRedundancyEnded
 	(*RunRedundancyError)(nil),            // 3: agentrepl.v1.RunRedundancyError
-	(*RunRedundancyUnknownWorkspace)(nil), // 4: agentrepl.v1.RunRedundancyUnknownWorkspace
-	(*RunRedundancyNoCommand)(nil),        // 5: agentrepl.v1.RunRedundancyNoCommand
-	(*RunRedundancyRunnerFailed)(nil),     // 6: agentrepl.v1.RunRedundancyRunnerFailed
-	(*v1.WorkspaceRef)(nil),               // 7: workspace.v1.WorkspaceRef
-	(*v11.RedundancyRequest)(nil),         // 8: testrun.v1.RedundancyRequest
+	(*RunRedundancyTransferringAway)(nil), // 4: agentrepl.v1.RunRedundancyTransferringAway
+	(*RunRedundancyUnknownWorkspace)(nil), // 5: agentrepl.v1.RunRedundancyUnknownWorkspace
+	(*RunRedundancyNoCommand)(nil),        // 6: agentrepl.v1.RunRedundancyNoCommand
+	(*RunRedundancyRunnerFailed)(nil),     // 7: agentrepl.v1.RunRedundancyRunnerFailed
+	(*v1.WorkspaceRef)(nil),               // 8: workspace.v1.WorkspaceRef
+	(*v11.RedundancyRequest)(nil),         // 9: testrun.v1.RedundancyRequest
 }
 var file_agentrepl_v1_endpoint_run_redundancy_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.RunRedundancyRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	8, // 1: agentrepl.v1.RunRedundancyRequest.redundancy:type_name -> testrun.v1.RedundancyRequest
+	8, // 0: agentrepl.v1.RunRedundancyRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 1: agentrepl.v1.RunRedundancyRequest.redundancy:type_name -> testrun.v1.RedundancyRequest
 	2, // 2: agentrepl.v1.RunRedundancyResponse.ended:type_name -> agentrepl.v1.RunRedundancyEnded
 	3, // 3: agentrepl.v1.RunRedundancyResponse.error:type_name -> agentrepl.v1.RunRedundancyError
-	4, // 4: agentrepl.v1.RunRedundancyError.unknown_workspace:type_name -> agentrepl.v1.RunRedundancyUnknownWorkspace
-	5, // 5: agentrepl.v1.RunRedundancyError.no_command:type_name -> agentrepl.v1.RunRedundancyNoCommand
-	6, // 6: agentrepl.v1.RunRedundancyError.runner_failed:type_name -> agentrepl.v1.RunRedundancyRunnerFailed
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	5, // 4: agentrepl.v1.RunRedundancyError.unknown_workspace:type_name -> agentrepl.v1.RunRedundancyUnknownWorkspace
+	6, // 5: agentrepl.v1.RunRedundancyError.no_command:type_name -> agentrepl.v1.RunRedundancyNoCommand
+	7, // 6: agentrepl.v1.RunRedundancyError.runner_failed:type_name -> agentrepl.v1.RunRedundancyRunnerFailed
+	4, // 7: agentrepl.v1.RunRedundancyError.transferring_away:type_name -> agentrepl.v1.RunRedundancyTransferringAway
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_run_redundancy_proto_init() }
@@ -545,6 +615,7 @@ func file_agentrepl_v1_endpoint_run_redundancy_proto_init() {
 		(*RunRedundancyError_UnknownWorkspace)(nil),
 		(*RunRedundancyError_NoCommand)(nil),
 		(*RunRedundancyError_RunnerFailed)(nil),
+		(*RunRedundancyError_TransferringAway)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -552,7 +623,7 @@ func file_agentrepl_v1_endpoint_run_redundancy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_run_redundancy_proto_rawDesc), len(file_agentrepl_v1_endpoint_run_redundancy_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

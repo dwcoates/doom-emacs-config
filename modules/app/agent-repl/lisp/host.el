@@ -717,6 +717,8 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-apply-current "roster" ())
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
+(declare-function agent-repl-webhost-shown-p "webhost" (ws))
+(declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-note-switch "webhost" (ws))
 (declare-function agent-repl--frontend-fit-webviews "frontend" (&optional frame))
@@ -2023,7 +2025,7 @@ their own walk."
                               (plist-put (plist-get (agent-repl-host--entry ws) :reattach)
                                          :from old))
         (agent-repl-host--put ws :conn new)
-        (agent-repl-frontend-reload-webview ws)
+        (agent-repl-host--handover-reload-webview ws)
         (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
                           ws address)
         (agent-repl-rpc-adopt-host-workspace
@@ -2036,6 +2038,7 @@ their own walk."
             (t
              (pcase (plist-get response :arm)
                (:success
+                (agent-repl-host--put ws :handover-page nil)
                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
                 (agent-repl-host--reattached ws new ref trigger))
                (:error
@@ -2074,11 +2077,12 @@ their own walk."
                (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
                                   ws detail))))))))))))
 
-(defun agent-repl-host--transferred (ws &optional _value)
+(defun agent-repl-host--transferred (ws &optional value)
   "Adopt WS onto the successor daemon after the old one released it.
 
-`HostWorkspaceTransferred' IS EMPTY ON THE WIRE, so the push names no
-daemon and _VALUE carries nothing to read.  THE SUCCESSOR IS THE ONE THE
+`HostWorkspaceTransferred' NAMES NO DAEMON.  VALUE carries only the
+outgoing daemon\='s page decision, `(:reload-page R)', which the adopt
+walk follows (`agent-repl-host--handover-reload-webview').  THE SUCCESSOR IS THE
 LINK RECORDED: `shutdown_announced{address}' is the single place an
 address for the joining daemon ever comes from, and daemon-link dialed
 and accepted it there — a per-workspace release cannot introduce a
@@ -2133,6 +2137,7 @@ It is an INFO record: the order is seen in the log, and nothing is wrong,
 since the announcement is on its way.  It was once a WARNING, which the
 standing rule forbids for ordinary operation (a deploy on 2026-09-29
 recorded seven of them, one per busy-free workspace handed over)."
+  (agent-repl-host--put ws :handover-page (plist-get value :reload-page))
   (let ((new (agent-repl-link-successor)))
     (cond
      (new
@@ -2145,6 +2150,37 @@ recorded seven of them, one per busy-free workspace handed over)."
      (t
       (agent-repl--info ws "elisp.host.transferred-before-the-announcement ws=%s" ws)
       (agent-repl-host--adopt-on-acceptance ws)))))
+
+(defun agent-repl-host--handover-reload-webview (ws)
+  "Load WS\='s page at the daemon WS is being adopted onto, as decided.
+
+THE OUTGOING DAEMON DECIDES WHAT A HANDOVER LOADS, from what stood when it
+announced the stand-down (owner ruling, 2026-11-13): a page that was not
+loaded then, or whose sidebar row was folded away, is never loaded by the
+handover.  Its `transferred' push says which (`:handover-page'):
+
+- :no-reload: nothing is loaded.  A page the host still holds would be
+  left on the departing daemon, so it is dropped instead, and the next
+  open mounts it fresh on the successor.  THE PAGE ON SCREEN IS THE ONE
+  EXCEPTION: it is the user\='s, not the handover\='s, and is reloaded.
+- :reload, :unset (a daemon predating the decision), or no transfer
+  decision at all: the page is reloaded when the host holds one
+  \=(`agent-repl-frontend-reload-webview'), which never loads one it
+  does not."
+  (let ((decision (plist-get (agent-repl-host--entry ws) :handover-page)))
+    (cond
+     ((not (eq decision :no-reload))
+      (agent-repl-frontend-reload-webview ws))
+     ((agent-repl-webhost-shown-p ws)
+      (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
+      (agent-repl-frontend-reload-webview ws))
+     ((agent-repl-webhost-has-page-p ws)
+      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws)
+      (agent-repl-webhost-remove ws t)
+      nil)
+     (t
+      (agent-repl--log ws "elisp.host.handover-page ws=%s action=none" ws)
+      nil))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
@@ -2199,6 +2235,7 @@ each time and recording an ERROR for every adopt."
          (from (plist-get walk :from))
          (pending (plist-get (agent-repl-host--entry ws) :adopt-pending)))
     (agent-repl-host--put ws :adopt-pending nil)
+    (agent-repl-host--put ws :handover-page nil)
     (cond
      ((eq (plist-get walk :claim) :adopt)
       (agent-repl-host--put ws :reattach nil)

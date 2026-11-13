@@ -184,6 +184,11 @@ type entry struct {
 	// latch: unlike process timing, it says the incumbent has passed freeness,
 	// quiesced intake and detached from the shim.
 	outgoing ids.InstanceID
+	// servedHere marks the OUTGOING daemon's own entry, armed at its
+	// announcement (handover.go): this daemon still serves the workspace
+	// until its transfer, so no participant's call joins it and no adoption
+	// ever runs on it (rendezvousCall).
+	servedHere bool
 	// expected is who owed an adoption call at announcement.
 	expected Participants
 	// hostCalled and webCalled record who has since called. The web slot is

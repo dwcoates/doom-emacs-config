@@ -19,3 +19,7 @@ var ProjectArm = projectArm
 // PatchedRegistry exposes patchedRegistry, the registry a select's change
 // installs into.
 var PatchedRegistry = patchedRegistry
+
+// SetOnQueued installs the hook the combined commit tells the queue's depth
+// each time a change joins it (combine.go).
+func SetOnQueued(r Resolver, hook func(depth int)) { r.(*resolver).onQueued = hook }

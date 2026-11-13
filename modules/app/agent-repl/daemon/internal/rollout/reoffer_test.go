@@ -105,7 +105,7 @@ func TestARefusedCarryIsNotFollowed(t *testing.T) {
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Host: true, Web: true})
 	carryParticipants(t, h, ws, outgoingPrevious, Participants{Host: true})
-	if err := h.c.writeRefusal(ws, "refused for the test"); err != nil {
+	if err := h.c.writeRefusal(ws, refusal{Kind: refusalIncompatible, Why: "refused for the test"}); err != nil {
 		t.Fatalf("writeRefusal: %v", err)
 	}
 

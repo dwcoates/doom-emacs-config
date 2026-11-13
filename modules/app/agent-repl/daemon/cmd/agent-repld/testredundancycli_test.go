@@ -210,3 +210,54 @@ func TestTestRedundancyPrintsTheOutputAndExitsByTheEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestTestRedundancyFollowsAHandover(t *testing.T) {
+	cases := []struct {
+		name      string
+		successor []*agentreplv1.RunRedundancyResponse
+		want      int
+	}{
+		{name: "the measurement is sent to the successor the refusal names", successor: []*agentreplv1.RunRedundancyResponse{endedWith(0)}, want: exitSuccess},
+		{name: "a successor handing over in turn is answered as refused, never chased", successor: []*agentreplv1.RunRedundancyResponse{redundancyHandedOver("127.0.0.1:1")}, want: exitRefused},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			successor := &redundancyDaemon{frames: tc.successor}
+			_, successorHandler := agentreplv1connect.NewAgentReplHandler(successor)
+			successorServer := httptest.NewServer(successorHandler)
+			t.Cleanup(successorServer.Close)
+			incumbent := &redundancyDaemon{frames: []*agentreplv1.RunRedundancyResponse{redundancyHandedOver(successorServer.URL)}}
+			_, incumbentHandler := agentreplv1connect.NewAgentReplHandler(incumbent)
+			incumbentServer := httptest.NewServer(incumbentHandler)
+			t.Cleanup(incumbentServer.Close)
+			var out, errOut bytes.Buffer
+			deps := cliDeps{
+				address: func(string) (string, error) { return incumbentServer.URL, nil },
+				client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+					return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
+				},
+				roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
+					return roster(cliRow("ws-caller", "/wt/caller", "caller")), nil
+				},
+				getwd:   func() (string, error) { return "/wt/caller/src", nil },
+				mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+			}
+
+			// Act
+			code := runNoun(context.Background(), testNoun, []string{"redundancy", "report", "-in", "/o/m.json"}, deps, &out, &errOut)
+
+			// Assert
+			if code != tc.want || successor.got.GetWorkspace().GetId() != "ws-caller" {
+				t.Fatalf("exit %d, successor request %v; stdout %q stderr %q", code, successor.got, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+// redundancyHandedOver is a daemon's answer for a workspace it handed to the
+// successor at ADDRESS.
+func redundancyHandedOver(address string) *agentreplv1.RunRedundancyResponse {
+	return &agentreplv1.RunRedundancyResponse{Frame: &agentreplv1.RunRedundancyResponse_Error{Error: &agentreplv1.RunRedundancyError{
+		Cause: &agentreplv1.RunRedundancyError_TransferringAway{TransferringAway: &agentreplv1.RunRedundancyTransferringAway{Address: address}}}}}
+}

@@ -2594,6 +2594,77 @@ answers `:unknown' and records the breach rather than opening."
                      (list "AdoptHostWorkspace" successor
                            (list :workspace (agent-repl-test-host--ref))))))))
 
+(defmacro agent-repl-test-host--with-page (shown held &rest body)
+  "Run BODY with the host showing ws-1\='s page when SHOWN, holding it when
+HELD, and recording every page it drops in `agent-repl-test-host--effects'."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl-webhost-shown-p) (lambda (_ws) ,shown))
+             ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (_ws) ,held))
+             ((symbol-function 'agent-repl-webhost-remove)
+              (lambda (ws &optional unloading)
+                (push (list :removed ws unloading) agent-repl-test-host--effects))))
+     ,@body))
+
+(defun agent-repl-test-host--transfer-with-page (decision shown held)
+  "Push ws-1\='s transfer notice carrying DECISION, the page SHOWN and HELD."
+  (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+    (setq agent-repl-test-host--successor successor)
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--effects nil)
+    (agent-repl-test-host--with-page shown held
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value (list :reload-page decision))))))
+
+(ert-deftest agent-repl-test-host-transferred-reloads-the-page-it-is-told-to ()
+  "A notice deciding :reload reloads the held page at the successor."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :reload nil t)
+    ;; Assert
+    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))))
+
+(ert-deftest agent-repl-test-host-transferred-from-an-older-daemon-reloads-as-before ()
+  "A notice with no decision (:unset) reloads a held page, as it always did."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :unset nil t)
+    ;; Assert
+    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))))
+
+(ert-deftest agent-repl-test-host-transferred-loads-no-page-it-is-told-not-to ()
+  "A notice deciding :no-reload reloads nothing."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :no-reload nil t)
+    ;; Assert
+    (should-not (assq :reload agent-repl-test-host--effects))))
+
+(ert-deftest agent-repl-test-host-transferred-drops-a-held-page-it-is-told-not-to-load ()
+  "A held page a :no-reload notice leaves is dropped, never left on the old daemon."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :no-reload nil t)
+    ;; Assert
+    (should (member '(:removed "ws-1" t) agent-repl-test-host--effects))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.handover-page ws=ws-1 action=dropped"))))
+
+(ert-deftest agent-repl-test-host-transferred-reloads-the-shown-page-whatever-it-is-told ()
+  "The page on screen is the user's: a :no-reload notice still reloads it."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :no-reload t t)
+    ;; Assert
+    (should (member '(:reload . "ws-1") agent-repl-test-host--effects))
+    (should-not (assq :removed agent-repl-test-host--effects))))
+
+(ert-deftest agent-repl-test-host-transferred-drops-nothing-without-a-page ()
+  "A :no-reload notice for a workspace with no page touches no page."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-test-host--transfer-with-page :no-reload nil nil)
+    ;; Assert
+    (should-not (assq :removed agent-repl-test-host--effects))
+    (should-not (assq :reload agent-repl-test-host--effects))))
+
 (ert-deftest agent-repl-test-host-transferred-cancels-the-old-stream-after-adopting ()
   "Order is the contract's: adopt, THEN cancel, then re-subscribe."
   (agent-repl-test-host--with-harness

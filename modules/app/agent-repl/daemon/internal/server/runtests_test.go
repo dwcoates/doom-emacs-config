@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
 
@@ -590,6 +591,46 @@ func TestTestWorktreeOf(t *testing.T) {
 	}
 }
 
+func TestATestRunForAWorkspaceHandedToTheSuccessorIsAnsweredAsHandedOver(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, w testWorktree, err error, log *dlog.TestLogger)
+	}{
+		{name: "the refusal names the successor's address", assert: func(t *testing.T, _ testWorktree, err error, _ *dlog.TestLogger) {
+			var transferred *transferredTestWorkspace
+			if !errors.As(err, &transferred) || transferred.address != "127.0.0.1:9999" {
+				t.Fatalf("testWorktreeOf = %v, want the transfer naming the successor", err)
+			}
+		}},
+		{name: "the refusal is recorded at INFO", assert: func(t *testing.T, _ testWorktree, _ error, log *dlog.TestLogger) {
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRunTests,
+				Message: "refused a test run for a workspace this daemon handed to its successor; the caller sends it there"}); !ok {
+				t.Fatalf("records = %+v, want the INFO naming the successor", log.Records())
+			}
+		}},
+		{name: "a typed arm is no unlanded-arm warning", assert: func(t *testing.T, _ testWorktree, _ error, log *dlog.TestLogger) {
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); ok {
+				t.Fatalf("records = %+v, want no warning", log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.Ownership.standing = workspace.StandingTransferringAway
+
+			// Act
+			w, err := h.Server.(*server).testWorktreeOf(context.Background(), "RunTests", opRunTests, ref)
+
+			// Assert
+			tc.assert(t, w, err, log)
+		})
+	}
+}
+
 // THE TEST ENDPOINTS RESOLVE THEIR WORKTREE ONE WAY: through testWorktreeOf,
 // never a hand-rolled resolve and script read of their own.
 func TestTheTestEndpointsResolveThroughTestWorktreeOf(t *testing.T) {
@@ -670,6 +711,30 @@ func TestRunTestsRunsAMainWorkspacesHandCutWorktree(t *testing.T) {
 	}
 	if want := merge.TestCommandFor(cut, "bin/test-all.sh", filepath.Base(cut)); !slices.Equal(h.Tests.argv[:len(want)], want) {
 		t.Fatalf("argv = %q, want the test command of the hand-cut worktree %q", h.Tests.argv, want)
+	}
+}
+
+func TestRunTestsGovernsAHandCutWorktreeByTheMainWorkspacesBypassStanding(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ref := mainTestsWorkspace(t, h)
+	cut := cutWorktree(t, ref.GetDir(), testsDeploy)
+	h.DB.bypass = map[ids.WorkspaceID]wsm.QueueBypass{ids.WorkspaceID(ref.GetId()): {Holds: true}}
+	h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
+
+	// Act
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent(),
+		Worktree: &agentreplv1.RunTestsWorktree{Dir: cut}})
+
+	// Assert
+	if len(frames) != 1 || frames[0].GetEvent().GetEnded().GetPassed() == nil {
+		t.Fatalf("frames = %v, want the run's passing end", frames)
+	}
+	if !slices.Equal(h.DB.bypassReads, []ids.WorkspaceID{ids.WorkspaceID(ref.GetId())}) {
+		t.Fatalf("bypass read for %v, want the main workspace %s alone", h.DB.bypassReads, ref.GetId())
+	}
+	if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, "env AGENT_REPL_TEST_NICENESS=1 AGENT_REPL_TEST_UNGOVERNED=1 ") {
+		t.Fatalf("argv = %s, want the bypass holder's ungoverned run", got)
 	}
 }
 
