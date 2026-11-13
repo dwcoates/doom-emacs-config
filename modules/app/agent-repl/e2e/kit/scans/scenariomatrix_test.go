@@ -1285,15 +1285,16 @@ func deriveSeamWiring(t *testing.T) map[string][]string {
 }
 
 // scenarioCovered is check (iv)'s mechanical verdict: a counted layer drives
-// SCENARIO, or both its halves are pinned and its seam is wired.
-func scenarioCovered(scenario string, derived coverage, halves halvesByScenario, wiring map[string][]string) bool {
+// SCENARIO, or both its halves are pinned and its seam is wired, or a step
+// retired to the integration tier pins replacements proving both halves
+// (retired_test.go).
+func scenarioCovered(scenario string, derived coverage, halves halvesByScenario, wiring map[string][]string, retired map[string][]retiredPin) bool {
 	for _, layer := range matrixLayers {
 		if len(derived.files(scenario, layer)) > 0 {
 			return true
 		}
 	}
-	h := halves[scenario]
-	return h.shim && h.daemon && h.seam != "" && len(wiring[h.seam]) > 0
+	return halvesWired(halves[scenario], wiring) || len(retired[scenario]) > 0
 }
 
 // checkSeamWiring is check (vii): every family a golden names has a wiring
@@ -1486,9 +1487,16 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 	halves := deriveHalves(t, r)
 	wiring := deriveSeamWiring(t)
 	doc := parseMatrix(t)
+	canonical := map[string]bool{}
+	for _, s := range r.canonical {
+		canonical[s] = true
+	}
+	// (viii) Every retired step's pins name tests that exist, in both
+	// halves' tiers, for a scenario the vendor registers.
+	retired := checkRetired(t, parseRetired(t, doc.lines), canonical, liveStep(t), repo.repoDir)
 
 	if os.Getenv(matrixWriteEnv) == "1" {
-		rewriteMatrix(t, r, derived, halves, wiring, doc)
+		rewriteMatrix(t, r, derived, halves, wiring, retired, doc)
 		doc = parseMatrix(t)
 	}
 
@@ -1503,11 +1511,6 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 			t.Errorf("%s: two rows for scenario %q", matrixPath, key)
 		}
 		byScenario[key] = row
-	}
-
-	canonical := map[string]bool{}
-	for _, s := range r.canonical {
-		canonical[s] = true
 	}
 
 	// (i) A scenario the registry declares but the document omits.
@@ -1550,16 +1553,18 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 		// covered at all is not. Under ruling (a) (2026-10-14) a scenario is
 		// covered when a counted layer drives it end to end, OR when both of
 		// its halves are pinned by the goldens and its seam has its wiring
-		// test.
-		covered := scenarioCovered(scenario, derived, halves, wiring)
+		// test. Under the ruling of 2026-11-13 it is also covered when a step
+		// retired to the integration tier pins replacements proving both
+		// halves.
+		covered := scenarioCovered(scenario, derived, halves, wiring, retired)
 		switch row.verdict {
 		case verdictUncovered:
 			if covered {
-				t.Errorf("%s: %s reads %q, but a counted layer drives it or both halves are pinned with a wired seam", matrixPath, scenarioCell(scenario), verdictUncovered)
+				t.Errorf("%s: %s reads %q, but a counted layer drives it, or both halves are pinned with a wired seam, or a retired step's replacements prove both", matrixPath, scenarioCell(scenario), verdictUncovered)
 			}
 		case verdictCovered, verdictWeak:
 			if !covered {
-				t.Errorf("%s: %s reads %q, but no counted layer drives it and its halves are not both pinned with a wired seam", matrixPath, scenarioCell(scenario), row.verdict)
+				t.Errorf("%s: %s reads %q, but no counted layer drives it, its halves are not both pinned with a wired seam, and no retired step's replacements prove both", matrixPath, scenarioCell(scenario), row.verdict)
 			}
 		default:
 			t.Errorf("%s: %s has verdict %q, want one of %q/%q/%q",
@@ -1784,7 +1789,7 @@ func firstInt(line string) (int, bool) {
 // counts, carrying every hand-written cell forward unchanged. A scenario with
 // no row yet gets one whose hand-written cells are placeholders for a human
 // to fill in.
-func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesByScenario, wiring map[string][]string, doc matrixDoc) {
+func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesByScenario, wiring map[string][]string, retired map[string][]retiredPin, doc matrixDoc) {
 	t.Helper()
 	existing := map[string]matrixRow{}
 	for _, row := range doc.rows {
@@ -1820,11 +1825,20 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 			}
 		}
 		switch {
-		case !scenarioCovered(scenario, derived, halves, wiring):
+		case !scenarioCovered(scenario, derived, halves, wiring, retired):
 			if row.verdict != verdictUncovered {
-				row.assertion = "No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam."
+				row.assertion = "No counted e2e layer drives this scenario, its halves are not both pinned with a wired seam, and no retired step's replacements prove both."
 			}
 			row.verdict = verdictUncovered
+		case !driven && !halvesWired(halves[scenario], wiring):
+			// COVERED BY ITS RETIRED STEP'S REPLACEMENTS, pinned in section
+			// (f) and checked to exist in both halves' tiers.
+			var pins []string
+			for _, p := range retired[scenario] {
+				pins = append(pins, p.String())
+			}
+			row.assertion = "Retired from e2e (section (f)); both halves are proven at the integration tier by " + strings.Join(pins, ", ") + "."
+			row.verdict = verdictCovered
 		case !driven:
 			// COVERED BY ITS HALVES. A golden compared byte for byte is the
 			// strongest assertion there is, so the verdict is covered, and the
@@ -1954,4 +1968,24 @@ func TestMarkerScenarioCellRoundTrips(t *testing.T) {
 			}
 		})
 	}
+}
+
+// halvesWired reports whether a scenario's halves are both pinned and its seam
+// wired: ruling (a)'s coverage.
+func halvesWired(h scenarioHalves, wiring map[string][]string) bool {
+	return h.shim && h.daemon && h.seam != "" && len(wiring[h.seam]) > 0
+}
+
+// liveStep answers whether a step path, Scenario/Xxx, is a step a scenario of
+// the e2e package lists today.
+func liveStep(t *testing.T) func(string) bool {
+	t.Helper()
+	pkg := parseE2EPackage(t)
+	live := map[string]bool{}
+	for step := range pkg.steps {
+		if path, ok := pkg.stepPath(step); ok {
+			live[path] = true
+		}
+	}
+	return func(step string) bool { return live[step] }
 }

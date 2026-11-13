@@ -55,7 +55,9 @@ Two further limits, stated rather than hidden:
   alias, is treated as selecting it and therefore contributes no row either.
 - **Covered means e2e drives the scenario, OR both of its halves are pinned
   and its seam is wired** (the owner's ruling (a) of 2026-10-14,
-  docs/investigations/2026-10-14-test-tier-audit-e2e-edj.md, "Rulings").
+  docs/investigations/2026-10-14-test-tier-audit-e2e-edj.md, "Rulings"),
+  **OR a step retired to the integration tier pins replacements proving both
+  halves** (section (f); owner ruling, 2026-11-13).
   - The e2e columns are Go (`e2e/*_e2e_test.go`, excluding `emacs_*`), webapp
     (`webapp/test/webapp-layer/*.layer.test.ts`) and Emacs (`e2e/emacs_*`),
     derived exactly as before.
@@ -183,7 +185,7 @@ Two further limits, stated rather than hidden:
 | `!push-sent` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!push-user-present` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | query-death | Go: TestFaults/QueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedRaisesTheFootersTurnDiedFault asserts the footer's agent_repl_fault · turn_died (a dead query is agent-repl's fault, never a block) and its FooterStatusActivityTurnEnded line. | covered |
-| `!query-eof-mid-ask` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
+| `!query-eof-mid-ask` | ungrounded | — | — | — | — | — | — | Retired from e2e (section (f)); both halves are proven at the integration tier by `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a query that dies with a permission ask open opens the ask, then settles it denied by the user before the turn ends`, `-go daemon/integration=TestAQueryThatDiesWithAnAskOpenDrawsTheAskDeniedAndTheTurnErrored`. | covered |
 | `!query-fail` | ungrounded | — | — | — | ✓ | ✓ | query-death | Both halves are pinned by its goldens (frames.json, feed.json); the `query-death` seam is wired by TestFaults/QueryEofEndsTheTurnAsQueryDied. | covered |
 | `!queue-vendor-turn` | ungrounded | hibernation_e2e_test.go | — | — | — | — | — | Go: TestCompletedTaskBesideKeepAliveAnchorsTheRewind asserts the next rewind anchors on the completed task's adopted turn and discards exactly [keepalive], no rewind is refused, and the vendor's own answer is drawn; TestKeepAlive/KeepAliveAnswerAfterVendorTurnNeverServed asserts no keep-alive row is served beside it. | covered |
 | `!rate-limit` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestTurns/RateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
@@ -247,9 +249,9 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 - Shim half pinned: 125 scenarios
 - Daemon half pinned: 125 scenarios
 - Seam families: 18, each wired by its e2e test
-- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **137**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam, or a retired step's replacements proving both): **138**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **2**
-- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **18**
+- Uncovered (no counted layer drives the scenario, its halves are not both pinned with a wired seam, and no retired step's replacements prove both): **17**
 - Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
@@ -278,7 +280,6 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 - `!perm-answered-remotely`
 - `!perm-no-standing`
 - `!perm-remote-interrupt`
-- `!query-eof-mid-ask`
 - `!rate-limit-five-hour`
 - `!remote-interrupt`
 - `!remote-prompt`
@@ -375,6 +376,22 @@ Two standing notes on tokens that LOOK dead and are not:
   `!perm-hold` against. A comment is not a literal, so it is not read as a
   trigger; the scenario's real coverage comes from `cards.layer.test.ts`,
   which submits it.
+
+## (f) Steps retired to an integration tier
+
+An e2e step whose assertion one system proves alone is retired into that
+system's integration tier. Once it is gone no e2e test drives its scenario,
+so each such step is pinned here: the scenario it drove, and its replacement
+tests in the runner's own selection syntax (`-go DIR=TestName`,
+`-vitest FILE=suite test`, relative to the agent-repl module). The check
+(`e2e/kit/scans/retired_test.go`) fails a pin naming a test that does not
+exist, a step that is still live, or a row that does not prove both halves
+(one replacement in the shim's tier, one in the daemon's). A row that passes
+counts its scenario covered (owner ruling, 2026-11-13).
+
+| Retired step | Scenario | Replacement tests |
+|---|---|---|
+| `TestFaults/QueryEofMidAskDeniesTheOpenAsk` | `!query-eof-mid-ask` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a query that dies with a permission ask open opens the ask, then settles it denied by the user before the turn ends`, `-go daemon/integration=TestAQueryThatDiesWithAnAskOpenDrawsTheAskDeniedAndTheTurnErrored` |
 
 ## Sidecar mock-scenario reconciliation (context only — not counted coverage)
 

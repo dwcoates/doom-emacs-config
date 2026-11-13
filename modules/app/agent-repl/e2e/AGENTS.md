@@ -20,6 +20,7 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
 - Every scenario and every step names the seam it proves on a line of its own in its doc comment: `Seam: <family>` for a family of `testdata/scenario-goldens` (whose wiring test it is), or `Seam: <producer> -> <consumer>, <what crosses>` (`modules/app/agent-repl/AGENTS.md`, "An e2e test proves a seam between real systems, and nothing else"). `TestEveryScenarioAndStepNamesItsSeam` fails one that names none or a line in neither form; `seamClaims` (`kit/scans/inventory_test.go`) is the one reader of the line, the scenario matrix's included. Exempt, with why, are the scenarios in `seamExempt`: `TestHarness` (the harness's own World machinery) and `TestDoom` (the Doom tier).
 - A step reruns alone by its path: `-go e2e=TestTurns/ContextUsage`, or `-harness bin/test-e2e-emacs.sh=TestEmacsWorkspaces/EmacsProofOfLife` for the Emacs layer and the Doom tier.
 - Where new e2e coverage goes is the `agent-repl-tests` skill's rule ("E2E coverage is a step of a scenario").
+- A step retired into a system's own tier, whose scenario no other e2e test drives, is pinned in `SCENARIO-MATRIX.md` section (f) with its replacement tests in the runner's selection syntax (`-go DIR=TestName`, `-vitest FILE=suite test`), one in the shim's tier and one in the daemon's. The matrix check (`kit/scans/retired_test.go`) fails a pin whose test does not exist, and counts the scenario covered only while both halves' pins stand.
 
 ## The harness lives in kit/, and its own tests run there
 

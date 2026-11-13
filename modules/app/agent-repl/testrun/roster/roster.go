@@ -450,8 +450,11 @@ var Suites = []Suite{
 		// The scans read the e2e package's sources, and the scenario matrix
 		// the mocked vendor's scenarios, their goldens and the webapp
 		// layer's areas it summarizes.
+		// Its retired steps' pins name tests of the daemon's and the shim's
+		// integration tiers, which it checks exist.
 		"scans": {"e2e/", "testdata/scenario-goldens/", "agent-shim/claude/shim/src/fake/",
-			"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/"},
+			"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/",
+			"daemon/integration/", "agent-shim/claude/shim/test/"},
 	}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
