@@ -113,11 +113,18 @@ func faultRank(f Fault) int {
 // that status, and among equals the one that was opened last, because the
 // newest evidence is the live one. Nil when none stands.
 func (r *resolver) standingFault(s *wsState, status health.FaultStatus) *Fault {
+	return r.strongestFault(s, func(f *Fault) bool { return f.Status == string(status) })
+}
+
+// strongestFault is the strongest of this workspace's own and the
+// daemon-scoped faults that KEEP admits, ranked by faultRank and among equals
+// the one opened last. Nil when none is admitted.
+func (r *resolver) strongestFault(s *wsState, keep func(*Fault) bool) *Fault {
 	var best *Fault
 	consider := func(faults []Fault) {
 		for i := range faults {
 			f := &faults[i]
-			if f.Status != string(status) {
+			if !keep(f) {
 				continue
 			}
 			if best == nil || faultRank(*f) > faultRank(*best) ||
