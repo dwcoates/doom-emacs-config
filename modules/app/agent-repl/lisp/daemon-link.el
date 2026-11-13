@@ -573,23 +573,56 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
   (and agent-repl-link--quiet-until-ms
        (< (agent-repl--now-unix-ms) agent-repl-link--quiet-until-ms)))
 
+(defvar agent-repl-link-daemon-gone-function nil
+  "Function of no arguments answering non-nil when NO daemon is alive.
+daemon.el sets it to its boot-claim probe: the kernel lock on
+`daemon.lock\=' that a daemon holds for its whole life and releases only
+when its process ends, a crash included.  Nil (no probe installed) answers
+that a daemon may be alive.")
+
+(defun agent-repl-link--daemon-gone-p ()
+  "Return non-nil when `agent-repl-link-daemon-gone-function' says no daemon lives."
+  (and agent-repl-link-daemon-gone-function
+       (funcall agent-repl-link-daemon-gone-function)))
+
+(defun agent-repl-link--abandon-pending ()
+  "Close the transport still waiting to be accepted, and forget it."
+  (when agent-repl-link--pending
+    (agent-repl-connect-close agent-repl-link--pending))
+  (setq agent-repl-link--pending nil
+        agent-repl-link--pending-stream nil
+        agent-repl-link--pending-reconnect-p nil))
+
 (defun agent-repl-link--reconnect-tick ()
   "One poll of the reconnect loop: the timer's whole body.
 Named and argument-free so a test drives the loop by calling it, with no
-dependence on the scheduler and no sleep anywhere."
+dependence on the scheduler and no sleep anywhere.
+
+A DAEMON THAT DIED IS NOT WAITED FOR.  A daemon that crashes (2026-11-13:
+both daemons of a handover panicked) leaves `daemon.addr\=' naming its dead
+address, so a loop keyed on the address alone retried it forever and no
+daemon was ever started.  Each tick asks the boot claim first: a claim no
+process holds means no daemon lives, whatever the address file says, and
+the cold start's hook runs, which treats the file as stale."
   (setq agent-repl-link--reconnect-timer nil)
   (cond
    ((agent-repl-link-up-p)
     (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-already-up")
     (agent-repl-link--cancel-reconnect))
+   ((agent-repl-link--quiet-p)
+    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-quiet until=%S now=%S"
+                     agent-repl-link--quiet-until-ms (agent-repl--now-unix-ms))
+    (agent-repl-link--schedule-reconnect))
+   ((agent-repl-link--daemon-gone-p)
+    (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-daemon-gone pending=%S"
+                      (and agent-repl-link--pending t))
+    (agent-repl-link--abandon-pending)
+    (agent-repl-link--run-hook 'agent-repl-link-no-daemon-functions)
+    (agent-repl-link--schedule-reconnect))
    (agent-repl-link--pending
     ;; A transport is already standing and waiting to be accepted; a second
     ;; one would race it and leave an orphan.
     (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-pending")
-    (agent-repl-link--schedule-reconnect))
-   ((agent-repl-link--quiet-p)
-    (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.reconnect-quiet until=%S now=%S"
-                     agent-repl-link--quiet-until-ms (agent-repl--now-unix-ms))
     (agent-repl-link--schedule-reconnect))
    (t
     (let ((address (condition-case err

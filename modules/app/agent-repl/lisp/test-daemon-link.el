@@ -101,6 +101,7 @@
          (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
          (agent-repl-link-no-daemon-functions nil)
+         (agent-repl-link-daemon-gone-function nil)
          (agent-repl-link-up-functions nil)
          (agent-repl-link-down-functions nil)
          (agent-repl-link-handover-functions nil)
@@ -619,6 +620,65 @@ gate is the point, so it is exercised here rather than bypassed."
     (agent-repl-link--reconnect-tick)
     ;; Assert
     (should (assq :no-daemon agent-repl-test-link--hooks))))
+
+;;;; ---- A daemon that died is not waited for ----
+
+(ert-deftest agent-repl-test-link-reconnect-tick-starts-a-daemon-when-the-addressed-one-is-gone ()
+  "A `daemon.addr' naming a daemon whose boot claim is free runs the cold start."
+  (agent-repl-test-link--with-harness
+    ;; Arrange: the address of a daemon that crashed.
+    (add-hook 'agent-repl-link-no-daemon-functions
+              (agent-repl-test-link--record-hook :no-daemon))
+    (setq agent-repl-test-link--address "127.0.0.1:9002"
+          agent-repl-link-daemon-gone-function #'always)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert: no dial of the dead address, the cold start run, the poll kept.
+    (should (assq :no-daemon agent-repl-test-link--hooks))
+    (should-not agent-repl-test-link--streams)
+    (should (eq (cdar agent-repl-test-link--timers) #'agent-repl-link--reconnect-tick))))
+
+(ert-deftest agent-repl-test-link-reconnect-tick-abandons-a-pending-dial-to-a-gone-daemon ()
+  "A dial still pending when the daemon is found gone is closed, then the cold start runs."
+  (agent-repl-test-link--with-harness
+    ;; Arrange: a pending dial, then the daemon's claim found free.
+    (add-hook 'agent-repl-link-no-daemon-functions
+              (agent-repl-test-link--record-hook :no-daemon))
+    (setq agent-repl-test-link--address "127.0.0.1:9002")
+    (agent-repl-link--reconnect-tick)
+    (should agent-repl-link--pending)
+    (setq agent-repl-link-daemon-gone-function #'always)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should-not agent-repl-link--pending)
+    (should (assq :no-daemon agent-repl-test-link--hooks))))
+
+(ert-deftest agent-repl-test-link-reconnect-tick-dials-a-live-daemon ()
+  "A daemon whose claim is held is dialed, never cold-started over."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-no-daemon-functions
+              (agent-repl-test-link--record-hook :no-daemon))
+    (setq agent-repl-test-link--address "127.0.0.1:9002"
+          agent-repl-link-daemon-gone-function #'ignore)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should agent-repl-link--pending)
+    (should-not (assq :no-daemon agent-repl-test-link--hooks))))
+
+(ert-deftest agent-repl-test-link-a-gone-daemon-is-recorded-at-warn ()
+  "Finding the daemon gone is recorded loudly."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (setq agent-repl-test-link--address "127.0.0.1:9002"
+          agent-repl-link-daemon-gone-function #'always)
+    ;; Act
+    (agent-repl-link--reconnect-tick)
+    ;; Assert
+    (should (cl-some (lambda (entry) (string-match-p "elisp.link.reconnect-daemon-gone" (format "%S" entry)))
+                     agent-repl-test-link--logs))))
 
 (ert-deftest agent-repl-test-link-reconnect-tick-restores-the-link ()
   "An address that appears is dialed and the up hooks run again."
