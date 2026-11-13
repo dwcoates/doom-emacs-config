@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: 'Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
+description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, or the test runner and its CPU governor. Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -177,9 +177,17 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   - A refused read does not always say "operation not permitted": a listing of an undeclared directory comes back EMPTY (`filepath.Glob` drops the refusal), so a scan that globs a directory fails on finding nothing. Its declaration is the directory (a `/`-suffixed subtree).
   - A unit whose reads cannot be enumerated goes in `Reuse.Never` with why: it runs unconfined and is never recorded.
   - A targeted run (`-go DIR=Test`, `-vitest FILE=name`) is never confined, so only an untargeted run of the unit proves a declaration; run one after adding a read.
-- Each vitest and ERT file runs in its own process, so a unit's profile confines only its own file's inputs.
-  - A new test file is a new unit and costs one process start: about 0.8s for vitest and 1.2s for ERT (the runner's per-chunk overhead history, 2026-11-11).
+- vitest and ERT files run in BATCHES, one process per batch (`testrun/internal/suites/batch.go`): files of one area (a vitest file's most imported `src/` directory, an ERT file's module family), at most `BatchMax` per batch, small areas pooled. A batch is one unit, confined to its files' inputs together.
+  - A file its suite never reuses (`Reuse.Never`) is a batch of its own.
 - How keys, profiles and records work is `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of each unit's exact inputs".
+
+## Test performance standards (owner rulings, 2026-11-12 and 2026-11-13)
+
+- A change that makes a suite slower or costlier is a defect, fixed before it lands. Report it in numbers: the suite's wall time and CPU before and after.
+- vitest and ERT stay batched; one process per file came back once and made `webapp` take 15.6 minutes in the gate (pitfall 15).
+- `NeverReused` is the owner's to grant: a new never-reused suite, or a suite becoming one, needs their approval. Today's list is `e2e`, `repo-scans`, `proto` and a few whole-module script harnesses.
+- No test needs Docker; the Emacs e2e layer was removed for it (2026-11-13, reviewed 2026-11-20, `e2e/AGENTS.md`). An e2e step proves a real seam and names it (`Seam:`); what one system can prove goes to that system's tier.
+- Measuring what the suites cost is done only at the user's explicit request: `-no-reuse -governed -as-user`, fresh then rerun, in High Power Mode (Low Power roughly doubles the times), reported per suite. Reference, 2026-11-13, governed: `webapp`+`shim`+`ert` fresh 4.7 min, rerun 10s.
 
 ## E2E coverage is a step of a scenario
 
@@ -373,6 +381,16 @@ coverage impact (always none).
     - Fix 1: one build command per module pass ("A Go module's test binaries are built by one command"). Measured (2026-11-11, full `-suite daemon` runs under the CPU governor): the daemon suite plans 175 units; its builds are two units, `daemon:build` 82.7-92.2 CPU-s (49-56s wall at `-p=2`) and `daemon:build[integration]` 4.7 CPU-s.
     - Fix 2: each daemon unit-test package is reused on its own green pass ("Every suite declares its inputs; reuse is per unit"), now every unit of every suite. Measured (2026-11-11): with a one-line change to `internal/runecap` (22 dependent test packages), 114 packages were reused and 61 units ran, 259 CPU-s against 792 CPU-s for the same suite with nothing reused; `daemon:build` built only the remaining packages, 26.4 CPU-s.
     - Coverage impact: none; every package's tests run as their own units against the same binaries, and a reused package's pass is of exactly its inputs.
+
+15. **One process per vitest or ERT file.**
+    - Evidence: per-unit reuse (450f3ccd79) ran each file in its own process; a vitest process costs about 12s beyond its tests, so the gate's `webapp` went from 2.3 to 15.6 min and `ert` from 1.1 to 3.8 (2026-11-12).
+    - Fix: area batches ("Every suite declares its inputs"), 0.425.8. Governed, High Power, 2026-11-13: `webapp` units sum 2.9 min, longest 0.9.
+    - Coverage impact: none; every file still runs, confined to its batch's inputs.
+
+16. **Measuring in Low Power Mode.**
+    - Evidence: persistent-wifi mode held the machine in Low Power with the lid open; an ungoverned run's longest units took about twice what the governed High Power run's did (2026-11-13).
+    - Fix: check `pmset -g` shows `powermode 2` before any measurement; persistent wifi now changes the energy mode only on lid close and open (0.427.1).
+    - Coverage impact: none.
 
 ## Changes that LOOK faster and are refused
 
