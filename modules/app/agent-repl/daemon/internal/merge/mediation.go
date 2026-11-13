@@ -192,26 +192,6 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		return
 	}
 	fields["workspace"] = string(ws)
-	turn := m.Turn
-	if !m.Prompted() {
-		turn, err = o.tellMediator(ctx, q, ws, m, fields)
-		if err != nil || turn == "" {
-			return
-		}
-	} else {
-		o.deps.Log.Global().Info(opMediation, "the mediator was told of this deploy before; its turn is awaited", withField(fields, "turn", string(turn)))
-	}
-	if _, err := o.deps.AwaitTurnEnd(ctx, ws, turn); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the mediator's turn could not be awaited; the queue stays held until the next round", withField(fields, "error", err.Error()))
-		return
-	}
-	o.mediationTurnEnded(ctx, q, ws, m.OwedAt, fields)
-}
-
-// tellMediator compacts the mediator's context and tells it of M in its
-// brief, behind the compaction, answering the brief's turn: empty when the
-// mediation was replaced or released meanwhile.
-func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, m wsm.Mediation, fields dlog.Context) (ids.TurnID, error) {
 	brief, err := o.deps.Briefs(BriefDeployMediation, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
@@ -219,8 +199,33 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 	})
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the mediation brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
-		return "", err
+		return
 	}
+	if !m.Prompted() {
+		turn, err := o.tellMediator(ctx, q, ws, m, brief, fields)
+		if err != nil || turn == "" {
+			return
+		}
+		_, err = o.deps.AwaitTurnEnd(ctx, ws, turn)
+	} else {
+		// THE TURN WAS RECORDED BEFORE ITS BRIEF WAS QUEUED, so a round cut
+		// between the two (a refused submission, the daemon's exit) left a
+		// turn that never reached the session: reattaching submits it then,
+		// and awaits one that did.
+		o.deps.Log.Global().Info(opMediation, "the mediator was told of this deploy before; its turn is reattached", withField(fields, "turn", string(m.Turn)))
+		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
+	}
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the mediator's turn could not be awaited; the queue stays held until the next round", withField(fields, "error", err.Error()))
+		return
+	}
+	o.mediationTurnEnded(ctx, q, ws, m.OwedAt, fields)
+}
+
+// tellMediator compacts the mediator's context and tells it of M in BRIEF,
+// behind the compaction, answering the brief's turn: empty when the
+// mediation was replaced or released meanwhile.
+func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, fields dlog.Context) (ids.TurnID, error) {
 	// EVERY ROUND OPENS ON A COMPACTED CONTEXT (owner request, 2026-11-13).
 	compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 	if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {

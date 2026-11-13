@@ -136,21 +136,41 @@ func TestADecisionInTheTurnLeavesNothingToSettle(t *testing.T) {
 	}
 }
 
-func TestAMediationAlreadyToldAwaitsItsTurnWithoutTellingAgain(t *testing.T) {
-	// Arrange: the mediator was told in turn-told.
-	h := mediated(t)
-	owe(t, h)
-	if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-told"); err != nil {
-		t.Fatal(err)
+func TestAMediationAlreadyToldIsReattachedToItsTurn(t *testing.T) {
+	tests := []struct {
+		name          string
+		delivered     bool
+		wantSubmitted int
+	}{
+		{name: "a turn the session ran is awaited without telling again", delivered: true},
+		{name: "a turn recorded but never queued is submitted then, with the brief", wantSubmitted: 1},
 	}
-	h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the mediator was told in turn-told.
+			h := mediated(t)
+			owe(t, h)
+			if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-told"); err != nil {
+				t.Fatal(err)
+			}
+			h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+			if tt.delivered {
+				h.db.turns["ws-mediator"] = append(h.db.turns["ws-mediator"], wsm.Turn{ID: "turn-told", Workspace: "ws-mediator"})
+			}
 
-	// Act
-	h.o.Mediate(context.Background())
+			// Act
+			h.o.Mediate(context.Background())
 
-	// Assert
-	if len(h.queue.submissions) != 0 || len(h.mediatorsMade) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
-		t.Fatalf("submitted %d, made %v, awaited %v; want only turn-told awaited", len(h.queue.submissions), h.mediatorsMade, h.awaitedTurns)
+			// Assert
+			if len(h.queue.submissions) != tt.wantSubmitted || len(h.mediatorsMade) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
+				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(h.queue.submissions), h.mediatorsMade, h.awaitedTurns, tt.wantSubmitted)
+			}
+			for _, sub := range h.queue.submissions {
+				if sub.Turn != "turn-told" || sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+					t.Fatalf("submitted turn %s with origin %v, want turn-told as the deploy mediation", sub.Turn, sub.Origin)
+				}
+			}
+		})
 	}
 }
 
