@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -477,5 +478,105 @@ func TestTickRecordsALossOncePerLoss(t *testing.T) {
 	// Assert.
 	if n := len(h.lossRecords()); n != 2 {
 		t.Fatalf("loss records = %d, want one per loss", n)
+	}
+}
+
+func TestAFailoverJoinRunsWithTheControllerLockFree(t *testing.T) {
+	// Arrange: one saved network out of range, then the hotspot; each join
+	// looks at the lock as it runs.
+	h := lostClosed(t)
+	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
+	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	var held []string
+	for _, argv := range []string{argJoinNamed("Home"), argJoin} {
+		h.r.whileRunning(argv, func(context.Context) {
+			if !h.c.mu.TryLock() {
+				held = append(held, argv)
+				return
+			}
+			h.c.mu.Unlock()
+		})
+	}
+	h.tickAt(0)
+
+	// Act
+	h.tickAt(failoverLossGrace)
+
+	// Assert
+	if len(held) != 0 {
+		t.Fatalf("joins run with the controller lock held: %v", held)
+	}
+	if h.r.count(argJoinNamed("Home")) != 1 || h.r.count(argJoin) != 1 {
+		t.Fatalf("join calls = %v, want the saved network then the hotspot", h.joinCalls())
+	}
+}
+
+func TestALidOpeningMidAttemptEndsTheAttemptBeforeItsNextJoin(t *testing.T) {
+	// Arrange: two saved networks before the hotspot; the lid opens while
+	// the first is being joined.
+	h := lostClosed(t)
+	h.r.on(argPreferred, answer{out: preferred("Home", "Office", hotspot)})
+	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.r.on(argDisplayWake, answer{})
+	h.r.whileRunning(argJoinNamed("Home"), func(context.Context) { h.hear(LidOpen) })
+	h.tickAt(0)
+
+	// Act
+	h.tickAt(failoverLossGrace)
+
+	// Assert
+	if calls := h.joinCalls(); !slices.Equal(calls, []string{argJoinNamed("Home")}) {
+		t.Fatalf("join calls = %v, want only the join in flight when the lid opened", calls)
+	}
+	if h.c.quiet {
+		t.Fatal("the quiet state still stands after the lid opened mid-attempt")
+	}
+	abandoned := h.failoverRecords("info", "a Wi-Fi failover attempt was abandoned: the quiet state ended, the mode changed or the daemon stood down")
+	if len(abandoned) != 1 || abandoned[0]["attempt"] != 1 || abandoned[0]["quiet"] != false {
+		t.Fatalf("abandoned records = %+v, want one naming the attempt", abandoned)
+	}
+}
+
+func TestALidOpeningCancelsTheJoinInFlight(t *testing.T) {
+	// Arrange: the lid opens while the first saved network is being joined.
+	h := lostClosed(t)
+	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
+	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.r.on(argDisplayWake, answer{})
+	var joinErr error
+	h.r.whileRunning(argJoinNamed("Home"), func(ctx context.Context) {
+		h.hear(LidOpen)
+		joinErr = ctx.Err()
+	})
+	h.tickAt(0)
+
+	// Act
+	h.tickAt(failoverLossGrace)
+
+	// Assert
+	if !errors.Is(joinErr, context.Canceled) {
+		t.Fatalf("the join's context after the lid opened = %v, want it cancelled", joinErr)
+	}
+	h.c.mu.Lock()
+	defer h.c.mu.Unlock()
+	if h.c.failoverCancel != nil {
+		t.Fatal("the attempt left its cancel behind once it ended")
+	}
+}
+
+func TestEachFailoverAttemptRecordsItsStart(t *testing.T) {
+	// Arrange
+	h := lostClosed(t)
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.tickAt(0)
+
+	// Act
+	h.tickAt(failoverLossGrace)
+
+	// Assert
+	started := h.failoverRecords("info", "a Wi-Fi failover attempt starts")
+	if len(started) != 1 || started[0]["attempt"] != 1 || started[0]["lost_for"] != failoverLossGrace.String() {
+		t.Fatalf("start records = %+v, want the first attempt at the grace", started)
 	}
 }

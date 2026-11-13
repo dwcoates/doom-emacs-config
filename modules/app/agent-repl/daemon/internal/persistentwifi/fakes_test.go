@@ -26,6 +26,21 @@ type fakeRunner struct {
 	mu      sync.Mutex
 	answers map[string][]answer
 	calls   []string
+	// before runs, outside the fake's own lock, before argv's call is
+	// answered: the controller acting while one of its calls is in flight.
+	before map[string]func(ctx context.Context)
+}
+
+// whileRunning makes HOOK run as argv's call is in flight, handed the call's
+// context.
+func (f *fakeRunner) whileRunning(argv string, hook func(ctx context.Context)) *fakeRunner {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.before == nil {
+		f.before = map[string]func(ctx context.Context){}
+	}
+	f.before[argv] = hook
+	return f
 }
 
 func newFakeRunner(t *testing.T) *fakeRunner {
@@ -38,7 +53,13 @@ func (f *fakeRunner) on(argv string, answers ...answer) *fakeRunner {
 	return f
 }
 
-func (f *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+	f.mu.Lock()
+	hook := f.before[strings.Join(argv, " ")]
+	f.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if dir != runDir {

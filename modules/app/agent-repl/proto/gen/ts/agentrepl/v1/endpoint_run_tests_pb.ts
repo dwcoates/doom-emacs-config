@@ -36,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_run_tests.proto.
  */
 export const file_agentrepl_v1_endpoint_run_tests: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEiwAIKD1J1blRlc3RzUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEicKA3J1bhgCIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1blJlcXVlc3QSDAoEcnVucxgDIAEoDRIdChVzdG9wX2F0X2ZpcnN0X2ZhaWx1cmUYBCABKAgSLwoIY3B1X2xvYWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkEjMKCXJlcXVlc3RlchgGIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISMAoId29ya3RyZWUYByABKAsyHi5hZ2VudHJlcGwudjEuUnVuVGVzdHNXb3JrdHJlZRIQCghnb3Zlcm5lZBgIIAEoCCIfChBSdW5UZXN0c1dvcmt0cmVlEgsKA2RpchgBIAEoCSIgCg9SdW5UZXN0c0NwdUxvYWQSDQoFbG9vcHMYASABKA0igQEKEFJ1blRlc3RzUmVzcG9uc2USKQoFZXZlbnQYASABKAsyGC50ZXN0cnVuLnYxLlRlc3RSdW5FdmVudEgAEiwKBWVycm9yGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJ1blRlc3RzRXJyb3JIABILCgNydW4YAyABKA1CBwoFZnJhbWUilQQKDVJ1blRlc3RzRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuUnVuVGVzdHNVbmtub3duV29ya3NwYWNlSAASOQoMbm9fc2VsZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLlJ1blRlc3RzTm9TZWxlY3Rpb25IABI7Cg1ydW5uZXJfZmFpbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLlJ1blRlc3RzUnVubmVyRmFpbGVkSAASQAoQY3B1X2xvYWRfcmVmdXNlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5SdW5UZXN0c0NwdUxvYWRSZWZ1c2VkSAASMAoHaW52YWxpZBgFIAEoCzIdLmFnZW50cmVwbC52MS5SdW5UZXN0c0ludmFsaWRIABJBChB3b3JrdHJlZV9yZWZ1c2VkGAYgASgLMiUuYWdlbnRyZXBsLnYxLlJ1blRlc3RzV29ya3RyZWVSZWZ1c2VkSAASQgoRdXNlcl9vbmx5X3JlZnVzZWQYByABKAsyJS5hZ2VudHJlcGwudjEuUnVuVGVzdHNVc2VyT25seVJlZnVzZWRIABJDChF0cmFuc2ZlcnJpbmdfYXdheRgIIAEoCzImLmFnZW50cmVwbC52MS5SdW5UZXN0c1RyYW5zZmVycmluZ0F3YXlIAEIHCgVjYXVzZSIrChhSdW5UZXN0c1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIqChdSdW5UZXN0c1VzZXJPbmx5UmVmdXNlZBIPCgdvcHRpb25zGAEgAygJIikKF1J1blRlc3RzV29ya3RyZWVSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSIYChZSdW5UZXN0c0NwdUxvYWRSZWZ1c2VkIiEKD1J1blRlc3RzSW52YWxpZBIOCgZkZXRhaWwYASABKAkiGgoYUnVuVGVzdHNVbmtub3duV29ya3NwYWNlIhUKE1J1blRlc3RzTm9TZWxlY3Rpb24iOQoUUnVuVGVzdHNSdW5uZXJGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEg4KBmRldGFpbBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_topology, file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcnVuX3Rlc3RzLnByb3RvEgxhZ2VudHJlcGwudjEi0gIKD1J1blRlc3RzUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEicKA3J1bhgCIAEoCzIaLnRlc3RydW4udjEuVGVzdFJ1blJlcXVlc3QSDAoEcnVucxgDIAEoDRIdChVzdG9wX2F0X2ZpcnN0X2ZhaWx1cmUYBCABKAgSLwoIY3B1X2xvYWQYBSABKAsyHS5hZ2VudHJlcGwudjEuUnVuVGVzdHNDcHVMb2FkEjMKCXJlcXVlc3RlchgGIAEoCzIgLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VSZXF1ZXN0ZXISMAoId29ya3RyZWUYByABKAsyHi5hZ2VudHJlcGwudjEuUnVuVGVzdHNXb3JrdHJlZRISCgp1bmdvdmVybmVkGAkgASgISgQICBAJUghnb3Zlcm5lZCIfChBSdW5UZXN0c1dvcmt0cmVlEgsKA2RpchgBIAEoCSIgCg9SdW5UZXN0c0NwdUxvYWQSDQoFbG9vcHMYASABKA0igQEKEFJ1blRlc3RzUmVzcG9uc2USKQoFZXZlbnQYASABKAsyGC50ZXN0cnVuLnYxLlRlc3RSdW5FdmVudEgAEiwKBWVycm9yGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJ1blRlc3RzRXJyb3JIABILCgNydW4YAyABKA1CBwoFZnJhbWUilQQKDVJ1blRlc3RzRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuUnVuVGVzdHNVbmtub3duV29ya3NwYWNlSAASOQoMbm9fc2VsZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLlJ1blRlc3RzTm9TZWxlY3Rpb25IABI7Cg1ydW5uZXJfZmFpbGVkGAMgASgLMiIuYWdlbnRyZXBsLnYxLlJ1blRlc3RzUnVubmVyRmFpbGVkSAASQAoQY3B1X2xvYWRfcmVmdXNlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5SdW5UZXN0c0NwdUxvYWRSZWZ1c2VkSAASMAoHaW52YWxpZBgFIAEoCzIdLmFnZW50cmVwbC52MS5SdW5UZXN0c0ludmFsaWRIABJBChB3b3JrdHJlZV9yZWZ1c2VkGAYgASgLMiUuYWdlbnRyZXBsLnYxLlJ1blRlc3RzV29ya3RyZWVSZWZ1c2VkSAASQgoRdXNlcl9vbmx5X3JlZnVzZWQYByABKAsyJS5hZ2VudHJlcGwudjEuUnVuVGVzdHNVc2VyT25seVJlZnVzZWRIABJDChF0cmFuc2ZlcnJpbmdfYXdheRgIIAEoCzImLmFnZW50cmVwbC52MS5SdW5UZXN0c1RyYW5zZmVycmluZ0F3YXlIAEIHCgVjYXVzZSIrChhSdW5UZXN0c1RyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIqChdSdW5UZXN0c1VzZXJPbmx5UmVmdXNlZBIPCgdvcHRpb25zGAEgAygJIikKF1J1blRlc3RzV29ya3RyZWVSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSIYChZSdW5UZXN0c0NwdUxvYWRSZWZ1c2VkIiEKD1J1blRlc3RzSW52YWxpZBIOCgZkZXRhaWwYASABKAkiGgoYUnVuVGVzdHNVbmtub3duV29ya3NwYWNlIhUKE1J1blRlc3RzTm9TZWxlY3Rpb24iOQoUUnVuVGVzdHNSdW5uZXJGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEg4KBmRldGFpbBgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_workspace_topology, file_testrun_v1_run_event, file_testrun_v1_selection, file_workspace_v1_workspace]);
 
 /**
  * Run the selected tests from one workspace's worktree.
@@ -104,15 +104,15 @@ export type RunTestsRequest = Message<"agentrepl.v1.RunTestsRequest"> & {
   worktree?: RunTestsWorktree | undefined;
 
   /**
-   * Run under the CPU governance the merge queue's gate runs under (the core
-   * cap and the background priority) even when the workspace holds its
-   * repository's queue bypass mode, whose runs are otherwise ungoverned: for
-   * measuring what a selection costs the way the gate pays it. THE USER'S
-   * ALONE: refused (`user_only_refused`) unless `requester` is the user.
+   * Run with no CPU governor: every core of the host, at the test runs' best
+   * priority. EVERY OTHER RUN IS GOVERNED, a queue bypass holder's included
+   * (owner ruling, 2026-11-13: an ungoverned run starved the owner's
+   * machine). THE USER'S ALONE: refused (`user_only_refused`) unless
+   * `requester` is the user.
    *
-   * @generated from field: bool governed = 8;
+   * @generated from field: bool ungoverned = 9;
    */
-  governed: boolean;
+  ungoverned: boolean;
 };
 
 /**
@@ -321,16 +321,16 @@ export const RunTestsTransferringAwaySchema: GenMessage<RunTestsTransferringAway
 
 /**
  * An option only the user may ask for was asked for by a workspace: a fresh
- * run (`TestRunRequest.no_reuse`) or a governed bypass run (`governed`). Both
- * measure the TESTS themselves, so they run only at the user's explicit
- * request, never as part of an agent's ordinary work.
+ * run (`TestRunRequest.no_reuse`) or an ungoverned run (`ungoverned`). Both
+ * run only at the user's explicit request, never as part of an agent's
+ * ordinary work.
  *
  * @generated from message agentrepl.v1.RunTestsUserOnlyRefused
  */
 export type RunTestsUserOnlyRefused = Message<"agentrepl.v1.RunTestsUserOnlyRefused"> & {
   /**
    * The options refused, as the command line names them ("-no-reuse",
-   * "-governed").
+   * "-ungoverned").
    *
    * @generated from field: repeated string options = 1;
    */

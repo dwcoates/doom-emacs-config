@@ -92,7 +92,7 @@ func testRun(c *cliCall, args []string) int {
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
 	remeasure := fs.Bool("remeasure", false, "bound every unit as one never measured, so a unit that got slower passes and records its new peak")
 	noReuse := fs.Bool("no-reuse", false, "run every selected unit, reusing no earlier pass (the user's alone: needs -as-user)")
-	governed := fs.Bool("governed", false, "run under the gate's CPU governance even from a bypass holder (the user's alone: needs -as-user)")
+	ungoverned := fs.Bool("ungoverned", false, "run with no CPU governor, on every core (the user's alone: needs -as-user)")
 	runs := fs.Uint("runs", 1, "how many times the run repeats, each its own run")
 	stop := fs.Bool("stop-at-first-failure", false, "stop repeating at the first run that fails")
 	cpuLoad := fs.Uint("cpu-load", 0, "busy loops held for the run's length (the user's alone: needs -as-user)")
@@ -107,8 +107,8 @@ func testRun(c *cliCall, args []string) int {
 	if sel.empty() {
 		return c.usageFailed("name the tests to run: the full suite is the merge queue's to run")
 	}
-	if (*noReuse || *governed) && !*asUser {
-		return c.usageFailed("-no-reuse and -governed are the user's alone, for debugging the tests themselves: pass -as-user only when the user asks for one")
+	if (*noReuse || *ungoverned) && !*asUser {
+		return c.usageFailed("-no-reuse and -ungoverned are the user's alone: pass -as-user only when the user asks for one")
 	}
 	if *cpuLoad > 0 && !*asUser {
 		return c.usageFailed("-cpu-load is the user's alone: pass -as-user only when the user asks for load")
@@ -140,7 +140,7 @@ func testRun(c *cliCall, args []string) int {
 		return c.usageFailed("%v", err)
 	}
 	run.Coverage, run.Record, run.Remeasure, run.NoReuse = *coverage, *record, *remeasure, *noReuse
-	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Governed: *governed}
+	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Ungoverned: *ungoverned}
 	if *worktree != "" {
 		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}
 	}

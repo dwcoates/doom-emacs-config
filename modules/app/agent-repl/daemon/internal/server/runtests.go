@@ -87,8 +87,8 @@ func (s *server) RunTests(
 	}
 	if refused := userOnlyOptions(msg); len(refused) > 0 && msg.GetRequester().GetUser() == nil {
 		// MEASURING THE TESTS IS THE USER'S ALONE (owner ruling, 2026-11-13):
-		// a fresh or governed run is for debugging the tests themselves, at
-		// the user's explicit request, never an agent's ordinary run.
+		// a fresh or ungoverned run is at the user's explicit request, never
+		// an agent's ordinary run.
 		s.log.Info(opRunTests, "refused an option only the user may ask for", dlog.Context{"workspace_id": msg.GetWorkspace().GetId(),
 			"requester": msg.GetRequester().GetWorkspace().GetWorkspace().GetId(), "options": refused})
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UserOnlyRefused{UserOnlyRefused: &agentreplv1.RunTestsUserOnlyRefused{Options: refused}}})
@@ -129,20 +129,12 @@ func (s *server) RunTests(
 	}
 	defer os.Remove(selection) //nolint:errcheck // a temp file the run is done with
 	argv := runTestsArgv(merge.TestCommandFor(dir, script, w.name), msg.GetCpuLoad().GetLoops(), selection)
-	// A WORKSPACE HOLDING THE QUEUE BYPASS MODE TESTS UNDETERRED (owner
-	// ruling, 2026-11-12): its run takes every core at the test runs' best
-	// priority, since the mode exists for it to fix things quickly.
-	bypass, err := s.deps.DB.QueueBypass(ctx, w.id)
-	if err != nil {
-		log.Error(opRunTests, "could not read whether the workspace holds the queue bypass mode; nothing was run", dlog.Context{"dir": dir, "workspace": string(w.id), "cause": err.Error()})
-		return fmt.Errorf("RunTests: read the queue bypass standing of %s: %w", w.id, err)
-	}
-	switch {
-	case bypass.Holds && msg.GetGoverned():
-		log.Info(opRunTests, "the workspace holds the queue bypass mode, but the run asked to be governed; it runs under the gate's CPU governance", dlog.Context{"dir": dir, "workspace": string(w.id)})
-	case bypass.Holds:
-		argv = merge.BypassTestArgv(argv)
-		log.Info(opRunTests, "the workspace holds the queue bypass mode; its run takes every core, ungoverned, at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
+	// EVERY RUN IS GOVERNED unless the user asks for an ungoverned one
+	// (owner ruling, 2026-11-13, replacing the 2026-11-12 ruling that a queue
+	// bypass holder tests ungoverned: its full run starved the machine).
+	if msg.GetUngoverned() {
+		argv = merge.UngovernedTestArgv(argv)
+		log.Info(opRunTests, "the user asked for an ungoverned run; it takes every core at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
 	}
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
@@ -315,8 +307,7 @@ type testWorktree struct {
 	// name is the workspace's name, which its run names itself by in the RAM
 	// disk seat it holds (merge.TestCommandFor).
 	name string
-	// id is the workspace whose run this is, which decides whether the run
-	// is a bypass holder's (merge.BypassTestArgv).
+	// id is the workspace whose run this is.
 	id ids.WorkspaceID
 }
 
@@ -487,14 +478,14 @@ func (t *lineTail) String() string {
 }
 
 // userOnlyOptions names the options of a run that only the user may ask for,
-// as the command line spells them: a fresh run and a governed bypass run.
+// as the command line spells them: a fresh run and an ungoverned run.
 func userOnlyOptions(msg *agentreplv1.RunTestsRequest) []string {
 	var out []string
 	if msg.GetRun().GetNoReuse() {
 		out = append(out, "-no-reuse")
 	}
-	if msg.GetGoverned() {
-		out = append(out, "-governed")
+	if msg.GetUngoverned() {
+		out = append(out, "-ungoverned")
 	}
 	return out
 }

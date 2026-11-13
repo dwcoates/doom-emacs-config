@@ -63,7 +63,7 @@ Options:
 -stop-at-first-failure   stop repeating at the first failing run
 -remeasure               bound every selected unit as one never measured, so a unit that legitimately got slower passes and records its new peak; the runner otherwise kills each unit at five times its expected time (`run.BoundFactor`)
 -no-reuse -as-user       run every selected unit, reusing no earlier pass; ONLY when the user explicitly asks to measure or debug the tests themselves (owner ruling 2026-11-13); never part of ordinary work, and the daemon refuses it from a workspace
--governed -as-user       run under the gate's CPU governance even from a queue bypass holder; the same user-only rule as -no-reuse
+-ungoverned -as-user     run with no CPU governor, on every core; ONLY when the user asks for it (owner ruling 2026-11-13: every run is governed by default, a queue bypass holder's included); the daemon refuses it from a workspace
 -cpu-load N -as-user     hold N busy loops for the run's length; ONLY when the user asks for load (owner ruling 2026-10-06); the daemon refuses load from a workspace
 ```
 
@@ -192,7 +192,7 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 - vitest and ERT stay batched; one process per file came back once and made `webapp` take 15.6 minutes in the gate (pitfall 15).
 - `NeverReused` is the owner's to grant: a new never-reused suite, or a suite becoming one, needs their approval. Today's list is `e2e`, `repo-scans`, `proto` and a few whole-module script harnesses.
 - No test needs Docker; the Emacs e2e layer was removed for it (2026-11-13, reviewed 2026-11-20, `e2e/AGENTS.md`). An e2e step proves a real seam and names it (`Seam:`); what one system can prove goes to that system's tier.
-- Measuring what the suites cost is done only at the user's explicit request: `-no-reuse -governed -as-user`, fresh then rerun, in High Power Mode (Low Power roughly doubles the times), reported per suite. Reference, 2026-11-13, governed: `webapp`+`shim`+`ert` fresh 4.7 min, rerun 10s.
+- Measuring what the suites cost is done only at the user's explicit request: `-no-reuse -as-user`, fresh then rerun, in High Power Mode (Low Power roughly doubles the times), reported per suite. Reference, 2026-11-13, governed: `webapp`+`shim`+`ert` fresh 4.7 min, rerun 10s.
 
 ## E2E coverage is a step of a scenario
 

@@ -166,6 +166,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("hard-stopped while this workspace holds the mode");
   });
 
+  it("governs a queue-bypass session's test runs unless the user asks for an ungoverned one", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert — owner ruling 2026-11-13: an ungoverned full run starved the
+    // owner's machine.
+    expect(text).toContain("Every test run is governed by default");
+    expect(text).toContain("Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();

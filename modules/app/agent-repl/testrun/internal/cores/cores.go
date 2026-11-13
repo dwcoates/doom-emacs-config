@@ -76,12 +76,10 @@ func Rank(getenv func(string) string) (int, error) {
 	return n, nil
 }
 
-// UngovernedEnv is the marker the daemon sets on a test run that a workspace
-// holding its repository's queue bypass mode asked for (the daemon's
-// merge.TestUngovernedEnv, the same name): "1" gives the run every core of
-// the host from a pool of its own, with no CPU governor (owner ruling,
-// 2026-11-12: a bypass workspace tests undeterred). Any other value is
-// refused, never read as unset.
+// UngovernedEnv is the marker the daemon sets on a test run the user asked to
+// run ungoverned (the daemon's merge.TestUngovernedEnv, the same name): "1"
+// gives the run every core of the host from a pool of its own, with no CPU
+// governor. Any other value is refused, never read as unset.
 const UngovernedEnv = "AGENT_REPL_TEST_UNGOVERNED"
 
 // Plan is how one run holds the host's cores: how many seats it plans on,
@@ -116,7 +114,7 @@ func PlanFor(getenv func(string) string, numCPU int, sharedDir, ownDir string) (
 		}
 		return Plan{Budget: seats, Dir: ownDir}, nil
 	default:
-		return Plan{}, fmt.Errorf("%s=%q is not the \"1\" the daemon sets on a queue bypass holder's run", UngovernedEnv, v)
+		return Plan{}, fmt.Errorf("%s=%q is not the \"1\" the daemon sets on an ungoverned run", UngovernedEnv, v)
 	}
 }
 

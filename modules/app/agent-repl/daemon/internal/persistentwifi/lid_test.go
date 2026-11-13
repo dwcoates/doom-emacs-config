@@ -469,3 +469,23 @@ func TestLidFactNamesAndStampsEveryKind(t *testing.T) {
 		})
 	}
 }
+
+func TestALidChangeRecordsHowLongItWaitedForTheLock(t *testing.T) {
+	// Arrange
+	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
+	h.r.on(argDisplaySleep, answer{})
+
+	// Act
+	h.hear(LidClosed)
+
+	// Assert
+	var found bool
+	for _, r := range h.records("info", opLid) {
+		if r.Message == "the lid changed" {
+			_, found = r.Context["lock_wait_ms"]
+		}
+	}
+	if !found {
+		t.Fatalf("no lid change record naming its lock wait: %+v", h.records("info", opLid))
+	}
+}

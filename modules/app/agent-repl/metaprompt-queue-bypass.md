@@ -53,6 +53,9 @@
 
 ### Tests
 
+- Every test run is governed by default: the CPU governor holds it to its share of the host.
+  - Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.
+  - An ungoverned run takes every core, which the user feels on their machine.
 - Run no gate before each landing: no gate runs while the queue is paused, and each change lands on its own review.
   - Run only the tests a change adds or changes while writing it, and keep every test it touches compiling.
 - Bypass queue mode never leaves the main branch broken.
