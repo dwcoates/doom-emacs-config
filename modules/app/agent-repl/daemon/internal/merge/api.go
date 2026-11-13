@@ -419,6 +419,9 @@ type Names interface {
 type Banners interface {
 	Queued(ws ids.WorkspaceID, label string)
 	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
+	// Mediated puts a deploy before the user for its mediator WS: one it
+	// escalated, or one it decided nothing about.
+	Mediated(ws ids.WorkspaceID, summary string)
 }
 
 // DetachedOutcome is how a detached merge ended, for its handback. THE KIND IS

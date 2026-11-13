@@ -41,6 +41,12 @@ func (b *fakeBanners) Queued(ws ids.WorkspaceID, label string) {
 	b.raised = append(b.raised, raisedBanner{ws: ws, kind: "queued", text: label})
 }
 
+func (b *fakeBanners) Mediated(ws ids.WorkspaceID, summary string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.raised = append(b.raised, raisedBanner{ws: ws, kind: desktopnotify.KindDeployMediated, text: summary})
+}
+
 func (b *fakeBanners) Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string) {
 	told := b.told()
 	b.mu.Lock()
