@@ -121,14 +121,6 @@ func mqCreateTopLevelChild(t *testing.T, w *stack.World, repoRef *workspacev1.Re
 	return mqCreateChildWithHooks(t, w, repoRef, name, nil)
 }
 
-// mqBranchOf is the branch a mqCreateTopLevelChild workspace checked out —
-// its directory's basename, since Name was passed as the branch name (the
-// same convention daemon/integration/merge_test.go's mergeBranchOf relies
-// on).
-func mqBranchOf(ws *workspacev1.WorkspaceRef) string {
-	return filepath.Base(ws.GetDir())
-}
-
 func mqStrPtr(s string) *string { return &s }
 
 // mqFinish asks for one workspace's deploy and fails the test unless it is
@@ -139,12 +131,6 @@ func mqFinish(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) {
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("FinishWorkspace = (%v, %v), want the deploy enqueued", resp.Msg.GetResult(), err)
 	}
-}
-
-// mqConcluded answers whether a root row is a merge bubble's terminal.
-func mqConcluded(row *frontendv1.FeedRow) bool {
-	merge := row.GetActivity().GetMerge()
-	return merge.GetError() != nil || merge.GetSuccess() != nil
 }
 
 // mqOpenFeedRows opens a feed (root when feed is nil, a sub-feed otherwise)
@@ -239,17 +225,6 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 // text is submitted verbatim, so it is exactly the gate text), and the
 // submission arrives while it is parked.
 // ---------------------------------------------------------------------------
-
-// mqSaid builds the plain-text UserSaid every raw SubmitPromptRequest in
-// this file sends, mirroring kit/stack/world.go's SubmitPrompt helper's own
-// construction (that helper cannot be reused directly by the tests in this
-// file that must inspect the raw, possibly-refused response instead of
-// failing the test on one).
-func mqSaid(text string) *conversationv1.UserSaid {
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
-		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}},
-	}}}
-}
 
 // ---------------------------------------------------------------------------
 // #40 — MergeBubbleCoalescesIntoOneFeedRow. daemon.md §"Merge
