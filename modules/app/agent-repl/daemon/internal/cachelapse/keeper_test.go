@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"regexp"
 	"slices"
 	"strings"
@@ -258,6 +259,9 @@ type harness struct {
 	// parkedRequests is each workspace's parked keep-alive request, nil for
 	// one that parks none.
 	parkedRequests map[ids.WorkspaceID]*shimv1.SendKeepaliveParked
+	// statErr, when set, is what stating each workspace directory answers;
+	// a directory absent from it exists.
+	statErr map[string]error
 }
 
 type nextKeepaliveCall struct {
@@ -354,6 +358,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Parked: func(_ context.Context, ws ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) {
 			return h.parkedRequests[ws], nil
 		},
+		Stat: func(dir string) (fs.FileInfo, error) { return nil, h.statErr[dir] },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -402,6 +407,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Telemetry:       &fakeTelemetry{},
 			NextKeepalive:   func(ids.WorkspaceID, time.Time) {},
 			Parked:          func(context.Context, ids.WorkspaceID) (*shimv1.SendKeepaliveParked, error) { return nil, nil },
+			Stat:            func(string) (fs.FileInfo, error) { return nil, nil },
 		}
 	}
 	tests := []struct {
@@ -421,6 +427,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},
 		{name: "views' next keep-alive", strip: func(d *Deps) { d.NextKeepalive = nil }},
 		{name: "parked keep-alive requests", strip: func(d *Deps) { d.Parked = nil }},
+		{name: "directory stat", strip: func(d *Deps) { d.Stat = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

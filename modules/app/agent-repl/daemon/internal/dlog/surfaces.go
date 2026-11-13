@@ -261,12 +261,12 @@ func (s *surfaces) Global() Logger {
 	return &logger{s: s, dest: s.runLog, runtime: RuntimeDaemon}
 }
 
-// errWorkspaceDirGone marks a resolve whose workspace directory does not
+// ErrWorkspaceDirGone marks a resolve whose workspace directory does not
 // exist. It is a sentinel, and not a test for fs.ErrNotExist on whatever
 // resolve returned, because a sink open failing with ENOENT (a logs directory
 // that went away) is a broken sink, not a vanished workspace: only the stat of
 // the workspace directory itself may say "gone".
-var errWorkspaceDirGone = errors.New("the workspace directory is gone")
+var ErrWorkspaceDirGone = errors.New("the workspace directory is gone")
 
 // errSurfacesClosed is resolve's refusal once Close has run. It is a sentinel
 // because Workspace has to tell "this daemon is shutting down" apart from
@@ -505,7 +505,7 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	switch {
 	case err == nil:
 		dest, who = sk, workspaceIdentity{dir: ws.dir, id: ws.id, dirHash: ws.dirHash}
-	case errors.Is(err, errWorkspaceDirGone):
+	case errors.Is(err, ErrWorkspaceDirGone):
 		gone, gerr := s.goneWorkspace(dir)
 		if gerr != nil {
 			return gerr
@@ -802,7 +802,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// directory" and record an ERROR for a teardown the daemon ordered.
 		info, err := os.Stat(clean)
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w: %w", clean, errWorkspaceDirGone, err)
+			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w: %w", clean, ErrWorkspaceDirGone, err)
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
@@ -828,7 +828,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// already open are untouched (their records live in logsDir), which
 		// is why this is checked only here and not on every resolve.
 		if _, err := os.Stat(ws.dir); errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, errWorkspaceDirGone, err)
+			return nil, nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, ErrWorkspaceDirGone, err)
 		}
 	}
 	key := ws.id + "/" + name

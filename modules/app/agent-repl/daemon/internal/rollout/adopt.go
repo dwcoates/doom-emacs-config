@@ -282,8 +282,10 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 		c.unlock()
 		return nil
 	}
+	var run *adoptionRun
 	if armed {
 		e.beginAdoption()
+		run = e.run
 	}
 	c.unlock()
 	err := c.adopt(context.WithoutCancel(ctx), ws, source)
@@ -295,6 +297,7 @@ func (c *controller) driveAdoption(ctx context.Context, ws ids.WorkspaceID, sour
 			e.adopting = false
 		}
 		c.unlock()
+		close(run.ended)
 	}
 	return err
 }
@@ -677,7 +680,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.log.Error(opAdopt, "the state handle could not be promoted to writing", dlog.WithCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
 	}
-	c.flushDispositions(ctx)
+	c.flushDispositions(ctx, ws)
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not read the workspace being adopted", dlog.WithCause(fields, err))
@@ -876,6 +879,16 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	wasOwned := c.owned[ws]
 	if e, ok := c.rendezvous[ws]; ok {
 		e.adopted = true
+		// THE PARTICIPANTS ARE ANSWERED AT OWNERSHIP, not once the rest of
+		// this adoption is done: the workspace is served here from this
+		// instant, and what follows (its merges, its faults, its carried
+		// replacements) is this daemon's own work. Answered at the end, a
+		// participant waited out that tail too: on 2026-11-13 24 workspaces
+		// adopted within 3s were still unanswered when Emacs's 10s
+		// AdoptHostWorkspace deadline passed, each held behind its merges'
+		// adoption. A tail that fails is still this adoption's error, and
+		// its caller's to retry; the settled answer stands.
+		e.settle(nil)
 	}
 	if c.owned == nil {
 		c.owned = map[ids.WorkspaceID]bool{}

@@ -60,6 +60,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sync"
 	"time"
 
@@ -174,6 +175,9 @@ type Deps struct {
 	// zero time for none, each time it changes (nextkeepalive.go). A park
 	// the views hold carries it (wsm.Park).
 	NextKeepalive func(ws ids.WorkspaceID, next time.Time)
+	// Stat stats a workspace's directory (os.Stat): a workspace whose
+	// directory is gone owes no keep-alive (beatPlanFor).
+	Stat func(name string) (fs.FileInfo, error)
 }
 
 // edgeKind is what one queued event is.
@@ -287,6 +291,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the views' next keep-alive")
 	case deps.Parked == nil:
 		return nil, errors.New("cachelapse: the keeper needs the parked conversations' keep-alive requests")
+	case deps.Stat == nil:
+		return nil, errors.New("cachelapse: the keeper needs to stat the workspaces' directories")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),

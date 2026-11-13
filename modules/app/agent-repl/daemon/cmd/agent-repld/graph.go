@@ -835,6 +835,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			footerResolver.SetNextKeepalive(ws, next)
 			topbarResolver.SetNextKeepalive(ws, next)
 		},
+		Stat: os.Stat,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)

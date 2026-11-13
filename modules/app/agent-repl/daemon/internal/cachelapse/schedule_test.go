@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -588,6 +589,101 @@ func TestAFailedRestoreIsAskedAgainShortly(t *testing.T) {
 	}
 	if !h.found(dlog.RecordQuery{Level: "error", Operation: opRestore}) {
 		t.Fatalf("records = %+v, want the failed restore at ERROR", h.log.Records())
+	}
+}
+
+func TestARestoreWhoseWorktreeIsGoneRetiresTheKeepalive(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "it is not asked again", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, again := h.keeper.restores[ws]; again {
+				t.Fatalf("restore re-armed at %v, want none", h.keeper.restores[ws])
+			}
+		}},
+		{name: "its keep-alive is retired", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat still armed at %v, want it retired", h.keeper.beats[ws])
+			}
+		}},
+		{name: "it is recorded at INFO, never as an error", assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if !h.found(dlog.RecordQuery{Level: "info", Operation: opRestore,
+				Message: "the workspace's directory is gone, so its parked session can never be restored; its keep-alive is retired"}) {
+				t.Fatalf("records = %+v, want the retirement at INFO", h.log.Records())
+			}
+			if h.found(dlog.RecordQuery{Level: "error", Operation: opRestore}) {
+				t.Fatalf("records = %+v, want no ERROR", h.log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, fleet := parkedFleet(t, 1)
+			h.keeper.restoresDue(context.Background())
+			gone := fmt.Errorf("start session for %q: resolve log sink: %w", fleet[0], dlog.ErrWorkspaceDirGone)
+
+			// Act
+			h.keeper.apply(context.Background(), edge{ws: fleet[0], kind: edgeRestored, err: gone, why: "test"})
+
+			// Assert
+			tc.assert(t, h, fleet[0])
+		})
+	}
+}
+
+func TestAParkedSessionWhoseDirectoryIsGoneIsNeverArmed(t *testing.T) {
+	const dir = "/worktrees/landed"
+	cases := []struct {
+		name    string
+		statErr error
+		assert  func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "no restore is armed for a gone directory", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if at, armed := h.keeper.restores[ws]; armed {
+				t.Fatalf("restore armed at %v, want none", at)
+			}
+		}},
+		{name: "no beat is armed for a gone directory", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if at, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat armed at %v, want none", at)
+			}
+		}},
+		{name: "a gone directory writes no error", statErr: fs.ErrNotExist, assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if h.found(dlog.RecordQuery{Level: "error"}) {
+				t.Fatalf("records = %+v, want no ERROR", h.log.Records())
+			}
+		}},
+		{name: "a stat that cannot tell arms nothing", statErr: fs.ErrPermission, assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, armed := h.keeper.beats[ws]; armed {
+				t.Fatalf("beat armed at %v, want none", h.keeper.beats[ws])
+			}
+		}},
+		{name: "a stat that cannot tell is said at ERROR", statErr: fs.ErrPermission, assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if !h.found(dlog.RecordQuery{Level: "error", Operation: opDrive,
+				Message: "could not tell whether the workspace's directory exists; its keep-alive is not armed"}) {
+				t.Fatalf("records = %+v, want the ERROR", h.log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a parked session owing its beat, whose directory stats as the case says.
+			h := newHarness(t, beatable(visible(), 10*time.Minute))
+			h.serving = false
+			ws := ids.WorkspaceID("ws-landed")
+			rec := beatable(wsm.Workspace{ID: ws, Dir: dir}, KeepaliveInterval)
+			h.db.records[ws] = rec
+			h.db.sessions[ws] = parkedSession(ws)
+			h.statErr = map[string]error{dir: tc.statErr}
+
+			// Act
+			h.keeper.schedule(context.Background(), ws, "the daemon started")
+
+			// Assert
+			tc.assert(t, h, ws)
+		})
 	}
 }
 

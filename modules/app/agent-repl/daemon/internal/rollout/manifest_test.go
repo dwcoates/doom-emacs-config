@@ -582,13 +582,13 @@ func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	recorder := &recordingDB{DB: h.c.deps.DB}
 	handle := &toggleReadOnlyDB{DB: recorder, readOnly: true}
 	h.c.deps.DB = handle
-	reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
 
 	// Act
 	if err := handle.Promote(context.Background()); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
-	h.c.flushDispositions(context.Background())
+	h.c.flushDispositions(context.Background(), ws)
 
 	// Assert
 	if len(recorder.opened) != 1 {
@@ -703,17 +703,98 @@ func TestWritingTheDeferredDispositionsRetiresTheManifest(t *testing.T) {
 	h := newHarness(t)
 	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
 	h.c.deps.DB = handle
-	reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
 	if err := handle.Promote(context.Background()); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 
 	// Act
-	h.c.flushDispositions(context.Background())
+	h.c.flushDispositions(context.Background(), ws)
 
 	// Assert
 	if manifestExists(t, h) {
 		t.Fatalf("the intent manifest is still on disk after its deferred dispositions were written")
+	}
+}
+
+// reconcileTwoReadOnly reconciles a two-session manifest on a read-only
+// handle, then promotes it, so both dispositions stand deferred.
+func reconcileTwoReadOnly(t *testing.T, h *harness) (first, second ids.WorkspaceID, recorder *recordingDB) {
+	t.Helper()
+	recorder = &recordingDB{DB: h.c.deps.DB}
+	handle := &toggleReadOnlyDB{DB: recorder, readOnly: true}
+	h.c.deps.DB = handle
+	first, firstDir := h.workspace(t)
+	second, secondDir := h.workspace(t)
+	h.mu.Lock()
+	h.lockStates[firstDir], h.lockStates[secondDir] = sessionlock.StateFree, sessionlock.StateFree
+	h.mu.Unlock()
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Sessions: []ManifestSession{
+			{Workspace: first, Dir: firstDir, ShimPID: 4242, VendorSessionID: "vendor-1", Intent: IntentPreserve},
+			{Workspace: second, Dir: secondDir, ShimPID: 4343, VendorSessionID: "vendor-2", Intent: IntentPreserve},
+		},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+	if _, err := h.c.Reconcile(context.Background(), Survivors{}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if err := handle.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	return first, second, recorder
+}
+
+func TestAnAdoptionWritesOnlyItsOwnWorkspacesDeferredDispositions(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, second ids.WorkspaceID, recorder *recordingDB)
+	}{
+		{name: "it writes one record, its own", assert: func(t *testing.T, _ *harness, _ ids.WorkspaceID, recorder *recordingDB) {
+			if len(recorder.opened) != 1 {
+				t.Fatalf("records written = %d, want only the adopted workspace's one", len(recorder.opened))
+			}
+		}},
+		{name: "the other workspace's stays deferred for its own adoption", assert: func(t *testing.T, h *harness, second ids.WorkspaceID, _ *recordingDB) {
+			if len(h.c.pendingDispositions) != 1 || h.c.pendingDispositions[0].session.Workspace != second {
+				t.Fatalf("pending = %+v, want only %s's", h.c.pendingDispositions, second)
+			}
+		}},
+		{name: "the manifest is kept while a disposition is still deferred", assert: func(t *testing.T, h *harness, _ ids.WorkspaceID, _ *recordingDB) {
+			if !manifestExists(t, h) {
+				t.Fatalf("the intent manifest was retired with a disposition still deferred")
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			first, second, recorder := reconcileTwoReadOnly(t, h)
+
+			// Act
+			h.c.flushDispositions(context.Background(), first)
+
+			// Assert
+			tc.assert(t, h, second, recorder)
+		})
+	}
+}
+
+func TestTheLastAdoptionsDeferredDispositionsRetireTheManifest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first, second, _ := reconcileTwoReadOnly(t, h)
+	h.c.flushDispositions(context.Background(), first)
+
+	// Act
+	h.c.flushDispositions(context.Background(), second)
+
+	// Assert
+	if manifestExists(t, h) {
+		t.Fatalf("the intent manifest is still on disk after every deferred disposition was written")
 	}
 }
 
