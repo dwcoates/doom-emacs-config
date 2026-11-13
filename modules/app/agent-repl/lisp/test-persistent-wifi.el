@@ -101,9 +101,15 @@ written inside BODY after the act."
 (ert-deftest agent-repl-test-pwifi-energy-mode-text-words-every-arm ()
   "Every energy mode outcome arm has its own words."
   (dolist (case '(((:arm :low-power :value nil) . "energy: low power")
-                  ((:arm :high-power :value nil) . "energy: high power")
+                  ((:arm :restored :value (:power-mode "2")) . "energy: restored high power")
+                  ((:arm :unchanged :value nil) . "energy: unchanged")
                   ((:arm :failed :value (:detail "refused")) . "energy: failed (refused)")))
     (should (equal (agent-repl-persistent-wifi--energy-mode-text (car case)) (cdr case)))))
+
+(ert-deftest agent-repl-test-pwifi-power-mode-text-words-every-value ()
+  "Every powermode value has its words, an unknown one named verbatim."
+  (dolist (case '(("0" . "automatic") ("1" . "low power") ("2" . "high power") ("7" . "powermode 7")))
+    (should (equal (agent-repl-persistent-wifi--power-mode-text (car case)) (cdr case)))))
 
 (ert-deftest agent-repl-test-pwifi-energy-mode-text-refuses-an-unworded-arm ()
   "An energy mode arm with no wording is a bug, signalled."

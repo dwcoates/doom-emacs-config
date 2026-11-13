@@ -27,8 +27,10 @@ import (
 //     dies.
 //   - At its daemon's death the guard asks for the owners file EXCLUSIVE,
 //     without waiting. Granted, no daemon is alive to own the record, so the
-//     guard thaws every process it names and clears it; refused, a living
-//     daemon (a handover's successor) owns it, and the guard leaves it be.
+//     guard thaws every process it names and clears it, then undoes the rest
+//     of the quiet state that outlives a daemon (AlsoRestore: the energy
+//     mode it recorded); refused, a living daemon (a handover's successor)
+//     owns it, and the guard leaves it be.
 //
 // A daemon booting while a guard thaws waits for the shared hold
 // (HoldOwnership), so it reads the record only once the guard has cleared it.
@@ -72,6 +74,14 @@ type GuardDeps struct {
 	Store  Store
 	Signal Signaler
 	Log    dlog.Logger
+	// AlsoRestore undoes the rest of the quiet state no daemon is left to
+	// undo (persistentwifi.GuardRestoreEnergy), recording its own failures.
+	// It runs once the exclusive hold is released, whatever the thaw did: its
+	// privileged write is no part of the thaw a booting daemon waits for
+	// (GuardThawBound), and the restore decides by the state it reads, so a
+	// daemon booting meanwhile reaches the same answer. nil restores nothing
+	// more.
+	AlsoRestore func() error
 }
 
 // RunGuard is the guard's whole life: wait for the daemon to be gone, then
@@ -95,16 +105,18 @@ func RunGuard(d GuardDeps) error {
 	// written, so a booting daemon waits for the thaw and nothing else.
 	r, err := thawOwned(d)
 	release()
-	if err != nil {
-		return err
-	}
-	if r == nil {
+	switch {
+	case err != nil:
+	case r == nil:
 		d.Log.Info(op, "the thaw guard's daemon is gone and nothing was frozen", nil)
-		return nil
+	default:
+		d.Log.Info(op, "the last daemon is gone; the thaw guard thawed the frozen applications", dlog.Context{
+			"thawed": describe(r.record), "signalled": r.signalled, "gone": r.gone, "failed": r.failed})
 	}
-	d.Log.Info(op, "the last daemon is gone; the thaw guard thawed the frozen applications", dlog.Context{
-		"thawed": describe(r.record), "signalled": r.signalled, "gone": r.gone, "failed": r.failed})
-	return nil
+	if d.AlsoRestore != nil {
+		err = errors.Join(err, d.AlsoRestore())
+	}
+	return err
 }
 
 // guardThaw is what one guard thaw did.

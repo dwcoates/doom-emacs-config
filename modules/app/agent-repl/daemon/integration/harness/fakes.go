@@ -403,7 +403,8 @@ const FakeHotspot = "Harness Hotspot"
 
 // fakeHostTools are the persistent-wifi host tools, by name. They are
 // STATEFUL where the daemon reads back what it wrote: `pmset -a disablesleep`
-// writes the value `pmset -g` reports, through the fake `sudo`, which runs
+// and `pmset -a powermode` write the values `pmset -g` reports (the energy
+// mode starting at FakeEnergyMode), through the fake `sudo`, which runs
 // the command it is handed. No test ever touches the real machine's power or
 // network settings, `mac-brightness` keeps the level it was set to, and the
 // display is asleep once `pmset displaysleepnow` ran until `caffeinate -u`
@@ -415,10 +416,14 @@ exec "$@"
 `,
 	"pmset": `#!/bin/sh
 state="$(dirname "$0")/pmset.state"
+energy="$(dirname "$0")/powermode.state"
 case "$1" in
-  -g) if [ "$2" = ps ]; then printf "Now drawing from 'Battery Power'\n"; exit 0; fi
-      printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n' "$(cat "$state" 2>/dev/null || echo 0)" ;;
-  -a) [ "$2" = disablesleep ] && printf '%s\n' "$3" > "$state" ;;
+  -g) printf 'System-wide power settings:\n SleepDisabled\t\t%s\nCurrently in use:\n standby 1\n powermode            %s\n' \
+        "$(cat "$state" 2>/dev/null || echo 0)" "$(cat "$energy" 2>/dev/null || echo ` + FakeEnergyMode + `)" ;;
+  -a) case "$2" in
+        disablesleep) printf '%s\n' "$3" > "$state" ;;
+        powermode) printf '%s\n' "$3" > "$energy" ;;
+      esac ;;
   displaysleepnow) printf 'asleep\n' > "$(dirname "$0")/display.state" ;;
 esac
 exit 0
@@ -462,6 +467,23 @@ func FakeBrightnessLevel(t testing.TB, dir string) string {
 	}
 	if err != nil {
 		t.Fatalf("harness: read the fake brightness: %v", err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// FakeEnergyMode is the fake host's energy mode until the daemon writes one:
+// High Power Mode, the user's own choice.
+const FakeEnergyMode = "2"
+
+// FakeEnergyModeIn answers the fake host's energy mode (`pmset` powermode).
+func FakeEnergyModeIn(t testing.TB, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "powermode.state"))
+	if errors.Is(err, os.ErrNotExist) {
+		return FakeEnergyMode
+	}
+	if err != nil {
+		t.Fatalf("harness: read the fake energy mode: %v", err)
 	}
 	return strings.TrimSpace(string(b))
 }

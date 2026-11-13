@@ -33,7 +33,6 @@ func TestALateFreezeRepublishesTheStandingWithWhatIsFrozenNow(t *testing.T) {
 	// Arrange: the quiet state stands with Slack's 4 processes frozen.
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
 	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
-	h.r.on(argPowerSource, answer{out: onBattery})
 	h.r.on(argDisplaySleep, answer{})
 	h.hear(LidClosed)
 	if h.freezer.onChange == nil {
@@ -55,7 +54,6 @@ func TestALidCloseWithTheModeOnEntersTheQuietState(t *testing.T) {
 	// Arrange
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
 	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
-	h.r.on(argPowerSource, answer{out: onBattery})
 	h.r.on(argDisplaySleep, answer{})
 
 	// Act
@@ -84,7 +82,6 @@ func TestALidOpenLeavesTheQuietStateInReverse(t *testing.T) {
 	// Arrange
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
 	h.freezer.frozen = []appfreeze.Frozen{{Name: "Slack", Processes: 4}}
-	h.r.on(argPowerSource, answer{out: onBattery})
 	h.r.on(argDisplaySleep, answer{})
 	h.r.on(argDisplayWake, answer{})
 	h.hear(LidClosed)
@@ -141,7 +138,6 @@ func TestADaemonHearingAnOpenLidThawsAKeptFrozenSet(t *testing.T) {
 func TestARepeatedClosedLidNeverFreezesTwice(t *testing.T) {
 	// Arrange
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
-	h.r.on(argPowerSource, answer{out: onBattery})
 	h.r.on(argDisplaySleep, answer{})
 	h.hear(LidClosed)
 
@@ -157,7 +153,6 @@ func TestARepeatedClosedLidNeverFreezesTwice(t *testing.T) {
 func TestAFailedDisplaySleepIsTriedAgainOnTheNextLidReport(t *testing.T) {
 	// Arrange
 	h := newHarness(t).standing(pmsetOn, summary(true, "Home"))
-	h.r.on(argPowerSource, answer{out: onBattery})
 	h.r.on(argDisplaySleep, answer{out: "no display", code: 1}, answer{})
 	h.hear(LidClosed)
 	awake := h.changes[len(h.changes)-1].GetQuiet().GetDisplayAwake()
@@ -228,6 +223,37 @@ func TestWatchLidStandsAFailedWatchAsUnwatched(t *testing.T) {
 	errs := h.records(dlog.LevelError, opLid)
 	if len(errs) != 1 || !strings.Contains(errs[0].Context["cause"].(string), "0xe00002c2") {
 		t.Fatalf("lid ERROR records = %+v, want one carrying the cause", errs)
+	}
+}
+
+func TestAnUnwatchedLidRestoresTheRecordedEnergyMode(t *testing.T) {
+	// Arrange: the quiet state stands, High Power Mode recorded, when the
+	// lid watch ends.
+	h := newHarness(t).standing(pmsetIn(true, energyModeHighPower), summary(true, hotspot))
+	h.r.on(argDisplaySleep, answer{})
+	h.r.on(argDisplayWake, answer{})
+	h.r.on(argLowPower, answer{})
+	h.hear(LidClosed)
+	h.r.on(argPmsetRead, answer{out: pmsetIn(true, energyModeLowPower)})
+	h.r.on(argPowerMode(energyModeHighPower), answer{})
+	h.lid.end = errors.New("the lid watch ended")
+	close(h.lid.lids)
+
+	// Act.
+	err := h.c.WatchLid(context.Background())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WatchLid() = %v, want nil", err)
+	}
+	if h.c.quiet || h.r.count(argPowerMode(energyModeHighPower)) != 1 || h.energy.kept() != "" {
+		t.Fatalf("quiet %v, calls %v, record %q: want the quiet state left, High Power Mode restored and forgotten",
+			h.c.quiet, h.r.ran(), h.energy.kept())
+	}
+	restored := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opEnergy,
+		Message: "the recorded energy mode was restored"})
+	if len(restored) != 1 || restored[0].Context["trigger"] != "lid_unwatched" {
+		t.Fatalf("energy INFO records = %+v, want the restore on the unwatched lid", h.records(dlog.LevelInfo, opEnergy))
 	}
 }
 

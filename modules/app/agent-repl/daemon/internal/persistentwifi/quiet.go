@@ -16,17 +16,19 @@ const opQuiet = "daemon.persistentwifi.quiet"
 // the mode on and the lid heard closed, the machine does no work for a screen
 // nobody sees, so the battery goes to agent work. Entering it, in order:
 //
-//  1. the views stop (Views): the daemon resolves and publishes no view for a
+//  1. the energy mode in use is recorded and Low Power Mode set (energy.go);
+//  2. the views stop (Views): the daemon resolves and publishes no view for a
 //     local page, and the pages and Emacs idle on the standing's push;
-//  2. the configured applications are frozen (Freezer);
-//  3. the display sleeps.
+//  3. the configured applications are frozen (Freezer);
+//  4. the display sleeps.
 //
-// Leaving it undoes the three in reverse, so the display is awake before the
-// applications move and the views resync last, at the state everything left.
+// Leaving it undoes the four in reverse, so the display is awake before the
+// applications move, the views resync at the state everything left, and the
+// recorded energy mode is restored last.
 // The decision reads STATES, never transitions, so a restart, a handover or a
 // repeated lid report reaches the same answer: a frozen set kept by an
 // earlier daemon is adopted while the state stands and thawed the moment it
-// does not.
+// does not, and so is the energy mode it recorded.
 
 // AppFreezer freezes and thaws the configured applications (appfreeze). It
 // freezes a process an application starts while the state stands on its
@@ -56,60 +58,72 @@ func quietWanted(lid lidKind, mode modeKnown, standing bool) bool {
 	return lid == lidClosed && mode == modeIsOn
 }
 
+// quietSteps are the outcomes of the quiet state's two steps an Update
+// reports.
+type quietSteps struct {
+	display *agentreplv1.UpdatePersistentWifiModeDisplay
+	energy  *agentreplv1.UpdatePersistentWifiModeEnergyMode
+}
+
 // holdQuietLocked holds the quiet state to quietWanted, entering or leaving
-// it, and answers the display step's outcome for an Update. With the state
+// it, and answers the display and energy steps' outcomes for an Update.
+// energy is the energy mode in use as read (reading.energy), which the energy
+// step holds to the state as it stands (holdEnergyLocked). With the state
 // standing and the display awake (a sleep that failed), the sleep is tried
 // again; the applications are not frozen again here, since the freezer
 // freezes each process started while the state stands itself
 // (frozenChanged). With the state not standing, a kept frozen set
-// is thawed, which is how a daemon booting with the lid open thaws what an
-// earlier one froze. trigger names what asked, for the record. Caller holds
-// mu.
-func (c *Controller) holdQuietLocked(ctx context.Context, mode modeKnown, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
+// is thawed and a recorded energy mode restored, which is how a daemon
+// booting with the lid open undoes what an earlier one left. trigger names
+// what asked, for the record. Caller holds mu.
+func (c *Controller) holdQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
 	want := quietWanted(c.lid.kind, mode, c.quiet)
 	switch {
 	case want && !c.quiet:
-		return c.enterQuietLocked(ctx, mode, trigger)
+		return c.enterQuietLocked(ctx, mode, energy, trigger)
 	case want:
-		if c.displayAsleep {
-			return displayUnchanged()
+		steps := quietSteps{display: displayUnchanged(), energy: c.holdEnergyLocked(ctx, energy, trigger)}
+		if !c.displayAsleep {
+			steps.display = c.sleepDisplayLocked(ctx, trigger)
 		}
-		return c.sleepDisplayLocked(ctx, trigger)
+		return steps
 	case c.quiet:
-		return c.leaveQuietLocked(ctx, mode, trigger)
+		return c.leaveQuietLocked(ctx, mode, energy, trigger)
 	default:
 		c.freezer.Thaw(ctx, trigger)
-		return displayUnchanged()
+		return quietSteps{display: displayUnchanged(), energy: c.holdEnergyLocked(ctx, energy, trigger)}
 	}
 }
 
-func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
+func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
+	c.quiet = true
+	energyStep := c.lowerEnergyLocked(ctx, energy, trigger)
 	c.views.Set(true)
 	frozen := c.freezer.Freeze(ctx, trigger)
 	display := c.sleepDisplayLocked(ctx, trigger)
-	c.quiet = true
 	if c.telemetry != nil {
 		c.telemetry.SetLidQuiet(true)
 	}
 	c.log.Info(opQuiet, "the lid closed with persistent wifi on; the machine entered the lid-closed quiet state", dlog.Context{
 		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode),
-		"frozen": frozenNames(frozen), "display": displayArm(display)})
-	return display
+		"frozen": frozenNames(frozen), "display": displayArm(display), "energy": energyModeArm(energyStep)})
+	return quietSteps{display: display, energy: energyStep}
 }
 
-func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
+func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
 	display := c.wakeDisplayLocked(ctx, trigger)
 	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)
 	c.views.Set(false)
 	c.quiet = false
+	energyStep := c.restoreEnergyLocked(ctx, energy, trigger, true)
 	if c.telemetry != nil {
 		c.telemetry.SetLidQuiet(false)
 	}
 	c.log.Info(opQuiet, "the machine left the lid-closed quiet state; every view was brought to its current state", dlog.Context{
 		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode),
-		"thawed": frozenNames(thawed), "display": displayArm(display)})
-	return display
+		"thawed": frozenNames(thawed), "display": displayArm(display), "energy": energyModeArm(energyStep)})
+	return quietSteps{display: display, energy: energyStep}
 }
 
 // stampQuiet sets the standing's quiet message from what the controller

@@ -33,10 +33,6 @@ var sleepDisabled = regexp.MustCompile(`(?m)^\s*SleepDisabled\s+(\d+)\s*$`)
 // mode (1 Low Power, 2 High Power). Machines without an energy mode print none.
 var energyModeLine = regexp.MustCompile(`(?m)^\s*powermode\s+(\d+)\s*$`)
 
-// powerSourceLine matches `pmset -g ps`'s first line, naming what the machine
-// draws from.
-var powerSourceLine = regexp.MustCompile(`(?m)^Now drawing from '([^']*)'`)
-
 // run runs argv and folds every way it can fail into one error naming the
 // tool, the code and its output, for the probe and change sites alike.
 func run(ctx context.Context, r Runner, argv ...string) (string, error) {
@@ -67,17 +63,6 @@ func parseEnergyMode(out string) string {
 		return m[1]
 	}
 	return ""
-}
-
-// parsePowerSource reads `pmset -g ps`: onAC is whether the machine draws from
-// AC power, and ok is false when the output names no source, which it always
-// does.
-func parsePowerSource(out string) (onAC, ok bool) {
-	m := powerSourceLine.FindStringSubmatch(out)
-	if m == nil {
-		return false, false
-	}
-	return m[1] == "AC Power", true
 }
 
 // wifiInterface finds the Wi-Fi interface's device name in
@@ -147,8 +132,8 @@ type reading struct {
 	// summary is `ipconfig getsummary`'s whole answer the link was parsed from,
 	// kept for the record of a loss (lossLocked); empty when device is empty.
 	summary string
-	// energy is the energy mode in use (energyModeLowPower or
-	// energyModeHighPower); empty when the machine names none or it could not
+	// energy is the energy mode in use, `pmset`'s powermode value verbatim
+	// (energyModeLowPower among them); empty when the machine names none or it could not
 	// be read.
 	energy string
 	// wifiErr and modeErr are why a fact was left unassigned; nil when read.

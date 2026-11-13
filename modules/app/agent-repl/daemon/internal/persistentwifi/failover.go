@@ -12,9 +12,11 @@ import (
 
 const opFailover = "daemon.persistentwifi.failover"
 
-// tick is one beat of Run: read the standing, then hold the energy mode
-// (reconcileEnergyLocked) and the Wi-Fi failover to it. Both run under the one lock, so a beat never acts on a reading an
-// Update changed underneath it.
+// tick is one beat of Run: read the standing, then hold the energy mode to
+// the quiet state as it stands (holdEnergyLocked: a Low Power write or a
+// restore that failed is retried; with neither owed nothing is written) and
+// the Wi-Fi failover to the reading. Both run under the one lock, so a beat
+// never acts on a reading an Update changed underneath it.
 func (c *Controller) tick(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -23,7 +25,7 @@ func (c *Controller) tick(ctx context.Context) {
 		// An abandoned read says nothing about either fact (readLocked).
 		return
 	}
-	c.reconcileEnergyLocked(ctx, rd, "beat")
+	c.holdEnergyLocked(ctx, rd.energy, "beat")
 	c.failoverLocked(ctx, rd)
 }
 

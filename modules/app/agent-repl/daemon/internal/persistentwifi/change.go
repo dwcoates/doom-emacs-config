@@ -11,15 +11,10 @@ import (
 	"agent-repld/internal/usersetup"
 )
 
-// Energy modes the energy mode step sets through `pmset -a powermode`: macOS's
-// Low Power Mode while the mode is on, so a lid-closed machine draws as little
-// as it can, except that a closed lid on AC power runs High Power Mode, and High
-// Power Mode when the mode is off (energy.go). The sudoers grant names both
-// invocations.
-const (
-	energyModeLowPower  = "1"
-	energyModeHighPower = "2"
-)
+// energyModeLowPower is `pmset -a powermode`'s Low Power Mode, which the
+// lid-closed quiet state runs; leaving it restores whatever mode was in use
+// before (energy.go). The sudoers grant names `powermode 0`, `1` and `2`.
+const energyModeLowPower = "1"
 
 // powerSettings are the three `pmset -a` settings the mode writes, in order:
 // sleep disabled outright, the network kept up over sleep, and wake on network
@@ -229,38 +224,17 @@ func (c *Controller) applyPower(ctx context.Context, on bool) error {
 	return nil
 }
 
-// pmsetAll is THE ONE privileged power write: `sudo -n pmset -a <setting>
+// pmsetAll is the controller's privileged power write (pmsetWrite).
+func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error {
+	return pmsetWrite(ctx, c.runner, c.cfg.Tools, setting, value)
+}
+
+// pmsetWrite is THE ONE privileged power write: `sudo -n pmset -a <setting>
 // <value>`, the exact shape every line of the sudoers grant names. The error
 // names the invocation.
-func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error {
-	if _, err := run(ctx, c.runner, c.cfg.Tools.Sudo, "-n", c.cfg.Tools.Pmset, "-a", setting, value); err != nil {
+func pmsetWrite(ctx context.Context, r Runner, tools Tools, setting, value string) error {
+	if _, err := run(ctx, r, tools.Sudo, "-n", tools.Pmset, "-a", setting, value); err != nil {
 		return fmt.Errorf("pmset -a %s %s: %w", setting, value, err)
 	}
 	return nil
-}
-
-// setEnergyMode is the energy mode step. No outcome of it fails the request:
-// the machine stays awake whichever energy mode it runs in. The mode it sets is
-// energyModeFor's, which reads the power source when the lid is closed.
-func (c *Controller) setEnergyMode(ctx context.Context, on bool) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
-	e := &agentreplv1.UpdatePersistentWifiModeEnergyMode{}
-	mode, err := c.energyModeFor(ctx, on)
-	if err == nil {
-		err = c.pmsetAll(ctx, "powermode", mode)
-	}
-	switch {
-	case err != nil:
-		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_Failed{
-			Failed: &agentreplv1.UpdatePersistentWifiModeEnergyModeFailed{Detail: err.Error()},
-		}
-	case mode == energyModeLowPower:
-		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_LowPower{
-			LowPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeLowPower{},
-		}
-	default:
-		e.Outcome = &agentreplv1.UpdatePersistentWifiModeEnergyMode_HighPower{
-			HighPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeHighPower{},
-		}
-	}
-	return e
 }

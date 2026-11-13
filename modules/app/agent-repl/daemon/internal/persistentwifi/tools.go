@@ -5,11 +5,11 @@
 // It is the daemon-side port of the owner's `laptop_keep_alive` script, and it
 // keeps that script's behavior and step order (hotspot, power settings,
 // display; see endpoint_update_persistent_wifi_mode.proto), with an energy
-// mode step (Low Power Mode on, except High Power Mode under a closed lid on AC
-// power, which energy.go holds to; High Power Mode off) before the display.
-// While the mode is on a closed lid puts the machine in the LID-CLOSED QUIET
-// STATE (quiet.go): the views stop, the configured applications freeze and
-// the display sleeps, all undone when the lid opens. The lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
+// mode step before the display. While the mode is on a closed lid puts the
+// machine in the LID-CLOSED QUIET STATE (quiet.go): the energy mode in use is
+// recorded and Low Power Mode set (energy.go), the views stop, the configured
+// applications freeze and the display sleeps, all undone when the lid opens,
+// the recorded energy mode restored last. The lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
 // polled. It also READS the
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads

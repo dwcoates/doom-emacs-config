@@ -87,6 +87,9 @@ that every protobuf decision be made without their input (2026-10-01).
 
 ### 5. `UpdatePersistentWifiModeSuccess.energy_mode = 4` (2026-10-17)
 
+Superseded in part by section 10: the energy mode now follows the lid-closed
+quiet state, not the switch.
+
 - WHAT: a fourth step between the power settings and the display. Turning the
   mode on runs `pmset -a powermode 1` (Low Power Mode). Turning it off runs
   `pmset -a powermode 2` (High Power Mode). The outcome oneof is
@@ -188,3 +191,49 @@ that every protobuf decision be made without their input (2026-10-01).
   - Supersedes section 7's hourly tier and give-up; its back-off record is
     kept (INFO, once, at the step to a minute), and a hotspot cause is still
     warned once per distinct cause.
+
+### 10. The energy mode follows the lid-closed quiet state (2026-11-13)
+
+- WHAT: the energy mode is written only on the quiet state's two edges
+  (`daemon/internal/persistentwifi/energy.go`). Entering it records the mode
+  in use (the user's) in `persistent-wifi/energy-mode.json` under the state
+  root, atomically and before the write, then sets Low Power Mode
+  (`powermode 1`). Leaving it (the lid opened, the mode turned off, the lid
+  unwatched) restores the recorded mode, then removes the record. The
+  `UpdatePersistentWifiModeEnergyMode` arm `high_power = 2` is retired
+  (`reserved`), and `restored = 4` (the `power_mode` restored, verbatim) and
+  `unchanged = 5` are added.
+- WHY: the owner ruling of 2026-11-13: "persistent wifi mode should only
+  update the low vs high when the lid closes (switching to low when closing,
+  restoring to whatever it was when opening)". Before it, every beat held the
+  energy mode to section 5's rule (Low Power Mode with the mode on, High
+  Power Mode under a closed lid on AC), so the owner's own switch to High
+  Power Mode with the lid open was undone by the next beat.
+- Consequences:
+  - Supersedes section 5's directions: turning the mode on with the lid
+    open, turning it off with no quiet state, any beat with the lid open, and
+    the power source never write the energy mode. The AC rule is gone:
+    closing always means Low Power Mode. Section 5's "written, never read
+    back" no longer holds: the mode in use is read with the standing.
+  - The record survives a restart, a handover or a crash while the lid is
+    closed, exactly as the frozen set does: a daemon that enters the quiet
+    state finding a record adopts it instead of recording the Low Power Mode
+    it finds. With no record on leaving (a quiet state entered by an earlier
+    build, or a record that could not be kept), nothing is restored, at INFO.
+    A record that cannot be read writes nothing and is recorded at ERROR.
+  - Every step decides by state and is retried on the next beat: while the
+    quiet state stands and Low Power Mode does not, it is set again; while it
+    does not stand and a record is kept, the restore is tried again, and the
+    record kept until it takes. A restore whose mode is no longer the Low
+    Power Mode the quiet state set (the user chose another since) forgets the
+    record, so the user's choice stands. Each distinct failure is recorded
+    once at ERROR (`daemon.persistentwifi.energy`).
+  - The thaw guard restores the record too (`GuardRestoreEnergy`), once no
+    daemon owns the quiet state, by the same decision: it exists to undo
+    what the quiet state leaves on the host when no daemon is left to undo
+    it, and an opened lid with no daemon would otherwise stay in Low Power
+    Mode. It runs after the guard releases the frozen set's exclusive hold,
+    so a booting daemon's bounded wait covers the thaw alone; a daemon
+    booting meanwhile reaches the same answer by state.
+  - The sudoers grant gains `powermode 0`, since the mode restored may be
+    Automatic (`docs/USER-GUIDE.md`).

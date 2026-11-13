@@ -3369,7 +3369,8 @@ Every arm's message is all strings, so FIELDS is its whole schema.")
 
 (defconst agent-repl-wire-persistent-wifi-energy-mode-arms
   '((lowPower :low-power nil)
-    (highPower :high-power nil)
+    (restored :restored ((powerMode :power-mode)))
+    (unchanged :unchanged nil)
     (failed :failed ((detail :detail))))
   "UpdatePersistentWifiModeEnergyMode's outcome arms: (WIRE KEYWORD FIELDS).")
 

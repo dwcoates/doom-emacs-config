@@ -6121,11 +6121,27 @@ instead diverges from it unseen."
                                         #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                                         (concat "{\"success\":{\"state\":{},"
                                                 "\"hotspot\":{\"notOnHotspot\":{}},"
-                                                "\"energyMode\":{\"highPower\":{}},"
+                                                "\"energyMode\":{\"unchanged\":{}},"
                                                 "\"display\":{\"woke\":{}}}}"))
                                        :value)
                             :state)
                  '(:wifi nil :mode nil :lid nil :quiet nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-persistent-wifi-energy-mode-decodes-each-arm ()
+  "Each energy mode outcome arm decodes arm for arm, the restored one with its mode."
+  (dolist (case '(("{\"lowPower\":{}}" . (:arm :low-power :value nil))
+                  ("{\"restored\":{\"powerMode\":\"2\"}}" . (:arm :restored :value (:power-mode "2")))
+                  ("{\"unchanged\":{}}" . (:arm :unchanged :value nil))
+                  ("{\"failed\":{\"detail\":\"x\"}}" . (:arm :failed :value (:detail "x")))))
+    (should (equal (plist-get (plist-get (agent-repl-test-wire-verbs--decode-quietly
+                                          #'agent-repl-wire-decode-update-persistent-wifi-mode-response
+                                          (concat "{\"success\":{\"state\":{},"
+                                                  "\"hotspot\":{\"notOnHotspot\":{}},"
+                                                  "\"energyMode\":" (car case) ","
+                                                  "\"display\":{\"woke\":{}}}}"))
+                                         :value)
+                              :energy-mode)
+                   (cdr case)))))
 
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-display-decodes-each-arm ()
   "Each display outcome arm decodes arm for arm, the failed one with its detail."
@@ -6137,7 +6153,7 @@ instead diverges from it unseen."
                                           #'agent-repl-wire-decode-update-persistent-wifi-mode-response
                                           (concat "{\"success\":{\"state\":{},"
                                                   "\"hotspot\":{\"notOnHotspot\":{}},"
-                                                  "\"energyMode\":{\"highPower\":{}},"
+                                                  "\"energyMode\":{\"unchanged\":{}},"
                                                   "\"display\":" (car case) "}}"))
                                          :value)
                               :display)

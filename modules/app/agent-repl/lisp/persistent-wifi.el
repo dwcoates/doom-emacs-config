@@ -145,11 +145,22 @@ Nil when the lid is not yet heard and no quiet state stands."
                        (plist-get v :network-name) (plist-get v :detail)))
       (arm (error "agent-repl-persistent-wifi: hotspot arm %S has no wording" arm)))))
 
+(defun agent-repl-persistent-wifi--power-mode-text (power-mode)
+  "Return the words for POWER-MODE, `pmset''s powermode value verbatim."
+  (pcase power-mode
+    ("0" "automatic")
+    ("1" "low power")
+    ("2" "high power")
+    (_ (format "powermode %s" power-mode))))
+
 (defun agent-repl-persistent-wifi--energy-mode-text (energy-mode)
   "Return the words for the decoded ENERGY-MODE step outcome."
   (pcase (plist-get energy-mode :arm)
     (:low-power "energy: low power")
-    (:high-power "energy: high power")
+    (:restored (format "energy: restored %s"
+                       (agent-repl-persistent-wifi--power-mode-text
+                        (plist-get (plist-get energy-mode :value) :power-mode))))
+    (:unchanged "energy: unchanged")
     (:failed (format "energy: failed (%s)"
                      (plist-get (plist-get energy-mode :value) :detail)))
     (arm (error "agent-repl-persistent-wifi: energy mode arm %S has no wording" arm))))
@@ -231,13 +242,13 @@ push of the same standing then reads as unchanged."
 
 (defun agent-repl-persistent-wifi-mode-toggle ()
   "Turn the machine's persistent wifi mode (lid-closed operation) over.
-On: join the phone hotspot, disable system sleep, switch to Low Power
-Mode (High Power Mode while the lid is closed on AC power, and back to Low
-Power Mode when the lid opens or the charger is unplugged); while on, the daemon rejoins the hotspot whenever Wi-Fi is lost,
-and a closed lid puts the machine in the lid-closed quiet state (the
-display sleeps, the configured applications freeze, nothing draws) until
-it opens.  Off: leave the hotspot, enable sleep, switch to High Power
-Mode, and leave the quiet state if it stands.  The daemon reads
+On: join the phone hotspot and disable system sleep; while on, the daemon
+rejoins the hotspot whenever Wi-Fi is lost, and a closed lid puts the
+machine in the lid-closed quiet state (Low Power Mode, the display
+sleeps, the configured applications freeze, nothing draws) until it
+opens, when the energy mode in use before it closed is restored.  The
+energy mode is never changed with the lid open.  Off: leave the hotspot,
+enable sleep, and leave the quiet state if it stands.  The daemon reads
 the mode and turns it; a refusal (no sudo grant for pmset) is reported as
 the daemon's refusal."
   (interactive)

@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/recordlock"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/scriptrunner"
 )
 
 // thawGuardVerb runs the thaw guard (appfreeze.RunGuard): the process each
@@ -24,6 +25,12 @@ const thawGuardVerb = "thaw-guard"
 
 // freezeDir is the frozen set's directory under the state root.
 func freezeDir(stateDir string) string { return filepath.Join(stateDir, "persistent-wifi") }
+
+// energyRecord is the store of the energy mode the quiet state recorded,
+// beside the frozen set, which the daemon and its thaw guard both read.
+func energyRecord(stateDir string) persistentwifi.EnergyFileStore {
+	return persistentwifi.EnergyFileStore{Path: filepath.Join(freezeDir(stateDir), persistentwifi.EnergyRecordFile)}
+}
 
 // The daemon keeps these for its whole life, so the kernel releases them only
 // at its death: the shared hold on the frozen set's owners file and the write
@@ -160,13 +167,33 @@ func runThawGuard(args []string, stderr io.Writer) int {
 		surfaces.Global().Error("daemon.appfreeze.guard", "the thaw guard was started without its daemon's pipe", nil)
 		return 1
 	}
+	log := surfaces.Global()
+	// The guard runs only on a real host (buildFreezer), so its tools are the
+	// environment's, exactly the daemon's.
+	wifiConfig, err := persistentwifi.ConfigFromEnv(os.Getenv)
+	if err != nil {
+		log.Error("daemon.appfreeze.guard", "the thaw guard could not resolve the persistent-wifi config", dlog.Context{"cause": err.Error()})
+		return 1
+	}
+	runner, err := scriptrunner.New(log)
+	if err != nil {
+		log.Error("daemon.appfreeze.guard", "the thaw guard could not build its tool runner", dlog.Context{"cause": err.Error()})
+		return 1
+	}
 	dir := freezeDir(*stateDir)
 	err = appfreeze.RunGuard(appfreeze.GuardDeps{
 		DaemonGone: appfreeze.PipeGone(pipe),
 		TryOwn:     appfreeze.RecordTryOwn(filepath.Join(dir, appfreeze.OwnersFile)),
 		Store:      appfreeze.FileStore{Path: filepath.Join(dir, appfreeze.RecordFile)},
 		Signal:     appfreeze.KillSignaler,
-		Log:        surfaces.Global(),
+		Log:        log,
+		// THE GUARD UNDOES THE QUIET STATE NO DAEMON IS LEFT TO UNDO: the
+		// energy mode it recorded is restored as well as the frozen set
+		// thawed, since the lid may open with no daemon to restore it.
+		AlsoRestore: func() error {
+			return persistentwifi.GuardRestoreEnergy(context.Background(), runner, wifiConfig.Tools,
+				energyRecord(*stateDir), log)
+		},
 	})
 	if err != nil {
 		return 1

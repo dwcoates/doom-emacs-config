@@ -62,26 +62,30 @@ type Deps struct {
 	Views *viewquiet.Gate
 	// Telemetry is the quiet state's gauge; nil records nothing.
 	Telemetry QuietTelemetry
+	// EnergyRecord keeps the energy mode the quiet state recorded on
+	// entering it, for its restore (energy.go). REQUIRED.
+	EnergyRecord EnergyStore
 }
 
 // Controller reads, publishes and changes the persistent-wifi standing. One
 // lock serializes every read and every change, so a toggle reads the mode it
 // turns over under the same lock as the turn.
 type Controller struct {
-	cfg       Config
-	runner    Runner
-	clock     clock.Clock
-	network   func() <-chan struct{}
-	power     kernelevent.Source
-	exists    func(string) bool
-	onChange  func(*agentreplv1.PersistentWifiState)
-	log       dlog.Logger
-	lidWatch  LidWatcher
-	legacy    LegacyLidDims
-	freezer   AppFreezer
-	views     *viewquiet.Gate
-	telemetry QuietTelemetry
-	topic     publish.Topic[*agentreplv1.PersistentWifiState]
+	cfg         Config
+	runner      Runner
+	clock       clock.Clock
+	network     func() <-chan struct{}
+	power       kernelevent.Source
+	exists      func(string) bool
+	onChange    func(*agentreplv1.PersistentWifiState)
+	log         dlog.Logger
+	lidWatch    LidWatcher
+	legacy      LegacyLidDims
+	freezer     AppFreezer
+	views       *viewquiet.Gate
+	telemetry   QuietTelemetry
+	energyStore EnergyStore
+	topic       publish.Topic[*agentreplv1.PersistentWifiState]
 
 	mu sync.Mutex
 	// last is the standing last published; nil before the first read.
@@ -96,9 +100,13 @@ type Controller struct {
 	// knownCause is why the failover's known-network step (the radio cycle)
 	// last could not take; empty while nothing stands against it.
 	knownCause string
-	// energyCause is why the energy mode last could not follow the lid and the
-	// power source; empty while nothing stands against it (reconcileEnergyLocked).
+	// energyCause is why the energy step last failed; empty while nothing
+	// stands against it (energyFailedLocked).
 	energyCause string
+	// energyKept is the energy mode the quiet state recorded, as this daemon
+	// holds it; empty when it holds none (energy.go). The store's record is
+	// the durable copy.
+	energyKept string
 	// failover is the Wi-Fi failover's retry schedule since Wi-Fi was lost;
 	// the zero value while the failover stands down (failoverLocked).
 	failover failoverSchedule
@@ -129,6 +137,8 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: an application freezer is required")
 	case d.Views == nil:
 		return nil, fmt.Errorf("persistentwifi: a view gate is required")
+	case d.EnergyRecord == nil:
+		return nil, fmt.Errorf("persistentwifi: the store of the recorded energy mode is required")
 	case d.NetworkChanged == nil:
 		return nil, fmt.Errorf("persistentwifi: the network's change signal is required")
 	case d.PowerChanges == nil:
@@ -143,7 +153,7 @@ func New(d Deps) (*Controller, error) {
 		network: d.NetworkChanged, power: d.PowerChanges,
 		exists: exists, onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, legacy: d.LegacyLidDims, freezer: d.Freezer,
-		views: d.Views, telemetry: d.Telemetry,
+		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
 	}
 	d.Freezer.OnChange(c.frozenChanged)
 	return c, nil
@@ -338,19 +348,19 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 		})
 	}
 
-	energy := c.setEnergyMode(ctx, on)
-	if failed := energy.GetFailed(); failed != nil {
-		c.log.Warn(opUpdate, "the energy mode step failed; the mode change stands",
-			dlog.Context{"on": on, "cause": failed.GetDetail()})
-	}
-
-	// THE QUIET STATE FOLLOWS THE LID: the step moves it only where this
-	// change does (holdQuietLocked), and records its own failures.
+	// THE QUIET STATE FOLLOWS THE LID, AND THE ENERGY MODE THE QUIET STATE:
+	// the energy and display steps move only where this change moves the
+	// quiet state (holdQuietLocked), and record their own failures.
 	mode := modeIsOff
 	if on {
 		mode = modeIsOn
 	}
-	display := c.holdQuietLocked(ctx, mode, "update")
+	steps := c.holdQuietLocked(ctx, mode, before.energy, "update")
+	display, energy := steps.display, steps.energy
+	if failed := energy.GetFailed(); failed != nil {
+		c.log.Warn(opUpdate, "the energy mode step failed; the mode change stands",
+			dlog.Context{"on": on, "cause": failed.GetDetail()})
+	}
 
 	after := c.readLocked(ctx)
 	c.log.Info(opUpdate, "persistent wifi mode was changed", dlog.Context{
@@ -430,8 +440,11 @@ func (c *Controller) WatchLid(ctx context.Context) error {
 		dlog.Context{"was": c.lid.name(), "cause": err.Error()})
 	c.lid = lidFact{kind: lidUnwatched, cause: err.Error()}
 	// A LID NOBODY HEARS IS NEVER CLOSED: a quiet state standing is left, so
-	// nothing stays frozen behind a watch that ended.
-	c.holdQuietLocked(ctx, modeOf(c.last), "lid_unwatched")
+	// nothing stays frozen, and no Low Power Mode stays set, behind a watch
+	// that ended. The standing is read afresh for the energy mode to restore
+	// over.
+	rd := c.readLocked(ctx)
+	c.holdQuietLocked(ctx, modeOf(c.last), rd.energy, "lid_unwatched")
 	c.republishLocked()
 	return nil
 }
@@ -452,7 +465,6 @@ func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
 	if ctx.Err() != nil {
 		return
 	}
-	c.holdQuietLocked(ctx, modeOf(rd.state), "lid_"+lid.name())
-	c.reconcileEnergyLocked(ctx, rd, "lid_"+lid.name())
+	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, "lid_"+lid.name())
 	c.republishLocked()
 }
