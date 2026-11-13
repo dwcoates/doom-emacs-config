@@ -70,4 +70,5 @@
 - [x] 6 undecided turn end (mediationTurnEnded)
 - [x] 7 session landing + metaprompt section
 - [x] 8 sidebar (frontend.v1.RosterRepoMergeQueue.mediation, pinned above the head)
-- [ ] full suite, land, deploy
+- [x] full suite, land, deploy (0.432.0)
+- [x] the `deploy_mediator` line in `.agent-repl/lifecycle.yaml`, after 0.432.0 parses it
