@@ -63,7 +63,7 @@
   `.agent-repl/lifecycle.yaml` lands only AFTER the daemon that parses it is
   deployed: the running daemon reads the worktree's and master's config and
   refuses an unknown field, so landing them together breaks the deploy)
-- [ ] 2 debt (wsm layout)
+- [x] 2 debt (wsm layout 132, internal/wsm/mediation.go)
 - [ ] 3 hold
 - [ ] 4 driver
 - [ ] 5 decision rpc + CLI
