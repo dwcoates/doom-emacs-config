@@ -1330,7 +1330,10 @@ like an improvement still needs that conversation. Code:
       of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
       (`shim`, `webapp`, `build-frontend-harness`), with `e2e` and
       `e2e-emacs`;
-    - `e2e/`: `e2e` and `e2e-emacs`, and `e2e/sandbox/` only `e2e-emacs`;
+    - `e2e/`: `e2e`, `e2e-emacs` and `e2e-kit` (whose scans read the e2e
+      package's sources), and `e2e/sandbox/` only `e2e-emacs`; `e2e/kit/`, the
+      e2e harness's world-free code in a module of its own, `e2e-kit`, `e2e`
+      and `e2e-emacs`;
   - two tests keep the map honest: every local module a Go suite's `go.mod`
     replaces, and every tree a Vitest suite imports outside itself, must select
     that suite. They and the mock-rule source scan are the `repo-scans` suite
