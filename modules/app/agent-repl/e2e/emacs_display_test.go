@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit"
 	"context"
 	"os"
 	"path/filepath"
@@ -263,7 +264,7 @@ func (x *xdisplay) tailLog() string {
 	if err != nil {
 		return "(Xvfb log unreadable: " + err.Error() + ")"
 	}
-	return string(tailBytes(body, artifactTailBytes))
+	return string(kit.TailBytes(body, artifactTailBytes))
 }
 
 // Env is what a process must carry to draw on this display.

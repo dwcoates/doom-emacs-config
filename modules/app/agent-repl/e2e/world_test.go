@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -440,11 +440,6 @@ func (w *World) WatchFooter(ws *workspacev1.WorkspaceRef) *FooterWatch {
 // Failure artifacts (SPEC.md section B, "Failure artifacts").
 // ===========================================================================
 
-// ArtifactsEnv names the directory a failing test copies its structured logs
-// into. Unset (the default) means the logs are emitted as bounded tails into
-// the test's own t.Log output instead — never nothing.
-const ArtifactsEnv = "AGENT_REPL_E2E_ARTIFACTS"
-
 // artifactTailBytes bounds how much of one log a failing test prints when no
 // artifacts directory is configured. Sized to hold a failing test's WHOLE
 // daemon log while still refusing an unbounded file. MEASURED 2026-10-10: a
@@ -495,7 +490,7 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 			return
 		}
 		dest := ""
-		if root := os.Getenv(ArtifactsEnv); root != "" {
+		if root := os.Getenv(kit.ArtifactsEnv); root != "" {
 			dest = filepath.Join(root, artifactDirName(t.Name()))
 			if err := os.MkdirAll(dest, 0o755); err != nil {
 				t.Logf("e2e artifacts: cannot create %s (%v); falling back to log tails", dest, err)
@@ -518,7 +513,7 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 				}
 				continue
 			}
-			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
+			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), kit.TailBytes(body, artifactTailBytes))
 		}
 		if dest != "" {
 			for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -538,19 +533,6 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 			t.Logf("e2e artifacts: structured logs and the store database preserved under %s", dest)
 		}
 	})
-}
-
-// tailBytes answers the last limit bytes of body, cut forward to the next
-// newline so the tail never opens mid-record and read as a broken JSONL line.
-func tailBytes(body []byte, limit int) string {
-	if len(body) <= limit {
-		return string(body)
-	}
-	tail := body[len(body)-limit:]
-	if i := bytes.IndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
-	}
-	return string(tail)
 }
 
 // artifactDirName turns a Go test name into one path segment: subtests are
@@ -761,23 +743,10 @@ func stopProcess(t testing.TB, name string, cmd *exec.Cmd, exit *processExit, lo
 		t.Errorf("e2e: SIGKILL %s: %v", name, err)
 	}
 	if !exit.awaitWithin(reapGrace) {
-		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM; its log ends:\n%s", name, reapGrace, DefaultTimeout, logTailOf(logPath))
+		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM; its log ends:\n%s", name, reapGrace, DefaultTimeout, kit.LogTailOf(logPath))
 		return
 	}
-	t.Errorf("e2e: %s did not exit within %s of SIGTERM; its log ends:\n%s", name, DefaultTimeout, logTailOf(logPath))
-}
-
-// stopLogTailBytes bounds the log a failed stop prints: enough for the last
-// few dozen records, which span the stop.
-const stopLogTailBytes = 8 << 10
-
-// logTailOf answers the end of a child's log file, or why it cannot.
-func logTailOf(path string) string {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Sprintf("(cannot read %s: %v)", path, err)
-	}
-	return tailBytes(body, stopLogTailBytes)
+	t.Errorf("e2e: %s did not exit within %s of SIGTERM; its log ends:\n%s", name, DefaultTimeout, kit.LogTailOf(logPath))
 }
 
 // ===========================================================================
