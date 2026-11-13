@@ -68,12 +68,12 @@ type RunTestsRequest struct {
 	// `workspace` is its repository's main workspace and the directory is a
 	// git worktree of that repository.
 	Worktree *RunTestsWorktree `protobuf:"bytes,7,opt,name=worktree,proto3" json:"worktree,omitempty"`
-	// Run under the CPU governance the merge queue's gate runs under (the core
-	// cap and the background priority) even when the workspace holds its
-	// repository's queue bypass mode, whose runs are otherwise ungoverned: for
-	// measuring what a selection costs the way the gate pays it. THE USER'S
-	// ALONE: refused (`user_only_refused`) unless `requester` is the user.
-	Governed      bool `protobuf:"varint,8,opt,name=governed,proto3" json:"governed,omitempty"`
+	// Run with no CPU governor: every core of the host, at the test runs' best
+	// priority. EVERY OTHER RUN IS GOVERNED, a queue bypass holder's included
+	// (owner ruling, 2026-11-13: an ungoverned run starved the owner's
+	// machine). THE USER'S ALONE: refused (`user_only_refused`) unless
+	// `requester` is the user.
+	Ungoverned    bool `protobuf:"varint,9,opt,name=ungoverned,proto3" json:"ungoverned,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -157,9 +157,9 @@ func (x *RunTestsRequest) GetWorktree() *RunTestsWorktree {
 	return nil
 }
 
-func (x *RunTestsRequest) GetGoverned() bool {
+func (x *RunTestsRequest) GetUngoverned() bool {
 	if x != nil {
-		return x.Governed
+		return x.Ungoverned
 	}
 	return false
 }
@@ -593,13 +593,13 @@ func (x *RunTestsTransferringAway) GetAddress() string {
 }
 
 // An option only the user may ask for was asked for by a workspace: a fresh
-// run (`TestRunRequest.no_reuse`) or a governed bypass run (`governed`). Both
-// measure the TESTS themselves, so they run only at the user's explicit
-// request, never as part of an agent's ordinary work.
+// run (`TestRunRequest.no_reuse`) or an ungoverned run (`ungoverned`). Both
+// run only at the user's explicit request, never as part of an agent's
+// ordinary work.
 type RunTestsUserOnlyRefused struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The options refused, as the command line names them ("-no-reuse",
-	// "-governed").
+	// "-ungoverned").
 	Options       []string `protobuf:"bytes,1,rep,name=options,proto3" json:"options,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -905,7 +905,7 @@ var File_agentrepl_v1_endpoint_run_tests_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_run_tests_proto_rawDesc = "" +
 	"\n" +
-	"%agentrepl/v1/endpoint_run_tests.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1atestrun/v1/run_event.proto\x1a\x1atestrun/v1/selection.proto\x1a\x1cworkspace/v1/workspace.proto\"\x92\x03\n" +
+	"%agentrepl/v1/endpoint_run_tests.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1atestrun/v1/run_event.proto\x1a\x1atestrun/v1/selection.proto\x1a\x1cworkspace/v1/workspace.proto\"\xa6\x03\n" +
 	"\x0fRunTestsRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12,\n" +
 	"\x03run\x18\x02 \x01(\v2\x1a.testrun.v1.TestRunRequestR\x03run\x12\x12\n" +
@@ -913,8 +913,10 @@ const file_agentrepl_v1_endpoint_run_tests_proto_rawDesc = "" +
 	"\x15stop_at_first_failure\x18\x04 \x01(\bR\x12stopAtFirstFailure\x128\n" +
 	"\bcpu_load\x18\x05 \x01(\v2\x1d.agentrepl.v1.RunTestsCpuLoadR\acpuLoad\x12>\n" +
 	"\trequester\x18\x06 \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x12:\n" +
-	"\bworktree\x18\a \x01(\v2\x1e.agentrepl.v1.RunTestsWorktreeR\bworktree\x12\x1a\n" +
-	"\bgoverned\x18\b \x01(\bR\bgoverned\"$\n" +
+	"\bworktree\x18\a \x01(\v2\x1e.agentrepl.v1.RunTestsWorktreeR\bworktree\x12\x1e\n" +
+	"\n" +
+	"ungoverned\x18\t \x01(\bR\n" +
+	"ungovernedJ\x04\b\b\x10\tR\bgoverned\"$\n" +
 	"\x10RunTestsWorktree\x12\x10\n" +
 	"\x03dir\x18\x01 \x01(\tR\x03dir\"'\n" +
 	"\x0fRunTestsCpuLoad\x12\x14\n" +

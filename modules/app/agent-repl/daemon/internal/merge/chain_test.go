@@ -828,17 +828,17 @@ func headInGate(t *testing.T) (*chain, <-chan error) {
 	return c, done
 }
 
-func TestBypassTestArgvRunsTheCommandUngovernedAtNicenessOne(t *testing.T) {
+func TestUngovernedTestArgvRunsTheCommandUngovernedAtNicenessOne(t *testing.T) {
 	// Arrange
 	command := []string{"env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "bash", "/w/bin/test-all.sh"}
 
 	// Act
-	got := BypassTestArgv(command)
+	got := UngovernedTestArgv(command)
 
 	// Assert
 	want := []string{"env", "AGENT_REPL_TEST_NICENESS=1", "AGENT_REPL_TEST_UNGOVERNED=1", "env", "AGENT_REPL_TEST_RUN_BY_DAEMON=1", "bash", "/w/bin/test-all.sh"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("BypassTestArgv = %q, want %q", got, want)
+		t.Fatalf("UngovernedTestArgv = %q, want %q", got, want)
 	}
 	if command[0] != "env" || len(command) != 4 {
 		t.Fatalf("the command handed in was changed: %q", command)
