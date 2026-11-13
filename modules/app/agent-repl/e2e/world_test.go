@@ -194,19 +194,6 @@ func NewWorldWithSidecarStaleness(t testing.TB, opts WorldOpts, staleness Sideca
 	return NewWorld(t, opts)
 }
 
-// worldDaemonEnv is a world daemon's environment: the caller's ExtraEnv,
-// then this suite's own statements, appended LAST so they win (the shim's env
-// is scanned front-to-back and the last assignment of a name is the effective
-// one). It names no checkout: harness.StartDaemon pins its own (see
-// checkoutEnv).
-func worldDaemonEnv(extra []string, spoolRoot, lockBin string) []string {
-	return append(append([]string{}, extra...),
-		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot,
-		// The shim inherits this from the daemon and spawns it for every
-		// kernel claim; without it no session starts at all.
-		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
-}
-
 // NewWorld builds one test's stack: the real store, the real sidecar, and a
 // real daemon spawning the real (built-from-source, `--fake`-mode) shim.
 // Every process is killed and every socket/temp root is removed at test
@@ -287,7 +274,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// A root this world minted is fresh, so its state lives in memory unless
 	// the test asked for DurableState (harness.Opts.FreshStateDir).
 	daemonOpts.FreshStateDir = opts.DaemonOpts.StateDir == ""
-	daemonOpts.ExtraEnv = worldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
+	daemonOpts.ExtraEnv = kit.WorldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
 	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
 	// builds into the daemon's lock dir (startStore/startSidecar are pointed
 	// at it), and the deploy's fake build stages copies of these very
@@ -1093,7 +1080,7 @@ func (w *World) SuccessorOpts(t testing.TB) harness.Opts {
 		StoreSocket:     w.Store.Socket,
 		RealStore:       true,
 		ServiceBinaries: w.ServiceBinaries(),
-		ExtraEnv:        worldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
+		ExtraEnv:        kit.WorldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
 	}
 }
 

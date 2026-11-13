@@ -192,8 +192,8 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		// THE MODULE ROOT IS THE CHECKOUT: the real Emacs loads the elisp
 		// beneath it, so a deploy's fresh elisp build is the one Emacs runs.
 		// The sandbox's working copy is a throwaway, so what a deploy
-		// installs there touches nothing of the host's (see checkoutEnv).
-		checkoutEnv + "=" + repo.repoDir,
+		// installs there touches nothing of the host's (see kit.CheckoutEnv).
+		kit.CheckoutEnv + "=" + repo.repoDir,
 		"AGENT_REPL_DEPLOY_BUILDER=" + deploy.Path,
 		"AGENT_REPL_LAUNCHCTL=" + services.Path,
 		"AGENT_REPL_SYSTEMCTL=" + services.Path,

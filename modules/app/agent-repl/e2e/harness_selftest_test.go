@@ -15,22 +15,6 @@ import (
 // The harness's own unit tests: the two helpers whose silent misbehavior does
 // not fail visibly, but as a whole suite of timeouts and no_session prompts.
 
-func TestWorldDaemonEnvLeavesTheCheckoutToTheHarness(t *testing.T) {
-	t.Parallel()
-	// Arrange: a caller that states nothing about the checkout.
-	extra := []string{"AGENT_REPL_TEST_ALL_SCRIPT=/gate"}
-
-	// Act.
-	env := worldDaemonEnv(extra, "/spool", "/shim-lock")
-
-	// Assert: no checkout override rides the world's env, so the harness's
-	// own pinned checkout stands and a deploy never installs into this
-	// worktree.
-	if got := valueOf(env, checkoutEnv); got != "" {
-		t.Fatalf("worldDaemonEnv sets %s=%q, want it left to harness.StartDaemon's pinned checkout", checkoutEnv, got)
-	}
-}
-
 // TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot pins the reason
 // shortStateRoot nests its root one level down.
 //

@@ -24,7 +24,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"testing"
 
@@ -210,29 +209,6 @@ func requireNode(t testing.TB) string {
 		requireDependency(t, "e2e: node not found on PATH: install Node.js (the shim bundle is built with it)")
 	}
 	return nodeBin
-}
-
-// checkoutEnv is agent-repld's checkout-root override (checkout.Env).
-//
-// THE CHECKOUT IS WHERE A DEPLOY INSTALLS. The daemon's own deploy judges and
-// installs against it: the daemon binary lands at <checkout>/daemon/bin, and
-// the fresh elisp build is hashed from <checkout>/lisp. A Go world therefore
-// never names this worktree — harness.StartDaemon pins its own throwaway
-// checkout (harness.BuildIdentityEnv), whose elisp is the build every harness
-// WatchDaemon stream reports — or a landing's deploy would install a test
-// daemon over this worktree's daemon/bin. Only the Emacs layer names the
-// module root, because a real Emacs loads the elisp beneath it and the
-// sandbox's working copy is a throwaway tmpfs.
-const checkoutEnv = "AGENT_REPL_CHECKOUT"
-
-// valueOf answers the value of name in a KEY=VALUE list, or "" when absent.
-func valueOf(env []string, name string) string {
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, name+"="); ok {
-			return v
-		}
-	}
-	return ""
 }
 
 var (
