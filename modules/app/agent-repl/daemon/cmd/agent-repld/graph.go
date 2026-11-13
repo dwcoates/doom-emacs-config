@@ -2571,11 +2571,11 @@ const opSuccessorEnv = "daemon.rollout.successor_env"
 
 // successorEnviron answers a spawned daemon's environment: this process's,
 // every per-user setting refreshed from the env file Emacs named
-// (userenv.Successor), the settings agent-repl's requirements manifest under
-// checkout declares. Each setting it changes is recorded, and a failure is
+// (userenv.Successor), the settings the requirements manifest at the root of
+// checkout (the agent-repl module root, paths.Checkout) declares. Each setting it changes is recorded, and a failure is
 // recorded at ERROR before it fails the spawn.
 func successorEnviron(checkout string, log dlog.Logger) func() ([]string, error) {
-	manifest := filepath.Join(checkout, "modules", "app", "agent-repl", "requirements.json")
+	manifest := filepath.Join(checkout, "requirements.json")
 	return func() ([]string, error) {
 		env, changed, err := userenv.Successor(os.Environ(), manifest)
 		if err != nil {
