@@ -43,6 +43,11 @@ message TestRunRequest {
   // old limit on every run, and records no time while it is; a remeasuring
   // run lets it pass and record its new peak, which later runs are held to.
   bool remeasure = 4;
+  // Run every selected unit even when an earlier pass of its exact inputs
+  // would let it be reused: a fresh run, for measuring what the selection
+  // costs with nothing skipped. A narrower selection than whole units never
+  // reuses anyway, so this matters for suites and whole files.
+  bool no_reuse = 5;
 }
 
 // One target and the tests within it to run.

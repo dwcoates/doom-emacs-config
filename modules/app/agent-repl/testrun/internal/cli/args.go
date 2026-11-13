@@ -172,6 +172,7 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
 	}
 	a.Remeasure = req.GetRemeasure()
+	a.NoReuse = a.NoReuse || req.GetNoReuse()
 	if !whole {
 		return a, nil
 	}

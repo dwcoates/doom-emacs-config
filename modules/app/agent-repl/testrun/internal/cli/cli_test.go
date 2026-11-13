@@ -1312,6 +1312,8 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Remeasure: true}},
 		{name: "a remeasuring narrowed request stays targeted and remeasures", req: remeasured(harnessSelection()),
 			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", Remeasure: true}},
+		{name: "a whole suite asked to reuse nothing reuses nothing", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("webapp")}, NoReuse: true},
+			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"webapp"}, NoReuse: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

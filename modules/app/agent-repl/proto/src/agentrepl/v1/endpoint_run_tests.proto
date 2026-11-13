@@ -52,6 +52,11 @@ message RunTestsRequest {
   // `workspace` is its repository's main workspace and the directory is a
   // git worktree of that repository.
   RunTestsWorktree worktree = 7;
+  // Run under the CPU governance the merge queue's gate runs under (the core
+  // cap and the background priority) even when the workspace holds its
+  // repository's queue bypass mode, whose runs are otherwise ungoverned: for
+  // measuring what a selection costs the way the gate pays it.
+  bool governed = 8;
 }
 
 // A worktree a main workspace runs tests in, in place of its own.

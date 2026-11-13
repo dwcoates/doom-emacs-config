@@ -125,7 +125,10 @@ func (s *server) RunTests(
 		log.Error(opRunTests, "could not read whether the workspace holds the queue bypass mode; nothing was run", dlog.Context{"dir": dir, "workspace": string(w.id), "cause": err.Error()})
 		return fmt.Errorf("RunTests: read the queue bypass standing of %s: %w", w.id, err)
 	}
-	if bypass.Holds {
+	switch {
+	case bypass.Holds && msg.GetGoverned():
+		log.Info(opRunTests, "the workspace holds the queue bypass mode, but the run asked to be governed; it runs under the gate's CPU governance", dlog.Context{"dir": dir, "workspace": string(w.id)})
+	case bypass.Holds:
 		argv = merge.BypassTestArgv(argv)
 		log.Info(opRunTests, "the workspace holds the queue bypass mode; its run takes every core, ungoverned, at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
 	}
