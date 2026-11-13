@@ -68,6 +68,6 @@
 - [x] 4 driver (internal/merge/mediation.go, deployprogress.Edges, cmd/agent-repld/mediationhook.go)
 - [x] 5 decision (UpdateMergeQueue mediation arm, `merge-queue mediation`)
 - [x] 6 undecided turn end (mediationTurnEnded)
-- [ ] 7 session landing + metaprompt section
-- [ ] 8 sidebar
+- [x] 7 session landing + metaprompt section
+- [x] 8 sidebar (frontend.v1.RosterRepoMergeQueue.mediation, pinned above the head)
 - [ ] full suite, land, deploy

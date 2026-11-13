@@ -1904,3 +1904,51 @@ func TestAGithubStandingOfAWorkspaceNotInTheRegistryIsRecordedAndNotDrawn(t *tes
 		t.Fatalf("no error record of the unregistered standing")
 	}
 }
+
+func TestTheMergeQueueDrawsTheDeployMediationItWaitsOn(t *testing.T) {
+	cases := []struct {
+		name         string
+		told         bool
+		wantChecking bool
+	}{
+		{name: "a mediator not yet told waits", told: false},
+		{name: "a told mediator is checking", told: true, wantChecking: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: nothing in line; the deploy owes a mediation by w1.
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Mediator: "w1", Told: tc.told}})
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "deploy-mediator")))
+
+			// Assert.
+			groups := queuedGroups(latest(t, r))
+			if len(groups) != 1 {
+				t.Fatalf("queue groups = %d, want the queue listed while its deploy is mediated", len(groups))
+			}
+			m := groups[0].GetQueue().GetMediation()
+			if m.GetSubject().GetName() != "deploy-mediator" || (m.GetChecking() != nil) != tc.wantChecking || (m.GetWaiting() != nil) == tc.wantChecking {
+				t.Fatalf("mediation = %v, want deploy-mediator, checking %v", m, tc.wantChecking)
+			}
+		})
+	}
+}
+
+func TestAMediationNamingAnUnregisteredMediatorIsNotDrawn(t *testing.T) {
+	// Arrange
+	r, log := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Mediator: "w-gone"}})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	if groups := queuedGroups(latest(t, r)); len(groups) != 0 {
+		t.Fatalf("queue groups = %d, want none drawn for an unregistered mediator", len(groups))
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Message: "a deploy mediation names a mediator the registry does not carry, so it is not drawn"}); !ok {
+		t.Fatalf("no ERROR record of the unregistered mediator")
+	}
+}

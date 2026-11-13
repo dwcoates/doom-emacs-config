@@ -226,3 +226,40 @@ func TestDecideMediation(t *testing.T) {
 		})
 	}
 }
+
+func TestTheRosterIsToldTheMediationTheQueueWaitsOn(t *testing.T) {
+	tests := []struct {
+		name     string
+		made     bool
+		told     bool
+		wantNil  bool
+		wantTold bool
+	}{
+		{name: "a mediator not made yet draws nothing", wantNil: true},
+		{name: "a made mediator not yet told waits", made: true},
+		{name: "a told mediator is checking", made: true, told: true, wantTold: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			if tt.made {
+				h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+			}
+			owe(t, h)
+			if tt.told {
+				if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-1"); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, err := h.o.rosterMediation(context.Background(), mediationKey(h))
+
+			// Assert
+			if err != nil || (got == nil) != tt.wantNil || (got != nil && (got.Told != tt.wantTold || got.Mediator != "ws-mediator")) {
+				t.Fatalf("rosterMediation = (%+v, %v), want nil %v, told %v", got, err, tt.wantNil, tt.wantTold)
+			}
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
@@ -120,6 +121,7 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 		}
 		o.deps.Log.Global().Info(opMediation, "the deploy owes a mediation; the queue advances nothing until its mediator decides", dlog.Context{
 			"repo": string(q.key), "mediator": q.mediator, "deploy_started": at.UTC().Format(time.RFC3339Nano)})
+		o.republishMediation(ctx, q.key)
 	}
 	return errors.Join(errs...)
 }
@@ -232,6 +234,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		return "", err
 	}
 	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy, on a compacted context", withField(fields, "turn", string(turn)))
+	o.republishMediation(ctx, q.key)
 	return turn, nil
 }
 
@@ -263,6 +266,7 @@ func (o *orchestrator) mediationTurnEnded(ctx context.Context, q mediatedQueue, 
 	}
 	o.deps.Log.Global().Error(opMediation, "the mediator's turn ended deciding nothing about the deploy; the queue is let through and the user is told", fields)
 	o.deps.Banners.Mediated(ws, "the deploy mediator ended its turn without deciding the deploy; the queue moved on")
+	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
 }
 
@@ -337,6 +341,44 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if decision == MediationEscalate {
 		o.deps.Banners.Mediated(ws, summary)
 	}
+	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
 	return nil
+}
+
+// rosterMediation is the deploy mediation REPO's queue waits on as the
+// roster draws it: nil while it owes none, or while its mediator is not made
+// yet (the round that makes it republishes the queue).
+func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
+	m, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil || m == nil {
+		return nil, err
+	}
+	queues, err := o.mediatedQueues(ctx, opMediation)
+	if err != nil {
+		return nil, err
+	}
+	for _, q := range queues {
+		if q.key != repo {
+			continue
+		}
+		workspaces, err := o.deps.DB.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, ws := range workspaces {
+			if !ws.Closed && ws.Name == q.mediator && ws.Repo == q.repository.ID {
+				return &sidebar.QueueMediation{Mediator: ws.ID, Told: m.Prompted()}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// republishMediation tells the roster and the queue's subscribers a change
+// of REPO's mediation; a republication that fails is recorded.
+func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey) {
+	if err := o.republishQueue(ctx, repo); err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not republish the queue whose mediation changed", dlog.Context{"repo": string(repo), "error": err.Error()})
+	}
 }
