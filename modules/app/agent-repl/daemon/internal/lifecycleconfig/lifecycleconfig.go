@@ -151,6 +151,9 @@ func check(cfg *repoconfigv1.LifecycleConfig) error {
 			return err
 		}
 	}
+	if cfg.DeployMediator != nil && strings.TrimSpace(cfg.GetDeployMediator().GetName()) == "" {
+		return errors.New("deploy_mediator.name is required: the mediator workspace's name")
+	}
 	if cfg.Concurrent != nil {
 		if cfg.GetConcurrent().GetThrough() == nil {
 			return errors.New("concurrent names no stage: `through_pre_deploy: {}` or `through_deploy: {}`")

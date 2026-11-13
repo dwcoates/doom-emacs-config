@@ -53,6 +53,16 @@ func TestParseAcceptsAgentReplsConfig(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsADeployMediator(t *testing.T) {
+	// Act
+	cfg, err := Parse("lifecycle.yaml", []byte("pre_deploy: {}\ndeploy_mediator:\n  name: deploy-mediator\n"))
+
+	// Assert
+	if err != nil || cfg.GetDeployMediator().GetName() != "deploy-mediator" {
+		t.Fatalf("Parse = (%v, %v), want the mediator named deploy-mediator", cfg.GetDeployMediator(), err)
+	}
+}
+
 func TestParseAcceptsHookOnlyConfigs(t *testing.T) {
 	// Arrange: a repository with no local merge, a prompt deploy and a script
 	// post-deploy hook.
@@ -127,6 +137,7 @@ func TestParseRefusesUnusableConfigs(t *testing.T) {
 		{name: "YAML that does not parse", doc: "pre_deploy: [", want: "yaml"},
 		{name: "an unknown key", doc: "pre_deploy: {}\nmerge_before: x\n", want: "merge_before"},
 		{name: "no pre_deploy", doc: "post_deploy: {}\n", want: "pre_deploy is required"},
+		{name: "a deploy mediator with no name", doc: "pre_deploy: {}\ndeploy_mediator: {}\n", want: "deploy_mediator.name is required"},
 		{name: "a local merge with no test kind", doc: "pre_deploy:\n  local_merge:\n    tests: {}\n", want: "names no test kind"},
 		{name: "a test kind with no script", doc: "pre_deploy:\n  local_merge:\n    tests:\n      agent_repl_suites: {}\n", want: "script_path is required"},
 		{name: "a hook entry with no hook", doc: "pre_deploy: {}\ndeploy:\n  emoji_ack:\n    runs_for:\n      main: {}\n", want: "deploy.emoji_ack.hook is required"},

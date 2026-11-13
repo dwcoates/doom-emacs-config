@@ -134,6 +134,20 @@ message LifecycleConfig {
   // its output kept among the queue's logs. Empty when the repository runs
   // nothing then.
   repeated HookScript queue_drained = 5;
+  // The repository's DEPLOY MEDIATOR: a hidden session of the daemon's that
+  // checks every deploy before the queue may advance past it -- the deploy
+  // window's errors, warnings and latency regressions -- and approves it,
+  // escalates it to the user, or remediates it itself and deploys again
+  // (docs/investigations/2026-11-13-deploy-mediator-plan.md). UNSET: the
+  // repository has no mediator, and a deploy holds nothing.
+  optional DeployMediator deploy_mediator = 11;
+}
+
+// A repository's deploy mediator.
+message DeployMediator {
+  // REQUIRED. The mediator workspace's name, unique among the daemon's
+  // workspaces (agent-repl's: `deploy-mediator`).
+  string name = 1;
 }
 
 // ---- Stages: one hook list per kind of workspace ----
