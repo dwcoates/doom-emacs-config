@@ -30,6 +30,7 @@ import (
 
 	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
+	"agentrepl/e2e/kit"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
@@ -165,7 +166,7 @@ func wlLayerServer(t *testing.T, npm, webappDir string) (*wlServer, error) {
 	bg := filepath.Join(filepath.Dir(webappDir), "bin", "background.sh")
 	cmd := exec.Command(bg, "node", filepath.Join("test", "webapp-layer", "layer-server.mjs"))
 	cmd.Dir = webappDir
-	covEnv, err := webappLayerCoverageEnv(harness.CoverageRoot())
+	covEnv, err := kit.DriverCoverageEnv(harness.CoverageRoot())
 	if err != nil {
 		return nil, err
 	}

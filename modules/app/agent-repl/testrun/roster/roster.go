@@ -314,7 +314,7 @@ var Suites = []Suite{
 		Units: map[string][]string{
 			"internal/cli":   {"test_time.csv"},
 			"caselist":       {"daemon/cmd/agent-repld/testredundancycli.go"},
-			"internal/cover": {"e2e/coverage_test.go"},
+			"internal/cover": {"e2e/kit/webapplayer.go"},
 			"reap":           {"daemon/integration/harness/runroot.go"},
 			// Their tests list the runner's ERT driver directory, the
 			// daemon's and the webapp's trees, and the module's root.
@@ -433,8 +433,9 @@ var Suites = []Suite{
 	// run per package and are reused, where in the e2e suite they ran in every
 	// run that selected it.
 	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit", Reuse: &Reuse{Units: map[string][]string{
-		// The preflight's own tests run the sandbox's preflight script.
-		".": {"e2e/sandbox/bin/"},
+		// The preflight's own tests run the sandbox's preflight script, and
+		// the webapp layer's boot budget is held to its driver's.
+		".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
 		// The scans read the e2e package's sources, and the scenario matrix
 		// the mocked vendor's scenarios, their goldens and the webapp
 		// layer's areas it summarizes.

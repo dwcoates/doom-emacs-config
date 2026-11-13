@@ -375,16 +375,16 @@ func TestVitestReportsFindsEveryTiersReports(t *testing.T) {
 
 // The e2e suite writes the webapp layer's reports where the baseline looks
 // for them: the two modules cannot share a constant, so this reads the e2e
-// side's source for the same names.
+// side's source (its kit's DriverCoverageEnv) for the same names.
 func TestTheE2ESuiteWritesTheWebappLayersReportsWhereTheBaselineReads(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "..", "e2e", "coverage_test.go"))
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "e2e", "kit", "webapplayer.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(b)
 	for _, want := range []string{`filepath.Join(root, "` + WebappLayerDir + `")`, `os.MkdirTemp(parent, "driver-")`} {
 		if !strings.Contains(src, want) {
-			t.Errorf("e2e/coverage_test.go no longer writes %s", want)
+			t.Errorf("e2e/kit/webapplayer.go no longer writes %s", want)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit"
 	"context"
 	"errors"
 	"os"
@@ -13,69 +14,6 @@ import (
 
 // The harness's own unit tests: the two helpers whose silent misbehavior does
 // not fail visibly, but as a whole suite of timeouts and no_session prompts.
-
-func TestResolvedPathResolvesASymlinkedDirectory(t *testing.T) {
-	t.Parallel()
-	// Arrange: a directory reached through a symlink, exactly the shape a
-	// macOS temp root has (/tmp -> /private/tmp).
-	real := filepath.Join(t.TempDir(), "real")
-	if err := os.Mkdir(real, 0o755); err != nil {
-		t.Fatalf("make the real dir: %v", err)
-	}
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(real, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
-
-	// Act.
-	got, err := resolvedPath(link)
-
-	// Assert: the resolved target, not the link.
-	if err != nil {
-		t.Fatalf("resolvedPath(%s) = error %v", link, err)
-	}
-	want, err := filepath.EvalSymlinks(real)
-	if err != nil {
-		t.Fatalf("resolve the real dir: %v", err)
-	}
-	if got != want {
-		t.Fatalf("resolvedPath(%s) = %q, want %q", link, got, want)
-	}
-}
-
-func TestResolvedPathLeavesAnUnsymlinkedDirectoryUnchanged(t *testing.T) {
-	t.Parallel()
-	// Arrange: an already-resolved directory.
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("resolve the temp dir: %v", err)
-	}
-
-	// Act.
-	got, err := resolvedPath(dir)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("resolvedPath(%s) = error %v", dir, err)
-	}
-	if got != dir {
-		t.Fatalf("resolvedPath(%s) = %q, want it unchanged", dir, got)
-	}
-}
-
-func TestResolvedPathFailsLoudlyOnAMissingDirectory(t *testing.T) {
-	t.Parallel()
-	// Arrange: a path nothing created.
-	missing := filepath.Join(t.TempDir(), "absent")
-
-	// Act.
-	_, err := resolvedPath(missing)
-
-	// Assert: an error, never the path itself.
-	if err == nil {
-		t.Fatalf("resolvedPath(%s) = nil error, want a loud failure", missing)
-	}
-}
 
 func TestWorldDaemonEnvLeavesTheCheckoutToTheHarness(t *testing.T) {
 	t.Parallel()
@@ -122,23 +60,9 @@ func TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot(t *testing.T) {
 //
 // The layer went red in eleven places at once, in the sandbox only, because
 // vite's default cache directory sat inside a read-only `node_modules`. The
-// cache moved out (webapp/vite-cache.ts); wlWebappWritable is what makes the
+// cache moved out (webapp/vite-cache.ts); kit.WlWebappWritable is what makes the
 // NEXT such move say so once, by name, instead of eleven times in a node
 // process. These two tests are its guarantee and its violation.
-
-func TestWebappWritableAcceptsAWritablePackageDirectory(t *testing.T) {
-	t.Parallel()
-	// Arrange: an ordinary writable directory, as a checkout is.
-	dir := t.TempDir()
-
-	// Act.
-	err := wlWebappWritable(dir)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("wlWebappWritable(%s) = %v, want nil", dir, err)
-	}
-}
 
 func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 	t.Parallel()
@@ -165,15 +89,15 @@ func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 	})
 
 	// Act.
-	err := wlWebappWritable(readonly)
+	err := kit.WlWebappWritable(readonly)
 
 	// Assert: the failure names the directory, because that name is the whole
 	// value of catching this here.
 	if err == nil {
-		t.Fatalf("wlWebappWritable(%s) = nil, want a failure naming the directory", readonly)
+		t.Fatalf("kit.WlWebappWritable(%s) = nil, want a failure naming the directory", readonly)
 	}
 	if !strings.Contains(err.Error(), readonly) {
-		t.Fatalf("wlWebappWritable(%s) = %v, want the message to name the directory", readonly, err)
+		t.Fatalf("kit.WlWebappWritable(%s) = %v, want the message to name the directory", readonly, err)
 	}
 }
 

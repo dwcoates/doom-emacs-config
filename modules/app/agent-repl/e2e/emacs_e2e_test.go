@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/integration/grantedclock"
@@ -363,7 +364,7 @@ func requireWebappDist(t *testing.T) string {
 // invariant above.
 func resolveOrFail(t *testing.T, dir string) string {
 	t.Helper()
-	resolved, err := resolvedPath(dir)
+	resolved, err := kit.ResolvedPath(dir)
 	if err != nil {
 		t.Fatalf("e2e: resolve the config root %s: %v", dir, err)
 	}

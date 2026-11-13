@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -995,10 +994,6 @@ var emacsAdvisedPrimitives = []string{
 	"yes-or-no-p",
 }
 
-// scenarioOverride is a scenario form redefining a function: a `cl-letf' of
-// its symbol-function, or an `advice-add' on it.
-var scenarioOverride = regexp.MustCompile(`(?:symbol-function|advice-add) #?'([a-zA-Z0-9-]+)`)
-
 // scenarioOverriddenFunctions is every function a scenario's own forms
 // redefine, read off the layer's test sources.
 //
@@ -1023,7 +1018,7 @@ func scenarioOverriddenFunctions(t *testing.T) []string {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		for _, m := range scenarioOverride.FindAllSubmatch(src, -1) {
+		for _, m := range kit.ScenarioOverride.FindAllSubmatch(src, -1) {
 			seen[string(m[1])] = true
 		}
 	}
@@ -1141,7 +1136,7 @@ func (e *Emacs) assertTheScenarioBuiltNoTrampoline() {
 	if strays := e.strayTrampolines(); len(strays) > 0 {
 		e.t.Errorf("this scenario built %d subr trampoline(s) mid-test instead of finding one "+
 			"already on disk: %s\nscenarioOverriddenFunctions did not read the form that redefines "+
-			"them; widen scenarioOverride so the prewarm builds them once into %s.",
+			"them; widen kit.ScenarioOverride so the prewarm builds them once into %s.",
 			len(strays), strings.Join(strays, ", "), trampolineCacheDir)
 	}
 }
