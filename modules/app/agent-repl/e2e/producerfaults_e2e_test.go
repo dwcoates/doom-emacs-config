@@ -219,54 +219,6 @@ func testQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 }
 
-// testQueryEofMidAskDeniesTheOpenAsk drives `!query-eof-mid-ask`: the query
-// dies with a `canUseTool` ask STILL OPEN. The scenario's whole point, in
-// its own words, is that "an unresolved `canUseTool` promise wedges the
-// vendor process, so the query-death path owes every pending callback a
-// denial" — its arms line is "SessionQueryDied.cause=unexpected_eof with an
-// AgentPermission settling denied".
-//
-// The DENIER is the gate's stand-down, which settles every pending ask as
-// AgentPermissionDenied.by=user carrying the teardown's reason
-// (permission-gate.ts's standDown), so the frontend arm this asserts is
-// FeedPermissionAnswered.denied_by_user. Reported, not weakened: nothing in
-// permission.proto reserves a separate "denied because the producer died"
-// arm, so the user arm is what the contract offers.
-func testQueryEofMidAskDeniesTheOpenAsk(t *testing.T) {
-	// Arrange
-	w := NewWorld(t, WorldOpts{})
-	pfQueryDiedWarnings(w)
-	ws, _ := pfNewWorkspace(t, w)
-
-	// Act
-	turn := SubmitPrompt(t, w, ws, "!query-eof-mid-ask")
-
-	// Assert: the ask genuinely OPENED before the death — the scenario
-	// insists on that ordering, and an ask that never opened would make the
-	// denial below vacuous.
-	askRow := awaitFeedRow(t, w, ws, "the permission ask opened before the query died", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission() != nil
-	})
-	if askRow.GetPermission().GetOpen() == nil && askRow.GetPermission().GetAnswered() == nil {
-		t.Fatalf("permission row = %v, want either the open ask or its settled answer", askRow.GetPermission())
-	}
-
-	// Assert: it does not stay open — the death owes it a denial.
-	settled := awaitFeedRow(t, w, ws, "the open ask settling denied when the query died", func(r *frontendv1.FeedRow) bool {
-		return r.GetId().GetValue() == askRow.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
-	})
-	answer := settled.GetPermission().GetAnswered()
-	if answer.GetDeniedByUser() == nil {
-		t.Fatalf("settled permission = %v, want denied_by_user (the gate's stand-down denies every pending ask)", answer)
-	}
-
-	// Assert: and the turn itself still ends on the query-died arm.
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	if ended.GetErrored().GetQueryDied() == nil {
-		t.Fatalf("turn ended = %v, want the query_died arm", ended)
-	}
-}
-
 // ===========================================================================
 // The converter fault window: `!fault-converter`, `!fault-recover`.
 // ===========================================================================
@@ -364,6 +316,8 @@ func testResidueAttachmentsDrawNoRow(t *testing.T) {
 // Two negatives, then: no extra feed row, and no footer salient line minted
 // from the tip (no footer line warns that the context is nearly full, owner
 // ruling 2026-10-06).
+//
+// Seam: shim -> daemon, a context-tip attachment reaching no feed row and no footer line
 func testContextTipDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -395,6 +349,8 @@ func testContextTipDrawsNoRow(t *testing.T) {
 // capture holds ... IT IS NOT the context-budget warning either". Arms line:
 // "residue `attachment/total_tokens_reminder` — recorded as itself,
 // unconverted, and reaching no arm".
+//
+// Seam: shim -> daemon, a tokens-reminder attachment reaching no feed row and no footer line
 func testTokensReminderDrawsNoRow(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})

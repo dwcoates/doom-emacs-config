@@ -365,6 +365,10 @@ const dbDetachGatePathEnv = "AGENT_REPL_FAKE_DETACH_GATE"
 // naming TaskOutput.
 // ===========================================================================
 
+// testBashDetachExplicitPoll proves an explicit poll of a detached shell
+// settles the shell and raises no unmodeled-tool warning naming TaskOutput.
+//
+// Seam: shim -> sidecar -> daemon, an explicitly polled detached shell settling with no unmodeled tool
 func testBashDetachExplicitPoll(t *testing.T) {
 	w := NewWorld(t, WorldOpts{})
 	// Detached work outliving its turn opens a health fault; that is the

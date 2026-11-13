@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	"agentrepl/logging/buildreport"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -194,19 +194,6 @@ func NewWorldWithSidecarStaleness(t testing.TB, opts WorldOpts, staleness Sideca
 	return NewWorld(t, opts)
 }
 
-// worldDaemonEnv is a world daemon's environment: the caller's ExtraEnv,
-// then this suite's own statements, appended LAST so they win (the shim's env
-// is scanned front-to-back and the last assignment of a name is the effective
-// one). It names no checkout: harness.StartDaemon pins its own (see
-// checkoutEnv).
-func worldDaemonEnv(extra []string, spoolRoot, lockBin string) []string {
-	return append(append([]string{}, extra...),
-		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot,
-		// The shim inherits this from the daemon and spawns it for every
-		// kernel claim; without it no session starts at all.
-		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
-}
-
 // NewWorld builds one test's stack: the real store, the real sidecar, and a
 // real daemon spawning the real (built-from-source, `--fake`-mode) shim.
 // Every process is killed and every socket/temp root is removed at test
@@ -287,7 +274,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// A root this world minted is fresh, so its state lives in memory unless
 	// the test asked for DurableState (harness.Opts.FreshStateDir).
 	daemonOpts.FreshStateDir = opts.DaemonOpts.StateDir == ""
-	daemonOpts.ExtraEnv = worldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
+	daemonOpts.ExtraEnv = kit.WorldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
 	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
 	// builds into the daemon's lock dir (startStore/startSidecar are pointed
 	// at it), and the deploy's fake build stages copies of these very
@@ -440,11 +427,6 @@ func (w *World) WatchFooter(ws *workspacev1.WorkspaceRef) *FooterWatch {
 // Failure artifacts (SPEC.md section B, "Failure artifacts").
 // ===========================================================================
 
-// ArtifactsEnv names the directory a failing test copies its structured logs
-// into. Unset (the default) means the logs are emitted as bounded tails into
-// the test's own t.Log output instead — never nothing.
-const ArtifactsEnv = "AGENT_REPL_E2E_ARTIFACTS"
-
 // artifactTailBytes bounds how much of one log a failing test prints when no
 // artifacts directory is configured. Sized to hold a failing test's WHOLE
 // daemon log while still refusing an unbounded file. MEASURED 2026-10-10: a
@@ -495,7 +477,7 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 			return
 		}
 		dest := ""
-		if root := os.Getenv(ArtifactsEnv); root != "" {
+		if root := os.Getenv(kit.ArtifactsEnv); root != "" {
 			dest = filepath.Join(root, artifactDirName(t.Name()))
 			if err := os.MkdirAll(dest, 0o755); err != nil {
 				t.Logf("e2e artifacts: cannot create %s (%v); falling back to log tails", dest, err)
@@ -518,7 +500,7 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 				}
 				continue
 			}
-			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
+			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), kit.TailBytes(body, artifactTailBytes))
 		}
 		if dest != "" {
 			for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -538,19 +520,6 @@ func preserveLogsOnFailure(t testing.TB, daemon **harness.Daemon, storeDB string
 			t.Logf("e2e artifacts: structured logs and the store database preserved under %s", dest)
 		}
 	})
-}
-
-// tailBytes answers the last limit bytes of body, cut forward to the next
-// newline so the tail never opens mid-record and read as a broken JSONL line.
-func tailBytes(body []byte, limit int) string {
-	if len(body) <= limit {
-		return string(body)
-	}
-	tail := body[len(body)-limit:]
-	if i := bytes.IndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
-	}
-	return string(tail)
 }
 
 // artifactDirName turns a Go test name into one path segment: subtests are
@@ -578,24 +547,12 @@ func artifactDirName(name string) string {
 func resolveConfigRoots(t testing.TB, d *harness.Daemon) {
 	t.Helper()
 	for _, root := range []*string{&d.DefaultConfigDir, &d.MultiRepoConfigDir} {
-		resolved, err := resolvedPath(*root)
+		resolved, err := kit.ResolvedPath(*root)
 		if err != nil {
 			t.Fatalf("e2e: resolve the daemon's config root %s: %v", *root, err)
 		}
 		*root = resolved
 	}
-}
-
-// resolvedPath answers path with every symlink resolved. A path that does not
-// exist is a LOUD error rather than the path itself: the only caller resolves
-// roots the daemon has already created, so a missing one is a defect, not a
-// case to paper over.
-func resolvedPath(path string) (string, error) {
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", err
-	}
-	return real, nil
 }
 
 // tailStoreLog reads back the store's own log file for the failure message
@@ -761,23 +718,10 @@ func stopProcess(t testing.TB, name string, cmd *exec.Cmd, exit *processExit, lo
 		t.Errorf("e2e: SIGKILL %s: %v", name, err)
 	}
 	if !exit.awaitWithin(reapGrace) {
-		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM; its log ends:\n%s", name, reapGrace, DefaultTimeout, logTailOf(logPath))
+		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM; its log ends:\n%s", name, reapGrace, DefaultTimeout, kit.LogTailOf(logPath))
 		return
 	}
-	t.Errorf("e2e: %s did not exit within %s of SIGTERM; its log ends:\n%s", name, DefaultTimeout, logTailOf(logPath))
-}
-
-// stopLogTailBytes bounds the log a failed stop prints: enough for the last
-// few dozen records, which span the stop.
-const stopLogTailBytes = 8 << 10
-
-// logTailOf answers the end of a child's log file, or why it cannot.
-func logTailOf(path string) string {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Sprintf("(cannot read %s: %v)", path, err)
-	}
-	return tailBytes(body, stopLogTailBytes)
+	t.Errorf("e2e: %s did not exit within %s of SIGTERM; its log ends:\n%s", name, DefaultTimeout, kit.LogTailOf(logPath))
 }
 
 // ===========================================================================
@@ -1136,7 +1080,7 @@ func (w *World) SuccessorOpts(t testing.TB) harness.Opts {
 		StoreSocket:     w.Store.Socket,
 		RealStore:       true,
 		ServiceBinaries: w.ServiceBinaries(),
-		ExtraEnv:        worldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
+		ExtraEnv:        kit.WorldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
 	}
 }
 
@@ -1299,14 +1243,7 @@ func newIdempotencyKey(t testing.TB) string {
 // turn's FeedTurnEnded row arrives, and answers that row.
 func AwaitTurnEnded(t testing.TB, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", endsTurn(turn))
-}
-
-// endsTurn matches TURN's FeedTurnEnded row.
-func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
-	return func(row *frontendv1.FeedRow) bool {
-		return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
-	}
+	return awaitFeedRowOn(t, w, w.Client(), ws, "turn "+turn.GetValue()+" to end", kit.EndsTurn(turn))
 }
 
 // turnEndedRow finds the given turn's terminal row in a feed snapshot, or
@@ -1314,7 +1251,7 @@ func endsTurn(turn *conversationv1.TurnId) func(*frontendv1.FeedRow) bool {
 // activity never froze or misclassified the turn's own outcome.
 func turnEndedRow(t testing.TB, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
 	t.Helper()
-	ends := endsTurn(turn)
+	ends := kit.EndsTurn(turn)
 	for _, row := range rows {
 		if ends(row) {
 			return row.GetTurnEnded()
@@ -1454,19 +1391,8 @@ func awaitFileIngested(t testing.TB, w *World, path string) {
 		t.Fatalf("e2e: stat %s: %v", path, err)
 	}
 	awaitCursors(t, w, DefaultTimeout, fmt.Sprintf("the sidecar to durably ingest %s through byte %d", path, info.Size()), func(cursors []*storev1.CursorState) bool {
-		return cursorIngested(cursors, path, info.Size())
+		return kit.CursorIngested(cursors, path, info.Size())
 	})
-}
-
-// cursorIngested reports whether a cursor of the file at path has read to
-// size or past it.
-func cursorIngested(cursors []*storev1.CursorState, path string, size int64) bool {
-	for _, c := range cursors {
-		if c.GetPath() == path && c.GetOffset() >= size {
-			return true
-		}
-	}
-	return false
 }
 
 // awaitCursors polls the store's durable sidecar cursors until done holds of

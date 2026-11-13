@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -975,8 +974,8 @@ const trampolineCacheDir = "/tmp/agent-repl-e2e-trampolines"
 // emacsAdvisedPrimitives is every primitive a scenario's Emacs redefines, as
 // OBSERVED: it is the key set of `comp-installed-trampolines-h' after a boot,
 // not a reading of the sources. Seven come from this module (`status.el',
-// `close-panels-on-open.el', `find-file-workspace.el', and `spell.el''s
-// bound on `accept-process-output'), `define-key' from
+// `close-panels-on-open.el', `find-file-workspace.el', and the bound
+// `spell.el' puts on `accept-process-output'), `define-key' from
 // Doom's `general-auto-unbind-keys', and `yes-or-no-p' from the unanswerable
 // -prompt guard the harness itself installs in e2e-settings.el.
 //
@@ -994,10 +993,6 @@ var emacsAdvisedPrimitives = []string{
 	"use-local-map",
 	"yes-or-no-p",
 }
-
-// scenarioOverride is a scenario form redefining a function: a `cl-letf' of
-// its symbol-function, or an `advice-add' on it.
-var scenarioOverride = regexp.MustCompile(`(?:symbol-function|advice-add) #?'([a-zA-Z0-9-]+)`)
 
 // scenarioOverriddenFunctions is every function a scenario's own forms
 // redefine, read off the layer's test sources.
@@ -1023,11 +1018,11 @@ func scenarioOverriddenFunctions(t *testing.T) []string {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		for _, m := range scenarioOverride.FindAllSubmatch(src, -1) {
+		for _, m := range kit.ScenarioOverride.FindAllSubmatch(src, -1) {
 			seen[string(m[1])] = true
 		}
 	}
-	return sortedKeys(seen)
+	return kit.SortedKeys(seen)
 }
 
 // prewarmedFunctions is every function whose trampoline the prewarm builds
@@ -1042,7 +1037,7 @@ func prewarmedFunctions(t *testing.T) []string {
 	for _, name := range scenarioOverriddenFunctions(t) {
 		all[name] = true
 	}
-	return sortedKeys(all)
+	return kit.SortedKeys(all)
 }
 
 // trampolinePrewarmBound bounds the one prewarm. It is nine `call-process'
@@ -1141,7 +1136,7 @@ func (e *Emacs) assertTheScenarioBuiltNoTrampoline() {
 	if strays := e.strayTrampolines(); len(strays) > 0 {
 		e.t.Errorf("this scenario built %d subr trampoline(s) mid-test instead of finding one "+
 			"already on disk: %s\nscenarioOverriddenFunctions did not read the form that redefines "+
-			"them; widen scenarioOverride so the prewarm builds them once into %s.",
+			"them; widen kit.ScenarioOverride so the prewarm builds them once into %s.",
 			len(strays), strings.Join(strays, ", "), trampolineCacheDir)
 	}
 }
@@ -1618,7 +1613,7 @@ func (e *Emacs) armHeartbeat() {
 			case <-ticker.C:
 			}
 			started := time.Now()
-			cpuBefore, cpuBeforeErr := readCgroupCPUStat(cgroupCPUStatPath)
+			cpuBefore, cpuBeforeErr := kit.ReadCgroupCPUStat(kit.CgroupCPUStatPath)
 			out, span, err := e.emacsclient(ctx, HeartbeatBound, heartbeatProbe)
 			if err == nil {
 				if took := int64(span.Granted); took > e.heartbeatMax.Load() {
@@ -1638,55 +1633,10 @@ func (e *Emacs) armHeartbeat() {
 				return
 			}
 			e.declareWedged(fmt.Sprintf("emacs did not answer a heartbeat probe: %v%s",
-				err, cpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
+				err, kit.CpuOverProbe(cpuBefore, cpuBeforeErr, time.Since(started))))
 			return
 		}
 	}()
-}
-
-// cgroupCPUStatPath is the sandbox container's own CPU accounting (cgroup
-// v2). It is EVIDENCE, not the verdict: the probe's bound is already kept on
-// the granted clock, which charges no time the container spent starved, and
-// this says on top what the container's quota did across a probe that still
-// went unanswered.
-const cgroupCPUStatPath = "/sys/fs/cgroup/cpu.stat"
-
-// readCgroupCPUStat reads a cgroup v2 cpu.stat file into its counters.
-func readCgroupCPUStat(path string) (map[string]int64, error) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]int64{}
-	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		n, perr := strconv.ParseInt(fields[1], 10, 64)
-		if perr != nil {
-			return nil, fmt.Errorf("%s: %q: %w", path, line, perr)
-		}
-		out[fields[0]] = n
-	}
-	return out, nil
-}
-
-// cpuOverProbe says what the container's CPU did across an unanswered probe
-// that began with BEFORE and lasted TOOK: how much CPU the container used
-// against what its quota allowed, and how often and how long it was
-// throttled. Every way it cannot be said is said instead.
-func cpuOverProbe(before map[string]int64, beforeErr error, took time.Duration) string {
-	if beforeErr != nil {
-		return fmt.Sprintf("\n  (the container's CPU accounting could not be read before the probe: %v)", beforeErr)
-	}
-	after, err := readCgroupCPUStat(cgroupCPUStatPath)
-	if err != nil {
-		return fmt.Sprintf("\n  (the container's CPU accounting could not be read after the probe: %v)", err)
-	}
-	delta := func(key string) int64 { return after[key] - before[key] }
-	return fmt.Sprintf("\n  the container's CPU across the %s probe: used %dms, throttled in %d of %d periods for %dms",
-		took.Round(time.Millisecond), delta("usage_usec")/1000, delta("nr_throttled"), delta("nr_periods"), delta("throttled_usec")/1000)
 }
 
 // heartbeatPrompt reads the probe's answer, which emacsclient prints as an
@@ -1731,23 +1681,23 @@ func (e *Emacs) declareWedged(cause string) {
 // behind used to have to be reproduced with instrumentation added.
 //
 // WITH NO ARTIFACTS DIRECTORY THE SAME SET IS COLLECTED AND PRINTED, as a
-// bounded tail of each log (tailArtifacts), and the scratch copy is removed.
+// bounded tail of each log (kit.TailArtifacts), and the scratch copy is removed.
 // It used to print the pty output alone -- routinely empty for a GUI frame --
 // so a red in a full run (where nobody sets the variable) left nothing: two
 // `TestEmacsDaemonLifecycle/EmacsDaemonDownSurfacesAndReconnects` reds on 2026-10-06 could only be
 // put down to load by inference.
 func (e *Emacs) dumpArtifacts() {
-	dir := os.Getenv(ArtifactsEnv)
+	dir := os.Getenv(kit.ArtifactsEnv)
 	if dir == "" {
 		scratch, err := os.MkdirTemp("", "emacs-e2e-artifacts-")
 		if err != nil {
 			e.t.Logf("emacs artifacts: no scratch to collect them in (%v); emacs pty output (set %s to preserve full artifacts):\n%s",
-				err, ArtifactsEnv, tailBytes([]byte(e.proc.Output()), artifactTailBytes))
+				err, kit.ArtifactsEnv, kit.TailBytes([]byte(e.proc.Output()), artifactTailBytes))
 			return
 		}
 		defer func() {
 			if root := e.artifactRoot; root != "" {
-				tailArtifacts(e.t.Logf, root)
+				kit.TailArtifacts(e.t.Logf, root)
 			}
 			if err := os.RemoveAll(scratch); err != nil {
 				e.t.Logf("emacs artifacts: remove the scratch copy %s: %v", scratch, err)
@@ -1867,9 +1817,6 @@ func (e *Emacs) preserveWorkspaceElispLogs(out string, root string) {
 // refused command and the module's own echo-area messages land.
 const messagesTailLines = 200
 
-// messagesFile is where that tail is filed with the other evidence.
-const messagesFile = "emacs.messages.log"
-
 // dumpMessages preserves the tail of Emacs's own `*Messages*` buffer.
 //
 // WHY IT IS PART OF EVERY FAILURE AND NOT A WEDGE-ONLY EXTRA. A GUI frame
@@ -1907,7 +1854,7 @@ func (e *Emacs) dumpMessages(out string) {
 		e.t.Logf("emacs's *Messages* did not come back as a string: %s", res.Value)
 		return
 	}
-	path := filepath.Join(out, messagesFile)
+	path := filepath.Join(out, kit.MessagesFile)
 	if writeErr := os.WriteFile(path, []byte(text), 0o644); writeErr != nil {
 		e.t.Logf("write %s: %v", path, writeErr)
 		return
@@ -1951,75 +1898,6 @@ func (e *Emacs) artifactDir(root string) string {
 		}
 	})
 	return e.artifactRoot
-}
-
-// artifactTailFileBytes bounds one log's tail when the artifacts are printed
-// rather than kept, and artifactTailBudget bounds them all together: enough
-// for the last few hundred records of every sink a scenario writes, never an
-// unbounded dump into a full run's transcript. A log past the budget is still
-// NAMED, with its size, so its absence from the output is never silent.
-const (
-	artifactTailFileBytes = 16 << 10
-	artifactTailBudget    = 512 << 10
-)
-
-// tailArtifacts prints a bounded tail of every log collected under root:
-// Emacs's *Messages* and pty output first, then every other `.log` and the
-// native backtrace, in path order.
-func tailArtifacts(logf func(format string, args ...any), root string) {
-	var files []string
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			logf("emacs artifacts: walk %s: %v", path, err)
-			return nil
-		}
-		if entry.Type().IsRegular() && (filepath.Ext(path) == ".log" || filepath.Base(path) == nativeBacktraceFile) {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		logf("emacs artifacts: walk %s: %v", root, err)
-	}
-	sort.SliceStable(files, func(i, j int) bool {
-		return artifactTailRank(files[i]) < artifactTailRank(files[j])
-	})
-	budget := artifactTailBudget
-	for _, path := range files {
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
-		}
-		body, readErr := os.ReadFile(path)
-		if readErr != nil {
-			logf("emacs artifacts: read %s: %v", rel, readErr)
-			continue
-		}
-		// A WHOLE TAIL OR NONE: a remainder smaller than one tail would print
-		// a sliver cut forward to the next record, which may be nothing.
-		if budget < artifactTailFileBytes {
-			logf("emacs artifacts: %s (%d bytes) not printed: the tail budget of %d bytes is spent (set %s to keep every log whole)",
-				rel, len(body), artifactTailBudget, ArtifactsEnv)
-			continue
-		}
-		tail := tailBytes(body, artifactTailFileBytes)
-		budget -= len(tail)
-		logf("emacs artifacts: %s (last %d bytes of %d):\n%s", rel, len(tail), len(body), tail)
-	}
-	logf("emacs artifacts: printed tails of %d log(s); set %s to keep them whole", len(files), ArtifactsEnv)
-}
-
-// artifactTailRank orders the printed tails: Emacs's own words first.
-func artifactTailRank(path string) int {
-	switch filepath.Base(path) {
-	case messagesFile:
-		return 0
-	case "emacs.pty.log":
-		return 1
-	case nativeBacktraceFile:
-		return 2
-	}
-	return 3
 }
 
 // copyTree copies a file or a directory tree; a missing source is not an
@@ -2685,16 +2563,6 @@ func (u *unansweredError) Unwrap() error { return u.err }
 // whole capture takes about a second; the bound is a small multiple.
 const nativeBacktraceBound = 20 * time.Second
 
-// nativeBacktraceFile is where the full capture lands in the failure
-// artifacts. The error message carries a trimmed head; the file carries every
-// frame of every thread.
-const nativeBacktraceFile = "emacs.native-backtrace.txt"
-
-// nativeBacktraceHeadFrames is how much of the capture the failure message
-// quotes inline BEYOND the main thread, which is never trimmed. Enough to
-// name the loop without burying the failure.
-const nativeBacktraceHeadFrames = 40
-
 // nativeBacktrace is the LAST witness this layer has.
 //
 // An Emacs looping in C answers nothing a lisp witness can reach: not the
@@ -2766,79 +2634,7 @@ func (e *Emacs) captureNativeBacktrace() string {
 	}
 	e.writeNativeBacktrace(text)
 	return "\n  emacs's native stack, from outside the process:\n    " +
-		strings.Join(nativeBacktraceExcerpt(text), "\n    ")
-}
-
-// nativeBacktraceMainThread names the thread whose stack is the answer. Emacs
-// runs lisp on ONE thread and gdb numbers it 1; the rest are glib's helpers,
-// which are asleep in `poll` in every capture ever taken here and say nothing
-// about why the editor stopped.
-const nativeBacktraceMainThread = "Thread 1 "
-
-// nativeBacktraceExcerpt is what the failure message quotes inline.
-//
-// WHAT IT GUARANTEES, and the reason it is not a plain head: THE MAIN
-// THREAD'S STACK APPEARS IN FULL, FIRST, whatever else is trimmed. gdb's own
-// output puts it last and a head-of-N excerpt therefore dropped exactly the
-// frames the failure turns on. Everything before the first thread section --
-// gdb's preamble and its `info threads` table -- is kept as the index to what
-// follows, and the remaining threads fill whatever budget is left.
-func nativeBacktraceExcerpt(text string) []string {
-	lines := strings.Split(text, "\n")
-	preamble, sections := nativeBacktraceSections(lines)
-
-	out := append([]string{}, preamble...)
-	var rest [][]string
-	seenMain := false
-	for _, section := range sections {
-		if !seenMain && strings.HasPrefix(section[0], nativeBacktraceMainThread) {
-			// The main thread, in full, immediately after the index. gdb
-			// prints it twice (once for `thread apply 1 bt`, once inside the
-			// `all` walk); only the first copy is quoted.
-			seenMain = true
-			out = append(out, section...)
-			continue
-		}
-		if seenMain && strings.HasPrefix(section[0], nativeBacktraceMainThread) {
-			continue
-		}
-		rest = append(rest, section)
-	}
-
-	budget := nativeBacktraceHeadFrames
-	dropped := 0
-	for _, section := range rest {
-		if budget-len(section) < 0 {
-			dropped += len(section)
-			continue
-		}
-		budget -= len(section)
-		out = append(out, section...)
-	}
-	if dropped > 0 {
-		out = append(out, fmt.Sprintf("... %d more lines in %s", dropped, nativeBacktraceFile))
-	}
-	return out
-}
-
-// nativeBacktraceSections splits a capture into gdb's preamble and one group
-// of lines per thread. A thread's group runs from its `Thread N (...)` header
-// to the line before the next one, so a stack is never cut in half.
-func nativeBacktraceSections(lines []string) (preamble []string, sections [][]string) {
-	current := -1
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Thread ") && strings.Contains(line, "(") {
-			sections = append(sections, []string{line})
-			current = len(sections) - 1
-			continue
-		}
-		if current < 0 {
-			preamble = append(preamble, line)
-			continue
-		}
-		sections[current] = append(sections[current], line)
-	}
-	return preamble, sections
+		strings.Join(kit.NativeBacktraceExcerpt(text), "\n    ")
 }
 
 // emacsPID answers the Emacs this scenario owns.
@@ -2868,7 +2664,7 @@ func (e *Emacs) emacsPID() int {
 // writeNativeBacktrace files the full capture with the failure artifacts,
 // where dumpArtifacts's other evidence for the same test already lands.
 func (e *Emacs) writeNativeBacktrace(text string) {
-	dir := os.Getenv(ArtifactsEnv)
+	dir := os.Getenv(kit.ArtifactsEnv)
 	if dir == "" {
 		return
 	}
@@ -2876,7 +2672,7 @@ func (e *Emacs) writeNativeBacktrace(text string) {
 	if out == "" {
 		return
 	}
-	path := filepath.Join(out, nativeBacktraceFile)
+	path := filepath.Join(out, kit.NativeBacktraceFile)
 	if err := os.WriteFile(path, []byte(text+"\n"), 0o644); err != nil {
 		e.t.Logf("write %s: %v", path, err)
 		return
@@ -3101,7 +2897,7 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 		}
 		if e.proc.Exited() {
 			e.t.Fatalf("await %s: emacs exited; pty output:\n%s", what,
-				tailBytes([]byte(e.proc.Output()), artifactTailBytes))
+				kit.TailBytes([]byte(e.proc.Output()), artifactTailBytes))
 		}
 		res, err := e.eval(form)
 		switch {

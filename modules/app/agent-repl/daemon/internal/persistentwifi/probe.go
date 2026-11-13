@@ -144,6 +144,9 @@ type reading struct {
 	device string
 	// link is the interface's link; zero when device is empty.
 	link link
+	// summary is `ipconfig getsummary`'s whole answer the link was parsed from,
+	// kept for the record of a loss (lossLocked); empty when device is empty.
+	summary string
 	// energy is the energy mode in use (energyModeLowPower or
 	// energyModeHighPower); empty when the machine names none or it could not
 	// be read.
@@ -169,7 +172,8 @@ func probe(ctx context.Context, r Runner, tools Tools) reading {
 		rd.state.Mode = &agentreplv1.PersistentWifiState_Off{Off: &agentreplv1.PersistentWifiModeOff{}}
 	}
 
-	rd.device, rd.link, rd.wifiErr = readLink(ctx, r, tools)
+	rd.device, rd.summary, rd.wifiErr = readLink(ctx, r, tools)
+	rd.link = parseSummary(rd.summary)
 	switch {
 	case rd.wifiErr != nil:
 	case rd.link.joined:
@@ -184,20 +188,40 @@ func probe(ctx context.Context, r Runner, tools Tools) reading {
 	return rd
 }
 
-// readLink finds the Wi-Fi interface and reads its link. A machine with no
-// Wi-Fi interface is not joined, which is an answer rather than an error.
-func readLink(ctx context.Context, r Runner, tools Tools) (string, link, error) {
+// readLink finds the Wi-Fi interface and reads its link summary. A machine
+// with no Wi-Fi interface is not joined, which is an answer rather than an
+// error.
+func readLink(ctx context.Context, r Runner, tools Tools) (string, string, error) {
 	ports, err := run(ctx, r, tools.Networksetup, "-listallhardwareports")
 	if err != nil {
-		return "", link{}, err
+		return "", "", err
 	}
 	device := wifiInterface(ports)
 	if device == "" {
-		return "", link{}, nil
+		return "", "", nil
 	}
 	summary, err := run(ctx, r, tools.Ipconfig, "getsummary", device)
 	if err != nil {
-		return device, link{}, err
+		return device, "", err
 	}
-	return device, parseSummary(summary), nil
+	return device, summary, nil
+}
+
+// radioPowerLine matches `networksetup -getairportpower <device>`'s answer,
+// "Wi-Fi Power (en0): On".
+var radioPowerLine = regexp.MustCompile(`(?m)^Wi-Fi Power \([^)]*\): (On|Off)\s*$`)
+
+// readRadioPower reads whether the Wi-Fi interface's radio is powered: "on" or
+// "off". An answer that names neither is an error carrying the answer, so a
+// record shows what the tool said.
+func readRadioPower(ctx context.Context, r Runner, tools Tools, device string) (string, error) {
+	out, err := run(ctx, r, tools.Networksetup, "-getairportpower", device)
+	if err != nil {
+		return "", err
+	}
+	m := radioPowerLine.FindStringSubmatch(out)
+	if m == nil {
+		return "", fmt.Errorf("%s -getairportpower %s named no power state: %q", tools.Networksetup, device, strings.TrimSpace(out))
+	}
+	return strings.ToLower(m[1]), nil
 }

@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -285,6 +286,8 @@ func emGHIAssertIngressEmpty(t *testing.T, e *Emacs, ws, when string) {
 // settles `:interrupted`), and the agent is NOT resumed afterwards — a
 // forced restart that quietly re-drove the turn would look identical at the
 // first assertion alone.
+//
+// Seam: Emacs -> daemon -> shim, a forced restart interrupting the live turn without resuming it
 func testEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 	// Arrange: a registered workspace with a genuinely live turn. The parked
 	// scenario is what makes "mid-turn" a fact rather than a race.
@@ -328,6 +331,8 @@ func testEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 // daemon's `:success' answer to the deferral is read at the RPC boundary.
 // The daemon's tray itself is not read here: this Emacs-layer world exposes
 // no daemon client.
+//
+// Seam: Emacs -> daemon, a deferred prompt held by the daemon across a restart
 func testEmacsRestartHoldsPromptsMeanwhile(t *testing.T) {
 	// Arrange. The parked turn here is the fake's TURN GATE, not
 	// `emGHIParkedPrompt`: a GRACEFUL restart waits for the turn to finish,
@@ -411,7 +416,7 @@ func emAwaitBookPrompt(t *testing.T, w *EmacsWorld, agent, text, what string) {
 	var said []string
 	for {
 		said = said[:0]
-		page, err := readAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
+		page, err := kit.ReadAgentBook(ctx, w.Store.Client, &conversationv1.AgentId{Value: agent})
 		if err == nil {
 			for _, line := range page.GetLines() {
 				prompt := line.GetLine().GetAgentItem().GetAgentPrompt()

@@ -26,11 +26,11 @@ type harness struct {
 	published chan *agentreplv1.PersistentWifiState
 	network   *fakeNetwork
 	power     *fakePower
-	exists  map[string]bool
-	dims    *fakeLidDims
-	lid     *fakeLidWatcher
-	freezer *fakeFreezer
-	views   *viewquiet.Gate
+	exists    map[string]bool
+	dims      *fakeLidDims
+	lid       *fakeLidWatcher
+	freezer   *fakeFreezer
+	views     *viewquiet.Gate
 	// viewMoves are the quiet gate's transitions, as a follower heard them.
 	viewMoves []bool
 	telemetry *fakeQuietTelemetry
@@ -83,6 +83,13 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	h.c = c
 	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
 	h.r.on(argPreferred, answer{out: preferred(hotspot)})
+	// A loss's record reads the radio's power; it is powered unless a test
+	// says otherwise.
+	h.r.on(argRadioPower, answer{out: radioPowered})
+	// The failover's radio cycle and a leave's radio restart take unless a
+	// test says otherwise.
+	h.r.on(argRadioOff, answer{})
+	h.r.on(argRadioOn, answer{})
 	return h
 }
 

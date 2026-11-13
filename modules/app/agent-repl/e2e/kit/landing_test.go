@@ -1,19 +1,9 @@
-package e2e
+package kit
 
 import (
 	"strings"
 	"testing"
 )
-
-// THE SETTLE PREDICATE'S OWN PROOF, host-side and with no world in it.
-//
-// `landingSettled` is the one thing standing between every playbook and the
-// panel show a freshly minted workspace performs on its own, and each of its
-// four clauses exists because the other three do not imply it. A clause
-// dropped by a later edit would not fail a playbook LOUDLY -- it would put
-// the race back, which is a flake rather than a failure. So each clause is
-// held down by a case that differs from the settled state in that clause
-// ALONE.
 
 // landingStateOf composes a state string the way `landingStateForm` does, so
 // these cases cannot drift from the field names the elisp writes.
@@ -25,7 +15,7 @@ func landingStateOf(ws, current, landing, pending, window, webview string) strin
 		"pending=" + pending,
 		"window=" + window,
 		"webview=" + webview,
-	}, landingStateSeparator)
+	}, LandingStateSeparator)
 }
 
 func TestLandingSettled(t *testing.T) {
@@ -70,8 +60,8 @@ func TestLandingSettled(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := landingSettled(tc.state); got != tc.want {
-				t.Fatalf("landingSettled(%q) = %v, want %v", tc.state, got, tc.want)
+			if got := LandingSettled(tc.state); got != tc.want {
+				t.Fatalf("LandingSettled(%q) = %v, want %v", tc.state, got, tc.want)
 			}
 		})
 	}
@@ -86,7 +76,7 @@ func TestLandingStateKeepsBufferNamesWhole(t *testing.T) {
 	t.Parallel()
 	state := landingStateOf("harbor-lantern", "harbor-lantern", "nil", "nil", "t", "*agent-repl web: harbor-lantern*")
 
-	fields := parseLandingState(state)
+	fields := ParseLandingState(state)
 
 	if got, want := fields["webview"], "*agent-repl web: harbor-lantern*"; got != want {
 		t.Fatalf("the webview field parsed as %q, want %q", got, want)

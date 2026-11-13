@@ -235,6 +235,45 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 	_ = got
 }
 
+// A CREATED CRON JOB STANDS ON THE FOOTER'S CRONS CHIP AFTER ITS TURN ENDS. The
+// job is left standing by the call that made it, so the chip is a state every
+// footer reader is handed, however far behind: a footer opened only after the
+// turn concluded still counts the one job.
+func TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-cron-create", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	feed := f.watchRootFeed()
+
+	// Act: the agent creates one job, then the turn concludes.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("cron-create-1"),
+		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{State: &conversationv1.AgentCron_Start{Start: &conversationv1.AgentCronStart{
+			Act:       &conversationv1.AgentCronStart_Create{Create: &conversationv1.AgentCronCreate{Cron: "*/5 * * * *", Prompt: "check the build", Recurring: true}},
+			StartedAt: startedAt(1),
+		}}}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("cron-create-1"),
+		Item: &conversationv1.AgentActivity_Cron{Cron: &conversationv1.AgentCron{State: &conversationv1.AgentCron_Success{Success: &conversationv1.AgentCronSuccess{
+			Act:       &conversationv1.AgentCronSuccess_Created{Created: &conversationv1.AgentCronCreated{JobId: "job-1", HumanSchedule: "every 5 minutes", Recurring: true}},
+			SettledAt: settledAt(2),
+		}}}},
+	}))
+	pushConcludedTurn(f.shim, mainAgent, "resp-cron")
+	awaitRow(t, f, feed, "the turn's conclusion", func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetConcluded() != nil })
+	footer := f.d.WatchFooter(f.ws)
+
+	// Assert: the one standing job is on the chip.
+	got := awaitFooter(t, f, footer, "the crons chip for the standing job", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetCrons() != nil
+	})
+	if count := got.GetStrip().GetLiveWork().GetCrons().GetCount(); count != 1 {
+		t.Fatalf("the footer's crons chip counts %d jobs, want the 1 standing job", count)
+	}
+}
+
 // A MONITOR ROW JUMPS TO ITS CALL'S TOOL-CALL CARD: the feed draws the card
 // and announces it, and the footer row names exactly that FeedId.
 func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
@@ -416,6 +455,45 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	if !allowance.GetNewsworthy() {
 		t.Fatal("the weekly allowance is not drawn newsworthy at 95% utilization")
 	}
+}
+
+// A SEVEN-DAY WINDOW'S WARNING FEEDS THE WEEKLY ALLOWANCE, its verdict and its
+// figure, on the enduring usage line alone: the event is never a salient line
+// (owner ruling, 2026-10-01). Both hops are asserted, the drawn allowance and
+// the session-arm record behind it, because the allowance alone would not say
+// the event's own window reached the footer's session-update path.
+func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigureAndNoSalientLine(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
+	status := ratelimittest.Figured(ratelimittest.AllowedWarning(ratelimittest.SevenDay()), 91, resetsAtMs)
+
+	// Act
+	f.shim.PushSessionUpdate(ratelimittest.Update(status))
+
+	// Assert
+	got := awaitFooter(t, f, footer, "the weekly allowance's warning at the event's figure", func(v *frontendv1.FooterView) bool {
+		allowance := v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
+		return allowance.GetAllowedWarning() != nil
+	})
+	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
+	if utilization := allowance.GetUtilization(); utilization < 0.905 || utilization > 0.915 {
+		t.Fatalf("the weekly allowance's utilization = %v, want the event's 0.91 as a 0..1 fraction", utilization)
+	}
+	if allowance.GetResetsAtS() != resetsAtMs/1000 {
+		t.Fatalf("the weekly allowance's resets_at_s = %d, want the event's reset in epoch seconds %d", allowance.GetResetsAtS(), resetsAtMs/1000)
+	}
+	if salient := got.GetStrip().GetStatus().GetIdle().GetActivity().GetSalient(); salient != nil {
+		t.Fatalf("the footer stands salient line %v, want none: a rate-limit event feeds the enduring usage line only", salient)
+	}
+	f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the footer's session-update record for the rate-limit arm", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "rate_limit_status"
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1017,7 +1095,6 @@ func ftFindBreakdownRow(v *frontendv1.TokenBreakdownView, label string) *fronten
 	}
 	return nil
 }
-
 
 // ---------------------------------------------------------------------------
 // Connectivity truth per hop (daemon.md invariant 11): a workspace is

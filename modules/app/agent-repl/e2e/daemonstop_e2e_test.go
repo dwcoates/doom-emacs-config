@@ -58,6 +58,8 @@ const straySettleBound = 2 * time.Second
 // was worst in and the one a freeness-waiting stop could never get out of: the
 // real shim's `canUseTool` callback is standing on an ask nobody will answer,
 // so the turn never ends on its own.
+//
+// Seam: daemon -> shim, store and sidecar, the host's stop reaping every process the world started
 func testHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	// Arrange: a live session with a real shim, parked on an open ask.
 	w, ws := pmNewPermissionWorld(t)
@@ -232,6 +234,8 @@ func TestConclusionBudgetRecords(t *testing.T) {
 // It is the e2e half of daemon/integration's test of the same name, which
 // checks the same stop against the fake shim. Only this one exercises the
 // real shim's teardown, which is where the tail conclusion lives.
+//
+// Seam: daemon -> shim, the ordinary stop ending the real shim's tails
 func testAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
@@ -280,6 +284,8 @@ func testAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 // The registry's size is stated in ONE place — the store's own shutdown
 // record — so the assertion stops the store and reads it there, the same way
 // the cold-bring-up tests read the store's refusals out of its real log.
+//
+// Seam: shim -> store, the page-only reads that leave no watch token behind
 func testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)

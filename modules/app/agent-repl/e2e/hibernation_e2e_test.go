@@ -284,6 +284,8 @@ const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the nex
 // seen to end in the feed proves every row the shim wrote before it — the
 // keep-alive's included — reached the store, because the shim writes in
 // order. Only then is absence asserted.
+//
+// Seam: vendor -> shim -> store, a keep-alive's answer after a vendor turn of its own, never served
 func testKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -389,6 +391,8 @@ func testKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 // keep-alive or just after it is the vendor's timing, and every assertion here
 // holds either way: SubmitPrompt fails the test on any refusal, the turn must
 // end, and the feed must carry exactly the real turns, each once.
+//
+// Seam: daemon -> shim, a prompt landing during a keep-alive, which turns once
 func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -442,6 +446,8 @@ func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 // hibernate/revive boundary carries exactly the two real turns, in order,
 // with nothing from the idle interval's real keep-alive activity leaking
 // onto it.
+//
+// Seam: daemon -> shim -> vendor, a hibernation's compaction and the revival that excludes the keep-alives
 func testRevivalAfterHibernate(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
@@ -625,6 +631,8 @@ func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
 // prose scenario echoes `[mode=<the mode the query is running under>]`
 // (`fake/scenarios/prose.ts`), so this reads what the resumed query actually
 // runs under rather than what a resolver decided to draw.
+//
+// Seam: shim -> vendor transcript -> revived shim, the session's permission mode across a hibernation's compaction
 func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// Arrange: the same world TestKeepAlive/RevivalAfterHibernate declares, for the same
 	// reasons -- a compressed cutoff so the sweep really parks the session, and

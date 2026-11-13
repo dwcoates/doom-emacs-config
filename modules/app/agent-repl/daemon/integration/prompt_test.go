@@ -868,9 +868,128 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 	}
 }
 
+// A PROMPT ADDRESSED AT A SETTLED SUBAGENT'S BUBBLE IS REFUSED not_deliverable,
+// by the shim's own verdict (a subagent has no SDK route for a prompt), relayed
+// by kind on SubmitPromptError.bubble_refused with the shim's words as detail.
+func TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
+	row := awaitRow(t, f, feed, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent().GetSettled() != nil
+	})
+	const detail = "a subagent has no SDK route for a prompt"
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: detail,
+			Kind:   &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}},
+		}},
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace: f.ws, Said: said("are you still there?"), IdempotencyKey: "k-bubble-settled", Origin: origin, Feed: row.GetId(),
+	})
+
+	// Assert
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetNotDeliverable() == nil {
+		t.Fatalf("a submit to a settled subagent's bubble = %v, want error.bubble_refused{kind: not_deliverable}", resp)
+	}
+	if refused.GetDetail() != detail {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's own words %q", refused.GetDetail(), detail)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Slash commands
 // ---------------------------------------------------------------------------
+
+// ctxUsage is a context_usage push of TOTAL tokens against a 200k window.
+func ctxUsage(total int64, percent int64) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens: total,
+			MaxTokens:   200_000,
+			Percentage:  percent,
+			Model:       "claude-opus-5",
+			Categories:  []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 4_000, Color: "blue"}},
+		}},
+	}
+}
+
+// contextPanelAfter reads /context once the topbar's context chip shows CHIP,
+// which orders the read behind the daemon having taken the push that figure came
+// from.
+func contextPanelAfter(t *testing.T, f *fixture, topbar *harness.Stream[*frontendv1.TopbarView], chip, key string) *frontendv1.ContextPanelView {
+	t.Helper()
+	awaitTopbar(t, f, topbar, "the context chip at "+chip, func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == chip
+	})
+	resp := f.submit("/context", key, origin)
+	panel := resp.GetSuccess().GetCommandPanel().GetContext()
+	if panel == nil {
+		t.Fatalf("SubmitPrompt(/context) = %v, want a command_panel.context", resp)
+	}
+	return panel
+}
+
+// THE /context PANEL RESOLVES FROM THE CONTEXT USAGE THE SHIM ALREADY PUSHED,
+// never a round trip to the vendor: after one push it answers a composed
+// header (used, total, model) and at least one section, with no StartTurn.
+func TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+
+	// Act
+	panel := contextPanelAfter(t, f, topbar, "142.3k", "k-context-1")
+
+	// Assert
+	header := panel.GetHeader()
+	if header.GetUsed() == "" || header.GetTotal() == "" || header.GetModel() == "" {
+		t.Fatalf("the /context panel header = %v, want used, total and model composed", header)
+	}
+	if len(panel.GetSections()) == 0 {
+		t.Fatalf("the /context panel = %v, want at least one section", panel)
+	}
+	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
+		t.Fatalf("StartTurn count after /context = %d, want 0: the panel is answered inline", got)
+	}
+}
+
+// A SECOND PUSH MOVES THE PANEL: the daemon's held usage is what /context
+// reads, so a larger figure pushed between two reads shows in the second
+// header without the reader asking the vendor anything.
+func TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushSessionUpdate(ctxUsage(142_300, 71))
+	first := contextPanelAfter(t, f, topbar, "142.3k", "k-context-first")
+
+	// Act
+	f.shim.PushSessionUpdate(ctxUsage(168_900, 84))
+	second := contextPanelAfter(t, f, topbar, "168.9k", "k-context-second")
+
+	// Assert
+	if second.GetHeader().GetUsed() == first.GetHeader().GetUsed() && second.GetHeader().GetPercent() == first.GetHeader().GetPercent() {
+		t.Fatalf("the /context header did not move between pushes: used %q/percent %d then used %q/percent %d",
+			first.GetHeader().GetUsed(), first.GetHeader().GetPercent(), second.GetHeader().GetUsed(), second.GetHeader().GetPercent())
+	}
+	if second.GetHeader().GetUsed() == "" {
+		t.Fatalf("the second /context header = %v, want it composed", second.GetHeader())
+	}
+}
 
 func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow(t *testing.T) {
 	t.Parallel()

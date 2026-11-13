@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/integration/grantedclock"
@@ -191,8 +192,8 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		// THE MODULE ROOT IS THE CHECKOUT: the real Emacs loads the elisp
 		// beneath it, so a deploy's fresh elisp build is the one Emacs runs.
 		// The sandbox's working copy is a throwaway, so what a deploy
-		// installs there touches nothing of the host's (see checkoutEnv).
-		checkoutEnv + "=" + repo.repoDir,
+		// installs there touches nothing of the host's (see kit.CheckoutEnv).
+		kit.CheckoutEnv + "=" + repo.repoDir,
 		"AGENT_REPL_DEPLOY_BUILDER=" + deploy.Path,
 		"AGENT_REPL_LAUNCHCTL=" + services.Path,
 		"AGENT_REPL_SYSTEMCTL=" + services.Path,
@@ -363,7 +364,7 @@ func requireWebappDist(t *testing.T) string {
 // invariant above.
 func resolveOrFail(t *testing.T, dir string) string {
 	t.Helper()
-	resolved, err := resolvedPath(dir)
+	resolved, err := kit.ResolvedPath(dir)
 	if err != nil {
 		t.Fatalf("e2e: resolve the config root %s: %v", dir, err)
 	}
@@ -379,6 +380,8 @@ func resolveOrFail(t *testing.T, dir string) string {
 // module, spawns the daemon through its own launcher, drives ordinary
 // commands, and hands state back as data — so the remaining 43 scenarios are
 // a matter of writing scenarios rather than of building machinery.
+//
+// Seam: Emacs -> daemon -> shim -> page, a prompt from the composer to the drawn reply
 func testEmacsProofOfLife(t *testing.T) {
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)

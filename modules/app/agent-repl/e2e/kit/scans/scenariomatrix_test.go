@@ -1,4 +1,4 @@
-package e2e
+package scans
 
 // The self-verifying half of `e2e/SCENARIO-MATRIX.md`.
 //
@@ -33,15 +33,16 @@ package e2e
 // never upgrades `weak` to `covered` or the reverse. See the document's own
 // "What this check cannot decide" section.
 //
-// REGENERATING. `AGENT_REPL_MATRIX_WRITE=1 go test ./e2e -run
-// TestScenarioMatrixMatchesReality` rewrites the derived columns, the derived
+// REGENERATING. `AGENT_REPL_MATRIX_WRITE=1 go test ./scans -run
+// TestScenarioMatrixMatchesReality`, in e2e/kit, rewrites the derived columns, the derived
 // rows and the counts in place, carrying every hand-written cell forward
 // unchanged, then re-runs the check against what it wrote.
 //
-// COST. File reads and one `go/parser` pass over this package. It spawns
+// COST. File reads and one `go/parser` pass over the e2e package. It spawns
 // nothing and drives no scenario.
 
 import (
+	"agentrepl/e2e/kit"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -1241,40 +1242,25 @@ func fileExists(t *testing.T, path string) bool {
 	return false
 }
 
-// seamLine is a wiring test's `Seam: <family>` doc-comment line.
-var seamLine = regexp.MustCompile(`(?m)^Seam: ([a-z0-9-]+)$`)
-
 // deriveSeamWiring reads every Go e2e test's doc comment for the seam
-// families it wires: family -> the tests that say they wire it, sorted.
+// families it wires (seamClaims): family -> the tests that say they wire it,
+// sorted.
 func deriveSeamWiring(t *testing.T) map[string][]string {
 	t.Helper()
-	fset := token.NewFileSet()
-	files, err := filepath.Glob(filepath.Join(repo.e2eDir, "*_e2e_test.go"))
-	if err != nil {
-		t.Fatalf("glob the e2e tests: %v", err)
-	}
 	pkg := parseE2EPackage(t)
 	wiring := map[string][]string{}
-	for _, path := range files {
-		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
+	for name, doc := range pkg.docs {
+		// A wiring test is a step of a scenario, named by its path; a
+		// top-level test, by its name.
+		if path, isStep := pkg.stepPath(name); isStep {
+			name = path
+		} else if _, isTest := pkg.tests[name]; !isTest {
+			continue
 		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Doc == nil {
-				continue
-			}
-			// A wiring test is a step of a scenario, named by its path; a
-			// top-level test, by its name.
-			name := fn.Name.Name
-			if path, isStep := pkg.stepPath(name); isStep {
-				name = path
-			} else if !strings.HasPrefix(name, "Test") {
-				continue
-			}
-			for _, m := range seamLine.FindAllStringSubmatch(fn.Doc.Text(), -1) {
-				wiring[m[1]] = append(wiring[m[1]], name)
+		claims, _ := seamClaims(doc)
+		for _, c := range claims {
+			if c.family != "" {
+				wiring[c.family] = append(wiring[c.family], name)
 			}
 		}
 	}
@@ -1306,26 +1292,16 @@ func checkSeamWiring(t *testing.T, halves halvesByScenario, wiring map[string][]
 			named[h.seam] = true
 		}
 	}
-	for _, family := range sortedKeys(named) {
+	for _, family := range kit.SortedKeys(named) {
 		if len(wiring[family]) == 0 {
 			t.Errorf("the seam family %q has no e2e wiring test: a Go e2e test that wires it says `Seam: %s` in its doc comment", family, family)
 		}
 	}
-	for _, family := range sortedKeys(wiring) {
+	for _, family := range kit.SortedKeys(wiring) {
 		if !named[family] {
 			t.Errorf("%v say `Seam: %s`, a family no scenario golden is in", wiring[family], family)
 		}
 	}
-}
-
-// sortedKeys is M's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -102,6 +103,8 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 // against the real quartet: after a stop and a relaunch, the announcement
 // Emacs sends is what brings the conversation back, and the page the new
 // daemon serves still draws the pre-stop turn.
+//
+// Seam: store and shim -> relaunched daemon, the conversation a stopped daemon stood down
 func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.
@@ -120,7 +123,7 @@ func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 
 	// Assert: the pre-stop turn is on the page the relaunched daemon serves.
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn, rehydrated after the relaunch",
-		endsTurn(turn))
+		kit.EndsTurn(turn))
 	adAwaitReplayedFeedRow(t, successor, ws, "the pre-stop turn's prompt bubble, rehydrated after the relaunch",
 		func(row *frontendv1.FeedRow) bool {
 			return row.GetTurn().GetValue() == turn.GetValue() && row.GetUserPrompt() != nil

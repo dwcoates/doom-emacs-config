@@ -202,6 +202,8 @@ func testClearRotatesIdentity(t *testing.T) {
 // SECOND `!rotate` ... instead of fabricating"), proving the daemon composes
 // the second rotation onto its already-rotated state rather than this test
 // fabricating an intermediate identity.
+//
+// Seam: shim -> store -> daemon, a second identity rotation composed onto the first
 func testSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})

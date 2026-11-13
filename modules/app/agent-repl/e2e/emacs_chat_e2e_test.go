@@ -50,6 +50,10 @@ func awaitAnswered(t *testing.T, addr string, thread *workspacev1.WorkspaceRef, 
 	t.Fatalf("the chat view never showed an answer saying %q: %v", words, stream.Err())
 }
 
+// testEmacsReachesAChatThreadOffTheTabBar proves Emacs reaches a chat thread
+// off the tab bar, and the thread's answer is drawn.
+//
+// Seam: Emacs -> daemon -> shim, a chat thread started and answered from the tab bar
 func testEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box, WithZettel())

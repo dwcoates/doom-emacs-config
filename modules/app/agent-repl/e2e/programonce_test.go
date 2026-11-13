@@ -3,8 +3,6 @@ package e2e
 import (
 	"errors"
 	"fmt"
-	"os"
-	"regexp"
 	"testing"
 
 	"agentrepl/testrun/testenv"
@@ -63,18 +61,5 @@ func TestProgramOnce(t *testing.T) {
 				t.Fatalf("path = %q, want %q", path, tt.wantPath)
 			}
 		})
-	}
-}
-
-func TestEveryProgramThisSuiteBuildsGoesThroughProgramOnce(t *testing.T) {
-	// A hand-rolled once-builder drifts from programOnce's prebuilt lookup
-	// and its failure; only programOnce may call testenv.ProgramOr.
-	src, err := os.ReadFile("main_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := regexp.MustCompile(`testenv\.ProgramOr\(`).FindAllIndex(src, -1)
-	if len(calls) != 1 {
-		t.Fatalf("main_test.go calls testenv.ProgramOr %d times, want once, inside programOnce.require", len(calls))
 	}
 }

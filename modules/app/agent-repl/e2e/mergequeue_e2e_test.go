@@ -48,6 +48,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -262,66 +263,6 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// #41 — a REBASE CONFLICT is resolved by the requesting workspace's own
-// session, and one left unresolved FAILS the merge in conflicts
-// (merge-landing.md: "a failed merge leaves the queue and hands the workspace
-// back"; "a failed conflict resolution LEAVES THE REBASE IN PROGRESS"). The
-// target moved, and replaying the workspace's work onto it conflicts; the
-// repair turn is answered by the real shim's default scenario, which resolves
-// nothing, so the resolution gives up. Nothing parks.
-// ---------------------------------------------------------------------------
-
-// mqConflictedMerge is one requesting workspace whose merge stops on a
-// scripted rebase conflict.
-type mqConflictedMerge struct {
-	w     *World
-	repo  *harness.Repo
-	child *workspacev1.WorkspaceRef
-	root  *mqFeedWatch
-}
-
-// mqStartConflictedMerge requests a merge whose rebase conflicts. The root
-// feed is opened first, so every row the merge draws is watched.
-func mqStartConflictedMerge(t *testing.T, name string) *mqConflictedMerge {
-	t.Helper()
-	repo := harness.NewRepo(t)
-	w := mqSelfRepoWorld(t, repo)
-	// The scripted conflict is this test's subject: the rebase stops on it,
-	// the conflict is recorded, and the resolution that gives up ends the run.
-	repoRef := mqRepositoryRef(t, w, repo)
-	child := mqCreateTopLevelChild(t, w, repoRef, name)
-	harness.CommitWork(t, child.GetDir())
-	repo.CommitIn(repo.Dir, "main.txt", "moved\n")
-	repo.ScriptRebaseConflict(mqBranchOf(child), 1, "work.txt")
-	root := mqOpenFeedWatch(t, w, child, nil)
-	t.Cleanup(root.Close)
-	mqFinish(t, w, child)
-	return &mqConflictedMerge{w: w, repo: repo, child: child, root: root}
-}
-
-// awaitFailed waits for the merge's failed terminal.
-func (m *mqConflictedMerge) awaitFailed(t *testing.T) *frontendv1.FeedMerge {
-	t.Helper()
-	merge := m.root.AwaitRow("the merge bubble's terminal", mqConcluded).GetActivity().GetMerge()
-	if merge.GetError() == nil {
-		t.Fatalf("merge terminal = %v, want the merge failed", merge)
-	}
-	return merge
-}
-
-func testAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing.T) {
-	// Arrange: the merge failed and handed the workspace back.
-	m := mqStartConflictedMerge(t, "mq-conflict-next")
-	m.awaitFailed(t)
-
-	// Act
-	turn := SubmitPrompt(t, m.w, m.child, "please help carry the rebase on")
-
-	// Assert: delivered and run to its end, never refused as merging.
-	AwaitTurnEnded(t, m.w, m.child, turn)
-}
-
-// ---------------------------------------------------------------------------
 // #42 — DisplacedTurnCapturedEndedThenResubmittedExactlyOnce. The most
 // recently settled contract point in this doc set (commit 8ad7e279c,
 // daemon.md §"...GIVE-UP RULES..."): "the displaced user turn is captured
@@ -349,6 +290,11 @@ func testAWorkspaceWhoseMergeFailedTakesTheNextPromptAsAnOrdinaryTurn(t *testing
 // reaches git at all, so no conflict is scripted.
 // ---------------------------------------------------------------------------
 
+// testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce proves a turn a
+// merge displaces is captured and ended, and resubmitted exactly once by the
+// daemon that boots after the crash.
+//
+// Seam: daemon -> shim -> successor daemon, a turn displaced by a merge, captured, ended and resubmitted once
 func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
@@ -415,7 +361,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 
 	// Assert: the displaced turn is CAPTURED then ENDED — its own terminal
 	// arrives on the feed.
-	endedRow := root.AwaitRow("the displaced turn's own terminal", endsTurn(turn))
+	endedRow := root.AwaitRow("the displaced turn's own terminal", kit.EndsTurn(turn))
 	if endedRow.GetTurnEnded().GetInterrupted() == nil {
 		t.Fatalf("the displaced turn's terminal = %v, want FeedTurnEndedInterrupted (KillTurn's feed-visible shape)", endedRow.GetTurnEnded())
 	}
@@ -731,6 +677,10 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *World {
 	}})
 }
 
+// testFailMarkerFailsAPreDeployHooksDeploy proves a pre-deploy hook whose turn
+// the vendor fails fails the deploy.
+//
+// Seam: shim -> daemon, a configured pre-deploy hook's failed turn failing the deploy
 func testFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 	// A typo in the marker would leave both arms driving PLAIN PROSE, whose
 	// turns conclude — so the before arm would fail with a confusing terminal

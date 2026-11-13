@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	agent-repld v0.0.0-00010101000000-000000000000
+	agentrepl/e2e/kit v0.0.0
 	agentrepl/logging v0.0.0
 	agentrepl/proto v0.0.0
 	agentrepl/protohelpers v0.0.0
@@ -46,3 +47,5 @@ replace agentrepl/testrun => ../testrun
 replace agentrepl/tldr => ../tree-sitter-tldr/tldr/src
 
 replace agentrepl/tldrprompt => ../tree-sitter-tldr/tldr_prompt/src
+
+replace agentrepl/e2e/kit => ./kit

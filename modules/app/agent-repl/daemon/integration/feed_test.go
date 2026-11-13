@@ -853,6 +853,116 @@ func TestPlanModeEnterThenExitCoalesceOntoOneFeedId(t *testing.T) {
 	}
 }
 
+// planEnterFrames are one enter call's start and its settled success.
+func planEnterFrames(unit string) []*conversationv1.AgentFrame {
+	return []*conversationv1.AgentFrame{
+		activityFrame(mainAgent, &conversationv1.AgentActivity{
+			ActivityId: activityID(unit),
+			Item: &conversationv1.AgentActivity_PlanMode{PlanMode: &conversationv1.AgentPlanMode{State: &conversationv1.AgentPlanMode_Start{
+				Start: &conversationv1.AgentPlanModeStart{Act: &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}}, StartedAt: startedAt(1)},
+			}}},
+		}),
+		activityFrame(mainAgent, &conversationv1.AgentActivity{
+			ActivityId: activityID(unit),
+			Item: &conversationv1.AgentActivity_PlanMode{PlanMode: &conversationv1.AgentPlanMode{State: &conversationv1.AgentPlanMode_Success{
+				Success: &conversationv1.AgentPlanModeSuccess{Act: &conversationv1.AgentPlanModeSuccess_Entered{Entered: &conversationv1.AgentPlanModeEntered{}}, SettledAt: settledAt(2)},
+			}}}},
+		),
+	}
+}
+
+// planExitFrames are one exit call's start and its settled success, presenting
+// the plan.
+func planExitFrames(unit, plan string) []*conversationv1.AgentFrame {
+	return []*conversationv1.AgentFrame{
+		activityFrame(mainAgent, &conversationv1.AgentActivity{
+			ActivityId: activityID(unit),
+			Item: &conversationv1.AgentActivity_PlanMode{PlanMode: &conversationv1.AgentPlanMode{State: &conversationv1.AgentPlanMode_Start{
+				Start: &conversationv1.AgentPlanModeStart{Act: &conversationv1.AgentPlanModeStart_Exit{Exit: &conversationv1.AgentPlanModeExit{}}, StartedAt: startedAt(3)},
+			}}},
+		}),
+		activityFrame(mainAgent, &conversationv1.AgentActivity{
+			ActivityId: activityID(unit),
+			Item: &conversationv1.AgentActivity_PlanMode{PlanMode: &conversationv1.AgentPlanMode{State: &conversationv1.AgentPlanMode_Success{
+				Success: &conversationv1.AgentPlanModeSuccess{
+					Act:       &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{Plan: &conversationv1.AgentResponseProse{Markdown: plan}}},
+					SettledAt: settledAt(4),
+				},
+			}}},
+		}),
+	}
+}
+
+// planRows answers every plan bubble a feed page holds.
+func planRows(page *frontendv1.FeedPage) []*frontendv1.FeedRow {
+	var plans []*frontendv1.FeedRow
+	for _, row := range page.GetSuccess().GetRows() {
+		if row.GetActivity().GetPlan() != nil {
+			plans = append(plans, row)
+		}
+	}
+	return plans
+}
+
+// A PLAN EPISODE IS ONE ROW OF THE PAGE, however many plan-mode calls it took:
+// the page a reader opens after the episode holds exactly one plan bubble, not
+// the plan card drawn once where the enter landed and again after the turn.
+func TestAPlanEpisodeIsOneRowOnTheOpenedPage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-plan-one-row", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act: enter, exit with the plan, then the turn concludes.
+	for _, frame := range append(planEnterFrames("plan-enter"), planExitFrames("plan-exit", "1. do it")...) {
+		f.shim.PushAgentFrame(mainAgent, frame)
+	}
+	pushConcludedTurn(f.shim, mainAgent, "resp-plan")
+
+	// Assert
+	page, _ := f.openFeedOnceCarrying("the page after the plan turn concluded", func(p *frontendv1.FeedPage) bool {
+		return rowIndex(p, func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetConcluded() != nil }) >= 0
+	})
+	if plans := planRows(page); len(plans) != 1 {
+		t.Fatalf("the page holds %d plan rows %v, want exactly 1: the enter and the exit coalesce onto ONE FeedId", len(plans), plans)
+	}
+}
+
+// A BUBBLE THAT PRESENTED ITS PLAN SETTLES PLANNED, even when the enter is
+// delivered again afterwards (a second plane's copy of the turn arrives after
+// the first, its enter last): taking that enter would send the bubble back to
+// its planning treatment with the plan already presented.
+func TestAPlanBubbleStaysPlannedWhenTheEnterIsDeliveredAgainAfterTheExit(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-plan-late-enter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	for _, frame := range append(planEnterFrames("plan-enter"), planExitFrames("plan-exit", "1. do it")...) {
+		f.shim.PushAgentFrame(mainAgent, frame)
+	}
+	awaitRow(t, f, tail, "the presented plan", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetPlan().GetPlanned() != nil })
+
+	// Act: the enter arrives again, after the exit; the turn then concludes,
+	// which orders the page read behind the late enter.
+	for _, frame := range planEnterFrames("plan-enter") {
+		f.shim.PushAgentFrame(mainAgent, frame)
+	}
+	pushConcludedTurn(f.shim, mainAgent, "resp-plan")
+
+	// Assert
+	page, _ := f.openFeedOnceCarrying("the page after the plan turn concluded", func(p *frontendv1.FeedPage) bool {
+		return rowIndex(p, func(r *frontendv1.FeedRow) bool { return r.GetTurnEnded().GetConcluded() != nil }) >= 0
+	})
+	plans := planRows(page)
+	if len(plans) != 1 {
+		t.Fatalf("the page holds %d plan rows, want the one bubble", len(plans))
+	}
+	if plans[0].GetActivity().GetPlan().GetPlanned() == nil {
+		t.Fatalf("the plan bubble settled as %T, want planned", plans[0].GetActivity().GetPlan().GetState())
+	}
+}
+
 // ==========================================================================
 // Worktree separation dividers.
 // ==========================================================================
@@ -1373,6 +1483,57 @@ func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
 	}
 }
 
+// A RATE-LIMITED TURN CARRIES THE VENDOR'S STATED WAIT. FeedTurnErrorRateLimited
+// has a `retry_after_ms` the client counts down from; the vendor's number
+// travels through the daemon unchanged, and an unset one stays unset (the
+// vendor said nothing, which is not "retry now").
+func TestARateLimitedTerminalCarriesTheVendorsStatedWaitAndNoneWhenUnstated(t *testing.T) {
+	t.Parallel()
+	statedMs := int64(549)
+	tests := []struct {
+		name       string
+		retryAfter *int64
+		wantSet    bool
+		wantMs     int64
+	}{
+		{name: "a stated wait is carried exactly", retryAfter: &statedMs, wantSet: true, wantMs: 549},
+		{name: "an unstated wait stays unset", retryAfter: nil, wantSet: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange
+			f := newOpened(t, harness.Opts{})
+			f.submit("go", "k-429", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+			tail := f.watchRootFeed()
+
+			// Act: the vendor rate-limited the call and the turn ended on it.
+			f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+				Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+					Message: "rate limited",
+					Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{RetryAfterMs: tt.retryAfter}},
+				}},
+			}))
+
+			// Assert
+			row := awaitRow(t, f, tail, "the rate-limited terminal", func(r *frontendv1.FeedRow) bool {
+				return r.GetTurnEnded().GetErrored().GetRateLimited() != nil
+			})
+			errored := row.GetTurnEnded().GetErrored()
+			if errored.GetHeadline().GetText() == "" {
+				t.Fatalf("the rate-limited terminal carries no composed headline: %v", errored)
+			}
+			limited := errored.GetRateLimited()
+			if limited.RetryAfterMs != nil != tt.wantSet {
+				t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %v, want set = %v", limited.RetryAfterMs, tt.wantSet)
+			}
+			if tt.wantSet && limited.GetRetryAfterMs() != tt.wantMs {
+				t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %d, want the vendor's stated %d", limited.GetRetryAfterMs(), tt.wantMs)
+			}
+		})
+	}
+}
+
 // THE RUN'S OWN TERMINALS (landing 8). One end-to-end path per arm family:
 // a FailureVendor* arm, which also resolves the workspace purple, and the
 // Stop-hook arm, which does not.
@@ -1403,6 +1564,9 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 	})
 	if row.GetTurnEnded().GetErrored().GetHeadline().GetText() == "" {
 		t.Fatal("the query-died terminal carries no composed headline")
+	}
+	if row.GetTurnEnded().GetErrored().GetQueryDied().GetUnexpectedEof() == nil {
+		t.Fatalf("the query-died terminal's cause = %v, want unexpected_eof, the cause the shim reported", row.GetTurnEnded().GetErrored().GetQueryDied())
 	}
 }
 

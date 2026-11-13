@@ -71,6 +71,10 @@ func searched(t *testing.T, w *World, query string) []string {
 	return ids
 }
 
+// testAChatThreadLivesItsWholeLife proves a chat thread lives its whole life:
+// it starts from its first question, opens, answers and is found again.
+//
+// Seam: daemon -> shim and zettel store, a chat thread from its first question to its close
 func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	w := NewWorld(t, WorldOpts{Zettel: true})
 	ctx := w.Ctx()

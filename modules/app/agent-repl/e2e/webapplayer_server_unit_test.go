@@ -3,9 +3,7 @@ package e2e
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -53,32 +51,6 @@ func TestKillProcessGroup(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestTheLayerDriverIsKilledOnlyThroughKillGroup pins that every kill of the
-// driver's group goes through killGroup, so none drops the kill's error.
-func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
-	// Arrange
-	src, err := os.ReadFile("webapplayer_server_test.go")
-	if err != nil {
-		t.Fatalf("read the driver's source: %v", err)
-	}
-
-	// Act
-	raw := regexp.MustCompile(`syscall\.Kill\(`).FindAllIndex(src, -1)
-	group := regexp.MustCompile(`harness\.KillGroup\(`).FindAllIndex(src, -1)
-	viaHelper := regexp.MustCompile(`s\.killGroup\(\)`).FindAllIndex(src, -1)
-
-	// Assert: no raw kill, and the one group kill is killProcessGroup's own.
-	if len(raw) != 0 {
-		t.Fatalf("webapplayer_server_test.go calls syscall.Kill %d time(s), want none: the group kill is harness.KillGroup's", len(raw))
-	}
-	if len(group) != 1 {
-		t.Fatalf("webapplayer_server_test.go calls harness.KillGroup %d time(s), want only killProcessGroup's one", len(group))
-	}
-	if len(viaHelper) < 3 {
-		t.Fatalf("webapplayer_server_test.go calls s.killGroup() %d time(s), want the warm-up, run and stop sites", len(viaHelper))
 	}
 }
 

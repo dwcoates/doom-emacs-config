@@ -1,4 +1,4 @@
-package e2e
+package scenario
 
 import (
 	"fmt"
@@ -8,8 +8,7 @@ import (
 )
 
 // testScenarioFixtureStep and testScenarioOtherFixtureStep are steps no
-// scenario lists: this file's own fixtures, which the source scans below
-// leave out (scenarioUnitFile).
+// scenario lists: this file's own fixtures.
 func testScenarioFixtureStep(*testing.T)      {}
 func testScenarioOtherFixtureStep(*testing.T) {}
 
@@ -31,7 +30,7 @@ func TestStepNameIsTheFunctionNameWithoutItsPrefix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := stepName(tt.step)
+			got := StepName(tt.step)
 
 			// Assert
 			if got != tt.want {
@@ -53,7 +52,7 @@ func TestStepNameRefusesAFunctionNotNamedAsAStep(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := recoverPanic(func() { stepName(tt.step) })
+			got := recoverPanic(func() { StepName(tt.step) })
 
 			// Assert
 			if !strings.Contains(got, "is not a function named testXxx") {
@@ -91,7 +90,7 @@ func TestAScenarioRunsItsStepsInOrderBesideTheOtherScenarios(t *testing.T) {
 			r := &recordingRunner{fail: tt.fail}
 
 			// Act
-			runScenario(r, []func(*testing.T){testScenarioFixtureStep, testScenarioOtherFixtureStep})
+			Run(r, []func(*testing.T){testScenarioFixtureStep, testScenarioOtherFixtureStep})
 
 			// Assert
 			want := []string{"parallel", "run ScenarioFixtureStep", "run ScenarioOtherFixtureStep"}
@@ -107,60 +106,14 @@ func TestAScenarioWithNoStepsIsRefused(t *testing.T) {
 	r := &recordingRunner{}
 
 	// Act
-	got := recoverPanic(func() { runScenario(r, nil) })
+	got := recoverPanic(func() { Run(r, nil) })
 
 	// Assert
 	if !strings.Contains(got, "no steps") {
-		t.Fatalf("runScenario(nil) panicked with %q, want it refused", got)
+		t.Fatalf("Run(nil) panicked with %q, want it refused", got)
 	}
 	if len(r.calls) != 0 {
 		t.Fatalf("calls = %q, want none before the refusal", r.calls)
-	}
-}
-
-func TestEveryStepRunsInExactlyOneScenario(t *testing.T) {
-	// Arrange
-	pkg := parseE2EPackage(t)
-
-	// Act
-	listed := map[string][]string{}
-	for scenarioName, steps := range pkg.scenarios {
-		for _, s := range steps {
-			listed[s] = append(listed[s], scenarioName)
-		}
-	}
-
-	// Assert
-	for _, s := range sortedKeys(pkg.steps) {
-		if scenarios := listed[s]; len(scenarios) != 1 {
-			t.Errorf("step %s (%s) is listed by %d scenarios %v, want exactly one: a step no scenario lists never runs", s, pkg.steps[s], len(scenarios), scenarios)
-		}
-	}
-	for _, s := range sortedKeys(listed) {
-		if _, ok := pkg.steps[s]; !ok {
-			t.Errorf("scenarios %v list %s, which is not a step: a step is a package-level func testXxx(t *testing.T)", listed[s], s)
-		}
-	}
-}
-
-func TestEveryWorldBuildingTestIsAScenario(t *testing.T) {
-	// Arrange
-	pkg := parseE2EPackage(t)
-
-	// Act
-	var offenders []string
-	for _, name := range sortedKeys(pkg.tests) {
-		if _, isScenario := pkg.scenarios[name]; isScenario {
-			continue
-		}
-		if builder := pkg.reachesWorldBuilder(name); builder != "" {
-			offenders = append(offenders, name+" (reaches "+builder+")")
-		}
-	}
-
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("top-level tests that build a world outside a scenario: %s; add the coverage as a step of the scenario whose subject it extends (scenarios_test.go)", strings.Join(offenders, ", "))
 	}
 }
 

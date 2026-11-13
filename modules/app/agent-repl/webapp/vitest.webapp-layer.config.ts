@@ -60,7 +60,7 @@ export default defineConfig({
     // helpers live here too, and a unit test OF a helper (test/webapp-layer/
     // drive.test.ts) must run in the fast unit suite, where there is no daemon
     // to demand. The suffix is the same one the Go scenario-matrix check reads
-    // the directory by (e2e/scenariomatrix_test.go, deriveWebappCoverage).
+    // the directory by (e2e/kit/scans/scenariomatrix_test.go, deriveWebappCoverage).
     include: ["test/webapp-layer/**/*.layer.test.ts"],
     // ONE WARM WORKER FOR EVERY AREA (layer-server.mjs). Isolated, each area
     // the warm driver ran stood a fresh worker up and re-evaluated the whole

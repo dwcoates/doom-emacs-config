@@ -35,7 +35,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +43,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -144,20 +144,16 @@ const WebappLayerSilence = 20 * time.Second
 // wlDriveArea's participant hold is written under.
 const WebappLayerHandoverTimeout = 60 * time.Second
 
-// wlBootBudget mirrors BOOT_BUDGET_MS in `webapp/test/webapp-layer/drive.ts`:
-// the child's own budget for its page's mount once vitest has collected it.
-const wlBootBudget = 5 * time.Second
-
 // WebappLayerColdMountTimeout bounds a COLD vitest child's boot up to its
 // page's mount: npm, node, vite's cold transform and collect of the module
 // graph, then the page's own boot. The first three are exactly the warm
-// driver's warm-up, so it is wlWarmupBound plus the page's wlBootBudget.
+// driver's warm-up, so it is wlWarmupBound plus the page's kit.WlBootBudget.
 //
 // WebappLayerTimeout DOES NOT BOUND IT: that constant is sized for an area run
 // whose cold transform the warm driver already paid. A full gate run
 // (2026-10-17) warmed its driver in 41s, and the restart-handover child, cold
 // in the same run, had not yet collected its file when the 45s bound fired.
-const WebappLayerColdMountTimeout = wlWarmupBound + wlBootBudget
+const WebappLayerColdMountTimeout = wlWarmupBound + kit.WlBootBudget
 
 // TestWebappLayerParticipantHoldOutlivesTheWaitBound pins the bound the host
 // participant hold runs on.
@@ -216,33 +212,6 @@ func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
 				t.Errorf("the participant hold's bound = %s, want more than %s", got, tc.floor)
 			}
 		})
-	}
-}
-
-// TestWlBootBudgetMirrorsTheChildsBootBudget pins wlBootBudget to
-// BOOT_BUDGET_MS in drive.ts, so the cold mount bound cannot drift below the
-// budget the child itself boots its page under.
-func TestWlBootBudgetMirrorsTheChildsBootBudget(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	src, err := os.ReadFile(filepath.Join("..", "webapp", "test", "webapp-layer", "drive.ts"))
-	if err != nil {
-		t.Fatalf("reading drive.ts: %v", err)
-	}
-	m := regexp.MustCompile(`export const BOOT_BUDGET_MS = ([0-9_]+);`).FindSubmatch(src)
-	if m == nil {
-		t.Fatal("drive.ts declares no `export const BOOT_BUDGET_MS = <n>;`")
-	}
-
-	// Act.
-	ms, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), "_", ""))
-	if err != nil {
-		t.Fatalf("BOOT_BUDGET_MS %q: %v", m[1], err)
-	}
-
-	// Assert.
-	if got := time.Duration(ms) * time.Millisecond; got != wlBootBudget {
-		t.Errorf("drive.ts BOOT_BUDGET_MS = %s, wlBootBudget = %s, want them equal", got, wlBootBudget)
 	}
 }
 
@@ -317,7 +286,7 @@ func wlRequireWebappDeps(t *testing.T) string {
 // run must never read as one that did.
 func wlRequireWebappWritable(t *testing.T, webappDir string) {
 	t.Helper()
-	if err := wlWebappWritable(webappDir); err != nil {
+	if err := kit.WlWebappWritable(webappDir); err != nil {
 		t.Fatalf("e2e/webapp-layer: THE WEBAPP LAYER CANNOT RUN HERE.\n"+
 			"  %v\n"+
 			"  vite and vitest keep their cache in that directory (webapp/vite-cache.ts),\n"+
@@ -325,24 +294,6 @@ func wlRequireWebappWritable(t *testing.T, webappDir string) {
 			"  In the e2e sandbox this is what a read-only working copy looks like; on the host,\n"+
 			"  check the permissions on the checkout.", err)
 	}
-}
-
-// wlWebappWritable answers whether the webapp package directory can hold the
-// cache vite and vitest write there, by actually creating and removing one —
-// a stat of the mode bits would answer for the wrong uid on a mount that
-// disagrees with them.
-//
-// A DIRECTORY, not a file: what vite creates is a directory, and a filesystem
-// can refuse that while a file write would have succeeded.
-func wlWebappWritable(webappDir string) error {
-	probe, err := os.MkdirTemp(webappDir, ".vite-cache-writeprobe-")
-	if err != nil {
-		return fmt.Errorf("%s is not writable: %w", webappDir, err)
-	}
-	if err := os.RemoveAll(probe); err != nil {
-		return fmt.Errorf("could not remove the write probe %s: %w", probe, err)
-	}
-	return nil
 }
 
 // ONE GO TEST PER AREA (project-lead ruling). Each area gets its OWN world,
@@ -379,6 +330,8 @@ const wlClientLogOperation = "webapp-layer.client-log-round-trip"
 // promoted) are the half a browser can see. What only this side can see is
 // that those identities are the SAME strings the other runtimes wrote for the
 // same session — which is what makes one incident readable across five logs.
+//
+// Seam: webapp -> daemon, a browser record joined to the daemon's and the shim's records for its session
 func testWebappLayerClientLog(t *testing.T) {
 	w, ws := wlDriveAreaWorld(t, "client-log.layer.test.ts")
 
@@ -451,6 +404,8 @@ func wlRequireJoin(t *testing.T, whose string, records []harness.LogRecord, fiel
 }
 
 // testWebappLayerCards is section F4: permission and question cards.
+//
+// Seam: webapp -> daemon, the permission and question cards' answers from the real page
 func testWebappLayerCards(t *testing.T) {
 	wlDriveArea(t, "cards.layer.test.ts")
 }
@@ -500,6 +455,8 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 // THE DECLARED WARNING is this test's own subject, as in the adoption area:
 // the standing unlanded-arm refusal record is the evidence of the refusal a
 // handover deliberately provokes.
+//
+// Seam: successor daemon -> webapp, the mounted page carried across a daemon handover
 func testWebappLayerRestartHandover(t *testing.T) {
 	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
@@ -979,56 +936,7 @@ func wlLiveGroupMembers(pgid int) ([]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps: %w", err)
 	}
-	return wlParseLiveGroupMembers(string(out), pgid)
-}
-
-// wlParseLiveGroupMembers reads ps's `pid pgid stat` lines and answers the
-// pids in group PGID whose state is not a zombie (Z).
-func wlParseLiveGroupMembers(out string, pgid int) ([]int, error) {
-	var live []int
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if len(fields) < 3 {
-			return nil, fmt.Errorf("ps line %q: want pid, pgid and stat", line)
-		}
-		pid, pidErr := strconv.Atoi(fields[0])
-		group, groupErr := strconv.Atoi(fields[1])
-		if pidErr != nil || groupErr != nil {
-			return nil, fmt.Errorf("ps line %q: pid or pgid is not a number", line)
-		}
-		if group == pgid && !strings.HasPrefix(fields[2], "Z") {
-			live = append(live, pid)
-		}
-	}
-	return live, nil
-}
-
-func TestWlParseLiveGroupMembersLeavesOutZombiesAndOtherGroups(t *testing.T) {
-	t.Parallel()
-	// Arrange.
-	out := "  10    10 S\n  11    10 Z\n  12    10 R+\n  13    99 S\n"
-
-	// Act.
-	live, err := wlParseLiveGroupMembers(out, 10)
-
-	// Assert.
-	if err != nil || len(live) != 2 || live[0] != 10 || live[1] != 12 {
-		t.Fatalf("live = %v (%v), want [10 12]", live, err)
-	}
-}
-
-func TestWlParseLiveGroupMembersRefusesAMalformedLine(t *testing.T) {
-	t.Parallel()
-	// Arrange / Act.
-	_, err := wlParseLiveGroupMembers("10 10\n", 10)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("a ps line with no stat was read, want it refused")
-	}
+	return kit.WlParseLiveGroupMembers(string(out), pgid)
 }
 
 // wlTailLines is how much of the child's output a failure quotes inline. The

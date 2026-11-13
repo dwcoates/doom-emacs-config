@@ -107,6 +107,8 @@ func findClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarD
 // same family, second half — the SAME degraded window transitions to CLOSED
 // once the store is back and the shim reconnects ("the degraded fact
 // clears", SPEC.md).
+//
+// Seam: store -> shim -> daemon, the degraded window a real store outage opens, closed when the store is back
 func testRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.

@@ -72,6 +72,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -89,6 +90,10 @@ import (
 // #47 — ColdBootReadsReplayFromStore
 // ===========================================================================
 
+// testColdBootReadsReplayFromStore proves a daemon cold-booted after a crash
+// reads its replay from the store (SPEC.md #47).
+//
+// Seam: store -> cold-booted daemon, the replay of a crashed daemon's conversation
 func testColdBootReadsReplayFromStore(t *testing.T) {
 	// Arrange: drive a real "!prose-streamed" turn to completion so the
 	// store durably holds REAL rows (driveScenarioToCompletion blocks on the
@@ -112,7 +117,7 @@ func testColdBootReadsReplayFromStore(t *testing.T) {
 	// cursor/replay semantics) — this daemon never started that session
 	// itself.
 	adAwaitReplayedFeedRow(t, successor, ws, "the prior REAL session's turn replayed from the store",
-		endsTurn(turn))
+		kit.EndsTurn(turn))
 }
 
 // ===========================================================================
@@ -404,6 +409,8 @@ func adLeaveSessionDown(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 // and serve an empty feed until the user's next prompt revived it (ship-gns,
 // 2026-10-01 17:55). The successor now starts its session as it adopts it, so
 // the conversation's turn is drawn on the successor's feed with no prompt.
+//
+// Seam: incumbent daemon -> successor daemon -> shim, a sessionless workspace's session started as it is adopted
 func testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 	// Arrange: a finished real conversation whose session the incumbent has
 	// left down. The shim deaths are what this test provokes: the link

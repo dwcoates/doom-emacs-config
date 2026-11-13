@@ -19,11 +19,11 @@ package e2e
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"testing"
 
@@ -209,29 +209,6 @@ func requireNode(t testing.TB) string {
 		requireDependency(t, "e2e: node not found on PATH: install Node.js (the shim bundle is built with it)")
 	}
 	return nodeBin
-}
-
-// checkoutEnv is agent-repld's checkout-root override (checkout.Env).
-//
-// THE CHECKOUT IS WHERE A DEPLOY INSTALLS. The daemon's own deploy judges and
-// installs against it: the daemon binary lands at <checkout>/daemon/bin, and
-// the fresh elisp build is hashed from <checkout>/lisp. A Go world therefore
-// never names this worktree — harness.StartDaemon pins its own throwaway
-// checkout (harness.BuildIdentityEnv), whose elisp is the build every harness
-// WatchDaemon stream reports — or a landing's deploy would install a test
-// daemon over this worktree's daemon/bin. Only the Emacs layer names the
-// module root, because a real Emacs loads the elisp beneath it and the
-// sandbox's working copy is a throwaway tmpfs.
-const checkoutEnv = "AGENT_REPL_CHECKOUT"
-
-// valueOf answers the value of name in a KEY=VALUE list, or "" when absent.
-func valueOf(env []string, name string) string {
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, name+"="); ok {
-			return v
-		}
-	}
-	return ""
 }
 
 var (
@@ -555,13 +532,30 @@ func runGrepGate(dir string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", dir, err)
 	}
-	var violations []string
+	var paths []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || filepath.Ext(name) != ".go" || !bytes.HasSuffix([]byte(name), []byte("_test.go")) {
 			continue
 		}
-		path := filepath.Join(dir, name)
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	// The harness code that moved out of this package into kit/ (its own
+	// module, so its tests are reused) is held to the same gate, every file.
+	err = filepath.WalkDir(filepath.Join(dir, "kit"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".go" {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk %s: %w", filepath.Join(dir, "kit"), err)
+	}
+	var violations []string
+	for _, path := range paths {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)

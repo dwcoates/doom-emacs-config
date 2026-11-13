@@ -81,6 +81,8 @@ func cbuBringUp(t *testing.T, w *World) string {
 
 // testColdBringUpEarnsNoStoreRefusal is the defect itself: a cold bring-up must
 // leave the store's log with no `unknown_agent` refusal in it at all.
+//
+// Seam: daemon and shim -> store, a cold bring-up's registrations in the order the store accepts
 func testColdBringUpEarnsNoStoreRefusal(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})

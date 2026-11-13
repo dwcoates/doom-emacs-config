@@ -259,7 +259,7 @@ func VitestIntegrationCoverage(work, suite string) string {
 
 // WebappLayerDir is the directory, anywhere under a coverage run's cover
 // root, whose driver-* subdirectories hold the e2e webapp layer's istanbul
-// reports (e2e/coverage_test.go's webappLayerCoverageEnv).
+// reports (e2e/kit/webapplayer.go's DriverCoverageEnv).
 const WebappLayerDir = "webapp-layer"
 
 // unmergedReach names, per vitest system, a reach no coverage run merges yet:

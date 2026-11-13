@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit"
 	"context"
 	"fmt"
 	"os"
@@ -97,9 +98,6 @@ type sandboxProc interface {
 	Pid() int
 }
 
-// sandboxScriptRel is the sandbox entry point, relative to the repo root.
-const sandboxScriptRel = "modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh"
-
 // insideSandboxEnv is set by `e2e-sandbox.sh run` on every container it
 // starts, and is this layer's primary in-container signal.
 const insideSandboxEnv = "AGENT_REPL_SANDBOX_SHA"
@@ -124,13 +122,13 @@ func requireSandbox(t *testing.T) sandbox {
 	if !ok {
 		noteEnvironmentSkipAs(t,
 			"the Emacs client layer runs only INSIDE the e2e sandbox container "+
-				"(`"+sandboxRunCommand("<name>")+"`); it was not exercised by this run",
+				"(`"+kit.SandboxRunCommand("<name>")+"`); it was not exercised by this run",
 			"emacs client layer needs the e2e sandbox: %s", reason)
 	}
 	ok, version := s.HasEmacs()
 	if !ok {
 		requireDependency(t, "emacs client layer needs Emacs 27 or later in the sandbox image; found %q "+
-			"(the image installs it; rebuild it with `%s build`)", version, sandboxScriptRel)
+			"(the image installs it; rebuild it with `%s build`)", version, kit.SandboxScriptRel)
 	}
 	// `script` is INSTALLED BY NAME in the image now (bsdutils + util-linux
 	// in the Dockerfile's apt list), so this is a backstop rather than the
@@ -138,7 +136,7 @@ func requireSandbox(t *testing.T) sandbox {
 	// drops it, must skip loudly instead of failing obscurely inside
 	// StartPTY.
 	if _, err := exec.LookPath("script"); err != nil {
-		requireDependency(t, "emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it; rebuild the image with `%s build`): %v", sandboxScriptRel, err)
+		requireDependency(t, "emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it; rebuild the image with `%s build`): %v", kit.SandboxScriptRel, err)
 	}
 	// Xvfb is what makes a GRAPHICAL frame possible, and the panel this
 	// layer opens is an `xwidget-webkit` webview, which cannot exist without
@@ -147,7 +145,7 @@ func requireSandbox(t *testing.T) sandbox {
 	// but without it every scenario would fail at `make-xwidget` with "GTK
 	// has not been initialized", which names nothing that is actually wrong.
 	if _, err := exec.LookPath("Xvfb"); err != nil {
-		requireDependency(t, "emacs client layer needs 'Xvfb' for a GUI frame (the panel is an xwidget-webkit webview; the Dockerfile installs xvfb for it; rebuild the image with `%s build`): %v", sandboxScriptRel, err)
+		requireDependency(t, "emacs client layer needs 'Xvfb' for a GUI frame (the panel is an xwidget-webkit webview; the Dockerfile installs xvfb for it; rebuild the image with `%s build`): %v", kit.SandboxScriptRel, err)
 	}
 	assertHostIsolation(t)
 	return s
@@ -293,8 +291,8 @@ func (s *localSandbox) Available() (bool, string) {
 	// and preflight talks to Docker (tens of seconds under load), so it runs
 	// ONCE; only the per-test instruction below is composed per test.
 	hostPreflightOnce.Do(func() {
-		hostPreflightReason = runHostPreflight(
-			filepath.Join(repoRoot(), sandboxScriptRel), hostPreflightTimeout)
+		hostPreflightReason = kit.RunHostPreflight(
+			filepath.Join(repoRoot(), kit.SandboxScriptRel), hostPreflightTimeout)
 	})
 	if hostPreflightReason != "" {
 		return false, hostPreflightReason
@@ -304,7 +302,7 @@ func (s *localSandbox) Available() (bool, string) {
 		"the sandbox image is ready, but this test process is running ON THE HOST. "+
 			"This layer starts a real Emacs that spawns a real daemon, so it must run INSIDE the container. Run:\n"+
 			"    %s",
-		sandboxRunCommand(s.t.Name()))
+		kit.SandboxRunCommand(s.t.Name()))
 }
 
 // hostPreflightTimeout bounds the WHOLE preflight run, so a preflight either
@@ -324,80 +322,6 @@ func (s *localSandbox) Available() (bool, string) {
 // diagnose the wedge itself, its own actionable message wins, and this bound
 // is only the backstop for a script that cannot return at all.
 const hostPreflightTimeout = 30 * time.Second
-
-// runHostPreflight runs the sandbox preflight under a deadline and returns the
-// skip reason, or "" when the sandbox image is usable.
-//
-// It is a free function rather than an inlined closure so a test can drive it
-// without racing the package-level sync.Once that guards the real probe.
-func runHostPreflight(script string, bound time.Duration) string {
-	if _, err := os.Stat(script); err != nil {
-		return fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
-	}
-
-	// wall-clock: the preflight asks an EXTERNAL engine (Docker) to answer,
-	// and a wedged engine is not this binary's processes being starved; the
-	// bound is the engine's, in wall time.
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
-	defer cancel()
-	return hostPreflightUntil(ctx, script, bound)
-}
-
-// hostPreflightUntil is runHostPreflight with its bound as a context: the
-// preflight is reported as not answering the moment ctx is done, and bound
-// only names the wait in that report. A test ends the wait itself, at a
-// point it has observed, rather than racing a wall-clock bound.
-func hostPreflightUntil(ctx context.Context, script string, bound time.Duration) string {
-	out, err := exec.CommandContext(ctx, script, "preflight").CombinedOutput()
-	partial := strings.TrimRight(string(out), "\n")
-
-	if ctx.Err() != nil {
-		// The bound fired. Say so, and carry whatever partial output there
-		// was: a preflight that got as far as naming its runtime tells the
-		// reader which engine is wedged.
-		reason := fmt.Sprintf(
-			"the sandbox preflight (%s preflight) did not answer within %s, so the sandbox is "+
-				"presumed unusable and this layer never falls back to an unsandboxed run. "+
-				"The container runtime's engine is likely wedged (Docker Desktop backend alive "+
-				"but the socket unresponsive): restart Docker Desktop, then re-run.",
-			sandboxScriptRel, bound)
-		if partial != "" {
-			return reason + "\nPartial preflight output before the bound expired:\n" + partial
-		}
-		return reason + "\nThe preflight produced no output before the bound expired."
-	}
-
-	if err != nil {
-		// Quoted VERBATIM: preflight's message is actionable (start
-		// Docker, build the image) and paraphrasing it would throw away
-		// the only instructions the reader needs.
-		return fmt.Sprintf(
-			"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
-			partial)
-	}
-	return ""
-}
-
-// sandboxRunCommand spells the module-aware invocation a host-side skip hands
-// back. The module root has no go.mod; the sandbox must enter e2e before Go
-// can discover e2e/go.mod.
-func sandboxRunCommand(testPattern string) string {
-	return fmt.Sprintf("%s run --dir e2e go test ./ -run %s -v", sandboxScriptRel, testPattern)
-}
-
-func TestSandboxRunCommandEntersTheE2EModule(t *testing.T) {
-	// Arrange.
-	const pattern = "TestEmacsExample"
-
-	// Act.
-	got := sandboxRunCommand(pattern)
-
-	// Assert.
-	want := sandboxScriptRel + " run --dir e2e go test ./ -run TestEmacsExample -v"
-	if got != want {
-		t.Fatalf("sandbox run command = %q, want %q", got, want)
-	}
-}
 
 // repoRoot is the checkout root, three levels above the module.
 func repoRoot() string {

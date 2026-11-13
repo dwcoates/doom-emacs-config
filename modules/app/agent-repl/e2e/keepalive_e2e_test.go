@@ -39,9 +39,6 @@ package e2e
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -76,34 +73,6 @@ func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")
-}
-
-// TestKeepaliveWorldIsTheOneCompressedCadence pins keepaliveWorld as the one
-// place a world compresses the daemon's keep-alive cadence, so a test that
-// hand-rolls its own cannot drift from it.
-func TestKeepaliveWorldIsTheOneCompressedCadence(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*_test.go")
-	if err != nil {
-		t.Fatalf("listing the e2e test files: %v", err)
-	}
-
-	// Act
-	sites := map[string]int{}
-	for _, file := range files {
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("reading %s: %v", file, err)
-		}
-		if n := strings.Count(string(src), "KeepaliveInterval"+": "); n > 0 {
-			sites[file] = n
-		}
-	}
-
-	// Assert
-	if want := map[string]int{"keepalive_e2e_test.go": 1}; !reflect.DeepEqual(sites, want) {
-		t.Errorf("worlds compressing the keep-alive cadence = %v, want only keepaliveWorld's %v", sites, want)
-	}
 }
 
 // awaitShimRecords awaits COUNT records satisfying pred, the first at or after
@@ -186,6 +155,8 @@ func shimRecords(t *testing.T, path string) []harness.LogRecord {
 // testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone — a real prompt that
 // arrives while a keep-alive is in flight waits it out, then rewinds past
 // exactly that keep-alive to the last real turn.
+//
+// Seam: daemon -> shim -> vendor, a prompt's rewind past exactly the keep-alive in flight
 func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
@@ -216,6 +187,8 @@ func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 // the mock's `!stop-on-rewind` lever, every rewind must resume at the same
 // real anchor, discard the stop's answer with the keep-alive, trip no
 // refusal, and store and serve nothing of it.
+//
+// Seam: vendor -> shim -> store, a stop answered on every rewind, discarded and never looping
 func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -307,6 +280,8 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 // testRestartedShimCarriesItsKeepAlivesUntilARealReply — a restarted shim is
 // a new process with no anchor: its keep-alives are carried (never rewound,
 // never refused) until its own first real reply anchors the next rewind.
+//
+// Seam: daemon -> restarted shim -> vendor, keep-alives carried until the new process's first real reply
 func testRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)

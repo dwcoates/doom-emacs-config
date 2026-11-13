@@ -412,8 +412,9 @@ runs is a defect to root-cause at its source, never a run to repeat. One such
 defect was found and fixed this way: the refused-vendor-start area's health
 fault lands asynchronously behind the rpc that causes it, so whether the
 cleanup sweep saw it depended on machine load — the fix is that the area
-states the fault its own arrangement causes (`refusals_e2e_test.go`'s
-`rfVendorStartFaultWarnings`), not that the run is retried.
+states the fault its own arrangement causes (the former
+`refusals_e2e_test.go`'s `rfVendorStartFaultWarnings`; that area has since
+left e2e, see "Refusal arms" below), not that the run is retried.
 
 ### Loud skips
 
@@ -963,7 +964,15 @@ docs. File-per-area grouping is given in section E.
     `not_yet_adopted` for unowned workspaces; old daemon refuses
     `transferring_away{address}`; a lagging client self-heals.
 
-### Refusal arms (`refusals_e2e_test.go`)
+### Refusal arms (retired from e2e, 2026-11-12)
+
+`refusals_e2e_test.go` is deleted: each arm is one system's relay of the
+shim's refusal, proven in `daemon/integration/` (`TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal`,
+`TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`,
+`TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm`,
+`TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal` and
+`TestTheStartAfterARejectedVendorStartReusesItsShim`). The entries below are
+the original spec.
 
 51. **BubbleRefusedNotDeliverable** — `PROTO-CHANGES.md` Landing 7:
     `SubmitPromptError.bubble_refused{kind: not_deliverable}` — a
@@ -1001,7 +1010,13 @@ docs. File-per-area grouping is given in section E.
 57. **RecoveryAfterStoreRestart** — same test family, second half — the
     degraded fact clears once the store is back and the shim reconnects.
 
-### Usage / accounting (`accounting_e2e_test.go`)
+### Usage / accounting (retired from e2e, 2026-11-12)
+
+`accounting_e2e_test.go` is deleted: the context-usage panel is proven in
+`daemon/integration/prompt_test.go`
+(`TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage`,
+`TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage`). The entries below are the original
+spec.
 
 58. **AccountUsage** — RETIRED (2026-10-30): the account's usage is never
     sampled, and `conversation.v1.SessionUpdate.account_usage` is retired;
@@ -1011,7 +1026,11 @@ docs. File-per-area grouping is given in section E.
     `shim.md` §"Simple reads the shim now PUSHES on the session stream
     (context usage, diagnostics) — no pull rpcs remain."
 
-### Slash commands (`slashcommands_e2e_test.go`)
+### Slash commands (retired from e2e, 2026-11-12)
+
+`slashcommands_e2e_test.go` is deleted: the withheld-unnamed record is
+proven by the shim's `test/integration/scenario-frames.test.ts`. The
+entries below are the original spec.
 
 60. **VendorAnsweredSlashCommand** — `vendor-answered-slash-commands` — the
     VENDOR answering a slash command (distinct from #61/#62's daemon-side
@@ -1037,7 +1056,12 @@ docs. File-per-area grouping is given in section E.
     ARBITRARY skill name/args/document body (e.g.
     `create-or-update-workspace merge`), replacing the fixed `"fake-skill"`.
 
-### File tools (`filetools_e2e_test.go`)
+### File tools (retired from e2e, 2026-11-12)
+
+`filetools_e2e_test.go` is deleted: a Write's diagnostics are proven by the
+shim's `test/integration/scenario-frames.test.ts` and
+`daemon/integration/feed_write_diagnostics_test.go`. The entries below are
+the original spec.
 
 66. **Edit** — `edit` — Edit-tool round trip, zero support in the old
     `fake-query.ts` per the coverage report; confirm the landed
@@ -1054,8 +1078,11 @@ The original single `misc_e2e_test.go` was 28 tests spanning unrelated
 families; it is split four ways for four writers:
 
 - `hooks_e2e_test.go` — #77-80
-- `questions_e2e_test.go` — #88-92
-- `mcpmonitors_e2e_test.go` — #81-84
+- `questions_e2e_test.go` — #88-92 (deleted 2026-11-12: proven in
+  `daemon/integration/` by `TestRosterAndFooterAgreeOnAnOpenQuestion` and
+  `TestQuestionAnsweredRepushesWithEchoedLabels`)
+- `mcpmonitors_e2e_test.go` — #81-84 (deleted 2026-11-12: the MCP tool call
+  is proven by the shim's `test/integration/scenario-frames.test.ts`)
 - `remainder_e2e_test.go` — #72-76, #85-87, #93-99
 
 One test per remaining golden, as below.
@@ -1333,15 +1360,15 @@ Area files, each independent (zero overlap once `harness_e2e.go` exists):
 8. `mergequeue_e2e_test.go` — §C #39-43
 9. `hibernation_e2e_test.go` — §C #44-46
 10. `adoption_e2e_test.go` — §C #47-50
-11. `refusals_e2e_test.go` — §C #51-55
+11. `refusals_e2e_test.go` — §C #51-55 (deleted 2026-11-12, see that section)
 12. `degradedstate_e2e_test.go` — §C #56-57
-13. `accounting_e2e_test.go` — §C #58-59
-14. `slashcommands_e2e_test.go` — §C #60-63
+13. `accounting_e2e_test.go` — §C #58-59 (deleted 2026-11-12, see that section)
+14. `slashcommands_e2e_test.go` — §C #60-63 (deleted 2026-11-12, see that section)
 15. `skills_e2e_test.go` — §C #64-65
-16. `filetools_e2e_test.go` — §C #66-71
+16. `filetools_e2e_test.go` — §C #66-71 (deleted 2026-11-12, see that section)
 17. `hooks_e2e_test.go` — §C #77-80
-18. `questions_e2e_test.go` — §C #88-92
-19. `mcpmonitors_e2e_test.go` — §C #81-84
+18. `questions_e2e_test.go` — §C #88-92 (deleted 2026-11-12, see that section)
+19. `mcpmonitors_e2e_test.go` — §C #81-84 (deleted 2026-11-12, see that section)
 20. `remainder_e2e_test.go` — §C #72-76, #85-87, #93-99
 
 20 independent writer groups plus the one harness writer who goes first

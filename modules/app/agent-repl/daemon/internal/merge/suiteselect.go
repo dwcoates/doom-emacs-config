@@ -116,8 +116,12 @@ var suiteRules = []suiteRule{
 	// -- the Emacs client layer's and the Doom tier's, which runs in it -- and
 	// nothing else's: the containerless cross-system suite never touches them.
 	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
-	// Both cross-system suites live in e2e/ and share its harness.
-	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e", "e2e-emacs", repoScans}},
+	// The e2e harness's world-free code, its own module: its own suite, and
+	// both cross-system suites, which import it.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/kit/", Suites: []string{"e2e-kit", "e2e", "e2e-emacs", repoScans}},
+	// Both cross-system suites live in e2e/ and share its harness; e2e-kit's
+	// scans read its sources.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e-kit", "e2e", "e2e-emacs", repoScans}},
 
 	// ONE SYSTEM, ITS OWN SUITES, PLUS THE END-TO-END SUITES THAT RUN IT.
 	// Every world of both end-to-end suites runs the store, the sidecar, the

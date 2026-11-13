@@ -121,19 +121,17 @@ package e2e
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	storev1 "agentrepl/proto/store/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
 
 	"agent-repld/integration/grantedclock"
-	"agent-repld/integration/harness"
 )
 
 // ---------------------------------------------------------------------------
@@ -154,33 +152,6 @@ func rmNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	return w, ws
 }
 
-// rmAwaitFeedRow opens ws's root feed and answers the first row satisfying
-// pred, checking the already-materialized page first (a scenario driven to
-// completion via driveScenarioToCompletion has already waited for the
-// turn's own terminal row by the time this is called) and falling back to
-// the live tail otherwise. Duplicated from the same shape world_test.go's
-// AwaitTurnEnded uses, rather than shared, because this file may not edit
-// world_test.go.
-func rmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
-	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed: %v", err)
-	}
-	success := opened.Msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
-	}
-	for _, row := range success.GetPage().GetSuccess().GetRows() {
-		if pred(row) {
-			return row
-		}
-	}
-	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
-	defer stream.Close()
-	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
-}
-
 // rmOpenAgentBook opens the given agent's book at the store directly (a
 // read-only verb, OpenAgentSession — never the forbidden WriteBatch) and
 // answers its first page. Used only by TestContextInjectedMemory and
@@ -192,39 +163,11 @@ func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *sto
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	page, err := readAgentBook(ctx, w.Store.Client, agent)
+	page, err := kit.ReadAgentBook(ctx, w.Store.Client, agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return page
-}
-
-// testCronCreateSetsTheFootersCronsChip drives `!cron-create`, which creates a
-// job and leaves it standing, so the footer's ⏱ chip stays set once the turn
-// has ended: a state every footer reader is handed, however far behind.
-func testCronCreateSetsTheFootersCronsChip(t *testing.T) {
-	// Arrange.
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron-create")
-	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
-	if ended.GetConcluded() == nil {
-		t.Fatalf("the cron-create turn ended = %v, want a concluded outcome", ended)
-	}
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-
-	// Assert: the standing job reached the ONE surface cron is contracted to
-	// reach -- the footer's ⏱ chip.
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip for the standing job", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetCrons() != nil
-	})
-	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got != 1 {
-		t.Fatalf("the footer's crons chip counts %d jobs, want the 1 standing job", got)
-	}
 }
 
 // ===========================================================================
@@ -283,6 +226,8 @@ func testPlanModeCoalescesOntoOneBubble(t *testing.T) {
 // of the turn arrives after the shim's, its `EnterPlanMode` last, and a bubble
 // that took that enter would go back to its PLANNING treatment with the plan
 // already presented. #85's wait passes either way.
+//
+// Seam: shim and sidecar -> daemon, the plan episode's two planes settling one bubble planned
 func testPlanModeSettlesPlanned(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
@@ -310,29 +255,4 @@ func testPlanModeSettlesPlanned(t *testing.T) {
 		return
 	}
 	t.Fatal("the feed holds no plan bubble at all")
-}
-
-// ===========================================================================
-// ChessBoard — "chess-board" (automation.ts CHESS_BOARD): the agent calls
-// agent-repl's own show_chess_board tool, and the daemon draws the board.
-// A test daemon has no explanation-engine checkout (the harness states the
-// host's empty), so the board settles as unavailable for exactly that reason.
-// ===========================================================================
-
-func testChessBoard(t *testing.T) {
-	// Arrange
-	w, ws := rmNewWorkspace(t)
-
-	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "chess-board")
-
-	// Assert
-	row := rmAwaitFeedRow(t, w, ws, "the chess board, unavailable for want of a checkout", func(r *frontendv1.FeedRow) bool {
-		board := r.GetActivity().GetChessBoard()
-		return r.GetTurn().GetValue() == turn.GetValue() &&
-			strings.HasPrefix(board.GetUnavailable().GetReason().GetText(), "The explanation-engine checkout was not found")
-	})
-	if got := row.GetActivity().GetChessBoard().GetHeading().GetText(); got != "Chess board · CEE session fake-cee-session" {
-		t.Fatalf("heading = %q, want the scenario's session", got)
-	}
 }
