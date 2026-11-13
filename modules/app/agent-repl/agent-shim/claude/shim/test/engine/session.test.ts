@@ -11612,6 +11612,26 @@ describe("the teardown's tails", () => {
     expect(h.persistence.concludedThrough).toContain("p-9");
   });
 
+  it("names where a tail stood when it does not end within its conclusion budget", async () => {
+    // Arrange: the tail served through p-3 and never ends; the book's head is p-9.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    h.persistence.servedPointer = "p-3";
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, {}))[Symbol.asyncIterator]();
+    await watching.next();
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const context = logContextFor(mark, "did not end within its conclusion budget");
+    expect([context?.["concluded_through"], context?.["served_through"]]).toEqual(["p-9", "p-3"]);
+  });
+
   it("VOUCHES for the agent when reading the head, so a book never written is not asked for", async () => {
     // Arrange. A session killed before its first turn has an agent with no book,
     // and asking the store for one earns an `unknown_agent` refusal on every

@@ -8337,8 +8337,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (open.length === 0) return;
     await Promise.all(
       open.map(async (entry) => {
+        let head: conversationv1.HistoryPointer | undefined;
         try {
-          entry.page.concludeThrough(await bookHead(entry.agent));
+          head = await bookHead(entry.agent);
+          entry.page.concludeThrough(head);
         } catch (err) {
           // The head could not be read, so there is no pointer to conclude
           // through; ending the tail now is still better than cutting it later.
@@ -8353,6 +8355,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           entry.ended,
           watcherConclusionBudgetMs,
           `the WatchAgent tail on ${entry.agent.value} did not end within its conclusion budget`,
+          // WHERE THE TAIL STOOD says which side held it: served short of the
+          // head is a consumer not reading, served through it is one that
+          // read everything and did not let the stream end (2026-11-13: 13
+          // tails ran out the budget in the minute after a handover).
+          () => ({ agent: entry.agent.value, concluded_through: head?.value, served_through: entry.page.servedThrough() }),
         );
       }),
     );

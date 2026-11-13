@@ -739,6 +739,39 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (eq (plist-get failure :kind) :transport))
       (should (string-match-p "no HTTP response" (plist-get failure :message))))))
 
+(ert-deftest agent-repl-test-connect-unary-timeout-states-nothing-arrived ()
+  "A timeout with no answer bytes states no status and nothing received."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (fire nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest _) (setq fire fn) nil)))
+        (agent-repl-connect-unary conn "AdoptHostWorkspace" "{}"))
+      ;; Act
+      (funcall fire)
+      ;; Assert
+      (should (agent-repl-test-connect--logs-matching
+               'warn "unary-timeout method=\"AdoptHostWorkspace\" .* status=nil received=0")))))
+
+(ert-deftest agent-repl-test-connect-unary-timeout-states-a-partial-answer ()
+  "A timeout after the status line states the status and the body bytes."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (fire nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest _) (setq fire fn) nil)))
+        (agent-repl-connect-unary conn "AdoptHostWorkspace" "{}"))
+      (agent-repl-test-connect--feed
+       (agent-repl-test-connect--last-spawn)
+       "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n{\"a\"")
+      ;; Act
+      (funcall fire)
+      ;; Assert
+      (should (agent-repl-test-connect--logs-matching
+               'warn "unary-timeout method=\"AdoptHostWorkspace\" .* status=200 received=4")))))
+
 (ert-deftest agent-repl-test-connect-unary-untimed-arms-no-timer ()
   "A `:none' timeout arms no timer: the call waits for its answer."
   ;; Arrange

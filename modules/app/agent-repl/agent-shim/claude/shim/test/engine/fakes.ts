@@ -498,6 +498,8 @@ export class RecordingPersistence implements Persistence {
   }
   /** Every pointer a reading session was asked to conclude through. */
   readonly concludedThrough: string[] = [];
+  /** The pointer every page's tail reports it served through; absent by default. */
+  servedPointer: string | undefined = undefined;
   /** How many times the vendor loop waited on the writer's backpressure. */
   writableWaits = 0;
   /** Set to hold `whenWritable` until the test releases it, the way a backlog does. */
@@ -557,6 +559,7 @@ export class RecordingPersistence implements Persistence {
       concludeThrough: (through) => {
         this.concludedThrough.push(through?.value ?? "");
       },
+      servedThrough: () => this.servedPointer,
       close: () => {
         this.closedPages++;
       },
