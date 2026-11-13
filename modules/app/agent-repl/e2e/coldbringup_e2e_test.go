@@ -25,6 +25,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ import (
 // The refusal's own vocabulary is what it matches on — the operation plus
 // `refusal_site` — never the prose detail, which is a sentence a store
 // maintainer may reword at any time.
-func cbuStoreOpenRefusals(t *testing.T, w *World) []harness.LogRecord {
+func cbuStoreOpenRefusals(t *testing.T, w *stack.World) []harness.LogRecord {
 	t.Helper()
 	var out []harness.LogRecord
 	for _, rec := range harness.ReadLog(t, w.Store.LogPath) {
@@ -56,7 +57,7 @@ func cbuStoreOpenRefusals(t *testing.T, w *World) []harness.LogRecord {
 // asking the store for a book. It is the synchronization point the refusal
 // assertion needs: without it, a store log read before the open had happened
 // would pass for the wrong reason.
-func cbuAwaitServedWithoutAsking(t *testing.T, w *World, workspaceDir string) harness.LogRecord {
+func cbuAwaitServedWithoutAsking(t *testing.T, w *stack.World, workspaceDir string) harness.LogRecord {
 	t.Helper()
 	return w.Daemon.AwaitLogRecord(
 		harness.WorkspaceLogPath(workspaceDir, "shim"),
@@ -68,14 +69,14 @@ func cbuAwaitServedWithoutAsking(t *testing.T, w *World, workspaceDir string) ha
 // cbuBringUp registers a fresh workspace and brings its session up cold,
 // through the first prompt, waiting until that turn has ended. It returns the
 // workspace's directory.
-func cbuBringUp(t *testing.T, w *World) string {
+func cbuBringUp(t *testing.T, w *stack.World) string {
 	t.Helper()
 	repo, ws := w.NewRepoWorkspace(t)
 	// Plain prose, which the fake registry falls through to its PROSE scenario
 	// for: this suite is about the bring-up BEFORE the turn, and a scenario with
 	// its own machinery would only add writes to reason about.
-	turn := SubmitPrompt(t, w, ws, "say something")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "say something")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 	return repo.Dir
 }
 
@@ -85,7 +86,7 @@ func cbuBringUp(t *testing.T, w *World) string {
 // Seam: daemon and shim -> store, a cold bring-up's registrations in the order the store accepts
 func testColdBringUpEarnsNoStoreRefusal(t *testing.T) {
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 
 	// Act.
 	workspaceDir := cbuBringUp(t, w)

@@ -117,3 +117,23 @@ func TestNewPinnedCheckoutCarriesNoBuildStamp(t *testing.T) {
 		t.Fatalf("the pinned checkout disagrees on the build identity: %v", err)
 	}
 }
+
+func TestThePinnedCheckoutCarriesTheRepositorysRequirementsManifest(t *testing.T) {
+	// Arrange
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "requirements.json"), []byte(`{"requirements": []}`), 0o644); err != nil {
+		t.Fatalf("write the stand-in manifest: %v", err)
+	}
+
+	// Act
+	checkout, err := newPinnedCheckout(filepath.Join(t.TempDir(), "checkout"), repo)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("newPinnedCheckout = %v, want a laid-out checkout", err)
+	}
+	body, err := os.ReadFile(filepath.Join(checkout, "requirements.json"))
+	if err != nil || string(body) != `{"requirements": []}` {
+		t.Fatalf("the pinned checkout's manifest = %q, %v; want the repository's", body, err)
+	}
+}

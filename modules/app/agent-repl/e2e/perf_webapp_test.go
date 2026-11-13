@@ -22,6 +22,7 @@
 package e2e
 
 import (
+	"agentrepl/e2e/kit/stack"
 	"context"
 	"math"
 	"testing"
@@ -100,13 +101,13 @@ func wlPerfAssertions() []string {
 // TestPerfWebappLayer drives the perf area and asserts its shipped numbers.
 func TestPerfWebappLayer(t *testing.T) {
 	perfRequire(t)
-	wlHoldAreaSlot(t)
-	npm := wlRequireNPM(t)
-	webappDir := wlRequireWebappDeps(t)
+	stack.WlHoldAreaSlot(t)
+	npm := stack.WlRequireNPM(t)
+	webappDir := stack.WlRequireWebappDeps(t)
 
 	// Arrange: the world, the page's workspace, and the SECOND workspace whose
 	// sidebar row row 11c moves the selection onto and off.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	repoA := harness.NewRepo(t)
 	repoB := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoA.Dir)
@@ -139,13 +140,13 @@ func TestPerfWebappLayer(t *testing.T) {
 	host.Drain()
 	defer host.Close()
 
-	env := append(wlChildEnv(t, w, ws),
+	env := append(stack.WlChildEnv(t, w, ws),
 		wlPerfWorkspaceIDBEnv+"="+wsB.GetId(),
 		wlPerfWorkspaceDirBEnv+"="+wsB.GetDir(),
 	)
 
 	// Act: the child measures, then ships one record before it stops its page.
-	child, err := wlStartVitest(t, npm, webappDir, "perf.layer.test.ts", env)
+	child, err := stack.WlStartVitest(t, npm, webappDir, "perf.layer.test.ts", env)
 	if err != nil {
 		t.Fatalf("e2e/webapp-layer: starting the perf child: %v", err)
 	}

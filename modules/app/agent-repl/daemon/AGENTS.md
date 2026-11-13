@@ -520,7 +520,7 @@ ending row, live and on replay.
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
-| `AGENT_REPL_TEMPORARY_REGISTRATION_TEST_ROOT` | test only | the ONE directory beneath which a test-run daemon may register directories inside a temporary root, which the registry otherwise refuses (owner ruling 2026-10-06, `internal/tempdirs`: `os.TempDir()`, `/tmp`, `/var/tmp`, `/var/folders`, canonicalized). It must lie strictly beneath a temporary root and not be one. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, it is a BOOT REFUSAL. The integration harness names its run root and moves the daemon's `TMPDIR` to `<run root>/daemon-tmp`; the e2e-emacs layer names each test's sandbox scratch (Emacs launches the daemon, so it rides Emacs's environment); unit-test binaries that open a real registry run through `tempdirstest.Main`. A test-run daemon that refuses a temporary folder with NO test root records ERROR `daemon.refusal.temporary_seam_missing`, so a launcher that forgot the seam fails its warning sweep instead of passing silently |
+| `AGENT_REPL_TEMPORARY_REGISTRATION_TEST_ROOT` | test only | the ONE directory beneath which a test-run daemon may register directories inside a temporary root, which the registry otherwise refuses (owner ruling 2026-10-06, `internal/tempdirs`: `os.TempDir()`, `/tmp`, `/var/tmp`, `/var/folders`, canonicalized). It must lie strictly beneath a temporary root and not be one. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, it is a BOOT REFUSAL. The integration harness names its run root and moves the daemon's `TMPDIR` to `<run root>/daemon-tmp`; unit-test binaries that open a real registry run through `tempdirstest.Main`. A test-run daemon that refuses a temporary folder with NO test root records ERROR `daemon.refusal.temporary_seam_missing`, so a launcher that forgot the seam fails its warning sweep instead of passing silently |
 | `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
 | `AGENT_REPL_TEST_HOLD_FIRST_WATCHER_START` | test only | an absolute unix socket path: the daemon dials it before starting its FIRST session watcher, after the bring-up marked the session started, and holds that start until the test closes the connection (`internal/workspace/watcherhold.go`). It pins open the window a prompt was once refused `no_session` in; the integration harness serves it as `harness.HoldFirstWatcherStart`. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, or relative, it is a BOOT REFUSAL. An unreachable hold, or one that ends in anything but the test's close, fails that watcher start at ERROR `daemon.workspace.watcher_hold` |
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff (the name predates the one park and is kept so an existing setting still holds) |
@@ -1539,6 +1539,25 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   status). Until it answers NOTHING is listed, announced, quiesced or asked of
   the bounce registry; a successor that dies or never answers abandons the
   handover at ERROR and the incumbent keeps serving.
+- **A successor proves it can spawn ITS successor before it serves.** In its
+  graph, after the deployer is built, every daemon runs
+  `rollout.Controller.PreflightSpawn`: `ProcessSpawner.Preflight` runs every
+  step of its own successor spawn but the exec (the binary named and
+  executable, the argv, the environment through the same `Environ` the spawn
+  uses), through the one door `Spawn` and `SpawnReplacement` also take
+  (`prepare`), so the preflight cannot pass where the spawn would fail before
+  its exec. Recorded under `daemon.rollout.spawn_preflight`. A JOINING
+  successor that fails it ends its boot before it answers `DaemonHealth`, so
+  its incumbent's `Ready` sees it exit and abandons the handover with the
+  `successor_spawn_failed` fault, keeping serving. A daemon that owns its
+  state (a fresh boot, a restart's replacement) SERVES with
+  `successor_spawn_failed` open: refusing its boot would take every workspace
+  down with no predecessor left to serve them, for a defect that blocks only
+  deploys. It runs after the deployer because the deployer's daemon-boot edge
+  (`CloseEarlierFailures`) closes that fault. Why (2026-11-13): 0.425.14
+  built its successors' environment from a manifest path that did not exist;
+  its predecessor spawned it on old code, and the next deploy could not roll
+  out from it at all.
 - **A closed workspace is served by no daemon.** `wsm.MarkClosed` is the
   one close write and clears `serving_instance` and `spawned_shim_pid` in the
   same update, so every close path releases serving. `served` never transfers

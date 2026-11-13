@@ -185,7 +185,7 @@ func TestSuiteEdgeReadsTheScriptsLines(t *testing.T) {
 		{line: "[agent-repl-tests] daemon: starting", name: "daemon", state: suiteStateRunning, ok: true},
 		{line: "[agent-repl-tests] daemon: passed in 3s", name: "daemon", state: suiteStatePassed, ok: true},
 		{line: "[agent-repl-tests] ERROR: webapp failed after 4s with exit code 1", name: "webapp", state: suiteStateFailed, ok: true},
-		{line: "[agent-repl-tests] e2e-emacs: DECLINED after 0.125s — its precondition is not met (exit 77)", ok: false},
+		{line: "[agent-repl-tests] proto: DECLINED after 0.125s — its precondition is not met (exit 77)", ok: false},
 		{line: reusedLine, name: "daemon", state: suiteStateReused, ok: true},
 		{line: "some output", ok: false},
 	}
@@ -415,7 +415,7 @@ func TestAGatesStartIsRecordedWithItsSelection(t *testing.T) {
 
 	// Assert.
 	got := gateRecord(t, h, "the merge's test gate started")
-	if got["suites"] != "daemon,repo-scans,e2e,e2e-emacs" {
+	if got["suites"] != "daemon,repo-scans,e2e-kit,e2e" {
 		t.Fatalf("start = %v, want the daemon's selection", got)
 	}
 }

@@ -1,7 +1,7 @@
 // interrupt_e2e_test.go — SPEC.md §C "Interrupts" (#18-19).
 //
 // Both tests drive the real daemon+store+sidecar+shim stack (World, see
-// world_test.go and main_test.go) against the real (`--fake`-mode) shim's
+// kit/stack/world.go and kit/stack/main.go) against the real (`--fake`-mode) shim's
 // scripted vendor. Contract: daemon.md's "Queue, holds, leases — contract
 // facts" ("PERMISSION DECLINE IS DENY-AND-CONTINUE... Stopping is what
 // Interrupt is for") and its "Session lifecycle" section's END act
@@ -64,6 +64,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -85,7 +86,7 @@ func testInterruptAfterTextDelta(t *testing.T) {
 	// ruling reversed real git: only agent-repld, the shim, shim-store, and
 	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt
 	// is submitted, so no push in between can be missed.
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
@@ -99,9 +100,9 @@ func testInterruptAfterTextDelta(t *testing.T) {
 	tail := w.WatchFeedOn(w.Client(), openedSuccess.GetWatch())
 	defer tail.Close()
 
-	turn := SubmitPrompt(t, w, ws, "!interrupt")
+	turn := stack.SubmitPrompt(t, w, ws, "!interrupt")
 
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 
 	// Act: wait until the Bash tool call is genuinely live (running, no

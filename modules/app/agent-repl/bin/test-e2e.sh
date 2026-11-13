@@ -8,10 +8,8 @@
 # FAKE SDK and the SCRIPTED FAKE GIT, so they need no container and no
 # network, and they belong in the gate like every other suite.
 #
-# The sandboxed Emacs client layer is a SEPARATE suite (test-e2e-emacs.sh),
-# because it needs a built container image that this machine may not have.
-# Its one test skips itself here, loudly, which is why running everything in
-# this directory is safe.
+# Every test in this directory runs here: the Emacs e2e layer, which ran in a
+# container, was removed on 2026-11-13 (e2e/AGENTS.md).
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
 [[ -n ${AGENT_REPL_BACKGROUND_PRIORITY:-} ]] || exec "$(dirname "${BASH_SOURCE[0]}")/background.sh" bash "${BASH_SOURCE[0]}" "$@"

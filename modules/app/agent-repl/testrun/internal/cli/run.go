@@ -61,11 +61,6 @@ type Deps struct {
 	// RunLog is the run's own log file; a coverage run writes its merged
 	// baseline beside it. "" when testrun was started directly.
 	RunLog string
-	// PrepareWebappDist builds the checkout's webapp dist when it is stale. A
-	// run calls it ONCE, before any unit starts, when a suite it runs needs
-	// the dist (roster.Suite.NeedsWebappDist): the run is then the dist's one
-	// writer, and no unit sees it change under it.
-	PrepareWebappDist func(moduleRoot string) error
 	// Metrics is where the run pushes every test's time when it ends, and
 	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
 	Metrics testtimes.Target
@@ -317,13 +312,6 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	log.Infof("plan: %d units on %d core slots, predicted %.1fs; chunks: %s",
 		len(p.Specs), d.Slots, p.Makespan, strings.Join(chunkNote, " "))
 
-	if needsWebappDist(selected) {
-		log.Infof("webapp dist: building it once, before any unit starts, if it is stale")
-		if err := d.PrepareWebappDist(moduleRoot); err != nil {
-			return abort("webapp dist: building it before the run failed, so no suite that reads it can run: %v", err)
-		}
-	}
-
 	ev.Planned(p.Specs, d.RunLog)
 	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, After: d.After, Log: log, Ended: ev.UnitEnded}
 	start := d.Clock.Now()
@@ -385,17 +373,6 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	}
 	printClosing(log, a)
 	return 0
-}
-
-// needsWebappDist reports whether a suite the run will run reads the
-// checkout's webapp dist.
-func needsWebappDist(selected []roster.Suite) bool {
-	for _, s := range selected {
-		if s.NeedsWebappDist {
-			return true
-		}
-	}
-	return false
 }
 
 // repoRoot is the checkout root a module root sits three directories under

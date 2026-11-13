@@ -90,12 +90,20 @@ func (c *controller) clearDeployLine(why string, fields dlog.Context) {
 // so a run of failed handovers stands as one fault, the latest. A fault that cannot be recorded is
 // ERROR: the handover's own failure is still the caller's answer.
 func (c *controller) openSuccessorFault(ctx context.Context, cause error, fields dlog.Context) {
+	c.openSpawnFault(ctx, fmt.Sprintf("the deploy's successor daemon did not come up; this daemon keeps serving: %v", cause), cause, fields)
+}
+
+// openSpawnFault opens the `successor_spawn_failed` fault with DETAIL as its
+// line, superseding any standing one: the one door a handover's failed
+// successor and a failed spawn preflight (PreflightSpawn) both open it
+// through.
+func (c *controller) openSpawnFault(ctx context.Context, detail string, cause error, fields dlog.Context) {
 	health.CloseOnEdge(context.WithoutCancel(ctx), c.deps.DB, c.log.With(fields), health.EdgeSuperseded,
 		health.EdgeScope{DaemonOnly: true, Match: func(f wsm.Fault) bool { return f.Kind == health.KindSuccessorSpawnFailed }},
 		c.deps.Clock.Now())
 	_, err := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
 		Kind:     health.KindSuccessorSpawnFailed,
-		Detail:   fmt.Sprintf("the deploy's successor daemon did not come up; this daemon keeps serving: %v", cause),
+		Detail:   detail,
 		Evidence: map[string]string{"detail": cause.Error()},
 		OpenedAt: c.deps.Clock.Now(),
 	})

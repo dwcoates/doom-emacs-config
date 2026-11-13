@@ -18,7 +18,7 @@ var rosterArmClaims = map[string]Claim{
 	"dead":            AgentReplFault,
 	"start_failed":    AgentReplFault,
 	"turn_died":       AgentReplFault,
-	"daemon_impaired": AgentReplFault,
+	"daemon_impaired": DaemonImpaired,
 	"network_fault":   NetworkFault,
 	"closing":         Closing,
 	"degraded":        Degraded,
@@ -65,15 +65,21 @@ func RosterArms() []string {
 // FooterClaim names the claim a footer status makes, and false for an unset
 // status.
 //
-// ONE ARM SPLITS ON ITS STEP. `waiting · wakeup` is the fallback the footer
+// TWO ARMS SPLIT ON THEIR STEP. `waiting · wakeup` is the fallback the footer
 // admits only where it would otherwise read idle — a self-scheduled wakeup is
 // the foreground being free — so it projects onto the idle rung, where every
-// other waiting step waits on the user.
+// other waiting step waits on the user. `agent_repl_fault · daemon_impaired`
+// is the daemon itself impaired, which stands on its own rung just above idle
+// (owner ruling, 2026-11-13), where every other agent-repl fault step is the
+// session's own.
 func FooterClaim(status *frontendv1.FooterStatus) (Claim, bool) {
 	switch arm := status.GetStatus().(type) {
 	case *frontendv1.FooterStatus_Merging:
 		return Merging, true
 	case *frontendv1.FooterStatus_AgentReplFault:
+		if arm.AgentReplFault.GetDaemonImpaired() != nil {
+			return DaemonImpaired, true
+		}
 		return AgentReplFault, true
 	case *frontendv1.FooterStatus_Starting:
 		return Starting, true

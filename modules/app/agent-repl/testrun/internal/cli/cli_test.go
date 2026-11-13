@@ -469,14 +469,6 @@ type harness struct {
 	module    string
 	recordOut string
 	git       *[]string
-	// prepared holds, per PrepareWebappDist call, its module root and how
-	// many units had started before it.
-	prepared *[]webappDistCall
-}
-
-type webappDistCall struct {
-	module      string
-	unitsBefore int
 }
 
 // newHarness is a module root with a valid test_time.csv, a history file, and
@@ -516,16 +508,9 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		},
 		Pid: 7,
 	}
-	prepared := &[]webappDistCall{}
-	d.PrepareWebappDist = func(m string) error {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-		*prepared = append(*prepared, webappDistCall{module: m, unitsBefore: len(e.ran)})
-		return nil
-	}
 	fr := &fakeReuser{mode: new(reuse.Mode), recordedUnits: &[]string{}}
 	d.Reuse = fr
-	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls, prepared: prepared}
+	return harness{deps: d, reuser: fr, exec: e, out: out, errOut: errOut, module: module, recordOut: filepath.Join(root, "pending-record.json"), git: gitCalls}
 }
 
 func (h harness) run(t *testing.T, argv ...string) int {
@@ -608,9 +593,9 @@ func TestRunWithAFailureContinuesAndExitsNonZero(t *testing.T) {
 	}
 }
 
-func TestRunFailsTheSandboxSuiteWhenItCannotRun(t *testing.T) {
-	// Arrange: the sandboxed suite exits 77, the old "declined" status.
-	h := newHarness(t, map[string]int{"e2e-emacs": 77}, nil)
+func TestRunFailsAScriptSuiteThatExitsTheOldDeclinedStatus(t *testing.T) {
+	// Arrange: a script suite exits 77, the old "declined" status.
+	h := newHarness(t, map[string]int{"proto": 77}, nil)
 
 	// Act
 	code := h.run(t)
@@ -619,8 +604,8 @@ func TestRunFailsTheSandboxSuiteWhenItCannotRun(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1: a suite that cannot run fails the run", code)
 	}
-	if !strings.Contains(h.out.String()+h.errOut.String(), "e2e-emacs failed after ") {
-		t.Errorf("output lacks e2e-emacs's failure line:\n%s\n%s", h.out.String(), h.errOut.String())
+	if !strings.Contains(h.out.String()+h.errOut.String(), "proto failed after ") {
+		t.Errorf("output lacks proto's failure line:\n%s\n%s", h.out.String(), h.errOut.String())
 	}
 	if strings.Contains(h.out.String(), "all agent-repl test suites passed") {
 		t.Error("a run with a suite that could not run was called passed")
@@ -844,61 +829,6 @@ func TestRunFailsBeforeRunningAnything(t *testing.T) {
 				t.Fatalf("units ran before the refusal: %v", h.exec.ran)
 			}
 		})
-	}
-}
-
-func TestRunBuildsTheWebappDistOnceBeforeAnyUnitWhenASuiteNeedsIt(t *testing.T) {
-	tests := []struct {
-		name   string
-		reused map[string]bool
-		argv   []string
-		want   int
-	}{
-		{name: "every suite, e2e-emacs among them", want: 1},
-		{name: "e2e-emacs alone", argv: []string{"--suites", "e2e-emacs"}, want: 1},
-		{name: "no suite that reads the dist", argv: []string{"--suites", "ert,daemon"}, want: 0},
-		{name: "e2e-emacs covered by an earlier pass", reused: map[string]bool{"e2e-emacs": true}, argv: []string{"--suites", "e2e-emacs,ert"}, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t, nil, nil)
-			h.reuser.reused = tt.reused
-
-			// Act
-			code := h.run(t, tt.argv...)
-
-			// Assert
-			if code != 0 {
-				t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
-			}
-			if len(*h.prepared) != tt.want {
-				t.Fatalf("PrepareWebappDist calls = %v, want %d", *h.prepared, tt.want)
-			}
-			for _, c := range *h.prepared {
-				if c.module != h.module || c.unitsBefore != 0 {
-					t.Fatalf("PrepareWebappDist call = %+v, want module %s with no unit started before it", c, h.module)
-				}
-			}
-		})
-	}
-}
-
-func TestRunWhoseWebappDistBuildFailsRunsNothing(t *testing.T) {
-	// Arrange
-	h := newHarness(t, nil, nil)
-	h.deps.PrepareWebappDist = func(string) error { return errors.New("vite build exited 1") }
-
-	// Act
-	code := h.run(t)
-
-	// Assert
-	want := "webapp dist: building it before the run failed, so no suite that reads it can run: vite build exited 1"
-	if code != 1 || !strings.Contains(h.errOut.String(), want) {
-		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
-	}
-	if len(h.exec.ran) != 0 {
-		t.Fatalf("units ran after the failed dist build: %v", h.exec.ran)
 	}
 }
 
@@ -1309,59 +1239,6 @@ func TestRunAFailingSelectionEndsFailed(t *testing.T) {
 	}
 }
 
-// TestRunATargetedE2EEmacsSelectionPlansAndRunsEachPattern is the merge
-// queue's failing-tests command for e2e-emacs: steps beneath two top-level
-// tests need two -test.run patterns, so two runs of the script, and both must
-// plan and run (2026-11-02: they were named as chunks are and the planner
-// refused them).
-func TestRunATargetedE2EEmacsSelectionPlansAndRunsEachPattern(t *testing.T) {
-	// Arrange
-	h := newHarness(t, nil, nil)
-	script := filepath.Join(h.module, "bin", "test-e2e-emacs.sh")
-	for path, body := range map[string]string{
-		script: "#!/bin/sh\n",
-		filepath.Join(h.module, "e2e", "x_test.go"): "package e2e\n\nimport \"testing\"\n\n" +
-			"func TestEmacsDaemonLifecycle(t *testing.T) {}\nfunc TestEmacsWorkspaces(t *testing.T) {}\n",
-	} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	h.deps.Build = suites.Build
-	var stream bytes.Buffer
-	h.deps.Events = events.New(&stream, h.deps.Log)
-	sel := &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
-		Script: "modules/app/agent-repl/bin/test-e2e-emacs.sh",
-		Groups: &testrunv1.TestSelectionHarness_Named{Named: &testrunv1.TestSelectionHarnessNamedGroups{Names: []string{
-			"TestEmacsDaemonLifecycle/EmacsHandoverTransfersAtFreeness", "TestEmacsWorkspaces/EmacsCreateWorkspaceAppearsOnTheRoster",
-		}}}}}}}}
-
-	// Act
-	code := h.run(t, "--selection", writeSelection(t, sel))
-
-	// Assert
-	t.Run("the run plans and passes", func(t *testing.T) {
-		if code != 0 {
-			t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
-		}
-		if evs := eventsOf(t, &stream); len(evs) == 0 || evs[0].GetPlanned() == nil || evs[len(evs)-1].GetEnded().GetPassed() == nil {
-			t.Fatalf("events = %v, want planned first and ended passed last", evs)
-		}
-	})
-	t.Run("each pattern is its own run of the script", func(t *testing.T) {
-		want := map[string][]string{
-			suites.ScriptRunID("e2e-emacs", 0): {script, "^(TestEmacsDaemonLifecycle)$/^(EmacsHandoverTransfersAtFreeness)$"},
-			suites.ScriptRunID("e2e-emacs", 1): {script, "^(TestEmacsWorkspaces)$/^(EmacsCreateWorkspaceAppearsOnTheRoster)$"},
-		}
-		if !reflect.DeepEqual(h.exec.argv, want) {
-			t.Fatalf("ran %v, want %v", h.exec.argv, want)
-		}
-	})
-}
-
 func TestRunRefusesASelectionItCannotRun(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1435,6 +1312,8 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Remeasure: true}},
 		{name: "a remeasuring narrowed request stays targeted and remeasures", req: remeasured(harnessSelection()),
 			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", Remeasure: true}},
+		{name: "a whole suite asked to reuse nothing reuses nothing", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("webapp")}, NoReuse: true},
+			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"webapp"}, NoReuse: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -225,6 +225,10 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 			}},
 		{name: "a remeasuring run", args: []string{"-go", "pkg=TestA", "-remeasure"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetRemeasure() }},
+		{name: "the user's fresh run reusing nothing", args: []string{"-suite", "webapp", "-no-reuse", "-as-user"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetNoReuse() && !r.GetGoverned() }},
+		{name: "the user's governed run", args: []string{"-suite", "webapp", "-governed", "-as-user"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetGoverned() && !r.GetRun().GetNoReuse() }},
 		{name: "a repeat stopping at the first failure", args: []string{"-go", "pkg=TestA", "-runs", "9", "-stop-at-first-failure"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRuns() == 9 && r.GetStopAtFirstFailure() }},
 		{name: "the user's run under load", args: []string{"-go", "pkg", "-cpu-load", "8", "-as-user"},
@@ -243,6 +247,30 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 			// Assert
 			if code != exitSuccess || !tc.check(daemon.got) {
 				t.Fatalf("exit %d, request %v, stderr %q", code, daemon.got, errOut)
+			}
+		})
+	}
+}
+
+func TestTestRunRefusesAMeasuringOptionTheUserDidNotAskFor(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "a fresh run", args: []string{"run", "-suite", "webapp", "-no-reuse"}},
+		{name: "a governed run", args: []string{"run", "-suite", "webapp", "-governed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			daemon := &testRunsDaemon{}
+
+			// Act
+			code, _, errOut := runTestCLI(t, daemon, tt.args...)
+
+			// Assert
+			if code != exitFailure || daemon.got != nil || !strings.Contains(errOut, "-no-reuse and -governed are the user's alone") {
+				t.Fatalf("exit %d, request %v, stderr %q; want the refusal and nothing sent", code, daemon.got, errOut)
 			}
 		})
 	}

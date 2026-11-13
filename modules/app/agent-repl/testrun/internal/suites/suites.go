@@ -19,8 +19,7 @@
 //
 // The one exception is a Script suite the roster gives a width (Slots): its
 // unit holds that many slots, is told the number in AGENT_REPL_UNIT_SLOTS,
-// and caps itself to exactly that many cores (e2e-emacs passes it to the
-// sandbox container as docker --cpus and GOMAXPROCS).
+// and caps itself to exactly that many cores.
 //
 // The parallelism lives in the scheduler, which can see every suite at once,
 // never inside a suite, which can only see itself.
@@ -38,10 +37,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
-	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -94,14 +91,6 @@ type Units struct {
 	// Programs are the shared programs (roster.Programs) the suite's units
 	// run; the run builds each once (ProgramUnits).
 	Programs []string
-	// Tests are the top-level Go tests a Script suite's one unit runs, for a
-	// suite that names them (roster.Suite.GoTests), in name order; Only is
-	// that unit running just the named test paths beneath them (a top-level
-	// test, or a subtest path such as a scenario's step), as one unit per
-	// -test.run pattern they need (gotest.PathsPatterns). Both are nil
-	// otherwise.
-	Tests []string
-	Only  func(names []string) []run.Spec
 	// GoBuilds are a Go suite's module builds, already placed in Atomic over
 	// the packages Atomic and Splits run (Finish).
 	GoBuilds []GoBuild
@@ -171,17 +160,6 @@ func (l Layout) resolve(p string) string {
 	return roster.Resolve(l.Repo, l.Module, p)
 }
 
-// NoWebappBuildEnv tells e2e-sandbox.sh not to build the webapp dist into the
-// checkout: the run built it before any unit started (roster.Suite.
-// NeedsWebappDist), and the run is the dist's one writer.
-const NoWebappBuildEnv = "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD"
-
-// ScriptRunID is run i of a Script suite run once per -test.run pattern
-// (Units.Only). Each run is an atomic unit, so its ID never holds the '#'
-// that names a split's chunks (sched.ChunkID): the scheduler refuses an
-// atomic ID that does, and history would read it as a chunk's.
-func ScriptRunID(suite string, i int) string { return fmt.Sprintf("%s/%02d", suite, i) }
-
 func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	path, err := executableScriptPath(l, s)
 	if err != nil {
@@ -190,66 +168,10 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	if s.Slots < 0 {
 		return Units{}, fmt.Errorf("suites: %s has a negative width %d", s.Name, s.Slots)
 	}
-	// unit is the suite's one unit running the script with args: a whole run
-	// and a run of named tests differ in nothing else.
-	unit := func(args ...string) run.Spec {
-		u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, args...))
-		u.Slots = s.Slots
-		u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
-		if s.NeedsWebappDist {
-			u.Env = append(u.Env, NoWebappBuildEnv+"=1")
-		}
-		return u
-	}
-	if s.GoTests == nil {
-		return Units{Atomic: []run.Spec{unit(s.Args...)}}, nil
-	}
-	tests, err := scriptGoTests(l, s)
-	if err != nil {
-		return Units{}, err
-	}
-	return Units{
-		Atomic: []run.Spec{unit(s.GoTests.Pattern)},
-		Tests:  tests,
-		Only: func(names []string) []run.Spec {
-			patterns := gotest.PathsPatterns(names)
-			if len(patterns) == 1 {
-				return []run.Spec{unit(patterns[0])}
-			}
-			// Several patterns are several runs of the script, each its own
-			// atomic unit (ScriptRunID).
-			specs := make([]run.Spec, len(patterns))
-			for i, pattern := range patterns {
-				specs[i] = unit(pattern)
-				specs[i].ID = ScriptRunID(s.Name, i)
-			}
-			return specs
-		},
-	}, nil
-}
-
-// scriptGoTests are the top-level tests of a GoTests suite's package that its
-// pattern matches, as `go test -run` matches a top-level name. A pattern that
-// matches none is refused: the suite would run nothing.
-func scriptGoTests(l Layout, s roster.Suite) ([]string, error) {
-	pattern, err := regexp.Compile(s.GoTests.Pattern)
-	if err != nil {
-		return nil, fmt.Errorf("suites: %s's Go test pattern %q: %w", s.Name, s.GoTests.Pattern, err)
-	}
-	all, err := GoTopLevelTests(l.resolve(s.GoTests.Dir))
-	if err != nil {
-		return nil, err
-	}
-	var tests []string
-	for _, t := range all {
-		if pattern.MatchString(t) {
-			tests = append(tests, t)
-		}
-	}
-	if len(tests) == 0 {
-		return nil, fmt.Errorf("suites: %s's pattern %q matches no test in %s", s.Name, s.GoTests.Pattern, s.GoTests.Dir)
-	}
-	return tests, nil
+	u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, s.Args...))
+	u.Slots = s.Slots
+	u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
+	return Units{Atomic: []run.Spec{u}}, nil
 }
 
 func executableScriptPath(l Layout, s roster.Suite) (string, error) {

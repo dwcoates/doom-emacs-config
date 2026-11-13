@@ -65,14 +65,13 @@ const matrixPath = "SCENARIO-MATRIX.md"
 // derived parts instead of only reporting on them.
 const matrixWriteEnv = "AGENT_REPL_MATRIX_WRITE"
 
-// The three counted e2e layers, in the column order the document uses.
+// The two counted e2e layers, in the column order the document uses.
 const (
 	layerGo     = "Go e2e"
 	layerWebapp = "Webapp layer"
-	layerEmacs  = "Emacs e2e"
 )
 
-var matrixLayers = []string{layerGo, layerWebapp, layerEmacs}
+var matrixLayers = []string{layerGo, layerWebapp}
 
 // emDash is what an empty layer cell holds, matching the document's existing
 // typography.
@@ -412,7 +411,7 @@ func (c coverage) files(scenario, layer string) []string {
 	return out
 }
 
-// deriveCoverage reads the three counted layers.
+// deriveCoverage reads the two counted layers.
 func deriveCoverage(t *testing.T, r registry) coverage {
 	t.Helper()
 	c := coverage{}
@@ -428,9 +427,6 @@ func goLayerOf(name string) string {
 	if !strings.HasSuffix(name, "_test.go") {
 		return ""
 	}
-	if strings.HasPrefix(name, "emacs_") {
-		return layerEmacs
-	}
 	if strings.HasSuffix(name, "_e2e_test.go") {
 		return layerGo
 	}
@@ -441,7 +437,7 @@ func goLayerOf(name string) string {
 // name that the helper itself prefixes with `!`. Every other prompt this
 // suite submits is a literal string, which the `!`-literal sweep below sees
 // directly, so these three are the whole of what needs dataflow.
-var goBareDriveHelpers = map[string]int{"driveScenarioToCompletion": 4}
+var goBareDriveHelpers = map[string]int{"stack.DriveScenarioToCompletion": 4}
 
 // deriveGoCoverage walks this package's AST.
 func deriveGoCoverage(t *testing.T, r registry, c coverage) {
@@ -459,8 +455,8 @@ func deriveGoCoverage(t *testing.T, r registry, c coverage) {
 	}
 
 	// (a) Every `!`-prefixed string literal, in every counted file, read by
-	// the vendor's own selection rule. This is the whole of the Emacs layer's
-	// mechanism and most of the Go layer's.
+	// the vendor's own selection rule. This is most of the Go layer's
+	// mechanism.
 	var deadTriggers []string
 	for path, file := range pkg.Files {
 		base := filepath.Base(path)
@@ -617,15 +613,29 @@ func goParamNames(fn *ast.FuncDecl) map[string]int {
 
 // goSinkArg answers the scenario-bearing argument of a call to a known sink.
 func goSinkArg(call *ast.CallExpr, sinks map[string]int) (string, ast.Expr, bool) {
-	ident, ok := call.Fun.(*ast.Ident)
+	name, ok := goCallee(call)
 	if !ok {
 		return "", nil, false
 	}
-	idx, ok := sinks[ident.Name]
+	idx, ok := sinks[name]
 	if !ok || idx >= len(call.Args) {
 		return "", nil, false
 	}
-	return ident.Name, call.Args[idx], true
+	return name, call.Args[idx], true
+}
+
+// goCallee names a call's function as the e2e package spells it: a local
+// function by its name, the harness's (kit/stack) by `stack.Name`.
+func goCallee(call *ast.CallExpr) (string, bool) {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return fun.Name, true
+	case *ast.SelectorExpr:
+		if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "stack" {
+			return "stack." + fun.Sel.Name, true
+		}
+	}
+	return "", false
 }
 
 // goResolveStrings answers the string values an argument can take, or false
@@ -1271,15 +1281,16 @@ func deriveSeamWiring(t *testing.T) map[string][]string {
 }
 
 // scenarioCovered is check (iv)'s mechanical verdict: a counted layer drives
-// SCENARIO, or both its halves are pinned and its seam is wired.
-func scenarioCovered(scenario string, derived coverage, halves halvesByScenario, wiring map[string][]string) bool {
+// SCENARIO, or both its halves are pinned and its seam is wired, or a step
+// retired to the integration tier pins replacements proving both halves
+// (retired_test.go).
+func scenarioCovered(scenario string, derived coverage, halves halvesByScenario, wiring map[string][]string, retired map[string][]retiredPin) bool {
 	for _, layer := range matrixLayers {
 		if len(derived.files(scenario, layer)) > 0 {
 			return true
 		}
 	}
-	h := halves[scenario]
-	return h.shim && h.daemon && h.seam != "" && len(wiring[h.seam]) > 0
+	return halvesWired(halves[scenario], wiring) || len(retired[scenario]) > 0
 }
 
 // checkSeamWiring is check (vii): every family a golden names has a wiring
@@ -1374,16 +1385,16 @@ func parseMatrix(t *testing.T) matrixDoc {
 		}
 		doc.tableTo = i + 1
 		cells := matrixCells(line)
-		if len(cells) != 10 {
-			t.Fatalf("%s:%d: row has %d cells, want 10: %s", matrixPath, i+1, len(cells), line)
+		if len(cells) != 9 {
+			t.Fatalf("%s:%d: row has %d cells, want 9: %s", matrixPath, i+1, len(cells), line)
 		}
 		row := matrixRow{
 			scenario:  parseScenarioCell(cells[0]),
 			grounded:  cells[1],
 			files:     map[string][]string{},
-			halves:    halvesCells{shim: cells[5], daemon: cells[6], seam: cells[7]},
-			assertion: cells[8],
-			verdict:   cells[9],
+			halves:    halvesCells{shim: cells[4], daemon: cells[5], seam: cells[6]},
+			assertion: cells[7],
+			verdict:   cells[8],
 		}
 		for j, layer := range matrixLayers {
 			row.files[layer] = matrixFileCell(cells[2+j])
@@ -1454,7 +1465,6 @@ func renderRow(row matrixRow) string {
 		row.grounded,
 		renderFileCell(row.files[layerGo]),
 		renderFileCell(row.files[layerWebapp]),
-		renderFileCell(row.files[layerEmacs]),
 		row.halves.shim,
 		row.halves.daemon,
 		row.halves.seam,
@@ -1472,9 +1482,16 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 	halves := deriveHalves(t, r)
 	wiring := deriveSeamWiring(t)
 	doc := parseMatrix(t)
+	canonical := map[string]bool{}
+	for _, s := range r.canonical {
+		canonical[s] = true
+	}
+	// (viii) Every retired step's pins name tests that exist, in both
+	// halves' tiers, for a scenario the vendor registers.
+	retired := checkRetired(t, parseRetired(t, doc.lines), canonical, liveStep(t), repo.repoDir)
 
 	if os.Getenv(matrixWriteEnv) == "1" {
-		rewriteMatrix(t, r, derived, halves, wiring, doc)
+		rewriteMatrix(t, r, derived, halves, wiring, retired, doc)
 		doc = parseMatrix(t)
 	}
 
@@ -1489,11 +1506,6 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 			t.Errorf("%s: two rows for scenario %q", matrixPath, key)
 		}
 		byScenario[key] = row
-	}
-
-	canonical := map[string]bool{}
-	for _, s := range r.canonical {
-		canonical[s] = true
 	}
 
 	// (i) A scenario the registry declares but the document omits.
@@ -1536,16 +1548,18 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 		// covered at all is not. Under ruling (a) (2026-10-14) a scenario is
 		// covered when a counted layer drives it end to end, OR when both of
 		// its halves are pinned by the goldens and its seam has its wiring
-		// test.
-		covered := scenarioCovered(scenario, derived, halves, wiring)
+		// test. Under the ruling of 2026-11-13 it is also covered when a step
+		// retired to the integration tier pins replacements proving both
+		// halves.
+		covered := scenarioCovered(scenario, derived, halves, wiring, retired)
 		switch row.verdict {
 		case verdictUncovered:
 			if covered {
-				t.Errorf("%s: %s reads %q, but a counted layer drives it or both halves are pinned with a wired seam", matrixPath, scenarioCell(scenario), verdictUncovered)
+				t.Errorf("%s: %s reads %q, but a counted layer drives it, or both halves are pinned with a wired seam, or a retired step's replacements prove both", matrixPath, scenarioCell(scenario), verdictUncovered)
 			}
 		case verdictCovered, verdictWeak:
 			if !covered {
-				t.Errorf("%s: %s reads %q, but no counted layer drives it and its halves are not both pinned with a wired seam", matrixPath, scenarioCell(scenario), row.verdict)
+				t.Errorf("%s: %s reads %q, but no counted layer drives it, its halves are not both pinned with a wired seam, and no retired step's replacements prove both", matrixPath, scenarioCell(scenario), row.verdict)
 			}
 		default:
 			t.Errorf("%s: %s has verdict %q, want one of %q/%q/%q",
@@ -1644,7 +1658,7 @@ type countLine struct {
 }
 
 var matrixCountMarker = regexp.MustCompile(`\*\*(\d+)\*\*`)
-var matrixLayerCount = regexp.MustCompile(`^- (Go e2e \(non-emacs\)|Webapp layer|Emacs e2e): (\d+) scenarios? `)
+var matrixLayerCount = regexp.MustCompile(`^- (Go e2e|Webapp layer): (\d+) scenarios? `)
 
 // checkMatrixCounts recomputes section (b) from table (a).
 func checkMatrixCounts(t *testing.T, doc matrixDoc) {
@@ -1652,7 +1666,7 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 	verdicts := map[string]int{}
 	layerScenarios := map[string]int{}
 	layerFiles := map[string]map[string]bool{
-		layerGo: {}, layerWebapp: {}, layerEmacs: {},
+		layerGo: {}, layerWebapp: {},
 	}
 	for _, row := range doc.rows {
 		verdicts[row.verdict]++
@@ -1697,9 +1711,6 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 			continue
 		}
 		layer := m[1]
-		if layer == "Go e2e (non-emacs)" {
-			layer = layerGo
-		}
 		got, _ := strconv.Atoi(m[2])
 		if got != layerScenarios[layer] {
 			t.Errorf("%s: the %s by-layer line says %d scenarios, but table (a)'s column holds %d",
@@ -1770,7 +1781,7 @@ func firstInt(line string) (int, bool) {
 // counts, carrying every hand-written cell forward unchanged. A scenario with
 // no row yet gets one whose hand-written cells are placeholders for a human
 // to fill in.
-func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesByScenario, wiring map[string][]string, doc matrixDoc) {
+func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesByScenario, wiring map[string][]string, retired map[string][]retiredPin, doc matrixDoc) {
 	t.Helper()
 	existing := map[string]matrixRow{}
 	for _, row := range doc.rows {
@@ -1780,7 +1791,7 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 	var renderedRows []matrixRow
 	verdicts := map[string]int{}
 	layerScenarios := map[string]int{}
-	layerFiles := map[string]map[string]bool{layerGo: {}, layerWebapp: {}, layerEmacs: {}}
+	layerFiles := map[string]map[string]bool{layerGo: {}, layerWebapp: {}}
 	for _, scenario := range r.canonical {
 		row, ok := existing[scenario]
 		if !ok {
@@ -1806,11 +1817,20 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 			}
 		}
 		switch {
-		case !scenarioCovered(scenario, derived, halves, wiring):
+		case !scenarioCovered(scenario, derived, halves, wiring, retired):
 			if row.verdict != verdictUncovered {
-				row.assertion = "No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam."
+				row.assertion = "No counted e2e layer drives this scenario, its halves are not both pinned with a wired seam, and no retired step's replacements prove both."
 			}
 			row.verdict = verdictUncovered
+		case !driven && !halvesWired(halves[scenario], wiring):
+			// COVERED BY ITS RETIRED STEP'S REPLACEMENTS, pinned in section
+			// (f) and checked to exist in both halves' tiers.
+			var pins []string
+			for _, p := range retired[scenario] {
+				pins = append(pins, p.String())
+			}
+			row.assertion = "Retired from e2e (section (f)); both halves are proven at the integration tier by " + strings.Join(pins, ", ") + "."
+			row.verdict = verdictCovered
 		case !driven:
 			// COVERED BY ITS HALVES. A golden compared byte for byte is the
 			// strongest assertion there is, so the verdict is covered, and the
@@ -1856,12 +1876,8 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 		case matrixLayerCount.MatchString(line):
 			m := matrixLayerCount.FindStringSubmatch(line)
 			layer := m[1]
-			key := layer
-			if key == "Go e2e (non-emacs)" {
-				key = layerGo
-			}
 			lines[i] = fmt.Sprintf("- %s: %d scenarios referenced across %d files", layer,
-				layerScenarios[key], len(layerFiles[key]))
+				layerScenarios[layer], len(layerFiles[layer]))
 		}
 	}
 
@@ -1940,4 +1956,24 @@ func TestMarkerScenarioCellRoundTrips(t *testing.T) {
 			}
 		})
 	}
+}
+
+// halvesWired reports whether a scenario's halves are both pinned and its seam
+// wired: ruling (a)'s coverage.
+func halvesWired(h scenarioHalves, wiring map[string][]string) bool {
+	return h.shim && h.daemon && h.seam != "" && len(wiring[h.seam]) > 0
+}
+
+// liveStep answers whether a step path, Scenario/Xxx, is a step a scenario of
+// the e2e package lists today.
+func liveStep(t *testing.T) func(string) bool {
+	t.Helper()
+	pkg := parseE2EPackage(t)
+	live := map[string]bool{}
+	for step := range pkg.steps {
+		if path, ok := pkg.stepPath(step); ok {
+			live[path] = true
+		}
+	}
+	return func(step string) bool { return live[step] }
 }

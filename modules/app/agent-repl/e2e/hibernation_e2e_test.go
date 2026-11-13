@@ -61,6 +61,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -92,21 +93,21 @@ const (
 
 // keepaliveTestInterval is the compressed cadence the keep-alive tests wait
 // out: the Keeper asks the shim for a beat this long after the cache clock.
-// Well clear of pollInterval (world_test.go, 20ms), so a slow host cannot
+// Well clear of pollInterval (kit/stack/world.go, 20ms), so a slow host cannot
 // make it read as faster than the suite polls.
 const keepaliveTestInterval = 100 * time.Millisecond
 
 // ---------------------------------------------------------------------------
 // The idle-cutoff hibernation tests' own budget (SPEC.md section B, "Waits"):
 // reused verbatim from HandoverChainTimeout rather than a same-value twin —
-// see that constant's own doc comment (world_test.go). The shape matches:
+// see that constant's own doc comment (kit/stack/world.go). The shape matches:
 // a real shim spawn, a real Hibernate/KillSession round trip, and (for
 // testRevivalAfterHibernate) a SECOND real StartSession(resume) spawn all
 // chain onto one budget, exactly "two real process lifecycles on one
 // budget".
 // ---------------------------------------------------------------------------
 
-const HibernationChainTimeout = HandoverChainTimeout
+const HibernationChainTimeout = stack.HandoverChainTimeout
 
 // hibernationIdleCutoffMS matches daemon/integration's own precedent
 // (session_lifecycle_test.go's TestHibernationParksAnIdleSessionAndRevivesOnPrompt
@@ -117,63 +118,9 @@ const HibernationChainTimeout = HandoverChainTimeout
 // the sweep looks.
 const hibernationIdleCutoffMS = 50
 
-// The daemon's own idle-sweep log operation and the two message strings this
-// area asserts on (daemon/internal/drain/sweep.go's opSweep = "daemon.drain.
-// sweep"; the exact wording is independently confirmed by daemon/integration/
-// session_lifecycle_test.go's own header comment on
-// TestHibernateTurnInFlightRefusalDefersTheStandDown, which quotes "a turn is
-// in flight; deferring the hibernation" verbatim). This is the daemon's OWN
-// structured log — unlike harness.AwaitShimLoggedRequest (which reads the
-// FAKE shim's control-socket recorder and does not exist for the real shim
-// this suite spawns), it is produced regardless of which shim is real.
-const (
-	hibernateSweepOp = "daemon.drain.sweep"
-	// The SWEEP's own freeness pre-check, which runs BEFORE any Hibernate
-	// directive is sent (daemon/internal/drain/sweep.go:64-66). A session
-	// with live work never reaches the shim at all, so this — not the
-	// shim's own refusal — is the record a turn-in-flight deferral leaves.
-	hibernateNotFreeMsg   = "the idle session is not free; deferring its park"
-	hibernateSucceededMsg = "parked a session idle past the cutoff"
-)
-
-// sweepMark is a position in a workspace's own daemon sink: the number of
-// records it already held when the mark was taken. A wait carrying a mark
-// reads only what the daemon wrote AFTER it, so a test can never be satisfied
-// by a record that predates the act it is waiting on.
-//
-// THIS AREA NEEDS ONE, and the need is a measurement rather than a caution.
-// The daemon spawns a session ON MOUNT (daemon.md's SPAWN ON MOUNT), and a
-// mount-spawned session that is never prompted goes idle at
-// hibernationIdleCutoffMS like any other — so on a quiet box the sweep stands
-// that session down BEFORE the test has submitted anything. Observed, from
-// testRevivalAfterHibernate's own sink on an idle host: "hibernated an idle
-// session" at T+0.368s, "the session was engaged inside the cutoff" (the
-// prompt queue's engagement stamp, promptqueue/deliver.go's touchEngagement)
-// at T+0.522s. An unmarked wait for that message therefore matched a
-// stand-down of a session the test's first turn had not yet run on, and only
-// a SATURATED box — where the first prompt lands inside the 50ms cutoff, so
-// no such record exists — made the test wait for the hibernation it actually
-// names. Waiting on the wrong fact is what made the pass load-dependent.
-type sweepMark int
-
 // markSweepLog answers the current position of a workspace's daemon sink.
-func markSweepLog(w *World, workspaceDir string) sweepMark {
-	return sweepMark(len(w.WorkspaceLog(workspaceDir, "daemon")))
-}
-
-// sweepRecordSince answers the first hibernateSweepOp record with the given
-// message that the sink holds AT OR AFTER mark. It is a pure function so the
-// marking rule itself is tested rather than only exercised.
-func sweepRecordSince(records []harness.LogRecord, mark sweepMark, message string) (harness.LogRecord, bool) {
-	if int(mark) < 0 {
-		mark = 0
-	}
-	for i := int(mark); i < len(records); i++ {
-		if records[i].Operation == hibernateSweepOp && records[i].Message == message {
-			return records[i], true
-		}
-	}
-	return harness.LogRecord{}, false
+func markSweepLog(w *stack.World, workspaceDir string) stack.SweepMark {
+	return stack.SweepMark(len(w.WorkspaceLog(workspaceDir, "daemon")))
 }
 
 // awaitHibernateSweepRecordSince polls a workspace's own daemon log sink until
@@ -187,14 +134,14 @@ func sweepRecordSince(records []harness.LogRecord, mark sweepMark, message strin
 // what was wanted: every one of the sweep's own records is rendered, so a
 // deferral (not free, already terminal, no session) is distinguishable from a
 // sweep that never ran at all without a second run to find out.
-func awaitHibernateSweepRecordSince(t *testing.T, w *World, workspaceDir string, mark sweepMark, what, message string) harness.LogRecord {
+func awaitHibernateSweepRecordSince(t *testing.T, w *stack.World, workspaceDir string, mark stack.SweepMark, what, message string) harness.LogRecord {
 	t.Helper()
 	ctx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	for {
-		if r, found := sweepRecordSince(w.WorkspaceLog(workspaceDir, "daemon"), mark, message); found {
+		if r, found := stack.SweepRecordSince(w.WorkspaceLog(workspaceDir, "daemon"), mark, message); found {
 			return r
 		}
 		select {
@@ -208,10 +155,10 @@ func awaitHibernateSweepRecordSince(t *testing.T, w *World, workspaceDir string,
 
 // sweepRecordDigest renders every idle-sweep record a workspace's own daemon
 // sink carries, so a missed hibernation reports WHAT THE SWEEP DECIDED.
-func sweepRecordDigest(w *World, workspaceDir string) string {
+func sweepRecordDigest(w *stack.World, workspaceDir string) string {
 	var b strings.Builder
 	for i, r := range w.WorkspaceLog(workspaceDir, "daemon") {
-		if r.Operation != hibernateSweepOp {
+		if r.Operation != stack.HibernateSweepOp {
 			continue
 		}
 		fmt.Fprintf(&b, "  [%d] %s %s %s %v\n", i, r.Timestamp, r.Level, r.Message, r.Context)
@@ -234,7 +181,7 @@ func shimDetached(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 // feedRows opens the workspace's feed and answers its current page's rows —
 // a read (OpenFeed), never a store write; the grep gate only forbids the
 // store's own WriteBatch verb and hand-authored vendor-transcript paths.
-func feedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func feedRows(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -289,8 +236,8 @@ const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the nex
 func testKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
-	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
-	AwaitTurnEnded(t, w, ws, queued)
+	queued := stack.SubmitPrompt(t, w, ws, "!queue-vendor-turn")
+	stack.AwaitTurnEnded(t, w, ws, queued)
 
 	// Act: the keep-alive beats, the vendor runs its own turn first, then
 	// answers the keep-alive.
@@ -298,8 +245,8 @@ func testKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 		"a keep-alive turn to close after the vendor's own turn ran",
 		func(r harness.LogRecord) bool { return r.Message == fakeVendorTurnMessage },
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
-	after := SubmitPrompt(t, w, ws, "after the keep-alive")
-	AwaitTurnEnded(t, w, ws, after)
+	after := stack.SubmitPrompt(t, w, ws, "after the keep-alive")
+	stack.AwaitTurnEnded(t, w, ws, after)
 
 	// Assert: the vendor's own turn is served; nothing of the keep-alive is.
 	rows := feedRows(t, w, ws)
@@ -338,12 +285,12 @@ func testKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Act: a keep-alive runs to its answer, then a real turn follows it.
 	w.Daemon.AwaitLogRecord(shimLog, "a keep-alive turn to close",
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
-	driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "after the keep-alive")
+	stack.DriveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "after the keep-alive")
 
 	// Assert: no row of the keep-alive, on either arm it could have taken.
 	db, err := sql.Open("sqlite", "file:"+w.Store.DBPath+"?mode=ro")
@@ -396,13 +343,13 @@ func testKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
-	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn1 := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	w.Daemon.AwaitLogRecord(shimLog, "a keep-alive to be submitted",
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
 
 	// Act
-	during := SubmitPrompt(t, w, ws, "during the keep-alive")
-	AwaitTurnEnded(t, w, ws, during)
+	during := stack.SubmitPrompt(t, w, ws, "during the keep-alive")
+	stack.AwaitTurnEnded(t, w, ws, during)
 
 	// Assert: exactly the two real turns, and the prompt drawn once.
 	rows := feedRows(t, w, ws)
@@ -450,7 +397,7 @@ func testPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 // Seam: daemon -> shim -> vendor, a hibernation's compaction and the revival that excludes the keep-alives
 func testRevivalAfterHibernate(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		// HibernationChainTimeout IS THIS WORLD'S BUDGET — the same reason
 		// TestHibernateOnIdleCutoff states, with this test's own figures: it
 		// spends 0.50s of the world budget quiet and 3.34s at a 1-minute load
@@ -486,9 +433,9 @@ func testRevivalAfterHibernate(t *testing.T) {
 	// this world's declared budget rather than on whatever a 5s default had
 	// left — which is the whole of what made this test's pass load-dependent.
 	mark := markSweepLog(w, ws.GetDir())
-	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn1 := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
-		"the idle sweep hibernating the session before revival", hibernateSucceededMsg)
+		"the idle sweep hibernating the session before revival", stack.HibernateSucceededMsg)
 	hostCtx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	harness.AwaitView(t, hostCtx, host,
@@ -499,7 +446,7 @@ func testRevivalAfterHibernate(t *testing.T) {
 	// (via driveScenarioToCompletion) fails the test on any refusal, so its
 	// clean return already IS the assertion that revival paid no
 	// cold-context cost.
-	turn2 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn2 := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Assert: the feed shows exactly turn1 then turn2, in that order, with no
 	// third turn (a leaked keep-alive, or anything else) ever appearing
@@ -551,66 +498,6 @@ func testRevivalAfterHibernate(t *testing.T) {
 		map[bool]string{true: "with it", false: "not at all — it is behind the revival's own separation"}[sawTurn1])
 }
 
-// TestSweepRecordSinceIgnoresARecordBeforeTheMark is the marking rule itself,
-// against the exact shape that made TestKeepAlive/RevivalAfterHibernate's pass depend on
-// how busy the box was: a "parked a session idle past the cutoff" record the daemon wrote
-// BEFORE the test acted (the mount-spawned session's own stand-down) must not
-// satisfy a wait for the hibernation of the session the test then ran a turn
-// on. Against an unmarked scan of the same sink this is the record that was
-// returned.
-func TestSweepRecordSinceIgnoresARecordBeforeTheMark(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	records := []harness.LogRecord{
-		{Operation: hibernateSweepOp, Message: hibernateSucceededMsg},
-		{Operation: hibernateSweepOp, Message: "the workspace's session is already terminal"},
-	}
-
-	// Act
-	_, found := sweepRecordSince(records, sweepMark(len(records)), hibernateSucceededMsg)
-
-	// Assert
-	if found {
-		t.Fatalf("sweepRecordSince matched a record written before the mark; that record is about an act the test had not yet performed")
-	}
-}
-
-// TestSweepRecordSinceFindsARecordAfterTheMark is the same rule's other half:
-// the record the test's own act produces is the one returned.
-func TestSweepRecordSinceFindsARecordAfterTheMark(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	before := []harness.LogRecord{{Operation: hibernateSweepOp, Message: hibernateSucceededMsg}}
-	after := append(append([]harness.LogRecord{}, before...),
-		harness.LogRecord{Operation: hibernateSweepOp, Message: hibernateSucceededMsg, Timestamp: "the one this test caused"})
-
-	// Act
-	got, found := sweepRecordSince(after, sweepMark(len(before)), hibernateSucceededMsg)
-
-	// Assert
-	if !found || got.Timestamp != "the one this test caused" {
-		t.Fatalf("sweepRecordSince(mark=%d) = %v, %t; want the record written after the mark", len(before), got, found)
-	}
-}
-
-// TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage keeps the match
-// bound to the idle sweep's OWN operation: a record from a different operation
-// that happens to carry the same message is not the sweep's decision.
-func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
-	t.Parallel()
-	// Arrange
-	records := []harness.LogRecord{{Operation: "daemon.workspace.bring_up", Message: hibernateSucceededMsg}}
-
-	// Act
-	_, found := sweepRecordSince(records, 0, hibernateSucceededMsg)
-
-	// Assert
-	if found {
-		t.Fatalf("sweepRecordSince matched a %q record; only %q is the idle sweep's own decision",
-			"daemon.workspace.bring_up", hibernateSweepOp)
-	}
-}
-
 // testRevivalRunsInTheSessionsModeNotTheSummarizers is the hibernation
 // contract's own posture clause, and it is here because a headless sandbox
 // run caught it broken: after an idle-cutoff park and a revival, the
@@ -637,7 +524,7 @@ func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// Arrange: the same world TestKeepAlive/RevivalAfterHibernate declares, for the same
 	// reasons -- a compressed cutoff so the sweep really parks the session, and
 	// the chain budget because this drives two real process lifecycles.
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		Timeout:      HibernationChainTimeout,
 		IdleCutoffMS: hibernationIdleCutoffMS,
 	}})
@@ -652,14 +539,14 @@ func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// Act: one real turn, the compressed cutoff's real park (which is what
 	// runs the compaction), then a real prompt, which is the implicit revival.
 	mark := markSweepLog(w, ws.GetDir())
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
-		"the idle sweep hibernating the session, which is what compacts it", hibernateSucceededMsg)
+		"the idle sweep hibernating the session, which is what compacts it", stack.HibernateSucceededMsg)
 	hostCtx, cancel := grantedclock.WithBound(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	harness.AwaitView(t, hostCtx, host,
 		"the host reporting the parked workspace with its shim detached before revival", shimDetached)
-	revived := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	revived := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Assert: the revived turn ran under the session's own mode. `plan` is
 	// named because it is the exact contamination -- the summarizer's mode,
@@ -670,7 +557,7 @@ func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	// the shim now starts under when nothing states a mode. The guarantee is
 	// unchanged: the revived turn runs under THE SESSION'S posture, whatever it
 	// is, and never the summarizer's.
-	ended := AwaitTurnEnded(t, w, ws, revived).GetTurnEnded()
+	ended := stack.AwaitTurnEnded(t, w, ws, revived).GetTurnEnded()
 	concluded := ended.GetConcluded()
 	if concluded == nil {
 		t.Fatalf("the revived turn's outcome = %v, want a Concluded terminal", ended)

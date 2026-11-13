@@ -212,7 +212,7 @@ value.
 |---|---|---|---|---|
 | `agent-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/agent-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
 | fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
-| real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `requireDependency` FAILURE, never an implicit `npm ci`** (a skip only under `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`; see `precondition_test.go`) |
+| real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `requireDependency` FAILURE, never an implicit `npm ci`** (a skip only under `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`; see `kit/stack/precondition.go`) |
 | `shim-store` | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShimStore` and on `shim-sidecar/integration/helpers_test.go`'s `storeBinary` | `agent-shim/shim-store` (`go build -o <bin> .`) | `go` on PATH (already required) |
 | `shim-sidecar` | same pattern | `agent-shim/claude/shim-sidecar` (`go build -o <bin> .`) | same |
 
@@ -290,7 +290,7 @@ root, fresh `.claude.json` account roots (routing through
 multi-repo tests in this suite).
 
 **The shared default World.** A test that needs only `WorldOpts{}` takes
-`SharedWorld(t)` (`sharedworld_test.go`) instead of `NewWorld`: the suite
+`SharedWorld(t)` (`kit/stack/sharedworld.go`) instead of `NewWorld`: the suite
 builds ONE default World per test process, on the first test that asks
 (`harness.Suite()` owns it), and ends it after the last test. Each test gets
 a view of it (`harness.Daemon.View`): its own failures, run budget and
@@ -345,10 +345,6 @@ had to be made safe for it:
 | built binaries | direct runs use `sync.Once` per binary in one test process; `testrun` adds one prebuild process and every chunk reads the same required artifacts through `AGENT_REPL_TEST_PREBUILT` |
 | stray-reaping exemptions | a package-level map keyed by pid, mutex-guarded, entries removed at each owner's cleanup |
 | process environment | nothing in this package calls `t.Setenv`, `os.Setenv` or `os.Chdir`; every lever travels through `Opts.ExtraEnv` into one daemon's own environment |
-
-The Emacs-layer files are the one part of the suite that does not declare
-`t.Parallel()`; they are owned separately and skip on a host with no sandbox
-image.
 
 #### Why 8, and not more
 
@@ -635,9 +631,7 @@ place.
     `harness.StartDaemon`'s own throwaway one stands (`checkoutEnv` in
     `main_test.go`): a deploy's install lands there, never over this
     worktree's `daemon/bin`, and its fresh elisp build is the one every
-    harness `WatchDaemon` stream reports. Only the Emacs layer names the
-    module root, because its real Emacs loads that elisp and the sandbox's
-    working copy is a throwaway.
+    harness `WatchDaemon` stream reports.
   - **The build is fake and stages what runs.** `AGENT_REPL_DEPLOY_BUILDER`
     names the harness's `DeployBuilder`, which stages the running bundle, the
     served dist and the harness daemon binary (`harness.DeployCurrent`), so a
@@ -662,7 +656,7 @@ place.
   ever seen to advance and `driveScenarioToCompletion` times out on turns
   that in fact completed and were durably written.
 
-Both helpers are unit-tested in `harness_selftest_test.go`.
+Both helpers are unit-tested in `kit/stack/harness_selftest_test.go`.
 
 ### Grep gate
 

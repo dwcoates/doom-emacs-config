@@ -45,6 +45,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -61,7 +62,7 @@ import (
 // workspace has been opened, and a workspace is not CONNECTED (daemon.md
 // invariant 11) until both client-hop streams are held, so this holds them
 // for the test's life exactly as that convention does.
-func openWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
+func openWorkspace(t *testing.T, w *stack.World) *workspacev1.WorkspaceRef {
 	t.Helper()
 	ws := w.NewWorkspace(t)
 
@@ -112,7 +113,7 @@ func findClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarD
 func testRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	// The store outage this test provokes is exactly a health fault. It also
 	// reaches the daemon's own standing streams: the shim serves WatchAgent
 	// out of the store, so a store the test killed severs that stream and
@@ -128,16 +129,16 @@ func testRecoveryAfterStoreRestart(t *testing.T) {
 	// THE OUTAGE MUST MEET A RUNNING SHIM. An open starts no shim (owner
 	// ruling, 2026-10-28), so a first turn brings the session up and ends
 	// before the store goes down, as the shim this test is about was up.
-	AwaitTurnEnded(t, w, ws, SubmitPrompt(t, w, ws, "!prose-streamed"))
+	stack.AwaitTurnEnded(t, w, ws, stack.SubmitPrompt(t, w, ws, "!prose-streamed"))
 
 	// No terminal is awaited inside the outage — see
 	// TestDegradedDuringRealStoreOutage's own note: the daemon's turn
 	// terminal is store-derived (shim.md:422-425), so none exists while the
 	// store is down.
 	w.Store.Stop()
-	SubmitPrompt(t, w, ws, "!prose-streamed")
+	stack.SubmitPrompt(t, w, ws, "!prose-streamed")
 
-	openCtx, openCancel := grantedclock.WithBound(w.Ctx(), StoreOutageWindow)
+	openCtx, openCancel := grantedclock.WithBound(w.Ctx(), stack.StoreOutageWindow)
 	defer openCancel()
 	openedView := harness.AwaitView(t, openCtx, topbar, "an open degraded window from the real store outage", func(v *frontendv1.TopbarView) bool {
 		return findOpenDegradedWindow(v) != nil
@@ -151,7 +152,7 @@ func testRecoveryAfterStoreRestart(t *testing.T) {
 	w.Store.StartSameDB(t)
 
 	// Assert: the SAME window (identified by component + began_at_ms) closes.
-	closeCtx, closeCancel := grantedclock.WithBound(w.Ctx(), StoreOutageWindow)
+	closeCtx, closeCancel := grantedclock.WithBound(w.Ctx(), stack.StoreOutageWindow)
 	defer closeCancel()
 	closedView := harness.AwaitView(t, closeCtx, topbar, "the same degraded window closing after the store restarted", func(v *frontendv1.TopbarView) bool {
 		return findClosedDegradedWindow(v, opened) != nil

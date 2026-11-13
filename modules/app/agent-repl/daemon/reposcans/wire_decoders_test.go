@@ -27,7 +27,6 @@ import (
 	_ "agentrepl/proto/agentrepl/v1"
 )
 
-
 // checkKeys matches one key check with a literal message name and a literal
 // key list: (agent-repl-wire--check-keys "Name" OBJECT '(key ...)), or nil.
 var checkKeys = regexp.MustCompile(`\(agent-repl-wire--check-keys\s+"([^"]+)"\s+\S+\s+(?:'\(([^)]*)\)|nil\))`)

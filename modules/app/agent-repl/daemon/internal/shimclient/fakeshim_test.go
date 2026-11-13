@@ -42,8 +42,8 @@ type fakeShim struct {
 	watchAgentFrames    []*shimv1.WatchAgentResponse
 	watchBashRefusal    error
 	// watchBashExpected is each WatchBash open's `expected`, in order.
-	watchBashExpected chan bool
-	watchSessionRefuse  error
+	watchBashExpected  chan bool
+	watchSessionRefuse error
 	// holdParkedBridgeFrames is what HoldParkedBridge sends before it stands
 	// until the caller lets go.
 	holdParkedBridgeFrames []*shimv1.HoldParkedBridgeResponse

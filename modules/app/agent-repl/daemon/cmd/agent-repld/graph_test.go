@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -864,6 +866,85 @@ func TestBuildBrowser(t *testing.T) {
 			})
 			if !found {
 				t.Fatalf("records = %+v, want a %s record under %s", log.Records(), tc.wantRecord.Level, tc.wantRecord.Operation)
+			}
+		})
+	}
+}
+
+// THE SPAWN PREFLIGHT RUNS ONCE, AFTER THE DEPLOYER IS BUILT: the deployer's
+// daemon-boot recovery edge (CloseEarlierFailures) closes every standing
+// successor_spawn_failed fault, so a preflight before it would have its own
+// fault closed by the same boot.
+func TestTheGraphPreflightsTheSpawnOnceAfterTheDeployerIsBuilt(t *testing.T) {
+	// Arrange
+	var graph string
+	for _, f := range sourcescan.Production(t) {
+		if f.Name == "graph.go" {
+			graph = string(f.Source)
+		}
+	}
+
+	// Act
+	preflights := strings.Count(graph, "rolloutController.PreflightSpawn(ctx)")
+	preflight := strings.Index(graph, "rolloutController.PreflightSpawn(ctx)")
+	deployer := strings.Index(graph, "buildDeployer(ctx, deployerParams{")
+
+	// Assert
+	if preflights != 1 || deployer < 0 || preflight < deployer {
+		t.Fatalf("PreflightSpawn sites = %d at %d, buildDeployer at %d; want one preflight after the deployer is built", preflights, preflight, deployer)
+	}
+}
+
+func TestResolvePathsNamesTheRequirementsManifestAtTheModuleRoot(t *testing.T) {
+	// Arrange
+	root := filepath.FromSlash("/repo/modules/app/agent-repl")
+	t.Setenv("AGENT_REPL_CHECKOUT", root)
+	t.Setenv(sessionlock.RunDirEnv, "/tmp/locks")
+
+	// Act
+	got, err := resolvePaths(options{})
+
+	// Assert
+	if err != nil || got.RequirementsManifest != filepath.Join(root, "requirements.json") {
+		t.Fatalf("resolvePaths() = (RequirementsManifest %q, %v), want the manifest at the module root %q", got.RequirementsManifest, err, root)
+	}
+}
+
+func TestRequireManifest(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      *string
+		wantErr   bool
+		wantLevel string
+	}{
+		{name: "a manifest that reads lets the boot go on", body: ptr(`{"requirements": [{"id": "h", "kind": "env", "name": "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"}]}`), wantLevel: dlog.LevelDebug},
+		{name: "a missing manifest refuses the boot", wantErr: true, wantLevel: dlog.LevelError},
+		{name: "a manifest that does not parse refuses the boot", body: ptr(`{"requirements": [`), wantErr: true, wantLevel: dlog.LevelError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			manifest := filepath.Join(t.TempDir(), "requirements.json")
+			if tt.body != nil {
+				if err := os.WriteFile(manifest, []byte(*tt.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			log := dlog.NewTestLogger()
+
+			// Act
+			err := requireManifest(manifest, log)
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("requireManifest = %v, want an error: %v", err, tt.wantErr)
+			}
+			rec, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: graphOperation})
+			if !found || rec.Context["manifest"] != manifest {
+				t.Fatalf("records = %+v, want a %s record naming the manifest", log.Records(), tt.wantLevel)
+			}
+			if tt.wantErr && rec.Context["cause"] == "" {
+				t.Fatalf("record = %+v, want the cause named", rec)
 			}
 		})
 	}

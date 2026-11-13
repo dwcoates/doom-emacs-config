@@ -43,8 +43,8 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 	if attempting := stated.GetAttempting(); attempting != nil {
 		r.observeUntimedRetry(ws, s, untimedRetry{
 			attempt: attempting.GetAttempt(), status: attempting.GetStatus(), now: true,
-			what:    "a vendor-error retry being made",
-			drawn:   "agent-repl is making its vendor-error retry now; the line says so",
+			what:  "a vendor-error retry being made",
+			drawn: "agent-repl is making its vendor-error retry now; the line says so",
 		})
 		return
 	}
@@ -53,8 +53,8 @@ func (r *resolver) observeVendorRetry(ws ids.WorkspaceID, s *wsState, stated *co
 	if awaiting := stated.GetAwaitingNetwork(); awaiting != nil {
 		r.observeUntimedRetry(ws, s, untimedRetry{
 			attempt: awaiting.GetAttempt(), status: awaiting.GetStatus(), awaitingNetwork: true,
-			what:    "a vendor-error retry waiting for the network",
-			drawn:   "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
+			what:  "a vendor-error retry waiting for the network",
+			drawn: "agent-repl's vendor-error retry waits for the network; the line counts down to nothing",
 		})
 		return
 	}

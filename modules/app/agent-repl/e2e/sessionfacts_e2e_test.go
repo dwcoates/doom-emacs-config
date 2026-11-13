@@ -48,6 +48,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -58,9 +59,9 @@ import (
 
 // sfNewWorkspace builds one World and registers a fresh scripted-fake-git
 // repository as its workspace.
-func sfNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
+func sfNewWorkspace(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, repo.Dir
 }
@@ -68,9 +69,9 @@ func sfNewWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 // sfAwaitConclusion waits for the turn's settled response bubble and asserts
 // its markdown is EXACTLY want — the one fact that tells the scenarios of a
 // family apart when none of them reaches a drawn shape.
-func sfAwaitConclusion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId, want string) {
+func sfAwaitConclusion(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId, want string) {
 	t.Helper()
-	awaitFeedRow(t, w, ws, "the scenario's settled response bubble ("+want+")", func(row *frontendv1.FeedRow) bool {
+	stack.AwaitFeedRow(t, w, ws, "the scenario's settled response bubble ("+want+")", func(row *frontendv1.FeedRow) bool {
 		return row.GetTurn().GetValue() == turn.GetValue() &&
 			row.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == want
 	})
@@ -95,7 +96,7 @@ const (
 // the rate-limit status are the footer's". So an arm's records stand on
 // exactly one of the two operations, and a test that greps the other one
 // would wait forever on a hop that never happens.
-func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm string) int {
+func sfSessionArmRecords(t *testing.T, w *stack.World, workspaceDir, operation, arm string) int {
 	t.Helper()
 	n := 0
 	for _, r := range w.WorkspaceLog(workspaceDir, "daemon") {
@@ -108,11 +109,11 @@ func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm st
 
 // sfAwaitSessionArmRecords waits until at least want records for the arm
 // stand on the workspace's daemon sink.
-func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm string, want int) {
+func sfAwaitSessionArmRecords(t *testing.T, w *stack.World, workspaceDir, operation, arm string, want int) {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	for {
 		if got := sfSessionArmRecords(t, w, workspaceDir, operation, arm); got >= want {
@@ -166,10 +167,10 @@ func testRateLimitSevenDayWindowFeedsTheWeeklyAllowance(t *testing.T) {
 	defer footer.Close()
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
 	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 91% used.")
 
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	view := sfAwaitEventAllowance(t, ctx, footer.Stream, "the weekly allowance", func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
 		return u.GetWeekly().GetOverall()

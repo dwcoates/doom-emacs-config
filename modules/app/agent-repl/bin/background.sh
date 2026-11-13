@@ -23,9 +23,7 @@
 #           to the live runtime. `taskpolicy -b` was measured and rejected:
 #           it held a run to the efficiency cores and throttled its I/O, and
 #           the webapp integration suite then passed 56-58 of 1765, its
-#           files failing their 1800ms boot-hook bound. On Linux the only
-#           place a suite runs is the e2e sandbox container
-#           (e2e/sandbox/bin/entrypoint.sh routes every `run` command here).
+#           files failing their 1800ms boot-hook bound.
 #           Disk I/O is NOT demoted on either platform.
 #   other   REFUSED, exit 78. No suite here has ever run anywhere else, and
 #           a run at normal priority is exactly what this exists to prevent.
@@ -99,8 +97,7 @@ priority_refuse() {
 # priority_read_niceness OS -- this process's niceness. macOS's nice(1) cannot
 # print it (it demands a utility), so there it is getpriority(PRIO_PROCESS,
 # self) from perl, which ships with macOS; the perl child inherits this
-# process's value. Linux's coreutils nice prints it, and the sandbox image may
-# lack perl.
+# process's value. Linux's coreutils nice prints it, so Linux needs no perl.
 priority_read_niceness() {
     case $1 in
         Darwin) perl -e 'print getpriority(0, 0)' ;;

@@ -6,9 +6,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"strings"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -464,7 +464,6 @@ func TestAnUndeclaredOffQueueCausePanics(t *testing.T) {
 		})
 	}
 }
-
 
 // exitCauses names every cause constant this package declares, by its Go
 // name, with its value: the table TestEveryExitCauseKeepsOrEndsItsRequest

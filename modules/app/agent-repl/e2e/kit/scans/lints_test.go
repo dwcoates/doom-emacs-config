@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -18,11 +17,11 @@ import (
 // interval and the failure message stay one loop's.
 func TestEveryCursorWaitGoesThroughAwaitCursors(t *testing.T) {
 	// Arrange.
-	file, err := parser.ParseFile(token.NewFileSet(), "world_test.go", nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "kit/stack/world.go", nil, 0)
 	if err != nil {
-		t.Fatalf("parse world_test.go: %v", err)
+		t.Fatalf("parse kit/stack/world.go: %v", err)
 	}
-	waits := map[string]bool{"awaitCursorAdvanceWithin": false, "awaitFileIngested": false}
+	waits := map[string]bool{"awaitCursorAdvanceWithin": false, "AwaitFileIngested": false}
 
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -59,20 +58,20 @@ func TestEveryCursorWaitGoesThroughAwaitCursors(t *testing.T) {
 func TestEveryProgramThisSuiteBuildsGoesThroughProgramOnce(t *testing.T) {
 	// A hand-rolled once-builder drifts from programOnce's prebuilt lookup
 	// and its failure; only programOnce may call testenv.ProgramOr.
-	src, err := os.ReadFile("main_test.go")
+	src, err := os.ReadFile("kit/stack/main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := regexp.MustCompile(`testenv\.ProgramOr\(`).FindAllIndex(src, -1)
 	if len(calls) != 1 {
-		t.Fatalf("main_test.go calls testenv.ProgramOr %d times, want once, inside programOnce.require", len(calls))
+		t.Fatalf("kit/stack/main.go calls testenv.ProgramOr %d times, want once, inside ProgramOnce.Require", len(calls))
 	}
 }
 
 // TestEveryBookReadGoesThroughReadAgentBook pins that no test opens a book by
 // hand: the store's success arm and failure arm are read in one place.
 func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
-	for _, name := range []string{"remainder_e2e_test.go", "emacs_interrupt_e2e_test.go", "subagents_e2e_test.go"} {
+	for _, name := range []string{"remainder_e2e_test.go", "subagents_e2e_test.go"} {
 		// Act.
 		raw, err := os.ReadFile(name)
 		if err != nil {
@@ -86,44 +85,11 @@ func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
 	}
 }
 
-// emacsclientExec is a sandbox Exec of emacsclient written out by hand.
-var emacsclientExec = regexp.MustCompile(`\.Exec\([^\n]*"emacsclient"`)
-
-// TestEveryServerCallRidesTheEmacsclientHelper fails a hand-rolled
-// emacsclient Exec anywhere in the layer: such a call would be bounded by its
-// own rule rather than the one the helper decides.
-func TestEveryServerCallRidesTheEmacsclientHelper(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob the layer's sources: %v", err)
-	}
-
-	// Act
-	var sites []string
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		for _, m := range emacsclientExec.FindAll(src, -1) {
-			sites = append(sites, f+": "+string(m))
-		}
-	}
-
-	// Assert
-	// Spelled in two halves so this file's own source is not a match.
-	want := []string{"emacs_test.go: .Exec(ctx, " + `"emacs` + `client"`}
-	if !slices.Equal(sites, want) {
-		t.Fatalf("emacsclient Exec sites = %q, want only the helper's %q", sites, want)
-	}
-}
-
 // TestTheLayerDriverIsKilledOnlyThroughKillGroup pins that every kill of the
 // driver's group goes through killGroup, so none drops the kill's error.
 func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
 	// Arrange
-	src, err := os.ReadFile("webapplayer_server_test.go")
+	src, err := os.ReadFile("kit/stack/webapplayer_server.go")
 	if err != nil {
 		t.Fatalf("read the driver's source: %v", err)
 	}
@@ -146,14 +112,13 @@ func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
 }
 
 // TestEveryWorldChecksItsServicesThroughOneHelper pins the extraction: an
-// owned World, the shared World's views and an EmacsWorld all check that
+// owned World and the shared World's views both check that
 // their services outlived the test through requireServicesOutlivedTheTest.
 func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
 	// Arrange
 	sites := map[string]string{
-		"world_test.go":       "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
-		"sharedworld_test.go": "t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar, s.world.Zettel) })",
-		"emacs_e2e_test.go":   "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
+		"kit/stack/world.go":       "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
+		"kit/stack/sharedworld.go": "t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar, s.world.Zettel) })",
 	}
 
 	for file, call := range sites {
@@ -168,7 +133,7 @@ func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
 			t.Errorf("%s does not check its services through requireServicesOutlivedTheTest", file)
 		}
 		// The helper itself is the one place that spells the check.
-		want := map[string]int{"world_test.go": 1, "sharedworld_test.go": 0, "emacs_e2e_test.go": 0}[file]
+		want := map[string]int{"kit/stack/world.go": 1, "kit/stack/sharedworld.go": 0}[file]
 		if got := strings.Count(string(body), "the store exited before test cleanup"); got != want {
 			t.Errorf("%s spells the service check %d times, want %d: only the helper spells it", file, got, want)
 		}
@@ -181,7 +146,7 @@ func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
 func TestNoTestMintsAWorkspaceByHand(t *testing.T) {
 	// Arrange
 	handRolled := regexp.MustCompile(`(\w+) := harness\.NewRepo\(t\)\n\s*(?:ws :=|return) harness\.Register\(t, \w+\.Daemon, (\w+)\.Dir\)`)
-	files, err := filepath.Glob("*_test.go")
+	files, err := e2eSources("*_test.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -194,7 +159,7 @@ func TestNoTestMintsAWorkspaceByHand(t *testing.T) {
 			t.Fatalf("read %s: %v", f, err)
 		}
 		for _, m := range handRolled.FindAllStringSubmatch(string(body), -1) {
-			if m[1] == m[2] && f != "world_test.go" {
+			if m[1] == m[2] && f != "kit/stack/world.go" {
 				found = append(found, f)
 			}
 		}
@@ -211,7 +176,7 @@ func TestNoTestMintsAWorkspaceByHand(t *testing.T) {
 func TestNoTestRequiresAnOpenByHand(t *testing.T) {
 	// Arrange
 	handRolled := regexp.MustCompile(`OpenWorkspace\(w\.Ctx\(\), [^\n]*\n\s*if err != nil \{\n\s*t\.Fatalf\([^\n]*\n\s*\}\n\s*if \w+\.Msg\.GetSuccess\(\) == nil \{\n\s*t\.Fatalf`)
-	files, err := filepath.Glob("*_test.go")
+	files, err := e2eSources("*_test.go")
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
@@ -223,7 +188,7 @@ func TestNoTestRequiresAnOpenByHand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		if n := len(handRolled.FindAllString(string(body), -1)); n > 0 && !(f == "world_test.go" && n == 1) {
+		if n := len(handRolled.FindAllString(string(body), -1)); n > 0 && !(f == "kit/stack/world.go" && n == 1) {
 			found = append(found, f)
 		}
 	}
@@ -242,7 +207,7 @@ var handRolledTurnEnded = regexp.MustCompile(`GetTurn\(\)\.GetValue\(\) == \w+\.
 // copy cannot drift from the one every wait shares.
 func TestTurnEndedMatchIsShared(t *testing.T) {
 	t.Parallel()
-	files, err := filepath.Glob("*_test.go")
+	files, err := e2eSources("*_test.go")
 	if err != nil {
 		t.Fatalf("glob the suite's sources: %v", err)
 	}
@@ -268,7 +233,7 @@ func TestTurnEndedMatchIsShared(t *testing.T) {
 // hand-rolls its own cannot drift from it.
 func TestKeepaliveWorldIsTheOneCompressedCadence(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*_test.go")
+	files, err := e2eSources("*_test.go")
 	if err != nil {
 		t.Fatalf("listing the e2e test files: %v", err)
 	}
@@ -289,4 +254,19 @@ func TestKeepaliveWorldIsTheOneCompressedCadence(t *testing.T) {
 	if want := map[string]int{"keepalive_e2e_test.go": 1}; !reflect.DeepEqual(sites, want) {
 		t.Errorf("worlds compressing the keep-alive cadence = %v, want only keepaliveWorld's %v", sites, want)
 	}
+}
+
+// e2eSources is the e2e package's files matching pattern, and every file of
+// kit/stack, the harness the package's worlds are built from: what a scan of
+// the suite's own sources reads.
+func e2eSources(pattern string) ([]string, error) {
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	stack, err := filepath.Glob(filepath.Join("kit", "stack", "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	return append(files, stack...), nil
 }

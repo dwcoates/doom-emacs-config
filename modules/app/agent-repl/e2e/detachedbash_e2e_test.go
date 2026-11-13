@@ -50,6 +50,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -61,10 +62,10 @@ import (
 
 // dbOpenRootFeed opens a workspace's root feed and answers its initial page
 // plus a tailing watch. Distinct from AwaitTurnEnded's private one-shot open
-// (world_test.go) because this file needs to observe SEVERAL successive
+// (kit/stack/world.go) because this file needs to observe SEVERAL successive
 // states of one upserted row (a shell bubble's live growth, then its
 // settlement) rather than a single terminal row.
-func dbOpenRootFeed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
+func dbOpenRootFeed(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -144,7 +145,7 @@ func dbAwaitShellHead(
 // dbOpenShellBody opens a shell bubble's own sub-feed — addressed by the head
 // row's FeedId, exactly as a client expanding the bubble does — and answers
 // its initial page plus a tailing watch. The caller closes the stream.
-func dbOpenShellBody(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, head *frontendv1.FeedRow) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
+func dbOpenShellBody(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, head *frontendv1.FeedRow) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow]) {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{
 		Workspace: ws,
@@ -200,7 +201,7 @@ func dbAwaitShellSpool(
 func dbAwaitSettledShell(
 	t *testing.T,
 	ctx context.Context,
-	w *World,
+	w *stack.World,
 	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
@@ -281,7 +282,7 @@ func dbAwaitSimpleToolCall(
 // Seam: shell-spool
 func testBashDetachedStartAndComplete(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "detach-gate")
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{dbDetachGatePathEnv + "=" + gatePath},
 	}})
 	// Detached work outliving its turn opens a health fault; that is the
@@ -292,8 +293,8 @@ func testBashDetachedStartAndComplete(t *testing.T) {
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	defer stream.Close()
 
-	turn := SubmitPrompt(t, w, ws, "!bash-detach")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 
 	ctx, cancel := w.WaitCtx()
 	defer cancel()
@@ -370,7 +371,7 @@ const dbDetachGatePathEnv = "AGENT_REPL_FAKE_DETACH_GATE"
 //
 // Seam: shim -> sidecar -> daemon, an explicitly polled detached shell settling with no unmodeled tool
 func testBashDetachExplicitPoll(t *testing.T) {
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
 	w.ExpectWarnings("daemon.health.open_fault")
@@ -381,8 +382,8 @@ func testBashDetachExplicitPoll(t *testing.T) {
 	topbarStream := w.WatchTopbar(ws)
 	defer topbarStream.Close()
 
-	turn := SubmitPrompt(t, w, ws, "!bash-detach-poll")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach-poll")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 
 	ctx, cancel := w.WaitCtx()
 	defer cancel()
@@ -430,14 +431,14 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 
 // Seam: stream-tool-card
 func testBashForegroundCompleted(t *testing.T) {
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	initial, stream := dbOpenRootFeed(t, w, ws)
 	defer stream.Close()
 
-	turn := SubmitPrompt(t, w, ws, "!bash")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!bash")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 
 	ctx, cancel := w.WaitCtx()
 	defer cancel()
@@ -449,7 +450,7 @@ func testBashForegroundCompleted(t *testing.T) {
 	returned := dbAwaitSimpleToolCall(t, ctx, initial, stream, "Bash", "pwd; ls | head",
 		func(r *frontendv1.FeedToolCallReturned) bool { return r.GetSucceeded() != nil })
 	if returned == nil {
-		t.Fatalf("no Bash tool call returned within %s", DefaultTimeout)
+		t.Fatalf("no Bash tool call returned within %s", stack.DefaultTimeout)
 	}
 	if got := returned.GetText().GetText(); !strings.Contains(got, "one") || !strings.Contains(got, "two") {
 		t.Errorf("returned text = %q, want it to contain the scenario's stdout (\"one\", \"two\")", got)

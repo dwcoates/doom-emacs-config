@@ -133,6 +133,13 @@ type Controller interface {
 	// then every owed landing report is paid, since what this daemon runs
 	// carries every landing before it started.
 	SettleBoot(ctx context.Context)
+	// PreflightSpawn proves this daemon can spawn its own successor: every
+	// step of that spawn short of the exec (SuccessorSpawner.Preflight). A
+	// joining successor answers a failure, and its boot ends before it
+	// serves; a daemon that owns its state opens `successor_spawn_failed`
+	// and answers nil, so it serves. Every outcome is recorded under
+	// daemon.rollout.spawn_preflight.
+	PreflightSpawn(ctx context.Context) error
 	// CheckStaleness re-judges a workspace's last reported shim build against
 	// the installed bundle, bouncing it through the registry when they differ.
 	// It is what a deploy and a mount call; neither waits on the bounce.
@@ -502,6 +509,12 @@ type SuccessorSpawner interface {
 	// so it opens the state only after this process has exited. The process
 	// outlives this one by design and is never stopped by it.
 	SpawnReplacement(ctx context.Context) (int, error)
+	// Preflight runs every step of the successor spawn this daemon would make,
+	// told selfAddress as its incumbent, EXCEPT the exec: the binary, the argv
+	// and the environment, through the same preparation Spawn uses, so it
+	// cannot pass where Spawn would fail before its exec. It starts nothing
+	// and changes nothing. Controller.PreflightSpawn is its one caller.
+	Preflight(selfAddress string) error
 }
 
 // Successor is one spawned successor daemon: the address it reported, and the

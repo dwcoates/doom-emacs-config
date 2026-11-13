@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/procgroup"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
+	"agent-repld/internal/userenv"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 	"agent-repld/internal/zettelclient"
@@ -245,6 +246,18 @@ func HostNeutralCheckoutEnv() []string {
 // ExtraEnv, which StartDaemon appends after this.
 func HostNeutralSlackEnv() []string {
 	return statedEmpty(externalbrowser.EnvSlackTeams)
+}
+
+// HostNeutralUserEnvEnv clears the env file Emacs names to every daemon it
+// starts (userenv.EnvFile) and the settings it states itself
+// (userenv.EmacsStated) for a test daemon. Inherited from a host whose
+// agent-repld runs the suite, the test daemon would refresh every daemon it
+// spawns from the HOST's per-user settings (its MULTI_REPO_ROOT, its hotspot)
+// over the world's own. Both are stated EMPTY, which userenv reads as unset,
+// so a successor inherits its predecessor's environment; a test of the refresh
+// states its own through ExtraEnv, which StartDaemon appends after this.
+func HostNeutralUserEnvEnv() []string {
+	return statedEmpty(userenv.EnvFile, userenv.EmacsStated)
 }
 
 // NeutralNewsDigestStartDelay is the news digest's start delay every test
@@ -919,6 +932,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)
 	env = append(env, HostNeutralSlackEnv()...)
+	env = append(env, HostNeutralUserEnvEnv()...)
 	env = append(env, TemporaryRegistrationEnv(t)...)
 	// THE VENDOR BINARY IS THE GUARD'S OTHER HALF. Left unset, the login pty
 	// falls back to the default `claude` and the guard refuses it; naming the

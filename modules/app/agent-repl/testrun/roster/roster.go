@@ -85,13 +85,6 @@ type Suite struct {
 	// Zero is one slot. A wider suite is told its width in
 	// AGENT_REPL_UNIT_SLOTS and must cap itself to exactly that many cores.
 	Slots int
-	// NeedsWebappDist marks a suite that reads the checkout's built webapp
-	// (webapp/dist). The run builds it ONCE, before any unit starts
-	// (cli.Deps.PrepareWebappDist), and the suite never builds it itself
-	// (suites.NoWebappBuildEnv): a suite that rebuilt it mid-run rewrote files
-	// another suite's watch-mode driver was reading, which restarted the
-	// driver and failed tests that had nothing to do with the rebuild.
-	NeedsWebappDist bool
 	// TestParallel names the Go packages (by path relative to Path, "." for
 	// the root) whose chunks overlap Tests of their top-level tests
 	// (-test.parallel) on Slots cores. A package not named runs its tests one
@@ -120,14 +113,6 @@ type Suite struct {
 	// The run builds each program ONCE (Programs) and every chunk of a package
 	// named here waits for it and reads it from AGENT_REPL_TEST_PROGRAMS.
 	Programs map[string][]string
-	// GoTests marks a Script suite whose script runs the Go tests of one
-	// package where the runner cannot run them itself (inside the e2e
-	// sandbox), and is the one home of which tests those are. The script
-	// takes the -test.run pattern as its one argument: a whole run hands it
-	// GoTests.Pattern, unchanged, and a run that names some of its tests
-	// (`-harness SCRIPT=TestA,TestB`) hands it exactly those, so one failing
-	// test reruns without the rest of the suite.
-	GoTests *GoTests
 	// Reuse declares what the suite's units read beyond what the runner
 	// derives (agentrepl/testrun/internal/reuse): a run skips every unit whose
 	// inputs are byte-identical to inputs an earlier run passed that unit on.
@@ -136,9 +121,9 @@ type Suite struct {
 	Reuse *Reuse
 	// NeverReused is why the suite can never be reused: it runs whole in
 	// every run that selects it, unconfined, and is never recorded. Only a
-	// suite whose reads no profile can confine (a container's daemon reads
-	// the checkout outside it) or whose verdict is not a function of its
-	// inputs (a latency measurement) is named here.
+	// suite whose reads no profile can confine (a scan that walks the whole
+	// module) or whose verdict is not a function of its inputs (a latency
+	// measurement) is named here.
 	NeverReused string
 }
 
@@ -176,15 +161,6 @@ type Reuse struct {
 	// runs whenever its suite runs, under the suite's own envelope, and is
 	// never recorded.
 	Never map[string]string
-}
-
-// GoTests is the Go tests a Script suite's script runs.
-type GoTests struct {
-	// Dir is the package's directory, relative to the agent-repl module root.
-	Dir string
-	// Pattern is the -test.run pattern a whole run runs: every top-level test
-	// of the package it matches.
-	Pattern string
 }
 
 // Parallel is how a wait-bound Go package's chunks overlap their tests.
@@ -386,11 +362,11 @@ var Suites = []Suite{
 			"proto/vocab/", "images/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 		},
-			// THE BUILT DIST IS AN OUTPUT, built from the hashed sources by the
-			// run itself (cli.Deps.PrepareWebappDist) and read by no webapp
-			// test. Hashed, a run that rebuilt a stale dist after keying the
-			// suite refused to record its green pass ("its inputs changed while
-			// it ran", 2026-10-16).
+			// THE BUILT DIST IS AN OUTPUT, built from the hashed sources (by
+			// bin/build-frontend.sh) and read by no webapp test. Hashed, a run
+			// that rebuilt a stale dist after keying the suite refused to
+			// record its green pass ("its inputs changed while it ran",
+			// 2026-10-16).
 			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"},
 			Units:     webappUnitInputs}},
 	// The shim's integration files spawn its bundle and its lock helper
@@ -427,38 +403,37 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
 	// The density report scans every system's logging calls.
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
-	// THE E2E HARNESS'S OWN CODE THAT BUILDS NO WORLD, and its tests (its
-	// scenario runner, its pure helpers, and the scans of the e2e package's
-	// sources). Its own module, which the e2e module replaces, so its tests
-	// run per package and are reused, where in the e2e suite they ran in every
-	// run that selected it.
-	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit", Reuse: &Reuse{Units: map[string][]string{
-		// The preflight's own tests run the sandbox's preflight script, and
-		// the webapp layer's boot budget is held to its driver's.
-		".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
-		// The scans read the e2e package's sources, and the scenario matrix
-		// the mocked vendor's scenarios, their goldens and the webapp
-		// layer's areas it summarizes.
-		"scans": {"e2e/", "testdata/scenario-goldens/", "agent-shim/claude/shim/src/fake/",
-			"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/"},
-	}}},
+	// THE E2E HARNESS and its tests: the world every scenario builds
+	// (stack), its scenario runner, its pure helpers, and the scans of the
+	// e2e package's sources. Its own module, which the e2e module replaces,
+	// so its tests run per package and are reused, where in the e2e suite
+	// they ran in every run that selected it.
+	{Name: "e2e-kit", Kind: GoModule, Path: "e2e/kit",
+		// THE WORLD'S OWN TESTS (stack) run the e2e suite's TestMain shape,
+		// harness.MainAt, which takes the daemon and its fakes from the
+		// run's programs rather than building them; the rest are the
+		// programs a world spawns.
+		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
+		Reuse: &Reuse{Units: map[string][]string{
+			// The webapp layer's boot budget is held to its driver's.
+			".": {"webapp/test/webapp-layer/drive.ts"},
+			// The world's layout is the e2e package's, and it checks each
+			// system's tree is where it says (a file in each stands for its
+			// directory).
+			"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
+				"agent-shim/claude/shim-sidecar/go.mod", "daemon/go.mod"},
+			// The scans read the e2e package's sources, and the scenario matrix
+			// the mocked vendor's scenarios, their goldens and the webapp
+			// layer's areas it summarizes.
+			// Its retired steps' pins name tests of the daemon's and the shim's
+			// integration tiers, which it checks exist.
+			"scans": {"e2e/", "testdata/scenario-goldens/", "agent-shim/claude/shim/src/fake/",
+				"agent-shim/claude/shim/AGENTS.md", "webapp/test/webapp-layer/",
+				"daemon/integration/", "agent-shim/claude/shim/test/"},
+		}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
-		NeverReused: "its sandbox staging walks the whole module, every untracked build output in it included, so no input set short of the checkout covers it"},
-	// Two slots: the sandbox container is capped to the width it is given
-	// (docker --cpus, GOMAXPROCS), and the layer runs its two Emacsen
-	// (e2e/EMACS-LAYER-SPEC.md, "The parallelism bound, measured") on two
-	// CPUs nearly as fast as on four -- 82s against 66s alone, worst Doom
-	// boot 0.88s against its 3.5s bound (2026-10-12) -- while holding half
-	// the run's slots: 264 -> 164 slot-seconds, a fifth of a full run's.
-	//
-	// THE DOOM TIER RUNS HERE TOO (TestDoom*, e2e/doomtier_test.go): it boots
-	// the same Doom in the same image, so it shares this suite's container
-	// rather than paying a second container start for tests of about three
-	// seconds each.
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", Slots: 2, NeedsWebappDist: true,
-		GoTests:     &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"},
-		NeverReused: "its tests run inside a docker container, whose daemon reads the checkout outside any profile the runner applies"},
+		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
 }
 
 // harness is a script suite's declaration: its one unit, the whole suite,
@@ -725,14 +700,14 @@ var AlwaysRunRegions = []string{
 	// The logging module's TS half is the Vitest suites' import, and they
 	// always run.
 	"agent-shim/logging/",
-	// The Doom module files the Emacs layer loads, the metaprompt the shim
+	// The Doom module files the ERT suite loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
 	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
-	// bin/ each have their harness; the sandbox image reads .agents-sandbox.
-	"/.githooks/", "/.claude/", "/bin/", "/.agents-sandbox/",
+	// bin/ each have their harness.
+	"/.githooks/", "/.claude/", "/bin/",
 }
 
 // ReadByNoSuite are the files and subtrees no suite reads: prose, and the
@@ -752,6 +727,8 @@ var ReadByNoSuite = []string{
 	// The owner's own Doom configuration, which no agent-repl suite loads.
 	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
+	// The agents' sandbox's own state, which no suite reads.
+	"/.agents-sandbox/",
 	// The repository's prose.
 	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
 }

@@ -111,7 +111,9 @@ func TestSubscribeGithubMergeQueueIsRefused(t *testing.T) {
 			h.Remotes.url = "git@gitlab.com:o/r.git"
 			return connect.NewRequest(&agentreplv1.SubscribeGithubMergeQueueRequest{Subscriber: ref(),
 				Repository: &agentreplv1.SubscribeGithubMergeQueueRequest_Subscribers{Subscribers: &agentreplv1.SubscribeGithubMergeQueueSubscribersRepository{}}})
-		}, got: func(e *agentreplv1.SubscribeGithubMergeQueueError) bool { return e.GetNotOnGithub().GetOrigin() == "git@gitlab.com:o/r.git" }},
+		}, got: func(e *agentreplv1.SubscribeGithubMergeQueueError) bool {
+			return e.GetNotOnGithub().GetOrigin() == "git@gitlab.com:o/r.git"
+		}},
 		{name: "a branch with no merge queue", arrange: func(h *harness) *connect.Request[agentreplv1.SubscribeGithubMergeQueueRequest] {
 			h.PRs.queueAnchorErr = prwatch.ErrNoMergeQueue
 			return subscribeNamedQueue(nil)
@@ -121,7 +123,9 @@ func TestSubscribeGithubMergeQueueIsRefused(t *testing.T) {
 		{name: "a queue GitHub will not show", arrange: func(h *harness) *connect.Request[agentreplv1.SubscribeGithubMergeQueueRequest] {
 			h.PRs.queueAnchorErr = &ghclient.Failure{Kind: ghclient.KindUnauthorized, Status: 401}
 			return subscribeNamedQueue(nil)
-		}, got: func(e *agentreplv1.SubscribeGithubMergeQueueError) bool { return e.GetUnreadable().GetCause().GetUnauthorized() != nil }},
+		}, got: func(e *agentreplv1.SubscribeGithubMergeQueueError) bool {
+			return e.GetUnreadable().GetCause().GetUnauthorized() != nil
+		}},
 		{name: "a subscriber that closed meanwhile", arrange: func(h *harness) *connect.Request[agentreplv1.SubscribeGithubMergeQueueRequest] {
 			h.DB.queueSubscribeErr = wsm.ErrSubscriberClosed
 			return subscribeNamedQueue(nil)

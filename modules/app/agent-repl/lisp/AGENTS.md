@@ -259,7 +259,7 @@ Two module-wide rules govern every `test-*.el` suite (`modules/app/agent-repl/AG
 - Real: the elisp, the one system under test.
 - Daemon: the fake daemon (`lisp/testsupport/fakedaemon`) in the `test-integration-*.el` suites, and stubs everywhere else. No real `agent-repld` is started by any ERT suite.
 - Git: stubbed at the process boundary (as `test-core.el` does around `agent-repl--capture-process-output`), or the fake git executable (`bin/fake-git.sh`). Never the host's `git`.
-- Emacs against the real daemon runs only in `e2e-emacs`.
+- Emacs against the real daemon runs in no suite: the Emacs e2e layer was removed on 2026-11-13 (`e2e/AGENTS.md`, "The Emacs e2e layer was removed").
 
 ## Performance lessons (living document)
 

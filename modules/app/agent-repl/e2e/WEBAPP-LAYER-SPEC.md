@@ -9,7 +9,7 @@ fake SDK -> real shim -> real store + real sidecar -> real agent-repld -> real w
 
 This document is a design record plus a scenario list. It states what to
 BUILD. Nothing here was derived by running the suite; every fact comes from
-`e2e/SPEC.md`, `e2e/world_test.go`, `e2e/main_test.go`,
+`e2e/SPEC.md`, `e2e/kit/stack/world.go`, `e2e/kit/stack/main.go`,
 `daemon/integration/harness/daemon.go`, `docs/overhaul/webapp.md`, the
 `frontend/v1` proto comments, and the webapp's own integration harness
 (`webapp/test/integration/{harness.ts,fake-daemon.ts}`).
@@ -194,7 +194,7 @@ The layer refuses to pass quietly when it cannot run. Every unmet prerequisite
 names itself and the exact command that supplies it, and FAILS the test — a run
 that covered nothing must never look like a pass. `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`
 turns those failures back into skips for a deliberate local poke, and every skip
-so taken is reprinted in the end-of-run summary block (`precondition_test.go`).
+so taken is reprinted in the end-of-run summary block (`kit/stack/precondition.go`).
 
 - **Go side** (`webapplayer_e2e_test.go`), each a `requireDependency` with the reason:
   - `npm` not on `PATH`.
@@ -207,11 +207,11 @@ so taken is reprinted in the end-of-run summary block (`precondition_test.go`).
     binaries) are already loud skips inside `requireNode`,
     `requireShimBundle`, `requireStoreBinary`, `requireSidecarBinary`.
   - the webapp package directory not writable (`wlRequireWebappWritable`,
-    over the pure `wlWebappWritable` that `harness_selftest_test.go` covers in
+    over the pure `wlWebappWritable` that `kit/stack/harness_selftest_test.go` covers in
     both directions). This one is a hard failure and NOT the
     `AGENT_REPL_E2E_ALLOW_MISSING_DEPS` opt-out: no command the reader could
     run supplies it. It exists because the layer already paid for its absence
-    — the e2e sandbox links `webapp/node_modules` at a read-only image layer,
+    — the e2e sandbox (removed 2026-11-13) linked `webapp/node_modules` at a read-only image layer,
     vite's default `cacheDir` is `node_modules/.vite`, and all eleven areas
     failed in the container (and only there) with a filesystem error nowhere
     near the config that caused it. The cache moved to `webapp/.vite-cache`

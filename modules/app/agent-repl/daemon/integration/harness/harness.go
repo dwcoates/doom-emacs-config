@@ -269,7 +269,9 @@ func runPinned(m *testing.M, module, parent string) int {
 // harness's SHIM_BUILD_SHA and AGENT_REPL_DEPLOY_STAMP are the only answers
 // and no host build can be read as this suite's deployed build. The shared
 // render vocabulary is the one asset beneath the checkout that has no flag
-// override, so the real tree's proto/ is linked in.
+// override, so the real tree's proto/ is linked in, and so is its requirements
+// manifest, which every daemon reads at boot and every spawned daemon's
+// environment is refreshed under (cmd/agent-repld requireManifest).
 func newPinnedCheckout(dir, repo string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir the pinned checkout %s: %w", dir, err)
@@ -280,6 +282,10 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 	link := filepath.Join(dir, "proto")
 	if err := os.Symlink(filepath.Join(repo, "proto"), link); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", fmt.Errorf("link the render vocabulary into %s: %w", dir, err)
+	}
+	manifest := filepath.Join(dir, "requirements.json")
+	if err := os.Symlink(filepath.Join(repo, "requirements.json"), manifest); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("link the requirements manifest into %s: %w", dir, err)
 	}
 	return dir, nil
 }

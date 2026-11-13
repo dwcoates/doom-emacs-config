@@ -221,6 +221,25 @@ func TestRunTestsRefuses(t *testing.T) {
 		{name: "CPU load a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{Loops: 4}, Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetCpuLoadRefused() != nil }},
+		{name: "a fresh run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			run := oneHarness()
+			run.NoReuse = true
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-no-reuse"})
+		}},
+		{name: "a governed run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), Governed: true, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-governed"})
+		}},
+		{name: "a fresh governed run a workspace asks for", req: func(h *harness) *agentreplv1.RunTestsRequest {
+			run := oneHarness()
+			run.NoReuse = true
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Governed: true, Requester: agent()}
+		}, check: func(e *agentreplv1.RunTestsError) bool {
+			return slices.Equal(e.GetUserOnlyRefused().GetOptions(), []string{"-no-reuse", "-governed"})
+		}},
 		{name: "a workspace the daemon does not serve", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			return &agentreplv1.RunTestsRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope", Dir: "/nowhere"}, Run: oneHarness(), Requester: agent()}
 		}, check: func(e *agentreplv1.RunTestsError) bool { return e.GetUnknownWorkspace() != nil }},
@@ -424,29 +443,44 @@ func TestRunTestsHoldsTheUsersRunUnderCPULoad(t *testing.T) {
 // run is told to take every core, ungoverned, at niceness 1.
 func TestRunTestsRunsABypassHoldersRunUngovernedAtTheBestTestPriority(t *testing.T) {
 	tests := []struct {
-		name  string
-		holds bool
-		want  string
+		name     string
+		holds    bool
+		governed bool
+		want     string
+		record   string
 	}{
 		{name: "a bypass holder's run", holds: true,
-			want: "env AGENT_REPL_TEST_NICENESS=1 AGENT_REPL_TEST_UNGOVERNED=1 env AGENT_REPL_TEST_RUN_BY_DAEMON=1 "},
+			want:   "env AGENT_REPL_TEST_NICENESS=1 AGENT_REPL_TEST_UNGOVERNED=1 env AGENT_REPL_TEST_RUN_BY_DAEMON=1 ",
+			record: "the workspace holds the queue bypass mode; its run takes every core, ungoverned, at the test runs' best priority"},
+		{name: "a bypass holder's run asked to be governed", holds: true, governed: true,
+			want:   "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 ",
+			record: "the workspace holds the queue bypass mode, but the run asked to be governed; it runs under the gate's CPU governance"},
 		{name: "any other run", holds: false,
+			want: "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 "},
+		{name: "any other run asked to be governed", holds: false, governed: true,
 			want: "env AGENT_REPL_TEST_RUN_BY_DAEMON=1 "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			log := dlog.NewTestLogger()
+			h.Surfaces.workspace, h.Surfaces.global = log, log
 			ref := testsWorkspace(t, h, testsDeploy)
 			h.DB.bypass = map[ids.WorkspaceID]wsm.QueueBypass{ids.WorkspaceID(ref.GetId()): {Holds: tt.holds}}
 			h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
 
 			// Act
-			runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+			runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: userRequester(), Governed: tt.governed})
 
 			// Assert
 			if got := strings.Join(h.Tests.argv, " "); !strings.HasPrefix(got, tt.want) {
 				t.Fatalf("argv = %s, want it to start %q", got, tt.want)
+			}
+			if tt.record != "" {
+				if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: opRunTests, Message: tt.record}); !found {
+					t.Fatalf("records = %+v, want %q", log.Records(), tt.record)
+				}
 			}
 		})
 	}

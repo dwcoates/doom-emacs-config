@@ -64,7 +64,7 @@ const progressReporter = {
   },
 };
 
-// COVERAGE, IN A COVERAGE RUN ONLY. e2e/webapplayer_server_test.go hands this
+// COVERAGE, IN A COVERAGE RUN ONLY. e2e/kit/stack/webapplayer_server.go hands this
 // driver a directory of its own under the run's coverage root when the run
 // collects coverage (AGENT_REPL_E2E_COVERAGE); unset, nothing here changes
 // the run. vitest with watch off writes each run's coverage-final.json over

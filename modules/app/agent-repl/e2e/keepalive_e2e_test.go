@@ -42,6 +42,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -66,9 +67,9 @@ const (
 
 // keepaliveWorld is a world whose shims beat their keep-alive fast enough to
 // observe, with one registered workspace.
-func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
+func keepaliveWorld(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
@@ -78,7 +79,7 @@ func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 // awaitShimRecords awaits COUNT records satisfying pred, the first at or after
 // the first record `from` accepts and each strictly after the one before it,
 // in the log's own order.
-func awaitShimRecords(t *testing.T, w *World, path, what string, from func(harness.LogRecord) bool, count int, pred func(harness.LogRecord) bool) []harness.LogRecord {
+func awaitShimRecords(t *testing.T, w *stack.World, path, what string, from func(harness.LogRecord) bool, count int, pred func(harness.LogRecord) bool) []harness.LogRecord {
 	t.Helper()
 	var got []harness.LogRecord
 	after := from
@@ -160,7 +161,7 @@ func shimRecords(t *testing.T, path string) []harness.LogRecord {
 func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	// THE KEEP-ALIVE IS AWAITED AFTER THE REAL TURN OPENED, so the wait can
 	// only be satisfied by a beat the daemon timed from that turn's end
 	// (2026-10-15 full run: an unanchored wait took an earlier one).
@@ -168,8 +169,8 @@ func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
 
 	// Act
-	during := SubmitPrompt(t, w, ws, "during a keep-alive")
-	AwaitTurnEnded(t, w, ws, during)
+	during := stack.SubmitPrompt(t, w, ws, "during a keep-alive")
+	stack.AwaitTurnEnded(t, w, ws, during)
 	rewind := w.Daemon.AwaitLogRecord(shimLog, "the real prompt's rewind", isRewind("real_prompt"))
 
 	// Assert
@@ -192,14 +193,14 @@ func testPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 	cases := []struct {
 		name   string
-		assert func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, shimLog, armed string, rewinds []harness.LogRecord)
+		assert func(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, shimLog, armed string, rewinds []harness.LogRecord)
 	}{
 		{
 			// THE REAL SHAPE ANSWERS THE STOP WITH NO REPLY (a lone result), and
 			// its notification is a transcript-only record the stream never
 			// carries: the span the shim sees past the anchor is the keep-alive.
 			name: "every rewind discards exactly the keep-alive",
-			assert: func(t *testing.T, _ *World, _ *workspacev1.WorkspaceRef, _, _ string, rewinds []harness.LogRecord) {
+			assert: func(t *testing.T, _ *stack.World, _ *workspacev1.WorkspaceRef, _, _ string, rewinds []harness.LogRecord) {
 				for i, r := range rewinds {
 					if got := spanKinds(t, r, "discarded_span"); fmt.Sprint(got) != "[keepalive]" {
 						t.Errorf("rewind #%d discards span kinds %v, want exactly the keep-alive", i+1, got)
@@ -209,7 +210,7 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 		},
 		{
 			name: "nothing of the replayed stop is served",
-			assert: func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
+			assert: func(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
 				for _, row := range feedRows(t, w, ws) {
 					if strings.Contains(row.String(), stopReplaySummary) {
 						t.Errorf("feed row %v draws the replayed stop, want it never served", row)
@@ -219,7 +220,7 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 		},
 		{
 			name: "nothing of the replayed stop is stored",
-			assert: func(t *testing.T, w *World, _ *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
+			assert: func(t *testing.T, w *stack.World, _ *workspacev1.WorkspaceRef, _, _ string, _ []harness.LogRecord) {
 				db, err := sql.Open("sqlite", "file:"+w.Store.DBPath+"?mode=ro")
 				if err != nil {
 					t.Fatalf("e2e: opening the store database read-only: %v", err)
@@ -246,7 +247,7 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 		},
 		{
 			name: "no turn is opened for the stop's answer",
-			assert: func(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, _, armed string, _ []harness.LogRecord) {
+			assert: func(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, _, armed string, _ []harness.LogRecord) {
 				turns := distinctTurnIDs(feedRows(t, w, ws))
 				if len(turns) != 2 || !turns[armed] {
 					t.Errorf("feed turns = %v, want exactly the arming turn %q and the prompt after the replays", turns, armed)
@@ -259,8 +260,8 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 			t.Parallel()
 			// Arrange
 			w, ws, shimLog := keepaliveWorld(t)
-			armed := SubmitPrompt(t, w, ws, "!stop-on-rewind")
-			AwaitTurnEnded(t, w, ws, armed)
+			armed := stack.SubmitPrompt(t, w, ws, "!stop-on-rewind")
+			stack.AwaitTurnEnded(t, w, ws, armed)
 
 			// Act: three replays, each answered beside a keep-alive, then a
 			// real prompt whose turn ending proves the ordered writer flushed
@@ -268,8 +269,8 @@ func testStopReplayedByEveryRewindNeverLoops(t *testing.T) {
 			awaitShimRecords(t, w, shimLog, "a stop replayed by a rewind", anyShimRecord, 3,
 				func(r harness.LogRecord) bool { return r.Message == stopReplayMessage })
 			rewinds := awaitShimRecords(t, w, shimLog, "a rewind before a keep-alive beat", anyShimRecord, 3, isRewind("keepalive"))
-			after := SubmitPrompt(t, w, ws, "after the replays")
-			AwaitTurnEnded(t, w, ws, after)
+			after := stack.SubmitPrompt(t, w, ws, "after the replays")
+			stack.AwaitTurnEnded(t, w, ws, after)
 
 			// Assert
 			tc.assert(t, w, ws, shimLog, armed.GetValue(), rewinds)
@@ -291,7 +292,7 @@ func testRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 		"daemon.shimclient.exit")
-	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	firstPID := w.Daemon.AwaitLogRecord(shimLog, "the first shim's own record",
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" }).PID
 	resp, err := w.Client().RestartWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ws}))
@@ -308,7 +309,7 @@ func testRestartedShimCarriesItsKeepAlivesUntilARealReply(t *testing.T) {
 		})
 
 	// Act
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	rewind := w.Daemon.AwaitLogRecord(shimLog, "the restarted shim's first rewind",
 		func(r harness.LogRecord) bool { return restarted(r) && isRewind("keepalive")(r) })
 

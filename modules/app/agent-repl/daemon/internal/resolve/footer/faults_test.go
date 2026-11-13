@@ -442,9 +442,11 @@ func TestTheFaultDomainsRankAgentReplThenNetworkThenVendor(t *testing.T) {
 		{name: "a network fault outranks a vendor fault opened before it",
 			faults: []Fault{vendorFaultOf(t, "vendor", health.KindVendorStartFailed), faultOf(t, "net", health.KindNetworkUnreachable, false)},
 			want:   "network_fault"},
-		{name: "a daemon-scoped agent-repl fault outranks a network fault",
+		// An impaired daemon is the one agent-repl fault that ranks below the
+		// network: it outranks only idle (owner ruling, 2026-11-13).
+		{name: "a network fault outranks an impaired daemon opened after it",
 			faults: []Fault{faultOf(t, "net", health.KindNetworkUnreachable, false), faultOf(t, "impaired", health.KindStateUnreadable, false)},
-			want:   "agent_repl_fault"},
+			want:   "network_fault"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

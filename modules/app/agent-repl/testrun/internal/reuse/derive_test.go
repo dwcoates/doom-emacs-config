@@ -43,16 +43,16 @@ func TestDeriveAScriptSuiteIsOneWholeUnit(t *testing.T) {
 func TestDeriveANeverReusedSuiteIsOneUnkeyedUnit(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	s := roster.Suite{Name: "e2e-emacs", Kind: roster.Script, Path: "bin/test-x.sh", NeverReused: "docker"}
+	s := roster.Suite{Name: "whole-module-scan", Kind: roster.Script, Path: "bin/test-x.sh", NeverReused: "a scan"}
 
 	// Act
-	su, err := Derive(f.d, s, suites.Units{Atomic: []run.Spec{spec("e2e-emacs")}}, true)
+	su, err := Derive(f.d, s, suites.Units{Atomic: []run.Spec{spec("whole-module-scan")}}, true)
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(su.Units) != 1 || su.Units[0].Never != "docker" || su.Units[0].Set != nil || su.Envelope != nil {
+	if len(su.Units) != 1 || su.Units[0].Never != "a scan" || su.Units[0].Set != nil || su.Envelope != nil {
 		t.Fatalf("units = %+v, want one never-reused unit with no inputs", su)
 	}
 }

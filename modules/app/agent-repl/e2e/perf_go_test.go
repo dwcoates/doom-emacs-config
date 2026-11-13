@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -65,7 +66,7 @@ func TestPerfSubmitPromptAck(t *testing.T) {
 	perfRequire(t)
 
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
@@ -78,7 +79,7 @@ func TestPerfSubmitPromptAck(t *testing.T) {
 		rec.Record(time.Since(start))
 		// The workspace is left IDLE for the next sample: the daemon holds
 		// every prompt submitted while a turn runs.
-		AwaitTurnEnded(t, w, ws, turn)
+		stack.AwaitTurnEnded(t, w, ws, turn)
 	}
 
 	// Assert.
@@ -107,7 +108,7 @@ func TestPerfSubmitPromptToRosterArm(t *testing.T) {
 	perfRequire(t)
 
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
@@ -127,7 +128,7 @@ func TestPerfSubmitPromptToRosterArm(t *testing.T) {
 			return perfRosterArmBusy(r, ws.GetId())
 		})
 		rec.Record(time.Since(start))
-		AwaitTurnEnded(t, w, ws, turn)
+		stack.AwaitTurnEnded(t, w, ws, turn)
 		perfDrainRoster(t, w, roster, ws)
 	}
 
@@ -154,7 +155,7 @@ func TestPerfSelectWorkspaceAck(t *testing.T) {
 	perfRequire(t)
 
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	rec := NewPerfRecorder("select-workspace-ack")
@@ -217,7 +218,7 @@ func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 	perfRequire(t)
 
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	ws := w.NewWorkspace(t)
 	perfCalibrate(t, w)
 	perfWarmSession(t, w, ws)
@@ -279,7 +280,7 @@ func TestPerfRosterSubscribeReplay(t *testing.T) {
 	perfRequire(t)
 
 	// Arrange.
-	w := NewWorld(t, WorldOpts{})
+	w := stack.NewWorld(t, stack.WorldOpts{})
 	repoFixture := harness.NewRepo(t)
 	harness.Register(t, w.Daemon, repoFixture.Dir)
 	perfCalibrate(t, w)
@@ -311,9 +312,9 @@ func TestPerfRosterSubscribeReplay(t *testing.T) {
 // (§C row 17a, phase 2), not to the hop these rows measure. Measured without
 // it, every prompt row's max was ~355 ms on sample 1 and under 12 ms on the
 // other nineteen: one cost, in the wrong row.
-func perfWarmSession(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func perfWarmSession(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	AwaitTurnEnded(t, w, ws, SubmitPrompt(t, w, ws, "perf warm-up"))
+	stack.AwaitTurnEnded(t, w, ws, stack.SubmitPrompt(t, w, ws, "perf warm-up"))
 }
 
 // perfSubmit submits one prompt and answers its turn, WITHOUT the helper
@@ -321,9 +322,9 @@ func perfWarmSession(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 // call SubmitPrompt makes; it exists only so the idempotency key — which is
 // 16 bytes of crypto/rand and a hex encode — is minted OUTSIDE the timed
 // region rather than inside it.
-func perfSubmit(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, text string) *conversationv1.TurnId {
+func perfSubmit(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, text string) *conversationv1.TurnId {
 	t.Helper()
-	return SubmitPrompt(t, w, ws, text)
+	return stack.SubmitPrompt(t, w, ws, text)
 }
 
 // perfRosterArmBusy answers whether the roster's row for ID reports an arm a
@@ -343,7 +344,7 @@ func perfRosterArmBusy(r *frontendv1.WorkspaceRoster, id string) bool {
 
 // perfDrainRoster reads roster frames until the workspace's arm is settled, so
 // the next sample's wait cannot be satisfied by a stale frame.
-func perfDrainRoster(t *testing.T, w *World, roster *harness.Stream[*frontendv1.WorkspaceRoster], ws *workspacev1.WorkspaceRef) {
+func perfDrainRoster(t *testing.T, w *stack.World, roster *harness.Stream[*frontendv1.WorkspaceRoster], ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	harness.AwaitView(t, w.Ctx(), roster, "the roster arm to settle", func(r *frontendv1.WorkspaceRoster) bool {
 		return !perfRosterArmBusy(r, ws.GetId())

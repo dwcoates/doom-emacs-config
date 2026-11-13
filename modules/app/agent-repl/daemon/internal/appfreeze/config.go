@@ -31,14 +31,15 @@ const EnvApps = "AGENT_REPL_PERSISTENT_WIFI_FREEZE_APPS"
 const NoApps = "none"
 
 // DefaultApps is the list frozen when EnvApps is unset: the applications that
-// draw for a screen nobody sees with the lid closed. Docker is not on it: the
-// e2e-emacs gate suite needs it while the lid is closed.
+// draw for a screen nobody sees with the lid closed. No container runtime is
+// on it, or may be (neverFrozen).
 var DefaultApps = []string{"Slack", "Google Chrome", "Spotify", "WhatsApp", "Activity Monitor"}
 
 // neverFrozen are the bundles no entry may name: the editor agent-repl runs
 // in, every terminal, agent-repl's own applications, and every container
-// runtime, since the merge queue's e2e-emacs gate runs in a container while
-// the lid is closed (owner ruling, 2026-11-12). A process of one is never
+// runtime, since other repositories' tests and services run in containers
+// while the lid is closed (owner rulings, 2026-11-12 and 2026-11-13: agent-repl
+// no longer uses one, and the exemption stands). A process of one is never
 // frozen, so an entry naming one is refused outright.
 var neverFrozen = []string{
 	"Emacs", "Zettel",

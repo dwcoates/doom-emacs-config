@@ -61,6 +61,17 @@ func TestResolveTakesTheStrongestClaimTheFactsMakeWithNoStoppedMerge(t *testing.
 		{name: "a parked session still stands on a vendor fault", parked: true, claims: []Claim{VendorFault}, want: VendorFault},
 		{name: "a merge rung the merge state does not claim is closed", merge: "", claims: []Claim{Merging}, want: Idle},
 		{name: "a merge rung other than the standing one is closed", merge: "merged", claims: []Claim{MergeFailed}, want: Idle},
+		// AN IMPAIRED DAEMON OUTRANKS ONLY IDLE (owner ruling, 2026-11-13).
+		{name: "an impaired daemon with nothing else claims its own rung", claims: []Claim{DaemonImpaired}, want: DaemonImpaired},
+		{name: "a turn in flight outranks an impaired daemon", claims: []Claim{DaemonImpaired, Thinking}, want: Thinking},
+		{name: "a gate outranks an impaired daemon", claims: []Claim{DaemonImpaired, Waiting}, want: Waiting},
+		{name: "a degraded view outranks an impaired daemon", claims: []Claim{DaemonImpaired, Degraded}, want: Degraded},
+		{name: "a vendor fault outranks an impaired daemon", claims: []Claim{DaemonImpaired, VendorFault}, want: VendorFault},
+		{name: "a network fault outranks an impaired daemon", claims: []Claim{DaemonImpaired, NetworkFault}, want: NetworkFault},
+		{name: "a booting session outranks an impaired daemon", claims: []Claim{DaemonImpaired, Starting}, want: Starting},
+		{name: "a failed merge outranks an impaired daemon", merge: "failed", claims: []Claim{DaemonImpaired, MergeFailed}, want: MergeFailed},
+		{name: "a session's agent-repl fault outranks a turn in flight", claims: []Claim{AgentReplFault, Thinking, DaemonImpaired}, want: AgentReplFault},
+		{name: "a parked session skips the daemon-impaired rung", parked: true, claims: []Claim{DaemonImpaired}, want: Idle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,6 +246,70 @@ func TestAGateClaimsTheWaitingRungOnBothSurfaces(t *testing.T) {
 				t.Fatal("the waiting rung ranks below a running turn")
 			}
 		})
+	}
+}
+
+// TestFooterClaimSplitsTheAgentReplFaultArmOnItsStep pins that only the
+// daemon-impaired step leaves the agent_repl_fault rung (owner ruling,
+// 2026-11-13): every other step is the session's own fault.
+func TestFooterClaimSplitsTheAgentReplFaultArmOnItsStep(t *testing.T) {
+	tests := []struct {
+		name  string
+		fault *frontendv1.FooterStatusAgentReplFault
+		want  Claim
+	}{
+		{name: "daemon_impaired", want: DaemonImpaired, fault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_DaemonImpaired{DaemonImpaired: &frontendv1.FooterSubStatusAgentReplFaultDaemonImpaired{}}}},
+		{name: "severed", want: AgentReplFault, fault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_Severed{Severed: &frontendv1.FooterSubStatusAgentReplFaultSevered{}}}},
+		{name: "dead", want: AgentReplFault, fault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_Dead{Dead: &frontendv1.FooterSubStatusAgentReplFaultDead{}}}},
+		{name: "start_failed", want: AgentReplFault, fault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_StartFailed{StartFailed: &frontendv1.FooterSubStatusAgentReplFaultStartFailed{}}}},
+		{name: "turn_died", want: AgentReplFault, fault: &frontendv1.FooterStatusAgentReplFault{
+			Substatus: &frontendv1.FooterStatusAgentReplFault_TurnDied{TurnDied: &frontendv1.FooterSubStatusAgentReplFaultTurnDied{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			status := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: tt.fault}}
+
+			// Act
+			claim, _ := FooterClaim(status)
+
+			// Assert
+			if claim != tt.want {
+				t.Fatalf("FooterClaim(agent_repl_fault · %s) = %q, want %q", tt.name, claim, tt.want)
+			}
+		})
+	}
+}
+
+// TestAnImpairedDaemonClaimsTheSameRungOnBothSurfaces pins the footer's
+// `agent_repl_fault · daemon_impaired` and the roster's `daemon_impaired` onto
+// one claim, so the roster's projection assertion holds for it.
+func TestAnImpairedDaemonClaimsTheSameRungOnBothSurfaces(t *testing.T) {
+	// Arrange
+	footer := &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_AgentReplFault{AgentReplFault: &frontendv1.FooterStatusAgentReplFault{
+		Substatus: &frontendv1.FooterStatusAgentReplFault_DaemonImpaired{DaemonImpaired: &frontendv1.FooterSubStatusAgentReplFaultDaemonImpaired{}}}}}
+
+	// Act
+	footerClaim, _ := FooterClaim(footer)
+	rosterClaim, _ := RosterArmClaim("daemon_impaired")
+
+	// Assert
+	if footerClaim != DaemonImpaired || rosterClaim != DaemonImpaired {
+		t.Fatalf("footer claims %q and roster claims %q, want both daemon_impaired", footerClaim, rosterClaim)
+	}
+}
+
+func TestTheDaemonImpairedRungSitsDirectlyAboveIdle(t *testing.T) {
+	// Act
+	at := slices.Index(Order, DaemonImpaired)
+
+	// Assert
+	if at < 0 || at+1 >= len(Order) || Order[at+1] != Idle {
+		t.Fatalf("Order = %v, want daemon_impaired directly above idle (owner ruling, 2026-11-13)", Order)
 	}
 }
 

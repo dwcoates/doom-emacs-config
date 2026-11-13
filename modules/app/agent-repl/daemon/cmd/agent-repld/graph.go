@@ -307,6 +307,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		"webapp_dist": paths.WebappDist, "prompts_dir": paths.PromptsDir,
 	})
 
+	if err := requireManifest(paths.RequirementsManifest, log); err != nil {
+		return nil, err
+	}
+
 	colors, err := vocab.LoadRenderColors(paths.VocabDir)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: load the render colors: %w", err)
@@ -1197,7 +1201,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StateDir:                p.Layout.Dir(),
 		IntentManifest:          p.Layout.IntentManifest(),
 		DB:                      p.DB,
-		Spawner:                 rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited, successorEnviron(paths.Checkout, log)),
+		Spawner:                 rollout.NewProcessSpawner(selfExe, p.Layout.Dir(), p.Opts.inherited, successorEnviron(paths.RequirementsManifest, log)),
 		Announcer:               pushes,
 		Pusher:                  pushes,
 		Participants:            pushes,
@@ -1263,6 +1267,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Reconnects: p.Reconnects,
 	})
 	if err != nil {
+		return nil, err
+	}
+	// THIS DAEMON PROVES IT CAN SPAWN ITS OWN SUCCESSOR before anything is
+	// served (rollout.Controller.PreflightSpawn): a joining successor that
+	// cannot ends its boot here, so its incumbent's handover is refused and
+	// the incumbent keeps serving. It runs AFTER buildDeployer, whose
+	// daemon-boot recovery edge would otherwise close the fault a fresh
+	// boot's failed preflight opens.
+	if err := rolloutController.PreflightSpawn(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1949,6 +1962,12 @@ type paths struct {
 	// ShimMain, WebappDist, PromptsDir and VocabDir are the four locations
 	// beneath it.
 	ShimMain, WebappDist, PromptsDir, VocabDir string
+	// RequirementsManifest is the installer's requirements manifest at its
+	// root, which declares the per-user settings every spawned daemon
+	// refreshes from the env file (successorEnviron). The boot reads it
+	// (requireManifest), so a path that names no manifest refuses the boot
+	// instead of the first spawn from it.
+	RequirementsManifest string
 	// BuiltSHA is daemon/bin/.built-sha, the source-revision stamp the build
 	// writes beside the daemon binary: the version the health and status
 	// surfaces show.
@@ -1999,14 +2018,15 @@ func resolvePaths(opts options) (paths, error) {
 		return paths{}, fmt.Errorf("agent-repld: resolve the kernel-lock directory: %w", err)
 	}
 	out := paths{
-		Checkout:   root,
-		ShimMain:   firstNonEmpty(opts.shim, checkout.ShimMain(root)),
-		WebappDist: firstNonEmpty(opts.webapp, checkout.WebappDist(root)),
-		PromptsDir: firstNonEmpty(opts.promptsDir, os.Getenv(envPromptsDir), checkout.PromptsDir(root)),
-		VocabDir:   checkout.VocabDir(root),
-		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
-		Home:       home,
-		RunDir:     runDir,
+		Checkout:             root,
+		ShimMain:             firstNonEmpty(opts.shim, checkout.ShimMain(root)),
+		WebappDist:           firstNonEmpty(opts.webapp, checkout.WebappDist(root)),
+		PromptsDir:           firstNonEmpty(opts.promptsDir, os.Getenv(envPromptsDir), checkout.PromptsDir(root)),
+		VocabDir:             checkout.VocabDir(root),
+		RequirementsManifest: checkout.RequirementsManifest(root),
+		BuiltSHA:             filepath.Join(root, "daemon", "bin", ".built-sha"),
+		Home:                 home,
+		RunDir:               runDir,
 	}
 	return out, nil
 }
@@ -2569,13 +2589,31 @@ func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent boo
 // opSuccessorEnv is the operation a spawned daemon's environment is recorded under.
 const opSuccessorEnv = "daemon.rollout.successor_env"
 
+// requireManifest reads the requirements manifest at path the way every
+// spawn's environment does (userenv.SettingNames), whether or not this daemon
+// was given an env file: a daemon whose manifest cannot be read refuses its
+// boot at ERROR, as one without its render vocabulary does, rather than
+// failing the first deploy that spawns from it.
+func requireManifest(path string, log dlog.Logger) error {
+	names, err := userenv.SettingNames(path)
+	if err != nil {
+		log.Error(graphOperation, "the requirements manifest could not be read; the boot is refused", dlog.Context{
+			"manifest": path, "cause": err.Error(),
+		})
+		return fmt.Errorf("agent-repld: read the requirements manifest: %w", err)
+	}
+	log.Debug(graphOperation, "read the requirements manifest's per-user settings", dlog.Context{
+		"manifest": path, "settings": names,
+	})
+	return nil
+}
+
 // successorEnviron answers a spawned daemon's environment: this process's,
 // every per-user setting refreshed from the env file Emacs named
-// (userenv.Successor), the settings the requirements manifest at the root of
-// checkout (the agent-repl module root, paths.Checkout) declares. Each setting it changes is recorded, and a failure is
-// recorded at ERROR before it fails the spawn.
-func successorEnviron(checkout string, log dlog.Logger) func() ([]string, error) {
-	manifest := filepath.Join(checkout, "requirements.json")
+// (userenv.Successor), the settings the requirements manifest at manifest
+// (paths.RequirementsManifest) declares. Each setting it changes is recorded,
+// and a failure is recorded at ERROR before it fails the spawn.
+func successorEnviron(manifest string, log dlog.Logger) func() ([]string, error) {
 	return func() ([]string, error) {
 		env, changed, err := userenv.Successor(os.Environ(), manifest)
 		if err != nil {

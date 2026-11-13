@@ -16,7 +16,7 @@
 // boot sweep to run, and the sidecar's production windows (30s grace, 30m
 // shell silence) cannot be reached inside this suite's budget. They are
 // flags, so this file buys short ones through
-// NewWorldWithSidecarStaleness (world_test.go) and drives each arm for real.
+// NewWorldWithSidecarStaleness (kit/stack/world.go) and drives each arm for real.
 // NOTHING IS SIMULATED: the real fake-SDK shim writes the real spool, the
 // real sidecar rules on it, the real store carries the terminal, and the
 // assertion is on the daemon's own FeedRow.
@@ -54,6 +54,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -66,7 +67,7 @@ import (
 // ===========================================================================
 
 // dlSweepInterval is how often the sidecar's LOST sweep runs: cycle.go arms
-// its sweep ticker at the RESCAN interval, which world_test.go's startSidecar
+// its sweep ticker at the RESCAN interval, which kit/stack/world.go's startSidecar
 // sets to 200ms for every world in this suite. A conclusion is therefore
 // owed no earlier than its window and no later than one sweep tick past it,
 // which is what makes the bounds below a multiple of window+tick rather than
@@ -106,7 +107,7 @@ const dlLostBound = 3 * (dlSilenceWindow + dlSweepInterval)
 // appear under the world's spool root. It is an ordinary "a real process did
 // the thing" wait, not a policy window, so it takes the suite's ordinary
 // budget.
-const dlSpoolBound = DefaultTimeout
+const dlSpoolBound = stack.DefaultTimeout
 
 // ===========================================================================
 // Helpers.
@@ -120,9 +121,9 @@ const dlSpoolBound = DefaultTimeout
 // spool would mean the test is ruling on a file it did not intend, and the
 // arm it then asserts would be about something else. It is failed rather
 // than picked between.
-func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *World) string {
+func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *stack.World) string {
 	t.Helper()
-	tick := time.NewTicker(pollInterval)
+	tick := time.NewTicker(stack.PollInterval)
 	defer tick.Stop()
 	for {
 		var found []string
@@ -171,9 +172,9 @@ func dlAwaitOneSpool(t *testing.T, ctx context.Context, w *World) string {
 // (seam.go) carries a dedicated `reason` key holding the same word the
 // wire's DetachedLost arm carries, so this assertion goes on failing if the
 // arm regresses — a substring match against the sentence would not.
-func dlAwaitLostReason(t *testing.T, ctx context.Context, w *World, workspaceDir, spool, reason string) harness.LogRecord {
+func dlAwaitLostReason(t *testing.T, ctx context.Context, w *stack.World, workspaceDir, spool, reason string) harness.LogRecord {
 	t.Helper()
-	tick := time.NewTicker(pollInterval)
+	tick := time.NewTicker(stack.PollInterval)
 	defer tick.Stop()
 	for {
 		var seen []string
@@ -229,7 +230,7 @@ func dlSamePath(a, b string) bool {
 func dlAwaitLostShell(
 	t *testing.T,
 	ctx context.Context,
-	w *World,
+	w *stack.World,
 	ws *workspacev1.WorkspaceRef,
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
@@ -281,13 +282,13 @@ func dlShellLostHow(lost *frontendv1.FeedShellLost) string {
 // The health fault is DECLARED, not tolerated: work that outlives its turn
 // opens one by design, exactly as the detached-bash family's own tests
 // declare it.
-func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow], *workspacev1.WorkspaceRef) {
+func dlDriveDetachedLive(t *testing.T, w *stack.World) ([]*frontendv1.FeedRow, *harness.Stream[*frontendv1.FeedRow], *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w.ExpectWarnings("daemon.health.open_fault")
 	ws := w.NewWorkspace(t)
 	initial, stream := dbOpenRootFeed(t, w, ws)
-	turn := SubmitPrompt(t, w, ws, "!bash-detach-live")
-	AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.SubmitPrompt(t, w, ws, "!bash-detach-live")
+	stack.AwaitTurnEnded(t, w, ws, turn)
 	return initial, stream, ws
 }
 
@@ -308,7 +309,7 @@ func dlDriveDetachedLive(t *testing.T, w *World) ([]*frontendv1.FeedRow, *harnes
 // Seam: sidecar -> daemon, a silent detached shell's spool concluding went_silent
 func testDetachedLostWentSilent(t *testing.T) {
 	// Arrange.
-	w := NewWorldWithSidecarStaleness(t, WorldOpts{}, SidecarStaleness{ShellSilence: dlSilenceWindow})
+	w := stack.NewWorldWithSidecarStaleness(t, stack.WorldOpts{}, stack.SidecarStaleness{ShellSilence: dlSilenceWindow})
 	initial, stream, ws := dlDriveDetachedLive(t, w)
 	defer stream.Close()
 

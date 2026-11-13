@@ -12,7 +12,6 @@ import (
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
-	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
 )
@@ -204,153 +203,6 @@ func TestScriptUnitsCarryTheirWidth(t *testing.T) {
 			sp := u.Atomic[0]
 			if sp.Slots != tt.wantSlots || !slices.Contains(sp.Env, tt.wantEnv) {
 				t.Fatalf("spec slots %d env %v, want slots %d and %q", sp.Slots, sp.Env, tt.wantSlots, tt.wantEnv)
-			}
-		})
-	}
-}
-
-func TestScriptUnitsThatReadTheWebappDistNeverBuildIt(t *testing.T) {
-	tests := []struct {
-		name  string
-		needs bool
-		want  bool
-	}{
-		{name: "a suite that reads the dist is told not to build it", needs: true, want: true},
-		{name: "any other suite is told nothing", needs: false, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			repo := t.TempDir()
-			write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
-
-			// Act
-			u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Path: "bin/e.sh", NeedsWebappDist: tt.needs})
-
-			// Assert
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := slices.Contains(u.Atomic[0].Env, "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1"); got != tt.want {
-				t.Fatalf("env %v carries the no-build switch = %v, want %v", u.Atomic[0].Env, got, tt.want)
-			}
-		})
-	}
-}
-
-// goTestsSuite is a sandbox-like Script suite over a package in repo holding
-// tests some of which its pattern matches.
-func goTestsSuite(t *testing.T, repo, pattern string) roster.Suite {
-	t.Helper()
-	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
-	write(t, filepath.Join(repo, "pkg", "x_test.go"), "package pkg\n\nimport \"testing\"\n\n"+
-		"func TestEmacsA(t *testing.T) {}\nfunc TestDoomB(t *testing.T) {}\nfunc TestOther(t *testing.T) {}\nfunc TestWithinTestEmacs(t *testing.T) {}\n", 0o644)
-	return roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh", Slots: 2, NeedsWebappDist: true,
-		GoTests: &roster.GoTests{Dir: "pkg", Pattern: pattern}}
-}
-
-func TestScriptUnitsOfAGoTestsSuite(t *testing.T) {
-	// Arrange
-	repo := t.TempDir()
-	s := goTestsSuite(t, repo, "TestEmacs|TestDoom")
-	script := filepath.Join(repo, "bin", "e.sh")
-
-	// Act
-	u, err := scriptUnits(Layout{Repo: repo, Module: repo}, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	only := u.Only([]string{"TestEmacsA", "TestDoomB"})
-	steps := u.Only([]string{"TestEmacsA/StepX", "TestDoomB"})
-
-	// Assert
-	t.Run("a whole run hands the script the roster's pattern unchanged", func(t *testing.T) {
-		if len(u.Atomic) != 1 || !reflect.DeepEqual(u.Atomic[0].Argv, []string{script, "TestEmacs|TestDoom"}) {
-			t.Fatalf("atomic = %+v, want one unit running %s with the pattern", u.Atomic, script)
-		}
-	})
-	t.Run("its tests are every top-level test the pattern matches, as go test -run matches", func(t *testing.T) {
-		if want := []string{"TestDoomB", "TestEmacsA", "TestWithinTestEmacs"}; !reflect.DeepEqual(u.Tests, want) {
-			t.Fatalf("tests = %v, want %v", u.Tests, want)
-		}
-	})
-	t.Run("a run of named tests hands the script exactly those", func(t *testing.T) {
-		if want := []string{script, gotest.TopPattern([]string{"TestEmacsA", "TestDoomB"})}; len(only) != 1 || !reflect.DeepEqual(only[0].Argv, want) {
-			t.Fatalf("only = %+v, want one unit running %v", only, want)
-		}
-	})
-	t.Run("a run of named tests is the whole run's unit in everything but its argument", func(t *testing.T) {
-		whole, named := u.Atomic[0], only[0]
-		whole.Argv, named.Argv = nil, nil
-		if !reflect.DeepEqual(whole, named) {
-			t.Fatalf("only = %+v, want the whole unit %+v", named, whole)
-		}
-	})
-	t.Run("a run naming a step and a test is one numbered unit per pattern", func(t *testing.T) {
-		want := [][]string{{script, "^(TestDoomB)$"}, {script, "^(TestEmacsA)$/^(StepX)$"}}
-		if len(steps) != len(want) {
-			t.Fatalf("units = %+v, want %d", steps, len(want))
-		}
-		for i, sp := range steps {
-			if id := ScriptRunID("e", i); sp.ID != id || !reflect.DeepEqual(sp.Argv, want[i]) {
-				t.Errorf("unit %d = %s %v, want %s %v", i, sp.ID, sp.Argv, id, want[i])
-			}
-		}
-	})
-}
-
-func TestScriptRunID(t *testing.T) {
-	// Act
-	first, second := ScriptRunID("e2e-emacs", 0), ScriptRunID("e2e-emacs", 1)
-
-	// Assert
-	t.Run("a run is named after its suite and its index", func(t *testing.T) {
-		if first != "e2e-emacs/00" || second != "e2e-emacs/01" {
-			t.Fatalf("ids = %q, %q, want e2e-emacs/00, e2e-emacs/01", first, second)
-		}
-	})
-	t.Run("a run is never named as a chunk is", func(t *testing.T) {
-		for _, id := range []string{first, second} {
-			if strings.Contains(id, "#") || id == sched.ChunkID("e2e-emacs", 0) {
-				t.Errorf("id %q holds a chunk's '#'", id)
-			}
-		}
-	})
-}
-
-func TestScriptUnitsOfAnyOtherScriptListNoTests(t *testing.T) {
-	// Arrange
-	repo := t.TempDir()
-	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
-
-	// Act
-	u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh"})
-
-	// Assert
-	if err != nil || u.Tests != nil || u.Only != nil {
-		t.Fatalf("units = %+v, %v; want no tests to name", u, err)
-	}
-}
-
-func TestScriptUnitsOfAGoTestsSuiteRefuse(t *testing.T) {
-	tests := []struct {
-		name, pattern, want string
-	}{
-		{name: "a pattern that matches no test", pattern: "TestNone", want: `suites: e's pattern "TestNone" matches no test in pkg`},
-		{name: "a pattern that does not compile", pattern: "Test(", want: `suites: e's Go test pattern "Test("`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			repo := t.TempDir()
-			s := goTestsSuite(t, repo, tt.pattern)
-
-			// Act
-			_, err := scriptUnits(Layout{Repo: repo, Module: repo}, s)
-
-			// Assert
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
 	}
@@ -647,24 +499,24 @@ func ExampleF_quiet() {
 	write(t, filepath.Join(dir, "ext_test.go"), "package x_test\nimport \"testing\"\nfunc TestExternal(t *testing.T) {}\n", 0o644)
 
 	// Act
-	got, err := GoTopLevelTests(dir)
+	got, err := GoTopLevelTestsTagged(dir, "")
 
 	// Assert
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"ExampleF", "FuzzParse", "TestA", "TestB", "TestExternal"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("GoTopLevelTests = %v, want %v", got, want)
+		t.Fatalf("GoTopLevelTestsTagged = %v, want %v", got, want)
 	}
 }
 
 func TestGoTopLevelTestsOfADirectoryWithoutGoIsEmpty(t *testing.T) {
 	// Act
-	got, err := GoTopLevelTests(t.TempDir())
+	got, err := GoTopLevelTestsTagged(t.TempDir(), "")
 
 	// Assert
 	if err != nil || len(got) != 0 {
-		t.Fatalf("GoTopLevelTests = %v, %v; want nothing", got, err)
+		t.Fatalf("GoTopLevelTestsTagged = %v, %v; want nothing", got, err)
 	}
 }
 

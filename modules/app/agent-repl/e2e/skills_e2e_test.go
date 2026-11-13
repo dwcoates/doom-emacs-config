@@ -38,6 +38,7 @@ import (
 	"strings"
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -70,7 +71,7 @@ func expectedSkillDocument(skill string) string {
 // the turn's terminal, so the loaded row is ordinarily already present), then
 // falls back to the live watch stream, bounded by DefaultTimeout, purely as a
 // defensive fallback -- never a sleep.
-func awaitSkillLoadedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
+func awaitSkillLoadedRow(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -115,14 +116,14 @@ func testSkillInvocation(t *testing.T) {
 		prompt:    "!skill",
 		wantSkill: "fake-skill",
 	}
-	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, SharedWorld(t), tc) })
+	t.Run(tc.name, func(t *testing.T) { runSkillScenarioCase(t, stack.SharedWorld(t), tc) })
 }
 
 // runSkillScenarioCase is the shared AAA body for the skill tests: they
 // differ only in which prompt is submitted and which skill name the fake
 // derives from it, so the arrange/act/assert shape is identical and factored
 // once rather than duplicated per SPEC.md test.
-func runSkillScenarioCase(t *testing.T, w *World, tc skillScenarioCase) {
+func runSkillScenarioCase(t *testing.T, w *stack.World, tc skillScenarioCase) {
 	t.Helper()
 
 	// Arrange: the World the caller brings (the shared one, or its own), one
@@ -138,7 +139,7 @@ func runSkillScenarioCase(t *testing.T, w *World, tc skillScenarioCase) {
 	// durable store write (driveDocumentedPrompt, since this scenario's
 	// documented invocation form carries the parameterized name/args after
 	// "!skill", not a bare "!"+scenario-name).
-	turn := driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, tc.prompt)
+	turn := stack.DriveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, tc.prompt)
 
 	// Assert: the feed settles into a loaded skill card whose document is
 	// this skill's own distinctive body (never a fabricated one), and whose

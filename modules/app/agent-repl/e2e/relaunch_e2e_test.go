@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -37,7 +38,7 @@ import (
 // ROOTS, which are exactly the facts a relaunch on one host keeps. A stop is
 // not a crash — every session is stood down and every shim is reaped — so the
 // successor adopts nothing and must revive from the durable record alone.
-func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
+func rlStopAndRelaunch(t *testing.T, w *stack.World) *harness.Daemon {
 	t.Helper()
 	// Standing a live session down on purpose is what this act IS; these are
 	// its own trail.
@@ -53,7 +54,7 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 	// ON ITS OWN BOUND, NOT ON WHAT THE RUN HAS LEFT: everything before this
 	// has already spent out of w.Ctx(), so handing the remainder to the stop
 	// would make it answer for time it never spent.
-	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	stopCtx, cancelStop := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancelStop()
 	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
@@ -93,7 +94,7 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 	// The revival spawns a SECOND real shim process inside the registration
 	// this test then asserts on, which is the same
 	// two-process-lifecycles-on-one-budget shape the adoption chain has.
-	opts.Timeout = AdoptionChainTimeout
+	opts.Timeout = stack.AdoptionChainTimeout
 	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
 	return successor
@@ -108,10 +109,10 @@ func rlStopAndRelaunch(t *testing.T, w *World) *harness.Daemon {
 func testARelaunchedDaemonKeepsTheConversationItStoodDown(t *testing.T) {
 	// Arrange: a real turn run to its terminal, so the store durably holds
 	// the conversation's own rows.
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo, ws := w.NewRepoWorkspace(t)
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Act: the host's stop, a fresh daemon, and the announcement Emacs makes
 	// when the link comes back.
@@ -146,7 +147,7 @@ func rlAwaitFooterDone(t *testing.T, d *harness.Daemon, ws *workspacev1.Workspac
 	defer web.Close()
 	stream := d.WatchFooter(ws)
 	defer stream.Close()
-	ctx, cancel := grantedclock.WithBound(d.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(d.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	harness.AwaitView(t, ctx, stream, "idle.done after the relaunch", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil

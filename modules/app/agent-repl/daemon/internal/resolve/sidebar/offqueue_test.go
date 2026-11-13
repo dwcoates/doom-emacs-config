@@ -58,4 +58,3 @@ func TestAClosedWorkspacesMergeOffItsQueueIsNotDrawn(t *testing.T) {
 		t.Fatalf("queue group = %v, want none for a closed workspace's merge", group)
 	}
 }
-

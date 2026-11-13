@@ -84,6 +84,14 @@ func (s *server) RunTests(
 			"requester": msg.GetRequester().GetWorkspace().GetWorkspace().GetId(), "loops": msg.GetCpuLoad().GetLoops()})
 		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_CpuLoadRefused{CpuLoadRefused: &agentreplv1.RunTestsCpuLoadRefused{}}})
 	}
+	if refused := userOnlyOptions(msg); len(refused) > 0 && msg.GetRequester().GetUser() == nil {
+		// MEASURING THE TESTS IS THE USER'S ALONE (owner ruling, 2026-11-13):
+		// a fresh or governed run is for debugging the tests themselves, at
+		// the user's explicit request, never an agent's ordinary run.
+		s.log.Info(opRunTests, "refused an option only the user may ask for", dlog.Context{"workspace_id": msg.GetWorkspace().GetId(),
+			"requester": msg.GetRequester().GetWorkspace().GetWorkspace().GetId(), "options": refused})
+		return sendRunTestsError(stream, 1, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UserOnlyRefused{UserOnlyRefused: &agentreplv1.RunTestsUserOnlyRefused{Options: refused}}})
+	}
 	w, err := s.testWorktreeOf(ctx, rpc, opRunTests, msg.GetWorkspace())
 	var noScript *noTestScriptError
 	switch {
@@ -125,7 +133,10 @@ func (s *server) RunTests(
 		log.Error(opRunTests, "could not read whether the workspace holds the queue bypass mode; nothing was run", dlog.Context{"dir": dir, "workspace": string(w.id), "cause": err.Error()})
 		return fmt.Errorf("RunTests: read the queue bypass standing of %s: %w", w.id, err)
 	}
-	if bypass.Holds {
+	switch {
+	case bypass.Holds && msg.GetGoverned():
+		log.Info(opRunTests, "the workspace holds the queue bypass mode, but the run asked to be governed; it runs under the gate's CPU governance", dlog.Context{"dir": dir, "workspace": string(w.id)})
+	case bypass.Holds:
 		argv = merge.BypassTestArgv(argv)
 		log.Info(opRunTests, "the workspace holds the queue bypass mode; its run takes every core, ungoverned, at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
 	}
@@ -449,4 +460,17 @@ func (t *lineTail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return strings.Join(t.lines, "\n")
+}
+
+// userOnlyOptions names the options of a run that only the user may ask for,
+// as the command line spells them: a fresh run and a governed bypass run.
+func userOnlyOptions(msg *agentreplv1.RunTestsRequest) []string {
+	var out []string
+	if msg.GetRun().GetNoReuse() {
+		out = append(out, "-no-reuse")
+	}
+	if msg.GetGoverned() {
+		out = append(out, "-governed")
+	}
+	return out
 }

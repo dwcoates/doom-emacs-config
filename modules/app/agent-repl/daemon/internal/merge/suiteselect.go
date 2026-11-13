@@ -105,59 +105,53 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "testrun/", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh", Full: true},
-	// The sandboxed suites' scripts and the runner they share are those
-	// suites' own, and the e2e module's sandboxscripts package tests them.
-	{Kind: matchExact, Path: moduleRoot + "bin/lib-sandbox-suite.sh", Suites: []string{"e2e", "e2e-emacs"}},
-	{Kind: matchExact, Path: moduleRoot + "bin/test-e2e-emacs.sh", Suites: []string{"e2e", "e2e-emacs"}},
 	// repo-scans reads the Go sources here too.
 	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: append(append([]string(nil), scriptHarnessSuites...), repoScans)},
 
-	// The sandbox image and its runner are the sandboxed suite's precondition
-	// -- the Emacs client layer's and the Doom tier's, which runs in it -- and
-	// nothing else's: the containerless cross-system suite never touches them.
-	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
-	// The e2e harness's world-free code, its own module: its own suite, and
-	// both cross-system suites, which import it.
-	{Kind: matchSubtree, Path: moduleRoot + "e2e/kit/", Suites: []string{"e2e-kit", "e2e", "e2e-emacs", repoScans}},
-	// Both cross-system suites live in e2e/ and share its harness; e2e-kit's
-	// scans read its sources.
-	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e-kit", "e2e", "e2e-emacs", repoScans}},
+	// The e2e harness, its own module (the world every scenario builds, and
+	// its world-free helpers): its own suite, and the cross-system suite,
+	// which imports it.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/kit/", Suites: []string{"e2e-kit", "e2e", repoScans}},
+	// The cross-system suite lives in e2e/; e2e-kit's scans read its sources.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e-kit", "e2e", repoScans}},
 
 	// ONE SYSTEM, ITS OWN SUITES, PLUS THE END-TO-END SUITES THAT RUN IT.
-	// Every world of both end-to-end suites runs the store, the sidecar, the
-	// daemon and its shims for real, and the Emacs layer draws the built
-	// webapp, so each system selects both. The daemon suite carries the
+	// Every world of the end-to-end suite runs the store, the sidecar, the
+	// daemon and its shims for real, and its webapp layer drives the real
+	// webapp, so each system selects it. The daemon suite carries the
 	// daemon's integration tests (daemon/integration) with it.
 	// THE WEBAPP'S PARSED-PROSE FIXTURE IS THE DAEMON'S ANSWER: the daemon's
 	// prose suite writes it from its inputs and fails while it is stale, and
 	// the webapp's tests draw from it.
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/test/fixtures/", Suites: []string{"daemon", "webapp", repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e", "e2e-emacs", repoScans}},
+	// e2e-kit reads the webapp layer's areas (its scenario matrix) and its driver's boot budget.
+	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness", "e2e-kit", "e2e", repoScans}},
 	// The whole-module scans are their own suite; nothing else reads them.
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/reposcans/", Suites: []string{repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs", repoScans}},
-	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", "e2e-emacs", repoScans}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e-kit", "e2e", repoScans}},
+	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree,
+	// and e2e-kit's scenario matrix reads its scenarios and its AGENTS.md.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e-kit", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", repoScans}},
 	// zettel, the knowledge graph service: its own suite.
 	{Kind: matchSubtree, Path: moduleRoot + "zettel/", Suites: []string{"zettel", repoScans}},
 	// The shim's integration files, and the sidecar's mocked vendor, spawn the
 	// real lock helper.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", repoScans}},
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
 	// sidecar, the lock helper, the test runner and zettel; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e", "e2e-emacs", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", repoScans}},
 	// The TLDR-tree grammars: their consumer, the daemon (which parses every
 	// drawn text with tldr through cgo, internal/prose, and holds its reading
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves
 	// that parse, and the scans that read the Go binding's go.mod. Each later
 	// consumer joins this list as it starts parsing with them.
-	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e-kit", "e2e", repoScans}},
 
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite
@@ -169,7 +163,7 @@ var suiteRules = []suiteRule{
 	// placeholders (internal/prompts), and its integration harness copies them
 	// into every test daemon. A broken placeholder would land untested and then
 	// fail every merge's brief, so prompts/ selects the daemon suite.
-	{Kind: matchSubtree, Path: moduleRoot + "prompts/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "prompts/", Suites: []string{"daemon", "e2e"}},
 
 	// DOCUMENTATION SELECTS NOTHING. The module's docs/, plans/ and org/
 	// (the todo table of noticed deficiencies) hold prose, and so does every Markdown file at
@@ -180,21 +174,19 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "docs/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "plans/", Suites: []string{}},
 	{Kind: matchSubtree, Path: moduleRoot + "org/", Suites: []string{}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-merge-queue.md", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-queue-bypass.md", Suites: []string{"shim", "sidecar", "e2e", "e2e-emacs"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt-merge-queue.md", Suites: []string{"shim", "sidecar", "e2e"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt-queue-bypass.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three
 	// files Doom's module loader resolves by exact path (config.el, packages.el,
 	// doctor.el) stay directly at the module root. `ert` carries Emacs's unit
 	// and integration tests both.
-	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert", "e2e-emacs"}},
-	// e2e-emacs carries the Doom tier too, which boots this elisp in a real
-	// Doom against the fake daemon under lisp/testsupport/.
+	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert"}},
 	// The repo scans read the wire decoders against the schema
 	// (reposcans/wire_decoders_test.go).
-	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "e2e-emacs", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", repoScans}},
 
 	// OUTSIDE THE MODULE, the paths a roster harness reads select exactly the
 	// suites that read them (roster.Suites spells them with a leading "/").

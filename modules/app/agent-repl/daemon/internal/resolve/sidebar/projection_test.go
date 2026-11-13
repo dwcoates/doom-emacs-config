@@ -95,6 +95,25 @@ func TestAnImpairedDaemonDrawsTheRowDaemonImpaired(t *testing.T) {
 	}
 }
 
+// TestAnImpairedDaemonLeavesARunningTurnsRowThinking is the owner's ruling of
+// 2026-11-13 on the roster: a failed deploy's `successor_spawn_failed` drew
+// every working workspace's row impaired. The impaired daemon outranks only
+// idle, so the row keeps the turn it is running.
+func TestAnImpairedDaemonLeavesARunningTurnsRowThinking(t *testing.T) {
+	// Arrange: a turn in flight.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.AckTurn(theWS)
+
+	// Act: a daemon-scoped fault stands on every strip.
+	footerOf(t, r).OpenFault("", footerFault(t, "fault-1", health.KindSuccessorSpawnFailed, true))
+
+	// Assert
+	if got := statusName(onlyRow(t, r)); got != "thinking" {
+		t.Fatalf("status = %q, want thinking: an impaired daemon outranks only idle", got)
+	}
+}
+
 func TestAnOpenQuestionDrawsTheRowQuestion(t *testing.T) {
 	// Arrange
 	r := live(t, arrange(t))

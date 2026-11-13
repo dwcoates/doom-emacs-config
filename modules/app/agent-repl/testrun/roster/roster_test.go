@@ -34,7 +34,7 @@ func TestLookup(t *testing.T) {
 		wantOK bool
 	}{
 		{"ert", true},
-		{"e2e-emacs", true},
+		{"e2e", true},
 		{"nope", false},
 	}
 	for _, tt := range tests {
@@ -49,10 +49,6 @@ func TestLookup(t *testing.T) {
 		})
 	}
 }
-
-// sandboxed are the suites that run inside the e2e sandbox
-// (bin/lib-sandbox-suite.sh): the Emacs client layer, the Doom tier with it.
-var sandboxed = map[string]bool{"e2e-emacs": true}
 
 func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
 	// Arrange / Act
@@ -78,47 +74,6 @@ func TestOnlyScriptSuitesHaveAWidth(t *testing.T) {
 		if s.Slots != 0 && s.Kind != Script {
 			t.Errorf("suite %s has width %d but is not a Script suite", s.Name, s.Slots)
 		}
-	}
-}
-
-func TestOnlyArgumentlessScriptSuitesRunGoTests(t *testing.T) {
-	// The script's one argument is the -test.run pattern, so another kind
-	// would ignore GoTests and arguments of its own would collide with it.
-	for _, s := range Suites {
-		if s.GoTests != nil && (s.Kind != Script || len(s.Args) > 0) {
-			t.Errorf("suite %s runs Go tests but is kind %d with args %v; want an argumentless Script suite", s.Name, s.Kind, s.Args)
-		}
-	}
-}
-
-func TestEverySandboxedSuiteNamesItsGoTests(t *testing.T) {
-	// A sandboxed suite's tests run where the runner cannot reach them, so
-	// GoTests is the only way one of them reruns alone.
-	for name := range sandboxed {
-		s, ok := Lookup(name)
-		if !ok || s.GoTests == nil || s.GoTests.Dir == "" || s.GoTests.Pattern == "" {
-			t.Errorf("sandboxed suite %s = %+v, want its Go tests' package and pattern", name, s)
-		}
-	}
-}
-
-func TestTheSandboxSuiteRunsTheEmacsLayerAndTheDoomTier(t *testing.T) {
-	// Arrange
-	s, _ := Lookup("e2e-emacs")
-
-	// Assert
-	if s.GoTests == nil || *s.GoTests != (GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}) {
-		t.Fatalf("e2e-emacs GoTests = %+v, want the e2e package's TestEmacs and TestDoom tests", s.GoTests)
-	}
-}
-
-func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
-	// Arrange
-	s, ok := Lookup("e2e-emacs")
-
-	// Assert
-	if !ok || s.Slots != 2 {
-		t.Fatalf("e2e-emacs = %+v, want a width of 2: the CPUs its two Emacsen were re-measured on (EMACS-LAYER-SPEC.md)", s)
 	}
 }
 
@@ -252,20 +207,6 @@ func TestAProgramBuiltFromAnIntegrationDirectoryIsAFake(t *testing.T) {
 	}
 }
 
-func TestOnlyTheSandboxSuiteReadsTheWebappDist(t *testing.T) {
-	// The sandbox suite stages webapp/dist into its container; no other
-	// suite reads it, and only a Script suite is handed the env that stops
-	// it building the dist itself (suites.NoWebappBuildEnv).
-	for _, s := range Suites {
-		if s.NeedsWebappDist != sandboxed[s.Name] {
-			t.Errorf("%s NeedsWebappDist = %v", s.Name, s.NeedsWebappDist)
-		}
-		if s.NeedsWebappDist && s.Kind != Script {
-			t.Errorf("%s needs the webapp dist but is not a Script suite", s.Name)
-		}
-	}
-}
-
 func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
 	// A keyed suite runs confined to its declared inputs, and its reuse key is
 	// taken over them: a suite reading the goldens undeclared is refused the
@@ -292,11 +233,11 @@ func TestEverySuiteThatReadsTheScenarioGoldensDeclaresThem(t *testing.T) {
 
 // TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead pins that a suite whose
 // keyed tree covers webapp/ but which reads no built dist declares the dist
-// generated: the run builds a stale dist after keying, and a hashed dist then
-// refused the suite's green record.
+// generated: a dist rebuilt after keying (2026-10-16, by the run itself) made
+// a hashed dist refuse the suite's green record.
 func TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead(t *testing.T) {
 	for _, s := range Suites {
-		if s.Reuse == nil || s.NeedsWebappDist {
+		if s.Reuse == nil {
 			continue
 		}
 		covers := s.Path == "webapp"

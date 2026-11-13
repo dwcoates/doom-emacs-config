@@ -339,8 +339,8 @@ for anything as large as `*Messages*`. The form is wrapped in a
 `condition-case`, so a probe that signals comes back as an error carrying the
 elisp message.
 
-The e2e Emacs layer reaches the same conclusion for the same reason, but through
-a helper INSTALLED in the sandbox profile. A realtest may not do that: the
+The e2e Emacs layer (removed 2026-11-13) reached the same conclusion for the
+same reason, but through a helper INSTALLED in the sandbox profile. A realtest may not do that: the
 owner's configuration gets nothing added to it, so the wrapper travels in the
 form itself.
 

@@ -26,6 +26,7 @@ package e2e
 import (
 	"testing"
 
+	"agentrepl/e2e/kit/stack"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
@@ -48,10 +49,10 @@ var faApiErrorWarnings = []string{"daemon.sessionwatcher.api_error", "daemon.fee
 // other outcome. The headline is checked here for every arm because Landing 8
 // (PROTO-CHANGES.md) makes it unconditional: `FeedTurnEndedErrored.headline`
 // is the client's whole account of what the arm means.
-func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenario string) *frontendv1.FeedTurnEndedErrored {
+func faDriveErrored(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, scenario string) *frontendv1.FeedTurnEndedErrored {
 	t.Helper()
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
-	row := AwaitTurnEnded(t, w, ws, turn)
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
+	row := stack.AwaitTurnEnded(t, w, ws, turn)
 	ended := row.GetTurnEnded()
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
@@ -89,7 +90,7 @@ func faDriveErrored(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenar
 // Seam: turn-failure
 func testApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	// Arrange
-	w := SharedWorld(t)
+	w := stack.SharedWorld(t)
 	w.ExpectWarnings(faApiErrorWarnings...)
 	ws := w.NewWorkspace(t)
 

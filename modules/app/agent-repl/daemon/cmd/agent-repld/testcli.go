@@ -30,7 +30,6 @@ import (
 //	-ert FILE=test-a,test-b        those ert-deftests
 //	-harness SCRIPT                the whole shell harness
 //	-harness SCRIPT=group1,group2  those groups of a harness that lists groups
-//	-harness SCRIPT=TestA,TestB    those top-level Go tests of a sandboxed suite (bin/test-e2e-emacs.sh)
 //	-suite NAME                    one roster suite, whole
 //	-every-suite                   the whole roster: the merge queue's gate, run
 //	                               by an agent only with a stated reason
@@ -92,6 +91,8 @@ func testRun(c *cliCall, args []string) int {
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
 	remeasure := fs.Bool("remeasure", false, "bound every unit as one never measured, so a unit that got slower passes and records its new peak")
+	noReuse := fs.Bool("no-reuse", false, "run every selected unit, reusing no earlier pass (the user's alone: needs -as-user)")
+	governed := fs.Bool("governed", false, "run under the gate's CPU governance even from a bypass holder (the user's alone: needs -as-user)")
 	runs := fs.Uint("runs", 1, "how many times the run repeats, each its own run")
 	stop := fs.Bool("stop-at-first-failure", false, "stop repeating at the first run that fails")
 	cpuLoad := fs.Uint("cpu-load", 0, "busy loops held for the run's length (the user's alone: needs -as-user)")
@@ -105,6 +106,9 @@ func testRun(c *cliCall, args []string) int {
 	}
 	if sel.empty() {
 		return c.usageFailed("name the tests to run: the full suite is the merge queue's to run")
+	}
+	if (*noReuse || *governed) && !*asUser {
+		return c.usageFailed("-no-reuse and -governed are the user's alone, for debugging the tests themselves: pass -as-user only when the user asks for one")
 	}
 	if *cpuLoad > 0 && !*asUser {
 		return c.usageFailed("-cpu-load is the user's alone: pass -as-user only when the user asks for load")
@@ -135,8 +139,8 @@ func testRun(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	run.Coverage, run.Record, run.Remeasure = *coverage, *record, *remeasure
-	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester}
+	run.Coverage, run.Record, run.Remeasure, run.NoReuse = *coverage, *record, *remeasure, *noReuse
+	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Governed: *governed}
 	if *worktree != "" {
 		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}
 	}

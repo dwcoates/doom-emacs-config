@@ -1,12 +1,12 @@
 // Adoption on restart (SPEC.md section C, "Adoption on restart", #47-50).
 //
 // Every test here drives a REAL daemon, a REAL shim-store, a REAL sidecar,
-// and the REAL shim (its `--fake` scripted vendor), per world_test.go and
-// main_test.go. Git is the harness's scripted fake-git world
+// and the REAL shim (its `--fake` scripted vendor), per kit/stack/world.go and
+// kit/stack/main.go. Git is the harness's scripted fake-git world
 // (agent-repld/integration/harness.NewRepo) — never a real git process —
 // exactly like every other daemon/integration test; only the daemon, store,
 // sidecar, and shim are real. No test seeds the store with hand-written
-// rows: #47 and #48 use driveScenarioToCompletion (world_test.go) to drive a
+// rows: #47 and #48 use driveScenarioToCompletion (kit/stack/world.go) to drive a
 // named, real fake-SDK scenario ("prose-streamed" — grounded, no manifest
 // caveat) through a real session to completion before simulating a daemon
 // bounce, per the binding ruling in
@@ -73,6 +73,7 @@ import (
 	"time"
 
 	"agentrepl/e2e/kit"
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -100,11 +101,11 @@ func testColdBootReadsReplayFromStore(t *testing.T) {
 	// sidecar's own cursor advance) before any bounce is simulated — the
 	// binding alternative to a hand-seeded storedAssistantEvent fixture
 	// (E2E-EVENT-INVENTORY.md ruling 3).
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	ws := w.NewWorkspace(t)
 
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Act: crash the daemon (SIGKILL) — the real shim, spawned into its own
 	// process group by the daemon's own shim-spawn plumbing, survives — and
@@ -164,7 +165,7 @@ func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.Wor
 	}
 	stream := d.WatchFeedOn(d.Client(), success.GetWatch())
 	defer stream.Close()
-	ctx, cancel := grantedclock.WithBound(d.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(d.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, stream, what, pred)
 }
@@ -172,15 +173,15 @@ func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.Wor
 // adColdBoot SIGKILLs w's daemon and boots a fresh one against the SAME
 // state root, kernel-lock dir, and store socket — a crash-restart cold boot
 // re-adopting whatever real shim survived, never a second spawn.
-func adColdBoot(t *testing.T, w *World) *harness.Daemon {
+func adColdBoot(t *testing.T, w *stack.World) *harness.Daemon {
 	t.Helper()
 	w.Kill()
 	opts := w.SuccessorOpts(t)
 	// A cold boot's own re-adoption of a still-running real shim chains a
 	// SECOND real process's full boot onto this one test, exactly the shape
-	// AdoptionChainTimeout documents (world_test.go) — reused verbatim rather
+	// AdoptionChainTimeout documents (kit/stack/world.go) — reused verbatim rather
 	// than the tighter single-boot DefaultTimeout.
-	opts.Timeout = AdoptionChainTimeout
+	opts.Timeout = stack.AdoptionChainTimeout
 	opts.ExpectWarnings = []string{"daemon.rollout.reconcile"}
 	successor := harness.StartDaemon(t, opts)
 	return successor
@@ -196,17 +197,17 @@ func adColdBoot(t *testing.T, w *World) *harness.Daemon {
 // whole handover — the incumbent's own re-exec, the successor's boot, and
 // its adoption of every workspace — runs on this ONE World's context, so it
 // gets HandoverChainTimeout rather than the tighter single-boot default.
-func adSelfRepoWorld(t *testing.T) (*harness.Repo, *World) {
+func adSelfRepoWorld(t *testing.T) (*harness.Repo, *stack.World) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, selfRepo.Dir)
 	script.SetExitCode(0)
 	script.SetStdout("e2e: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
 		ExtraEnv:     []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
-		Timeout:      HandoverChainTimeout,
+		Timeout:      stack.HandoverChainTimeout,
 	}})
 	return selfRepo, w
 }
@@ -227,7 +228,7 @@ func adFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.Repos
 
 // adRepositoryRef registers a fake-git repository and answers its roster
 // RepositoryRef, once the roster carries it.
-func adRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
+func adRepositoryRef(t *testing.T, w *stack.World, repo *harness.Repo) *workspacev1.RepositoryRef {
 	t.Helper()
 	harness.Register(t, w.Daemon, repo.Dir)
 	roster := w.WatchRoster()
@@ -244,7 +245,7 @@ func adRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.Re
 
 // adSaidText builds the plain UserSaid shape SubmitPrompt sends, for the
 // CreateWorkspace/SubmitPrompt calls this file makes directly against a raw
-// client rather than through world_test.go's own SubmitPrompt helper.
+// client rather than through kit/stack/world.go's own SubmitPrompt helper.
 func adSaidText(text string) *conversationv1.UserSaid {
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
 		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}},
@@ -256,7 +257,7 @@ func adStrPtr(s string) *string { return &s }
 // adAwaitAnyTurnEnded waits for a workspace's feed to carry a FeedTurnEnded
 // row, for a freshly CREATED workspace whose own initial-prompt turn id this
 // caller does not track (CreateWorkspaceSuccess mints no TurnId of its own).
-func adAwaitAnyTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func adAwaitAnyTurnEnded(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -283,7 +284,7 @@ func adAwaitAnyTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 // the fake-shim scripting daemon/integration's own mergeCreateChild uses),
 // and waits for that turn to conclude so the workspace starts idle — the
 // state MergeWorkspace requires.
-func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
+func adCreateAndFinishChild(t *testing.T, w *stack.World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
 	t.Helper()
 	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
 		Originator:    &agentreplv1.WorkspaceOriginator{Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}}},
@@ -312,7 +313,7 @@ func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.Reposit
 // workspace and a real MergeWorkspace call: the landing runs the daemon's ONE
 // deploy for it, which finds that component out of date (mirrors
 // daemon/integration/drain_rollout_test.go's drainTriggerDeploy).
-func adTriggerDeploy(t *testing.T, w *World, selfRepo *harness.Repo, build harness.DeployBuild) {
+func adTriggerDeploy(t *testing.T, w *stack.World, selfRepo *harness.Repo, build harness.DeployBuild) {
 	t.Helper()
 	w.StageDeployBuild(build)
 	path := adSelfMergeTriggerPath
@@ -356,7 +357,7 @@ func adDial(addr string) agentreplv1connect.AgentReplClient {
 // daemon/integration/drain_rollout_test.go's drainAwaitAddrFileChange.
 func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 	t.Helper()
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(stack.PollInterval)
 	defer ticker.Stop()
 	for {
 		if body, err := os.ReadFile(d.AddrFile()); err == nil && harness.AddrLine(string(body)) == want {
@@ -387,7 +388,7 @@ const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/agent-repld/ma
 // so the workspace is SESSION-LESS on a daemon that still serves it. Each
 // step waits on the incumbent's own record of it, never on the killed pid,
 // which the live incumbent reaps on its own schedule.
-func adLeaveSessionDown(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func adLeaveSessionDown(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	first := killShimProcesses(t, w.Daemon)
 	w.Daemon.AwaitWorkspaceLogRecord(ws.GetDir(), "the incumbent's revival of the killed shim", func(r harness.LogRecord) bool {
@@ -430,7 +431,7 @@ func testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		"daemon.shimclient.gather_title_digest", "daemon.shimclient.watch_agent",
 		"daemon.shimclient.watch_session")
 	ws := w.NewWorkspace(t)
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 	adLeaveSessionDown(t, w, ws)
 	daemonStream := w.WatchDaemonStream()
 	defer daemonStream.Close()
@@ -452,7 +453,7 @@ func testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 
 	// Assert: with no prompt sent anywhere, the successor's feed draws the
 	// conversation's turn.
-	awaitFeedRowOn(t, w, adDial(addr), ws, "turn "+turn.GetValue()+" drawn on the successor with no prompt", func(r *frontendv1.FeedRow) bool {
+	stack.AwaitFeedRowOn(t, w, adDial(addr), ws, "turn "+turn.GetValue()+" drawn on the successor with no prompt", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue()
 	})
 }

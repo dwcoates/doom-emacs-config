@@ -201,6 +201,10 @@ type fakeSpawner struct {
 	readyErr error
 	// replacementErr is what SpawnReplacement answers.
 	replacementErr error
+	// preflightErr is what Preflight answers.
+	preflightErr error
+	// preflighted is every address a Preflight was told.
+	preflighted []string
 	// replacements counts the replacements spawned.
 	replacements int
 	// readies counts the Ready calls.
@@ -278,6 +282,14 @@ func (c *fakeSuccessor) Ready(context.Context) error {
 	defer c.spawner.mu.Unlock()
 	c.spawner.readies++
 	return c.spawner.readyErr
+}
+
+// Preflight records the address it was told and answers preflightErr.
+func (s *fakeSpawner) Preflight(selfAddress string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.preflighted = append(s.preflighted, selfAddress)
+	return s.preflightErr
 }
 
 // SpawnReplacement records a replacement's spawn.

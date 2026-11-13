@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,7 +20,7 @@ import (
 // names a step by its path.
 
 // worldBuilders are the functions that build a world a step runs in.
-var worldBuilders = []string{"NewWorld", "NewWorldWithSidecarStaleness", "SharedWorld", "NewEmacsWorld", "StartEmacs", "NewDoomWorld"}
+var worldBuilders = []string{"NewWorld", "NewWorldWithSidecarStaleness", "SharedWorld"}
 
 // e2ePackage is the e2e package's source as the scans read it, under the
 // default build context (so the perf-tagged files, a measurement of their
@@ -83,7 +84,38 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 			}
 		}
 	}
+	addHarnessRefs(t, fset, pkg.refs)
 	return pkg
+}
+
+// addHarnessRefs adds to refs what every function of the harness the e2e
+// package builds its worlds from (kit/stack, outside its own tests) names, so
+// a test reaching a world builder through a harness helper (stack.WlDriveArea
+// building a World, say) is followed to it. The package spells the harness's
+// functions as selectors, whose selected name namesIn records.
+func addHarnessRefs(t *testing.T, fset *token.FileSet, refs map[string][]string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join("kit", "stack", "*.go"))
+	if err != nil {
+		t.Fatalf("glob the harness: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no harness source under kit/stack, so no helper could be followed to a world builder")
+	}
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range f.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
+				refs[fn.Name.Name] = append(refs[fn.Name.Name], namesIn(fn.Body)...)
+			}
+		}
+	}
 }
 
 // scenarioSteps is the steps a scenario's body lists, when its body is

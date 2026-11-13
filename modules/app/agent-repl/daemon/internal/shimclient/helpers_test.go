@@ -371,7 +371,6 @@ func alive(pid int) bool { return syscall.Kill(pid, syscall.Signal(0)) == nil }
 // Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
 func (s testSurfaces) Evict(_ string) error { return nil }
 
-
 // bringUpAnswerBound is the POSITIVE bound: how long a bring-up that the shim
 // has already answered may take to return. Same measured basis, and it is
 // paid only by a red test.

@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/e2e/kit/stack"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"connectrpc.com/connect"
@@ -88,7 +89,7 @@ func perfEnforcingBaselines() bool { return os.Getenv(PerfBaselineEnv) == "enfor
 // ===========================================================================
 
 // PerfRecorder gathers a fixed number of samples and answers percentiles over
-// them. Modeled on emacs_test.go's phase/record/reportPhases trio, which
+// them. Modeled on kit/stack/emacs.go's phase/record/reportPhases trio, which
 // already implements this discipline: measure on every run, print on a
 // PASSING run, derive the bound from the print.
 type PerfRecorder struct {
@@ -147,7 +148,7 @@ func (r *PerfRecorder) Max() time.Duration { s := r.sorted(); return s[len(s)-1]
 //
 // This is not a convenience. A budget in this suite is a stated multiple of an
 // observed healthy maximum, and the only run that produces that observation is
-// a run that passed — verbatim the reason emacs_test.go's reportPhases gives.
+// a run that passed — verbatim the reason kit/stack/emacs.go's reportPhases gives.
 func (r *PerfRecorder) Report(t *testing.T) {
 	t.Helper()
 	if len(r.samples) == 0 {
@@ -592,7 +593,7 @@ var (
 // It runs on the CALLER'S world rather than building one of its own: the probe
 // is meant to measure the box this assertion actually runs on, and a dedicated
 // world would both cost a bring-up and measure a different moment.
-func perfCalibrate(t *testing.T, w *World) {
+func perfCalibrate(t *testing.T, w *stack.World) {
 	t.Helper()
 	loopback := perfLoopbackProbe(t, w)
 	cpu := perfCalibrationCPUOnce()
@@ -620,9 +621,9 @@ func perfCalibrate(t *testing.T, w *World) {
 // three whole runs whose own samples came in at their quiet figures. The
 // percentile rule is also what §D1 already requires of every other number in
 // this phase; the probe had no business being the exception.
-func perfLoopbackProbe(t *testing.T, w *World) time.Duration {
+func perfLoopbackProbe(t *testing.T, w *stack.World) time.Duration {
 	t.Helper()
-	ctx, cancel := grantedclock.WithBound(w.Ctx(), DefaultTimeout)
+	ctx, cancel := grantedclock.WithBound(w.Ctx(), stack.DefaultTimeout)
 	defer cancel()
 	samples := make([]time.Duration, 0, PerfCalibrationLoopbackProbes)
 	for i := 0; i < PerfCalibrationLoopbackProbes; i++ {

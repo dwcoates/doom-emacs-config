@@ -23,9 +23,7 @@ func WorldDaemonEnv(extra []string, spoolRoot, lockBin string) []string {
 // never names this worktree — harness.StartDaemon pins its own throwaway
 // checkout (harness.BuildIdentityEnv), whose elisp is the build every harness
 // WatchDaemon stream reports — or a landing's deploy would install a test
-// daemon over this worktree's daemon/bin. Only the Emacs layer names the
-// module root, because a real Emacs loads the elisp beneath it and the
-// sandbox's working copy is a throwaway tmpfs.
+// daemon over this worktree's daemon/bin.
 const CheckoutEnv = "AGENT_REPL_CHECKOUT"
 
 // ValueOf answers the value of name in a KEY=VALUE list, or "" when absent.

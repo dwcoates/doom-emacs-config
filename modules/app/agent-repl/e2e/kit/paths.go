@@ -1,9 +1,6 @@
 package kit
 
-import (
-	"path/filepath"
-	"regexp"
-)
+import "path/filepath"
 
 // ResolvedPath answers path with every symlink resolved. A path that does not
 // exist is a LOUD error rather than the path itself: the only caller resolves
@@ -16,7 +13,3 @@ func ResolvedPath(path string) (string, error) {
 	}
 	return real, nil
 }
-
-// ScenarioOverride is a scenario form redefining a function: a `cl-letf' of
-// its symbol-function, or an `advice-add' on it.
-var ScenarioOverride = regexp.MustCompile(`(?:symbol-function|advice-add) #?'([a-zA-Z0-9-]+)`)
