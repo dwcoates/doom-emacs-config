@@ -155,7 +155,6 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	if !found {
 		return false, nil
 	}
-	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
 	c.recordDeployTakeover(m)
 	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
@@ -394,10 +393,19 @@ func (c *controller) reclaimArmed(ws ids.WorkspaceID) bool {
 // than once by design (a successor boots before the incumbent writes it, and
 // both the awaiting poll and a participant's own call re-read it), so every
 // read must be additive.
+//
+// THE MANIFEST IS SEEN IN THE SAME CRITICAL SECTION ITS SESSIONS ARE ARMED IN.
+// Seen with nothing armed yet, the transfer set reads as empty: the queue's
+// standing (servesQueueLocked) and the joining test (stillJoiningLocked)
+// would answer "nothing left to adopt" between the two, so a successor's
+// queue flipped from served to held and back once its sessions were armed
+// (2026-11-13 23:38:19, each flip suspending the running merges).
 func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, sessions []ManifestSession) int {
 	added := 0
 	armed := make([]ManifestSession, 0, len(sessions))
 	c.mu.Lock()
+	firstSeen := !c.manifestSeen
+	c.manifestSeen = true
 	if c.joining == nil {
 		c.joining = make(map[ids.WorkspaceID]bool, len(sessions))
 	}
@@ -420,6 +428,12 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 		added++
 	}
 	c.unlock()
+	if firstSeen {
+		c.log.Debug(opJoin, "rollout state changed", dlog.Context{
+			"state": "manifest_seen", "before": false, "after": true,
+			"path": c.deps.IntentManifest, "armed": added,
+		})
+	}
 	for _, session := range armed {
 		c.logTransition(opJoin, session.Workspace, "rendezvous", "unarmed", "armed", dlog.Context{
 			"expected_host": session.ExpectedHost,
@@ -473,7 +487,6 @@ func (c *controller) armFromManifest() error {
 	if err != nil || !found {
 		return err
 	}
-	c.recordManifestSeen()
 	c.recordForcedTakeover(m.Forced)
 	c.recordDeployTakeover(m)
 	added := c.armSessions(m.Daemon, m.WrittenAt, m.Sessions)
@@ -993,21 +1006,6 @@ func (c *controller) recordForcedTakeover(forced bool) {
 	c.unlock()
 	if !before {
 		c.log.Info(opJoin, "the handover being joined was forced; stale adopted shims are bounced at once", nil)
-	}
-}
-
-// recordManifestSeen latches that the incumbent's intent manifest has been
-// read, so the transfer set is known from here on.
-func (c *controller) recordManifestSeen() {
-	c.mu.Lock()
-	first := !c.manifestSeen
-	c.manifestSeen = true
-	c.unlock()
-	if first {
-		c.log.Debug(opJoin, "rollout state changed", dlog.Context{
-			"state": "manifest_seen", "before": false, "after": true,
-			"path": c.deps.IntentManifest,
-		})
 	}
 }
 
