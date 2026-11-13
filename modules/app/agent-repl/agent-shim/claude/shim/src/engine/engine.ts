@@ -49,6 +49,12 @@ export interface Engine {
   startSession(request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse>;
 
   /**
+   * Summarize a conversation of the workspace before StartSession: compact
+   * the one the start resumes, or summarize another for the daemon to carry.
+   */
+  summarizeConversation(request: shimv1.SummarizeConversationRequest): Promise<shimv1.SummarizeConversationResponse>;
+
+  /**
    * The standing stream of session-level facts.
    *
    * Never concludes on its own. Its FIRST push after StartSession is
@@ -225,6 +231,10 @@ export interface Engine {
 export class NotImplementedEngine implements Engine {
   startSession(): Promise<shimv1.StartSessionResponse> {
     return Promise.reject(unimplemented("StartSession"));
+  }
+
+  summarizeConversation(): Promise<shimv1.SummarizeConversationResponse> {
+    return Promise.reject(unimplemented("SummarizeConversation"));
   }
 
   watchSession(): AsyncIterable<shimv1.WatchSessionResponse> {

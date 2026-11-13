@@ -13,6 +13,7 @@ import { NotImplementedEngine, type Engine } from "../../src/engine/engine.js";
 
 const UNARY_VERBS = [
   "startSession",
+  "summarizeConversation",
   "setSessionModel",
   "setSessionPermissionMode",
   "setSessionRemoteControl",

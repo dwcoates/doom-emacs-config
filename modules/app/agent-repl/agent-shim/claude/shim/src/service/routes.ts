@@ -43,6 +43,7 @@ import {
   validateSetSessionPermissionModeRequest,
   validateSetSessionRemoteControlRequest,
   validateStartSessionRequest,
+  validateSummarizeConversationRequest,
   validateStartTurnRequest,
   validateStopBashRequest,
   validateUpdateAgentRequest,
@@ -184,6 +185,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("StartSession");
         validateStartSessionRequest(request);
         return answering("StartSession", () => engine.startSession(request));
+      },
+
+      async summarizeConversation(request) {
+        entered("SummarizeConversation");
+        validateSummarizeConversationRequest(request);
+        return answering("SummarizeConversation", () => engine.summarizeConversation(request));
       },
 
       async *watchSession(request, context) {

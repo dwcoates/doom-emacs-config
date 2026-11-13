@@ -82,11 +82,6 @@ type StartSessionCause =
       readonly cause: VendorStartCause;
       /** The API's refusal a REJECTED start was, when it was one. */
       readonly apiFailure?: conversationv1.ApiRequestFailed | undefined;
-      /**
-       * The failure was the compaction or summary the start was asked for
-       * (`StartSessionVendorStartFailed.compaction`).
-       */
-      readonly compaction?: boolean;
     }
   | { readonly kind: "unknownSession" }
   | { readonly kind: "alreadyStarted" }
@@ -104,7 +99,7 @@ export function startSessionFailure(
       cause.kind === "cold"
         ? { case: "cold", value: cause.cold }
         : cause.kind === "vendorStartFailed"
-          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure, cause.compaction ?? false) }
+          ? { case: "vendorStartFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure) }
           : cause.kind === "unknownSession"
             ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
             : cause.kind === "alreadyStarted"
@@ -125,22 +120,10 @@ export function startSessionFailure(
  * neither arm is malformed and the daemon treats it as a rejection), and a
  * retryable one's cause ALWAYS set too. A rejection carries the API's refusal
  * when it was one (`StartSessionVendorStartRejected.api_failure`); a retryable
- * failure never does. A failure that was the asked-for compaction or summary
- * carries the `compaction` marker, whichever its retry label.
+ * failure never does. A failed start and a failed summarizer
+ * (`SummarizeConversationFailure.summarizer_failed`) are both stated by it.
  */
 function vendorStartFailed(
-  retry: VendorStartRetry,
-  cause: VendorStartCause,
-  apiFailure: conversationv1.ApiRequestFailed | undefined,
-  compaction: boolean,
-): shimv1.StartSessionVendorStartFailed {
-  const failed = vendorStartFailedRetry(retry, cause, apiFailure);
-  if (compaction) failed.compaction = create(shimv1.StartSessionCompactionFailedSchema, {});
-  return failed;
-}
-
-/** The `vendor_start_failed` arm's retry label, as {@link vendorStartFailed} states it. */
-function vendorStartFailedRetry(
   retry: VendorStartRetry,
   cause: VendorStartCause,
   apiFailure: conversationv1.ApiRequestFailed | undefined,
@@ -199,22 +182,85 @@ export function startSessionRefused(
   });
 }
 
-/**
- * The accepted answer, carrying the session's opening facts, and the summary
- * the resume carried when it asked for one.
- */
-export function startSessionStarted(
-  session: conversationv1.SessionStarted,
-  carriedSummary?: string,
-): shimv1.StartSessionResponse {
+/** The accepted answer, carrying the session's opening facts. */
+export function startSessionStarted(session: conversationv1.SessionStarted): shimv1.StartSessionResponse {
   return create(shimv1.StartSessionResponseSchema, {
     result: {
       case: "success",
-      value: create(shimv1.StartSessionSuccessSchema, {
-        session,
-        ...(carriedSummary === undefined
-          ? {}
-          : { carriedSummary: create(shimv1.StartSessionCarriedSummarySchema, { text: carriedSummary }) }),
+      value: create(shimv1.StartSessionSuccessSchema, { session }),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// SummarizeConversation
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a summary could not be written. `summarizerFailed` is labeled exactly as
+ * a vendor start's failure is, because the summarizer is a vendor query and
+ * the daemon reads its retry label with the same rules.
+ */
+type SummarizeConversationCause =
+  | {
+      readonly kind: "summarizerFailed";
+      readonly retry: VendorStartRetry;
+      readonly cause: VendorStartCause;
+      /** The API's refusal a REJECTED summarizer was, when it was one. */
+      readonly apiFailure?: conversationv1.ApiRequestFailed | undefined;
+    }
+  | { readonly kind: "unknownSession" }
+  | { readonly kind: "alreadyStarted" };
+
+/** The refusal as the whole `shim.v1.SummarizeConversationResponse`. */
+export function summarizeConversationRefused(
+  cause: SummarizeConversationCause,
+  detail: string,
+): shimv1.SummarizeConversationResponse {
+  return create(shimv1.SummarizeConversationResponseSchema, {
+    result: {
+      case: "failure",
+      value: create(shimv1.SummarizeConversationFailureSchema, {
+        detail,
+        cause:
+          cause.kind === "summarizerFailed"
+            ? { case: "summarizerFailed", value: vendorStartFailed(cause.retry, cause.cause, cause.apiFailure) }
+            : cause.kind === "unknownSession"
+              ? { case: "unknownSession", value: create(shimv1.StartSessionUnknownSessionSchema, {}) }
+              : { case: "alreadyStarted", value: create(shimv1.StartSessionAlreadyStartedSchema, {}) },
+      }),
+    },
+  });
+}
+
+/** A `compact` answered: the conversation's transcript ends on the summary. */
+export function summarizeConversationCompacted(
+  tokensBefore: number,
+  tokensAfter: number,
+): shimv1.SummarizeConversationResponse {
+  return create(shimv1.SummarizeConversationResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.SummarizeConversationSuccessSchema, {
+        use: {
+          case: "compacted",
+          value: create(shimv1.SummarizeConversationCompactedSchema, {
+            tokensBefore: BigInt(tokensBefore),
+            tokensAfter: BigInt(tokensAfter),
+          }),
+        },
+      }),
+    },
+  });
+}
+
+/** A `carry` answered with the summary TEXT. */
+export function summarizeConversationCarried(text: string): shimv1.SummarizeConversationResponse {
+  return create(shimv1.SummarizeConversationResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.SummarizeConversationSuccessSchema, {
+        use: { case: "carried", value: create(shimv1.SummarizeConversationCarriedSchema, { text }) },
       }),
     },
   });

@@ -34,6 +34,7 @@ export * from "../../../../proto/gen/ts/shim/v1/endpoint_start_session_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_start_turn_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_stop_bash_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_stop_workflow_pb.js";
+export * from "../../../../proto/gen/ts/shim/v1/endpoint_summarize_conversation_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_update_agent_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_watch_agent_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_watch_bash_pb.js";

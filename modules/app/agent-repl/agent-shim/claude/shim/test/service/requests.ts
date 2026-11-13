@@ -44,6 +44,18 @@ export function startSessionRequest(): shimv1.StartSessionRequest {
   });
 }
 
+export function summarizeConversationRequest(): shimv1.SummarizeConversationRequest {
+  return create(shimv1.SummarizeConversationRequestSchema, {
+    workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
+    summarizer: create(conversationv1.SessionColdCompactSchema, {
+      model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      scope: conversationv1.SessionCompactScope.ALL,
+    }),
+    use: { case: "compact", value: create(shimv1.SummarizeConversationCompactSchema, { vendorSessionId: "resume-1" }) },
+  });
+}
+
 export function watchSessionRequest(): shimv1.WatchSessionRequest {
   return create(shimv1.WatchSessionRequestSchema, {});
 }

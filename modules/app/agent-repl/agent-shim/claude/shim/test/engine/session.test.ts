@@ -467,6 +467,58 @@ function resumeRequest(
   });
 }
 
+/**
+ * SummarizeConversation's `compact` of VENDOR_SESSION_ID, as the daemon asks it
+ * before a start whose remediation is `compact`. No model names the session's
+ * own.
+ */
+function compactRequest(
+  vendorSessionId: string,
+  options: { rolledBackTurns?: readonly string[]; model?: string; scope?: conversationv1.SessionCompactScope } = {},
+): shimv1.SummarizeConversationRequest {
+  return create(shimv1.SummarizeConversationRequestSchema, {
+    workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
+    summarizer: create(conversationv1.SessionColdCompactSchema, {
+      scope: options.scope ?? conversationv1.SessionCompactScope.ALL,
+      ...(options.model === undefined ? {} : { model: create(conversationv1.AgentModelSchema, { name: options.model }) }),
+    }),
+    use: {
+      case: "compact",
+      value: create(shimv1.SummarizeConversationCompactSchema, {
+        vendorSessionId,
+        rolledBackTurns: (options.rolledBackTurns ?? []).map((value) => create(conversationv1.TurnIdSchema, { value })),
+      }),
+    },
+  });
+}
+
+/**
+ * A start whose remediation is `compact`, asked the daemon's way: the
+ * compaction first (SummarizeConversation, for the same conversation, scope,
+ * model and rolled-back turns), then the start. A compaction that is refused
+ * fails the test, since every caller here expects it written.
+ */
+async function startCompacted(h: Harness, request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
+  const resume = request.source.case === "resume" ? request.source.value : undefined;
+  const remediation = resume?.coldRemediation?.remediation;
+  if (resume === undefined || remediation?.case !== "compact") {
+    throw new Error("startCompacted: the request is not a resume naming compact");
+  }
+  const summarizer = remediation.value;
+  const compacted = await h.engine.summarizeConversation(
+    compactRequest(resume.vendorSessionId, {
+      rolledBackTurns: resume.rolledBackTurns.map((turn) => turn.value),
+      scope: summarizer.scope,
+      ...(summarizer.model === undefined ? {} : { model: summarizer.model.name }),
+    }),
+  );
+  if (compacted.result.case !== "success") {
+    throw new Error(`startCompacted: the compaction was refused: ${compacted.result.value?.detail ?? "no result"}`);
+  }
+  return h.engine.startSession(request);
+}
+
 /** Persist a main AgentId for the harness's workspace, as an earlier session would. */
 function persistIdentity(h: Harness, originalVendorSessionId: string): void {
   const file = agentIdPath(h.stateDir, workspaceLockKey(h.cwd));
@@ -583,21 +635,32 @@ function failureCause(response: shimv1.StartSessionResponse): string | undefined
 }
 
 /** The retry label a `vendor_start_failed` refusal carries, or undefined for any other answer. */
-function retryLabel(response: shimv1.StartSessionResponse): string | undefined {
-  if (response.result.case !== "failure") return undefined;
-  const cause = response.result.value.cause;
-  return cause.case === "vendorStartFailed" ? cause.value.retry.case : undefined;
+function retryLabel(response: shimv1.StartSessionResponse | shimv1.SummarizeConversationResponse): string | undefined {
+  return vendorFailure(response)?.retry.case;
 }
 
 /**
- * The API refusal kind a REJECTED vendor start carries, `"none"` for a
- * rejection that carries none, and undefined for any other answer.
+ * The vendor failure a refused start (`vendor_start_failed`) or a refused
+ * summary (`summarizer_failed`) carries; undefined for any other answer.
  */
-function rejectedApiFailureKind(response: shimv1.StartSessionResponse): string | undefined {
+function vendorFailure(
+  response: shimv1.StartSessionResponse | shimv1.SummarizeConversationResponse,
+): shimv1.StartSessionVendorStartFailed | undefined {
   if (response.result.case !== "failure") return undefined;
   const cause = response.result.value.cause;
-  if (cause.case !== "vendorStartFailed" || cause.value.retry.case !== "rejected") return undefined;
-  return cause.value.retry.value.apiFailure?.kind.case ?? "none";
+  return cause.case === "vendorStartFailed" || cause.case === "summarizerFailed" ? cause.value : undefined;
+}
+
+/**
+ * The API refusal kind a REJECTED vendor start or summary carries, `"none"`
+ * for a rejection that carries none, and undefined for any other answer.
+ */
+function rejectedApiFailureKind(
+  response: shimv1.StartSessionResponse | shimv1.SummarizeConversationResponse,
+): string | undefined {
+  const failed = vendorFailure(response);
+  if (failed?.retry.case !== "rejected") return undefined;
+  return failed.retry.value.apiFailure?.kind.case ?? "none";
 }
 
 beforeEach(() => {
@@ -10415,7 +10478,7 @@ describe("the cold gate's COMPACT remediation", () => {
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const pending = startCompacted(h, resumeRequest("resume-1", compactRemediation()));
     (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
@@ -10433,7 +10496,7 @@ describe("the cold gate's COMPACT remediation", () => {
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const pending = startCompacted(h, resumeRequest("resume-1", compactRemediation()));
     (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
@@ -10460,7 +10523,7 @@ describe("the cold gate's COMPACT remediation", () => {
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
-    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
@@ -10481,7 +10544,7 @@ describe("the cold gate's COMPACT remediation", () => {
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
-    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
@@ -10492,7 +10555,7 @@ describe("the cold gate's COMPACT remediation", () => {
     const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, createQueryFailsFrom: 0 });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
-    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
@@ -10513,7 +10576,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("rejected");
@@ -10534,7 +10597,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("retryable");
@@ -10561,7 +10624,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(response.result.case === "failure" ? response.result.value.detail : undefined).toBe(
@@ -10582,7 +10645,7 @@ describe("the cold gate's COMPACT remediation", () => {
       const before = readFileSync(transcript, "utf8");
 
       // Act.
-      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(readFileSync(transcript, "utf8")).toBe(before);
@@ -10603,7 +10666,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe(retry);
@@ -10620,7 +10683,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(rejectedApiFailureKind(response)).toBe("authenticationFailed");
@@ -10641,7 +10704,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(rejectedApiFailureKind(response)).toBe("none");
@@ -10662,7 +10725,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("rejected");
@@ -10679,7 +10742,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("retryable");
@@ -10696,7 +10759,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("retryable");
@@ -10708,7 +10771,7 @@ describe("the cold gate's COMPACT remediation", () => {
       writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
       // Act.
-      const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
       expect(retryLabel(response)).toBe("rejected");
@@ -10726,10 +10789,10 @@ describe("the cold gate's COMPACT remediation", () => {
       const before = logSinkMark();
 
       // Act.
-      await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+      await h.engine.summarizeConversation(compactRequest("resume-1"));
 
       // Assert.
-      expect(logContextFor(before, "refused StartSession: the cold gate's remediation failed")?.["retry"]).toBe(
+      expect(logContextFor(before, "refused SummarizeConversation: the summarizer did not complete")?.["retry"]).toBe(
         "retryable",
       );
     });
@@ -10778,7 +10841,9 @@ describe("the cold gate's COMPACT remediation", () => {
     queryIndex: number,
   ): Promise<shimv1.StartSessionResponse> {
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    const pending = h.engine.startSession(resumeRequest("resume-1", remediation));
+    const request = resumeRequest("resume-1", remediation);
+    const pending =
+      remediation.remediation.case === "compact" ? startCompacted(h, request) : h.engine.startSession(request);
     (await untilQuery(h, queryIndex)).query.emit(initMessage({ sessionId: "resume-1" }));
     return pending;
   }
@@ -10987,7 +11052,7 @@ describe("the cold gate's COMPACT remediation", () => {
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
     // Act
-    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     // Assert
     expect({
@@ -11018,7 +11083,7 @@ describe("the cold gate's COMPACT remediation", () => {
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
     // Act
-    await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     // Assert
     expect(frameOf(watched.frames, conversationv1.SessionCompactionPhase.FAILED)?.spend).toBeUndefined();
@@ -11041,7 +11106,7 @@ describe("the cold gate's COMPACT remediation", () => {
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
     // Act
-    await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     // Assert
     const failed = watched.frames.find(
@@ -11098,21 +11163,11 @@ describe("the cold gate's COMPACT remediation", () => {
   });
 });
 
-describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => {
-  /** The summary of `main-1` a resume of the bypass conversation carries. */
-  const carry = (): shimv1.StartSessionCarrySummary =>
-    create(shimv1.StartSessionCarrySummarySchema, {
-      vendorSessionId: "main-1",
-      summarizer: create(conversationv1.SessionColdCompactSchema, {
-        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
-        scope: conversationv1.SessionCompactScope.ALL,
-      }),
-    });
-
-  /** A resume of `bypass-1` carrying {@link carry}. */
-  function carryingRequest(): shimv1.StartSessionRequest {
-    const request = resumeRequest("bypass-1");
-    if (request.source.case === "resume") request.source.value.carrySummary = carry();
+describe("SummarizeConversation's carry: a summary of another conversation", () => {
+  /** SummarizeConversation's `carry` of `main-1`, on the carried model. */
+  function carryRequest(): shimv1.SummarizeConversationRequest {
+    const request = compactRequest("main-1", { model: "claude-haiku-4-5" });
+    request.use = { case: "carry", value: create(shimv1.SummarizeConversationCarrySchema, { vendorSessionId: "main-1" }) };
     return request;
   }
 
@@ -11128,17 +11183,16 @@ describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => 
     return h;
   }
 
-  it("answers the summary on the success", async () => {
+  it("answers the summary as carried", async () => {
     // Arrange
     const h = summarizing();
 
     // Act
-    const pending = h.engine.startSession(carryingRequest());
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
-    const response = await pending;
+    const response = await h.engine.summarizeConversation(carryRequest());
 
     // Assert
-    expect(response.result.case === "success" ? response.result.value.carriedSummary?.text : undefined).toBe("done");
+    const use = response.result.case === "success" ? response.result.value.use : undefined;
+    expect(use?.case === "carried" ? use.value.text : "not carried").toBe("done");
   });
 
   it("summarizes the named conversation on an ephemeral fork, which writes nothing", async () => {
@@ -11146,9 +11200,7 @@ describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => 
     const h = summarizing();
 
     // Act
-    const pending = h.engine.startSession(carryingRequest());
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
-    await pending;
+    await h.engine.summarizeConversation(carryRequest());
 
     // Assert
     expect(h.queries[0]?.spec.binding).toEqual({ kind: "ephemeral_fork", parentSessionId: "main-1" });
@@ -11159,58 +11211,50 @@ describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => 
     const h = summarizing();
 
     // Act
-    const pending = h.engine.startSession(carryingRequest());
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
-    await pending;
+    await h.engine.summarizeConversation(carryRequest());
 
     // Assert
     expect(h.queries[0]?.spec.model).toBe("claude-haiku-4-5");
   });
 
-  it("leaves the resumed conversation's transcript as it was", async () => {
+  it("hands the summarizer the request's workspace name before any start named one", async () => {
     // Arrange
     const h = summarizing();
-    const transcript = transcriptPath(h.configDir, h.cwd, "bypass-1");
+
+    // Act
+    await h.engine.summarizeConversation(carryRequest());
+
+    // Assert
+    expect(h.queries[0]?.spec.workspaceName).toBe("parser-fix");
+  });
+
+  it("leaves the summarized conversation's transcript as it was", async () => {
+    // Arrange
+    const h = summarizing();
+    const transcript = transcriptPath(h.configDir, h.cwd, "main-1");
     const before = readFileSync(transcript, "utf8");
 
     // Act
-    const pending = h.engine.startSession(carryingRequest());
-    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "bypass-1" }));
-    await pending;
+    await h.engine.summarizeConversation(carryRequest());
 
     // Assert
     expect(readFileSync(transcript, "utf8")).toBe(before);
   });
 
-  it("answers no carried summary on a resume that asked for none", async () => {
-    // Arrange
-    const h = harness();
-    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
-
-    // Act
-    const pending = h.engine.startSession(resumeRequest("bypass-1"));
-    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "bypass-1" }));
-    const response = await pending;
-
-    // Assert
-    expect(response.result.case === "success" ? response.result.value.carriedSummary : "not a success").toBeUndefined();
-  });
-
-  it("refuses vendor_start_failed marked as the compaction when the summary does not complete", async () => {
+  it("refuses summarizer_failed when the summary does not complete", async () => {
     // Arrange
     const h = harness({
       onQueryCreated: (query, _spec, index) => {
         if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
       },
     });
-    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+    writeTranscript(h.configDir, h.cwd, "main-1", [assistantLine()]);
 
     // Act
-    const response = await h.engine.startSession(carryingRequest());
+    const response = await h.engine.summarizeConversation(carryRequest());
 
     // Assert
-    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
-    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction !== undefined : "not vendor_start_failed").toBe(true);
+    expect(retryLabel(response)).toBe("rejected");
   });
 
   it("opens no session when the summary does not complete", async () => {
@@ -11220,76 +11264,203 @@ describe("a resume's CARRIED summary (StartSessionResume.carry_summary)", () => 
         if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
       },
     });
-    writeTranscript(h.configDir, h.cwd, "bypass-1", [assistantLine()]);
+    writeTranscript(h.configDir, h.cwd, "main-1", [assistantLine()]);
 
     // Act
-    await h.engine.startSession(carryingRequest());
+    await h.engine.summarizeConversation(carryRequest());
 
     // Assert
     expect(h.queries).toHaveLength(1);
   });
 });
 
-describe("the compaction marker on a failed start", () => {
-  it("marks a failed cold-gate compaction as the compaction", async () => {
-    // Arrange
-    const h = harness({
-      nowMs: 1_000_000 + 10 * 60 * 1000,
-      onQueryCreated: (query, _spec, index) => {
-        if (index === 0) query.emit(errorResultMessage({ errors: ["the budget is exhausted"] }));
-      },
-    });
-    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    const compact = create(conversationv1.SessionColdRemediationSchema, {
-      remediation: {
-        case: "compact",
-        value: create(conversationv1.SessionColdCompactSchema, { scope: conversationv1.SessionCompactScope.ALL }),
-      },
-    });
-
-    // Act
-    const response = await h.engine.startSession(resumeRequest("resume-1", compact));
-
-    // Assert
-    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
-    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction !== undefined : "not vendor_start_failed").toBe(true);
-  });
-
-  it("leaves the marker off a vendor that would not open", async () => {
-    // Arrange
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
-      },
-    });
-
-    // Act
-    const response = await h.engine.startSession(freshRequest());
-
-    // Assert
-    const cause = response.result.case === "failure" ? response.result.value.cause : undefined;
-    expect(cause?.case === "vendorStartFailed" ? cause.value.compaction : "not vendor_start_failed").toBeUndefined();
-  });
-
-  it("compacts a WARM context when the resume names the compact remediation", async () => {
-    // A SET REMEDIATION IS CARRIED OUT WARM OR COLD: the compacted fork a
-    // queue-bypass switch owes is warm, and its first start compacts it.
-    // Arrange
+describe("SummarizeConversation's compact, and the start that follows it", () => {
+  /** A harness whose first query, the summarizer, answers with a summary. */
+  function summarizing(): Harness {
     const h = harness({
       onQueryCreated: (query, _spec, index) => {
         if (index === 0) emitSummary(query, "77777777-7777-4777-8777-777777777772");
       },
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    const compact = create(conversationv1.SessionColdRemediationSchema, {
+    return h;
+  }
+
+  /** A `compact` remediation, as the start after the compaction names it. */
+  const compact = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
       remediation: {
         case: "compact",
         value: create(conversationv1.SessionColdCompactSchema, { scope: conversationv1.SessionCompactScope.ALL }),
       },
     });
 
+  it("answers compacted with the conversation's before figure and the summary's output tokens", async () => {
+    // Arrange
+    const h = summarizing();
+
     // Act
-    const pending = h.engine.startSession(resumeRequest("resume-1", compact));
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    const use = response.result.case === "success" ? response.result.value.use : undefined;
+    expect(use?.case === "compacted" ? [use.value.tokensBefore, use.value.tokensAfter] : "not compacted").toEqual([
+      BigInt(FIXTURE_CONTEXT_TOKENS),
+      BigInt(2),
+    ]);
+  });
+
+  it("opens no session of its own", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert: the summarizer is the one query.
+    expect(h.queries).toHaveLength(1);
+  });
+
+  it("refuses unknown_session for a conversation with no transcript", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await h.engine.summarizeConversation(compactRequest("never-written"));
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "not a failure").toBe("unknownSession");
+  });
+
+  it("asks no summarizer for a conversation with no transcript", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("never-written"));
+
+    // Assert
+    expect(h.queries).toHaveLength(0);
+  });
+
+  it("refuses already_started once the shim's session has started", async () => {
+    // Arrange
+    const h = summarizing();
+    const pending = h.engine.startSession(freshRequest());
+    (await untilQuery(h, 0)).query.emit(initMessage());
+    await pending;
+
+    // Act
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "not a failure").toBe("alreadyStarted");
+  });
+
+  it("labels a summarizer the network failed retryable on the network", async () => {
+    // Arrange
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.fail(new Error("getaddrinfo ENOTFOUND api.anthropic.com"));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Assert
+    const retry = vendorFailure(response)?.retry;
+    expect(retry?.case === "retryable" ? retry.value.cause.case : "not retryable").toBe("network");
+  });
+
+  it("states the request's model on the SUMMARIZING phase's line, before the summarizer answers", async () => {
+    // Arrange
+    const h = summarizing();
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1", { model: "claude-haiku-5-5" }));
+
+    // Assert
+    expect(logContextFor(before, "the cold gate is summarizing the conversation on a throwaway query")?.["requested_model"]).toBe(
+      "claude-haiku-5-5",
+    );
+  });
+
+  it("asks the summarizer on the request's model", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    await h.engine.summarizeConversation(compactRequest("resume-1", { model: "claude-haiku-5-5" }));
+
+    // Assert
+    expect(h.queries[0]?.spec.model).toBe("claude-haiku-5-5");
+  });
+
+  it("fails a start naming compact that no compaction on this shim preceded", async () => {
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    const started = h.engine.startSession(resumeRequest("resume-1", compact()));
+
+    // Assert
+    await expect(started).rejects.toThrow(/no SummarizeConversation on this shim compacted it/);
+  });
+
+  it("logs the start naming a compaction this shim never made as an invariant violation", async () => {
+    // Arrange
+    const h = summarizing();
+    const before = logSinkMark();
+
+    // Act
+    await h.engine.startSession(resumeRequest("resume-1", compact())).catch(() => undefined);
+
+    // Assert
+    expect(
+      logContextFor(before, "refused StartSession: its compact remediation names a compaction this shim never made")?.[
+        "invariant_violation"
+      ],
+    ).toBe("a compact start follows a compaction of the same conversation on the same shim");
+  });
+
+  it("fails a start naming compact for a conversation other than the one compacted", async () => {
+    // Arrange
+    const h = summarizing();
+    writeTranscript(h.configDir, h.cwd, "other-1", [assistantLine()]);
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Act
+    const started = h.engine.startSession(resumeRequest("other-1", compact()));
+
+    // Assert
+    await expect(started).rejects.toThrow(/no SummarizeConversation on this shim compacted it/);
+  });
+
+  it("asks the start no summarizer: its only query is the session's own", async () => {
+    // Arrange
+    const h = summarizing();
+    await h.engine.summarizeConversation(compactRequest("resume-1"));
+
+    // Act
+    const pending = h.engine.startSession(resumeRequest("resume-1", compact()));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert
+    expect(h.queries).toHaveLength(2);
+  });
+
+  it("compacts a WARM context the start then resumes", async () => {
+    // A SET REMEDIATION IS CARRIED OUT WARM OR COLD: the compacted fork a
+    // queue-bypass switch owes is warm, and its first start compacts it.
+    // Arrange
+    const h = summarizing();
+
+    // Act
+    const pending = startCompacted(h, resumeRequest("resume-1", compact()));
     (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
@@ -11982,7 +12153,7 @@ describe("compaction when no model is in effect", () => {
         }),
       },
     });
-    const pending = h.engine.startSession(resumeRequest("resume-1", remediation));
+    const pending = startCompacted(h, resumeRequest("resume-1", remediation));
     (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
 
@@ -12376,26 +12547,14 @@ describe("a vendor failure that is not an Error", () => {
     ).toBe("the store socket went away");
   });
 
-  it("carries a bare-string throwaway-query rejection into the cold refusal", async () => {
+  it("carries a bare-string throwaway-query rejection into the summary's refusal", async () => {
     const h = harness({
       nowMs: 1_000_000 + 10 * 60 * 1000,
       createQueryRejection: "the vendor binary is not on this box",
     });
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
 
-    const response = await h.engine.startSession(
-      resumeRequest(
-        "resume-1",
-        create(conversationv1.SessionColdRemediationSchema, {
-          remediation: {
-            case: "compact",
-            value: create(conversationv1.SessionColdCompactSchema, {
-              scope: conversationv1.SessionCompactScope.ALL,
-            }),
-          },
-        }),
-      ),
-    );
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     expect(
       response.result.case === "failure" ? response.result.value.detail : undefined,
@@ -13153,7 +13312,7 @@ describe("the cold gate's compact remediation, in detail", () => {
     remediation: conversationv1.SessionColdRemediation,
   ): Promise<shimv1.StartSessionResponse> => {
     writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    return h.engine.startSession(resumeRequest("resume-1", remediation));
+    return startCompacted(h, resumeRequest("resume-1", remediation));
   };
 
   it("summarizes on the model the remediation named", async () => {
@@ -16224,7 +16383,7 @@ describe("RollBackSession", () => {
       });
 
       // Act
-      const pending = h.engine.startSession(resumeRequest("resume-1", compact, { rolledBackTurns: ["turn-2"] }));
+      const pending = startCompacted(h, resumeRequest("resume-1", compact, { rolledBackTurns: ["turn-2"] }));
       (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
       await pending;
 
@@ -19139,26 +19298,16 @@ describe("HoldParkedBridge", () => {
     ]).toEqual(["success", "resume-1", 1]);
   });
 
-  it("refuses a pay answer carrying a summary already_started, so a new shim writes the summary", async () => {
+  it("refuses a compaction already_started, since the bridge's vendor process holds the conversation open", async () => {
     // Arrange
     const h = parkedHarness();
     await opened(h);
-    const request = resumeRequest("resume-1", pay());
-    if (request.source.case === "resume") {
-      request.source.value.carrySummary = create(shimv1.StartSessionCarrySummarySchema, {
-        vendorSessionId: "main-1",
-        summarizer: create(conversationv1.SessionColdCompactSchema, {
-          model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
-          scope: conversationv1.SessionCompactScope.ALL,
-        }),
-      });
-    }
 
     // Act
-    const response = await h.engine.startSession(request);
+    const response = await h.engine.summarizeConversation(compactRequest("resume-1"));
 
     // Assert
-    expect(failureCause(response)).toBe("alreadyStarted");
+    expect(response.result.case === "failure" ? response.result.value.cause.case : "not a failure").toBe("alreadyStarted");
   });
 
   it("ends its watch once the pay answer takes the session", async () => {

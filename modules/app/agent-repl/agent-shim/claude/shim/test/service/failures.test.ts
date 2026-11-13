@@ -84,28 +84,6 @@ describe("startSessionFailure", () => {
     expect(retry?.case === "rejected" ? retry.value.apiFailure : "not rejected").toBeUndefined();
   });
 
-  it.each(["retryable", "rejected"] as const)(
-    "marks a %s vendorStartFailed that was the asked-for compaction",
-    (retry) => {
-      // Arrange, Act.
-      const failure = failures.startSessionFailure(
-        { kind: "vendorStartFailed", retry, cause: "vendor", compaction: true },
-        "why",
-      );
-
-      // Assert.
-      expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.compaction : undefined).toBeDefined();
-    },
-  );
-
-  it("leaves the compaction marker off a vendorStartFailed that was not one", () => {
-    // Arrange, Act.
-    const failure = failures.startSessionFailure({ kind: "vendorStartFailed", retry: "retryable", cause: "vendor" }, "why");
-
-    // Assert.
-    expect(failure.cause.case === "vendorStartFailed" ? failure.cause.value.compaction : "not vendorStartFailed").toBeUndefined();
-  });
-
   it("carries the cold evidence verbatim so the daemon can offer a remediation", () => {
     // Arrange.
     const cold = create(conversationv1.SessionColdSchema, { contextTokens: 40_000n });
@@ -177,26 +155,70 @@ describe("startSessionStarted", () => {
       value: containing({ session }),
     });
   });
-  it("carries the summary the resume carried", () => {
-    // Arrange.
-    const session = create(conversationv1.SessionStartedSchema, { vendorSessionId: "v-1" });
+});
 
+describe("summarizeConversation answers", () => {
+  it.each([
+    ["retryable", "network", "network"],
+    ["retryable", "vendor", "vendor"],
+  ] as const)("states a %s summarizer failure's %s cause", (retry, cause, want) => {
     // Act.
-    const response = failures.startSessionStarted(session, "the summary");
+    const response = failures.summarizeConversationRefused({ kind: "summarizerFailed", retry, cause }, "why");
 
     // Assert.
-    expect(response.result.case === "success" ? response.result.value.carriedSummary?.text : undefined).toBe("the summary");
+    const failure = response.result.case === "failure" ? response.result.value.cause : undefined;
+    const label = failure?.case === "summarizerFailed" ? failure.value.retry : undefined;
+    expect(label?.case === "retryable" ? label.value.cause.case : "not retryable").toBe(want);
   });
 
-  it("carries no summary when the resume carried none", () => {
+  it("carries the API refusal on a rejected summarizer", () => {
     // Arrange.
-    const session = create(conversationv1.SessionStartedSchema, { vendorSessionId: "v-1" });
+    const apiFailure = create(conversationv1.ApiRequestFailedSchema, {
+      kind: { case: "authenticationFailed", value: create(conversationv1.ApiAuthenticationFailedSchema, {}) },
+    });
 
     // Act.
-    const response = failures.startSessionStarted(session);
+    const response = failures.summarizeConversationRefused(
+      { kind: "summarizerFailed", retry: "rejected", cause: "vendor", apiFailure },
+      "why",
+    );
 
     // Assert.
-    expect(response.result.case === "success" ? response.result.value.carriedSummary : "not a success").toBeUndefined();
+    const failure = response.result.case === "failure" ? response.result.value.cause : undefined;
+    const label = failure?.case === "summarizerFailed" ? failure.value.retry : undefined;
+    expect(label?.case === "rejected" ? label.value.apiFailure?.kind.case : "not rejected").toBe("authenticationFailed");
+  });
+
+  it.each([
+    ["unknownSession", "unknownSession"],
+    ["alreadyStarted", "alreadyStarted"],
+  ] as const)("states the %s arm with its detail", (kind, want) => {
+    // Act.
+    const response = failures.summarizeConversationRefused({ kind }, "the detail");
+
+    // Assert.
+    expect(response.result.case === "failure" ? [response.result.value.cause.case, response.result.value.detail] : []).toEqual([
+      want,
+      "the detail",
+    ]);
+  });
+
+  it("answers a compaction's figures as compacted", () => {
+    // Act.
+    const response = failures.summarizeConversationCompacted(596_848, 2_100);
+
+    // Assert.
+    const use = response.result.case === "success" ? response.result.value.use : undefined;
+    expect(use?.case === "compacted" ? [use.value.tokensBefore, use.value.tokensAfter] : []).toEqual([596_848n, 2_100n]);
+  });
+
+  it("answers a carried summary's text as carried", () => {
+    // Act.
+    const response = failures.summarizeConversationCarried("the summary");
+
+    // Assert.
+    const use = response.result.case === "success" ? response.result.value.use : undefined;
+    expect(use?.case === "carried" ? use.value.text : "not carried").toBe("the summary");
   });
 });
 

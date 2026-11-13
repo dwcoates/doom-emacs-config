@@ -22,11 +22,12 @@ import {
   validateAgentEffortLevel,
   validateAgentPermissionMode,
   validateDetachedWorkId,
+  emptyIdentity,
   validateForkPoint,
   validateHistoryPointer,
   validatePromptOrigin,
   validateSessionColdRemediation,
-  validateStartSessionCarrySummary,
+  validateSummarizer,
   validateStartTurnSentBy,
   validateTurnId,
   validateUserSaid,
@@ -72,6 +73,38 @@ export function validateSessionProfile(profile: shimv1.SessionProfile | undefine
   }
 }
 
+/**
+ * `shim.v1.SummarizeConversationRequest` — the workspace and profile every
+ * query states, a whole summarizer, and exactly one use naming its
+ * conversation.
+ */
+export function validateSummarizeConversationRequest(request: shimv1.SummarizeConversationRequest): void {
+  try {
+    if (request.workspaceName === "") {
+      throw invalidArgument("summarize_conversation.workspace_name is empty; the summarizer's system prompt names the workspace");
+    }
+    validateSessionProfile(request.profile, "summarize_conversation.profile");
+    validateSummarizer(request.summarizer, "summarize_conversation.summarizer");
+    switch (request.use.case) {
+      case "compact": {
+        const compact = request.use.value;
+        if (compact.vendorSessionId === "") throw emptyIdentity("summarize_conversation.compact.vendor_session_id");
+        compact.rolledBackTurns.forEach((turn, index) => {
+          validateTurnId(turn, `summarize_conversation.compact.rolled_back_turns[${index}]`);
+        });
+        return;
+      }
+      case "carry":
+        if (request.use.value.vendorSessionId === "") throw emptyIdentity("summarize_conversation.carry.vendor_session_id");
+        return;
+      default:
+        throw unsetOneof("summarize_conversation.use");
+    }
+  } catch (err) {
+    refuse("SummarizeConversation", err);
+  }
+}
+
 /** `shim.v1.StartSessionRequest` — fresh or resume, never neither. */
 export function validateStartSessionRequest(request: shimv1.StartSessionRequest): void {
   try {
@@ -109,9 +142,6 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
         resume.rolledBackTurns.forEach((turn, index) => {
           validateTurnId(turn, `start_session.resume.rolled_back_turns[${index}]`);
         });
-        if (resume.carrySummary !== undefined) {
-          validateStartSessionCarrySummary(resume.carrySummary, "start_session.resume.carry_summary");
-        }
         return;
       }
       default:
@@ -216,9 +246,6 @@ export function validateHoldParkedBridgeRequest(request: shimv1.HoldParkedBridge
     }
     if (request.start.source.value.coldRemediation !== undefined) {
       throw invalidArgument("hold_parked_bridge.start.resume.cold_remediation is set; the gate parks a resume that named none");
-    }
-    if (request.start.source.value.carrySummary !== undefined) {
-      throw invalidArgument("hold_parked_bridge.start.resume.carry_summary is set; a bridge resumes its conversation alone");
     }
     if (!request.remoteControl.enabled) {
       throw invalidArgument("hold_parked_bridge.remote_control.enabled is false; a bridge held off is no bridge");

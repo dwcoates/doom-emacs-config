@@ -122,6 +122,9 @@ import {
   setSessionRemoteControlSucceeded,
   startSessionRefused,
   startSessionStarted,
+  summarizeConversationCarried,
+  summarizeConversationCompacted,
+  summarizeConversationRefused,
   transcriptsRead,
   transcriptsRefused,
   type VendorStartCause,
@@ -1204,6 +1207,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * means no cold-gate compaction has landed in this process.
    */
   let coldCompactionFigures: CompactionFigures | undefined;
+  /**
+   * The vendor session the last SummarizeConversation `compact` on this shim
+   * compacted, until the StartSession that resumes it takes it. A start
+   * naming `compact` reads a compaction ALREADY MADE, so one with no match
+   * here is a caller defect (shim.v1.StartSessionResume.cold_remediation).
+   */
+  let compactedForStart: string | undefined;
+  /**
+   * The summarizer model the last compaction's request named ("" for the
+   * session's own), restated on the phases StartSession says after it.
+   */
+  let coldCompactionRequestedModel = "";
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
@@ -1842,7 +1857,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     which: conversationv1.SessionCompactionPhase,
     said: string,
   ): void {
-    narrateCompactionPhase(which, coldCompactionFigures ?? {}, said);
+    narrateCompactionPhase(which, coldCompactionFigures ?? {}, said, coldCompactionRequestedModel);
   }
 
   /**
@@ -1854,6 +1869,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     which: conversationv1.SessionCompactionPhase,
     figures: Partial<CompactionFigures> & { error?: string },
     said: string,
+    requestedModel: string,
     context: Record<string, string> = {},
   ): void {
     pushes.push(compactionProgressUpdate(which, figures));
@@ -1861,6 +1877,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       {
         ...context,
         phase: conversationv1.SessionCompactionPhase[which],
+        // THE MODEL THE REQUEST NAMED, on every phase: `summarizer_model` is
+        // the model that answered, so it is unknown until the summary is in.
+        requested_model: requestedModel,
         tokens_before: figures.tokensBefore ?? 0,
         tokens_after: figures.tokensAfter ?? 0,
         summarizer_model: figures.spend?.model ?? "",
@@ -5512,12 +5531,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
      * no gate at all has no compaction to be the `started` phase of.
      */
     let coldCompacted = false;
-    /**
-     * The summary of another conversation this resume carries, when the
-     * request asked for one (StartSessionResume.carry_summary): answered on
-     * the success, never anywhere else.
-     */
-    let carriedSummary: string | undefined;
     // No initializer: BOTH source arms below set it, and a third arm that
     // forgot to would be a compile error rather than a silent empty model.
     let requestedModel: string;
@@ -5578,32 +5591,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           `resuming this conversation is a cold read of ${facts.contextTokens} tokens (${cold})`,
         );
       }
-      const remedy = await applyColdRemediation(remediation, vendorSessionId, facts, requestedModel);
-      if (remedy.kind === "failed") {
-        // LABELED BY THE REMEDIATION'S OWN CAUSE, carried out of `compact`
-        // rather than guessed here. The compaction's failure is already on the
-        // record at its own layer; this says what the daemon is told.
-        LOGGER.info(
-          {
-            vendor_session_id: vendorSessionId,
-            retry: remedy.retry,
-            elapsed_ms: deps.nowMs() - startBeganMs,
-            cause: remedy.detail,
-          },
-          "refused StartSession: the cold gate's remediation failed",
-        );
-        return refuseVendorStart(
-          remedy.retry,
-          remedy.retry === "retryable" && classifyAgentFailure({ text: remedy.detail }).network ? "network" : "vendor",
-          remedy.detail,
-          remedy.apiFailure,
-          true,
-        );
-      }
-      // THE HANDOVER FROM THE REMEDIATION TO THE SESSION ITSELF. Said here
-      // rather than inside `compact`, because the compaction's own work is
-      // over: what remains is the resume this whole gate answer was for, and
-      // it is the second half of the wait the user is sitting through.
+      const remedy = applyColdRemediation(remediation, vendorSessionId);
+      // THE HANDOVER FROM THE COMPACTION TO THE SESSION ITSELF. The
+      // compaction's own work is over (SummarizeConversation): what remains
+      // is the resume this whole gate answer was for, and it is the second
+      // half of the wait the user is sitting through.
       if (remediation?.remediation.case === "compact") {
         coldCompacted = true;
         pushColdCompactionPhase(
@@ -5618,33 +5610,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // minted vendor session id: no API call, no transcript rewrite, and the
         // AgentId is unaffected because R9 fixes it to the ORIGINAL id. The
         // rotation is announced on WatchSession like any other.
-      }
-      // THE CARRIED SUMMARY IS WRITTEN BEFORE THE SESSION OPENS, as the cold
-      // gate's compaction is, so a summary that does not complete refuses the
-      // start labeled as its own failure, and the daemon asks again.
-      const carry = source.value.carrySummary;
-      if (carry !== undefined) {
-        const carried = await carrySummary(carry, requestedModel);
-        if (!carried.ok) {
-          LOGGER.info(
-            {
-              vendor_session_id: vendorSessionId,
-              summarized_vendor_session_id: carry.vendorSessionId,
-              retry: carried.retry,
-              elapsed_ms: deps.nowMs() - startBeganMs,
-              cause: carried.error,
-            },
-            "refused StartSession: the summary the resume carries did not complete",
-          );
-          return refuseVendorStart(
-            carried.retry,
-            carried.retry === "retryable" && classifyAgentFailure({ text: carried.error }).network ? "network" : "vendor",
-            carried.error,
-            carried.apiFailure,
-            true,
-          );
-        }
-        carriedSummary = carried.text;
       }
     }
     const inForce = clearedTo ?? vendorSessionId;
@@ -5989,7 +5954,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE START REACHED THE VENDOR, so whatever outage an earlier attempt saw
     // is over (conversation.v1 SessionFaultNetworkUnreachable).
     noteNetworkReach({ kind: "reached" });
-    return startSessionStarted(started_, carriedSummary);
+    return startSessionStarted(started_);
   }
 
   /**
@@ -6003,10 +5968,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     cause: VendorStartCause,
     detail: string,
     apiFailure?: conversationv1.ApiRequestFailed,
-    compaction = false,
   ): shimv1.StartSessionResponse {
     if (retry === "retryable" && cause === "network") noteNetworkReach({ kind: "unreachable", detail });
-    return startSessionRefused({ kind: "vendorStartFailed", retry, cause, apiFailure, compaction }, detail);
+    return startSessionRefused({ kind: "vendorStartFailed", retry, cause, apiFailure }, detail);
   }
 
   /**
@@ -6035,23 +5999,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     vendorErrorRetry.networkFaultResolved();
   }
 
-  type Remedy =
-    | { kind: "none" }
-    | { kind: "cleared"; vendorSessionId: string }
-    | {
-        kind: "failed";
-        detail: string;
-        retry: VendorStartRetry;
-        /** The API's refusal of the summarizer, when the failure was one. */
-        apiFailure: conversationv1.ApiRequestFailed | undefined;
-      };
+  type Remedy = { kind: "none" } | { kind: "cleared"; vendorSessionId: string };
 
-  async function applyColdRemediation(
+  /**
+   * What a resume's cold remediation does to the start. None of them asks
+   * the vendor anything: `compact` names the compaction the preceding
+   * SummarizeConversation already made, so the start's time is the opening's
+   * alone.
+   */
+  function applyColdRemediation(
     remediation: conversationv1.SessionColdRemediation | undefined,
     vendorSessionId: string,
-    facts: TranscriptFacts,
-    requestedModel: string,
-  ): Promise<Remedy> {
+  ): Remedy {
     if (remediation === undefined) return { kind: "none" };
     switch (remediation.remediation.case) {
       case "pay":
@@ -6066,19 +6025,116 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         return { kind: "cleared", vendorSessionId: minted };
       }
       case "compact": {
-        const outcome = await compact(
-          vendorSessionId,
-          facts,
-          remediation.remediation.value.model?.name ?? requestedModel,
-          remediation.remediation.value.scope,
-        );
-        return outcome.ok
-          ? { kind: "none" }
-          : { kind: "failed", detail: outcome.error, retry: outcome.retry, apiFailure: outcome.apiFailure };
+        // THE COMPACTION WAS MADE BEFORE THE START, on this shim. A start
+        // naming one that was not is the daemon skipping its summary: the
+        // resume would read the whole conversation it was told is compacted.
+        if (compactedForStart !== vendorSessionId) {
+          const err = new Error(
+            `shim session: StartSession named a compact remediation for vendor session ${JSON.stringify(vendorSessionId)}, but no SummarizeConversation on this shim compacted it (compacted: ${JSON.stringify(compactedForStart ?? "")})`,
+          );
+          LOGGER.error(
+            {
+              vendor_session_id: vendorSessionId,
+              compacted_vendor_session_id: compactedForStart ?? "",
+              invariant_violation: "a compact start follows a compaction of the same conversation on the same shim",
+              cause: err.message,
+            },
+            "refused StartSession: its compact remediation names a compaction this shim never made",
+          );
+          throw err;
+        }
+        compactedForStart = undefined;
+        LOGGER.debug({ vendor_session_id: vendorSessionId }, "cold remediation: COMPACT — resuming the conversation this shim compacted");
+        return { kind: "none" };
       }
       default:
         return { kind: "none" };
     }
+  }
+
+  /**
+   * Who asks the summarizer: the workspace's name and the profile its
+   * session runs under, as SummarizeConversation states them. Passed rather
+   * than read from the started session's state, because a summary is asked
+   * before the session starts.
+   */
+  type SummarizerAsker = { readonly workspaceName: string; readonly profile: SessionProfile };
+
+  /**
+   * The summarizer's failure as SummarizeConversation states it, labeled by
+   * the summarizer's own cause; for a failure the NETWORK caused, the network
+   * fault is stated first on the session stream, as a failed start's is.
+   */
+  function refuseSummary(
+    retry: VendorStartRetry,
+    detail: string,
+    apiFailure: conversationv1.ApiRequestFailed | undefined,
+    context: Record<string, unknown>,
+  ): shimv1.SummarizeConversationResponse {
+    const cause: VendorStartCause =
+      retry === "retryable" && classifyAgentFailure({ text: detail }).network ? "network" : "vendor";
+    LOGGER.info(
+      { ...context, retry, failure_cause: cause, api_failure: apiFailure?.kind.case ?? "", cause: detail },
+      "refused SummarizeConversation: the summarizer did not complete",
+    );
+    if (cause === "network") noteNetworkReach({ kind: "unreachable", detail });
+    return summarizeConversationRefused({ kind: "summarizerFailed", retry, cause, apiFailure }, detail);
+  }
+
+  /**
+   * SummarizeConversation: the cold gate's compaction of the conversation the
+   * next StartSession resumes, or the summary of another conversation the
+   * daemon carries into it. Its own call, so the start's bound never covers a
+   * summarizer whose time grows with the conversation it reads.
+   */
+  async function summarizeConversation(
+    request: shimv1.SummarizeConversationRequest,
+  ): Promise<shimv1.SummarizeConversationResponse> {
+    const use = request.use;
+    const summarizer = request.summarizer;
+    if (use.case === undefined || summarizer === undefined) {
+      // The validator refuses both before the engine is reached.
+      throw new Error("shim session: SummarizeConversation reached the engine with no use or no summarizer");
+    }
+    const model = summarizer.model?.name ?? "";
+    const context = { use: use.case, vendor_session_id: use.value.vendorSessionId, requested_model: model, scope: summarizer.scope };
+    if (started || (use.case === "compact" && (parked !== undefined || parkedOpening !== undefined))) {
+      const detail = started
+        ? "this shim already started its session; a summary is asked before the start"
+        : "this shim holds a parked conversation's bridge, whose vendor process holds the conversation open";
+      LOGGER.info(context, `refused SummarizeConversation: ${detail}`);
+      return summarizeConversationRefused({ kind: "alreadyStarted" }, detail);
+    }
+    const asker: SummarizerAsker = { workspaceName: request.workspaceName, profile: profileFromProto(request.profile) };
+    if (use.case === "carry") {
+      const carried = await carrySummary(use.value.vendorSessionId, model, summarizer.scope, asker);
+      return carried.ok
+        ? summarizeConversationCarried(carried.text)
+        : refuseSummary(carried.retry, carried.error, carried.apiFailure, context);
+    }
+    const vendorSessionId = use.value.vendorSessionId;
+    const facts = readTranscriptFacts(transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId));
+    if (facts === undefined) {
+      LOGGER.info(context, "refused SummarizeConversation: the conversation to compact has no transcript in this workspace");
+      return summarizeConversationRefused(
+        { kind: "unknownSession" },
+        `no transcript exists for vendor session ${JSON.stringify(vendorSessionId)} in this workspace`,
+      );
+    }
+    // THE SUMMARY IS OF THE LIVE CONVERSATION: the daemon's rolled-back turns
+    // replace whatever this process held, as a start's do.
+    rolledBackTurns.clear();
+    for (const turn of use.value.rolledBackTurns) rolledBackTurns.add(turn.value);
+    // THE CONVERSATION'S OWN MODE, as the start that resumes it restores it.
+    const mode =
+      facts.lastPermissionMode !== undefined
+        ? fromVendorPermissionMode(facts.lastPermissionMode as PermissionModeLike)
+        : permissionMode;
+    compactedForStart = undefined;
+    const outcome = await compact(vendorSessionId, facts, model, summarizer.scope, asker, mode);
+    if (!outcome.ok) return refuseSummary(outcome.retry, outcome.error, outcome.apiFailure, context);
+    compactedForStart = vendorSessionId;
+    return summarizeConversationCompacted(facts.contextTokens, outcome.tokensAfter);
   }
 
   /**
@@ -6094,8 +6150,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     facts: TranscriptFacts,
     model: string,
     scope: conversationv1.SessionCompactScope,
+    asker: SummarizerAsker,
+    mode: conversationv1.AgentPermissionMode,
   ): Promise<
-    | { ok: true; summary: string }
+    | { ok: true; summary: string; tokensAfter: number }
     | { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined }
   > {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
@@ -6105,7 +6163,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       which: conversationv1.SessionCompactionPhase,
       figures: Partial<CompactionFigures> & { error?: string },
       said: string,
-    ): void => narrateCompactionPhase(which, figures, said, { vendor_session_id: vendorSessionId });
+    ): void => narrateCompactionPhase(which, figures, said, model, { vendor_session_id: vendorSessionId });
     /**
      * A compaction that did not complete, said once to both surfaces, with
      * whether asking again can help — the start it gates carries that label —
@@ -6128,6 +6186,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return { ok: false, error, retry, apiFailure };
     };
     coldCompactionFigures = undefined;
+    coldCompactionRequestedModel = model;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
     // part of the minute the user is waiting through, so a frame that waited
     // for the query to exist would leave the opening of the wait unnarrated.
@@ -6136,7 +6195,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       { tokensBefore: facts.contextTokens },
       "the cold gate is summarizing the conversation on a throwaway query",
     );
-    const asked = await summarize({ kind: "resume", resumeSessionId: vendorSessionId }, vendorSessionId, model, scope);
+    const asked = await summarize({ kind: "resume", resumeSessionId: vendorSessionId }, vendorSessionId, model, scope, asker);
     if (!asked.ok) {
       // A QUERY THAT NEVER RAN OR BROKE MID-STREAM is a compaction the
       // conversation's record states as failed; an answer that came back
@@ -6168,7 +6227,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           // summary line is the LAST record this compaction appends, so
           // stating the session's own mode there is what keeps a revival from
           // coming back in a mode nobody chose.
-          permissionMode: toVendorPermissionMode(permissionMode),
+          permissionMode: toVendorPermissionMode(mode),
       });
       appendCompactionLines(transcript, lines);
       // THE COMPACTION IS A BOUNDARY. Whatever the anchor named is on the far
@@ -6194,7 +6253,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         coldCompactionFigures,
         "the cold gate's summary came back and the compaction boundary was appended to the transcript",
       );
-      return { ok: true, summary };
+      return { ok: true, summary, tokensAfter: outputTokens };
     } catch (err) {
       // THE TRANSCRIPT THAT COULD NOT BE WRITTEN meets the same failure on the
       // next attempt (rejected).
@@ -6219,6 +6278,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     vendorSessionId: string,
     model: string,
     scope: conversationv1.SessionCompactScope,
+    asker: SummarizerAsker,
   ): Promise<
     | { ok: true; summary: string; model: string; usage: NormalizedApiUsage }
     | {
@@ -6232,9 +6292,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const asked = await askSideQuery(
       (prompt, abortController) =>
         deps.createQuery({
-          profile: sessionProfile(),
+          profile: asker.profile,
           binding,
-          workspaceName: requireWorkspaceName(),
+          workspaceName: asker.workspaceName,
           // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
           // the transcript's tail is neither summarized nor chained under it.
           ...resumeAtLiveEnd(vendorSessionId),
@@ -6294,31 +6354,29 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * THE SUMMARY A RESUME CARRIES (shim.v1.StartSessionResume.carry_summary):
+   * THE SUMMARY A RESUME CARRIES (shim.v1.SummarizeConversationCarry):
    * another conversation of this workspace, summarized by the one summarizer
    * on an EPHEMERAL FORK, which writes nothing to either transcript. The
    * daemon delivers the answer into the resumed conversation; nothing here
    * touches it.
    */
   async function carrySummary(
-    carry: shimv1.StartSessionCarrySummary,
-    requestedModel: string,
+    summarizedVendorSessionId: string,
+    model: string,
+    scope: conversationv1.SessionCompactScope,
+    asker: SummarizerAsker,
   ): Promise<
     | { ok: true; text: string }
     | { ok: false; error: string; retry: VendorStartRetry; apiFailure: conversationv1.ApiRequestFailed | undefined }
   > {
-    const summarizer = carry.summarizer;
-    if (summarizer === undefined) {
-      // The validator refuses an unset summarizer before the engine is reached.
-      throw new Error("shim session: a carried summary reached the engine with no summarizer");
-    }
-    const context = { summarized_vendor_session_id: carry.vendorSessionId, scope: summarizer.scope };
+    const context = { summarized_vendor_session_id: summarizedVendorSessionId, requested_model: model, scope };
     LOGGER.info(context, "summarizing another conversation of the workspace on an ephemeral fork, to carry into this resume");
     const asked = await summarize(
-      { kind: "ephemeral_fork", parentSessionId: carry.vendorSessionId },
-      carry.vendorSessionId,
-      summarizer.model?.name ?? requestedModel,
-      summarizer.scope,
+      { kind: "ephemeral_fork", parentSessionId: summarizedVendorSessionId },
+      summarizedVendorSessionId,
+      model,
+      scope,
+      asker,
     );
     if (!asked.ok) {
       LOGGER.error({ ...context, retry: asked.retry, cause: asked.error }, "the summary this resume carries did not complete");
@@ -7360,14 +7418,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function promoteParked(bridge: ParkedBridge, request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
     const source = request.source;
-    // A PAY ANSWER CARRYING A SUMMARY IS NOT THE BRIDGE'S: the bridge resumed
-    // the conversation alone, so the answer starts on a new shim, which
-    // writes the summary as an ordinary start does.
+    // A summary the answer carries is the daemon's to deliver
+    // (SummarizeConversation's `carry`), so it never keeps the bridge from
+    // taking the pay answer.
     const pays =
       source.case === "resume" &&
       source.value.vendorSessionId === bridge.vendorSessionId &&
-      source.value.coldRemediation?.remediation.case === "pay" &&
-      source.value.carrySummary === undefined;
+      source.value.coldRemediation?.remediation.case === "pay";
     if (!pays) {
       const detail =
         "this shim holds the parked conversation's Remote Control bridge, and only the cold gate's pay answer on that conversation takes it";
@@ -8543,6 +8600,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushes,
     onSdkMessage,
     startSession: async (request) => statingBook(await startSessionAsked(request)),
+    summarizeConversation: (request) => summarizeConversation(request),
     holdParkedBridge: (request, signal) => holdParkedBridge(request, signal),
     // `subscribe()` runs EAGERLY here, at the open, not at the consumer's first
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
