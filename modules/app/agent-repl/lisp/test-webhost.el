@@ -43,6 +43,8 @@
            (agent-repl-test-wh--reported nil)
            (agent-repl-test-wh--host 'host-xwidget)
            (agent-repl--webhost-url nil)
+           ;; Each load the scenario makes is the host's next generation, from 0.
+           (agent-repl--webhost-reload-generation 0)
            (agent-repl--webhost-daemon-origin nil)
            (agent-repl--webhost-reload-started-ms nil)
            (agent-repl-test-wh--primary (agent-repl-test-wh--conn "127.0.0.1:1"))
@@ -1008,7 +1010,7 @@ pointed the host and the sidebar back at it, and it had exited 240ms before."
         ;; Act
         (agent-repl--webhost-navigate))
       ;; Assert
-      (should (equal navigated "http://host.localhost:2/?host=1")))))
+      (should (equal navigated "http://host.localhost:2/?host=1&reload=1")))))
 
 (ert-deftest agent-repl-test-wh-a-reload-with-no-link-leaves-the-host-at-warn ()
   "No link standing: neither the host nor the sidebar is navigated, and the skip is a WARN."
@@ -1939,7 +1941,7 @@ The current tab's page, not shown here, is the nearest of all."
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
       ;; Assert
-      (should (equal navigated "http://host.localhost:4242/?host=1")))))
+      (should (equal navigated "http://host.localhost:4242/?host=1&reload=1")))))
 
 (ert-deftest agent-repl-test-wh-a-reload-clears-the-burst ()
   "Once the host reloaded, the next rollout reloads it again."
@@ -1998,6 +2000,77 @@ The current tab's page, not shown here, is the nearest of all."
     ;; Act / Assert
     (should (agent-repl--webhost-refuse-kill))))
 
+;;;; ---- The host's reload generation ----
+
+(ert-deftest agent-repl-test-wh-every-host-load-is-the-next-generation ()
+  "Each load of the host states one generation more than the last."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let (navigated)
+      (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                 (lambda (_xw uri) (push uri navigated))))
+        ;; Act
+        (agent-repl--webhost-load 'host-xwidget)
+        (agent-repl--webhost-load 'host-xwidget))
+      ;; Assert
+      (should (equal (reverse navigated) '("http://host.localhost:1/?host=1&reload=1"
+                                           "http://host.localhost:1/?host=1&reload=2")))
+      (should (= agent-repl--webhost-reload-generation 2)))))
+
+(ert-deftest agent-repl-test-wh-a-document-url-states-the-current-generation ()
+  "A host or sidebar URL is loaded at the host's current generation."
+  ;; Arrange
+  (let ((agent-repl--webhost-reload-generation 7))
+    ;; Act / Assert
+    (should (equal (agent-repl-webhost-document-url "http://host.localhost:1/?sidebar=1")
+                   "http://host.localhost:1/?sidebar=1&reload=7"))))
+
+(ert-deftest agent-repl-test-wh-a-new-host-starts-at-generation-zero ()
+  "The host created after another is generation 0 again."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--webhost-reload-generation 5)
+          (agent-repl--webhost-buffer nil)
+          (agent-repl--webhost-url nil)
+          made)
+      (cl-letf (((symbol-function 'agent-repl-webhost-xwidget) (lambda () nil))
+                ((symbol-function 'agent-repl-webhost-daemon-conn)
+                 (lambda () (agent-repl-test-wh--conn "127.0.0.1:3")))
+                ((symbol-function 'agent-repl--webview-make-hidden)
+                 (lambda (url &rest _) (setq made url) (generate-new-buffer " host-test")))
+                ((symbol-function 'agent-repl--frontend-webview-live-widget) (lambda (_buf) 'host-xwidget))
+                ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                ((symbol-function 'agent-repl--info) #'ignore))
+        ;; Act
+        (agent-repl-webhost-ensure))
+      ;; Assert
+      (should (equal made "http://host.localhost:3/?host=1&reload=0"))
+      (should (equal agent-repl--webhost-url "http://host.localhost:3/?host=1"))
+      (kill-buffer agent-repl--webhost-buffer))))
+
+(ert-deftest agent-repl-test-wh-every-document-load-goes-through-the-generation-url ()
+  "No host or sidebar load spells its URL without the reload generation.
+A load that did would state no generation, and the daemon could not tell a
+host that has not reloaded yet from one that ignored its reload."
+  ;; Arrange
+  (let (offenders)
+    (dolist (file '("webhost.el" "sidebar-view.el"))
+      (with-temp-buffer
+        (insert-file-contents (expand-file-name file agent-repl-test--module-dir))
+        (goto-char (point-min))
+        ;; Act
+        (while (re-search-forward "(agent-repl--\\(frontend-webview-navigate-widget\\|webview-make-hidden\\)[ \n]" nil t)
+          (let ((call (save-excursion
+                        (goto-char (match-beginning 0))
+                        (buffer-substring-no-properties (point) (progn (forward-sexp) (point))))))
+            (unless (or (string-match-p "agent-repl-webhost-document-url" call)
+                        (save-excursion (beginning-of-defun)
+                                        (looking-at "(defun agent-repl--webview-make-hidden ")))
+              (push (format "%s:%d" file (line-number-at-pos)) offenders))))))
+    ;; Assert
+    (should-not offenders)))
+
 ;;; test-webhost.el ends here
 
 ;;;; ---- A reload retires the pages before it navigates ----
@@ -2029,7 +2102,7 @@ The current tab's page, not shown here, is the nearest of all."
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242")))
       ;; Assert
-      (should (equal navigated "http://host.localhost:4242/?host=1"))
+      (should (equal navigated "http://host.localhost:4242/?host=1&reload=1"))
       (should (member "elisp.webhost.retired outcome=retired pages=2" infos)))))
 
 (ert-deftest agent-repl-test-wh-an-unreadable-retired-answer-is-an-error-and-still-navigates ()
@@ -2043,7 +2116,7 @@ The current tab's page, not shown here, is the nearest of all."
         ;; Act
         (agent-repl-test-wh--reload-and-answer (agent-repl-test-wh--conn "127.0.0.1:4242") "not json"))
       ;; Assert
-      (should (equal navigated "http://host.localhost:4242/?host=1"))
+      (should (equal navigated "http://host.localhost:4242/?host=1&reload=1"))
       (should (seq-some (lambda (e) (string-prefix-p "elisp.webhost.retire-answer-unreadable" e)) errors)))))
 
 (ert-deftest agent-repl-test-wh-a-host-predating-retire-all-is-not-navigated-twice ()
@@ -2075,7 +2148,7 @@ The current tab's page, not shown here, is the nearest of all."
          (agent-repl-test-wh--conn "127.0.0.1:4242")
          "{\"op\":\"retireAll\",\"id\":null,\"outcome\":\"queued\",\"notes\":[]}"))
       ;; Assert
-      (should (equal navigated '("http://host.localhost:4242/?host=1"))))))
+      (should (equal navigated '("http://host.localhost:4242/?host=1&reload=1"))))))
 
 ;;;; ---- A reload tells the daemon its pages are unloading first ----
 
@@ -2148,7 +2221,7 @@ and seven rows drew severed on every webapp deploy."
       ;; Act
       (agent-repl-test-wh--load "load-committed")
       ;; Assert
-      (should (equal navigated '("http://host.localhost:1/?host=1"))))))
+      (should (equal navigated '("http://host.localhost:1/?host=1&reload=1"))))))
 
 (ert-deftest agent-repl-test-wh-a-host-that-strays-is-recorded-at-error ()
   "The stray navigation is recorded at ERROR, naming the URI."
@@ -2220,4 +2293,4 @@ and seven rows drew severed on every webapp deploy."
       ;; Act
       (agent-repl-test-wh--load "load-committed")
       ;; Assert
-      (should (equal navigated '("http://host.localhost:1/?host=1"))))))
+      (should (equal navigated '("http://host.localhost:1/?host=1&reload=1"))))))

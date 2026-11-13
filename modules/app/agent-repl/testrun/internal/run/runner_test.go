@@ -184,7 +184,7 @@ func newRunnerOn(slots int, c *fakeCores, e *fakeExec) (*Runner, *bytes.Buffer, 
 }
 
 func spec(id, suite string, deps ...string) Spec {
-	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}, Bound: time.Minute, Expected: 20 * time.Second, Cores: 1}
+	return Spec{Unit: sched.Unit{ID: id, Suite: suite, Deps: deps, Est: 1}, Argv: []string{"x"}, Bound: time.Minute, Expected: time.Minute / BoundFactor, Cores: 1}
 }
 
 // never is a timer that never fires: no unit reaches its time limit.
@@ -994,7 +994,7 @@ func TestRunKillsAUnitAtItsTimeLimitAndFailsIt(t *testing.T) {
 	if !slices.Equal(e.killed, []string{"hang"}) {
 		t.Fatalf("killed = %v, want the unit killed", e.killed)
 	}
-	if want := "ERROR: unit hang (s) ran past its time limit of 1m0s (3 times its expected 20s) and is killed"; !strings.Contains(errOut.String(), want) {
+	if want := "ERROR: unit hang (s) ran past its time limit of 1m0s (5 times its expected 12s) and is killed"; !strings.Contains(errOut.String(), want) {
 		t.Fatalf("error log = %q, want %q", errOut.String(), want)
 	}
 	if !strings.Contains(out.String(), "unit hang was KILLED: it ran past its time limit of 1m0s") {

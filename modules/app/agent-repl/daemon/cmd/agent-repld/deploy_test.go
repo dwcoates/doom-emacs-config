@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/deployprogress"
@@ -300,7 +302,9 @@ func (f *fakeClients) PushReloadWebappBuild(ws ids.WorkspaceID, _ string) {
 	f.pushedWebapp = append(f.pushedWebapp, ws)
 }
 
-func (f *fakeClients) WebhostBuilds() []string { return []string{"old"} }
+func (f *fakeClients) WebhostPages() []*agentreplv1.WebhostPage {
+	return []*agentreplv1.WebhostPage{{WebappBuild: "old"}}
+}
 
 func (f *fakeClients) PushReloadWebhost(build string) int {
 	f.pushedWebhost = append(f.pushedWebhost, build)
@@ -338,5 +342,33 @@ func TestABoundClientsForwarderHandsEverythingOn(t *testing.T) {
 	}
 	if len(target.pushedElisp) != 1 || len(target.pushedWebapp) != 1 {
 		t.Fatalf("pushes = (%v, %v), want both handed on", target.pushedElisp, target.pushedWebapp)
+	}
+}
+
+func TestTheClientsForwarderHandsOnTheWebhostPages(t *testing.T) {
+	tests := []struct {
+		name      string
+		bound     bool
+		wantPages int
+	}{
+		{name: "an unbound forwarder answers no host", bound: false, wantPages: 0},
+		{name: "a bound forwarder answers the server's hosts", bound: true, wantPages: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := &deployClientsForwarder{}
+			if tt.bound {
+				f.bind(&fakeClients{})
+			}
+
+			// Act
+			pages := f.WebhostPages()
+
+			// Assert
+			if len(pages) != tt.wantPages {
+				t.Fatalf("WebhostPages = %v, want %d", pages, tt.wantPages)
+			}
+		})
 	}
 }

@@ -110,6 +110,40 @@ Regression, 2026-09-27: a daemon exited without transferring a workspace,
 the link was promoted onto its successor, and the workspace kept its dead
 connection — calls to `127.0.0.1:61043` and a blank webview.
 
+## A workspace's calls wait for its adopt's answer, without waiting
+
+The `:adopt` walk moves `:conn` to the successor BEFORE AdoptHostWorkspace
+is answered, so a call about that workspace made in between reached a
+daemon that had not adopted it and was refused `not_yet_adopted`: the
+2026-11-13 14:42 deploy lost ReportPageResidency, ReportPageUnloading,
+MarkWorkspaceViewed and SelectWorkspace for every workspace with a loaded
+page, 1-3s before its adopt was answered. So (owner ruling, 2026-11-13):
+
+- Every async unary call passes ONE gate, `agent-repl-host-gate-call`,
+  which `rpc.el`'s `agent-repl-rpc--unary` routes every verb through; no
+  other source calls `agent-repl-connect-unary`
+  (`agent-repl-test-rpc-only-the-gates-send-reaches-the-unary-transport`).
+- A call naming a workspace (`:workspace` ref) whose adopt onto the call's
+  daemon is unanswered is HELD on that workspace (INFO
+  `elisp.host.call-held`); AdoptHostWorkspace itself never is. Every other
+  call is sent at once, exactly as before.
+- Nothing waits: a held call returns at once and its callbacks run when it
+  is sent, so the editor and its own UI act immediately. No
+  `accept-process-output`, timer or blocking call stands on the input path.
+- The held calls are sent IN ORDER from the adopt's own answer
+  (`agent-repl-host--release-held`, INFO `elisp.host.held-calls-sent ...
+  outcome=`), each to the daemon the workspace stands on THEN: the
+  successor once adopted, the daemon it was put back on after a refusal,
+  a failure or a timeout. The hold is bounded by the adopt's own deadline
+  (the unary timeout), whose failure is the adopt's own ERROR
+  (`elisp.host.adopt-failed`). A walk that supersedes the adopt with
+  anything but an adopt onto the same daemon, a withdrawn transfer, and a
+  forgotten workspace also send them.
+- A held call that finds no daemon, or whose send signals, answers its own
+  ON-FAILURE at ERROR (`elisp.host.held-call-unsent`), and the calls
+  behind it are still sent.
+- A `-sync` call is never held: it blocks its caller by contract.
+
 ## A prompt the daemon did not take is held on disk, never in memory
 
 Owner ruling, 2026-09-28: held prompts survive outages and restarts of

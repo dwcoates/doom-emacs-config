@@ -75,6 +75,7 @@ import (
 	"agent-repld/internal/revealpace"
 	"agent-repld/internal/revision"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/rostermirror"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/selectionfollow"
 	"agent-repld/internal/server"
@@ -1232,6 +1233,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
 		Lifetime: ctx,
 		Log:      p.Surfaces,
+		// A JOINING DAEMON DRAWS EACH WORKSPACE IT HAS NOT ADOPTED YET FROM
+		// ITS INCUMBENT'S OWN ROSTER ROW (rollout.Join's one exception).
+		DialIncumbentRoster: rostermirror.DialIncumbent,
+		IncumbentArms:       sidebarResolver.SetIncumbentArms,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the rollout controller: %w", err)

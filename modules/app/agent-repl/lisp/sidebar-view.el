@@ -49,6 +49,7 @@
 (declare-function agent-repl--frontend-webview-navigate-widget "frontend" (xwidget uri))
 (declare-function agent-repl--frontend-kill-webview "frontend" (buf))
 (declare-function agent-repl-webhost-origin "webhost" (conn))
+(declare-function agent-repl-webhost-document-url "webhost" (url))
 (declare-function agent-repl-webhost-daemon-conn "webhost" ())
 (declare-function agent-repl--webview-answered "webhost" (raw prefix scope-of central predates))
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
@@ -148,7 +149,7 @@ kept for the session.  No window is touched."
   (or (agent-repl-sidebar-view-xwidget)
       (let* ((url (agent-repl-sidebar-view-url (agent-repl-webhost-daemon-conn)))
              (buf (agent-repl--webview-make-hidden
-                   url agent-repl-sidebar-view-buffer-name #'agent-repl--sidebar-view-refuse-kill
+                   (agent-repl-webhost-document-url url) agent-repl-sidebar-view-buffer-name #'agent-repl--sidebar-view-refuse-kill
                    #'agent-repl--sidebar-view-kill-buffer "the sidebar's web view"))
              (xw (agent-repl--frontend-webview-live-widget buf)))
         (setq agent-repl--sidebar-view-buffer buf
@@ -196,7 +197,8 @@ INSTALLED BY NAME, never as a closure, so a hot reload reaches it (see
 
 (defun agent-repl--sidebar-view-on-load (event-type)
   "Replay the desired state when the sidebar's EVENT-TYPE commits a load.
-At the load's finish the sidebar's boot is read (`agent-repl--webview-on-finish').
+At the load's finish the sidebar's boot is read
+\(`agent-repl--webview-on-finish').
 One replay per document, at `load-committed', as the host replays
 \(`agent-repl--webhost-on-load').  A load that strayed off the sidebar's own
 origin is taken back instead."
@@ -212,7 +214,8 @@ origin is taken back instead."
 
 (defun agent-repl--sidebar-view-on-boot (raw)
   "Record the sidebar's RAW boot answer (`agent-repl--webview-record-boot').
-Called BY SYMBOL from the read channel (`agent-repl--frontend-webview-read-script')."
+Called BY SYMBOL from the read channel
+\(`agent-repl--frontend-webview-read-script')."
   (agent-repl--webview-record-boot agent-repl--sidebar-view-central "sidebar" raw))
 
 (defun agent-repl--sidebar-view-take-back (uri)
@@ -222,7 +225,8 @@ that reached the sidebar is a defect in the page, recorded at ERROR."
   (agent-repl--error agent-repl--sidebar-view-central
                      "elisp.sidebar-view.navigated-away uri=%s: an outward link escaped the sidebar's routing; the sidebar is taken back and the link was not opened"
                      uri)
-  (agent-repl--frontend-webview-navigate-widget (agent-repl-sidebar-view-xwidget) agent-repl--sidebar-view-url))
+  (agent-repl--frontend-webview-navigate-widget
+   (agent-repl-sidebar-view-xwidget) (agent-repl-webhost-document-url agent-repl--sidebar-view-url)))
 
 (defun agent-repl--sidebar-view-replay ()
   "Hand the sidebar everything it should know, after a load: it starts empty."
@@ -247,7 +251,8 @@ two documents always run the webapp build the daemon serves."
       (progn
         (setq agent-repl--sidebar-view-url (agent-repl-sidebar-view-url conn)
               agent-repl--sidebar-view-daemon-origin nil)
-        (agent-repl--frontend-webview-navigate-widget xw agent-repl--sidebar-view-url)
+        (agent-repl--frontend-webview-navigate-widget
+         xw (agent-repl-webhost-document-url agent-repl--sidebar-view-url))
         (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.reloaded url=%s"
                           agent-repl--sidebar-view-url))
     (agent-repl--log agent-repl--sidebar-view-central "elisp.sidebar-view.reload-skipped reason=no-sidebar")))
@@ -293,7 +298,7 @@ elisp, an ERROR no reload heals."
       (agent-repl--info agent-repl--sidebar-view-central
                         "elisp.sidebar-view.predates-call op=%s action=reload url=%s" op url)
       (when-let ((xw (agent-repl-sidebar-view-xwidget)))
-        (agent-repl--frontend-webview-navigate-widget xw url)))))
+        (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-document-url url))))))
 
 (defun agent-repl-sidebar-view-mark-shown (id)
   "Highlight workspace ID's row in the sidebar; kept for its reloads."

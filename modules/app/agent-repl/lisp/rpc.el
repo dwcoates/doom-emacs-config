@@ -10,6 +10,13 @@
 ;; state — those belong to `daemon-link.el', `host.el', `roster.el' and
 ;; `verbs.el', which call this file.
 ;;
+;; ONE GATE STANDS BETWEEN AN ASYNC UNARY CALL AND THE TRANSPORT: host.el's
+;; `agent-repl-host-gate-call', which holds a call about a workspace whose
+;; adopt onto the call's daemon is unanswered until that answer.  The
+;; policy is host.el's; this file only routes every async unary through it,
+;; so no call site can skip it.  A `-sync' call is never held: it blocks
+;; its caller by contract, and a hold would block it on the adopt.
+;;
 ;; SHAPE OF EVERY UNARY VERB.  `(agent-repl-rpc-<method-kebab> CONN REQUEST
 ;; &key on-response on-failure)' plus a `-sync' variant for tests and the
 ;; doctor.  REQUEST is the decoded request plist; ON-RESPONSE receives the
@@ -43,6 +50,7 @@
 
 (declare-function agent-repl-connect-unary "connect"
                   (conn method json-string &rest keys))
+(declare-function agent-repl-host-gate-call "host" (conn method request send fail))
 (declare-function agent-repl-connect-unary-sync "connect"
                   (conn method json-string &optional timeout))
 (declare-function agent-repl-connect-stream "connect"
@@ -188,28 +196,47 @@ left waiting on a callback that will not come."
         (log-scope
          (agent-repl--capture-log-scope
           '(:agent-repl-context "an unscoped RPC exchange is process-wide"))))
-    (agent-repl--log log-scope "elisp.rpc.send method=%S" method)
-    (agent-repl-connect-unary
-     conn method json
-     :timeout timeout
-     :on-response
-     (lambda (alist)
-       (condition-case err
-           (let ((decoded (agent-repl-wire-call 'decode decoder alist)))
-             (agent-repl--log log-scope "elisp.rpc.answer method=%S arm=%S"
-                              method (plist-get decoded :arm))
-             (when on-response (funcall on-response decoded)))
-         (error
-          (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%S"
-                             method err alist)
-          (when on-failure
-            (funcall on-failure
-                     (list :kind :malformed :code nil :status 200
-                           :message (format "%s: undecodable response (%S)" method err)))))))
-     :on-failure
-     (lambda (detail)
-       (agent-repl--warn log-scope "elisp.rpc.transport-failure method=%S detail=%S" method detail)
-       (when on-failure (funcall on-failure detail))))))
+    ;; THE CALL GATE (host.el): a call about a workspace whose adopt onto
+    ;; CONN is unanswered is held until that answer, every other call is
+    ;; sent now.  So a call is sent here, at the gate's word, on the
+    ;; connection the gate names.
+    (let ((fail (lambda (detail)
+                  (agent-repl--warn log-scope "elisp.rpc.transport-failure method=%S detail=%S" method detail)
+                  (when on-failure (funcall on-failure detail)))))
+      (agent-repl-host-gate-call
+       conn method request
+       (lambda (target)
+         (agent-repl--log log-scope "elisp.rpc.send method=%S" method)
+         (agent-repl-rpc--send-unary target method json decoder log-scope
+                                     on-response on-failure fail timeout))
+       fail))))
+
+(defun agent-repl-rpc--send-unary (conn method json decoder log-scope
+                                        on-response on-failure fail timeout)
+  "Send the serialized JSON to METHOD on CONN and decode the answer with DECODER.
+The transport half of `agent-repl-rpc--unary', run when the call gate sends
+the call.  LOG-SCOPE is the scope captured when the call was made;
+ON-RESPONSE, ON-FAILURE and TIMEOUT are `agent-repl-rpc--unary\='s, and
+FAIL is its transport-failure path, which records the failure and answers
+ON-FAILURE."
+  (agent-repl-connect-unary
+   conn method json
+   :timeout timeout
+   :on-response
+   (lambda (alist)
+     (condition-case err
+         (let ((decoded (agent-repl-wire-call 'decode decoder alist)))
+           (agent-repl--log log-scope "elisp.rpc.answer method=%S arm=%S"
+                            method (plist-get decoded :arm))
+           (when on-response (funcall on-response decoded)))
+       (error
+        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%S"
+                           method err alist)
+        (when on-failure
+          (funcall on-failure
+                   (list :kind :malformed :code nil :status 200
+                         :message (format "%s: undecodable response (%S)" method err)))))))
+   :on-failure fail))
 
 (defun agent-repl-rpc--unary-sync (conn method encoder decoder request &optional timeout)
   "Blocking form of `agent-repl-rpc--unary'; returns the decoded response.

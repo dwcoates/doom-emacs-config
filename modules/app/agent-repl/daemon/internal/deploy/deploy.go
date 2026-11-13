@@ -192,9 +192,9 @@ type Clients interface {
 	// PushReloadWebappBuild pushes reload_webapp on one workspace's host
 	// stream, naming the webapp build the deploy brings.
 	PushReloadWebappBuild(ws ids.WorkspaceID, build string)
-	// WebhostBuilds answers the webapp build every standing web view host
-	// stated on its page stream.
-	WebhostBuilds() []string
+	// WebhostPages answers what every standing web view host page stream
+	// stated of itself: its webapp build and its reload generation.
+	WebhostPages() []*agentreplv1.WebhostPage
 	// PushReloadWebhost pushes reload_webhost to every Emacs, naming the
 	// webapp build the deploy brings, and answers how many it reached.
 	PushReloadWebhost(build string) int

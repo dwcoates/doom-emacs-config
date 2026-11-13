@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/rostermirror"
 )
 
 // The controller's operation names. Every logical branch records under one of
@@ -62,6 +63,9 @@ type controller struct {
 	rendezvous map[ids.WorkspaceID]*entry
 	// owned is every workspace this joining daemon has finished adopting.
 	owned map[ids.WorkspaceID]bool
+	// mirror is the joining window's subscription to the incumbent's roster
+	// (startRosterMirror), nil outside one.
+	mirror *rostermirror.Mirror
 	// created is every workspace THIS daemon minted (Created). A workspace
 	// is born owned by the daemon that created it: it can be in no
 	// predecessor's manifest, so no adoption of it is ever coming.

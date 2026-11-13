@@ -234,6 +234,16 @@ type Resolver interface {
 	// FooterStatusChanged redraws the roster because the footer's status for
 	// the workspace moved: the row's status is a projection of it.
 	FooterStatusChanged(ws ids.WorkspaceID)
+	// SetIncumbentArms installs, WHOLE, the status arm the INCUMBENT's own
+	// roster draws for each workspace this JOINING daemon has not adopted
+	// yet: each named row draws that arm in place of the one this daemon would
+	// project from its own footer, whose state for a workspace it does not
+	// serve yet is frozen at what it last read. An empty or nil map is no
+	// mirror, and every row is this daemon's own again. The roster mirror
+	// (internal/rostermirror) is the one caller; it names exactly the
+	// workspaces whose standing is not_yet_adopted, so a row the daemon owns
+	// is never drawn from another daemon.
+	SetIncumbentArms(arms map[ids.WorkspaceID]string)
 	// DeployedVersion installs the agent-repl version the daemon deploys
 	// from, drawn in the rail's header as its bare release
 	// (frontend.v1.WorkspaceRoster.version); nil withdraws it. The deployed

@@ -1075,14 +1075,18 @@ func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *test
 	}
 }
 
-// TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout is the
-// old-shim fallback end to end: a shim that never re-announces its session
-// facts cannot be adopted mid-work, so the successor refuses it, the incumbent
-// takes the workspace back at once and asks for the transfer again at
-// FREENESS -- the old way, never unsafe -- naming the holdout on the cadence
-// while the turn runs. The AGENT_REPL_HOLDOUT_WARN_EVERY and
-// AGENT_REPL_HANDOVER_FACTS_BOUND test knobs compress both waits.
-func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing.T) {
+// TestALateFactsRefusalIsOfferedAgainMidWork is the
+// late-facts refusal end to end: a shim whose session facts do not reach the
+// successor's watches in time cannot be adopted mid-work, so the successor
+// refuses it (facts_late), the incumbent takes the workspace back at once and
+// offers it again MID-WORK (ae13c08bf3: a workspace whose detached work runs
+// for hours no longer holds the handover open until it ends); the second
+// offer's adoption lands with the turn still running. The
+// AGENT_REPL_HANDOVER_FACTS_BOUND test knob compresses the facts wait. The
+// holdout is no longer asserted here: the re-offer can land before the
+// cadence's first tick, so whether it is named is a race, and its naming is
+// carry_test.go's (the refused workspace named a holdout).
+func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn on a shim whose next watch re-announces nothing.
 	selfRepo := harness.NewRepo(t)
@@ -1092,7 +1096,8 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	selfRepo.DeploysAsAgentRepl()
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
-		// The holdout is named on the cadence at WARN, which is the subject.
+		// The re-offered workspace may be named a holdout on the cadence at
+		// WARN in the instant before the re-offer lands.
 		ExpectWarnings: []string{"daemon.rollout.handover"},
 		ExtraEnv: []string{
 			harness.TestAllScriptEnv(script.Path),
@@ -1138,39 +1143,24 @@ func TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout(t *testing
 	}()
 	wg.Wait()
 
-	// Assert: the incumbent asks for the transfer again at freeness, and names
-	// the holdout on the cadence while the turn runs.
-	d.AwaitLogRecord(incumbentLog, "the transfer asked again at freeness", func(r harness.LogRecord) bool {
+	// Assert: the incumbent offers the workspace again mid-work, at the
+	// gate that waits for no turn.
+	d.AwaitLogRecord(incumbentLog, "the late-facts refusal offered again mid-work", func(r harness.LogRecord) bool {
+		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" &&
+			r.Message == "the successor refused the mid-work adoption because the adopted shim's facts came too late; the workspace is offered to the successor again mid-work"
+	})
+	d.AwaitLogRecord(incumbentLog, "the transfer asked again mid-work", func(r harness.LogRecord) bool {
 		return r.PID == d.PID() && r.Operation == "daemon.rollout.transfer" &&
-			r.Message == "asked the bounce registry to transfer the workspace again" && r.Context["gate"] == "freeness"
+			r.Message == "asked the bounce registry to transfer the workspace again" && r.Context["gate"] == "dispatch_quiet"
 	})
-	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
-		return r.PID == d.PID() && r.Operation == "daemon.rollout.handover" && strings.ToLower(r.Level) == "warn" &&
-			namesHoldout(r.Context["holdouts"], f.ws.GetId()) && numeric(r.Context["warnings"]) >= 2
+	// Assert: the second offer's adoption lands on the successor mid-turn.
+	d.AwaitRunLogRecordFromAnyProcess("the successor adopting the workspace on its retry", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.rollout.join" &&
+			r.Message == "adopted the workspace on a retry" && r.Context["workspace"] == f.ws.GetId()
 	})
-	if got := second.Context["cadence"]; got != "25ms" {
-		t.Fatalf("the holdout warning's cadence = %v, want the 25ms the knob set", got)
-	}
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
-		t.Fatalf("KillTurn was called %d time(s); the fallback interrupts nothing", got)
+		t.Fatalf("KillTurn was called %d time(s); offering the workspace again interrupts nothing", got)
 	}
-}
-
-// namesHoldout reports whether a JSON-decoded holdout list names ws.
-func namesHoldout(v any, ws string) bool {
-	list, _ := v.([]any)
-	for _, item := range list {
-		if item == ws {
-			return true
-		}
-	}
-	return false
-}
-
-// numeric reads a JSON-decoded log context number, which arrives as float64.
-func numeric(v any) float64 {
-	f, _ := v.(float64)
-	return f
 }
 
 func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {

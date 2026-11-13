@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/rostermirror"
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
@@ -290,6 +291,13 @@ type Deps struct {
 	// It is what a not_yet_adopted refusal names while the incumbent still
 	// serves the workspace (Controller.IncumbentAddress).
 	IncumbentAddress string
+	// DialIncumbentRoster opens the incumbent's WatchWorkspaceRoster stream
+	// (rostermirror.DialIncumbent), and IncumbentArms installs the status
+	// arms the mirror reads off it (sidebar.Resolver.SetIncumbentArms). A
+	// JOINING daemon draws each workspace it has not adopted yet from its
+	// incumbent's own row (Join); both are required beside IncumbentAddress.
+	DialIncumbentRoster rostermirror.Dial
+	IncumbentArms       func(arms map[ids.WorkspaceID]string)
 	// Instance identifies this daemon process for serving ownership.
 	Instance ids.InstanceID
 	// StateDir is the state root; the successor reports its address in it.
@@ -795,6 +803,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Restarts == nil {
 		return nil, errors.New("rollout: a restart recorder is required; every shim replacement and transfer is timed")
+	}
+	if deps.IncumbentAddress != "" && (deps.DialIncumbentRoster == nil || deps.IncumbentArms == nil) {
+		return nil, errors.New("rollout: a joining daemon needs the incumbent's roster dial and the arms sink; a row it has not adopted would draw its frozen footer instead of the incumbent's status")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

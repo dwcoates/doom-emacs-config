@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -281,31 +283,36 @@ func (s *server) holdWebBuild(ws ids.WorkspaceID, build string) func() {
 	}
 }
 
-// WebhostBuilds answers the webapp build every standing web view host's page
-// stream stated, sorted.
-func (s *server) WebhostBuilds() []string {
+// WebhostPages answers what every standing web view host's page stream
+// stated of itself, in the order the streams attached. Each is a clone, so no
+// caller can reach a stream's own message.
+func (s *server) WebhostPages() []*agentreplv1.WebhostPage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.webhostBuilds))
-	for _, build := range s.webhostBuilds {
-		out = append(out, build)
+	keys := make([]uint64, 0, len(s.webhostPages))
+	for key := range s.webhostPages {
+		keys = append(keys, key)
 	}
-	sort.Strings(out)
+	slices.Sort(keys)
+	out := make([]*agentreplv1.WebhostPage, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, proto.CloneOf(s.webhostPages[key]))
+	}
 	return out
 }
 
-// holdWebhostBuild records a web view host's stated build for as long as its
-// page stream stands, and answers the release.
-func (s *server) holdWebhostBuild(build string) func() {
+// holdWebhostPage records what a web view host's page stream stated of
+// itself for as long as the stream stands, and answers the release.
+func (s *server) holdWebhostPage(page *agentreplv1.WebhostPage) func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.webStreamSeq++
-	key := strconv.FormatUint(s.webStreamSeq, 10)
-	s.webhostBuilds[key] = build
+	key := s.webStreamSeq
+	s.webhostPages[key] = proto.CloneOf(page)
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		delete(s.webhostBuilds, key)
+		delete(s.webhostPages, key)
 	}
 }
 

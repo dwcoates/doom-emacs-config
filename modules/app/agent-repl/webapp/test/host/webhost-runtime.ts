@@ -5,11 +5,13 @@
  * document without dialing a daemon.
  */
 import type { ClientLogRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import type { WatchPageRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb";
 import { startWebhostRuntime, type WebhostDocument, type WebhostRuntime, type WebhostRuntimeDeps } from "../../src/host/document.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
 
 /**
- * DOCUMENT's runtime and every ClientLog request its client was handed.
+ * DOCUMENT's runtime and every ClientLog and WatchPage request its client was
+ * handed.
  * INSTALL_LOGGER, when given, is handed the runtime's logger; none is
  * installed when absent.
  */
@@ -19,8 +21,10 @@ export function quietWebhostRuntime(
 ): {
   runtime: WebhostRuntime;
   logged: ClientLogRequest[];
+  pages: WatchPageRequest[];
+  firstPage: Promise<WatchPageRequest>;
 } {
-  const { client, logged } = clientLogRecorder();
+  const { client, logged, pages, firstPage } = clientLogRecorder();
   const runtime = startWebhostRuntime(document, window, { client, installLogger });
-  return { runtime, logged };
+  return { runtime, logged, pages, firstPage };
 }

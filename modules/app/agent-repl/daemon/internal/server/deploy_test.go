@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -433,44 +434,77 @@ func TestAReleasedWebBuildIsForgotten(t *testing.T) {
 	}
 }
 
-func TestTheWebviewHostsPageStreamHoldsItsBuildWhileItStands(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	s := h.Server.(*server)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stream, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{
-		Page: "webhost-1", Webhost: &agentreplv1.WebhostPage{WebappBuild: "Web1"},
-	}))
-	if err != nil {
-		t.Fatalf("WatchPage: %v", err)
+func TestTheWebviewHostsPageStreamHoldsWhatItStatedWhileItStands(t *testing.T) {
+	generation := uint32(3)
+	tests := []struct {
+		name string
+		host *agentreplv1.WebhostPage
+	}{
+		{name: "a host stating its reload generation", host: &agentreplv1.WebhostPage{WebappBuild: "Web1", ReloadGeneration: &generation}},
+		{name: "a host stating none", host: &agentreplv1.WebhostPage{WebappBuild: "Web1"}},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			s := h.Server.(*server)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{
+				Page: "webhost-1", Webhost: tt.host,
+			}))
+			if err != nil {
+				t.Fatalf("WatchPage: %v", err)
+			}
 
-	// Act
-	if !stream.Receive() {
-		t.Fatalf("the host's page stream ended before it attached: %v", stream.Err())
-	}
+			// Act
+			if !stream.Receive() {
+				t.Fatalf("the host's page stream ended before it attached: %v", stream.Err())
+			}
 
-	// Assert
-	if got := s.WebhostBuilds(); len(got) != 1 || got[0] != "Web1" {
-		t.Fatalf("WebhostBuilds = %v, want the host's build", got)
+			// Assert
+			got := s.WebhostPages()
+			if len(got) != 1 || !proto.Equal(got[0], tt.host) {
+				t.Fatalf("WebhostPages = %v, want the host's own statement %v", got, tt.host)
+			}
+		})
 	}
 }
 
-func TestAHeldHostBuildGoesWithItsRelease(t *testing.T) {
+func TestAHeldHostPageGoesWithItsRelease(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	s := h.Server.(*server)
-	release := s.holdWebhostBuild("Web1")
-	keep := s.holdWebhostBuild("Web2")
+	release := s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web1"})
+	keep := s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web2"})
 	defer keep()
 
 	// Act
 	release()
 
 	// Assert
-	if got := s.WebhostBuilds(); len(got) != 1 || got[0] != "Web2" {
-		t.Fatalf("WebhostBuilds = %v, want only the build still held", got)
+	if got := s.WebhostPages(); len(got) != 1 || got[0].GetWebappBuild() != "Web2" {
+		t.Fatalf("WebhostPages = %v, want only the page still held", got)
+	}
+}
+
+func TestHeldHostPagesAnswerInAttachOrderAsClones(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	s := h.Server.(*server)
+	first := &agentreplv1.WebhostPage{WebappBuild: "Web1"}
+	defer s.holdWebhostPage(first)()
+	defer s.holdWebhostPage(&agentreplv1.WebhostPage{WebappBuild: "Web2"})()
+	first.WebappBuild = "changed after the hold"
+
+	// Act
+	got := s.WebhostPages()
+	got[0].WebappBuild = "changed by the caller"
+
+	// Assert
+	again := s.WebhostPages()
+	if len(again) != 2 || again[0].GetWebappBuild() != "Web1" || again[1].GetWebappBuild() != "Web2" {
+		t.Fatalf("WebhostPages = %v, want Web1 then Web2, untouched by either side's writes", again)
 	}
 }
 
@@ -484,8 +518,8 @@ func TestAWorkspacePagesStreamStatesNoHostBuild(t *testing.T) {
 	attachPageStream(t, h, ctx, "page-1")
 
 	// Assert
-	if got := h.Server.(*server).WebhostBuilds(); len(got) != 0 {
-		t.Fatalf("WebhostBuilds = %v, want none", got)
+	if got := h.Server.(*server).WebhostPages(); len(got) != 0 {
+		t.Fatalf("WebhostPages = %v, want none", got)
 	}
 }
 

@@ -718,6 +718,7 @@ roster it holds is at REVISION or later.")
 (declare-function agent-repl-roster-move-frame "roster" (name))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-shown-p "webhost" (ws))
+(declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-show "webhost" (ws))
 (declare-function agent-repl-webhost-note-switch "webhost" (ws))
@@ -1157,8 +1158,8 @@ ON-REPORTED is called with no argument once the daemon has answered
 success, and the daemon stores whether the page is loaded, which the
 registration after a bounce answers (`agent-repl-host-last-known-page').
 FIRE AND FORGET otherwise: a report that does not land is recorded and
-the next change, or the next link-up, reports again.  Answers nil without calling
-anything when WS has no ref or no connection yet."
+the next change, or the next link-up, reports again.  Answers nil without
+calling anything when WS has no ref or no connection yet."
   (agent-repl-host--send-subject-verb
    ws "page-residency"
    (lambda (conn request &rest args)
@@ -1386,6 +1387,8 @@ nothing moves: two workspaces would otherwise share one stream."
 Called when a workspace's tab is torn down; the daemon-side session is
 untouched, because closing a tab is a VIEW act."
   (agent-repl-host-unsubscribe ws)
+  ;; A call held for WS is the user's: it goes before WS is forgotten.
+  (agent-repl-host--release-held ws "forgotten")
   (remhash ws agent-repl-host--by-name)
   (agent-repl--info ws "elisp.host.forgotten ws=%s" ws))
 
@@ -1739,8 +1742,14 @@ Every walk starts here, a lone one (`agent-repl-host--reattach') and each
 of a batch (`agent-repl-host--reattach-all') alike, so a walk is recorded
 and superseded one way.  TRIGGER is recorded."
   (let ((token (setq agent-repl-host--reattach-tokens
-                     (1+ agent-repl-host--reattach-tokens))))
+                     (1+ agent-repl-host--reattach-tokens)))
+        (was (plist-get (agent-repl-host--entry ws) :reattach)))
     (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger))
+    ;; A NEWER WALK THAT IS NOT AN ADOPT ONTO THE SAME DAEMON ENDS THE HOLD:
+    ;; the superseded adopt's answer is dropped, so nothing else would send
+    ;; what it held.
+    (unless (and (eq claim :adopt) (eq (plist-get was :conn) new))
+      (agent-repl-host--release-held ws "superseded"))
     (agent-repl--info ws "elisp.host.reattach ws=%s address=%S claim=%s trigger=%s"
                       ws (agent-repl-connect-connection-address new) claim trigger)
     token))
@@ -1936,6 +1945,99 @@ the successor was already in flight when the old stream ended planned."
 
 ;;;; ---- The handover, per workspace ----
 
+;;;; ---- The call gate: a workspace's calls wait for its adopt's answer ----
+;;
+;; WHILE WS\='S ADOPT ONTO THE SUCCESSOR IS UNANSWERED, ITS CALLS ARE HELD.
+;; The adopt walk moves `:conn' to the successor BEFORE AdoptHostWorkspace
+;; is answered (`agent-repl-host--adopt-onto'), so every call about WS made
+;; in that window reached a daemon that had not adopted WS yet and was
+;; refused `not_yet_adopted', and what it reported was lost: in the
+;; 2026-11-13 14:42 deploy, ReportPageResidency, ReportPageUnloading,
+;; MarkWorkspaceViewed and SelectWorkspace for the four workspaces with a
+;; loaded page, 1-3s before their adopt was answered (24 WARN records at the
+;; successor).  So every async unary call goes through ONE gate
+;; \=(`agent-repl-host-gate-call', from rpc.el\='s `agent-repl-rpc--unary'):
+;; a call that names WS and is addressed to the daemon WS\='s outstanding
+;; adopt is on is queued on WS, and the queue is sent, IN ORDER, from the
+;; adopt\='s own answer (`agent-repl-host--release-held').
+;;
+;; NOTHING WAITS.  A held call returns at once and its callbacks run when
+;; it is sent, so the editor and its own UI act immediately; only the
+;; daemon hears later.  THE HOLD IS BOUNDED BY THE ADOPT\='S OWN DEADLINE:
+;; a refused, failed or timed-out adopt still sends every held call, at the
+;; daemon WS stands on afterwards, and the failure is the adopt\='s own
+;; ERROR record.
+
+(defconst agent-repl-host--never-held-methods '("AdoptHostWorkspace")
+  "Methods the call gate never holds: the adopt, whose answer ends the hold.")
+
+(defun agent-repl-host-gate-call (conn method request send fail)
+  "Send REQUEST\='s call to METHOD on CONN now, or hold it for its workspace.
+THE ONE GATE every async unary call passes (rpc.el `agent-repl-rpc--unary').
+SEND is a function of the connection that sends the call; FAIL is a
+function of a transport failure plist that answers the call\='s ON-FAILURE.
+A call naming a workspace (`:workspace' ref) whose adopt onto CONN is
+unanswered is held (`agent-repl-host--hold-call'); every other call is sent
+at once, and a send that signals signals to the caller, as it always did."
+  (let ((ws (and (not (member method agent-repl-host--never-held-methods))
+                 (agent-repl-host--adopt-holding
+                  conn (plist-get (plist-get request :workspace) :id)))))
+    (if ws
+        (agent-repl-host--hold-call ws method send fail)
+      (funcall send conn))))
+
+(defun agent-repl-host--adopt-holding (conn id)
+  "Return the workspace whose ref is ID and whose adopt onto CONN is unanswered.
+Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
+  (when id
+    (catch 'held
+      (maphash
+       (lambda (ws entry)
+         (let ((walk (plist-get entry :reattach)))
+           (when (and (equal (plist-get (plist-get entry :ref) :id) id)
+                      (eq (plist-get walk :claim) :adopt)
+                      (eq (plist-get walk :conn) conn))
+             (throw 'held ws))))
+       agent-repl-host--by-name)
+      nil)))
+
+(defun agent-repl-host--hold-call (ws method send fail)
+  "Queue METHOD\='s SEND and FAIL on WS until its adopt is answered."
+  (let ((held (append (plist-get (agent-repl-host--entry ws) :held-calls)
+                      (list (list :method method :send send :fail fail)))))
+    (agent-repl-host--put ws :held-calls held)
+    (agent-repl--info ws "elisp.host.call-held ws=%s method=%s held=%d" ws method (length held))))
+
+(defun agent-repl-host--release-held (ws outcome)
+  "Send every call held for WS, in the order it was made: its adopt is OUTCOME.
+OUTCOME names how the hold ended (`adopted', `refused', `failed',
+`superseded', `withdrawn', `forgotten').  Each call goes to the daemon WS
+stands on NOW (`agent-repl-host-conn-or-primary'): the successor once WS
+is adopted, the daemon it was put back on otherwise.  A call with no
+daemon to go to, and a send that signals, answers its own ON-FAILURE, at
+ERROR, and the calls after it are still sent."
+  (let ((held (plist-get (agent-repl-host--entry ws) :held-calls)))
+    (when held
+      (agent-repl-host--put ws :held-calls nil)
+      (agent-repl--info ws "elisp.host.held-calls-sent ws=%s count=%d outcome=%s"
+                        ws (length held) outcome)
+      (dolist (call held)
+        (let ((conn (agent-repl-host-conn-or-primary ws))
+              (method (plist-get call :method)))
+          (if (null conn)
+              (progn
+                (agent-repl--error ws "elisp.host.held-call-unsent ws=%s method=%s outcome=%s reason=no-connection"
+                                   ws method outcome)
+                (funcall (plist-get call :fail)
+                         (list :kind :transport :code nil :status nil
+                               :message (format "%s: no daemon connection for the held call" method))))
+            (condition-case err
+                (funcall (plist-get call :send) conn)
+              (agent-repl-connect-error
+               (agent-repl--error ws "elisp.host.held-call-unsent ws=%s method=%s outcome=%s error=%S"
+                                  ws method outcome err)
+               (funcall (plist-get call :fail) (cadr err))))))))))
+
 (defun agent-repl-host--adopt-onto (ws new token trigger)
   "The `:adopt' claim of reattach TOKEN: adopt WS onto the NEW daemon.
 Moves WS\='s webview there and re-subscribes on the adopt\='s success.
@@ -2040,15 +2142,18 @@ their own walk."
                (:success
                 (agent-repl-host--put ws :handover-page nil)
                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
-                (agent-repl-host--reattached ws new ref trigger))
+                (agent-repl-host--reattached ws new ref trigger)
+                (agent-repl-host--release-held ws "adopted"))
                (:error
                 (funcall restore)
                 (agent-repl-host--put ws :reattach nil)
-                (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
+                (agent-repl-host--on-refused ws "adopt" (plist-get response :value))
+                (agent-repl-host--release-held ws "refused"))
                (arm
                 (funcall restore)
                 (agent-repl-host--put ws :reattach nil)
-                (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))))
+                (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm)
+                (agent-repl-host--release-held ws "refused"))))))
          :on-failure
          (lambda (detail)
            (cond
@@ -2056,6 +2161,10 @@ their own walk."
              (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
             (t
              (funcall restore)
+             ;; THE HOLD ENDS WITH THE ADOPT'S DEADLINE: the calls held for
+             ;; WS go now, to the daemon `restore' put it back on, before
+             ;; any retry moves it again.
+             (agent-repl-host--release-held ws "failed")
              (cond
               ((eq new (agent-repl-link-successor))
                (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
@@ -2161,8 +2270,16 @@ handover.  Its `transferred' push says which (`:handover-page'):
 
 - :no-reload: nothing is loaded.  A page the host still holds would be
   left on the departing daemon, so it is dropped instead, and the next
-  open mounts it fresh on the successor.  THE PAGE ON SCREEN IS THE ONE
-  EXCEPTION: it is the user\='s, not the handover\='s, and is reloaded.
+  open mounts it fresh on the successor.  THE DROP IS ANNOUNCED
+  \=(`agent-repl-page-drop-announced'): the workspace stays open, so the
+  daemon is told first, or its page stream\='s end is drawn as a broken
+  link.  The report is about a workspace whose adopt is unanswered, so it
+  is held and sent from the adopt\='s answer (`agent-repl-host-gate-call'),
+  and the page goes once it is answered and the page is still held and
+  not on screen.  A page the report leaves kept stays as it is, and one
+  that came on screen meanwhile is reloaded.  THE PAGE ON SCREEN IS THE
+  ONE EXCEPTION: it is the user\='s, not the handover\='s, and is
+  reloaded.
 - :reload, :unset (a daemon predating the decision), or no transfer
   decision at all: the page is reloaded when the host holds one
   \=(`agent-repl-frontend-reload-webview'), which never loads one it
@@ -2175,8 +2292,19 @@ handover.  Its `transferred' push says which (`:handover-page'):
       (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
       (agent-repl-frontend-reload-webview ws))
      ((agent-repl-webhost-has-page-p ws)
-      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws)
-      (agent-repl-webhost-remove ws t)
+      (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropping" ws)
+      (agent-repl-page-drop-announced
+       ws
+       (lambda () (and (agent-repl-webhost-has-page-p ws)
+                       (not (agent-repl-webhost-shown-p ws))))
+       (lambda ()
+         (agent-repl-webhost-remove ws t)
+         (agent-repl--info ws "elisp.host.handover-page ws=%s action=dropped" ws))
+       (lambda (why)
+         (agent-repl--info ws "elisp.host.handover-page ws=%s action=kept reason=%s" ws why)
+         (when (agent-repl-webhost-shown-p ws)
+           (agent-repl--info ws "elisp.host.handover-page ws=%s action=reloaded reason=shown" ws)
+           (agent-repl-frontend-reload-webview ws))))
       nil)
      (t
       (agent-repl--log ws "elisp.host.handover-page ws=%s action=none" ws)
@@ -2242,6 +2370,7 @@ each time and recording an ERROR for every adopt."
       (when (and from (not (eq from (agent-repl-host--recorded-conn ws))))
         (agent-repl-host--put ws :conn from)
         (agent-repl-frontend-reload-webview ws))
+      (agent-repl-host--release-held ws "withdrawn")
       (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s address=%S adopt=ended"
                         ws (and from (agent-repl-connect-connection-address from))))
      (pending

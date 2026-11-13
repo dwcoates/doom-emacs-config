@@ -832,7 +832,8 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 // for a turn the shim is running, and the take-back's next steps -- the drain
 // it ends, the replacements it asks for again, a refused move's transfer at
 // freeness -- read that as free. The fallback transfer at "freeness" then ran
-// mid-turn (TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout,
+// mid-turn (TestARefusedMidWorkAdoptionFallsBackToFreenessAndNamesTheHoldout, now
+// TestALateFactsRefusalIsOfferedAgainMidWork,
 // ~1 in 15 under -parallel 8: asked at .372, facts in at .374).
 func (c *controller) awaitReattachedFacts(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
 	facts, cancel := context.WithTimeout(ctx, c.deps.FactsBound)

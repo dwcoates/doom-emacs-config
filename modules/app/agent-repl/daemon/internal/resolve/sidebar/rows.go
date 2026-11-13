@@ -69,7 +69,19 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 				"end": s.restoredEnd, "result": s.result.String(),
 			})
 	}
-	armName := statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
+	armName, mirrored := r.state.incumbentArms[rec.ID]
+	if mirrored {
+		// A ROW THIS JOINING DAEMON HAS NOT ADOPTED YET DRAWS THE
+		// INCUMBENT'S OWN ARM. This daemon's footer state for the workspace
+		// is frozen at what it last read, since the incumbent still serves
+		// it; the incumbent's arm is its own footer's resolved claim, checked
+		// there against that footer (statusArm), so the projection is
+		// skipped here rather than run against a frozen footer.
+		rowLog.Debug("daemon.sidebar.status_decision", "the roster drew the incumbent's status arm for a workspace not yet adopted",
+			dlog.Context{"arm": armName, "source": "incumbent"})
+	} else {
+		armName = statusArm(s, rec, session, r.footer.Status(rec.ID), r.now(), rowLog)
+	}
 	r.noteResult(rec.ID, s, rowLog)
 	// THE MARKER IS DERIVED FROM THE READ FACT, in the same breath as the
 	// status, so the row's display mode cannot lag its status by a push and a
@@ -78,7 +90,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	previousArm, armChanged := s.noteArm(armName)
 	if armChanged {
 		r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
-		r.noteStatusChange(rec.ID, s)
+		r.noteStatusChange(rec.ID, s, !mirrored)
 	}
 	if r.factsOnly {
 		// A FACTS-ONLY RENDER (renderFacts) stops here: everything above is
@@ -507,12 +519,16 @@ func (r *resolver) noteResult(ws ids.WorkspaceID, s *wsState, log dlog.Logger) {
 }
 
 // noteStatusChange stamps the workspace's live status change instant at the
-// moment its published arm moved, and queues the instant for mutate to hand
-// the status change sink once the lock is released.
-func (r *resolver) noteStatusChange(ws ids.WorkspaceID, s *wsState) {
+// moment its published arm moved, and, when DURABLE, queues the instant for
+// mutate to hand the status change sink once the lock is released.
+//
+// A MIRRORED ARM'S MOVE IS NOT DURABLE HERE: it is the incumbent's own status
+// change, which the incumbent keeps durable as the workspace's writer, and a
+// joining daemon's handle refuses every write until it adopts.
+func (r *resolver) noteStatusChange(ws ids.WorkspaceID, s *wsState, durable bool) {
 	at := r.now()
 	s.statusChangedAt = &at
-	if r.statusChanges == nil {
+	if r.statusChanges == nil || !durable {
 		return
 	}
 	r.pendingStatusChanges = append(r.pendingStatusChanges, statusChange{ws: ws, at: at})

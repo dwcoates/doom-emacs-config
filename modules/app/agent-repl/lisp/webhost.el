@@ -193,6 +193,29 @@ connection budget with any workspace's page (frontend.el's page origin)."
   http://host.localhost:<daemon port>/?host=1"
   (concat (agent-repl-webhost-origin conn) "/?host=1"))
 
+(defvar agent-repl--webhost-reload-generation 0
+  "How many times this Emacs has reloaded the host since it created it.
+THE HOST'S RELOAD GENERATION (agentrepl.v1.WebhostPage.reload_generation):
+0 at the host\='s creation, raised by every load of the host after it
+\=(`agent-repl--webhost-load').  The sidebar reloads with the host and loads
+at the same generation.  Each document reads it off its URL
+\=(`agent-repl-webhost-document-url') and states it on its page stream, so
+the daemon can tell a host that has not reloaded yet from one that reloaded
+and still runs another webapp.")
+
+(defun agent-repl-webhost-document-url (url)
+  "Return URL, a host or sidebar page URL, at the host\='s reload generation.
+Every load of either document goes through here, so each document states
+the generation it was loaded at."
+  (format "%s&reload=%d" url agent-repl--webhost-reload-generation))
+
+(defun agent-repl--webhost-load (xw)
+  "Load the host XW at its URL again, one reload generation later."
+  (setq agent-repl--webhost-reload-generation (1+ agent-repl--webhost-reload-generation))
+  (agent-repl--info agent-repl--webhost-central "elisp.webhost.load generation=%d"
+                    agent-repl--webhost-reload-generation)
+  (agent-repl--frontend-webview-navigate-widget xw (agent-repl-webhost-document-url agent-repl--webhost-url)))
+
 (defun agent-repl-webhost-daemon-conn ()
   "Return the connection to the daemon the host and the sidebar belong on, or nil.
 THE NEWEST DAEMON THE LINK KNOWS: the accepted successor during a
@@ -356,7 +379,7 @@ defect to fix, and the link itself was not opened."
   (agent-repl--error agent-repl--webhost-central
                      "elisp.webhost.navigated-away uri=%s: an outward link escaped the page's routing; the host is taken back and the link was not opened"
                      uri)
-  (agent-repl--frontend-webview-navigate-widget (agent-repl-webhost-xwidget) agent-repl--webhost-url))
+  (agent-repl--webhost-load (agent-repl-webhost-xwidget)))
 
 (defun agent-repl--webhost-callback (xwidget event-type)
   "The host XWIDGET's `callback': its prior handler, then the load handler.
@@ -421,12 +444,16 @@ window is touched: the host buffer is never displayed itself; workspace
 slots display it."
   (or (agent-repl-webhost-xwidget)
       (let* ((url (agent-repl-webhost-url (agent-repl-webhost-daemon-conn)))
-             (buf (agent-repl--webview-make-hidden
-                   url agent-repl-webhost-buffer-name #'agent-repl--webhost-refuse-kill
-                   (lambda (buf)
-                     (let ((agent-repl--webhost-killing t))
-                       (agent-repl--frontend-kill-webview buf)))
-                   "the web view host"))
+             (buf (progn
+                    ;; A NEW HOST STARTS AT GENERATION 0.
+                    (setq agent-repl--webhost-reload-generation 0)
+                    (agent-repl--webview-make-hidden
+                     (agent-repl-webhost-document-url url)
+                     agent-repl-webhost-buffer-name #'agent-repl--webhost-refuse-kill
+                     (lambda (buf)
+                       (let ((agent-repl--webhost-killing t))
+                         (agent-repl--frontend-kill-webview buf)))
+                     "the web view host")))
              (xw (agent-repl--frontend-webview-live-widget buf)))
         (setq agent-repl--webhost-buffer buf
               agent-repl--webhost-url url)
@@ -1056,7 +1083,7 @@ webapp than it serves."
       (setq agent-repl--webhost-url (agent-repl-webhost-url conn)
             agent-repl--webhost-daemon-origin nil
             agent-repl--webhost-reload-started-ms (agent-repl--now-unix-ms))
-      (agent-repl--frontend-webview-navigate-widget xw agent-repl--webhost-url)
+      (agent-repl--webhost-load xw)
       ;; THE SIDEBAR RELOADS WITH THE HOST, onto the same daemon, so the
       ;; two documents run one build (sidebar-view.el).
       (agent-repl-sidebar-view-navigate conn)

@@ -101,6 +101,7 @@ func (c *controller) Created(ws ids.WorkspaceID) {
 		c.logTransition(opJoin, ws, "serving_standing", "unknown", "owned", dlog.Context{
 			"created_here": true, "joining": joining,
 		})
+		c.mirrorOwnershipChanged()
 	}
 }
 

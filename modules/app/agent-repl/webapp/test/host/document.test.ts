@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  readReloadGeneration,
   startWebhostDocument,
   startWebhostRuntime,
   type StartedWebhostDocument,
@@ -203,5 +204,55 @@ describe("startWebhostDocument", () => {
 
     // Assert
     expect(stopped).toBe(1);
+  });
+});
+
+describe("readReloadGeneration", () => {
+  it.each([
+    ["the first load's generation", "?host=1&reload=0", 0],
+    ["a later generation", "?sidebar=1&reload=12", 12],
+    ["no generation, as an older Emacs loads it", "?host=1", undefined],
+  ])("reads %s", (_name, search, want) => {
+    // Act
+    const got = readReloadGeneration(search);
+
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it.each([
+    ["a negative number", "?host=1&reload=-1"],
+    ["a fraction", "?host=1&reload=1.5"],
+    ["a word", "?host=1&reload=later"],
+    ["an empty value", "?host=1&reload="],
+    ["a leading zero", "?host=1&reload=01"],
+    ["a number past uint32", "?host=1&reload=4294967296"],
+  ])("refuses %s loudly", (_name, search) => {
+    // Act, Assert
+    expect(() => readReloadGeneration(search)).toThrow(/reload generation in its URL is not a whole number/);
+  });
+});
+
+describe("the document's page stream", () => {
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it.each([
+    ["with the generation its URL carries", "/?sidebar=1&reload=3", { webappBuild: "Web1", reloadGeneration: 3 }],
+    ["with no generation when its URL carries none", "/?sidebar=1", { webappBuild: "Web1", reloadGeneration: undefined }],
+  ])("states the document %s", async (_name, url, want) => {
+    // Arrange
+    window.history.replaceState(null, "", url);
+    const { runtime, firstPage } = quietWebhostRuntime("sidebar");
+
+    // Act
+    started = startWebhostDocument(runtime, document, window, {
+      installCensus: () => ({ stop: () => undefined }),
+      webappBuild: () => "Web1",
+    });
+    const request = await firstPage;
+
+    // Assert
+    expect(request.webhost?.webappBuild).toBe(want.webappBuild);
+    expect(request.webhost?.reloadGeneration).toBe(want.reloadGeneration);
   });
 });

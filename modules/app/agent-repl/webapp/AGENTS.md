@@ -69,7 +69,8 @@ composer. On the NS port one web view shows in one window only, so the two are
 separate documents of the same bundle, each started through
 `startWebhostDocument` (src/host/document.ts): its own daemon connection on the
 host origin, its own page stream (`WatchPage`, no workspace, stating its
-build), and records logged as `ClientLogRequest.source.webhost` (filed in the
+build and the host's reload generation, read off its URL's `reload`
+parameter by `readReloadGeneration`), and records logged as `ClientLogRequest.source.webhost` (filed in the
 daemon's central log) that name the document (`webhost_document`: `host` or
 `sidebar`).
 

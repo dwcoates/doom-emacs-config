@@ -430,13 +430,14 @@ func (r *Runner) await(s Spec, p Process, out *bytes.Buffer, done chan<- complet
 }
 
 // BoundFactor is how many times its expected time a unit may run before it
-// is killed (owner ruling, 2026-11-09: every timeout is 2-3 times the
-// expected time of what it bounds). The expected time is the unit's peak
-// passing time (plan.Build), so 3 leaves room for a healthy run slower than
-// any yet seen: over 4,659 recorded runs of 260 units, 3 times a peak that
-// decays by history.PeakDecay per run was passed only twice, both by a cold
-// build early in its unit's history.
-const BoundFactor = 3
+// is killed. The expected time is the unit's peak passing time (plan.Build).
+// It was 3 (owner ruling, 2026-11-09: every timeout is 2-3 times the expected
+// time of what it bounds; over 4,659 recorded runs of 260 units, 3 times a
+// decaying peak was passed only twice). The owner raised it to 5 (2026-11-13)
+// when tests moved to macOS utility QoS: a unit's wall time then depends on
+// the owner's foreground work, and the first governed run under it killed
+// eight short healthy units at 3 times peaks recorded at the old priority.
+const BoundFactor = 5
 
 // tellEnded tells the run's observer, if it has one, that a unit ended.
 func (r *Runner) tellEnded(res Result, output []byte) {

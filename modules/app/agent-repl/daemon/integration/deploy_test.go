@@ -255,6 +255,74 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	})
 }
 
+// A MID-WORK HOLDOUT'S ROW ON THE SUCCESSOR READS THE INCUMBENT'S STATUS.
+// Emacs takes its whole roster from the successor during a handover, and the
+// successor's own footer state for a workspace the incumbent still serves is
+// frozen: on 2026-11-13 a holdout stayed `idle_async` in the sidebar while
+// the incumbent published `thinking` six times. The successor mirrors the
+// incumbent's own row until it adopts the workspace (rollout.Join's one
+// exception, internal/rostermirror). Seam: the successor's WatchWorkspaceRoster
+// subscription on the incumbent, between two real daemons.
+func TestADeployHandoverDrawsAMidWorkHoldoutsRowFromTheIncumbent(t *testing.T) {
+	t.Parallel()
+	// Arrange: a turn in flight, with both participants open so the
+	// workspace transfers only once it falls free and both have called.
+	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout})
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	host := d.WatchHost(f.ws)
+	f.web = d.WatchWeb(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	openTurnOn(t, f, "k-holdout-mirror")
+	daemonStream := d.WatchDaemonStream()
+
+	// Act: an UNFORCED deploy announces its successor while the turn runs.
+	d.StageDeployBuild(harness.DeployStaleDaemon)
+	if _, err := d.Client().Deploy(d.Ctx(), connect.NewRequest(&agentreplv1.DeployRequest{})); err != nil {
+		t.Fatalf("Deploy = error %v, want the handover accepted", err)
+	}
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	successor := drainDial(announced.GetAddress())
+	roster := d.WatchRosterOn(successor)
+
+	// Assert: the successor's row is the incumbent's thinking, not its own.
+	harness.AwaitView(t, d.Ctx(), roster, "the holdout's row thinking on the successor", func(r *frontendv1.WorkspaceRoster) bool {
+		_, thinking := rosterRow(r, f.ws.GetId()).GetStatus().(*frontendv1.RosterRow_Thinking)
+		return thinking
+	})
+
+	// Act: the turn ends, so the workspace falls free and transfers.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	harness.AwaitView(t, d.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	var wg sync.WaitGroup
+	var hostErr, webErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, hostErr = successor.AdoptHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: f.ws}))
+	}()
+	go func() {
+		defer wg.Done()
+		_, webErr = successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+	}()
+	wg.Wait()
+
+	// Assert: the adopted row is the successor's own, and the mirror ended
+	// with the incumbent.
+	if hostErr != nil || webErr != nil {
+		t.Fatalf("AdoptHostWorkspace = %v, AdoptWebWorkspace = %v; want both to succeed", hostErr, webErr)
+	}
+	d.AwaitRunLogRecordFromAnyProcess("the successor's mirror ending with the handover", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.rostermirror" &&
+			(r.Message == "the incumbent ended its roster stream; every row is this daemon's own" ||
+				r.Message == "the mirror stopped; every row is this daemon's own")
+	})
+}
+
 // deployHandsOver asks CLIENT for an unforced deploy and fails unless its
 // daemon decision is a handover. Found live on 2026-09-21: the first deploy
 // after a handover was refused as `joining` by a daemon that had finished

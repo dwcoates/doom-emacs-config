@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"maps"
 	"slices"
 	"time"
 
@@ -848,6 +849,27 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_bringing_up",
 		"the roster took whether a bring-up is under way",
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
+}
+
+// SetIncumbentArms implements Resolver. The map is copied, so the caller's
+// later writes to it cannot reach a render.
+func (r *resolver) SetIncumbentArms(arms map[ids.WorkspaceID]string) {
+	var copied map[ids.WorkspaceID]string
+	if len(arms) > 0 {
+		copied = make(map[ids.WorkspaceID]string, len(arms))
+		for ws, arm := range arms {
+			copied[ws] = arm
+		}
+	}
+	r.mutateIf("daemon.sidebar.set_incumbent_arms",
+		"the roster took the incumbent's status arms for the workspaces not yet adopted",
+		dlog.Context{"mirrored": len(copied)}, r.log.Global(), func() bool {
+			if maps.Equal(r.state.incumbentArms, copied) {
+				return false
+			}
+			r.state.incumbentArms = copied
+			return true
+		})
 }
 
 // SetOpening raises or lowers the workspace's open-in-flight fact, which
