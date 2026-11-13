@@ -26,6 +26,7 @@
  * here and is looking here, and no view is pushed to tell them what happened.
  */
 import { createControl } from "../control.js";
+import { countNoun } from "../count-noun.js";
 import { create } from "@bufbuild/protobuf";
 import {
   InterruptResponseSchema,
@@ -284,13 +285,13 @@ export function drawInterruptSuccess(success: InterruptSuccess, path: string): H
       break;
     case "interruptedDetached":
       note.textContent =
-        outcome.value.count === 1n ? "stopped 1 agent" : `stopped ${outcome.value.count} agents`;
+        `stopped ${countNoun(Number(outcome.value.count), "agent")}`;
       break;
     case "interruptedRevisions":
       // The stop reached the workspace's response rewrites first; a running
       // turn runs on, and the next press stops it.
       note.textContent =
-        outcome.value.count === 1n ? "stopped the response update" : `stopped ${outcome.value.count} response updates`;
+        `stopped ${countNoun(Number(outcome.value.count), "response update")}`;
       break;
     case "nothingRunning":
       note.textContent = "nothing running";

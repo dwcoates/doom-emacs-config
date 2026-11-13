@@ -31,7 +31,7 @@ describe("countNoun", () => {
 describe("every count is worded through count-noun", () => {
   it("hand-rolls the singular-or-s ternary in no src file", () => {
     const src = path.join(here, "..", "src");
-    const handRolled = /=== 1 \? (?:"" : "s"|" ?(\w+)" : " ?\1s")/;
+    const handRolled = /=== 1n? \? (?:"" : "s"|" ?(\w+)" : " ?\1s"|"[^"]*\b1 \w+" : `[^`]*\$\{[^}]*\} \w+s`)/;
     const offenders = filesUnder(src)
       .filter((file) => handRolled.test(readFileSync(file, "utf8")))
       .map((file) => path.relative(src, file));

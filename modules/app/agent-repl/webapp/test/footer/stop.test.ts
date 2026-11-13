@@ -122,7 +122,7 @@ describe("drawTurnStopControl", () => {
     const control = turnStop(h.ctx);
     press(control);
     await settle();
-    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped the response update");
+    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped 1 response update");
   });
 
   it("notes a stop that ended several response updates by count", async () => {
