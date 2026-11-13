@@ -7626,6 +7626,51 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
             (should (string-match-p "reverted to info"
                                     (alist-get 'message (car records))))))))))
 
+;;;; ---- Tests: a count of something ----
+
+(ert-deftest agent-repl-test-core-count-noun-of-one-is-singular ()
+  "Exactly one takes the singular."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 1 "agent") "1 agent")))
+
+(ert-deftest agent-repl-test-core-count-noun-of-many-adds-s ()
+  "More than one takes the noun with an s."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 3 "agent") "3 agents")))
+
+(ert-deftest agent-repl-test-core-count-noun-of-zero-is-plural ()
+  "Zero takes the plural, never the singular."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 0 "agent") "0 agents")))
+
+(ert-deftest agent-repl-test-core-count-noun-takes-an-irregular-plural ()
+  "A noun whose plural is no added s names it."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 2 "shell or agent" "shells and agents") "2 shells and agents")))
+
+(ert-deftest agent-repl-test-core-plural-noun-without-the-count ()
+  "The noun alone follows the same rule."
+  ;; Arrange, Act, Assert.
+  (should (equal (list (agent-repl-plural-noun 1 "update") (agent-repl-plural-noun 2 "update"))
+                 '("update" "updates"))))
+
+(ert-deftest agent-repl-test-core-no-source-hand-rolls-the-plural ()
+  "No source file spells the singular-or-s rule itself: every count's noun
+goes through `agent-repl-plural-noun'."
+  ;; Arrange.
+  (let* ((dir agent-repl-test-core--lisp-dir)
+         (sources (seq-remove (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
+                              (directory-files dir t "\\.el\\'")))
+         (hand-rolled (rx " 1) \"\" \"s\")")))
+    ;; Act.
+    (let ((offenders (seq-filter (lambda (f)
+                                   (with-temp-buffer
+                                     (insert-file-contents f)
+                                     (re-search-forward hand-rolled nil t)))
+                                 sources)))
+      ;; Assert.
+      (should (null (mapcar #'file-name-nondirectory offenders))))))
+
 ;;;; ---- Tests: how long ago ----
 
 (ert-deftest agent-repl-test-core-annotation-column-is-gap-past-the-widest-name ()

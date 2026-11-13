@@ -18,6 +18,7 @@
 (declare-function agent-repl--cancel-timer-key "core")
 (declare-function agent-repl--error "core")
 (declare-function agent-repl--info "core")
+(declare-function agent-repl-count-noun "core" (n one &optional many))
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
@@ -3070,8 +3071,8 @@ frame showing the webview stays hidden.  Returns the applied row count."
      frame rows prior-lines (frame-parameter frame 'tab-bar-lines)
      prior-keep-state
      (frame-parameter frame 'tab-bar-lines-keep-state))
-    (message "agent-repl: tab-bar set to %d line%s on this frame"
-             rows (if (= rows 1) "" "s"))
+    (message "agent-repl: tab-bar set to %s on this frame"
+             (agent-repl-count-noun rows "line"))
     rows))
 
 (defun agent-repl--install-fixed-height-tab-bar ()

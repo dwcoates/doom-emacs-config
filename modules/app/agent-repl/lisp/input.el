@@ -83,6 +83,7 @@
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-count-noun "agent-repl-core" (n one &optional many))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
@@ -1228,10 +1229,6 @@ A vendor refusal carries the vendor's own words, which are appended."
         (format "rollback: %s: %s" said vendor)
       (format "rollback: %s" said))))
 
-(defun agent-repl--input-rollback-plural (n one many)
-  "Return \"N ONE\" when N is 1, else \"N MANY\"."
-  (format "%d %s" n (if (= n 1) one many)))
-
 (defun agent-repl--input-rollback-side-effects (plan)
   "Return PLAN's side effects as sentences.
 They come in the order the confirmation lists them."
@@ -1244,11 +1241,11 @@ They come in the order the confirmation lists them."
                   "The running turn will be interrupted.")
                 (when queued
                   (format "%s will be dropped."
-                          (agent-repl--input-rollback-plural
+                          (agent-repl-count-noun
                            (plist-get queued :prompts) "queued prompt" "queued prompts")))
                 (when cancel
                   (format "%s started since then will be stopped."
-                          (agent-repl--input-rollback-plural
+                          (agent-repl-count-noun
                            (plist-get cancel :items)
                            "background agent or shell" "background agents and shells")))))))
 
@@ -1346,14 +1343,14 @@ logged at WARN and flashed, never silently lost."
       (agent-repl--warn ws "elisp.input.rollback-attachments-dropped ws=%s count=%d" ws dropped)
       (agent-repl--input-flash
        ws (format "rollback: %s could not be attached and %s dropped"
-                  (agent-repl--input-rollback-plural dropped "image" "images")
+                  (agent-repl-count-noun dropped "image" "images")
                   (if (= dropped 1) "was" "were"))))
     (agent-repl--info ws "elisp.input.rollback-done ws=%s images=%d dropped=%d files-restored=%S"
                       ws (length (agent-repl--input-parts-images parts)) dropped
                       (and restored (plist-get restored :files)))
     (message "%s" (if restored
                       (format "rollback: done, %s restored"
-                              (agent-repl--input-rollback-plural
+                              (agent-repl-count-noun
                                (plist-get restored :files) "file" "files"))
                     "rollback: done"))))
 

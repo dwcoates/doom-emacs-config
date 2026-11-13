@@ -66,6 +66,8 @@
 (declare-function agent-repl--read-sexp-file-if-exists "history" (file))
 (declare-function agent-repl--write-sexp-file "history" (file data))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-plural-noun "agent-repl-core" (n one &optional many))
+(declare-function agent-repl-count-noun "agent-repl-core" (n one &optional many))
 (declare-function agent-repl--webview-window "agent-repl-panels" (ws))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
@@ -896,15 +898,15 @@ surfaced loudly by the shared dispatcher."
           ;; response stands as it was, and a running turn runs on.
           (let ((count (plist-get (plist-get value :value) :count)))
             (agent-repl--info ws "elisp.verbs.interrupt-revisions ws=%s count=%S" ws count)
-            (message "agent-repl: response update%s stopped" (if (eql count 1) "" "s"))))
+            (message "agent-repl: %s stopped" (agent-repl-plural-noun count "response update"))))
          (:interrupted-detached
           ;; A turn stop confirmed with live agents also ends them; the
           ;; daemon may answer with the fan-wide count rather than the bare
           ;; turn arm, so the count is stated when it comes.
           (let ((count (plist-get (plist-get value :value) :count)))
             (agent-repl--info ws "elisp.verbs.interrupt-detached ws=%s count=%S" ws count)
-            (message "agent-repl: turn stopped, %s agent%s also ended"
-                     (or count 0) (if (eql count 1) "" "s"))))
+            (message "agent-repl: turn stopped, %s also ended"
+                     (agent-repl-count-noun (or count 0) "agent"))))
          (arm
           (agent-repl--error ws "elisp.verbs.interrupt-unknown-outcome ws=%s arm=%S" ws arm)
           (message "agent-repl: the interrupt answer could not be read"))))
@@ -921,8 +923,8 @@ surfaced loudly by the shared dispatcher."
            (let ((count (plist-get (plist-get refusal :value) :live-agent-count)))
              (agent-repl--warn ws "elisp.verbs.interrupt-confirm-required ws=%s count=%S" ws count)
              (if (yes-or-no-p
-                  (format "Also stop %s live agent%s the turn started? "
-                          (or count 0) (if (eql count 1) "" "s")))
+                  (format "Also stop %s the turn started? "
+                          (agent-repl-count-noun (or count 0) "live agent")))
                  (agent-repl-verb-interrupt ws t)
                (agent-repl--info ws "elisp.verbs.interrupt-confirm-declined ws=%s" ws)
                (message "agent-repl: turn left running")))
@@ -1510,8 +1512,8 @@ to supply a name by hand."
   (let ((cause (plist-get failed :cause))
         (answer (plist-get failed :answer))
         (attempts (plist-get failed :attempts)))
-    (format "the workspace could not be named (%s, %s attempt%s)%s"
-            cause attempts (if (eql attempts 1) "" "s")
+    (format "the workspace could not be named (%s, %s)%s"
+            cause (agent-repl-count-noun attempts "attempt")
             (if (and answer (not (string-empty-p answer)))
                 (format " -- the model answered %S" answer)
               ""))))
@@ -1882,17 +1884,15 @@ whole stack's build, so it is far longer than an ordinary verb's deadline."
       (:up-to-date "up to date")
       (:restarted "restarted")
       (:handing-over
-       (format "handing over %d workspace%s (%d busy%s)"
-               (plist-get value :workspaces)
-               (if (= (plist-get value :workspaces) 1) "" "s")
+       (format "handing over %s (%d busy%s)"
+               (agent-repl-count-noun (plist-get value :workspaces) "workspace")
                (plist-get value :busy)
                (if (plist-get value :forced) ", forced" "")))
       (:restarting
-       (format "restarting for state layout %d→%d, %d workspace%s (%d busy%s)"
+       (format "restarting for state layout %d→%d, %s (%d busy%s)"
                (plist-get value :running-state-layout)
                (plist-get value :fresh-state-layout)
-               (plist-get value :workspaces)
-               (if (= (plist-get value :workspaces) 1) "" "s")
+               (agent-repl-count-noun (plist-get value :workspaces) "workspace")
                (plist-get value :busy)
                (if (plist-get value :forced) ", forced" "")))
       (:shims
