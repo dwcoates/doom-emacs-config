@@ -62,6 +62,8 @@ Options:
 -runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
 -stop-at-first-failure   stop repeating at the first failing run
 -remeasure               bound every selected unit as one never measured, so a unit that legitimately got slower passes and records its new peak; the runner otherwise kills each unit at three times its expected time
+-no-reuse                run every selected unit, reusing no earlier pass: a fresh run, for measuring what a selection costs
+-governed                run under the gate's CPU governance even from a workspace holding the queue bypass mode, whose runs are otherwise ungoverned
 -cpu-load N -as-user     hold N busy loops for the run's length; ONLY when the user asks for load (owner ruling 2026-10-06); the daemon refuses load from a workspace
 ```
 
