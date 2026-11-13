@@ -20,7 +20,7 @@ import (
 // names a step by its path.
 
 // worldBuilders are the functions that build a world a step runs in.
-var worldBuilders = []string{"NewWorld", "NewWorldWithSidecarStaleness", "SharedWorld", "NewEmacsWorld", "StartEmacs", "NewDoomWorld"}
+var worldBuilders = []string{"NewWorld", "NewWorldWithSidecarStaleness", "SharedWorld"}
 
 // e2ePackage is the e2e package's source as the scans read it, under the
 // default build context (so the perf-tagged files, a measurement of their

@@ -1,8 +1,8 @@
 // Package stack is the e2e suite's world: a real agent-repld, a real
 // shim-store, a real shim-claude-sidecar, and the real TypeScript shim (built
 // from source, running its `--fake` offline scripted vendor), composed
-// exactly as production wires them, and the Emacs sandbox and the webapp
-// layer's driver that stand a client in front of it. The e2e scenarios
+// exactly as production wires them, and the webapp layer's driver that
+// stands a client in front of it. The e2e scenarios
 // (agentrepl/e2e) build their worlds from it; its own tests run here, in the
 // e2e-kit suite, which is reused, rather than in the e2e suite, which never
 // is. See e2e/SPEC.md for the full design.
@@ -43,8 +43,6 @@ type layout struct {
 	lockDir    string // .../modules/app/agent-repl/agent-shim/shim-lock
 	sidecarDir string // .../modules/app/agent-repl/agent-shim/claude/shim-sidecar
 	zettelDir  string // .../modules/app/agent-repl/zettel
-	// FakeDaemonDir is the Doom tier's fake daemon module.
-	FakeDaemonDir string // .../modules/app/agent-repl/lisp/testsupport/fakedaemon
 }
 
 var Repo layout
@@ -60,13 +58,11 @@ func resolveLayout(e2eDir string) (layout, error) {
 	l.lockDir = filepath.Join(l.repoDir, "agent-shim", "shim-lock")
 	l.sidecarDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim-sidecar")
 	l.zettelDir = filepath.Join(l.repoDir, "zettel")
-	l.FakeDaemonDir = filepath.Join(l.repoDir, "lisp", "testsupport", "fakedaemon")
 	for name, dir := range map[string]string{
 		"daemon module":  l.daemonDir,
 		"shim source":    l.shimDir,
 		"store module":   l.storeDir,
 		"sidecar module": l.sidecarDir,
-		"fake daemon":    l.FakeDaemonDir,
 	} {
 		if _, err := os.Stat(dir); err != nil {
 			return layout{}, fmt.Errorf("%s not found at %s: %w", name, dir, err)

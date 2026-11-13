@@ -172,21 +172,21 @@ func WlRequireWebappDeps(t *testing.T) string {
 // is built, when the vitest child could not write what it must write.
 //
 // WHY THIS EXISTS, and it is a defect this suite already paid for once. The
-// e2e sandbox links `webapp/node_modules` at a READ-ONLY image layer (the
-// trees are baked once and shared, because materializing them per run cost
-// ~730 MiB of tmpfs and OOM-killed concurrent sandboxes). Vite's default
-// `cacheDir` is `node_modules/.vite`, so vitest's first act failed with a
-// filesystem error and ALL ELEVEN areas of this layer went red — inside the
-// container, which is the environment this layer exists for, while staying
-// green on the host. Eleven confusing failures named the symptom eleven times
-// and the cause not once.
+// e2e sandbox (removed 2026-11-13) linked `webapp/node_modules` at a
+// READ-ONLY image layer (the trees were baked once and shared, because
+// materializing them per run cost ~730 MiB of tmpfs and OOM-killed concurrent
+// sandboxes). Vite's default `cacheDir` is `node_modules/.vite`, so
+// vitest's first act failed with a filesystem error and ALL ELEVEN areas of
+// this layer went red inside the container, while staying green on the host.
+// Eleven confusing failures named the symptom eleven times and the cause not
+// once.
 //
 // The cache now lives in the webapp package directory instead
 // (webapp/vite-cache.ts; webapp/test/vite-cache.test.ts holds every config to
 // it). That directory being writable is what the whole layer rests on, so it
 // is CHECKED HERE rather than assumed: if it stops being writable — a
-// read-only mount, a staging change, a sandbox that starts linking the package
-// directory too — the run says the layer cannot run, instead of eleven areas
+// read-only mount, a staging change, a checkout that links the package
+// directory — the run says the layer cannot run, instead of eleven areas
 // failing somewhere deep in a node process.
 //
 // It is a hard failure, never a skip and never the missing-dependency opt-out:
@@ -199,8 +199,7 @@ func wlRequireWebappWritable(t *testing.T, webappDir string) {
 			"  %v\n"+
 			"  vite and vitest keep their cache in that directory (webapp/vite-cache.ts),\n"+
 			"  so the vitest child cannot start and no area of this layer would exercise anything.\n"+
-			"  In the e2e sandbox this is what a read-only working copy looks like; on the host,\n"+
-			"  check the permissions on the checkout.", err)
+			"  A read-only working copy looks like this: check the permissions on the checkout.", err)
 	}
 }
 

@@ -65,14 +65,13 @@ const matrixPath = "SCENARIO-MATRIX.md"
 // derived parts instead of only reporting on them.
 const matrixWriteEnv = "AGENT_REPL_MATRIX_WRITE"
 
-// The three counted e2e layers, in the column order the document uses.
+// The two counted e2e layers, in the column order the document uses.
 const (
 	layerGo     = "Go e2e"
 	layerWebapp = "Webapp layer"
-	layerEmacs  = "Emacs e2e"
 )
 
-var matrixLayers = []string{layerGo, layerWebapp, layerEmacs}
+var matrixLayers = []string{layerGo, layerWebapp}
 
 // emDash is what an empty layer cell holds, matching the document's existing
 // typography.
@@ -412,7 +411,7 @@ func (c coverage) files(scenario, layer string) []string {
 	return out
 }
 
-// deriveCoverage reads the three counted layers.
+// deriveCoverage reads the two counted layers.
 func deriveCoverage(t *testing.T, r registry) coverage {
 	t.Helper()
 	c := coverage{}
@@ -427,9 +426,6 @@ func deriveCoverage(t *testing.T, r registry) coverage {
 func goLayerOf(name string) string {
 	if !strings.HasSuffix(name, "_test.go") {
 		return ""
-	}
-	if strings.HasPrefix(name, "emacs_") {
-		return layerEmacs
 	}
 	if strings.HasSuffix(name, "_e2e_test.go") {
 		return layerGo
@@ -459,8 +455,8 @@ func deriveGoCoverage(t *testing.T, r registry, c coverage) {
 	}
 
 	// (a) Every `!`-prefixed string literal, in every counted file, read by
-	// the vendor's own selection rule. This is the whole of the Emacs layer's
-	// mechanism and most of the Go layer's.
+	// the vendor's own selection rule. This is most of the Go layer's
+	// mechanism.
 	var deadTriggers []string
 	for path, file := range pkg.Files {
 		base := filepath.Base(path)
@@ -1389,16 +1385,16 @@ func parseMatrix(t *testing.T) matrixDoc {
 		}
 		doc.tableTo = i + 1
 		cells := matrixCells(line)
-		if len(cells) != 10 {
-			t.Fatalf("%s:%d: row has %d cells, want 10: %s", matrixPath, i+1, len(cells), line)
+		if len(cells) != 9 {
+			t.Fatalf("%s:%d: row has %d cells, want 9: %s", matrixPath, i+1, len(cells), line)
 		}
 		row := matrixRow{
 			scenario:  parseScenarioCell(cells[0]),
 			grounded:  cells[1],
 			files:     map[string][]string{},
-			halves:    halvesCells{shim: cells[5], daemon: cells[6], seam: cells[7]},
-			assertion: cells[8],
-			verdict:   cells[9],
+			halves:    halvesCells{shim: cells[4], daemon: cells[5], seam: cells[6]},
+			assertion: cells[7],
+			verdict:   cells[8],
 		}
 		for j, layer := range matrixLayers {
 			row.files[layer] = matrixFileCell(cells[2+j])
@@ -1469,7 +1465,6 @@ func renderRow(row matrixRow) string {
 		row.grounded,
 		renderFileCell(row.files[layerGo]),
 		renderFileCell(row.files[layerWebapp]),
-		renderFileCell(row.files[layerEmacs]),
 		row.halves.shim,
 		row.halves.daemon,
 		row.halves.seam,
@@ -1663,7 +1658,7 @@ type countLine struct {
 }
 
 var matrixCountMarker = regexp.MustCompile(`\*\*(\d+)\*\*`)
-var matrixLayerCount = regexp.MustCompile(`^- (Go e2e \(non-emacs\)|Webapp layer|Emacs e2e): (\d+) scenarios? `)
+var matrixLayerCount = regexp.MustCompile(`^- (Go e2e|Webapp layer): (\d+) scenarios? `)
 
 // checkMatrixCounts recomputes section (b) from table (a).
 func checkMatrixCounts(t *testing.T, doc matrixDoc) {
@@ -1671,7 +1666,7 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 	verdicts := map[string]int{}
 	layerScenarios := map[string]int{}
 	layerFiles := map[string]map[string]bool{
-		layerGo: {}, layerWebapp: {}, layerEmacs: {},
+		layerGo: {}, layerWebapp: {},
 	}
 	for _, row := range doc.rows {
 		verdicts[row.verdict]++
@@ -1716,9 +1711,6 @@ func checkMatrixCounts(t *testing.T, doc matrixDoc) {
 			continue
 		}
 		layer := m[1]
-		if layer == "Go e2e (non-emacs)" {
-			layer = layerGo
-		}
 		got, _ := strconv.Atoi(m[2])
 		if got != layerScenarios[layer] {
 			t.Errorf("%s: the %s by-layer line says %d scenarios, but table (a)'s column holds %d",
@@ -1799,7 +1791,7 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 	var renderedRows []matrixRow
 	verdicts := map[string]int{}
 	layerScenarios := map[string]int{}
-	layerFiles := map[string]map[string]bool{layerGo: {}, layerWebapp: {}, layerEmacs: {}}
+	layerFiles := map[string]map[string]bool{layerGo: {}, layerWebapp: {}}
 	for _, scenario := range r.canonical {
 		row, ok := existing[scenario]
 		if !ok {
@@ -1884,12 +1876,8 @@ func rewriteMatrix(t *testing.T, r registry, derived coverage, halves halvesBySc
 		case matrixLayerCount.MatchString(line):
 			m := matrixLayerCount.FindStringSubmatch(line)
 			layer := m[1]
-			key := layer
-			if key == "Go e2e (non-emacs)" {
-				key = layerGo
-			}
 			lines[i] = fmt.Sprintf("- %s: %d scenarios referenced across %d files", layer,
-				layerScenarios[key], len(layerFiles[key]))
+				layerScenarios[layer], len(layerFiles[layer]))
 		}
 	}
 

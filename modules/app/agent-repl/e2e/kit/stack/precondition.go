@@ -29,20 +29,19 @@ import (
 //     someone trusting that line. Route these through requireDependency.
 //
 //  2. An ENVIRONMENT gate — a layer that can only run in a place this process
-//     is not, and that no command run from here could supply (the Emacs
-//     client layer needs the e2e sandbox container; a host run is not a
-//     broken checkout, it is the wrong place). Those stay skips, routed
-//     through noteEnvironmentSkip so they land in the end-of-run summary.
+//     is not, and that no command run from here could supply (a probe that
+//     cannot be staged as root; a run in that place is not a broken
+//     checkout, it is the wrong place). Those stay skips, routed through
+//     noteEnvironmentSkip so they land in the end-of-run summary.
 //
 // OPT-OUT: set
 //
 //	AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1
 //
-// to turn kind (1) back into a skip, in the style of this suite's other
-// escape hatches (AGENT_REPL_SANDBOX_NO_GATE and friends). It is for someone
-// poking at a single test locally who genuinely does not want to install the
-// dependency; it is never for CI, and a run that used it says so loudly in
-// the summary block below.
+// to turn kind (1) back into a skip. It is for someone poking at a single
+// test locally who genuinely does not want to install the dependency; it is
+// never for CI, and a run that used it says so loudly in the summary block
+// below.
 //
 // Either way, EVERY skip this suite takes is recorded and reprinted in one
 // loud block after the last test, so the output alone answers whether the run

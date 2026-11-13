@@ -535,14 +535,6 @@ scan() {
         fi
     done
 
-    # (g) The e2e sandbox runs every command through the helper.
-    file="$module/e2e/sandbox/bin/entrypoint.sh"
-    if [ -f "$file" ]; then
-        grep -Fqx 'exec "$REPO/$MODULE_REL/bin/background.sh" "$@"' "$file" ||
-            printf '%s: does not exec its command through bin/background.sh\n' "$file"
-        ! grep -Eqx 'exec "\$@"' "$file" ||
-            printf '%s: execs a command without bin/background.sh\n' "$file"
-    fi
 
     # (h) Every ERT suite loads the gated batch harness. test-helpers.el makes
     # the gate call at top level; every other lisp/test-*.el loads it, either
@@ -570,7 +562,7 @@ fi
 # make_fixture DIR -- a minimal CLEAN tree with one of each entry-point kind.
 make_fixture() {
     local root="$1" m="$1/modules/app/agent-repl"
-    mkdir -p "$m/bin" "$m/pkg" "$m/svc" "$m/e2e/sandbox/bin" "$m/lisp" "$root/.githooks" "$root/.claude"
+    mkdir -p "$m/bin" "$m/pkg" "$m/svc" "$m/lisp" "$root/.githooks" "$root/.claude"
     cp "$HELPER" "$m/bin/background.sh"
     printf '// guard\n' >"$m/bin/require-background.mjs"
     cat >"$m/bin/test-thing.sh" <<'EOF'
@@ -598,10 +590,6 @@ EOF
     cat >"$m/pkg/vitest.config.ts" <<'EOF'
 import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
-EOF
-    cat >"$m/e2e/sandbox/bin/entrypoint.sh" <<'EOF'
-#!/usr/bin/env bash
-exec "$REPO/$MODULE_REL/bin/background.sh" "$@"
 EOF
     cat >"$root/.githooks/pre-commit" <<'EOF'
 #!/usr/bin/env bash
@@ -699,11 +687,6 @@ expect_violation "the deploy path demoting its build" "$d" "builder.go: live run
 d="$TMP/s-runtime"; make_fixture "$d"
 printf '(list "nice" "-n" "19" daemon)\n' >"$d/modules/app/agent-repl/lisp/daemon.el"
 expect_violation "a live-runtime spawn demoting the daemon" "$d" "daemon.el: live runtime or deploy path references the test background helper"
-
-# --- 3p. the sandbox entrypoint exec'ing its command bare ------------------------
-d="$TMP/s-sandbox"; make_fixture "$d"
-printf '#!/usr/bin/env bash\nexec "$@"\n' >"$d/modules/app/agent-repl/e2e/sandbox/bin/entrypoint.sh"
-expect_violation "a sandbox entrypoint that execs its command bare" "$d" "entrypoint.sh: does not exec its command through bin/background.sh"
 
 # --- 3q. an ERT suite that never loads the gated harness ------------------------
 d="$TMP/s-ert"; make_fixture "$d"

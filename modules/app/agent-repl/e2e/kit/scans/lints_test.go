@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -72,7 +71,7 @@ func TestEveryProgramThisSuiteBuildsGoesThroughProgramOnce(t *testing.T) {
 // TestEveryBookReadGoesThroughReadAgentBook pins that no test opens a book by
 // hand: the store's success arm and failure arm are read in one place.
 func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
-	for _, name := range []string{"remainder_e2e_test.go", "emacs_interrupt_e2e_test.go", "subagents_e2e_test.go"} {
+	for _, name := range []string{"remainder_e2e_test.go", "subagents_e2e_test.go"} {
 		// Act.
 		raw, err := os.ReadFile(name)
 		if err != nil {
@@ -83,39 +82,6 @@ func TestEveryBookReadGoesThroughReadAgentBook(t *testing.T) {
 		if strings.Contains(string(raw), ".OpenAgentSession(") {
 			t.Fatalf("%s opens a store book by hand; use kit.ReadAgentBook", name)
 		}
-	}
-}
-
-// emacsclientExec is a sandbox Exec of emacsclient written out by hand.
-var emacsclientExec = regexp.MustCompile(`\.Exec\([^\n]*"emacsclient"`)
-
-// TestEveryServerCallRidesTheEmacsclientHelper fails a hand-rolled
-// emacsclient Exec anywhere in the layer: such a call would be bounded by its
-// own rule rather than the one the helper decides.
-func TestEveryServerCallRidesTheEmacsclientHelper(t *testing.T) {
-	// Arrange
-	files, err := e2eSources("*.go")
-	if err != nil {
-		t.Fatalf("glob the layer's sources: %v", err)
-	}
-
-	// Act
-	var sites []string
-	for _, f := range files {
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("read %s: %v", f, err)
-		}
-		for _, m := range emacsclientExec.FindAll(src, -1) {
-			sites = append(sites, f+": "+string(m))
-		}
-	}
-
-	// Assert
-	// Spelled in two halves so this file's own source is not a match.
-	want := []string{"kit/stack/emacs.go: .Exec(ctx, " + `"emacs` + `client"`}
-	if !slices.Equal(sites, want) {
-		t.Fatalf("emacsclient Exec sites = %q, want only the helper's %q", sites, want)
 	}
 }
 
@@ -146,14 +112,13 @@ func TestTheLayerDriverIsKilledOnlyThroughKillGroup(t *testing.T) {
 }
 
 // TestEveryWorldChecksItsServicesThroughOneHelper pins the extraction: an
-// owned World, the shared World's views and an EmacsWorld all check that
+// owned World and the shared World's views both check that
 // their services outlived the test through requireServicesOutlivedTheTest.
 func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
 	// Arrange
 	sites := map[string]string{
 		"kit/stack/world.go":       "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
 		"kit/stack/sharedworld.go": "t.Cleanup(func() { requireServicesOutlivedTheTest(t, s.world.Store, s.world.Sidecar, s.world.Zettel) })",
-		"kit/stack/emacs_world.go": "t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })",
 	}
 
 	for file, call := range sites {
@@ -168,7 +133,7 @@ func TestEveryWorldChecksItsServicesThroughOneHelper(t *testing.T) {
 			t.Errorf("%s does not check its services through requireServicesOutlivedTheTest", file)
 		}
 		// The helper itself is the one place that spells the check.
-		want := map[string]int{"kit/stack/world.go": 1, "kit/stack/sharedworld.go": 0, "kit/stack/emacs_world.go": 0}[file]
+		want := map[string]int{"kit/stack/world.go": 1, "kit/stack/sharedworld.go": 0}[file]
 		if got := strings.Count(string(body), "the store exited before test cleanup"); got != want {
 			t.Errorf("%s spells the service check %d times, want %d: only the helper spells it", file, got, want)
 		}

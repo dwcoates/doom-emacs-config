@@ -211,7 +211,7 @@ so taken is reprinted in the end-of-run summary block (`kit/stack/precondition.g
     both directions). This one is a hard failure and NOT the
     `AGENT_REPL_E2E_ALLOW_MISSING_DEPS` opt-out: no command the reader could
     run supplies it. It exists because the layer already paid for its absence
-    — the e2e sandbox links `webapp/node_modules` at a read-only image layer,
+    — the e2e sandbox (removed 2026-11-13) linked `webapp/node_modules` at a read-only image layer,
     vite's default `cacheDir` is `node_modules/.vite`, and all eleven areas
     failed in the container (and only there) with a filesystem error nowhere
     near the config that caused it. The cache moved to `webapp/.vite-cache`

@@ -362,8 +362,8 @@ func (w *World) RequireOpen(t testing.TB, ws *workspacev1.WorkspaceRef) {
 // requireServicesOutlivedTheTest fails t if the store, the sidecar or zettel
 // (nil in a world that runs none) exited on its own before t's cleanup: one a
 // test stopped on purpose (Store.Stop, Store.StartSameDB) is the test's own
-// doing. Every world's test asks it, an owned World's, a shared World's and
-// an EmacsWorld's alike.
+// doing. Every world's test asks it, an owned World's and a shared World's
+// alike.
 func requireServicesOutlivedTheTest(t testing.TB, store *Store, sidecar *Sidecar, zettel *Zettel) {
 	t.Helper()
 	if store.Exited() && !store.stopped {

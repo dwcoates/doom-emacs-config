@@ -24,24 +24,6 @@
         "pacman": "go",
         "zypper": "go"
       }
-    },
-    {
-      "id": "docker",
-      "kind": "program",
-      "why": "the Emacs e2e scenarios run Emacs in a Linux container under Xvfb",
-      "profile": "dev",
-      "platforms": [
-        "darwin",
-        "linux"
-      ],
-      "command": "docker",
-      "install": {
-        "brew_cask": "docker",
-        "apt": "docker.io",
-        "dnf": "moby-engine",
-        "pacman": "docker",
-        "zypper": "docker"
-      }
     }
   ]
 }

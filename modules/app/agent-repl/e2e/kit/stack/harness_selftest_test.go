@@ -2,14 +2,10 @@ package stack
 
 import (
 	"agentrepl/e2e/kit"
-	"context"
-	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 // The harness's own unit tests: the two helpers whose silent misbehavior does
@@ -42,11 +38,11 @@ func TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot(t *testing.T) {
 
 // THE WEBAPP LAYER'S WRITABILITY PRECONDITION.
 //
-// The layer went red in eleven places at once, in the sandbox only, because
-// vite's default cache directory sat inside a read-only `node_modules`. The
-// cache moved out (webapp/vite-cache.ts); kit.WlWebappWritable is what makes the
-// NEXT such move say so once, by name, instead of eleven times in a node
-// process. These two tests are its guarantee and its violation.
+// The layer went red in eleven places at once, in the e2e sandbox only (the
+// sandbox was removed 2026-11-13), because vite's default cache directory sat
+// inside a read-only `node_modules`. The cache moved out
+// (webapp/vite-cache.ts); kit.WlWebappWritable is what makes the NEXT such
+// move say so once, by name, instead of eleven times in a node process. These two tests are its guarantee and its violation.
 
 func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 	t.Parallel()
@@ -55,7 +51,7 @@ func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 	// did not exercise this must not look like one that did.
 	if os.Geteuid() == 0 {
 		noteEnvironmentSkip(t, "e2e/webapp-layer: the read-only-directory probe cannot be staged as root, "+
-			"which writes through the mode bit; the sandbox runs as uid 1000, where it does run")
+			"which writes through the mode bit; run it as an ordinary user")
 	}
 
 	// Arrange: a directory nothing may create inside, which is what a
@@ -82,293 +78,5 @@ func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), readonly) {
 		t.Fatalf("kit.WlWebappWritable(%s) = %v, want the message to name the directory", readonly, err)
-	}
-}
-
-// TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink covers the whole
-// reason the sweep exists: what a workspace holds is a SYMLINK, and the
-// records live in the durable target it names.
-func TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink(t *testing.T) {
-	// Arrange: a workspace under the Emacs root whose canonical elisp sink is
-	// a symlink to a target OUTSIDE the root, exactly as
-	// `agent-repl--workspace-emacs-log-target` mints it.
-	root := t.TempDir()
-	outside := t.TempDir()
-	target := filepath.Join(outside, "agent-repl-emacs-abc.log")
-	const record = `{"operation":"agent-repl.elisp-host-transferred"}`
-	if err := os.WriteFile(target, []byte(record), 0o600); err != nil {
-		t.Fatalf("write the durable target: %v", err)
-	}
-	sink := filepath.Join(root, "repo-a", ".claude", "emacs")
-	if err := os.MkdirAll(sink, 0o755); err != nil {
-		t.Fatalf("create the workspace sink directory: %v", err)
-	}
-	if err := os.Symlink(target, filepath.Join(sink, "emacs.log")); err != nil {
-		t.Fatalf("link the canonical path: %v", err)
-	}
-	out := t.TempDir()
-
-	// Act
-	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, root)
-
-	// Assert
-	got, err := os.ReadFile(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log"))
-	if err != nil {
-		t.Fatalf("the preserved workspace sink could not be read: %v", err)
-	}
-	if string(got) != record {
-		t.Fatalf("preserved sink = %q, want the durable target's own bytes %q", got, record)
-	}
-}
-
-// TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude keeps
-// the sweep to the ONE shape it is about. `emacs` is an ordinary directory
-// name — the staged `~/.emacs.d` lives under this same root — and copying
-// every one of them would put hundreds of megabytes of Doom into a failure's
-// artifacts.
-func TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude(t *testing.T) {
-	// Arrange
-	root := t.TempDir()
-	stray := filepath.Join(root, "state", "emacs")
-	if err := os.MkdirAll(stray, 0o755); err != nil {
-		t.Fatalf("create the stray directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(stray, "not-a-sink.log"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("write the stray file: %v", err)
-	}
-	out := t.TempDir()
-
-	// Act
-	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, root)
-
-	// Assert
-	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs")); !os.IsNotExist(err) {
-		t.Fatalf("stat of the preserved tree = %v, want it never created for a non-.claude `emacs` directory", err)
-	}
-}
-
-// TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot is the defect the
-// first version of this sweep had: it walked `e.Root`, which is
-// `<scratch>/emacs`, while the workspaces live beside it under the same
-// scratch directory — so a red run's sweep found nothing and said nothing.
-func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
-	// Arrange: the real layout — the Emacs HOME and a registered workspace as
-	// siblings under one scratch root.
-	scratch := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(scratch, "emacs", ".emacs.d", "lisp"), 0o755); err != nil {
-		t.Fatalf("stage the Emacs home: %v", err)
-	}
-	sink := filepath.Join(scratch, "repo-a", ".claude", "emacs")
-	if err := os.MkdirAll(sink, 0o755); err != nil {
-		t.Fatalf("create the workspace sink directory: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sink, "emacs.log"), []byte("{}"), 0o600); err != nil {
-		t.Fatalf("write the sink: %v", err)
-	}
-	out := t.TempDir()
-
-	// Act
-	(&Emacs{T: t}).preserveWorkspaceElispLogs(out, scratch)
-
-	// Assert
-	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log")); err != nil {
-		t.Fatalf("stat of the preserved workspace sink = %v, want it collected from beside the Emacs root", err)
-	}
-}
-
-// probeSandbox answers Exec with execErr and records each call's argv and
-// deadline; nothing else of the sandbox is reached by probeServer.
-type probeSandbox struct {
-	Sandbox
-	execErr   error
-	calls     [][]string
-	deadlines []time.Duration
-}
-
-func (s *probeSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
-	s.calls = append(s.calls, argv)
-	if d, ok := ctx.Deadline(); ok {
-		s.deadlines = append(s.deadlines, time.Until(d))
-	}
-	return "", s.execErr
-}
-
-// probeProc is an Emacs process that has or has not exited.
-type probeProc struct {
-	sandboxProc
-	exited bool
-}
-
-func (p probeProc) Exited() bool   { return p.exited }
-func (p probeProc) Output() string { return "pty text" }
-
-// TestProbeServerAsksOnceUnderTheHeartbeatBound pins awaitServer's probe: ONE
-// emacsclient question bounded by HeartbeatBound (the socket is bound before
-// the stamp, so there is nothing to poll for), and a failure named by
-// whether Emacs is still alive.
-func TestProbeServerAsksOnceUnderTheHeartbeatBound(t *testing.T) {
-	tests := []struct {
-		name    string
-		execErr error
-		exited  bool
-		wantErr string
-	}{
-		{name: "an answer is the server up"},
-		{name: "no answer from a live Emacs names the bound", execErr: context.DeadlineExceeded,
-			wantErr: "emacs server did not answer within " + HeartbeatBound.String()},
-		{name: "no answer from an Emacs that exited names the exit", execErr: errors.New("exit status 1"), exited: true,
-			wantErr: "emacs exited during boot"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			box := &probeSandbox{execErr: tt.execErr}
-			e := &Emacs{T: t, Box: box, proc: probeProc{exited: tt.exited}, ServerSocket: "/s/server",
-				cpuStall: func() (time.Duration, error) { return 0, nil }}
-
-			// Act
-			err := e.probeServer()
-
-			// Assert
-			if tt.wantErr == "" && err != nil {
-				t.Fatalf("probeServer() = %v, want nil", err)
-			}
-			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
-				t.Fatalf("probeServer() = %v, want an error naming %q", err, tt.wantErr)
-			}
-			want := []string{"emacsclient", "--socket-name", "/s/server", "--eval", "(emacs-pid)"}
-			if len(box.calls) != 1 || !slices.Equal(box.calls[0], want) {
-				t.Fatalf("Exec calls = %v, want exactly one %v", box.calls, want)
-			}
-			// NO WALL DEADLINE: HeartbeatBound is kept on the granted clock,
-			// and a context deadline would charge the probe for time the
-			// container was starved.
-			if len(box.deadlines) != 0 {
-				t.Fatalf("the probe carried a wall deadline %s away, want none", box.deadlines[0])
-			}
-		})
-	}
-}
-
-// killedErr is what a real emacsclient killed by CommandContext reports.
-var killedErr = errors.New("signal: killed")
-
-// scriptedSandbox answers each Exec by its script and records its argv: with
-// RELEASE set it answers once RELEASE closes, with BLOCK it answers only when
-// its context ends, and otherwise at once with execErr.
-type scriptedSandbox struct {
-	Sandbox
-	execErr error
-	block   bool
-	release <-chan struct{}
-	calls   [][]string
-}
-
-func (s *scriptedSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
-	s.calls = append(s.calls, argv)
-	switch {
-	case s.release != nil:
-		select {
-		case <-s.release:
-			return "answer", nil
-		case <-ctx.Done():
-			return "", killedErr
-		}
-	case s.block:
-		<-ctx.Done()
-		return "", killedErr
-	}
-	return "answer", s.execErr
-}
-
-// stallScript is a container CPU stall a test scripts: each reading after
-// the first adds PER to it, and a reading at or past FAILAT (when set) fails.
-// RELEASE, when set, closes once READS readings have been taken.
-type stallScript struct {
-	per     time.Duration
-	failAt  int
-	release chan struct{}
-	after   int
-	reads   int
-	total   time.Duration
-}
-
-func (s *stallScript) read() (time.Duration, error) {
-	s.reads++
-	if s.failAt != 0 && s.reads >= s.failAt {
-		return 0, errors.New("EIO")
-	}
-	if s.reads > 1 {
-		s.total += s.per
-	}
-	if s.release != nil && s.reads == s.after {
-		close(s.release)
-	}
-	return s.total, nil
-}
-
-// TestEmacsclientChargesItsBoundOnlyGrantedTime pins the one helper every
-// server call rides: one emacsclient against this Emacs's socket, a call the
-// granted clock gives more than its bound reported as unanswered, a call the
-// container starved never given up on, and the clock's own failures loud.
-func TestEmacsclientChargesItsBoundOnlyGrantedTime(t *testing.T) {
-	tests := []struct {
-		name           string
-		box            func(stall *stallScript) *scriptedSandbox
-		stall          *stallScript
-		wantOut        string
-		wantErr        string
-		wantUnanswered bool
-		wantCalls      int
-	}{
-		{name: "an answer comes back as printed", box: func(*stallScript) *scriptedSandbox { return &scriptedSandbox{} },
-			stall: &stallScript{}, wantOut: "answer", wantCalls: 1},
-		{name: "a failure that is not the bound passes through",
-			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{execErr: errors.New("exit status 1")} },
-			stall: &stallScript{}, wantOut: "answer", wantErr: "exit status 1", wantCalls: 1},
-		{name: "a call granted more than its bound is unanswered",
-			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{block: true} },
-			stall: &stallScript{}, wantErr: "no answer within 10ms granted", wantUnanswered: true, wantCalls: 1},
-		{name: "a call the container starved past its bound is waited out",
-			box: func(stall *stallScript) *scriptedSandbox {
-				stall.release = make(chan struct{})
-				return &scriptedSandbox{release: stall.release}
-			},
-			stall: &stallScript{per: time.Hour, after: 4}, wantOut: "answer", wantCalls: 1},
-		{name: "a stall that cannot be read refuses the call before it is made",
-			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{} },
-			stall: &stallScript{failAt: 1}, wantErr: "to start a granted clock: EIO", wantCalls: 0},
-		{name: "a stall that stops being readable stops the call",
-			box:   func(*stallScript) *scriptedSandbox { return &scriptedSandbox{block: true} },
-			stall: &stallScript{failAt: 2}, wantErr: "read the CPU stall: EIO (emacsclient, stopped for it: signal: killed)", wantCalls: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			box := tt.box(tt.stall)
-			e := &Emacs{T: t, Box: box, ServerSocket: "/s/server", cpuStall: tt.stall.read}
-
-			// Act
-			out, _, err := e.emacsclient(context.Background(), 10*time.Millisecond, "(emacs-pid)")
-
-			// Assert
-			if out != tt.wantOut {
-				t.Fatalf("emacsclient() out = %q, want %q", out, tt.wantOut)
-			}
-			if tt.wantErr == "" && err != nil {
-				t.Fatalf("emacsclient() = %v, want nil", err)
-			}
-			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
-				t.Fatalf("emacsclient() = %v, want an error naming %q", err, tt.wantErr)
-			}
-			var unanswered *unansweredError
-			if got := errors.As(err, &unanswered); got != tt.wantUnanswered {
-				t.Fatalf("emacsclient() unanswered = %v, want %v (err %v)", got, tt.wantUnanswered, err)
-			}
-			want := []string{"emacsclient", "--socket-name", "/s/server", "--eval", "(emacs-pid)"}
-			if len(box.calls) != tt.wantCalls || (tt.wantCalls == 1 && !slices.Equal(box.calls[0], want)) {
-				t.Fatalf("Exec calls = %v, want %d of %v", box.calls, tt.wantCalls, want)
-			}
-		})
 	}
 }

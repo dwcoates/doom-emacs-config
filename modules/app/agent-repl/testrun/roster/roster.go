@@ -415,14 +415,13 @@ var Suites = []Suite{
 		// programs a world spawns.
 		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		Reuse: &Reuse{Units: map[string][]string{
-			// The preflight's own tests run the sandbox's preflight script, and
-			// the webapp layer's boot budget is held to its driver's.
-			".": {"e2e/sandbox/bin/", "webapp/test/webapp-layer/drive.ts"},
-			// The world's layout checks each system's tree is where it says (a
-			// file in each stands for its directory), and the trampoline
-			// prewarm's own test reads the Emacs scenarios it serves.
+			// The webapp layer's boot budget is held to its driver's.
+			".": {"webapp/test/webapp-layer/drive.ts"},
+			// The world's layout is the e2e package's, and it checks each
+			// system's tree is where it says (a file in each stands for its
+			// directory).
 			"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
-				"agent-shim/claude/shim-sidecar/go.mod", "lisp/testsupport/fakedaemon/go.mod", "daemon/go.mod"},
+				"agent-shim/claude/shim-sidecar/go.mod", "daemon/go.mod"},
 			// The scans read the e2e package's sources, and the scenario matrix
 			// the mocked vendor's scenarios, their goldens and the webapp
 			// layer's areas it summarizes.
@@ -434,7 +433,7 @@ var Suites = []Suite{
 		}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
-		NeverReused: "its sandbox staging walks the whole module, every untracked build output in it included, so no input set short of the checkout covers it"},
+		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
 }
 
 // harness is a script suite's declaration: its one unit, the whole suite,
@@ -701,14 +700,14 @@ var AlwaysRunRegions = []string{
 	// The logging module's TS half is the Vitest suites' import, and they
 	// always run.
 	"agent-shim/logging/",
-	// The Doom module files the Emacs layer loads, the metaprompt the shim
+	// The Doom module files the ERT suite loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
 	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
-	// bin/ each have their harness; the sandbox image reads .agents-sandbox.
-	"/.githooks/", "/.claude/", "/bin/", "/.agents-sandbox/",
+	// bin/ each have their harness.
+	"/.githooks/", "/.claude/", "/bin/",
 }
 
 // ReadByNoSuite are the files and subtrees no suite reads: prose, and the
@@ -728,6 +727,8 @@ var ReadByNoSuite = []string{
 	// The owner's own Doom configuration, which no agent-repl suite loads.
 	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
+	// The agents' sandbox's own state, which no suite reads.
+	"/.agents-sandbox/",
 	// The repository's prose.
 	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
 }

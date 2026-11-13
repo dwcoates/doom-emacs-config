@@ -91,7 +91,6 @@ func TestSeamClaimsReadsEachFormOfTheSeamLine(t *testing.T) {
 // scenario named here is exempt with every step it lists.
 var seamExempt = map[string]string{
 	"TestHarness": "its subject is the e2e harness's own World machinery, which needs a world to test but is no system of agent-repl",
-	"TestDoom":    "the Doom tier proves Emacs's own behavior under a booted Doom against the fake daemon (AGENTS.md, \"An e2e test proves a seam\"), which crosses no seam between real systems",
 }
 
 func TestEveryScenarioAndStepNamesItsSeam(t *testing.T) {

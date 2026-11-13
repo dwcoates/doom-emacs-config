@@ -10,6 +10,11 @@ assertion it belongs to was allowed to fail a run.
 > their measurements, their final budgets and the defects the measurement found
 > in **section I**. The Emacs-layer halves (rows 1a, 2a/2b, 8b, 11a/11b, 14b,
 > 17a — every row whose stamps are `float-time` inside Emacs, §A3) are phase 2.
+> **Phase 2 has no layer to run in:** the Emacs e2e layer it was to be built in
+> was removed on 2026-11-13 (`e2e/AGENTS.md`, "The Emacs e2e layer was
+> removed"), with `EMACS-LAYER-SPEC.md`, `kit/stack/emacs.go` and the
+> `emacs_*` files this document cites. Those citations are left as written,
+> as the design record; restoring the layer restores what they name.
 > Section C's per-row budgets are left as written: they are the provisional
 > figures the ratchet in §I was applied to, and rewriting them would erase the
 > record of what was proposed before anything was run.

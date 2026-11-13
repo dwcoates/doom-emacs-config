@@ -799,7 +799,7 @@
     {
       "id": "perl",
       "kind": "program",
-      "why": "bin/background.sh reads every test run's niceness with it on macOS, and the e2e sandbox stamp (e2e/sandbox/bin/sandbox-image.sh) walks the checkout with it; macOS ships it at /usr/bin/perl",
+      "why": "bin/background.sh reads every test run's niceness with it on macOS; macOS ships it at /usr/bin/perl",
       "profile": "dev",
       "platforms": [
         "darwin",

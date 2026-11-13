@@ -3,7 +3,7 @@ package e2e
 import "testing"
 
 // THE E2E SCENARIOS: every top-level test in this package that builds a
-// world (World, the shared World, EmacsWorld, DoomWorld) is one of these.
+// world (World, the shared World) is one of these.
 //
 // Each scenario runs its steps in order over the worlds they build, and each
 // step is a former top-level test kept whole: it builds or takes the same
@@ -136,40 +136,5 @@ func TestHarness(t *testing.T) {
 		testNewWorkspaceMintsAFreshWorkspaceEachTime,
 		testRequireOpenOpensARegisteredWorkspace,
 		testRequireOpenFailsTheTestForAWorkspaceTheDaemonDoesNotKnow,
-	)
-}
-
-// TestEmacsWorkspaces is Emacs's workspaces, tabs, roster arms, banners and chat threads.
-//
-// Seam: Emacs -> daemon -> shim -> page, a workspace from Emacs's command to its drawn reply
-func TestEmacsWorkspaces(t *testing.T) {
-	scenario(t,
-		testEmacsProofOfLife,
-		testEmacsReachesAChatThreadOffTheTabBar,
-	)
-}
-
-// TestEmacsDaemonLifecycle is Emacs's daemon: cold start, restarts, handovers, reconnects and a daemon that is not there.
-//
-// Seam: daemon -> Emacs, the link across a real daemon restart or handover
-func TestEmacsDaemonLifecycle(t *testing.T) {
-	scenario(t,
-		testEmacsTabsRehydrateFromTheRosterOnConnect,
-		testEmacsHandoverTransfersAtFreeness,
-		testEmacsRestartKeepsTheSelectedWorkspace,
-		testEmacsForcedRestartInterruptsTheTurn,
-		testEmacsRestartHoldsPromptsMeanwhile,
-	)
-}
-
-// TestDoom is the Doom tier: agent-repl inside a real Doom.
-func TestDoom(t *testing.T) {
-	scenario(t,
-		testDoomPopupOpensAFileRightSideHalfWidth,
-		testDoomRegisteringAWorkspaceSelectsIt,
-		testDoomWorkspaceNavigationFollowsTheDrawnTabBar,
-		testDoomANewProjectDoesNotRecycleTheWorkspaceBeingLeft,
-		testDoomPlainCloseHidesPanelsAndLeavesTheTabAlone,
-		testDoomSplashLoadsWithoutTheDashboardModule,
 	)
 }
