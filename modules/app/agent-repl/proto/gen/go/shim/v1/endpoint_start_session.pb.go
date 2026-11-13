@@ -433,8 +433,9 @@ func (*SessionProfileAgentLandingThroughQueue) Descriptor() ([]byte, []int) {
 }
 
 // The bypass landing: the workspace holds its repository's queue bypass mode,
-// the queue is hard-stopped, and the agent lands each change on the main
-// branch itself.
+// the agent pauses the queue before it changes anything and lands each change
+// on the main branch itself, and the queue is let through at the end of each
+// of its turns.
 type SessionProfileAgentLandingBypassingQueue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields

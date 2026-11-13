@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
 
@@ -433,5 +434,179 @@ func TestTheContextArmsAreBuiltOnlyByProto(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("files building the context's echo token by hand = %v, want every one through QueueBypassContext.Proto", offenders)
+	}
+}
+
+func TestLetQueueThroughAfterBypassTurn(t *testing.T) {
+	cases := []struct {
+		name        string
+		standing    map[ids.WorkspaceID]wsm.QueueBypass
+		readErr     error
+		resumeErr   error
+		wantResumes []ownResume
+		wantErr     string
+	}{
+		{name: "the holder's turn end resumes its own pause",
+			standing:    map[ids.WorkspaceID]wsm.QueueBypass{"w1": {Holds: true, RepoID: "r1"}},
+			wantResumes: []ownResume{{scope: merge.RepositoryScope{ID: "r1"}, ws: "w1"}}},
+		{name: "a workspace that does not hold the mode resumes nothing",
+			standing: map[ids.WorkspaceID]wsm.QueueBypass{"w1": {HeldBy: "w2", RepoID: "r1"}}},
+		{name: "a workspace no longer registered resumes nothing", readErr: wsm.ErrNotFound},
+		{name: "an unreadable standing is answered and resumes nothing", readErr: errors.New("db gone"), wantErr: "db gone"},
+		{name: "a resume that fails is answered",
+			standing:    map[ids.WorkspaceID]wsm.QueueBypass{"w1": {Holds: true, RepoID: "r1"}},
+			resumeErr:   errors.New("queue gone"),
+			wantResumes: []ownResume{{scope: merge.RepositoryScope{ID: "r1"}, ws: "w1"}},
+			wantErr:     "queue gone"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.bypass = tc.standing
+			f.db.bypassErr = tc.readErr
+			f.merge.ownResumeErr = tc.resumeErr
+
+			// Act
+			err := f.verbs.LetQueueThroughAfterBypassTurn(context.Background(), "w1")
+
+			// Assert
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("LetQueueThroughAfterBypassTurn: %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("LetQueueThroughAfterBypassTurn = %v, want an error naming %q", err, tc.wantErr)
+			}
+			if !slices.Equal(f.merge.ownResumes, tc.wantResumes) {
+				t.Fatalf("resumes = %+v, want %+v", f.merge.ownResumes, tc.wantResumes)
+			}
+		})
+	}
+}
+
+func TestLetQueueThroughAfterBypassTurnRecordsAWorkspaceNoLongerRegistered(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.bypassErr = wsm.ErrNotFound
+
+	// Act
+	err := f.verbs.LetQueueThroughAfterBypassTurn(context.Background(), "w1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LetQueueThroughAfterBypassTurn: %v", err)
+	}
+	if rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opBypassTurnEnd}); !ok || rec.Context["workspace"] != "w1" {
+		t.Fatalf("no INFO record naming the workspace: %+v", f.log.logger.Records())
+	}
+}
+
+func TestBypassTurnEndsMovesOnlyAtATurnsEnd(t *testing.T) {
+	cases := []struct {
+		name string
+		edge func(*TurnEdgeRunner)
+		want []ids.WorkspaceID
+	}{
+		{name: "a turn ending", edge: func(r *TurnEdgeRunner) { r.TurnEnded("w1") }, want: []ids.WorkspaceID{"w1"}},
+		{name: "a turn ending unobserved", edge: func(r *TurnEdgeRunner) { r.TurnEndedUnobserved("w1") }, want: []ids.WorkspaceID{"w1"}},
+		{name: "a turn starting", edge: func(r *TurnEdgeRunner) { r.TurnStarted("w1") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var carried []ids.WorkspaceID
+			r := NewBypassTurnEnds(func(_ context.Context, ws ids.WorkspaceID) error { carried = append(carried, ws); return nil }, dlog.NewTestLogger())
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act
+			tc.edge(r)
+			r.Run(ctx)
+
+			// Assert
+			if !slices.Equal(carried, tc.want) {
+				t.Fatalf("carried = %v, want %v", carried, tc.want)
+			}
+		})
+	}
+}
+
+func TestBypassTurnEndsRecordsAResumeItCannotCarryOut(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	r := NewBypassTurnEnds(func(context.Context, ids.WorkspaceID) error { return errors.New("queue gone") }, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	r.TurnEnded("w1")
+	r.Run(ctx)
+
+	// Assert
+	if rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opBypassTurnEnd,
+		Message: "could not let the merge queue through at the end of a turn"}); !ok || rec.Context["workspace"] != "w1" {
+		t.Fatalf("no ERROR record naming the workspace: %+v", log.Records())
+	}
+}
+
+func TestTakingTheModeStopsTheQueueInTheHoldersName(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	bindTo(f, "w1", "vendor-queue")
+	f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{"w1": {RepoID: "r1"}}
+
+	// Act
+	on, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", QueueBypassOn, QueueBypassContextDefault)
+
+	// Assert
+	if err != nil || !on {
+		t.Fatalf("UpdateQueueBypassMode = (%v, %v), want the mode taken", on, err)
+	}
+	if want := []merge.Pauser{{By: merge.RequestedByAgent, Asker: "w1"}}; !slices.Equal(f.merge.hardStops, want) {
+		t.Fatalf("hard stops = %+v, want %+v", f.merge.hardStops, want)
+	}
+}
+
+func TestReleasingTheMode(t *testing.T) {
+	cases := []struct {
+		name      string
+		unpause   error
+		wantErr   bool
+		wantLevel string
+		wantText  string
+	}{
+		{name: "a paused queue is resumed", wantLevel: "info", wantText: "the workspace switched its queue bypass mode"},
+		{name: "a running queue has nothing to resume", unpause: &merge.RefusalError{Arm: merge.ArmNotPaused, Reason: "the merge queue is not paused"},
+			wantLevel: "info", wantText: "the repository's merge queue was running when the mode was released, so there was nothing to resume"},
+		{name: "a resume that fails is refused as a failed switch", unpause: errors.New("queue gone"), wantErr: true,
+			wantLevel: "error", wantText: "the repository's merge queue could not be resumed after the mode was released"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			bindTo(f, "w1", "vendor-bypass")
+			f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{"w1": {Holds: true, RepoID: "r1", ParkedVendorSessionID: "vendor-queue"}}
+			f.merge.unpauseErr = tc.unpause
+
+			// Act
+			on, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", QueueBypassOff, QueueBypassContextDefault)
+
+			// Assert
+			if on || (err != nil) != tc.wantErr {
+				t.Fatalf("UpdateQueueBypassMode = (%v, %v), want released with error %v", on, err, tc.wantErr)
+			}
+			if tc.wantErr && refusedArm(err) != ArmSwitchFailed {
+				t.Fatalf("arm = %q, want %q", refusedArm(err), ArmSwitchFailed)
+			}
+			if f.merge.unpaused != 1 {
+				t.Fatalf("unpaused %d times, want 1", f.merge.unpaused)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tc.wantLevel, Operation: opQueueBypass, Message: tc.wantText}); !ok {
+				t.Fatalf("want %q at %s: %+v", tc.wantText, tc.wantLevel, f.log.logger.Records())
+			}
+		})
 	}
 }

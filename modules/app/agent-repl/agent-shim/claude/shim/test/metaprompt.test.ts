@@ -154,6 +154,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This workspace lands that branch with `land-direct.sh`, as it lands its own.");
   });
 
+  it("has a queue-bypass session pause the queue before its first change and leave the resume to agent-repl", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert — owner request 2026-11-13: the queue runs between the
+    // holder's turns, so the session pauses it before it changes anything.
+    expect(text).toContain("Before the first change of every prompt, pause the queue: `agent-repld merge-queue pause -repository here`.");
+    expect(text).toContain("Never resume the queue yourself, since agent-repl resumes it when the turn ends.");
+    expect(text).not.toContain("hard-stopped while this workspace holds the mode");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();

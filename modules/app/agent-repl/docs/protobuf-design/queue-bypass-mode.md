@@ -1,8 +1,9 @@
 # Queue bypass mode
 
 A personal-account workspace can hold its repository's queue bypass mode: the
-repository's merge queue is hard-stopped and the workspace lands each change on
-the main branch itself, under a system prompt whose landing section is the
+workspace lands each change on the main branch itself, and the repository's
+merge queue runs only between the holder's turns (see "The queue between the
+holder's turns" below), under a system prompt whose landing section is the
 bypass directive instead of the merge-queue rules, with the merge-queue skill
 switched off. Designed autonomously (owner request, 2026-11-10).
 
@@ -152,3 +153,21 @@ switched off. Designed autonomously (owner request, 2026-11-10).
     `toggle`.
   - Elisp: no command takes the mode, and no wire pin names the new arms, so
     nothing changed there.
+
+## The queue between the holder's turns
+
+Owner request, 2026-11-13: the user watches the queue work while bypass mode
+is on, so the mode no longer keeps the queue stopped for as long as it is held.
+
+- Taking the mode hard-stops the queue in the holder's name
+  (`wsm.MergeQueuePauser.Workspace` is the holder's id).
+- The holder's agent pauses the queue before it changes anything
+  (`metaprompt-queue-bypass.md`).
+- The end of each of the holder's turns resumes the queue, but only when the
+  pause standing on it is the holder's own
+  (`merge.Orchestrator.ResumeOwnPause`, run by `workspace.NewBypassTurnEnds`).
+  The user's pause and another workspace's pause are never lifted there.
+- Every pause write is serialized (`orchestrator.pauseWrites`), so the resume's
+  read of whose pause stands cannot be overtaken by a pause written after it.
+- Releasing the mode resumes a paused queue; a running one has nothing to
+  resume.

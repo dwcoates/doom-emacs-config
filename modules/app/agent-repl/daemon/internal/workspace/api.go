@@ -459,6 +459,11 @@ type Verbs interface {
 	// UnfoldSubsectionForWork expands the collapsed subsection a workspace
 	// sits in, when its turn starts (SubsectionUnfolds calls it).
 	UnfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID) error
+	// LetQueueThroughAfterBypassTurn resumes the merge queue of the
+	// repository whose queue bypass mode WS holds, when the pause standing on
+	// it is WS's own, at the end of each of WS's turns (BypassTurnEnds calls
+	// it).
+	LetQueueThroughAfterBypassTurn(ctx context.Context, ws ids.WorkspaceID) error
 	// Kill is the big red button: forced session death, never blocks, data
 	// survives. It is BeginKill and its Teardown, run in one call.
 	Kill(ctx context.Context, ws ids.WorkspaceID) error
@@ -652,7 +657,8 @@ type Verbs interface {
 	UpdateRemoteControlMode(ctx context.Context, ws ids.WorkspaceID, change wsm.RemoteControlChange) (bool, error)
 	// UpdateQueueBypassMode takes or releases the workspace's queue bypass
 	// mode and answers whether it holds the mode afterwards: the repository's
-	// merge queue hard-stopped while it does, and the workspace switched to
+	// merge queue hard-stopped in its name when it takes the mode
+	// (LetQueueThroughAfterBypassTurn lets it through), and the workspace switched to
 	// the conversation that lands the way the mode says (queuebypass.go).
 	UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, change QueueBypassChange, bypassContext QueueBypassContext) (bool, error)
 	// SetDefaultModel makes a model the topbar's selector served the default

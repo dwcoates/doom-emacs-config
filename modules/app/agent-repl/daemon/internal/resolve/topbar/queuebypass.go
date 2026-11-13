@@ -19,7 +19,7 @@ import (
 // The chip's hover texts.
 const (
 	queueBypassOffTooltip = "Pause repository merge queue and make all changes in this workspace bypass it"
-	queueBypassOnTooltip  = "Queue bypass mode is on: the repository's merge queue is hard-stopped and this workspace lands its changes directly · click to resume the queue"
+	queueBypassOnTooltip  = "Queue bypass mode is on: this workspace lands its changes directly, pausing the repository's merge queue while it works and letting it through when its turn ends · click to release the mode"
 )
 
 // SetQueueBypass replaces the workspace's queue-bypass chip standing, leaving
