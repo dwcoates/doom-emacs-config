@@ -275,14 +275,14 @@ func TestTheHashCacheReadsAFileOnceUntilItChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := NewHashCache()
-	first, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
+	first, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Cache: cache})
 	if err != nil {
 		t.Fatal(err)
 	}
 	write(t, root, "a.txt", "two, longer")
 
 	// Act
-	second, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
+	second, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Cache: cache})
 
 	// Assert
 	if err != nil {
@@ -310,8 +310,8 @@ func TestACachedDigestIsTheFilesOwn(t *testing.T) {
 	cache := NewHashCache()
 
 	// Act
-	cached, err := ComputeKeyCached(root, set, Facts{}, cache, nil)
-	again, err2 := ComputeKeyCached(root, set, Facts{}, cache, nil)
+	cached, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Cache: cache})
+	again, err2 := ComputeKeyCached(root, set, Facts{}, KeyEnv{Cache: cache})
 
 	// Assert
 	plain, err3 := ComputeKey(root, set, Facts{})
@@ -393,14 +393,14 @@ func TestAnIgnoredPathMovesNoTreesKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			ignored := Ignored{"prompts/session/", "prompts/binary"}
-			before, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+			before, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Ignored: ignored})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Act
 			tt.change(t, root)
-			after, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+			after, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Ignored: ignored})
 
 			// Assert
 			if err != nil || after.Digest != before.Digest {
@@ -418,14 +418,14 @@ func TestATrackedFileBesideAnIgnoredOneStillMovesTheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	ignored := Ignored{"prompts/session/"}
-	before, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+	before, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Ignored: ignored})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
 	write(t, root, "prompts/p.md", "a new brief")
-	after, err := ComputeKeyCached(root, set, Facts{}, nil, ignored)
+	after, err := ComputeKeyCached(root, set, Facts{}, KeyEnv{Ignored: ignored})
 
 	// Assert
 	if err != nil || after.Digest == before.Digest {

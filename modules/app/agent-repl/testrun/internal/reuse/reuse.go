@@ -61,6 +61,9 @@ type Deps struct {
 	// Ignored is what git ignores in the checkout (ExecIgnored): session
 	// state and build output, which no input tree's key reads.
 	Ignored Ignored
+	// Bindings is the generated protobuf code's symbols (ExecBindings),
+	// which every key reads that code by.
+	Bindings *Bindings
 	// Head answers the checkout's branch, commit and whether its files
 	// differ from that commit.
 	Head func() (branch, commit string, dirty bool, err error)
@@ -418,4 +421,9 @@ func staleInstall(repo string, set *InputSet) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// keyEnv is what this run's keys are computed with, through CACHE.
+func (d Deps) keyEnv(cache *HashCache) KeyEnv {
+	return KeyEnv{Cache: cache, Ignored: d.Ignored, Bindings: d.Bindings}
 }

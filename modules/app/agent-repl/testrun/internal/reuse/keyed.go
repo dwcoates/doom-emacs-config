@@ -25,7 +25,7 @@ type keyedDecision struct {
 // mode reuses, or why the subject runs: it failed before, its inputs changed
 // since its newest green record, or it was never recorded.
 func decideKeyed(d Deps, name string, set *InputSet, facts Facts, mode Mode) (keyedDecision, error) {
-	key, err := ComputeKeyCached(d.Repo, set, facts, d.Hashes, d.Ignored)
+	key, err := ComputeKeyCached(d.Repo, set, facts, d.keyEnv(d.Hashes))
 	if err != nil {
 		return keyedDecision{}, fmt.Errorf("reuse: key %s: %w", name, err)
 	}
@@ -94,7 +94,7 @@ func newRecorder(d Deps) *recorder { return &recorder{d: d, cache: NewHashCache(
 // inputs moved, or that passed on a node_modules its lock did not install,
 // records nothing, and label names it in the run's log.
 func (r *recorder) record(name, label string, set *InputSet, facts Facts, key Key, units int, failed bool) (bool, error) {
-	after, err := ComputeKeyCached(r.d.Repo, set, facts, r.cache, r.d.Ignored)
+	after, err := ComputeKeyCached(r.d.Repo, set, facts, r.d.keyEnv(r.cache))
 	if err != nil {
 		return false, fmt.Errorf("reuse: re-key %s after its run: %w", name, err)
 	}
