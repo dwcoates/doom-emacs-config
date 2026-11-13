@@ -93,6 +93,9 @@ type fakeShim struct {
 	// hangs makes the call answer only when its context ends, as a shim that
 	// never answers does.
 	hangs bool
+	// answerCtx, when set, answers in place of answer, seeing the call's
+	// context.
+	answerCtx func(context.Context, *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error)
 }
 
 func (s *fakeShim) ReviseResponse(ctx context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
@@ -102,6 +105,9 @@ func (s *fakeShim) ReviseResponse(ctx context.Context, req *shimv1.ReviseRespons
 	if s.hangs {
 		<-ctx.Done()
 		return nil, ctx.Err()
+	}
+	if s.answerCtx != nil {
+		return s.answerCtx(ctx, req)
 	}
 	return s.answer(req)
 }
@@ -586,4 +592,205 @@ func TestNewRefusesAReviserWithNoBound(t *testing.T) {
 
 	// Act.
 	New(Deps{Owed: &fakeOwed{}, Now: time.Now})
+}
+
+// untilCancelled is a shim whose call answers once its context is cancelled,
+// as a Connect call does, signalling STARTED when each call begins.
+func untilCancelled(started chan<- struct{}) *fakeShim {
+	return &fakeShim{answerCtx: func(ctx context.Context, _ *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+}
+
+// untilReleased is a shim whose first call answers success once RELEASE is
+// closed, whatever its context; later calls answer at once.
+func untilReleased(started chan<- struct{}, release <-chan struct{}) *fakeShim {
+	shim := &fakeShim{}
+	shim.answerCtx = func(_ context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+		if len(shim.asked()) == 1 {
+			started <- struct{}{}
+			<-release
+		}
+		return succeeded(req)
+	}
+	return shim
+}
+
+func TestStopWithNoRevisionStopsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeShim{answer: succeeded}, repoPromptsDir)
+
+	// Act.
+	stopped := h.reviser.Stop(ws)
+
+	// Assert.
+	if stopped != 0 || len(h.feed.states) != 0 || len(h.status.facts()) != 0 {
+		t.Fatalf("Stop() = %d, states %v, updating %v, want nothing touched", stopped, h.feed.states, h.status.facts())
+	}
+}
+
+func TestStopCancelsTheRunningRevisionAndClearsItsState(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	h := newHarness(t, untilCancelled(started), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "what does this mean")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+
+	// Act.
+	stopped := h.reviser.Stop(ws)
+	<-h.finished
+
+	// Assert.
+	if stopped != 1 {
+		t.Fatalf("Stop() = %d, want 1", stopped)
+	}
+	h.feed.mu.Lock()
+	states := append([]*frontendv1.FeedResponseRevision(nil), h.feed.states...)
+	h.feed.mu.Unlock()
+	if len(states) != 2 || states[0].GetPending() == nil || states[1] != nil {
+		t.Fatalf("states = %v, want pending then cleared", states)
+	}
+}
+
+func TestAStoppedRevisionRecordsNoFailure(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	h := newHarness(t, untilCancelled(started), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "what does this mean")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+
+	// Act.
+	h.reviser.Stop(ws)
+	<-h.finished
+
+	// Assert.
+	if record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opRun}); ok {
+		t.Fatalf("a stopped revision logged an error %+v", record.Context)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opRun}); !ok {
+		t.Fatalf("a stopped revision's end was not recorded")
+	}
+}
+
+func TestStopRecordsHowManyItStopped(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	h := newHarness(t, untilCancelled(started), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "what does this mean")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+
+	// Act.
+	h.reviser.Stop(ws)
+	<-h.finished
+
+	// Assert.
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opStop})
+	if !ok || record.Context["stopped"] != 1 || record.Context["workspace"] != string(ws) {
+		t.Fatalf("stop record = %+v (%v), want stopped 1 for the workspace", record.Context, ok)
+	}
+}
+
+func TestStopLowersUpdatingOnceTheStoppedCallReturns(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	h := newHarness(t, untilCancelled(started), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "what does this mean")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+
+	// Act.
+	h.reviser.Stop(ws)
+	<-h.finished
+
+	// Assert.
+	if facts := h.status.facts(); len(facts) != 2 || !facts[0] || facts[1] {
+		t.Fatalf("updating facts %v, want [true false]", facts)
+	}
+}
+
+func TestStopDropsTheRevisionsQueuedBehindTheRunningOne(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	h := newHarness(t, untilCancelled(started), repoPromptsDir)
+	for _, text := range []string{"first", "second"} {
+		if err := h.reviser.Revise(ws, ask("word", text)); err != nil {
+			t.Fatalf("Revise() = %v", err)
+		}
+	}
+	<-started
+
+	// Act.
+	stopped := h.reviser.Stop(ws)
+	<-h.finished
+
+	// Assert.
+	if stopped != 2 {
+		t.Fatalf("Stop() = %d, want 2", stopped)
+	}
+	if asked := h.shim.asked(); len(asked) != 1 {
+		t.Fatalf("the shim was asked %d times, want only the running revision", len(asked))
+	}
+	if facts := h.status.facts(); len(facts) != 2 || facts[1] {
+		t.Fatalf("updating facts %v, want the lane ended", facts)
+	}
+}
+
+func TestASecondStopBeforeTheStoppedCallReturnsStopsNothing(t *testing.T) {
+	// Arrange.
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h := newHarness(t, untilReleased(started, release), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "what does this mean")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+	h.reviser.Stop(ws)
+
+	// Act.
+	again := h.reviser.Stop(ws)
+
+	// Assert.
+	if again != 0 {
+		t.Fatalf("the second Stop() = %d, want 0 so the next press reaches the turn", again)
+	}
+	close(release)
+	<-h.finished
+}
+
+func TestARevisionAskedAfterAStopRuns(t *testing.T) {
+	// Arrange: the stopped call has not returned when the next is asked.
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h := newHarness(t, untilReleased(started, release), repoPromptsDir)
+	if err := h.reviser.Revise(ws, ask("word", "first")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	<-started
+	h.reviser.Stop(ws)
+
+	// Act.
+	if err := h.reviser.Revise(ws, ask("word", "second")); err != nil {
+		t.Fatalf("Revise() = %v", err)
+	}
+	close(release)
+	<-h.finished
+	<-h.finished
+
+	// Assert.
+	asked := h.shim.asked()
+	if len(asked) != 2 || asked[1].GetInstruction().GetContent().GetBlocks()[1].GetText().GetText() != "second" {
+		t.Fatalf("the shim was asked %d times, want the second revision run after the stop", len(asked))
+	}
+	if h.feed.lastState().GetPending() == nil {
+		t.Fatalf("last state = %v, want the second revision still pending its page line", h.feed.lastState())
+	}
 }

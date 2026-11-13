@@ -146,6 +146,18 @@ func (s *server) Interrupt(
 	var unanswered *rollbackPlan
 	switch {
 	case req.Msg.GetTurn() != nil:
+		// A RESPONSE REVISION IS STOPPED FIRST, and nothing else is: a turn
+		// in flight runs on, and the next press stops it.
+		if stopped := s.deps.Revisions.Stop(subject.Record.ID); stopped > 0 {
+			subject.Log.Debug("daemon.server.interrupt", "answered that the stop stopped the workspace's response revisions",
+				dlog.Context{"revisions": stopped})
+			resp.Result = &agentreplv1.InterruptResponse_Success{Success: &agentreplv1.InterruptSuccess{
+				Outcome: &agentreplv1.InterruptSuccess_InterruptedRevisions{
+					InterruptedRevisions: &agentreplv1.InterruptedRevisions{Count: int64(stopped)},
+				},
+			}}
+			return connect.NewResponse(resp), nil
+		}
 		target.Turn = true
 		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
 			// A PROMPT HELD BEHIND THE RUNNING TURN THAT NOTHING HAS ANSWERED

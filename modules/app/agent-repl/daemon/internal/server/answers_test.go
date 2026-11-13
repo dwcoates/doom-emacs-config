@@ -40,6 +40,86 @@ func TestInterruptAnswersNothingRunningAsASuccess(t *testing.T) {
 	}
 }
 
+// TestInterruptOfATurnStopsTheWorkspacesRevisionsFirst pins that a turn stop
+// with response revisions running stops those and nothing else: the verbs
+// never see the stop, so a turn in flight runs on.
+func TestInterruptOfATurnStopsTheWorkspacesRevisionsFirst(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Revisions.running = 2
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{
+				RollBackUnanswered: &agentreplv1.InterruptTurnRollBackUnanswered{},
+			}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedRevisions(); got == nil || got.GetCount() != 2 {
+		t.Fatalf("result = %v, want interrupted_revisions count 2", resp.Msg.GetResult())
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("the verbs were asked to stop the turn %+v; the revisions are stopped instead", h.Verbs.interruptTarget)
+	}
+}
+
+// TestInterruptOfATurnWithNoRevisionStopsTheTurn pins that a turn stop finding
+// no revision goes on to stop the turn.
+func TestInterruptOfATurnWithNoRevisionStopsTheTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(h.Revisions.stops) != 1 || h.Revisions.stops[0] != testWorkspaceID {
+		t.Fatalf("revision stops = %v, want one for the workspace", h.Revisions.stops)
+	}
+	if !h.Verbs.interruptTarget.Turn || resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("target = %+v, result = %v, want the turn stopped", h.Verbs.interruptTarget, resp.Msg.GetResult())
+	}
+}
+
+// TestInterruptOfAgentsLeavesRevisionsRunning pins that only the turn stop
+// reaches revisions: the fan-wide agent stop leaves them running.
+func TestInterruptOfAgentsLeavesRevisionsRunning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Revisions.running = 1
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{DetachedCount: 1}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(h.Revisions.stops) != 0 {
+		t.Fatalf("revision stops = %v, want none", h.Revisions.stops)
+	}
+}
+
 // TestInterruptAnswersTheMergeQueueQuestionWithNoRollback pins that a stop which
 // raised the merge-queue question answers that arm, and never a rollback offer.
 func TestInterruptAnswersTheMergeQueueQuestionWithNoRollback(t *testing.T) {
