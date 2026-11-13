@@ -82,13 +82,13 @@ process, no correlation problem. It measures **rpc issued → frame delivered to
 a Connect client**, which is what the daemon owes; it does not measure any
 client's drawing.
 
-Existing precedent: `emacs_test.go:940 AwaitEvalFor` already stamps `started
+Existing precedent: `kit/stack/emacs.go:940 AwaitEvalFor` already stamps `started
 := time.Now()` and records the satisfied wait as a phase.
 
 ### A3. Emacs: `float-time` stamped INSIDE Emacs, read back afterwards
 
 The naive instrument — a Go `AwaitEval` loop — cannot measure anything in
-this document's range. It polls at `world_test.go:85 pollInterval = 20ms`
+this document's range. It polls at `kit/stack/world.go:85 pollInterval = 20ms`
 and each probe is an `emacsclient` round trip whose observed healthy maximum
 is 414 ms (`EMACS-LAYER-SPEC.md`, "The bounds, measured"). An instrument with
 20 ms granularity and a 414 ms tail cannot adjudicate a 15 ms budget.
@@ -680,7 +680,7 @@ Go layer, N=20, budget PROVISIONAL 500/1500 ms, reusing
   `elisp.daemon.addr-absent`, `elisp.daemon.linking`, `elisp.link.open-pending`,
   `elisp.roster.subscribed`.
 
-  **This row already has a measurement and a harness.** `emacs_test.go`'s
+  **This row already has a measurement and a harness.** `kit/stack/emacs.go`'s
   `Emacs.record` / `reportPhases` time each boot phase on every run, and
   `EMACS-LAYER-SPEC.md`'s bounds table already reports `daemonLinkBound`
   observed max **265 ms** (spread 263-265 ms) and `doomBootBound` observed max
@@ -729,14 +729,14 @@ follows is the grounding the budget rests on, recorded so the number stays
 legible — not an argument against the ruling.
 
 The 50 ms figure is the cadence this suite runs the sidecar at:
-`e2e/world_test.go:810-811` passes `--poll-interval 50ms --rescan-interval
+`e2e/kit/stack/world.go:810-811` passes `--poll-interval 50ms --rescan-interval
 200ms`. The sidecar's compiled-in defaults are different
 (`shim-sidecar/main.go:70-71`: `DefaultPollInterval = time.Second`,
 `DefaultRescanInterval = 30 * time.Second`, and nothing in launchd overrides
 them), and `shim-sidecar/cycle.go:83 recoverTick = 50ms` is a third, unrelated
 store-recovery cadence. Three different 50 ms-adjacent numbers sit near this
 row, so the assertion's doc comment must name **which** one it was measured
-under: `--poll-interval`, from `world_test.go:810`.
+under: `--poll-interval`, from `kit/stack/world.go:810`.
 
 **The poll actually on this path is the sidecar's alone for a shell.** The
 shim no longer re-asks the store for a detached shell run's rows (2026-09-27):
@@ -817,7 +817,7 @@ absolute one would just restate row 1.
 
 Same obstruction as 23b: no exported handle on any spawned process. Also
 platform-bound — the Emacs layer runs in a Linux container where `/proc` is
-available (`emacs_sandbox_test.go:196`, `emacs_coldstart_e2e_test.go:72`
+available (`kit/stack/emacs_sandbox.go:196`, `emacs_coldstart_e2e_test.go:72`
 already read it), but the Go layer runs on the developer's macOS host too, so
 a `/proc`-based sampler would silently skip on half the runs. Not built until
 the owner rules on P3.
@@ -829,7 +829,7 @@ the owner rules on P3.
 ### D1. The perf recorder
 
 One type, in a new `e2e/perf_test.go`, modeled directly on the existing
-`emacs_test.go` `phase` / `record` / `reportPhases` trio rather than invented:
+`kit/stack/emacs.go` `phase` / `record` / `reportPhases` trio rather than invented:
 that trio already implements this document's core discipline (measure on
 every run, print on a PASSING run, derive the bound from the print).
 
@@ -847,7 +847,7 @@ Rules, each with its reason:
 - **`Report` runs on every outcome.** A budget must be a stated multiple of
   an observed healthy maximum, and the only run that produces that
   observation is a run that passed. This is verbatim the reason
-  `emacs_test.go:reportPhases` gives.
+  `kit/stack/emacs.go:reportPhases` gives.
 - **No interpolation.** With N=20 an interpolated percentile is a value no
   sample took. A budget must be violated by a real observation.
 - **A sample is never discarded.** No trimming, no outlier rejection, no
@@ -982,8 +982,8 @@ and they are cheap, deterministic, and immune to machine load.
 | daemon | `daemon/internal/shimclient/transport.go:45` | `defaultBackoff` | 100 ms ×2 → 5 s (daemon→shim redial) |
 | daemon | `daemon/internal/drain/controller.go:44` | `DefaultSweepEvery` | 5 min (idle sweep) |
 | daemon | `daemon/internal/server/api.go:504` | `announcementFlush` | 2 s |
-| sidecar | `shim-sidecar/main.go:70` | `DefaultPollInterval` | **1 s compiled-in default** (launchd ships it unchanged); `e2e/world_test.go:810` overrides to 50 ms — the **accepted inherent floor** per ruling 2 |
-| sidecar | `shim-sidecar/main.go:71` | `DefaultRescanInterval` | **30 s compiled-in default**; `e2e/world_test.go:811` overrides to 200 ms |
+| sidecar | `shim-sidecar/main.go:70` | `DefaultPollInterval` | **1 s compiled-in default** (launchd ships it unchanged); `e2e/kit/stack/world.go:810` overrides to 50 ms — the **accepted inherent floor** per ruling 2 |
+| sidecar | `shim-sidecar/main.go:71` | `DefaultRescanInterval` | **30 s compiled-in default**; `e2e/kit/stack/world.go:811` overrides to 200 ms |
 | sidecar | `shim-sidecar/cycle.go:83` | `recoverTick` | 50 ms — store-recovery heartbeat, reads no files |
 | webapp | `webapp/src/clock.ts` | `DEFAULT_TICK_MS` | 1000 ms — ONE shared page ticker; `sidebar/row.ts:19`, `lifecycle/lifecycle.ts:37`, `feed/ticking.ts:7`, `rpc/context.ts:36` all declare the invariant that components subscribe to it and never call `setInterval` |
 | webapp | `webapp/src/rpc/streams.ts:210` | reconnect backoff | 250 ms → 5000 ms |

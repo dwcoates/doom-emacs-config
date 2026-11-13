@@ -265,7 +265,7 @@ export GDK_BACKEND=x11   # this Emacs is pgtk and would otherwise want Wayland
 
 and then starts Emacs with a graphical frame instead of `-nw`.
 
-**The Emacs layer now does exactly this.** `e2e/emacs_display_test.go`
+**The Emacs layer now does exactly this.** `e2e/kit/stack/emacs_display.go`
 starts one Xvfb per test with `-displayfd`, so the *server* picks a free
 display and reporting it is the same edge as it being ready, and
 `StartEmacs` boots plain `emacs` — no `-nw` — with `DISPLAY` and
@@ -315,7 +315,7 @@ or any parent directory".
 Logs stream straight through: stdout stays stdout, stderr stays stderr, and
 nothing is captured or buffered, so a failing test's output is the caller's
 output. Set `AGENT_REPL_E2E_ARTIFACTS=/some/host/dir` to have the suite's own
-artifacts (`world_test.go`'s `ArtifactsEnv`) land on the host.
+artifacts (`kit/stack/world.go`'s `ArtifactsEnv`) land on the host.
 
 ## What is mounted where
 
@@ -474,7 +474,7 @@ Two omissions worth restating:
 
 - **Emacs has xwidgets, and the Emacs layer now drives them.** The binary is
   built `--with-xwidgets` and the image carries `Xvfb`, and
-  `e2e/emacs_display_test.go` starts one per test while `StartEmacs` takes a
+  `e2e/kit/stack/emacs_display.go` starts one per test while `StartEmacs` takes a
   graphical frame on it. `TestEmacsWorkspaces/EmacsProofOfLife` asserts the live WKWebView
   and reads back the daemon origin it navigated to. The entrypoint still
   starts no display of its own, deliberately: the layer that needs one owns
@@ -507,7 +507,7 @@ check as a backstop for an image built before that line existed.
 
 ## The Emacs client layer boots this profile
 
-`e2e/emacs_test.go` does **not** run `emacs -Q` any more. It boots the Doom
+`e2e/kit/stack/emacs.go` does **not** run `emacs -Q` any more. It boots the Doom
 baked here, so `map!`, `set-popup-rule!` and module load order are all real.
 Three things in `doom/` exist for it, and all three are inert without the
 environment variables the Go layer sets:
@@ -617,7 +617,7 @@ Desktop). Everything below was OBSERVED, not reasoned about:
   2.40.5 — under Emacs's `< 2.41.92` ceiling, which is the whole reason for
   the September-2023 snapshot.
 - **INTERACTIVE Doom boots and publishes its readiness stamp.**
-  `bin/doom-boot-probe.sh` replicates what `e2e/emacs_test.go` StartEmacs does
+  `bin/doom-boot-probe.sh` replicates what `e2e/kit/stack/emacs.go` StartEmacs does
   — staged `~/.emacs.d` under a scratch HOME, a pty from `script(1)`,
   `TERM=xterm-256color` — and reports the stamp:
 

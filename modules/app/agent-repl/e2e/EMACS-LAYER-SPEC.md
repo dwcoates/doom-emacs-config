@@ -432,7 +432,7 @@ because **Emacs performs the launch**. There is then only one spelling.
 
 So the Go side does NOT call `harness.StartDaemon` for this layer:
 
-- It builds the same binaries `main_test.go` already builds, reusing
+- It builds the same binaries `kit/stack/main.go` already builds, reusing
   `requireNode`, `requireShimBundle`, `requireStoreBinary`,
   `requireSidecarBinary` verbatim, and it starts the
   **store** and **sidecar** itself with the existing `startStore` /

@@ -21,12 +21,15 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
 - A step reruns alone by its path: `-go e2e=TestTurns/ContextUsage`, or `-harness bin/test-e2e-emacs.sh=TestEmacsWorkspaces/EmacsProofOfLife` for the Emacs layer and the Doom tier.
 - Where new e2e coverage goes is the `agent-repl-tests` skill's rule ("E2E coverage is a step of a scenario").
 
-## The harness's own tests run outside this suite
+## The harness lives in kit/, and its own tests run there
 
-- The e2e suite is never reused (`testrun/roster/roster.go`), so a test in it runs in every run that selects it. A test that builds no world does not belong in it.
+- The e2e suite is never reused (`testrun/roster/roster.go`), so a test in it runs in every run that selects it. A test that is not a scenario step does not belong in it.
 - `kit/` is its own Go module (`agentrepl/e2e/kit`, replaced into this one) and its own roster suite, `e2e-kit`, reused per package on the inputs each reads:
+  - `kit/stack`: the world every scenario builds (`stack.World`, `stack.SharedWorld`, `stack.EmacsWorld`, the Emacs sandbox, the webapp layer's driver, the suite's layout and programs, `stack.RunSuite`), with its own tests. Its unit takes the run's programs and declares the trees the layout checks.
   - `kit/scenario`: the scenario runner `scenario` calls.
-  - `kit/scans`: every scan of this package's sources (the scenario inventory and seam lints, the scenario matrix, and the lints pinning each shared helper as the one place its shape is spelled). It runs in this directory and declares `e2e/` as its input.
-  - `kit` and its other packages: harness code that builds no world, with its unit tests.
-- A new harness test whose subject builds no world goes in `kit/`, with its subject. A test whose subject is the World, the shared World, an EmacsWorld or the webapp layer's driver stays here, beside what it tests.
+  - `kit/scans`: every scan of this package's sources and of `kit/stack`'s (the scenario inventory and seam lints, the scenario matrix, and the lints pinning each shared helper as the one place its shape is spelled). It runs in this directory and declares `e2e/` as its input.
+  - `kit`: harness helpers that build nothing, with their tests.
+- A new harness test goes in `kit/`, beside its subject. It stays here only when it needs what only this suite's runs give it:
+  - a world of real systems (the `TestHarness` steps): a world spawns the real shim, whose installed `node_modules` and built bundle the e2e suite's prebuild provides and a confined `e2e-kit` unit cannot read;
+  - the `e2e-emacs` container (`TestEmacsTeardown*`, which read Linux's `/proc`): that suite runs this package's `TestEmacs*` tests in the container.
 - The grep gate (`main_test.go`) and `TestNoE2EWaitIsBoundOnWallTime` hold `kit/`'s code to the same rules as this package's.

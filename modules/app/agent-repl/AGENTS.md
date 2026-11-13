@@ -1315,7 +1315,8 @@ like an improvement still needs that conversation. Code:
     test the systems together:
     - Emacs elisp (`lisp/` and the module-root `.el` files): `ert` and
       `e2e-emacs`;
-    - `daemon/`: `daemon`, `e2e` and `e2e-emacs`;
+    - `daemon/`: `daemon`, `e2e-kit` (the e2e world is built on the daemon's
+      integration harness), `e2e` and `e2e-emacs`;
     - the shim, the sidecar and the store: `shim`, `sidecar` and `store`,
       each with `e2e` and `e2e-emacs`, and the shim also `sidecar`, whose
       mocked vendor is the shim's fake mode;
@@ -1328,7 +1329,7 @@ like an improvement still needs that conversation. Code:
     - `proto/` (the contract and its Go helpers): every suite;
     - `agent-shim/logging/`: `logging`, `logging-density`, and every consumer
       of its Go half (`daemon`, `store`, `sidecar`, `lock`) and its TS half
-      (`shim`, `webapp`, `build-frontend-harness`), with `e2e` and
+      (`shim`, `webapp`, `build-frontend-harness`), with `e2e-kit`, `e2e` and
       `e2e-emacs`;
     - `e2e/`: `e2e`, `e2e-emacs` and `e2e-kit` (whose scans read the e2e
       package's sources), and `e2e/sandbox/` only `e2e-emacs`; `e2e/kit/`, the

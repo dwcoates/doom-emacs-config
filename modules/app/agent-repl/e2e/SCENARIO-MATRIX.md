@@ -463,7 +463,7 @@ ELAPSE or its boot sweep to run, and its production windows (30s grace, 30m
 shell silence) cannot be reached inside this suite's budget.
 
 CLOSED by `detachedlost_e2e_test.go`, which buys short windows through
-`NewWorldWithSidecarStaleness` (`world_test.go`, wrapping the sidecar's own
+`NewWorldWithSidecarStaleness` (`kit/stack/world.go`, wrapping the sidecar's own
 `--stale-grace` / `--stale-shell-silence` / `--stale-agent-silence` /
 `--stale-workflow-silence` / `--unowned-spool-window` flags) and drives each
 arm off `!bash-detach-live`, whose spool never carries an `EXIT=` terminator:
