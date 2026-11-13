@@ -1539,6 +1539,25 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   status). Until it answers NOTHING is listed, announced, quiesced or asked of
   the bounce registry; a successor that dies or never answers abandons the
   handover at ERROR and the incumbent keeps serving.
+- **A successor proves it can spawn ITS successor before it serves.** In its
+  graph, after the deployer is built, every daemon runs
+  `rollout.Controller.PreflightSpawn`: `ProcessSpawner.Preflight` runs every
+  step of its own successor spawn but the exec (the binary named and
+  executable, the argv, the environment through the same `Environ` the spawn
+  uses), through the one door `Spawn` and `SpawnReplacement` also take
+  (`prepare`), so the preflight cannot pass where the spawn would fail before
+  its exec. Recorded under `daemon.rollout.spawn_preflight`. A JOINING
+  successor that fails it ends its boot before it answers `DaemonHealth`, so
+  its incumbent's `Ready` sees it exit and abandons the handover with the
+  `successor_spawn_failed` fault, keeping serving. A daemon that owns its
+  state (a fresh boot, a restart's replacement) SERVES with
+  `successor_spawn_failed` open: refusing its boot would take every workspace
+  down with no predecessor left to serve them, for a defect that blocks only
+  deploys. It runs after the deployer because the deployer's daemon-boot edge
+  (`CloseEarlierFailures`) closes that fault. Why (2026-11-13): 0.425.14
+  built its successors' environment from a manifest path that did not exist;
+  its predecessor spawned it on old code, and the next deploy could not roll
+  out from it at all.
 - **A closed workspace is served by no daemon.** `wsm.MarkClosed` is the
   one close write and clears `serving_instance` and `spawned_shim_pid` in the
   same update, so every close path releases serving. `served` never transfers

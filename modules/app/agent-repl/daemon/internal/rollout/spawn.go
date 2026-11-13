@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -159,11 +160,9 @@ func NewProcessSpawner(exe, stateDir string, argv []string, environ func() ([]st
 // successor that never reported is still a running process, and the caller is
 // the one that stops it (see SuccessorSpawner).
 func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Successor, error) {
-	if strings.TrimSpace(s.Exe) == "" {
-		return nil, fmt.Errorf("rollout: no daemon binary to spawn the successor from")
-	}
-	if strings.TrimSpace(incumbentAddress) == "" {
-		return nil, fmt.Errorf("rollout: the successor is told the incumbent's address, never left to infer it")
+	plan, err := s.prepareSuccessor(incumbentAddress)
+	if err != nil {
+		return nil, err
 	}
 	// A report left by an earlier handover would be read as this one's answer.
 	if err := os.Remove(JoiningAddrPath(s.StateDir)); err != nil && !os.IsNotExist(err) {
@@ -180,13 +179,7 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// just been handed refusing connections. ctx still bounds the WAIT below,
 	// which is this call's own work; it must not bound the process this call
 	// exists to leave running.
-	env, err := s.Environ()
-	if err != nil {
-		return nil, fmt.Errorf("rollout: the successor's environment: %w", err)
-	}
-	cmd := childproc.Command(childproc.Stable, s.Exe, successorArgv(s.Argv, incumbentAddress)...)
-	cmd.Env = env
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	//
 	// ITS OWN SESSION, WHICH IS WHAT "OUTLIVES" ACTUALLY TAKES.
 	//
 	// Emacs spawns the incumbent through `make-process' with the default
@@ -202,10 +195,10 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 	// Setsid makes the successor a session leader with NO controlling
 	// terminal, which is the structural form of the guarantee: no signal aimed
 	// at the incumbent's terminal, session or process group can reach it. It
-	// is not a matter of the incumbent exiting politely enough.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	// is not a matter of the incumbent exiting politely enough (plan.command).
+	cmd := plan.command()
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
+		return nil, fmt.Errorf("rollout: start the successor %s: %w", plan.exe, err)
 	}
 	child := &processSuccessor{
 		process:   cmd.Process,
@@ -278,24 +271,81 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (Su
 // this process could wait on: it blocks on the boot claim until this process
 // is gone.
 func (s *ProcessSpawner) SpawnReplacement(_ context.Context) (int, error) {
-	if strings.TrimSpace(s.Exe) == "" {
-		return 0, fmt.Errorf("rollout: no daemon binary to spawn the replacement from")
-	}
-	env, err := s.Environ()
+	plan, err := s.prepare("replacement", replacementArgv(s.Argv))
 	if err != nil {
-		return 0, fmt.Errorf("rollout: the replacement's environment: %w", err)
+		return 0, err
 	}
-	cmd := childproc.Command(childproc.Stable, s.Exe, replacementArgv(s.Argv)...)
-	cmd.Env = env
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd := plan.command()
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("rollout: start the replacement %s: %w", s.Exe, err)
+		return 0, fmt.Errorf("rollout: start the replacement %s: %w", plan.exe, err)
 	}
 	// The wait status is the replacement's own exit, which its own run log
 	// records; this process has exited long before it could act on it.
 	inflight.Standing(func() { _ = cmd.Wait() })
 	return cmd.Process.Pid, nil
+}
+
+// Preflight implements SuccessorSpawner: every step of the successor spawn
+// this daemon would make, told selfAddress as its incumbent, short of the
+// exec. It runs the one door Spawn runs (prepareSuccessor), so it cannot pass
+// where the real spawn would fail before its exec. A replacement's spawn goes
+// through the same door (prepare) with an argv that cannot fail to build, so
+// this one preparation answers for both.
+func (s *ProcessSpawner) Preflight(selfAddress string) error {
+	_, err := s.prepareSuccessor(selfAddress)
+	return err
+}
+
+// spawnPlan is one spawn with everything but its exec settled: the binary,
+// its argv and its environment.
+type spawnPlan struct {
+	exe  string
+	argv []string
+	env  []string
+}
+
+// prepareSuccessor is the successor spawn's plan: the incumbent's address it
+// is told, then the shared preparation.
+func (s *ProcessSpawner) prepareSuccessor(incumbentAddress string) (spawnPlan, error) {
+	if strings.TrimSpace(incumbentAddress) == "" {
+		return spawnPlan{}, fmt.Errorf("rollout: the successor is told the incumbent's address, never left to infer it")
+	}
+	return s.prepare("successor", successorArgv(s.Argv, incumbentAddress))
+}
+
+// prepare is the ONE door every spawn's inputs come through, the real spawns'
+// and the preflight's alike: the binary named, the environment answered, and
+// the binary executable. ROLE names the daemon being spawned in each failure.
+func (s *ProcessSpawner) prepare(role string, argv []string) (spawnPlan, error) {
+	if strings.TrimSpace(s.Exe) == "" {
+		return spawnPlan{}, fmt.Errorf("rollout: no daemon binary to spawn the %s from", role)
+	}
+	if s.Environ == nil {
+		return spawnPlan{}, fmt.Errorf("rollout: no environment source to spawn the %s with", role)
+	}
+	env, err := s.Environ()
+	if err != nil {
+		return spawnPlan{}, fmt.Errorf("rollout: the %s's environment: %w", role, err)
+	}
+	info, err := os.Stat(s.Exe)
+	if err != nil {
+		return spawnPlan{}, fmt.Errorf("rollout: the daemon binary to spawn the %s from: %w", role, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return spawnPlan{}, fmt.Errorf("rollout: the daemon binary %s to spawn the %s from is not an executable file (mode %s)", s.Exe, role, info.Mode())
+	}
+	return spawnPlan{exe: s.Exe, argv: argv, env: env}, nil
+}
+
+// command is the plan's process, unstarted: its own session (Setsid), so no
+// signal aimed at this process's terminal, session or process group reaches
+// it (see Spawn), and this process's stdout and stderr.
+func (p spawnPlan) command() *exec.Cmd {
+	cmd := childproc.Command(childproc.Stable, p.exe, p.argv...)
+	cmd.Env = p.env
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd
 }
 
 // processSuccessor is the production Successor: a child process this daemon

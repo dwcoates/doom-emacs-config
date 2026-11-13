@@ -1571,6 +1571,11 @@ a busy workspace's `waiting` (its own turn and background counts), and a
 momentary `updated` the daemon that stays says, or the successor says after a
 handover (it reads `Manifest.deploy`). A deploy's handover draws no webapp
 banner; a successor that will not start is the `successor_spawn_failed` fault.
+A successor that could not spawn a successor of its own refuses before it
+serves, so the deploy fails while its incumbent keeps serving, instead of
+landing a daemon no later deploy can roll out from; a fresh daemon in that
+state serves with the same fault open (daemon/AGENTS.md, "A successor proves
+it can spawn ITS successor before it serves").
 A build, install or service restart that FAILS takes the line down and stands
 as the daemon-scoped `deploy_failed` fault (non-escalating: the running build
 keeps serving), its line naming the step and the last line of its output. It

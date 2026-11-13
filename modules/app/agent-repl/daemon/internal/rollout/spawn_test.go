@@ -770,3 +770,128 @@ func TestSpawnReplacementStartsNoProcessWhoseEnvironmentCannotBeRead(t *testing.
 		t.Fatalf("SpawnReplacement = %d, %v; want no process and the environment's failure", pid, err)
 	}
 }
+
+// runnableBinary is an executable file that exists on every host: this test
+// binary.
+func runnableBinary(t *testing.T) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return exe
+}
+
+// brokenSpawners are the spawners whose spawn fails before its exec, each by
+// one step of the preparation.
+func brokenSpawners(t *testing.T) []struct {
+	name    string
+	spawner *ProcessSpawner
+	self    string
+	want    string
+} {
+	t.Helper()
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "not-executable")
+	if err := os.WriteFile(plain, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	failing := func() ([]string, error) { return nil, errors.New("the env file is gone") }
+	exe := runnableBinary(t)
+	return []struct {
+		name    string
+		spawner *ProcessSpawner
+		self    string
+		want    string
+	}{
+		{name: "no binary is named", spawner: NewProcessSpawner("", dir, nil, inheritEnv), self: "127.0.0.1:7777", want: "no daemon binary"},
+		{name: "the binary is gone", spawner: NewProcessSpawner(filepath.Join(dir, "gone"), dir, nil, inheritEnv), self: "127.0.0.1:7777", want: "no such file"},
+		{name: "the binary is not executable", spawner: NewProcessSpawner(plain, dir, nil, inheritEnv), self: "127.0.0.1:7777", want: "not an executable file"},
+		{name: "the binary is a directory", spawner: NewProcessSpawner(dir, dir, nil, inheritEnv), self: "127.0.0.1:7777", want: "not an executable file"},
+		{name: "no environment source is wired", spawner: NewProcessSpawner(exe, dir, nil, nil), self: "127.0.0.1:7777", want: "no environment source"},
+		{name: "the environment cannot be read", spawner: NewProcessSpawner(exe, dir, nil, failing), self: "127.0.0.1:7777", want: "the env file is gone"},
+		{name: "no incumbent address is told", spawner: NewProcessSpawner(exe, dir, nil, inheritEnv), self: "", want: "never left to infer"},
+	}
+}
+
+func TestPreflightRefusesEverySpawnThatWouldFailBeforeItsExec(t *testing.T) {
+	for _, tt := range brokenSpawners(t) {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := tt.spawner.Preflight(tt.self)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Preflight = %v, want a refusal naming %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// THE PREFLIGHT CANNOT DIVERGE FROM THE SPAWN: every spawner the preflight
+// refuses, the real spawn refuses with the very same failure, starting
+// nothing.
+func TestSpawnFailsExactlyWhereThePreflightFails(t *testing.T) {
+	for _, tt := range brokenSpawners(t) {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			preflight := tt.spawner.Preflight(tt.self)
+
+			// Act
+			successor, err := tt.spawner.Spawn(context.Background(), tt.self)
+
+			// Assert
+			if err == nil || preflight == nil || err.Error() != preflight.Error() {
+				t.Fatalf("Spawn = %v, Preflight = %v; want the one failure from both", err, preflight)
+			}
+			if successor != nil {
+				t.Fatalf("Spawn answered successor pid %d, want nothing started", successor.PID())
+			}
+		})
+	}
+}
+
+func TestPreflightPassesAndChangesNothing(t *testing.T) {
+	// Arrange: a stale report the real spawn would clear, and an environment
+	// source that counts its calls.
+	state := t.TempDir()
+	if err := ReportJoiningAddr(state, "127.0.0.1:1"); err != nil {
+		t.Fatal(err)
+	}
+	var asked atomic.Int32
+	spawner := NewProcessSpawner(runnableBinary(t), state, nil, func() ([]string, error) {
+		asked.Add(1)
+		return os.Environ(), nil
+	})
+
+	// Act
+	err := spawner.Preflight("127.0.0.1:7777")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Preflight = %v, want the spawn proven", err)
+	}
+	if asked.Load() != 1 {
+		t.Fatalf("the environment was asked %d times, want once, as the spawn asks it", asked.Load())
+	}
+	if addr, reported, _ := ReadJoiningAddr(state); !reported || addr != "127.0.0.1:1" {
+		t.Fatalf("the report = %q (%v), want the preflight to have left it alone", addr, reported)
+	}
+}
+
+func TestSpawnReplacementRefusesANonExecutableBinary(t *testing.T) {
+	// Arrange
+	plain := filepath.Join(t.TempDir(), "not-executable")
+	if err := os.WriteFile(plain, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spawner := NewProcessSpawner(plain, t.TempDir(), nil, inheritEnv)
+
+	// Act
+	pid, err := spawner.SpawnReplacement(context.Background())
+
+	// Assert
+	if err == nil || pid != 0 || !strings.Contains(err.Error(), "not an executable file") {
+		t.Fatalf("SpawnReplacement = %d, %v; want no process and the binary refused", pid, err)
+	}
+}

@@ -1265,6 +1265,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	// THIS DAEMON PROVES IT CAN SPAWN ITS OWN SUCCESSOR before anything is
+	// served (rollout.Controller.PreflightSpawn): a joining successor that
+	// cannot ends its boot here, so its incumbent's handover is refused and
+	// the incumbent keeps serving. It runs AFTER buildDeployer, whose
+	// daemon-boot recovery edge would otherwise close the fault a fresh
+	// boot's failed preflight opens.
+	if err := rolloutController.PreflightSpawn(ctx); err != nil {
+		return nil, err
+	}
 
 	drainController, err = drain.New(drain.Deps{
 		DB:         p.DB,

@@ -868,3 +868,27 @@ func TestBuildBrowser(t *testing.T) {
 		})
 	}
 }
+
+// THE SPAWN PREFLIGHT RUNS ONCE, AFTER THE DEPLOYER IS BUILT: the deployer's
+// daemon-boot recovery edge (CloseEarlierFailures) closes every standing
+// successor_spawn_failed fault, so a preflight before it would have its own
+// fault closed by the same boot.
+func TestTheGraphPreflightsTheSpawnOnceAfterTheDeployerIsBuilt(t *testing.T) {
+	// Arrange
+	var graph string
+	for _, f := range sourcescan.Production(t) {
+		if f.Name == "graph.go" {
+			graph = string(f.Source)
+		}
+	}
+
+	// Act
+	preflights := strings.Count(graph, "rolloutController.PreflightSpawn(ctx)")
+	preflight := strings.Index(graph, "rolloutController.PreflightSpawn(ctx)")
+	deployer := strings.Index(graph, "buildDeployer(ctx, deployerParams{")
+
+	// Assert
+	if preflights != 1 || deployer < 0 || preflight < deployer {
+		t.Fatalf("PreflightSpawn sites = %d at %d, buildDeployer at %d; want one preflight after the deployer is built", preflights, preflight, deployer)
+	}
+}
