@@ -434,9 +434,9 @@ func (r *Runner) await(s Spec, p Process, out *bytes.Buffer, done chan<- complet
 // It was 3 (owner ruling, 2026-11-09: every timeout is 2-3 times the expected
 // time of what it bounds; over 4,659 recorded runs of 260 units, 3 times a
 // decaying peak was passed only twice). The owner raised it to 5 (2026-11-13)
-// when tests moved to macOS utility QoS: a unit's wall time then depends on
-// the owner's foreground work, and the first governed run under it killed
-// eight short healthy units at 3 times peaks recorded at the old priority.
+// while tests ran at macOS utility QoS, whose first governed run killed eight
+// short healthy units at 3 times peaks recorded at full priority, and kept it
+// at 5 once that clamp was dropped the same day.
 const BoundFactor = 5
 
 // tellEnded tells the run's observer, if it has one, that a unit ended.

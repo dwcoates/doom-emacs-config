@@ -116,9 +116,9 @@ never bring the whole host above 50% (`cores.CeilingPercent`). The governor
 process carrying `cores.NestedEnv`), averages the last 3 one-second reads, and
 admits a unit when tests + its cores fit the target and other + tests + its
 cores fit the ceiling. A unit costs its own history (`plan.CoresKey`), else 2
-cores per slot. It admits, never pauses. On macOS tests run under
-`taskpolicy -c utility` (nice alone changed no scheduler priority; the
-background clamp confines them to the 4 efficiency cores). The mechanics are in `modules/app/agent-repl/AGENTS.md`,
+cores per slot. It admits, never pauses. Tests keep normal CPU priority
+(a lower one made their time depend on the owner's work and tripped limits);
+only their disk I/O is throttled on macOS. The mechanics are in `modules/app/agent-repl/AGENTS.md`,
 "THE HOST'S TOTAL CPU IS CAPPED" and "A UNIT'S WIDTH MUST BE THE CORES IT
 USES"; read those for how it works, not restated here.
 

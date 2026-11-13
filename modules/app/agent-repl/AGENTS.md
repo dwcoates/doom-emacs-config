@@ -131,21 +131,13 @@ sidecar, Emacs, webview). `bin/background.sh <cmd>` runs a command and its
 whole process tree at the machine's background priority, and it is the ONE
 helper every test entry point goes through.
 
-- macOS: the UTILITY QoS clamp, `taskpolicy -c utility` (owner ruling
-  2026-11-13, tests at macOS background priority so foreground work always
-  wins at the scheduler), plus `nice` for the run's rank.
-  - `nice` alone demotes nothing on macOS: measured 2026-11-13 with `ps -M`,
-    a niceness-19 thread sits at priority 31, the owner's own. Under the
-    utility clamp every thread of the run is at 20 or below, under the
-    owner's 31 (default) and 37 (user-initiated), and children inherit it.
-  - The run keeps the performance cores: utility QoS is eligible for every
-    core; only the background and maintenance classes are confined to the
-    efficiency cores. (Not measured under load: load generators are
-    off-limits.)
-  - The background clamp (`-c background`, `-b`, priority 4) is rejected: on
-    Apple silicon it confines a run to the efficiency cores, 4 of 16, below
-    the tests' 5.6-core target, and `-b` failed the webapp integration suite
-    (56-58 of 1765 passed, 2026-09-23).
+- macOS: the CPU is NOT demoted (owner ruling 2026-11-13); the CPU
+  governor alone moderates the tests (the tests average 35% of the host and
+  never push it above 50%). A test at a lower scheduler priority runs slower
+  whenever the owner's work is busy, and trips time limits measured at full
+  speed: the utility clamp (`taskpolicy -c utility`) tried 2026-11-13 killed
+  short units at their limits. `nice` stays as the run's rank; it demotes
+  nothing on macOS (a niceness-19 thread sits at 31, the owner's own).
 - macOS also throttles the run's DISK I/O: `taskpolicy -d throttle` (owner
   ruling 2026-10-06), so a full run's SQLite and build traffic waits behind
   the live store's writes.
@@ -819,8 +811,8 @@ to three times the measured expected time of what it bounds". What this module
 adds:
 
 - **Every test unit is bounded by the runner.** `testrun` kills a unit at
-  `run.BoundFactor` (5, owner ruling 2026-11-13: tests run at utility QoS, so
-  their wall time depends on foreground work) times its expected time, its
+  `run.BoundFactor` (5, owner ruling 2026-11-13, raised while tests ran at
+  utility QoS and kept after the clamp was dropped) times its expected time, its
   decaying peak passing time in the host's test history
   (`testrun/internal/history`, `PeakDecay`), and a unit never measured at five
   times the longest unit the host knows

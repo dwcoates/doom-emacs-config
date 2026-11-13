@@ -116,15 +116,15 @@ for platform in Darwin Linux; do
     fi
     # --- 1a'. disk I/O: throttled on macOS, untouched on Linux ----------------
     if [ "$platform" = Darwin ]; then
-        if grep -q '^taskpolicy -c utility -d throttle nice -n 19 bash -c' "$d/log"; then
-            pass "Darwin: a normal-priority run is clamped to utility QoS and its disk I/O throttled, with taskpolicy -c utility -d throttle"
+        if grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log"; then
+            pass "Darwin: a normal-priority run has its disk I/O throttled, with taskpolicy -d throttle"
         else
-            fail "Darwin: a normal-priority run is clamped to utility QoS and its disk I/O throttled, with taskpolicy -c utility -d throttle" "log: $(cat "$d/log")"
+            fail "Darwin: a normal-priority run has its disk I/O throttled, with taskpolicy -d throttle" "log: $(cat "$d/log")"
         fi
-        if grep -Eq '^taskpolicy .*(-b|-c (background|maintenance))' "$d/log"; then
-            fail "Darwin: the run is never put in the background band that pins to efficiency cores" "log: $(cat "$d/log")"
+        if grep -Eq '^taskpolicy (-[a-z] [a-z]+ )*(-b |-c )' "$d/log"; then
+            fail "Darwin: the run's CPU is never clamped to a lower QoS class" "log: $(cat "$d/log")"
         else
-            pass "Darwin: the run is never put in the background band that pins to efficiency cores"
+            pass "Darwin: the run's CPU is never clamped to a lower QoS class"
         fi
     else
         if grep -q '^taskpolicy' "$d/log"; then
@@ -299,7 +299,7 @@ fi
 # --- 1m. low-priority.sh demotes the same way, but marks no test run --------
 d="$TMP/h1m"
 SUBJECT="$THIS_DIR/low-priority.sh" run_helper "$d" STUB_UNAME=Darwin STUB_NICENESS=0 AGENT_REPL_TEST_RUN_BY_DAEMON= -- "${MARKER_CMD[@]}"
-if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -c utility -d throttle nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
+if [ "$RC" -eq 0 ] && grep -q '^taskpolicy -d throttle nice -n 19 bash -c' "$d/log" && [ "$(cat "$d/out")" = "marker=" ]; then
     pass "low-priority.sh demotes as the helper does, unmarked, and needs no daemon"
 else
     fail "low-priority.sh demotes as the helper does, unmarked, and needs no daemon" "rc=$RC log: $(cat "$d/log") out: $(cat "$d/out") err: $(cat "$d/err")"
@@ -364,16 +364,16 @@ if [ -n "$QUERY" ]; then
         fail "$HOST_OS (real): a helper nested in a helper leaves the niceness where it was" "niceness=$out want=$BASE"
     fi
 
-    # --- 2c'. on macOS a test process runs under the utility clamp --------
-    # The harness was wrapped by the helper, so the clamp it set is what a
-    # test process runs under: utility's priority 20 or below (a process at
-    # nice alone runs at 31, measured 2026-11-13).
+    # --- 2c'. on macOS a test process keeps the CPU priority of normal work -
+    # The harness was wrapped by the helper, and no CPU clamp is set (owner
+    # ruling 2026-11-13): a test process runs above utility's 20 (a process
+    # at nice alone runs at 31, measured 2026-11-13).
     if [ "$HOST_OS" = Darwin ]; then
         out="$(ps -o pri= -p "$$" 2>&1 | tr -d ' ')" || true
-        if [[ $out =~ ^[0-9]+$ ]] && [ "$out" -le 20 ]; then
-            pass "Darwin (real): a test process runs at utility QoS priority (20) or below"
+        if [[ $out =~ ^[0-9]+$ ]] && [ "$out" -gt 20 ]; then
+            pass "Darwin (real): a test process keeps the CPU priority of normal work, above utility's 20"
         else
-            fail "Darwin (real): a test process runs at utility QoS priority (20) or below" "priority: $out"
+            fail "Darwin (real): a test process keeps the CPU priority of normal work, above utility's 20" "priority: $out"
         fi
     fi
 
