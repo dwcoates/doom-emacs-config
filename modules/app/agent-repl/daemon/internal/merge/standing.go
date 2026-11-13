@@ -83,7 +83,7 @@ func (o *orchestrator) standingMoved(ctx context.Context, serves bool) {
 	}
 	if !serves {
 		o.deps.Log.Global().Info(opStanding, "a handover holds every queue: running merges are suspended at their step and nothing is admitted", dlog.Context{"repos": len(repos)})
-		if err := o.suspendForPause(ctx, repos); err != nil {
+		if err := o.suspendHeld(ctx, repos, suspendHandover); err != nil {
 			o.deps.Log.Global().Error(opStanding, "could not suspend every running merge for the handover", dlog.Context{"error": err.Error()})
 		}
 		return

@@ -133,6 +133,24 @@ func TestAHandoverSuspendsTheRunningMergeAndItsEndTakesItOnAtItsStep(t *testing.
 	}
 }
 
+func TestAHandoverSuspendsTheRunningMergeAsTheHandoversNotAPause(t *testing.T) {
+	// Arrange: the head holds in its gate.
+	c, done := headInGate(t)
+
+	// Act: a handover holds the queue.
+	c.h.standing.set(false)
+	c.h.o.followStandingOnce(context.Background(), true)
+	<-done
+
+	// Assert
+	if !c.recorded("info", suspendHandover.op, suspendHandover.moved) {
+		t.Fatal("the merge's suspension was not recorded as the handover's")
+	}
+	if _, paused := c.h.recordFor("info", suspendPause.op); paused {
+		t.Fatal("the handover's suspension was recorded as a pause")
+	}
+}
+
 func TestFollowStandingOnceActsOnlyOnAChange(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

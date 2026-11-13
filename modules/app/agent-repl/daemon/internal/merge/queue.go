@@ -145,7 +145,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	}
 	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
 	if paused {
-		suspended := o.suspendForPause(ctx, repos)
+		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
 	}
 	redrawn := o.redrawPaused(ctx, op, changed)

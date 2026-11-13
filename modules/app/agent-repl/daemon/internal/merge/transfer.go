@@ -110,6 +110,15 @@ var (
 		by:        "its workspace's restart",
 		resumes:   "it resumes at the step it recorded once the restart finished",
 		gateRerun: "it runs again from its start once the restart finished"}
+	// suspendHandover is a deploy's handover holding every queue
+	// (standingMoved): like a pause, this daemon takes the merge straight
+	// back, so a handover that does not finish leaves it here to go on, and
+	// the daemon that serves its workspace next resumes it.
+	suspendHandover = suspension{op: "daemon.merge.transfer", cause: errHandingOver,
+		moved:     "a merge is suspended for the handover; the daemon that serves its workspace next resumes it at the step it recorded",
+		by:        "the handover",
+		resumes:   "the daemon that serves its workspace next resumes it at the step it recorded",
+		gateRerun: "it runs again from its start when the merge is resumed after the handover"}
 	// suspendExit is the daemon's exit (Drain). Its records are the drain's
 	// own, so it is never handed to suspendFor and says nothing on moving.
 	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting, handedOn: true,
@@ -142,13 +151,16 @@ func (r *run) suspendedFor() (suspension, bool) {
 // errPaused is the cause a pause cuts a running merge with.
 var errPaused = errors.New("merge: the queue was paused; the merge is suspended until the queue is resumed")
 
-// suspendForPause brings every merge running in the paused queues to a
-// stopping point, at once, and takes each straight back from its durable
-// rows: it then waits, recorded, as a resume the paused pump does not start,
-// and the next resume of the queue (or the next boot, under no pause) goes
-// on with it at the step it recorded. Every merge is attempted; the first
-// failure is answered.
-func (o *orchestrator) suspendForPause(ctx context.Context, repos []wsm.RepoKey) error {
+// errHandingOver is the cause a handover's hold cuts a running merge with.
+var errHandingOver = errors.New("merge: a handover holds the queue; the merge is suspended for the daemon that serves its workspace next")
+
+// suspendHeld brings every merge running in the held queues REPOS to a
+// stopping point for WHY (a pause, or a handover's hold), at once, and takes
+// each straight back from its durable rows: it then waits, recorded, as a
+// resume the held pump does not start, and the queue's release (or the next
+// daemon to serve it) goes on with it at the step it recorded. Every merge is
+// attempted; the first failure is answered.
+func (o *orchestrator) suspendHeld(ctx context.Context, repos []wsm.RepoKey, why suspension) error {
 	paused := map[wsm.RepoKey]bool{}
 	for _, repo := range repos {
 		paused[repo] = true
@@ -164,8 +176,8 @@ func (o *orchestrator) suspendForPause(ctx context.Context, repos []wsm.RepoKey)
 	sort.Slice(running, func(i, j int) bool { return running[i] < running[j] })
 	var first error
 	for _, ws := range running {
-		if err := o.suspendFor(ctx, ws, suspendPause); err != nil {
-			o.deps.Log.Global().Error("daemon.merge.pause", "could not suspend a running merge for its queue's pause", dlog.Context{
+		if err := o.suspendFor(ctx, ws, why); err != nil {
+			o.deps.Log.Global().Error(why.op, "could not suspend a running merge for "+why.by, dlog.Context{
 				"workspace": string(ws), "error": err.Error()})
 			if first == nil {
 				first = err
