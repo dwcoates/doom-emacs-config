@@ -2393,3 +2393,25 @@ func TestTheParticipantSeamHoldsTheDaemonsAdoptionUntilEveryParticipantCalls(t *
 		t.Fatal("the held adoption never ran after its participant called")
 	}
 }
+
+func TestAParticipantIsAnsweredOnceTheWorkspaceIsOwnedNotOnceTheAdoptionsTailEnds(t *testing.T) {
+	// Arrange: the daemon's adoption waits for the participant's call (the
+	// test seam), so the call is waiting before the workspace is owned; the
+	// adoption's tail (the workspace's merges) is then held.
+	h := newHarness(t, func(d *Deps) { d.AdoptAwaitsParticipants = true })
+	ws, _ := h.workspace(t)
+	h.merges.adopting = make(chan ids.WorkspaceID, 1)
+	h.merges.release = make(chan struct{})
+	t.Cleanup(func() { close(h.merges.release) })
+	arm(t, h, ws, Participants{Host: true})
+	answered := make(chan error, 1)
+
+	// Act
+	go func() { answered <- h.c.AdoptHost(context.Background(), ws) }()
+	<-h.merges.adopting
+
+	// Assert: answered while the tail is still held.
+	if err := <-answered; err != nil {
+		t.Fatalf("AdoptHost = %v, want the owned workspace answered adopted", err)
+	}
+}

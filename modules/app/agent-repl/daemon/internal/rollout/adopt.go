@@ -876,6 +876,16 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	wasOwned := c.owned[ws]
 	if e, ok := c.rendezvous[ws]; ok {
 		e.adopted = true
+		// THE PARTICIPANTS ARE ANSWERED AT OWNERSHIP, not once the rest of
+		// this adoption is done: the workspace is served here from this
+		// instant, and what follows (its merges, its faults, its carried
+		// replacements) is this daemon's own work. Answered at the end, a
+		// participant waited out that tail too: on 2026-11-13 24 workspaces
+		// adopted within 3s were still unanswered when Emacs's 10s
+		// AdoptHostWorkspace deadline passed, each held behind its merges'
+		// adoption. A tail that fails is still this adoption's error, and
+		// its caller's to retry; the settled answer stands.
+		e.settle(nil)
 	}
 	if c.owned == nil {
 		c.owned = map[ids.WorkspaceID]bool{}

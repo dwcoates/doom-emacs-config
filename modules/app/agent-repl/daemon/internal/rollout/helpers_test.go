@@ -1679,6 +1679,10 @@ type fakeMerges struct {
 	suspendErr error
 	adoptErr   error
 	reviewErr  error
+	// adopting, when set, is told each AdoptWorkspace as it starts, and the
+	// call then waits for release: a test holds an adoption's tail here.
+	adopting chan ids.WorkspaceID
+	release  chan struct{}
 }
 
 func (f *fakeMerges) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
@@ -1691,6 +1695,10 @@ func (f *fakeMerges) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) e
 
 func (f *fakeMerges) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) error {
 	f.order.record("adopt_merges")
+	if f.adopting != nil {
+		f.adopting <- ws
+		<-f.release
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "adopt "+string(ws))
