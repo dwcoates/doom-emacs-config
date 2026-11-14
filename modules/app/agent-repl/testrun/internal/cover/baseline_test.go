@@ -150,8 +150,8 @@ func TestBaselineRefuses(t *testing.T) {
 			root:    func(t *testing.T) string { return t.TempDir() },
 			tool:    func(c *[][]string) Runner { return profileTool(mergedProfile, c) },
 			systems: map[string]string{"agent-repld": "daemon"},
-			sel:     Selection{Suites: []string{"e2e-emacs"}},
-			want:    "the suites e2e-emacs measured no coverage system",
+			sel:     Selection{Suites: []string{"e2e-kit"}},
+			want:    "the suites e2e-kit measured no coverage system",
 		},
 		{
 			name: "a merged profile without its mode line",
@@ -210,7 +210,7 @@ func TestParseBaselineArgs(t *testing.T) {
 		wantErr string
 	}{
 		{name: "every flag, every suite", argv: append(base(), "-every-suite"), want: Selection{Every: true}},
-		{name: "a selection, sorted and once each", argv: append(base(), "-suite", "e2e-emacs", "-suite", "e2e", "-suite", "e2e-emacs"), want: Selection{Suites: []string{"e2e", "e2e-emacs"}}},
+		{name: "a selection, sorted and once each", argv: append(base(), "-suite", "e2e-kit", "-suite", "e2e", "-suite", "e2e-kit"), want: Selection{Suites: []string{"e2e", "e2e-kit"}}},
 		{name: "no selection", argv: base(), wantErr: "exactly one of -every-suite or one -suite"},
 		{name: "every suite and a selection", argv: append(base(), "-every-suite", "-suite", "e2e"), wantErr: "exactly one of -every-suite or one -suite"},
 		{name: "a suite the roster does not hold", argv: append(base(), "-suite", "nope"), wantErr: `"nope" is no roster suite`},
@@ -445,10 +445,10 @@ func TestSelection(t *testing.T) {
 			wantGo: "go: unit, integration and e2e, spawned systems included",
 		},
 		{
-			name: "a selection", sel: Selection{Suites: []string{"e2e", "e2e-emacs"}},
-			ran:         map[string]bool{"daemon": false, "e2e": true, "e2e-emacs": true},
-			wantPartial: "a partial measurement: only the suites e2e, e2e-emacs ran",
-			wantGo:      "go: e2e, e2e-emacs only, spawned systems included",
+			name: "a selection", sel: Selection{Suites: []string{"e2e", "e2e-kit"}},
+			ran:         map[string]bool{"daemon": false, "e2e": true, "e2e-kit": true},
+			wantPartial: "a partial measurement: only the suites e2e, e2e-kit ran",
+			wantGo:      "go: e2e, e2e-kit only, spawned systems included",
 		},
 	}
 	for _, tt := range tests {
@@ -490,7 +490,7 @@ func TestBaselineOfASelectionReportsOnlyWhatItsSuitesReached(t *testing.T) {
 		CoverRoot: root, Commit: "c",
 		GoSystems: map[string]string{"agent-repld": "daemon", "agentrepl/shim-store": "store"},
 		Vitest:    map[string]VitestReports{"webapp": {Tiers: map[string][]string{"e2e webapp layer": {layer}}}},
-		Selection: Selection{Suites: []string{"e2e", "e2e-emacs"}},
+		Selection: Selection{Suites: []string{"e2e", "e2e-kit"}},
 	}
 
 	// Act
@@ -503,8 +503,8 @@ func TestBaselineOfASelectionReportsOnlyWhatItsSuitesReached(t *testing.T) {
 	if len(got.Systems) != 2 {
 		t.Fatalf("systems = %v, want the daemon and the webapp only", got.Systems)
 	}
-	const why = "a partial measurement: only the suites e2e, e2e-emacs ran"
-	if d := got.Systems["agent-repld"]; d.Percent != 60 || d.Tiers != "go: e2e, e2e-emacs only, spawned systems included" || !d.Provisional || d.Reason != why {
+	const why = "a partial measurement: only the suites e2e, e2e-kit ran"
+	if d := got.Systems["agent-repld"]; d.Percent != 60 || d.Tiers != "go: e2e, e2e-kit only, spawned systems included" || !d.Provisional || d.Reason != why {
 		t.Errorf("daemon = %+v", d)
 	}
 	if w := got.Systems["webapp"]; w.Percent*3 != 100 || !w.Provisional || w.Reason != why {
@@ -656,8 +656,10 @@ func TestVitestReportsOfASelection(t *testing.T) {
 }
 
 func TestRunBaselineOfTheE2ESuitesAlone(t *testing.T) {
-	// Arrange: the run of 2026-10-31 that failed, `-suite e2e -suite e2e-emacs
-	// -coverage`: spawned counters and the layer's reports, no unit report.
+	// Arrange: a run of the e2e suites alone, shaped like the run of
+	// 2026-10-31 that failed (`-suite e2e -suite e2e-emacs -coverage`, before
+	// e2e-emacs left the roster): spawned counters and the layer's reports, no
+	// unit report.
 	work := t.TempDir()
 	dir := filepath.Join(work, "cover", "spawned", "e2e-000", "agent-repld")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -669,7 +671,7 @@ func TestRunBaselineOfTheE2ESuitesAlone(t *testing.T) {
 	writeReport(t, filepath.Join(work, "cover", "spawned", "e2e-000", WebappLayerDir, "driver-1", "run-1-a.layer.test.ts.json"), statementsJSON("/w/src/a.ts", 1, 1, 0))
 	out := filepath.Join(t.TempDir(), "coverage-baseline.json")
 	var calls [][]string
-	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Suites: []string{"e2e", "e2e-emacs"}}}
+	a := BaselineArgs{Module: "/m", Work: work, Commit: "c", Out: out, Selection: Selection{Suites: []string{"e2e", "e2e-kit"}}}
 
 	// Act
 	_, err := RunBaseline(profileTool(mergedProfile, &calls), a, map[string]string{"agent-repld": "daemon", "agentrepl/logging": "logging"}, []string{"webapp", "shim"}, time.Now())
@@ -715,7 +717,7 @@ func TestSelectionOf(t *testing.T) {
 		wantArgs []string
 	}{
 		{name: "no narrowing is every suite", want: Selection{Every: true}, wantArgs: []string{"-every-suite"}},
-		{name: "a narrowing, sorted and once each", selected: []string{"e2e-emacs", "e2e", "e2e-emacs"}, want: Selection{Suites: []string{"e2e", "e2e-emacs"}}, wantArgs: []string{"-suite", "e2e", "-suite", "e2e-emacs"}},
+		{name: "a narrowing, sorted and once each", selected: []string{"e2e-kit", "e2e", "e2e-kit"}, want: Selection{Suites: []string{"e2e", "e2e-kit"}}, wantArgs: []string{"-suite", "e2e", "-suite", "e2e-kit"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

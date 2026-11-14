@@ -30,7 +30,7 @@ func TestBaselineUnitWaitsForEveryChunkAndReport(t *testing.T) {
 		selection []string
 	}{
 		{name: "every suite", selection: []string{"-every-suite"}},
-		{name: "a selection, sorted and once each", selected: []string{"e2e-emacs", "e2e", "e2e-emacs"}, selection: []string{"-suite", "e2e", "-suite", "e2e-emacs"}},
+		{name: "a selection, sorted and once each", selected: []string{"e2e-kit", "e2e", "e2e-kit"}, selection: []string{"-suite", "e2e", "-suite", "e2e-kit"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestBaselineUnitWaitsForEveryChunkAndReport(t *testing.T) {
 // The argv baselineUnit writes is the one ParseBaselineArgs reads: the two
 // halves of the coverage-baseline command line cannot drift apart.
 func TestBaselineUnitArgvParses(t *testing.T) {
-	for _, selected := range [][]string{nil, {"e2e", "e2e-emacs"}} {
+	for _, selected := range [][]string{nil, {"e2e", "e2e-kit"}} {
 		// Arrange
 		d := Deps{Self: "/testrun", RunLog: "/logs/x.log", Git: func(string) (string, string, error) { return "master", "c", nil }}
 		u, _, err := baselineUnit(suites.Layout{Repo: "/r", Module: "/m", Work: "/w"}, d, selected, nil)
