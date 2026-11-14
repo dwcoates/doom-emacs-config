@@ -9051,6 +9051,10 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    (owner request, 2026-10-23): the row's workspace and target are drawn in
    --blocked at the front and in --muted behind it. */
 .merge-queue-entry[data-queue-status="merging"] :is(.merge-queue-label, .merge-queue-target) { color: var(--blocked); }
+/* THE DEPLOY MEDIATION'S LABEL beside a queued repository's name (owner
+   ruling, 2026-11-14): the purple of a merge at work, since the queue is held
+   for the last deploy's check. */
+.sb-mq-label.sb-mq-mediation { color: var(--blocked); margin-left: 0.5em; }
 .merge-queue-entry[data-queue-status="waiting"] :is(.merge-queue-label, .merge-queue-target) { color: var(--muted); }
 .merge-queue-target {
   min-width: 0;

@@ -2087,33 +2087,37 @@ workspace its requeue and discard controls name."
                          (plist-get (plist-get (plist-get off :discard) :merge) :id))
                    '("one" "evicted" "m1" "m1")))))
 
-(ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-decodes-its-mediator-and-standing ()
-  "The deploy mediation a queue waits on decodes its mediator and whether it
-is checking the deploy."
-  (let ((mediation (plist-get
-                    (agent-repl-test-wire-roster--decode
-                     #'agent-repl-wire-decode-roster-repo-merge-queue
-                     (format "{\"mediation\":{\"subject\":%s,\"checking\":{}}}"
-                             agent-repl-test-wire-roster--subject))
-                    :mediation)))
-    (should (equal (list (plist-get (plist-get mediation :subject) :name)
-                         (plist-get mediation :standing))
-                   '("one" :checking)))))
+(ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-decodes-its-standing ()
+  "The deploy mediation a queue waits on decodes whether it is checking
+the deploy."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-repo-merge-queue
+                   "{\"mediation\":{\"checking\":{}}}")
+                  :mediation)
+                 '(:standing :checking))))
 
 (ert-deftest agent-repl-test-wire-roster-a-waiting-deploy-mediation-decodes-waiting ()
   "A mediation whose deploy still rolls out decodes `:waiting'."
   (should (eq (plist-get (agent-repl-test-wire-roster--decode
                           #'agent-repl-wire-decode-roster-merge-queue-mediation
-                          (format "{\"subject\":%s,\"waiting\":{}}" agent-repl-test-wire-roster--subject))
+                          "{\"waiting\":{}}")
                          :standing)
               :waiting)))
 
 (ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-without-a-standing-is-a-breach ()
   "A deploy mediation always says where it stands."
   (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-mediation
-                  (format "{\"subject\":%s}" agent-repl-test-wire-roster--subject))
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation "{}")
                  '("RosterMergeQueueMediation" standing "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-refuses-the-retired-subject ()
+  "Tag 1, the mediator workspace, is retired: a mediation carrying it is an
+unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  (format "{\"subject\":%s,\"checking\":{}}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueMediation" subject "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-off-its-queue-without-its-requeue-is-a-breach ()
   "A merge off its queue always carries its requeue control."

@@ -103,7 +103,7 @@ import {
   type DeploysGroupSection,
 } from "./deploys-fold.js";
 import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
-import { drawQueuedGroupHead, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
+import { drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -918,6 +918,7 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
   const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, sc, queuePath), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
+  if (queue.mediation !== undefined) head.appendChild(drawQueueMediationLabel(queue.mediation, `${queuePath}.mediation`));
   head.appendChild(drawQueueCount(queueCount(queue)));
   drawQueuedGroupHead(group, head, queue, key, sc, queuePath);
   tickPaint(sc, (nowMs) => {

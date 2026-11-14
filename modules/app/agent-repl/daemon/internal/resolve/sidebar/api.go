@@ -488,9 +488,9 @@ func (v VendorStart) String() string {
 	}
 }
 
-// QueueMediation is a deploy mediation a queue waits on: its mediator, and
-// whether the mediator was told of the deploy.
+// QueueMediation is a deploy mediation a queue waits on: the repository
+// whose queue it holds, and whether the mediator was told of the deploy.
 type QueueMediation struct {
-	Mediator ids.WorkspaceID
-	Told     bool
+	Repo ids.RepoID
+	Told bool
 }

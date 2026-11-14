@@ -1512,18 +1512,15 @@ mediation the queue waits on, nil while it waits on none
 
 (defun agent-repl-wire-decode-roster-merge-queue-mediation (value)
   "Decode VALUE as `RosterMergeQueueMediation'.
-A plist `(:subject SUBJECT :standing STANDING)': the deploy mediator the
-queue waits on, and where its mediation stands, `:waiting' (the deploy
-still rolls out, or the mediator is not told yet) or `:checking'.  The
-standing is never unset."
+A plist `(:standing STANDING)': where the deploy mediation the queue waits
+on stands, `:waiting' (the deploy still rolls out, or the mediator is not
+told yet) or `:checking'.  The standing is never unset; the mediator is
+never named."
   (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(subject waiting checking))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking))
     (agent-repl-wire--decoded
      "RosterMergeQueueMediation"
-     (list :subject (agent-repl-wire--decode-message
-                     "RosterMergeQueueMediation" 'subject object
-                     #'agent-repl-wire-decode-roster-merge-queue-subject)
-           :standing (plist-get
+     (list :standing (plist-get
                       (agent-repl-wire--decode-oneof
                        "RosterMergeQueueMediation" 'standing object
                        `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueMediationWaiting" v)))

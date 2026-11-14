@@ -55,7 +55,8 @@
    is `metaprompt-deploy-mediator.md`.
 8. SIDEBAR. The roster's merge queue carries the mediation
    (`frontend.v1.RosterMergeQueue.mediation`: the mediator's name, and
-   checking / remediating / none), drawn as a pinned row at the queue's head.
+   checking / remediating / none), drawn as a purple label beside the repository's name, never as a
+   workspace row (owner ruling, 2026-11-14).
 
 ## Progress
 
@@ -69,6 +70,6 @@
 - [x] 5 decision (UpdateMergeQueue mediation arm, `merge-queue mediation`)
 - [x] 6 undecided turn end (mediationTurnEnded)
 - [x] 7 session landing + metaprompt section
-- [x] 8 sidebar (frontend.v1.RosterRepoMergeQueue.mediation, pinned above the head)
+- [x] 8 sidebar (frontend.v1.RosterRepoMergeQueue.mediation, a purple label beside the repository's name)
 - [x] full suite, land, deploy (0.432.0)
 - [x] the `deploy_mediator` line in `.agent-repl/lifecycle.yaml`, after 0.432.0 parses it

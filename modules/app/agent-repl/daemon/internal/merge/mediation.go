@@ -439,6 +439,8 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 type OwedMediation struct {
 	// Name is the mediator's name, as the lifecycle config names it.
 	Name string
+	// Repository is the registered repository whose queue it holds.
+	Repository ids.RepoID
 	// Mediator is the mediator workspace, empty while it is not made yet.
 	Mediator ids.WorkspaceID
 	// Told reports that the mediator was told of the deploy.
@@ -464,7 +466,7 @@ func (o *orchestrator) owedMediation(ctx context.Context, repo wsm.RepoKey) (*Ow
 		if err != nil {
 			return nil, err
 		}
-		return &OwedMediation{Name: q.mediator, Mediator: ws, Told: m.Prompted()}, nil
+		return &OwedMediation{Name: q.mediator, Repository: q.repository.ID, Mediator: ws, Told: m.Prompted()}, nil
 	}
 	// OWED IN A REPOSITORY WHOSE CONFIG NAMES NO MEDIATOR NOW: nobody
 	// decides it, and the next sweep (releaseUnmediated) releases it.
@@ -472,14 +474,13 @@ func (o *orchestrator) owedMediation(ctx context.Context, repo wsm.RepoKey) (*Ow
 }
 
 // rosterMediation is the deploy mediation REPO's queue waits on as the
-// roster draws it: nil while it owes none, or while its mediator is not made
-// yet (the round that makes it republishes the queue).
+// roster draws it, beside the repository's name: nil while it owes none.
 func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
 	owed, err := o.owedMediation(ctx, repo)
-	if err != nil || owed == nil || owed.Mediator == "" {
+	if err != nil || owed == nil {
 		return nil, err
 	}
-	return &sidebar.QueueMediation{Mediator: owed.Mediator, Told: owed.Told}, nil
+	return &sidebar.QueueMediation{Repo: owed.Repository, Told: owed.Told}, nil
 }
 
 // republishMediation tells the roster and the queue's subscribers a change

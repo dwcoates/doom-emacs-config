@@ -305,7 +305,8 @@ func TestTheRosterIsToldTheMediationTheQueueWaitsOn(t *testing.T) {
 		wantNil  bool
 		wantTold bool
 	}{
-		{name: "a mediator not made yet draws nothing", wantNil: true},
+		{name: "a queue owing nothing draws nothing", wantNil: true},
+		{name: "a mediation whose mediator is not made yet waits", made: false},
 		{name: "a made mediator not yet told waits", made: true},
 		{name: "a told mediator is checking", made: true, told: true, wantTold: true},
 	}
@@ -316,7 +317,9 @@ func TestTheRosterIsToldTheMediationTheQueueWaitsOn(t *testing.T) {
 			if tt.made {
 				h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
 			}
-			owe(t, h)
+			if !tt.wantNil {
+				owe(t, h)
+			}
 			if tt.told {
 				if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-1"); err != nil {
 					t.Fatal(err)
@@ -327,7 +330,7 @@ func TestTheRosterIsToldTheMediationTheQueueWaitsOn(t *testing.T) {
 			got, err := h.o.rosterMediation(context.Background(), mediationKey(h))
 
 			// Assert
-			if err != nil || (got == nil) != tt.wantNil || (got != nil && (got.Told != tt.wantTold || got.Mediator != "ws-mediator")) {
+			if err != nil || (got == nil) != tt.wantNil || (got != nil && (got.Told != tt.wantTold || got.Repo != theRepository)) {
 				t.Fatalf("rosterMediation = (%+v, %v), want nil %v, told %v", got, err, tt.wantNil, tt.wantTold)
 			}
 		})
@@ -455,11 +458,11 @@ func TestOwedMediation(t *testing.T) {
 	}{
 		{name: "a queue owing none answers none"},
 		{name: "an owed mediation whose mediator is not made names no workspace", owed: true,
-			want: &OwedMediation{Name: "deploy-mediator"}},
+			want: &OwedMediation{Name: "deploy-mediator", Repository: theRepository}},
 		{name: "an owed mediation names its made mediator", owed: true, made: true,
-			want: &OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator"}},
+			want: &OwedMediation{Name: "deploy-mediator", Repository: theRepository, Mediator: "ws-mediator"}},
 		{name: "an owed mediation the mediator was told of is told", owed: true, made: true, told: true,
-			want: &OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator", Told: true}},
+			want: &OwedMediation{Name: "deploy-mediator", Repository: theRepository, Mediator: "ws-mediator", Told: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

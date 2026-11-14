@@ -1075,10 +1075,13 @@ message RosterRepoMergeQueue {
   optional RosterMergeQueueMediation mediation = 12;
 }
 
-// A deploy mediation the queue waits on.
+// A deploy mediation the queue waits on, drawn as a label beside the
+// repository's name (owner ruling, 2026-11-14). Tag 1 (`subject`, the mediator
+// workspace) is RETIRED: the mediator is never drawn as a workspace, nor
+// named.
 message RosterMergeQueueMediation {
-  // The mediator workspace. A click selects it.
-  RosterMergeQueueSubject subject = 1;
+  reserved 1;
+  reserved "subject";
   // REQUIRED. Where the mediation stands.
   oneof standing {
     // The deploy is still rolling out, or the mediator is not yet told.
