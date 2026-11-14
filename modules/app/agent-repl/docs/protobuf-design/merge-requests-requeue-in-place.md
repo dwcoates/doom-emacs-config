@@ -222,3 +222,23 @@ arm and words, or no queue exit.
   the next landing, boot or status read, not at once.
 - `RosterMergeQueueOffQueueCause.text` is always "evicted"; the typed cause
   stays in `MergeQueueStatusOffQueue.cause`.
+
+### A second request beside a request off its queue is refused (2026-11-14)
+
+- Defect: `wsm.requestMerge` refused only a workspace already holding a queue
+  row. A workspace whose merge failed and whose agent then asked for its merge
+  again held two requests: one in line and one off it. The sidebar's requeue
+  of the record then failed as already queued
+  (`daemon.merge.requeue`, 2026-11-14, `merge-glyph-toggles-queue` and
+  `styled-bash-copy-button`).
+- WHAT: `FinishWorkspaceError.merge_off_queue`
+  (`FinishWorkspaceMergeOffQueue`, carrying the
+  `MergeQueueStatusOffQueueCause`). An own-branch request from a workspace
+  whose request stands off its queue is refused. That request is requeued or
+  discarded, never asked for again, matching the async name refusal above.
+- WHERE: `wsm.requestMerge` refuses it in the transaction that would write the
+  row (`wsm.MergeOffQueueError`), which is the guarantee.
+  `merge.orchestrator.Enqueue` asks first, before any held prompt is flushed,
+  so a refused request changes nothing.
+- Layout 134 (additive) ends every record standing beside a queue row of the
+  same workspace. The request in line is the later ask, so it is kept.
