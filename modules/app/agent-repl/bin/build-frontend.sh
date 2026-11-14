@@ -106,7 +106,8 @@
 # lockfile, never by whether it exists: an entry that exists but is broken
 # (emptied through a link, left partial) is repaired in place under a per-entry
 # lock and swapped in atomically. lib-node-store.sh holds that one repair path,
-# shared with ensure-deps.sh; see link_node_modules below.
+# shared with ensure-deps.sh, as is the one link path (node_store_link) and the
+# list of packages it links (NODE_STORE_PACKAGES).
 #
 # STORE COLLECTION. Because a lockfile change keys a NEW entry and nothing ever
 # removed the old one, the store grew without bound: entries for lockfiles no
@@ -188,8 +189,6 @@ else
     WORKTREE_ROOT="$ROOT"
     REL_ROOT=""
 fi
-REL_SHIM="${REL_ROOT:+$REL_ROOT/}agent-shim/claude/shim"
-REL_WEBAPP="${REL_ROOT:+$REL_ROOT/}webapp"
 
 NODE_STORE="$(node_store_root)"
 
@@ -392,54 +391,21 @@ stamp_source_tree() {
     write_source_tree "$2" "$(system_source_id "$1" || true)"
 }
 
-# store_key DIR — echo a short content hash of DIR's dependency manifest, so a
-# lockfile (or, absent one, package.json) change keys a different store entry.
-# The one derivation lives in lib-node-store.sh, shared with ensure-deps.sh.
-store_key() {
-    node_store_key "$1"
-}
-
-# link_node_modules DIR NAME — point DIR/node_modules at the shared store entry
-# for NAME, making sure the entry it points at SATISFIES ITS LOCKFILE.
-#
-#   - A real directory is a deliberate local install and is left exactly as it
-#     is.
-#   - A link into the store has THAT entry checked (`npm ls` inside it) and,
-#     when it exists but is broken — emptied or partial — repaired in place
-#     under the entry's lock (lib-node-store.sh). The link itself is kept.
-#   - Anything else (absent, dangling) is linked to the entry the current
-#     lockfile keys, installing that entry once, for every worktree, when it
-#     is not there yet.
-#
-# A repair that fails fails the build: a checkout linked to a tree that does
-# not satisfy its lockfile would build against missing dependencies.
+# link_node_modules DIR — point DIR/node_modules at its shared store entry
+# (lib-node-store.sh's node_store_link, the one link path, which ensure-deps.sh
+# takes too). A repair or install that fails fails the build.
 link_node_modules() {
-    local dir="$1" name="$2" entry linked
-    if [ -d "$dir/node_modules" ] && [ ! -L "$dir/node_modules" ]; then
-        return 0
-    fi
-    if [ -d "$dir/node_modules" ] && linked="$(node_store_entry_of_link "$dir/node_modules")"; then
-        require_bin npm "install Node.js"
-        if ! node_store_repair "$linked" "$dir"; then
-            echo "[build-frontend] $name: the store entry $linked is broken and could not be repaired" >&2
-            return 1
-        fi
-        return 0
-    fi
-    [ -d "$dir/node_modules" ] && return 0
-    entry="$NODE_STORE/$name-$(store_key "$dir")"
+    local dir="$1" entry
     require_bin npm "install Node.js"
-    if [ ! -e "$entry/node_modules" ]; then
-        echo "[build-frontend] $name: populating shared dep store $entry"
+    if [ ! -e "$dir/node_modules" ] && entry="$(node_store_entry_for "$dir")" && [ ! -e "$entry/node_modules" ]; then
+        echo "[build-frontend] $(node_store_name "$dir"): populating shared dep store $entry"
         # The store just grew: this run is the one that should sweep.
         MINTED_ENTRY=1
     fi
-    if ! node_store_repair "$entry" "$dir"; then
-        echo "[build-frontend] $name: the store entry $entry could not be installed" >&2
+    if ! node_store_link "$dir"; then
+        echo "[build-frontend] $(node_store_name "$dir"): node_modules could not be linked into the store" >&2
         return 1
     fi
-    ln -sfn "$entry/node_modules" "$dir/node_modules"
-    echo "[build-frontend] $name: node_modules -> $entry/node_modules"
 }
 
 # ---------------------------------------------------------------------------
@@ -488,16 +454,15 @@ worktree_roots() {
 # since; that worktree is still using the old entry, so hashing alone would
 # happily delete the deps out from under it.
 protected_keys() {
-    local wt dir name manifest target
+    local wt dir package manifest target
     while read -r wt; do
         [ -n "$wt" ] || continue
-        for rel in "$REL_SHIM:shim" "$REL_WEBAPP:webapp"; do
-            dir="$wt/${rel%%:*}"
-            name="${rel##*:}"
+        for package in "${NODE_STORE_PACKAGES[@]}"; do
+            dir="$wt/${REL_ROOT:+$REL_ROOT/}$package"
             [ -d "$dir" ] || continue
             manifest="$dir/package-lock.json"
             [ -f "$manifest" ] || manifest="$dir/package.json"
-            [ -f "$manifest" ] && echo "$name-$(store_key "$dir")"
+            [ -f "$manifest" ] && basename "$(node_store_entry_for "$dir")"
             # The symlink's real target, whatever the lockfile now says.
             if [ -L "$dir/node_modules" ]; then
                 target="$(readlink "$dir/node_modules" 2>/dev/null || true)"
@@ -577,12 +542,14 @@ gc_store() {
 }
 
 build_deps() {
-    link_node_modules "$SHIM_DIR" shim
-    link_node_modules "$WEBAPP_DIR" webapp
+    local package
+    for package in "${NODE_STORE_PACKAGES[@]}"; do
+        link_node_modules "$ROOT/$package"
+    done
 }
 
 build_shim() {
-    link_node_modules "$SHIM_DIR" shim
+    link_node_modules "$SHIM_DIR"
     if ! source_is_stale shim "$SHIM_ARTIFACT" "$SHIM_TREE_STAMP"; then
         echo "[build-frontend] shim: fresh, skipping"
         return 0
@@ -631,7 +598,7 @@ write_webapp_build_id() {
 }
 
 build_webapp() {
-    link_node_modules "$WEBAPP_DIR" webapp
+    link_node_modules "$WEBAPP_DIR"
     if ! source_is_stale webapp "$WEBAPP_ARTIFACT" "$WEBAPP_TREE_STAMP"; then
         # The build-id describes the ARTIFACT, so a skipped build still owes it:
         # the artifact standing here is the one the webview must address, and a

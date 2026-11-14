@@ -916,8 +916,8 @@
     {
       "id": "perl",
       "kind": "program",
-      "why": "bin/background.sh reads every test run's niceness with it on macOS; macOS ships it at /usr/bin/perl",
-      "profile": "dev",
+      "why": "bin/lib-node-store.sh bounds every npm install of a package with it, and bin/background.sh reads every test run's niceness with it on macOS; macOS ships it at /usr/bin/perl",
+      "profile": "run",
       "platforms": [
         "darwin",
         "linux"

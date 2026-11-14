@@ -92,6 +92,7 @@ make_tree() {
              "$root/proto/gen/go" \
              "$root/proto/helpers/go" \
              "$root/webapp/src" "$root/webapp/dist" \
+             "$root/tree-sitter-tldr" \
              "$root/daemon/cmd/agent-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
@@ -111,6 +112,7 @@ make_tree() {
     echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
+    echo '{"name":"tree-sitter-tldr"}' > "$root/tree-sitter-tldr/package.json"
     echo "module x" > "$root/daemon/go.mod"
     echo "module store" > "$root/agent-shim/shim-store/go.mod"
     echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
@@ -130,9 +132,11 @@ make_tree() {
     # node_modules present, as complete installs (the .package-lock.json a
     # finished `npm ci` writes), so the stubs are never asked to `npm install`.
     mkdir -p "$root/agent-shim/claude/shim/node_modules" \
-             "$root/webapp/node_modules"
+             "$root/webapp/node_modules" \
+             "$root/tree-sitter-tldr/node_modules"
     : > "$root/agent-shim/claude/shim/node_modules/.package-lock.json"
     : > "$root/webapp/node_modules/.package-lock.json"
+    : > "$root/tree-sitter-tldr/node_modules/.package-lock.json"
 
     [ "$nogit" = "nogit" ] || commit_tree "$root"
 }
@@ -393,6 +397,26 @@ t_deps_linked_from_store() {
         pass "deps: absent node_modules is installed once in the store and symlinked"
     else
         fail "deps: node_modules symlinked at store" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_deps_links_every_npm_package() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    rm -rf "$root/agent-shim/claude/shim/node_modules" "$root/webapp/node_modules" "$root/tree-sitter-tldr/node_modules"
+    run_script "$root" deps >/dev/null 2>&1
+    local bad="" dir
+    for dir in agent-shim/claude/shim webapp tree-sitter-tldr; do
+        case "$(readlink "$root/$dir/node_modules")" in
+            "$root/store/$(basename "$dir")-"*/node_modules) ;;
+            *) bad="$bad $dir" ;;
+        esac
+    done
+    if [ -z "$bad" ]; then
+        pass "deps: every npm package's node_modules is linked into the store"
+    else
+        fail "deps: every npm package's node_modules is linked into the store" "unlinked:$bad"
     fi
     rm -rf "$root"
 }
@@ -1465,6 +1489,7 @@ ed_complete_tree() {
 ed_fixture() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/pkg" "$root/store/node_modules"
+    echo '{"name":"pkg"}' > "$root/pkg/package.json"
     ed_complete_tree "$root/store/node_modules"
     cat > "$root/bin/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -1484,9 +1509,17 @@ EOF
     echo "$root"
 }
 
+# ed_run ROOT [PKG] — ensure-deps over ROOT/pkg (or PKG), its shared store
+# ROOT/nstore.
 ed_run() {
     local root="$1"
-    ED_LOG="$root/npm.log" PATH="$root/bin:$PATH" bash "$ENSURE_DEPS" "$root/pkg" 2>"$root/stderr"
+    ED_LOG="$root/npm.log" AGENT_REPL_NODE_STORE="$root/nstore" PATH="$root/bin:$PATH" \
+        bash "$ENSURE_DEPS" "${2:-$root/pkg}" 2>"$root/stderr"
+}
+
+# ed_entry ROOT — the store entry ROOT/pkg's manifest keys.
+ed_entry() {
+    echo "$1/nstore/pkg-$(store_key_of "$1/pkg/package.json")"
 }
 
 t_ensure_deps_leaves_a_satisfied_link_alone() {
@@ -1529,22 +1562,110 @@ t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link() {
     rm -rf "$root"
 }
 
-t_ensure_deps_installs_an_absent_tree() {
-    local root; root="$(ed_fixture)"
+t_ensure_deps_links_an_absent_tree_into_the_store() {
+    local root entry; root="$(ed_fixture)"; entry="$(ed_entry "$root")"
     ed_run "$root"
-    if [ -f "$root/pkg/node_modules/.ok" ] && grep -q '^npm ci' "$root/npm.log"; then
-        pass "ensure-deps: an absent node_modules is installed"
+    if [ -L "$root/pkg/node_modules" ] && [ "$(readlink "$root/pkg/node_modules")" = "$entry/node_modules" ] &&
+           [ -f "$root/pkg/node_modules/.ok" ] && grep -q '^npm ci' "$root/npm.log"; then
+        pass "ensure-deps: an absent node_modules is installed once in the store and linked"
     else
-        fail "ensure-deps: an absent node_modules is installed" "$(cat "$root/npm.log")"
+        fail "ensure-deps: an absent node_modules is installed once in the store and linked" "$(cat "$root/stderr")"
     fi
     rm -rf "$root"
+}
+
+t_ensure_deps_links_a_second_checkout_without_installing() {
+    local root; root="$(ed_fixture)"
+    mkdir -p "$root/second/pkg" && cp "$root/pkg/package.json" "$root/second/pkg/"
+    ed_run "$root"
+    : > "$root/npm.log"
+    ed_run "$root" "$root/second/pkg"
+    if [ -L "$root/second/pkg/node_modules" ] && ! grep -q '^npm ci' "$root/npm.log"; then
+        pass "ensure-deps: a second checkout on the same lockfile links the store entry and installs nothing"
+    else
+        fail "ensure-deps: a second checkout links without installing" "$(cat "$root/npm.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_fails_loudly_when_the_store_install_fails() {
+    local root rc=0; root="$(ed_fixture)"
+    printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\n[ "${1:-}" = ci ] && exit 7\nexit 1\n' > "$root/bin/npm"
+    ed_run "$root" || rc=$?
+    if [ "$rc" -ne 0 ] && [ ! -e "$root/pkg/node_modules" ] && [ ! -L "$root/pkg/node_modules" ] &&
+           grep -q 'could not be installed' "$root/stderr" && grep -q 'could not be linked into the shared store' "$root/stderr"; then
+        pass "ensure-deps: a store install that fails fails loudly and links nothing"
+    else
+        fail "ensure-deps: a failed store install fails loudly" "rc=$rc $(cat "$root/stderr")"
+    fi
+    rm -rf "$root"
+}
+
+# ed_hung_npm ROOT — an npm stub whose install never ends: it reads a fifo
+# nobody writes.
+ed_hung_npm() {
+    mkfifo "$1/never"
+    printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\ncase "${1:-}" in ci) read -r _ < "%s/never" ;; ls) exit 1 ;; esac\n' "$1" > "$1/bin/npm"
+}
+
+t_ensure_deps_kills_an_install_past_its_bound() {
+    local root rc=0; root="$(ed_fixture)"
+    ed_hung_npm "$root"
+    # A private tree an install was cut short in, so the install is private.
+    mkdir -p "$root/pkg/node_modules"
+    AGENT_REPL_NODE_INSTALL_SECS=1 ed_run "$root" || rc=$?
+    if [ "$rc" -eq 124 ] && grep -q "npm ci of $root/pkg ran past its 1s bound" "$root/stderr" &&
+           ! pgrep -f "$root/never" >/dev/null; then
+        pass "ensure-deps: an install past its bound is killed with every process under it, loudly"
+    else
+        fail "ensure-deps: an install past its bound is killed" "rc=$rc $(cat "$root/stderr")"
+    fi
+    rm -rf "$root"
+}
+
+t_a_store_install_past_its_bound_fails_and_links_nothing() {
+    local root rc=0; root="$(ed_fixture)"
+    ed_hung_npm "$root"
+    AGENT_REPL_NODE_INSTALL_SECS=1 ed_run "$root" || rc=$?
+    if [ "$rc" -ne 0 ] && grep -q "ran past its 1s bound" "$root/stderr" && [ ! -L "$root/pkg/node_modules" ] &&
+           [ -z "$(ls -A "$(ed_entry "$root")/.trees" 2>/dev/null)" ]; then
+        pass "store: an install past its bound fails the link and leaves no tree behind"
+    else
+        fail "store: an install past its bound fails the link" "rc=$rc $(cat "$root/stderr")"
+    fi
+    rm -rf "$root"
+}
+
+# Every npm package of the module is in NODE_STORE_PACKAGES and its tests
+# install only through ensure-deps.sh: a package that installs by hand (as
+# tree-sitter-tldr once did with `npm ci --silent`) fails here.
+t_every_npm_package_installs_through_ensure_deps() {
+    local module packages pkg bad="" listed
+    module="$(cd "$THIS_DIR/.." && pwd -P)"
+    # shellcheck source=lib-node-store.sh
+    listed="$(. "$THIS_DIR/lib-node-store.sh" && printf '%s\n' "${NODE_STORE_PACKAGES[@]}" | sort)"
+    packages="$(cd "$module" && find . -name package.json -not -path '*/node_modules/*' -not -path './e2e/*' \
+        | sed 's#^\./##' | xargs -n1 dirname \
+        | while read -r pkg; do jq -e '.scripts.test' "$pkg/package.json" >/dev/null && echo "$pkg"; done | sort)"
+    [ "$packages" = "$listed" ] || bad="$bad [NODE_STORE_PACKAGES is not every npm package with tests: listed=$(echo $listed) tested=$(echo $packages)]"
+    for pkg in $packages; do
+        grep -rqs 'ensure-deps\.sh' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh || bad="$bad [$pkg: no ensure-deps]"
+        if grep -Eqs '(^|[^-])npm[[:space:]]+(ci|install)' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh; then
+            bad="$bad [$pkg: installs by hand]"
+        fi
+    done
+    if [ -z "$bad" ]; then
+        pass "every npm package's tests install through ensure-deps.sh, and NODE_STORE_PACKAGES lists them all"
+    else
+        fail "every npm package installs through ensure-deps.sh" "$bad"
+    fi
 }
 
 t_ensure_deps_installs_nothing_a_lock_holder_already_installed() {
     local root; root="$(ed_fixture)"
     # Arrange: another installer holds the package's install lock, alive.
     mkdir "$root/pkg/.node_modules.lock" && echo "$$" > "$root/pkg/.node_modules.lock/pid"
-    ED_LOG="$root/npm.log" PATH="$root/bin:$PATH" bash "$ENSURE_DEPS" "$root/pkg" 2>"$root/stderr" &
+    ED_LOG="$root/npm.log" AGENT_REPL_NODE_STORE="$root/nstore" PATH="$root/bin:$PATH" bash "$ENSURE_DEPS" "$root/pkg" 2>"$root/stderr" &
     local waiter=$!
     # Act: once the waiter has seen the deps unsatisfied, the holder finishes
     # its install and releases the lock.
@@ -1603,6 +1724,8 @@ t_ensure_deps_releases_the_install_lock_when_the_install_fails() {
 
 t_ensure_deps_fails_when_the_install_fails() {
     local root; root="$(ed_fixture)"
+    # A private tree an install was cut short in, so the install is private.
+    mkdir -p "$root/pkg/node_modules"
     printf '#!/usr/bin/env bash\necho "npm $*" >> "$ED_LOG"\n[ "${1:-}" = ci ] && exit 7\nexit 1\n' > "$root/bin/npm"
     local rc=0
     ed_run "$root" || rc=$?
@@ -1985,6 +2108,7 @@ build_group_core() {
     t_missing_artifact
     t_force
     t_deps_linked_from_store
+    t_deps_links_every_npm_package
     t_deps_store_shared_across_worktrees
 }
 
@@ -2060,7 +2184,12 @@ build_group_dependencies() {
     t_ensure_deps_leaves_a_satisfied_link_alone
     t_ensure_deps_never_empties_the_store_through_a_link
     t_ensure_deps_installs_privately_in_place_of_an_unsatisfied_link
-    t_ensure_deps_installs_an_absent_tree
+    t_ensure_deps_links_an_absent_tree_into_the_store
+    t_ensure_deps_links_a_second_checkout_without_installing
+    t_ensure_deps_fails_loudly_when_the_store_install_fails
+    t_ensure_deps_kills_an_install_past_its_bound
+    t_a_store_install_past_its_bound_fails_and_links_nothing
+    t_every_npm_package_installs_through_ensure_deps
     t_ensure_deps_fails_when_the_install_fails
     t_ensure_deps_installs_nothing_a_lock_holder_already_installed
     t_ensure_deps_reinstalls_a_tree_an_install_was_cut_short_in
