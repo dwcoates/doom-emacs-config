@@ -51,13 +51,7 @@ func describeCreateRefusal(e *agentreplv1.CreateWorkspaceError) (string, error) 
 	case *agentreplv1.CreateWorkspaceError_NameBranchExists:
 		return fmt.Sprintf("the branch %s already exists (at %s), and no workspace the daemon serves holds it; choose another name", r.NameBranchExists.GetBranch(), r.NameBranchExists.GetHead()), nil
 	case *agentreplv1.CreateWorkspaceError_InvalidName:
-		n := r.InvalidName
-		switch n.GetRule().(type) {
-		case *agentreplv1.CreateWorkspaceInvalidName_Slug:
-			return sayInvalidName(n.GetName(), n.GetComponent(), true), nil
-		case *agentreplv1.CreateWorkspaceInvalidName_Prefix:
-			return sayInvalidName(n.GetName(), n.GetComponent(), false), nil
-		}
+		return sayInvalidName(r.InvalidName)
 	case *agentreplv1.CreateWorkspaceError_UnknownContextWorkspace:
 		return fmt.Sprintf("the daemon has no workspace %s for the one-shot's context", r.UnknownContextWorkspace.GetWorkspace().GetDir()), nil
 	case *agentreplv1.CreateWorkspaceError_ParentNotOpen:

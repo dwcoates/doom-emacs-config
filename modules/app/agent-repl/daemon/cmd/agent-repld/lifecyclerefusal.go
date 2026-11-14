@@ -194,26 +194,22 @@ func describeStatusRefusal(ws string, e *agentreplv1.GetWorkspaceStatusError) (s
 	return "", undescribed("the status of "+ws, e)
 }
 
-// describeColdGateRefusal says in one plain sentence why WS's cold gate was
-// not answered. Every AnswerColdGateError arm has its own sentence.
-func describeColdGateRefusal(ws string, e *agentreplv1.AnswerColdGateError) (string, error) {
+// describePassColdGateRefusal says in one plain sentence why WS's cold gate
+// was not passed. Every PassColdGateError arm has its own sentence.
+func describePassColdGateRefusal(ws string, e *agentreplv1.PassColdGateError) (string, error) {
 	switch r := e.GetCause().(type) {
-	case *agentreplv1.AnswerColdGateError_UnknownWorkspace:
+	case *agentreplv1.PassColdGateError_UnknownWorkspace:
 		return sayNoWorkspace(ws), nil
-	case *agentreplv1.AnswerColdGateError_WorkspaceRefMismatch:
+	case *agentreplv1.PassColdGateError_WorkspaceRefMismatch:
 		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
-	case *agentreplv1.AnswerColdGateError_TransferringAway:
-		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "answer the gate again"), nil
-	case *agentreplv1.AnswerColdGateError_NotYetAdopted:
-		return sayNotYetAdopted(ws, "answer the gate again"), nil
-	case *agentreplv1.AnswerColdGateError_NoColdGate:
+	case *agentreplv1.PassColdGateError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "pass the gate again"), nil
+	case *agentreplv1.PassColdGateError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "pass the gate again"), nil
+	case *agentreplv1.PassColdGateError_NoColdGate:
 		return fmt.Sprintf("no cold gate stands on %s", ws), nil
-	case *agentreplv1.AnswerColdGateError_UnservedRemediation:
-		return fmt.Sprintf("the cold gate on %s never offered that answer", ws), nil
-	case *agentreplv1.AnswerColdGateError_NoSession:
-		return fmt.Sprintf("%s has no session to reopen", ws), nil
-	case *agentreplv1.AnswerColdGateError_ReopenFailed:
-		return fmt.Sprintf("the reopen the answer asked for failed, so %s's session did not come back (%s)", ws, r.ReopenFailed.GetDetail()), nil
+	case *agentreplv1.PassColdGateError_UnservedRemediation:
+		return fmt.Sprintf("the cold gate on %s offered no Haiku compaction of all its context, the one way an agent passes a gate", ws), nil
 	}
 	return "", undescribed("the cold gate of "+ws, e)
 }

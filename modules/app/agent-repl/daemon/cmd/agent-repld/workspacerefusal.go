@@ -160,13 +160,7 @@ func describeNameRefusal(ws string, e *agentreplv1.SetWorkspaceNameError) (strin
 	case *agentreplv1.SetWorkspaceNameError_NotYetAdopted:
 		return sayNotYetAdopted(ws, "rename it again"), nil
 	case *agentreplv1.SetWorkspaceNameError_InvalidName:
-		n := r.InvalidName
-		switch n.GetRule().(type) {
-		case *agentreplv1.SetWorkspaceNameInvalidName_Slug:
-			return sayInvalidName(n.GetName(), n.GetComponent(), true), nil
-		case *agentreplv1.SetWorkspaceNameInvalidName_Prefix:
-			return sayInvalidName(n.GetName(), n.GetComponent(), false), nil
-		}
+		return sayInvalidName(r.InvalidName)
 	case *agentreplv1.SetWorkspaceNameError_NameTaken:
 		t := r.NameTaken
 		switch h := t.GetHolder().(type) {
@@ -301,6 +295,8 @@ func describeFindRefusal(e *agentreplv1.FindWorkspacesError) (string, error) {
 		return "the daemon has no workspace by the one -created-by named", nil
 	case *agentreplv1.FindWorkspacesError_UnknownCaller:
 		return "the daemon has no workspace for the calling directory", nil
+	case *agentreplv1.FindWorkspacesError_UnknownLoginWorkspace:
+		return "the daemon has no workspace by the one -login named", nil
 	}
 	return "", undescribed("finding workspaces", e)
 }

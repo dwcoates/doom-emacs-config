@@ -20,7 +20,7 @@ var lifecycleRefusals = func() []describedRefusal {
 	interrupt := &agentreplv1.InterruptError{}
 	compact := &agentreplv1.CompactWorkspaceError{}
 	status := &agentreplv1.GetWorkspaceStatusError{}
-	gate := &agentreplv1.AnswerColdGateError{}
+	gate := &agentreplv1.PassColdGateError{}
 	notify := &agentreplv1.NotifyWorkspaceError{}
 	return []describedRefusal{
 		{name: "open", empty: open, oneof: "cause",
@@ -101,14 +101,12 @@ var lifecycleRefusals = func() []describedRefusal {
 				return describeStatusRefusal("ws", e.(*agentreplv1.GetWorkspaceStatusError))
 			}},
 		{name: "cold gate", empty: gate, oneof: "cause",
-			cases: append(sharedWorkspaceCases(gate, "answer the gate again", theFourWorkspaceArms...),
+			cases: append(sharedWorkspaceCases(gate, "pass the gate again", theFourWorkspaceArms...),
 				refusalCase{name: "no_cold_gate", err: armed(gate, "no_cold_gate", nil), want: "no cold gate stands on ws"},
-				refusalCase{name: "unserved_remediation", err: armed(gate, "unserved_remediation", nil), want: "the cold gate on ws never offered that answer"},
-				refusalCase{name: "no_session", err: armed(gate, "no_session", nil), want: "ws has no session to reopen"},
-				refusalCase{name: "reopen_failed", err: armedWith(gate, "reopen_failed", map[string]any{"detail": "spawn"}),
-					want: "the reopen the answer asked for failed, so ws's session did not come back (spawn)"}),
+				refusalCase{name: "unserved_remediation", err: armed(gate, "unserved_remediation", nil),
+					want: "the cold gate on ws offered no Haiku compaction of all its context, the one way an agent passes a gate"}),
 			describe: func(e proto.Message) (string, error) {
-				return describeColdGateRefusal("ws", e.(*agentreplv1.AnswerColdGateError))
+				return describePassColdGateRefusal("ws", e.(*agentreplv1.PassColdGateError))
 			}},
 		{name: "notify", empty: notify, oneof: "cause",
 			cases: append(sharedWorkspaceCases(notify, "", "unknown_workspace", "workspace_ref_mismatch"),

@@ -135,13 +135,15 @@ func TestDryRunAsksForTheInterceptor(t *testing.T) {
 	}
 }
 
-func TestAnswerTreatsAStoppedRequestAsSuccess(t *testing.T) {
+func TestAnswerDescribedTreatsAStoppedRequestAsSuccess(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
 	c := &cliCall{out: &f.out, errOut: &f.errOut, name: "workspace kill"}
 
 	// Act
-	code := answer[agentreplv1.KillWorkspaceResponse](c, nil, errDryRun)
+	code := answerDescribed(c, (*connect.Response[agentreplv1.KillWorkspaceResponse])(nil), errDryRun, func(msg *agentreplv1.KillWorkspaceResponse) (string, error) {
+		return describeKillRefusal("peer", msg.GetError())
+	})
 
 	// Assert
 	if code != exitSuccess || f.errOut.Len() != 0 {

@@ -86,10 +86,15 @@ func TestTheSharedNestedRefusalSentences(t *testing.T) {
 		{name: "parent closing", say: func() (string, error) {
 			return sayParentNotOpen(&agentreplv1.WorkspaceParentNotOpen{Parent: parent, State: &agentreplv1.WorkspaceParentNotOpen_Closing{Closing: &agentreplv1.WorkspaceParentNotOpenClosing{}}}, "open it again")
 		}, want: "the parent /w/p closes once its queued merge lands, so it takes no open child"},
-		{name: "invalid last component", say: func() (string, error) { return sayInvalidName("a/B", "B", true), nil },
-			want: `the name "a/B" breaks the naming rule: its last component "B" is not a slug`},
-		{name: "invalid prefix", say: func() (string, error) { return sayInvalidName("A/b", "A", false), nil },
-			want: `the name "A/b" breaks the naming rule: its component "A" before the last is not a prefix`},
+		{name: "invalid last component", say: func() (string, error) {
+			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "a/B", Component: "B", Rule: &agentreplv1.CreateWorkspaceInvalidName_Slug{Slug: &agentreplv1.CreateWorkspaceInvalidNameSlug{}}})
+		}, want: `the name "a/B" breaks the naming rule: its last component "B" is not a slug`},
+		{name: "invalid prefix", say: func() (string, error) {
+			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "A/b", Component: "A", Rule: &agentreplv1.CreateWorkspaceInvalidName_Prefix{Prefix: &agentreplv1.CreateWorkspaceInvalidNamePrefix{}}})
+		}, want: `the name "A/b" breaks the naming rule: its component "A" before the last is not a prefix`},
+		{name: "a name in the daemon's namespace", say: func() (string, error) {
+			return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "agent-repl/x", Component: "agent-repl", Rule: &agentreplv1.CreateWorkspaceInvalidName_Reserved{Reserved: &agentreplv1.CreateWorkspaceInvalidNameReserved{}}})
+		}, want: `the name "agent-repl/x" lies in the daemon's own branch namespace "agent-repl", which no workspace's name may use`},
 		{name: "version unexpected, unversioned", say: func() (string, error) {
 			return sayVersionUnexpected(&agentreplv1.MergeWorkspaceVersionIncrementUnexpected{Reason: &agentreplv1.MergeWorkspaceVersionIncrementUnexpected_UnversionedRepository{UnversionedRepository: &agentreplv1.MergeWorkspaceVersionIncrementUnexpectedUnversionedRepository{}}})
 		}, want: "its repository's deploy config versions nothing"},
@@ -141,6 +146,7 @@ func TestASharedNestedSentenceWithNoChoiceIsABug(t *testing.T) {
 		}},
 		{name: "github failure with no cause", say: func() (string, error) { return sayGithubFailure(&agentreplv1.PullRequestGitHubFailure{}) }},
 		{name: "no github failure at all", say: func() (string, error) { return sayGithubFailure(nil) }},
+		{name: "invalid name with no rule", say: func() (string, error) { return sayInvalidName(&agentreplv1.CreateWorkspaceInvalidName{Name: "x"}) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

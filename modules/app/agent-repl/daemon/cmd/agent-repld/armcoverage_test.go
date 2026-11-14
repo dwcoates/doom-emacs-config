@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
 // uncasedArms answers, in declaration order, every arm of EMPTY's oneof ONEOF
@@ -201,6 +202,184 @@ func TestArmedPanicsOnAMisnamedArm(t *testing.T) {
 
 			// Act
 			armed(&agentreplv1.SetWorkspaceOneShotError{}, tt.arm, tt.value)
+		})
+	}
+}
+
+// armVariants answers one message of descriptor MD per way its oneofs can be
+// set, recursively: each arm of each oneof, and each such variant of every
+// singular message field that has oneofs of its own, so a nested choice (a
+// parent's hidden or closed state, GitHub's failure) is enumerated too. A
+// message with no oneof anywhere in it is one empty variant.
+func armVariants(md protoreflect.MessageDescriptor, depth int) []protoreflect.Message {
+	out := []protoreflect.Message{newGenerated(md)}
+	if depth > 4 {
+		return out
+	}
+	fields := md.Fields()
+	for i := range fields.Len() {
+		f := fields.Get(i)
+		if f.Message() == nil || f.IsList() || f.IsMap() || f.ContainingOneof() != nil || !hasOneofs(f.Message(), 0) {
+			continue
+		}
+		var next []protoreflect.Message
+		for _, base := range out {
+			for _, v := range armVariants(f.Message(), depth+1) {
+				m := cloneMessage(base)
+				m.Set(f, protoreflect.ValueOfMessage(v))
+				next = append(next, m)
+			}
+		}
+		out = next
+	}
+	oneofs := md.Oneofs()
+	for i := range oneofs.Len() {
+		o := oneofs.Get(i)
+		var next []protoreflect.Message
+		for _, base := range out {
+			arms := o.Fields()
+			for j := range arms.Len() {
+				arm := arms.Get(j)
+				if arm.Message() == nil {
+					m := cloneMessage(base)
+					m.Set(arm, m.NewField(arm))
+					next = append(next, m)
+					continue
+				}
+				for _, v := range armVariants(arm.Message(), depth+1) {
+					m := cloneMessage(base)
+					m.Set(arm, protoreflect.ValueOfMessage(v))
+					next = append(next, m)
+				}
+			}
+		}
+		out = next
+	}
+	return out
+}
+
+// hasOneofs reports whether MD or a singular message field of it declares a
+// oneof.
+func hasOneofs(md protoreflect.MessageDescriptor, depth int) bool {
+	if md.Oneofs().Len() > 0 {
+		return true
+	}
+	if depth > 4 {
+		return false
+	}
+	fields := md.Fields()
+	for i := range fields.Len() {
+		f := fields.Get(i)
+		if f.Message() != nil && !f.IsList() && !f.IsMap() && hasOneofs(f.Message(), depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+// newGenerated answers a new message of MD, of its generated type, so a
+// describer's type switch sees the arms it names.
+func newGenerated(md protoreflect.MessageDescriptor) protoreflect.Message {
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(md.FullName())
+	if err != nil {
+		panic(fmt.Sprintf("no generated type for %s: %v", md.FullName(), err))
+	}
+	return mt.New()
+}
+
+// cloneMessage answers a deep copy of M.
+func cloneMessage(m protoreflect.Message) protoreflect.Message {
+	return proto.Clone(m.Interface()).ProtoReflect()
+}
+
+func TestArmVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		md   protoreflect.MessageDescriptor
+		want int
+	}{
+		{name: "a message with no oneof is one empty variant", md: (&agentreplv1.SetWorkspaceOneShotClosed{}).ProtoReflect().Descriptor(), want: 1},
+		{name: "each arm of a oneof is a variant", md: (&agentreplv1.SetWorkspaceOneShotError{}).ProtoReflect().Descriptor(), want: 6},
+		{name: "a nested oneof is enumerated within its arm", md: (&agentreplv1.SetWorkspaceHiddenError{}).ProtoReflect().Descriptor(), want: 5 + 3},
+		{name: "a singular field's oneof is enumerated", md: (&agentreplv1.CommentOnPullRequestNotPosted{}).ProtoReflect().Descriptor(), want: 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := armVariants(tt.md, 0)
+
+			// Assert
+			if len(got) != tt.want {
+				t.Fatalf("%d variants, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
+// everyDescribedRefusal is every rpc error the CLI describes, each with its
+// describer.
+func everyDescribedRefusal() []describedRefusal {
+	all := []describedRefusal{
+		{name: "prompt", empty: &agentreplv1.SubmitPromptError{}, oneof: "reason",
+			describe: func(e proto.Message) (string, error) {
+				return describePromptRefusal("ws", e.(*agentreplv1.SubmitPromptError))
+			}},
+		{name: "gather", empty: &agentreplv1.GatherWorkspacesError{}, oneof: "cause",
+			describe: func(e proto.Message) (string, error) {
+				return describeGatherRefusal(e.(*agentreplv1.GatherWorkspacesError))
+			}},
+		{name: "gather status", empty: &agentreplv1.GetGatherStatusError{}, oneof: "cause",
+			describe: func(e proto.Message) (string, error) {
+				return describeGatherStatusRefusal("g", e.(*agentreplv1.GetGatherStatusError))
+			}},
+	}
+	for _, group := range [][]describedRefusal{workspaceRefusals, workspaceSettingRefusals, lifecycleRefusals, createRefusals, queueRefusals, subscriptionRefusals, runtimeRefusals} {
+		all = append(all, group...)
+	}
+	return all
+}
+
+// TestEveryDescribedRpcSaysEveryArm holds every rpc whose answer the CLI
+// describes (each answerDescribed call site's response) to a sentence for
+// every arm of its error, enumerated off the proto itself, nested choices
+// included: an arm added to the proto without a sentence fails here, with
+// no table to remember to extend.
+func TestEveryDescribedRpcSaysEveryArm(t *testing.T) {
+	// Arrange
+	byError := map[protoreflect.FullName]describedRefusal{}
+	for _, d := range everyDescribedRefusal() {
+		byError[d.empty.ProtoReflect().Descriptor().FullName()] = d
+	}
+	responses := describedResponses(t)
+	if len(responses) == 0 {
+		t.Fatal("found no described response to check")
+	}
+	for _, response := range responses {
+		t.Run(response, func(t *testing.T) {
+			mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName("agentrepl.v1." + response))
+			if err != nil {
+				t.Fatalf("no message agentrepl.v1.%s: %v", response, err)
+			}
+			field := mt.Descriptor().Fields().ByName("error")
+			if field == nil || field.Message() == nil {
+				t.Fatalf("%s has no error arm to describe", response)
+			}
+			d, ok := byError[field.Message().FullName()]
+			if !ok {
+				t.Fatalf("%s's describer is not in everyDescribedRefusal", field.Message().FullName())
+			}
+
+			// Act / Assert
+			oneof := field.Message().Oneofs().ByName(protoreflect.Name(d.oneof))
+			if oneof == nil {
+				t.Fatalf("%s declares no oneof %q", field.Message().FullName(), d.oneof)
+			}
+			for _, v := range armVariants(field.Message(), 0) {
+				got, err := d.describe(v.Interface())
+				if err != nil || got == "" {
+					t.Errorf("%v: describe = %q, %v; want a sentence", v.Interface(), got, err)
+				}
+			}
 		})
 	}
 }

@@ -210,11 +210,11 @@ var workspaceSettingRefusals = func() []describedRefusal {
 			}},
 		{name: "name", empty: name, oneof: "cause",
 			cases: append(sharedWorkspaceCases(name, "rename it again", theFourWorkspaceArms...),
-				refusalCase{name: "invalid_name/slug", err: armed(name, "invalid_name", &agentreplv1.SetWorkspaceNameInvalidName{Name: "a/B C", Component: "B C",
-					Rule: &agentreplv1.SetWorkspaceNameInvalidName_Slug{Slug: &agentreplv1.SetWorkspaceNameInvalidNameSlug{}}}),
+				refusalCase{name: "invalid_name/slug", err: armed(name, "invalid_name", &agentreplv1.CreateWorkspaceInvalidName{Name: "a/B C", Component: "B C",
+					Rule: &agentreplv1.CreateWorkspaceInvalidName_Slug{Slug: &agentreplv1.CreateWorkspaceInvalidNameSlug{}}}),
 					want: `the name "a/B C" breaks the naming rule: its last component "B C" is not a slug`},
-				refusalCase{name: "invalid_name/prefix", err: armed(name, "invalid_name", &agentreplv1.SetWorkspaceNameInvalidName{Name: "A A/b", Component: "A A",
-					Rule: &agentreplv1.SetWorkspaceNameInvalidName_Prefix{Prefix: &agentreplv1.SetWorkspaceNameInvalidNamePrefix{}}}),
+				refusalCase{name: "invalid_name/prefix", err: armed(name, "invalid_name", &agentreplv1.CreateWorkspaceInvalidName{Name: "A A/b", Component: "A A",
+					Rule: &agentreplv1.CreateWorkspaceInvalidName_Prefix{Prefix: &agentreplv1.CreateWorkspaceInvalidNamePrefix{}}}),
 					want: `the name "A A/b" breaks the naming rule: its component "A A" before the last is not a prefix`},
 				refusalCase{name: "name_taken/workspace", err: armed(name, "name_taken", &agentreplv1.SetWorkspaceNameTaken{Name: "x/y",
 					Holder: &agentreplv1.SetWorkspaceNameTaken_Workspace{Workspace: &workspacev1.WorkspaceRef{Dir: "/w/y"}}}),
@@ -290,6 +290,7 @@ var workspaceSettingRefusals = func() []describedRefusal {
 				{name: "unknown_repository", err: armed(find, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"},
 				{name: "unknown_creator", err: armed(find, "unknown_creator", nil), want: "the daemon has no workspace by the one -created-by named"},
 				{name: "unknown_caller", err: armed(find, "unknown_caller", nil), want: "the daemon has no workspace for the calling directory"},
+				{name: "unknown_login_workspace", err: armed(find, "unknown_login_workspace", nil), want: "the daemon has no workspace by the one -login named"},
 			},
 			describe: func(e proto.Message) (string, error) {
 				return describeFindRefusal(e.(*agentreplv1.FindWorkspacesError))
