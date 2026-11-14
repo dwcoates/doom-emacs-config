@@ -475,6 +475,37 @@ Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
 agent receives a copy of that response ahead of your prompt, so it knows what
 you are replying to. Sending ends the selection.
 
+## Answering a response's tree by label
+
+A line of your prompt that opens on a label of a response's tree and a dash (`3.1.2 - my answer`) is an entry: it answers that node. The input window draws each entry's label in bold as you type it.
+
+- **An entry answers the response the prompt replies to.**
+  - With a response selected, its entries answer that response's tree, and a label its tree does not hold answers nothing.
+  - With nothing selected, an entry answers the newest response whose tree holds its label.
+  - The feed highlights the node the entry under the cursor answers.
+- **Clicking a node of a response's tree opens an entry answering it.**
+  - The input window opens a line reading `LABEL - ` with the cursor after it.
+  - The entry answers the response you clicked:
+    - A click in an older response selects that response.
+    - A click in the newest final response ends any other selection.
+- **Keys on an entry line in the input window:**
+
+  | Key | Mode | What it does |
+  |---|---|---|
+  | `o` | normal | Opens a line below on the next node's label: the entry's next sibling, else its parent's next sibling, and so on up (`3.2 - ` opens `3.3 - `). |
+  | `O` | normal | Opens a line above on the previous node's label: the entry's previous sibling, else its parent. |
+  | `C-o` | normal and insert | Relabels the entry to the node read after it: its first child, else its next sibling, else the next sibling of its nearest ancestor that has one. The words are kept. |
+  | `C-i` | normal and insert | Relabels the entry to the node before it: its previous sibling, else its parent. The words are kept. |
+  | `M-j` | insert | Opens a line above answering the entry's previous sibling (`3.3 - ` opens `3.2 - `). |
+  | `M-k` | insert | Opens a line below answering the entry's next sibling (`3.3 - ` opens `3.4 - `). |
+  | `C-SPC` | insert | On an empty entry, relabels it to its next sibling, else its parent's next sibling. On a filled one, opens the next sibling below, as `M-k` does. |
+  | `S-RET` | insert | Opens a new line, first clearing the entry when nothing follows its label. |
+
+  - Off an entry line, every one of these keys does what it always did.
+  - A line that `o`, `O`, `M-j` or `M-k` would open on a label already answered that way is not opened again: the cursor goes to the end of that entry instead.
+  - When there is no node that way (the first sibling, the tree's last node), the label stays and the input window says so.
+  - `TAB` is never taken: `C-i` is told apart from it only in the GUI.
+
 ## Asking about words in a final response
 
 Highlight words in a final response (drag across them, or extend a selection with the keyboard) and, while they are highlighted, send a prompt from the input window. The prompt does not start a turn: the agent rewrites that response so it answers your prompt about those words, and the response's own bubble shows the result.
