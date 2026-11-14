@@ -240,7 +240,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		case err := <-power:
 			if err != nil {
 				c.log.Error(opProbe, "the power settings could not be followed; a mode changed outside agent-repl is heard only on the next network change",
-					dlog.Context{"dir": PowerPrefsDir, "cause": err.Error()})
+					dlog.Context{"source": c.cfg.PowerChangesSource(), "cause": err.Error()})
 				power = nil
 				continue
 			}

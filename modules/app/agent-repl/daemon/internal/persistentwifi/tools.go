@@ -141,7 +141,9 @@ type Config struct {
 	// Platform is the GOOS whose Host drives the tools (NewHost).
 	Platform string
 	// Tools are macOS's tools.
-	Tools   Tools
+	Tools Tools
+	// Linux are Linux's tools.
+	Linux   LinuxTools
 	Hotspot string
 	// FreezeApps are the applications the quiet state freezes
 	// (appfreeze.AppsFromEnv). A fake host freezes none unless the variable
@@ -179,7 +181,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 
 // configFromEnv is ConfigFromEnv on the platform goos.
 func configFromEnv(goos string, getenv func(string) string) (Config, error) {
-	cfg := Config{Platform: goos, Tools: DefaultTools()}
+	cfg := Config{Platform: goos}
 	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
 	if err := fakeFact(EnvLid, lid, dir, parseLidLine); err != nil {
 		return Config{}, err
@@ -189,12 +191,17 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.FakeLid, cfg.FakePowerSource = lid, source
-	if dir != "" {
-		if !filepath.IsAbs(dir) {
-			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
-		}
+	switch {
+	case dir != "" && !filepath.IsAbs(dir):
+		return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
+	case goos == "linux" && dir != "":
+		cfg.Linux = LinuxToolsIn(dir)
+	case goos == "linux":
+		cfg.Linux = DefaultLinuxTools()
+	case dir != "":
 		cfg.Tools = ToolsIn(dir)
-	} else {
+	default:
+		cfg.Tools = DefaultTools()
 		// THE WI-FI HELPER IS INSTALLED UNDER HOME (WifiAppIn); a HOME that
 		// is not absolute would name it relative to the daemon's directory.
 		home := getenv("HOME")

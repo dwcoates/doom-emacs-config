@@ -89,6 +89,8 @@ func NewHost(cfg Config, runner Runner, exists func(string) bool, scanDir string
 	switch cfg.Platform {
 	case "darwin":
 		return &darwinHost{runner: runner, tools: cfg.Tools, exists: exists, scanDir: scanDir}, nil
+	case "linux":
+		return newLinuxHost(cfg.Linux, runner)
 	default:
 		return nil, fmt.Errorf("persistentwifi: no host drives persistent wifi on %q (darwin and linux do)", cfg.Platform)
 	}

@@ -197,3 +197,27 @@ func TestConfigFromEnvNamesThisPlatform(t *testing.T) {
 		t.Fatalf("ConfigFromEnv() = (%+v, %v), want the platform %s", got, err, runtime.GOOS)
 	}
 }
+
+func TestConfigFromEnvOnLinux(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want Config
+	}{
+		{name: "the freedesktop tools", env: map[string]string{appfreeze.EnvApps: "none"},
+			want: Config{Platform: "linux", Linux: DefaultLinuxTools()}},
+		{name: "fake tools from one directory", env: map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac"},
+			want: Config{Platform: "linux", Linux: LinuxToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := configFromEnv("linux", func(k string) string { return tt.env[k] })
+
+			// Assert
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("configFromEnv(linux) = (%+v, %v), want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
