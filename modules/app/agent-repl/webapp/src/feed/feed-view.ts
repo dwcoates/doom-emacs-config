@@ -497,6 +497,11 @@ export function createFeedController(
           result.value.breadcrumbs,
           "FeedPageSuccess.breadcrumbs",
         ).crumbs;
+        // THE ROWS THE PAGE'S LOADS RETIRED GO BEFORE ITS ROWS ARE PLACED
+        // (FeedPageSuccess.removed): a turn's earlier-steps row whose steps
+        // this page loaded never stands over them, so its face never asks for
+        // another page. The tail's own removal of it then finds nothing.
+        for (const removed of result.value.removed) remove(removed.value);
         const above = placement === "prepend" ? sampleFirstRow() : null;
         if (placement === "replace") {
           // OWNER RULING (2026-09-18): A REDRAW NEVER UN-TOGGLES, WHATEVER ITS

@@ -447,3 +447,94 @@ func TestReadNewestWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 		t.Fatalf("err = %v, want ErrHistoryUnavailable", err)
 	}
 }
+
+// removedIDs answers the removals PAGE carries.
+func removedIDs(page *frontendv1.FeedPage) []string {
+	var out []string
+	for _, id := range page.GetSuccess().GetRemoved() {
+		out = append(out, id.GetValue())
+	}
+	return out
+}
+
+func TestThePageWhoseLoadClosedAGapCarriesTheGapRowsRemoval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.headsBook()
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	page := h.nextPage("reader-1")
+
+	// Assert.
+	if got, want := strings.Join(removedIDs(page), ","), h.earlierStepsRowID("turn-1"); got != want {
+		t.Fatalf("the page's removals = %v, want the gap row %v", got, want)
+	}
+}
+
+func TestAPageWhoseLoadsClosedNoGapCarriesNoRemoval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.headsBook()
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if got := removedIDs(page); len(got) != 0 {
+		t.Fatalf("the opening's removals = %v, want none", got)
+	}
+}
+
+func TestAWalkToARowCarriesAGapRowsRemovalOnTheOnePageThatClosedIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.headsBook()
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	pages, _, err := h.loadThrough("turn-0")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("LoadThrough: %v", err)
+	}
+	var removed []string
+	for _, page := range pages {
+		removed = append(removed, removedIDs(page)...)
+	}
+	if got, want := strings.Join(removed, ","), h.earlierStepsRowID("turn-1"); got != want {
+		t.Fatalf("the walk's removals = %v, want the gap row %v once", got, want)
+	}
+}
+
+func TestCarryRetired(t *testing.T) {
+	success := func() *frontendv1.FeedPage {
+		return &frontendv1.FeedPage{Result: &frontendv1.FeedPage_Success{Success: &frontendv1.FeedPageSuccess{}}}
+	}
+	tests := []struct {
+		name        string
+		page        *frontendv1.FeedPage
+		retired     []string
+		wantRemoved string
+		wantLeft    int
+	}{
+		{name: "a success carries every retired row, oldest closed first", page: success(), retired: []string{"gap-1", "gap-2"}, wantRemoved: "gap-1,gap-2", wantLeft: 0},
+		{name: "a success with nothing retired carries nothing", page: success(), wantRemoved: "", wantLeft: 0},
+		{name: "an error carries nothing and keeps the rows for the next page", page: &frontendv1.FeedPage{Result: &frontendv1.FeedPage_Error{Error: &frontendv1.FeedPageError{}}}, retired: []string{"gap-1"}, wantRemoved: "", wantLeft: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			step := &pageStep{retired: tc.retired}
+
+			// Act.
+			carryRetired(tc.page, step)
+
+			// Assert.
+			if got := strings.Join(removedIDs(tc.page), ","); got != tc.wantRemoved || len(step.retired) != tc.wantLeft {
+				t.Fatalf("removed = %q with %d left, want %q with %d left", got, len(step.retired), tc.wantRemoved, tc.wantLeft)
+			}
+		})
+	}
+}

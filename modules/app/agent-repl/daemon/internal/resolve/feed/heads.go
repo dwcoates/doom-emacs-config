@@ -154,8 +154,9 @@ func (r *resolver) drawEarlierSteps(s *wsState, head *conversationv1.HistoryEntr
 
 // closeGap removes the earlier-steps row of the turn whose prompt AT is, when
 // one stands: a load met the head as an ordinary entry of an older page, so
-// every step between it and the newer pages is now loaded. Called with r.mu
-// held.
+// every step between it and the newer pages is now loaded. The removal goes
+// to every tail and rides the page the load is read for (load.retired).
+// Called with r.mu held.
 func (r *resolver) closeGap(s *wsState, at *conversationv1.HistoryEntryAt, load *pageLoad) {
 	turn := ids.TurnID(at.GetEntry().GetUserPrompt().GetId().GetValue())
 	if turn == "" {
@@ -167,6 +168,11 @@ func (r *resolver) closeGap(s *wsState, at *conversationv1.HistoryEntryAt, load 
 	}
 	delete(load.book.gaps, turn)
 	removed := r.retire(s, gap.feed, gap.id)
+	// THE PAGE THIS LOAD IS READ FOR CARRIES THE REMOVAL, so the reader drops
+	// the row as it places the page, never after it on the tail.
+	if removed && r.feedKey(s.id, gap.feed) == load.feedKey {
+		load.retired = append(load.retired, gap.id)
+	}
 	r.logger(s.id).Info("daemon.feed.earlier_steps_removed",
 		"the walk loaded the page holding a turn's prompt, so every earlier step of it is loaded and its loading row was removed",
 		dlog.Context{"feed": load.feedKey, "turn": string(turn), "row": gap.id, "stood": removed})

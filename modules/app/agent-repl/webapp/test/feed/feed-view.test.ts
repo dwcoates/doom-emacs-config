@@ -3464,6 +3464,36 @@ describe("createFeedController: the walk control on sight", () => {
     expect(h.calls.getFeedPage).toHaveLength(2);
   });
 
+  it("drops the rows an older page's loads retired before placing its rows", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, {
+          result: { case: "success", value: page([withOrder(responseRow("older"), "a")], { hasMore: true, removed: ["gap"] }) },
+        }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a"), responseRow("gap")], { hasMore: true }), "replace");
+
+    // Act
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Assert
+    expect([host.querySelector('[data-feed-row="gap"]'), host.querySelector('[data-feed-row="older"]') !== null]).toEqual([null, true]);
+  });
+
+  it("places a page whose removals name rows this feed does not hold", () => {
+    // Arrange
+    const { controller, host } = fixture();
+
+    // Act
+    controller.applyPage(page([responseRow("a")], { hasMore: true, removed: ["absent"] }), "replace");
+
+    // Assert
+    expect(host.querySelector('[data-feed-row="a"]')).not.toBeNull();
+  });
+
   it("re-asks the observer once a compaction's re-anchor lands", async () => {
     // Arrange
     const h = harness({

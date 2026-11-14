@@ -168,6 +168,9 @@ type pageLoad struct {
 	outcomes entryOutcomes
 	// heads counts the turn heads whose prompts this load drew (heads.go).
 	heads int
+	// retired are the earlier-steps rows of its feed this load retired
+	// (closeGap), oldest closed first.
+	retired []string
 	// inherited is the generation of a fork's past the page was read from,
 	// nil for a page of the feed's own book: its rows are drawn in the
 	// inherited plane, and its turns' records are its ancestor's.
@@ -333,6 +336,9 @@ func (r *resolver) loadMu(ws ids.WorkspaceID) *sync.Mutex {
 type loaded struct {
 	low  string
 	drew bool
+	// retired are the rows of its feed the load retired (closeGap), which the
+	// page it was read for carries (frontend.v1.FeedPageSuccess.removed).
+	retired []string
 }
 
 // load reads the page PLAN names OFF the resolver's mutex and draws it into
@@ -463,7 +469,7 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 			"heads": len(page.GetHeads()), "heads_drawn": l.heads, "gaps": len(f.book.gaps),
 			"outcomes": l.outcomes.String(),
 		})
-	return loaded{low: l.low, drew: l.drew}, nil
+	return loaded{low: l.low, drew: l.drew, retired: l.retired}, nil
 }
 
 // readPlanned reads the page PLAN names: from the feed's own book, or — for a

@@ -631,6 +631,15 @@ message FeedPageSuccess {
   // open deep inside nesting draws for context, and how a client knows which
   // container this page is OF (the last crumb). EMPTY = the feed's own top.
   FeedBreadcrumbs breadcrumbs = 4;
+  // THE ROWS THE LOADS BEHIND THIS PAGE RETIRED from this feed: a turn's
+  // earlier-steps row, removed because the page holding the turn's prompt was
+  // loaded. A reader drops each one it holds before it places the page's rows,
+  // so the page and the removals it caused arrive together, and a reader never
+  // asks for another page over a row the daemon already removed. Every tail is
+  // told the same removals as rows (FeedRowRemoved), which a reader that
+  // already dropped them finds nothing to do for. EMPTY when the page's loads
+  // retired nothing.
+  repeated FeedId removed = 5;
 }
 
 // The page could not be completed. Drawn where the rows would be, with the

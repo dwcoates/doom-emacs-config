@@ -61,13 +61,18 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 		}
 		r.mu.Unlock()
 		if err != nil || plan == nil {
-			if err == nil && open {
-				r.reportOpeningReads(ws, feed, step.reads)
+			if err == nil {
+				carryRetired(page, &step)
+				if open {
+					r.reportOpeningReads(ws, feed, step.reads)
+				}
 			}
 			return page, token, held, err
 		}
 		step.reads++
-		if _, err := r.load(ctx, *plan); err != nil {
+		got, err := r.load(ctx, *plan)
+		step.retired = append(step.retired, got.retired...)
+		if err != nil {
 			if !errors.Is(err, ErrNoHistorySource) {
 				return nil, nil, nil, err
 			}
@@ -98,6 +103,23 @@ type pageStep struct {
 	unsourced bool
 	// reads counts the store pages the walk read.
 	reads int
+	// retired are the rows the step's loads retired, carried by the next page
+	// it serves (carryRetired).
+	retired []string
+}
+
+// carryRetired puts the rows STEP's loads retired on PAGE, the page it
+// serves, as its removals (frontend.v1.FeedPageSuccess.removed), and clears
+// them so a later page of the same walk does not carry them again.
+func carryRetired(page *frontendv1.FeedPage, step *pageStep) {
+	success := page.GetSuccess()
+	if success == nil || len(step.retired) == 0 {
+		return
+	}
+	for _, id := range step.retired {
+		success.Removed = append(success.Removed, &frontendv1.FeedId{Value: id})
+	}
+	step.retired = nil
 }
 
 // reportOpeningReads says how many store pages an opening read before it was
