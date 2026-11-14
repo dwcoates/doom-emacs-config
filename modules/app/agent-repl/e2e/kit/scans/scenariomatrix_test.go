@@ -31,7 +31,10 @@ package scans
 // hand-written, and this test checks only that a row claiming ANY coverage
 // has a test behind it and a row claiming none has no test behind it. It
 // never upgrades `weak` to `covered` or the reverse. See the document's own
-// "What this check cannot decide" section.
+// "What this check cannot decide" section. What it does hold the
+// `Strongest assertion` cells to is the Go tests they name: each must exist
+// (TestEveryGoTestAMatrixCellNamesExists), so a reader following a name
+// never reaches nothing.
 //
 // REGENERATING. `AGENT_REPL_MATRIX_WRITE=1 go test ./scans -run
 // TestScenarioMatrixMatchesReality`, in e2e/kit, rewrites the derived columns, the derived
@@ -1976,4 +1979,80 @@ func liveStep(t *testing.T) func(string) bool {
 		}
 	}
 	return func(step string) bool { return live[step] }
+}
+
+// goTestNameInCell is a Go test a hand-written cell names: a top-level test,
+// or a scenario's step by its path (Scenario/Xxx).
+var goTestNameInCell = regexp.MustCompile(`\bTest[A-Z]\w*(?:/[A-Z]\w*)?`)
+
+// unresolvedCellTests is every Go test CELL names that EXISTS does not know,
+// in the order the cell names them.
+func unresolvedCellTests(cell string, exists func(name string) bool) []string {
+	var missing []string
+	for _, name := range goTestNameInCell.FindAllString(cell, -1) {
+		if !exists(name) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+// TestEveryGoTestAMatrixCellNamesExists holds table (a)'s hand-written
+// `Strongest assertion` cells to the Go tests they name: a top-level test or a
+// scenario step of the e2e package, or a top-level test of the daemon's
+// integration tier (where a retired step's replacement lives). Cells once
+// named tests consolidated away (TestQuestionFreeText among them), and a
+// reader planning e2e work from them followed a name to nothing.
+func TestEveryGoTestAMatrixCellNamesExists(t *testing.T) {
+	// Arrange
+	doc := parseMatrix(t)
+	pkg := parseE2EPackage(t)
+	live := liveStep(t)
+	integration := filepath.Join(repo.repoDir, "daemon", "integration")
+	exists := func(name string) bool {
+		if _, ok := pkg.tests[name]; ok {
+			return true
+		}
+		if live(name) {
+			return true
+		}
+		return !strings.Contains(name, "/") && goTestExists(integration, name) == nil
+	}
+
+	for _, row := range doc.rows {
+		// Act
+		missing := unresolvedCellTests(row.assertion, exists)
+
+		// Assert
+		if len(missing) > 0 {
+			t.Errorf("%s's row in %s names %v, which no e2e test or step and no daemon integration test is; name the test that proves it now", row.scenario, matrixPath, missing)
+		}
+	}
+}
+
+func TestUnresolvedCellTestsNamesOnlyTheUnknown(t *testing.T) {
+	known := map[string]bool{"TestTurns/SkillInvocation": true, "TestFaults": true}
+	tests := []struct {
+		name string
+		cell string
+		want []string
+	}{
+		{name: "a cell naming known tests resolves", cell: "Go: TestTurns/SkillInvocation asserts it; TestFaults too."},
+		{name: "an unknown top-level test is named", cell: "Go: TestQuestionFreeText asserts the echo.", want: []string{"TestQuestionFreeText"}},
+		{name: "an unknown step path is named whole", cell: "Go: TestTurns/Gone asserts it.", want: []string{"TestTurns/Gone"}},
+		{name: "every unknown name is named, in order", cell: "TestB and TestA", want: []string{"TestB", "TestA"}},
+		{name: "a word merely starting with Test is no test", cell: "Testing shows Tests pass.", want: nil},
+		{name: "a cell naming no test resolves", cell: "Web: cards.layer asserts [data-state] present."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := unresolvedCellTests(tt.cell, func(name string) bool { return known[name] })
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
