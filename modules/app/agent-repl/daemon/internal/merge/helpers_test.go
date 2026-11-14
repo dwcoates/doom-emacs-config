@@ -1484,6 +1484,10 @@ type fakeGit struct {
 	seq func() int
 	at  map[string]int
 
+	// standingErr fails RebaseInProgress; abortErr fails AbortRebase.
+	standingErr error
+	abortErr    error
+
 	defaultBranch string
 	commonDirs    map[string]string
 	// commonDirErr, when set, fails every CommonDir.
@@ -1982,6 +1986,9 @@ func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.abortErr != nil {
+		return g.abortErr
+	}
 	g.leftStanding = false
 	g.rebaseCommands = append(g.rebaseCommands, "abort")
 	return nil
@@ -2021,7 +2028,7 @@ func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.standing || g.leftStanding, nil
+	return g.standing || g.leftStanding, g.standingErr
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {

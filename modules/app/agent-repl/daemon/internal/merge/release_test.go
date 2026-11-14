@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -200,5 +201,35 @@ func TestAnAskedForReleaseIsRecordedAtInfoNotWarn(t *testing.T) {
 	}
 	if r, ok := h.recordFor("info", "daemon.merge.drop_queued"); !ok || r.Message != "released a queued merge" {
 		t.Fatalf("the eviction's release record = %+v (found %v), want it at info", r, ok)
+	}
+}
+
+func TestEvictingAMergeWithARebaseStandingAbortsItAndSaysSo(t *testing.T) {
+	// Arrange: the merge holds inside its gate, and a rebase stands in its
+	// worktree, as one taken out mid conflict resolution leaves it.
+	c := newChain(t)
+	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+	c.h.git.mu.Lock()
+	c.h.git.standing = true
+	c.h.git.mu.Unlock()
+
+	// Act.
+	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	<-done
+
+	// Assert.
+	c.h.git.mu.Lock()
+	aborted := slices.Contains(c.h.git.rebaseCommands, "abort")
+	c.h.git.mu.Unlock()
+	if !aborted {
+		t.Fatal("the rebase standing in the evicted merge's worktree was not aborted")
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.abandoned", text: "abandoned a running merge", context: map[string]string{"rebase_aborted": "true"}}) {
+		t.Fatalf("no record says the rebase was aborted: %+v", c.h.logs.Records())
 	}
 }
