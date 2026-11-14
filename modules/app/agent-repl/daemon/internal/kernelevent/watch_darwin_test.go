@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -86,5 +87,62 @@ func TestOpenErrorNamesWhatTheRefusalMeans(t *testing.T) {
 				t.Fatalf("openError(%s, %v) = %v, want a PathError naming the path", tt.path, tt.err, got)
 			}
 		})
+	}
+}
+
+func TestOpenErrorStatesWhatTheKernelRefusedALinkFor(t *testing.T) {
+	// Arrange: a log link to its target, refused for a reason nothing names.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shim.log.target")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	link := filepath.Join(dir, "shim.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Act
+	err := openError(link, unix.EACCES)
+
+	// Assert
+	if !errors.Is(err, unix.EACCES) {
+		t.Fatalf("openError = %v, want it to still match EACCES", err)
+	}
+	for _, want := range []string{"EACCES(13)", "entry: type=symlink", "link to " + `"` + target + `"`, "target: type=file", "size=1", "ino="} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("openError = %q, want it to state %q", err, want)
+		}
+	}
+}
+
+func TestOpenErrorStatesARefusedPathItCannotStat(t *testing.T) {
+	// Act: the path is gone by the time the refusal is described.
+	err := openError(filepath.Join(t.TempDir(), "gone"), unix.EINVAL)
+
+	// Assert
+	if !errors.Is(err, unix.EINVAL) || !strings.Contains(err.Error(), "EINVAL(22)") || !strings.Contains(err.Error(), "lstat:") {
+		t.Fatalf("openError = %v, want EINVAL named, with the failed lstat", err)
+	}
+}
+
+func TestOpenErrorLeavesTheNamedRefusalsUndescribed(t *testing.T) {
+	// Arrange: a symlink, so EINVAL on it is a link replaced under the open.
+	dir := t.TempDir()
+	link := filepath.Join(dir, "shim.log")
+	if err := os.Symlink(filepath.Join(dir, "target"), link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	for _, refused := range []struct {
+		path string
+		err  error
+	}{{link, unix.EINVAL}, {link, unix.EOPNOTSUPP}, {filepath.Join(dir, "gone"), unix.ENOENT}} {
+		// Act
+		err := openError(refused.path, refused.err)
+
+		// Assert
+		if strings.Contains(err.Error(), "entry:") || strings.Contains(err.Error(), "lstat:") {
+			t.Errorf("openError(%s, %v) = %q, want a named refusal with no description", refused.path, refused.err, err)
+		}
 	}
 }
