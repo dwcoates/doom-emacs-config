@@ -417,6 +417,8 @@ type fakeReuser struct {
 	mode     *reuse.Mode
 	// decideErr fails every decision.
 	decideErr error
+	// recordErr fails Record.
+	recordErr error
 	// recordedUnits are the unit IDs Record was handed.
 	recordedUnits *[]string
 }
@@ -456,6 +458,9 @@ func (f fakeReuser) Unplaced([]reuse.SuiteVerdict) ([]string, error) { return f.
 func (f fakeReuser) Confine(_ reuse.SuiteVerdict, u suites.Units) suites.Units { return u }
 
 func (f fakeReuser) Record(_ reuse.Mode, _ []reuse.SuiteVerdict, units []run.Result) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	for _, u := range units {
 		*f.recordedUnits = append(*f.recordedUnits, u.Spec.ID)
 	}
@@ -1238,6 +1243,65 @@ func TestRunAFailingSelectionEndsFailed(t *testing.T) {
 	evs := eventsOf(t, &stream)
 	if code != 1 || evs[len(evs)-1].GetEnded().GetFailed().GetFailedUnits() != 1 {
 		t.Fatalf("exit = %d, events = %v; want 1 and ended failed", code, evs)
+	}
+}
+
+// THE ENDED EVENT AGREES WITH THE EXIT STATUS: a check after the units that
+// fails the run fails its ended event too, naming the failure. On 2026-11-14
+// every merge gate's full run exited 1 on its placement check while the
+// event stream said ended passed.
+func TestTheRunsEndedEventAgreesWithItsExitStatus(t *testing.T) {
+	cases := []struct {
+		name         string
+		exits        map[string]int
+		unplaced     []string
+		recordErr    error
+		selected     bool
+		wantCode     int
+		wantPassed   bool
+		wantFailed   int32
+		wantFailures []string
+	}{
+		{
+			name: "an unplaced file fails a full run whose units passed", unplaced: []string{"newdir/thing.go"}, wantCode: 1,
+			wantFailures: []string{"placement: 1 file(s) are read by no suite and listed nowhere (newdir/thing.go); place each in testrun/roster"},
+		},
+		{name: "an unplaced file leaves a targeted run passed", unplaced: []string{"newdir/thing.go"}, selected: true, wantPassed: true},
+		{
+			name: "passes that cannot be recorded fail the run", recordErr: errors.New("disk full"), wantCode: 1,
+			wantFailures: []string{"recording this run's passes failed: disk full"},
+		},
+		{name: "a failed unit fails the run with no failure of the run's own", exits: map[string]int{"store": 1}, wantCode: 1, wantFailed: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, tc.exits, nil)
+			h.reuser.unplaced = tc.unplaced
+			h.reuser.recordErr = tc.recordErr
+			var stream bytes.Buffer
+			h.deps.Events = events.New(&stream, h.deps.Log)
+			var argv []string
+			if tc.selected {
+				argv = []string{"--selection", writeSelection(t, harnessSelection())}
+			}
+
+			// Act
+			code := h.run(t, argv...)
+
+			// Assert
+			evs := eventsOf(t, &stream)
+			ended := evs[len(evs)-1].GetEnded()
+			if code != tc.wantCode || (ended.GetPassed() != nil) != tc.wantPassed {
+				t.Fatalf("exit = %d, ended = %v; want exit %d and passed %v", code, ended, tc.wantCode, tc.wantPassed)
+			}
+			if got := ended.GetFailed().GetFailedUnits(); got != tc.wantFailed {
+				t.Errorf("failed units = %d, want %d", got, tc.wantFailed)
+			}
+			if got := ended.GetFailed().GetRunFailures(); !slices.Equal(got, tc.wantFailures) {
+				t.Errorf("run failures = %q, want %q", got, tc.wantFailures)
+			}
+		})
 	}
 }
 
