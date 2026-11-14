@@ -19,11 +19,11 @@ import (
 // ConfigDir: that field records where the session last CAME UP, which is the
 // fact portAcrossAccounts compares against to decide whether the transcript
 // has to move.
+//
+// The precedence itself is account.RootFor's, the one the headless calls
+// about this workspace bill by too.
 func accountRootFor(accounts account.Resolver, dir string, session wsm.Session) string {
-	if session.SelectedConfigDir != "" {
-		return session.SelectedConfigDir
-	}
-	return accounts.ConfigDirFor(dir)
+	return account.RootFor(accounts, dir, session.SelectedConfigDir)
 }
 
 // spawnRootFor answers the account root a BOUNCE spawns its replacement shim
@@ -35,11 +35,8 @@ func accountRootFor(accounts account.Resolver, dir string, session wsm.Session) 
 // replaces the process under a session that is already filed somewhere — so it
 // spawns where that session LIVES, and only a choice moves it.
 func spawnRootFor(accounts account.Resolver, dir string, session wsm.Session) string {
-	if session.SelectedConfigDir != "" {
-		return session.SelectedConfigDir
-	}
-	if session.ConfigDir != "" {
+	if session.SelectedConfigDir == "" && session.ConfigDir != "" {
 		return session.ConfigDir
 	}
-	return accounts.ConfigDirFor(dir)
+	return accountRootFor(accounts, dir, session)
 }
