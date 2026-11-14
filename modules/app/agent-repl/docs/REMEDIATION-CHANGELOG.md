@@ -1453,3 +1453,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): persistent wifi: a hotspot check that cannot name networks stops scanning for that closed lid
 - 2026-11-14 deploy-mediator (landed in queue bypass mode): The worktree reaper judges a landed branch whose landing target was deleted by the default branch, instead of failing every sweep
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): a session that owes a retry after a network failure stays busy until the retry runs, so a deploy's bounce never kills the retry
+- 2026-11-14 deploy-mediator (landed in queue bypass mode): The worktree reaper probes a landing target as any ref, so a landing into origin/master is no longer judged gone
