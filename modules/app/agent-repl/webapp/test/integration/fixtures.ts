@@ -181,7 +181,6 @@ export const userSaid = (text = "hello") =>
 
 /** The origin every webapp submission carries; re-exported so suites assert it. */
 export const WEBAPP_ORIGIN = PromptOrigin.WEBAPP_USER_SENT;
-export const CARD_ACTION_ORIGIN = PromptOrigin.WEBAPP_CARD_ACTION;
 
 // ---------------------------------------------------------------------------
 // Feed rows
@@ -550,9 +549,6 @@ export const planUnit = (state: PlanState): ActivityUnit => ({
           : { case: "planning", value: {} },
   },
 });
-
-export const FINDINGS_VERDICTS = ["confirmed", "plausible"] as const;
-export const FINDINGS_OUTCOMES = ["fixed", "skipped", "noChange"] as const;
 
 /** The first findings row's location: the one that carries a line number. */
 export const FINDINGS_LOCATION = { text: "feed.ts:42", path: "/repo/src/feed.ts", line: 42 } as const;
