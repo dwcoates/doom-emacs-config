@@ -2785,9 +2785,9 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 
 // harness is one orchestrator with every fake it was built from.
 type harness struct {
-	// timings keeps every merge stage the orchestrator timed.
-	timings *fakeTimings
-	t       *testing.T
+	// meter keeps every metric the orchestrator recorded.
+	meter *fakeMeter
+	t     *testing.T
 
 	// asks are the workspace sessions' open asks, as the watcher reports them.
 	asks *Asks
@@ -3202,7 +3202,7 @@ func newHarness(t *testing.T) *harness {
 		briefs:   map[string][]string{},
 		config:   &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}},
 		freeness: &fakeFreeness{},
-		timings:  &fakeTimings{},
+		meter:    &fakeMeter{},
 	}
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
@@ -3253,7 +3253,7 @@ func newHarness(t *testing.T) *harness {
 // deps assembles the dependency set from the harness's fakes.
 func (h *harness) deps() Deps {
 	return Deps{
-		Timings:     h.timings,
+		Meter:       h.meter,
 		QueueEvents: h.events,
 		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
@@ -3954,32 +3954,32 @@ func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID)
 	return f.openChildrenErr
 }
 
-// fakeTimings records every merge stage timing: a step as "step:<name>", a
+// fakeMeter records every metric: a step as "step:<name>", a
 // span as "<span>:<outcome>".
-type fakeTimings struct {
+type fakeMeter struct {
 	mu  sync.Mutex
 	got []string
 }
 
-func (f *fakeTimings) ObserveMergeStep(step string, took time.Duration) {
+func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "step:"+step)
 }
 
-func (f *fakeTimings) ObserveMergeSpan(span, outcome string, took time.Duration) {
+func (f *fakeMeter) ObserveMergeSpan(span, outcome string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, span+":"+outcome)
 }
 
-func (f *fakeTimings) ObserveMediationSpan(span, outcome string, took time.Duration) {
+func (f *fakeMeter) ObserveMediationSpan(span, outcome string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "mediation:"+span+":"+outcome)
 }
 
-func (f *fakeTimings) all() []string {
+func (f *fakeMeter) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.got...)

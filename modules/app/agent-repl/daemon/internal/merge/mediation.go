@@ -69,7 +69,7 @@ func (d MediationDecision) String() string {
 	return fmt.Sprintf("MediationDecision(%d)", int(d))
 }
 
-// The spans of a deploy mediation a Timer records: how long its deploy rolled
+// The spans of a deploy mediation a Meter records: how long its deploy rolled
 // out before its mediator was told (the sidebar's "hot reloading"), how long
 // the mediator then worked on it ("assessing reload"), and both together.
 const (
@@ -105,9 +105,9 @@ const (
 // assessment span when its mediator was told, and its total.
 func (o *orchestrator) observeMediationEnd(m wsm.Mediation, outcome string, at time.Time) {
 	if m.PromptedAt != nil {
-		o.deps.Timings.ObserveMediationSpan(MediationSpanAssessment, outcome, at.Sub(*m.PromptedAt))
+		o.deps.Meter.ObserveMediationSpan(MediationSpanAssessment, outcome, at.Sub(*m.PromptedAt))
 	}
-	o.deps.Timings.ObserveMediationSpan(MediationSpanTotal, outcome, at.Sub(m.OwedAt))
+	o.deps.Meter.ObserveMediationSpan(MediationSpanTotal, outcome, at.Sub(m.OwedAt))
 }
 
 // replacedOutcome is how a mediation a newer deploy replaced ended: redeployed
@@ -391,7 +391,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		o.deps.Log.Global().Info(opMediation, "the mediation was replaced or released before its mediator was told; this round ends", fields)
 		return "", nil
 	}
-	o.deps.Timings.ObserveMediationSpan(MediationSpanRollout, MediationTold, told.Sub(m.OwedAt))
+	o.deps.Meter.ObserveMediationSpan(MediationSpanRollout, MediationTold, told.Sub(m.OwedAt))
 	if _, err := o.submitMediatorPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
 		o.mediationFailed(ctx, fields, "the mediation brief could not be submitted; the queue stays held", err)
 		return "", err

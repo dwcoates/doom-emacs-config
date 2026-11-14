@@ -6,7 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// The merge queue's series (merge.Timer).
+// The merge queue's series (merge.Meter).
 const (
 	// MergeStepName is how long a merge spent on each step before it left it.
 	MergeStepName = "agentrepl_merge_step_seconds"
@@ -43,7 +43,7 @@ func newMerges() merges {
 	}
 }
 
-// ObserveMergeStep implements merge.Timer. The off surface records nothing.
+// ObserveMergeStep implements merge.Meter. The off surface records nothing.
 func (s *Surface) ObserveMergeStep(step string, took time.Duration) {
 	if s == nil {
 		return
@@ -51,7 +51,7 @@ func (s *Surface) ObserveMergeStep(step string, took time.Duration) {
 	s.merges.steps.WithLabelValues(step).Observe(took.Seconds())
 }
 
-// ObserveMergeSpan implements merge.Timer. The off surface records nothing.
+// ObserveMergeSpan implements merge.Meter. The off surface records nothing.
 func (s *Surface) ObserveMergeSpan(span, outcome string, took time.Duration) {
 	if s == nil {
 		return
@@ -59,7 +59,7 @@ func (s *Surface) ObserveMergeSpan(span, outcome string, took time.Duration) {
 	s.merges.spans.WithLabelValues(span, outcome).Observe(took.Seconds())
 }
 
-// ObserveMediationSpan implements merge.Timer. The off surface records
+// ObserveMediationSpan implements merge.Meter. The off surface records
 // nothing.
 func (s *Surface) ObserveMediationSpan(span, outcome string, took time.Duration) {
 	if s == nil {

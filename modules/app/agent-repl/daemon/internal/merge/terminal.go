@@ -77,7 +77,7 @@ func (r *run) timeEnd(out outcome, endedMS int64) {
 	case out.alreadyOn != "":
 		result = OutcomeAlreadyOn
 	}
-	t := r.o.deps.Timings
+	t := r.o.deps.Meter
 	if r.startedMS > 0 {
 		t.ObserveMergeSpan(SpanQueued, result, time.Duration(r.startedMS-r.queuedMS)*time.Millisecond)
 		t.ObserveMergeSpan(SpanRunning, result, time.Duration(endedMS-r.startedMS)*time.Millisecond)

@@ -733,17 +733,16 @@ type Deps struct {
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time
-	// Timings records how long each merge stage took (runtimemetrics.Surface):
-	// every step a run leaves, the pick, and each merge's queued, running and
-	// total spans. REQUIRED.
-	Timings Timer
+	// Meter records the merge queue's metrics (runtimemetrics.Surface): how
+	// long each merge stage took, and the deploy mediations. REQUIRED.
+	Meter Meter
 	// Log is the orchestrator's logger.
 	Log dlog.Surfaces
 }
 
-// Timer records merge stage durations. Each call is an atomic add and never
-// blocks the merge.
-type Timer interface {
+// Meter records the merge queue's metrics. Each call is an atomic add and
+// never blocks the merge.
+type Meter interface {
 	// ObserveMergeStep records how long a run spent on one step before it
 	// left it, by the step's footer.MergeStep spelling.
 	ObserveMergeStep(step string, took time.Duration)
@@ -756,7 +755,7 @@ type Timer interface {
 	ObserveMediationSpan(span, outcome string, took time.Duration)
 }
 
-// The merge spans a Timer records.
+// The merge spans a Meter records.
 const (
 	// SpanPick is the branch's preparation from the request's instruction.
 	SpanPick = "pick"

@@ -61,7 +61,7 @@ func (r *run) timeStep(step footer.MergeStep, began, now time.Time) {
 	if step == "" || began.IsZero() {
 		return
 	}
-	r.o.deps.Timings.ObserveMergeStep(string(step), now.Sub(began))
+	r.o.deps.Meter.ObserveMergeStep(string(step), now.Sub(began))
 }
 
 // updateFacts changes the standing step's facts in place -- a rebase's

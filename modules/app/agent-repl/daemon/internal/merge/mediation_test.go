@@ -655,7 +655,7 @@ func TestEveryMediationEndIsTimedOnceByHowItEnded(t *testing.T) {
 
 			// Assert
 			var got []string
-			for _, timed := range h.timings.all() {
+			for _, timed := range h.meter.all() {
 				if strings.HasPrefix(timed, "mediation:") {
 					got = append(got, timed)
 				}

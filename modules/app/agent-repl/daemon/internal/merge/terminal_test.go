@@ -2289,7 +2289,7 @@ func TestALandedMergeTimesEveryStepItLeftAndItsSpans(t *testing.T) {
 	}
 
 	// Assert: steps were timed as the run left them, and the spans landed.
-	got := h.timings.all()
+	got := h.meter.all()
 	steps := 0
 	for _, g := range got {
 		if strings.HasPrefix(g, "step:") {
@@ -2318,8 +2318,8 @@ func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
 	_ = h.admit(context.Background())
 
 	// Assert.
-	if !slices.Contains(h.timings.all(), "total:failed") {
-		t.Fatalf("timings = %v, want the total span as failed", h.timings.all())
+	if !slices.Contains(h.meter.all(), "total:failed") {
+		t.Fatalf("timings = %v, want the total span as failed", h.meter.all())
 	}
 }
 
