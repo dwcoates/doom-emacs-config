@@ -52,6 +52,10 @@ type Deps struct {
 	Log dlog.Logger
 	// Lid hears the built-in display's lid (WatchLid). REQUIRED.
 	Lid LidWatcher
+	// PowerSource hears whether the machine draws AC or battery power
+	// (WatchPowerSource): the quiet state's Low Power Mode follows it.
+	// REQUIRED.
+	PowerSource PowerSourceWatcher
 	// LegacyLidDims is a lid dim an earlier build kept, undone once at boot.
 	// REQUIRED.
 	LegacyLidDims LegacyLidDims
@@ -83,6 +87,7 @@ type Controller struct {
 	onChange    func(*agentreplv1.PersistentWifiState)
 	log         dlog.Logger
 	lidWatch    LidWatcher
+	sourceWatch PowerSourceWatcher
 	legacy      LegacyLidDims
 	freezer     AppFreezer
 	views       *viewquiet.Gate
@@ -130,6 +135,9 @@ type Controller struct {
 	failoverCancel context.CancelFunc
 	// lid is the lid as last heard (WatchLid), or why it is not heard.
 	lid lidFact
+	// powerSource is the power source as last heard (WatchPowerSource), or
+	// why it is not heard.
+	powerSource powerSourceFact
 	// quiet is whether the lid-closed quiet state stands (quiet.go);
 	// displayAsleep whether its display sleep took, and displayCause why the
 	// last sleep failed. What is frozen is the freezer's (Frozen).
@@ -149,6 +157,8 @@ func New(d Deps) (*Controller, error) {
 		return nil, fmt.Errorf("persistentwifi: a logger is required")
 	case d.Lid == nil:
 		return nil, fmt.Errorf("persistentwifi: a lid watcher is required")
+	case d.PowerSource == nil:
+		return nil, fmt.Errorf("persistentwifi: a power source watcher is required")
 	case d.LegacyLidDims == nil:
 		return nil, fmt.Errorf("persistentwifi: the store of an earlier build's lid dim is required")
 	case d.Freezer == nil:
@@ -170,7 +180,7 @@ func New(d Deps) (*Controller, error) {
 		cfg: d.Config, runner: d.Runner, clock: d.Clock,
 		network: d.NetworkChanged, power: d.PowerChanges,
 		exists: exists, onChange: d.OnChange, log: d.Log,
-		lidWatch: d.Lid, legacy: d.LegacyLidDims, freezer: d.Freezer,
+		lidWatch: d.Lid, sourceWatch: d.PowerSource, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
 		scanDir: d.ScanDir, scanBound: scanBound,
 	}
@@ -505,5 +515,46 @@ func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
 		return
 	}
 	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, "lid_"+lid.name())
+	c.republishLocked()
+}
+
+const opPowerSource = "daemon.persistentwifi.power_source"
+
+// WatchPowerSource hears the power source until ctx ends, holding the quiet
+// state's Low Power Mode to each change (holdEnergyLocked). A watch that
+// cannot subscribe, or that ends while ctx is live, leaves the power source
+// UNWATCHED: recorded at ERROR, with no polling in its place. It answers nil
+// either way, since the rest of the daemon runs on without it.
+func (c *Controller) WatchPowerSource(ctx context.Context) error {
+	err := c.sourceWatch.Watch(ctx, func(p PowerSource) { c.powerSourceHeard(ctx, heardPowerSource(p)) })
+	// A POWER SOURCE NOBODY HEARS IS NEVER A BATTERY: Low Power Mode is
+	// never held behind a watch that ended (energyWanted).
+	c.watchEnded(ctx, err, opPowerSource, "the power source is not heard; a closed lid no longer sets Low Power Mode on battery until the daemon restarts",
+		"power_source_unwatched", func(cause string) string {
+			was := c.powerSource.name()
+			c.powerSource = powerSourceFact{kind: powerSourceUnwatched, cause: cause}
+			return was
+		})
+	return nil
+}
+
+// powerSourceHeard takes one power source: the one read at subscription or
+// a change. Like lidHeard it reads the standing afresh, then holds the quiet
+// state, whose energy step follows the power source; a source already held
+// is taken again idempotently.
+func (c *Controller) powerSourceHeard(ctx context.Context, source powerSourceFact) {
+	asked := c.clock.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if source != c.powerSource {
+		c.log.Info(opPowerSource, "the power source changed", dlog.Context{"was": c.powerSource.name(), "power_source": source.name(),
+			"lid": c.lid.name(), "quiet": c.quiet, "lock_wait_ms": c.clock.Now().Sub(asked).Milliseconds()})
+	}
+	c.powerSource = source
+	rd := c.readLocked(ctx)
+	if ctx.Err() != nil {
+		return
+	}
+	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, "power_source_"+source.name())
 	c.republishLocked()
 }

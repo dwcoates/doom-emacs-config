@@ -596,6 +596,23 @@ func (l *FakeLid) Close() { l.set("closed") }
 // Open opens the lid.
 func (l *FakeLid) Open() { l.set("open") }
 
+// FakePowerSource is the daemon's power source on a fake host
+// (AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE), a stateSocket.
+type FakePowerSource struct{ *stateSocket }
+
+// NewFakePowerSource serves the power source's socket in dir with the
+// machine on AC power.
+func NewFakePowerSource(t testing.TB, dir string) *FakePowerSource {
+	t.Helper()
+	return &FakePowerSource{newStateSocket(t, dir, "power", "ac")}
+}
+
+// Unplug moves the machine onto its battery.
+func (p *FakePowerSource) Unplug() { p.set("battery") }
+
+// PlugIn moves the machine onto AC power.
+func (p *FakePowerSource) PlugIn() { p.set("ac") }
+
 // NewFakeHostTools writes the persistent-wifi host tools into dir
 // (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR) and answers it. The machine they
 // describe starts joined to FakeHostNetwork with the mode off.

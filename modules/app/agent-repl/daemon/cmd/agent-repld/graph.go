@@ -1109,6 +1109,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		OnChange:       topbarResolver.SetPersistentWifi,
 		Log:            log,
 		Lid:            wifiConfig.Lid(),
+		PowerSource:    wifiConfig.PowerSource(),
 		LegacyLidDims:  p.DB,
 		Freezer:        freezer,
 		Views:          viewGate,
@@ -1770,6 +1771,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
 		{Name: "persistent_wifi_lid", Run: wifi.WatchLid},
+		{Name: "persistent_wifi_power_source", Run: wifi.WatchPowerSource},
 		{Name: "network_watch", Run: networkWatch.Run},
 		{Name: "network_changed", Run: func(ctx context.Context) error {
 			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)

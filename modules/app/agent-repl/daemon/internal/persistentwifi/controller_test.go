@@ -29,12 +29,19 @@ type harness struct {
 	exists    map[string]bool
 	dims      *fakeLidDims
 	lid       *fakeLidWatcher
+	source    *fakePowerSourceWatcher
 	freezer   *fakeFreezer
 	views     *viewquiet.Gate
 	// viewMoves are the quiet gate's transitions, as a follower heard them.
 	viewMoves []bool
 	telemetry *fakeQuietTelemetry
 	energy    *fakeEnergyStore
+}
+
+// withPowerSource stands the power source as heard, without a read.
+func (h *harness) withPowerSource(kind powerSourceKind) *harness {
+	h.c.powerSource = powerSourceFact{kind: kind}
+	return h
 }
 
 // withLid stands the lid as heard, without a read: the state an Update then
@@ -58,14 +65,14 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	h := &harness{
 		r: r, log: dlog.NewTestLogger(), clock: newFakeClock(), energy: &fakeEnergyStore{r: r},
 		exists: map[string]bool{tools.WifiUtil: true, tools.Brightness: true},
-		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(),
+		dims:   &fakeLidDims{}, lid: newFakeLidWatcher(), source: newFakePowerSourceWatcher(),
 		freezer: &fakeFreezer{}, views: viewquiet.New(nil), telemetry: &fakeQuietTelemetry{},
 		published: make(chan *agentreplv1.PersistentWifiState, 256),
 		network:   newFakeNetwork(), power: newFakePower(),
 	}
 	c, err := New(Deps{
 		Config: Config{Tools: tools, Hotspot: configured},
-		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LegacyLidDims: h.dims,
+		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, PowerSource: h.source, LegacyLidDims: h.dims,
 		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
 		Exists:  func(p string) bool { return h.exists[p] },
@@ -79,6 +86,9 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		t.Fatalf("New() error = %v", err)
 	}
 	h.c = c
+	// THE MACHINE IS ON BATTERY POWER unless a test says otherwise
+	// (withPowerSource, hearSource): a closed lid then sets Low Power Mode.
+	h.c.powerSource = powerSourceFact{kind: powerSourceBattery}
 	h.views.Follow("test", func(q bool) { h.viewMoves = append(h.viewMoves, q) })
 	h.r.on(argPreferred, answer{out: preferred(hotspot)})
 	// A loss's record reads the radio's power; it is powered unless a test
@@ -122,7 +132,7 @@ func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
 func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
 		return Deps{Config: Config{Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
-			Lid: newFakeLidWatcher(), LegacyLidDims: &fakeLidDims{},
+			Lid: newFakeLidWatcher(), PowerSource: newFakePowerSourceWatcher(), LegacyLidDims: &fakeLidDims{},
 			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil), EnergyRecord: &fakeEnergyStore{},
 			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}
 	}
@@ -134,6 +144,7 @@ func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 		{name: "no clock", break_: func(d *Deps) { d.Clock = nil }},
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
 		{name: "no lid watcher", break_: func(d *Deps) { d.Lid = nil }},
+		{name: "no power source watcher", break_: func(d *Deps) { d.PowerSource = nil }},
 		{name: "no store for an earlier build's lid dim", break_: func(d *Deps) { d.LegacyLidDims = nil }},
 		{name: "no application freezer", break_: func(d *Deps) { d.Freezer = nil }},
 		{name: "no view gate", break_: func(d *Deps) { d.Views = nil }},

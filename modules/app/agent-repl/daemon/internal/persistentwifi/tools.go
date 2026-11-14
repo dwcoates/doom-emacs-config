@@ -136,6 +136,9 @@ type Config struct {
 	// FakeLid is EnvLid's value; empty is the operating system's lid
 	// (SystemLid).
 	FakeLid string
+	// FakePowerSource is EnvPowerSource's value; empty is the operating
+	// system's power source (SystemPowerSource).
+	FakePowerSource string
 }
 
 // Lid is the LidWatcher the config names.
@@ -143,19 +146,30 @@ func (c Config) Lid() LidWatcher {
 	return pickWatcher(c.FakeLid, parseLidLine, SystemLid, FixedLid, SocketLid)
 }
 
+// PowerSource is the PowerSourceWatcher the config names.
+func (c Config) PowerSource() PowerSourceWatcher {
+	return pickWatcher(c.FakePowerSource, parsePowerSourceLine, SystemPowerSource, FixedPowerSource, SocketPowerSource)
+}
+
 // ConfigFromEnv resolves the Config from getenv. A tools dir that is set but
 // not absolute is REFUSED: a relative dir resolves against whatever the
 // daemon's working directory happens to be, which is never what was meant.
-// Fake tools without a fake lid are REFUSED too (fakeFact): the real lid
-// would then move a display the fake tools only pretend to set, and a fake
-// lid is likewise refused without fake tools.
+// Fake tools without a fake lid and a fake power source are REFUSED too
+// (fakeFact): the real lid would then move a display the fake tools only
+// pretend to set, and the real power source an energy mode they only pretend
+// to write; a fake lid or power source is likewise refused without fake
+// tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	cfg := Config{Tools: DefaultTools()}
 	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
 	if err := fakeFact(EnvLid, lid, dir, parseLidLine); err != nil {
 		return Config{}, err
 	}
-	cfg.FakeLid = lid
+	source := getenv(EnvPowerSource)
+	if err := fakeFact(EnvPowerSource, source, dir, parsePowerSourceLine); err != nil {
+		return Config{}, err
+	}
+	cfg.FakeLid, cfg.FakePowerSource = lid, source
 	if dir != "" {
 		if !filepath.IsAbs(dir) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)

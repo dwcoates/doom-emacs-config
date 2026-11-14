@@ -11,9 +11,10 @@
 //      decides whether the change happened at all;
 //   3. the energy mode — moved only where the change moves the lid-closed
 //      quiet state: put in Low Power Mode when turning on with the lid closed
-//      (the mode in use recorded first), restored to that recorded mode when
-//      turning off leaves the quiet state, and left alone otherwise, so the
-//      user's own choice with the lid open is never overridden;
+//      on battery power (the mode in use recorded first), restored to that
+//      recorded mode when turning off leaves the quiet state, and left alone
+//      otherwise, so the user's own choice with the lid open or on AC power
+//      is never overridden;
 //   4. the display — LAST, and only where the change moves it: put to sleep
 //      when turning on with the lid closed, woken when turning off with the
 //      display asleep for the quiet state (UpdatePersistentWifiModeDisplay).
@@ -902,13 +903,16 @@ func (x *UpdatePersistentWifiModeHotspotFailed) GetDetail() string {
 // power adapter alike. THE ARM IS THE OUTCOME, and none of these is a failure
 // of the request.
 //
-// THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE, NOT THE SWITCH (owner
-// ruling, 2026-11-13). Entering the quiet state records the energy mode in
-// use and puts the machine in Low Power Mode; leaving it restores the
-// recorded mode. So the step acts only where the change itself moves the
-// quiet state: turning on with the lid closed lowers, turning off while the
-// quiet state stands restores, and every other change leaves the energy mode
-// as it is.
+// THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE AND THE POWER SOURCE,
+// NOT THE SWITCH (owner rulings, 2026-11-13 and 2026-11-14). While the quiet
+// state stands on battery power, the energy mode in use is recorded and the
+// machine put in Low Power Mode; on AC power, or once the quiet state is
+// left, the recorded mode is restored. So the step acts only where the
+// change itself moves the quiet state: turning on with the lid closed on
+// battery lowers, turning off while the quiet state stands restores, and
+// every other change leaves the energy mode as it is. A change of power
+// source under the closed lid moves the energy mode on its own, outside any
+// request.
 type UpdatePersistentWifiModeEnergyMode struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Outcome:
@@ -1000,8 +1004,8 @@ type isUpdatePersistentWifiModeEnergyMode_Outcome interface {
 }
 
 type UpdatePersistentWifiModeEnergyMode_LowPower struct {
-	// Turning on with the lid closed: the energy mode in use was recorded
-	// and the machine was put in Low Power Mode.
+	// Turning on with the lid closed on battery power: the energy mode in
+	// use was recorded and the machine was put in Low Power Mode.
 	LowPower *UpdatePersistentWifiModeEnergyModeLowPower `protobuf:"bytes,1,opt,name=low_power,json=lowPower,proto3,oneof"`
 }
 
@@ -1019,8 +1023,9 @@ type UpdatePersistentWifiModeEnergyMode_Restored struct {
 }
 
 type UpdatePersistentWifiModeEnergyMode_Unchanged struct {
-	// Nothing to move: turning on with the lid open (or not heard), turning
-	// off with no quiet state standing, the machine already in the mode due,
+	// Nothing to move: turning on with the lid open (or not heard) or on AC
+	// power (or the power source not yet heard), turning off with no quiet
+	// state standing, the machine already in the mode due,
 	// a machine that names no energy mode, or no mode recorded to restore.
 	Unchanged *UpdatePersistentWifiModeEnergyModeUnchanged `protobuf:"bytes,5,opt,name=unchanged,proto3,oneof"`
 }

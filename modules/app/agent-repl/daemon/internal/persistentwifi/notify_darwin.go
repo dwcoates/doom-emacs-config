@@ -10,8 +10,10 @@ package persistentwifi
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOMessage.h>
 #include <IOKit/pwr_mgt/IOPM.h>
+#include <IOKit/ps/IOPowerSources.h>
 
 extern void persistentwifiLidHeard(uintptr_t handle, int closed);
+extern void persistentwifiPowerSourceHeard(uintptr_t handle, int battery);
 
 // THE RUN LOOP every heard fact's subscription runs on (watchOnRunLoop): the
 // loop of the thread that opened it, and a stop source that ends it. It is C
@@ -109,6 +111,72 @@ static void lid_close(lid_watch *w) {
 	IOObjectRelease(w->notifier);
 	IONotificationPortDestroy(w->port);
 	IOObjectRelease(w->root);
+}
+
+// ps_watch is the power source's subscription: IOKit's limited-power
+// notification, which fires only when the machine moves between unlimited
+// power (AC) and limited power (a battery or a UPS), never on a battery's
+// percentage. It is C memory, because the notification holds a pointer to
+// it for the subscription's life. failed is set when a change could not be
+// read, which ends the watch.
+typedef struct {
+	CFRunLoopSourceRef source;
+	uintptr_t handle;
+	int failed;
+} ps_watch;
+
+// ps_read answers the power source providing power: 0 AC, 1 a battery or a
+// UPS, -1 when IOKit names none.
+static int ps_read(void) {
+	CFTypeRef snapshot = IOPSCopyPowerSourcesInfo();
+	if (snapshot == NULL) {
+		return -1;
+	}
+	CFStringRef type = IOPSGetProvidingPowerSourceType(snapshot);
+	int state = -1;
+	if (type != NULL) {
+		state = CFStringCompare(type, CFSTR(kIOPMACPowerKey), 0) == kCFCompareEqualTo ? 0 : 1;
+	}
+	CFRelease(snapshot);
+	return state;
+}
+
+// ps_changed takes a change. A change that cannot be read stops the watch's
+// run loop with failed set, so the watch ends with its cause rather than
+// hearing nothing.
+static void ps_changed(void *context) {
+	ps_watch *w = context;
+	int state = ps_read();
+	if (state < 0) {
+		w->failed = 1;
+		CFRunLoopStop(CFRunLoopGetCurrent());
+		return;
+	}
+	persistentwifiPowerSourceHeard(w->handle, state);
+}
+
+// ps_open subscribes, THEN reads the power source into *battery (1 battery,
+// 0 AC). Answers 0, -1 when the notification could not be made, or -2 when
+// the power source could not be read.
+static int ps_open(ps_watch *w, uintptr_t handle, int *battery) {
+	w->handle = handle;
+	w->source = IOPSCreateLimitedPowerNotification(ps_changed, w);
+	if (w->source == NULL) {
+		return -1;
+	}
+	CFRunLoopAddSource(CFRunLoopGetCurrent(), w->source, kCFRunLoopDefaultMode);
+	*battery = ps_read();
+	if (*battery < 0) {
+		CFRunLoopSourceInvalidate(w->source);
+		CFRelease(w->source);
+		return -2;
+	}
+	return 0;
+}
+
+static void ps_close(ps_watch *w) {
+	CFRunLoopSourceInvalidate(w->source);
+	CFRelease(w->source);
 }
 */
 import "C"
@@ -208,3 +276,36 @@ func lidOpenFailure(rc int) string {
 	return fmt.Sprintf("IOServiceAddInterestNotification answered 0x%x", rc)
 }
 
+// SystemPowerSource is the operating system's power source: IOKit's
+// limited-power notification (IOPSCreateLimitedPowerNotification), read by
+// IOPSDrawingUnlimitedPower, heard on a run loop of its own thread
+// (watchOnRunLoop).
+func SystemPowerSource() PowerSourceWatcher { return systemPowerSource{} }
+
+type systemPowerSource struct{}
+
+func (systemPowerSource) Watch(ctx context.Context, heard func(PowerSource)) error {
+	handle := cgo.NewHandle(heard)
+	defer handle.Delete()
+	w := (*C.ps_watch)(C.calloc(1, C.size_t(unsafe.Sizeof(C.ps_watch{}))))
+	defer C.free(unsafe.Pointer(w))
+	err := watchOnRunLoop(ctx, "the power source", func() (func(), error) {
+		var battery C.int
+		switch C.ps_open(w, C.uintptr_t(handle), &battery) {
+		case 0:
+		case -1:
+			return nil, errors.New("subscribe to the power source's IOKit notifications: IOPSCreateLimitedPowerNotification answered nothing")
+		default:
+			return nil, errPowerSourceUnread
+		}
+		heard(powerSourceOf(battery != 0))
+		return func() { C.ps_close(w) }, nil
+	})
+	if err != nil && w.failed != 0 {
+		return errPowerSourceUnread
+	}
+	return err
+}
+
+// errPowerSourceUnread is a power source IOKit named none for.
+var errPowerSourceUnread = errors.New("read the power source: IOPSGetProvidingPowerSourceType named no power source")
