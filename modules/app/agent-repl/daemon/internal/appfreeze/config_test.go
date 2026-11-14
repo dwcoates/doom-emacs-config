@@ -61,3 +61,15 @@ func TestTheDefaultListLeavesDockerAlone(t *testing.T) {
 		}
 	}
 }
+
+func TestAppsFromEnvOnLinuxFreezesNothingUnlessNamed(t *testing.T) {
+	// Act
+	unset, unsetErr := appsFromEnv("linux", func(string) string { return "" })
+	named, namedErr := appsFromEnv("linux", func(string) string { return "slack,chrome" })
+	_, editorErr := appsFromEnv("linux", func(string) string { return "emacs" })
+
+	// Assert
+	if unsetErr != nil || unset != nil || namedErr != nil || !reflect.DeepEqual(named, []string{"slack", "chrome"}) || editorErr == nil {
+		t.Fatalf("unset %v (%v), named %v (%v), editor %v", unset, unsetErr, named, namedErr, editorErr)
+	}
+}

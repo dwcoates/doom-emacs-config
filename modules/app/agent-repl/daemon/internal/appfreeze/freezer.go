@@ -480,7 +480,7 @@ func (f *Freezer) plan(table []Process) (Record, []string, []refusal) {
 		var pids, guarded []int
 		running := false
 		for _, proc := range table {
-			if !bundleOf(proc.Path, app) {
+			if !appOf(proc.Path, app) {
 				continue
 			}
 			running = true

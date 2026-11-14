@@ -17,6 +17,8 @@ import (
 	"agent-repld/internal/recordlock"
 	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/scriptrunner"
+
+	"agentrepl/logging/procstat"
 )
 
 // thawGuardVerb runs the thaw guard (appfreeze.RunGuard): the process each
@@ -48,6 +50,15 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 	dir := freezeDir(stateDir)
 	signal := appfreeze.Signaler(appfreeze.KillSignaler)
 	spawns := appfreeze.SpawnSource(appfreeze.KernelSpawns)
+	processes := appfreeze.PSLister(runner, cfg.Tools.Ps)
+	if cfg.Platform == "linux" {
+		// LINUX NAMES A PROCESS'S EXECUTABLE ONLY IN /proc, and reports no
+		// process start to an unprivileged follower, so an application
+		// started while the lid is closed is frozen only by a later read.
+		processes = appfreeze.ProcLister(procstat.New("/proc"))
+		spawns = idleSpawns
+		log.Info("daemon.appfreeze", "Linux reports no process start to an unprivileged follower; an application started while the lid is closed is frozen only by a later read", dlog.Context{"apps": cfg.FreezeApps})
+	}
 	if cfg.FakeLid != "" {
 		signal = refuseSignal
 		spawns = idleSpawns
@@ -70,7 +81,7 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 	}
 	freezer, err := appfreeze.New(appfreeze.Deps{
 		Apps:      cfg.FreezeApps,
-		Processes: appfreeze.PSLister(runner, cfg.Tools.Ps),
+		Processes: processes,
 		Signal:    signal,
 		Store:     appfreeze.FileStore{Path: filepath.Join(dir, appfreeze.RecordFile)},
 		Spawns:    spawns,

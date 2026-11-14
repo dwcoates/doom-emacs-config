@@ -3,8 +3,13 @@ package appfreeze
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
+
+	"agentrepl/logging/procstat"
 )
 
 type fakeRunner struct {
@@ -54,5 +59,69 @@ func TestPSLister(t *testing.T) {
 				t.Fatalf("PSLister() = %v, %v; want %v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestExecutableOf(t *testing.T) {
+	tests := []struct {
+		path, app string
+		want      bool
+	}{
+		{path: "/usr/bin/slack", app: "slack", want: true},
+		{path: "/opt/google/chrome/chrome_crashpad_handler", app: "chrome", want: true},
+		{path: "/usr/bin/slack-desktop-helper", app: "slack", want: false},
+		{path: "", app: "slack", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path+"/"+tt.app, func(t *testing.T) {
+			// Act
+			got := executableOf(tt.path, tt.app)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("executableOf(%q, %q) = %v, want %v", tt.path, tt.app, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppMatcherFor(t *testing.T) {
+	// Act
+	mac, linux := appMatcherFor("darwin"), appMatcherFor("linux")
+
+	// Assert
+	if !mac("/Applications/Slack.app/Contents/MacOS/Slack", "Slack") || mac("/usr/bin/slack", "slack") ||
+		!linux("/usr/bin/slack", "slack") || linux("/Applications/Slack.app/Contents/MacOS/Slack", "slack") {
+		t.Fatal("each platform must match its own naming of an application, and only it")
+	}
+}
+
+func TestProcListerReadsTheTreeAndHidesAnotherUsersExecutable(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(root, "stat"), "btime 1\n")
+	write(filepath.Join(root, "10", "stat"), "10 (slack) S 1 10 10 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 5 0 0")
+	if err := os.Symlink("/usr/bin/slack", filepath.Join(root, "10", "exe")); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(root, "11", "stat"), "11 (systemd) S 0 11 11 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 5 0 0")
+
+	// Act
+	got, err := ProcLister(procstat.New(root))(context.Background())
+
+	// Assert
+	sort.Slice(got, func(i, j int) bool { return got[i].PID < got[j].PID })
+	want := []Process{{PID: 10, PPID: 1, Path: "/usr/bin/slack"}, {PID: 11, PPID: 0, Path: ""}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("ProcLister() = (%+v, %v), want %+v", got, err, want)
 	}
 }
