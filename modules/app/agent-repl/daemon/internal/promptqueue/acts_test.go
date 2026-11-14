@@ -55,6 +55,35 @@ func TestSubmitSessionActSetsThePermissionModeWhenThePathIsClear(t *testing.T) {
 	}
 }
 
+func TestSubmitSessionActSetsThePermissionModeDuringARunningTurn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetPermissionMode, Value: "plan"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	// Assert
+	if len(h.sender.modes) != 1 || h.sender.modes[0] != "plan" {
+		t.Fatalf("modes = %v, want the mode applied at once beside the running turn", h.sender.modes)
+	}
+}
+
+func TestSubmitSessionActSetsThePermissionModeUnderAStandingHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
+	h.lease(wsm.HolderDrain, wsm.PolicyHold)
+	// Act
+	if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetPermissionMode, Value: "plan"}); err != nil {
+		t.Fatalf("SubmitSessionAct: %v", err)
+	}
+	// Assert
+	if len(h.sender.modes) != 1 || h.sender.modes[0] != "plan" {
+		t.Fatalf("modes = %v, want the mode applied at once under the hold", h.sender.modes)
+	}
+}
+
 func TestSubmitSessionActQueuesBehindARunningTurn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
