@@ -215,7 +215,7 @@ would otherwise reason out, and hands it facts, not questions:
 6. Metrics and the catalog.
 7. Retire the standing mediator and its brief.
 
-## Implementation stages (contract landed 2026-11-14)
+## Implementation stages (contract landed 2026-11-14; every stage built 2026-11-14, deviations in the contract record's implementation notes)
 
 The contract is in `docs/protobuf-design/2026-11-14-deploy-intake.md` and
 the `.proto` files. Every stage below lands with the rest, on one branch:

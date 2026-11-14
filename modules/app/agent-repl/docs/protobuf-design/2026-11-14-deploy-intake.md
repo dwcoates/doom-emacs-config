@@ -150,6 +150,49 @@ embeds another's new messages.
   each step durably (gate, land, deploy, owed check) so a handover resumes
   it.
 
+### 6. `shim.v1.SessionProfileAgentLanding.deploy_intake` replaces `mediating`
+
+- WHAT: tag 3 (`mediating`, `SessionProfileAgentLandingMediating`) is
+  retired; `deploy_intake` (tag 4, `SessionProfileAgentLandingDeployIntake`)
+  lands a chain's intake under `metaprompt-deploy-intake.md`.
+- WHY (a gap the implementation found): the intake needs its own system
+  prompt (it changes nothing, states problems, decides through the queue),
+  and the retired `metaprompt-deploy-mediator.md` was the mediating
+  landing's. A new tag rather than a renamed one, because the meaning
+  changed: a shim of the old build reading tag 3 would land the intake as
+  the mediator that fixed deploys itself.
+- The remediation workspace keeps the ordinary `through_queue` landing: its
+  dispatch brief says its finish lands directly, and `workspace finished`
+  answers `landing_directly`, so no second system prompt is needed.
+- The landing is chosen by the workspace's recorded role
+  (`wsm.MediationRoleOf`), which the daemon records before the intake's
+  first prompt brings its session up: a workspace made with no initial
+  prompt starts no shim.
+- CONSEQUENCES: `agent-shim/claude/shim/src/metaprompt.ts` maps
+  `deploy_intake` to `metaprompt-deploy-intake.md`;
+  `daemon/internal/workspace/sessions.go` (`sessionProfile`) chooses it.
+
+## Implementation notes (2026-11-14)
+
+- `conversation.v1.PromptOrigin.PROMPT_ORIGIN_DEPLOY_MEDIATION` (52) carries
+  every deploy check brief: the intake's per deploy and the remediation's
+  dispatch. A gate failure resumes the remediation as
+  `PROMPT_ORIGIN_MERGE_TEST_REPAIR`, as a queue merge's fixing turn is.
+- The plan's "past the fixing bound, the intake is told and escalates" and
+  "a remediation that closes without landing hands the hold back to the
+  intake, which escalates" are carried out by the daemon escalating for the
+  intake (`merge.escalateForIntake`): the queue is then never held by a
+  remediation that cannot land, whatever the intake's turn does.
+- The intake's facts sort the window's warnings and errors NEW or SEEN
+  BEFORE (`merge.SortFindings`). The `--doctor` faults and the latency
+  comparison are left to the intake's brief as commands to read; sorting
+  them NEW or SEEN BEFORE needs the doctor's and the metrics' state before
+  the deploy, which nothing keeps yet (`org/todo.md`).
+- A check's round is claimed per check (queue and deploy instant), never per
+  queue, so a round still awaiting the turn of a check a newer deploy
+  replaced never keeps the newer check untold (2026-11-14, a 19:03 deploy's
+  check left untold for twenty minutes).
+
 ## Sweep
 
 - `repoconfig.v1.DeployMediator` was removed with its field. No other
