@@ -88,3 +88,20 @@ embeds another's new messages.
 - CONSEQUENCES: the CLI verb `agentrepl merge-queue mediation` gains a
   `dispatch` form; `daemon/internal/merge/mediation.go` (`DecideMediation`)
   gains the dispatch path and both refusals.
+
+### 3. `agentrepl.v1.MergeQueueStatusAdvanceMediating` says the stage
+
+- WHAT: `mediator` (1) and `name` (2) are retired. A required `stage` oneof
+  of `rolling_out` (optional intake), `assessing` (intake) and `fixing`
+  (remediation, intake), plus `remediations_in_a_row`.
+- WHY: there is no one mediator any more; whoever reads the status (an
+  agent, `merge-queue status`) needs which stage the check is in and which
+  workspace is at work, which is also what the sidebar label draws.
+- The `mediating` arm's comment now says merges keep their work in flight:
+  the owner ruled that only the head waits while the intake assesses, and
+  new speculative work stops only once a fix is dispatched
+  (`daemon/internal/merge/standing.go:21`, `queueHeld`, is split to do so).
+- `remediations_in_a_row` sits on the encompassing message, not an arm,
+  because it holds in every stage of a chain.
+- CONSEQUENCES: the CLI's status printer and its tests read the stage;
+  `daemon/internal/merge` resolves the stage from the chain's store record.
