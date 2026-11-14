@@ -17448,6 +17448,40 @@ describe("the vendor-error retry", () => {
     await drainTurns();
   }
 
+  /** An unforced KillSession's refusal as cause and the activity it names, or the outcome when not refused. */
+  async function unforcedKill(h: Harness): Promise<{ cause: string; activity: string }> {
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    if (failure === undefined) return { cause: response.result.case ?? "unset", activity: "" };
+    const live = failure.cause.case === "live" ? failure.cause.value : undefined;
+    return { cause: failure.cause.case ?? "unset", activity: live?.vendorActivity?.state.case ?? "unset" };
+  }
+
+  it("stays live while a retry is owed, so nothing that waits for freeness takes the shim", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Assert
+    expect(await unforcedKill(h)).toEqual({ cause: "live", activity: "busy" });
+  });
+
+  it("stays live when the vendor states idle while a retry is owed", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Act
+    await h.engine.onSdkMessage({ type: "system", subtype: "session_state_changed", state: "idle", uuid: "state-idle", session_id: "s" } as never);
+
+    // Assert
+    expect(await unforcedKill(h)).toEqual({ cause: "live", activity: "busy" });
+  });
+
   it("schedules a retry after a turn that failed on a retryable API failure", async () => {
     // Arrange
     const h = harness();
