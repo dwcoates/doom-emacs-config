@@ -17,6 +17,7 @@ import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
 
 import { testTempDir } from "../temp-dir.js";
+import { Waiters } from "../waiters.js";
 import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 import { cwdSlug, projectDir } from "../../src/engine/vendor-paths.js";
 
@@ -341,27 +342,10 @@ export function messageArrivals(messages: readonly SdkMessage[]): {
   ended: (how: string) => void;
   until: UntilMessage;
 } {
-  const waiters = new Set<{ accept: (message: SdkMessage) => boolean; resolve: () => void; reject: (err: Error) => void; what: string }>();
-  let end: string | undefined;
+  const waiters = new Waiters("the drive");
   return {
-    arrived: (message) => {
-      for (const waiter of [...waiters]) {
-        if (!waiter.accept(message)) continue;
-        waiters.delete(waiter);
-        waiter.resolve();
-      }
-    },
-    ended: (how) => {
-      end = how;
-      for (const waiter of [...waiters]) {
-        waiters.delete(waiter);
-        waiter.reject(new Error(`waiting for ${waiter.what}: the drive ended first (${how})`));
-      }
-    },
-    until: (what, accept) => {
-      if (messages.some(accept)) return Promise.resolve();
-      if (end !== undefined) return Promise.reject(new Error(`waiting for ${what}: the drive ended first (${end})`));
-      return new Promise((resolve, reject) => waiters.add({ accept, resolve, reject, what }));
-    },
+    arrived: () => waiters.notify(),
+    ended: (how) => waiters.end(how),
+    until: (what, accept) => waiters.until(what, () => messages.some(accept)),
   };
 }

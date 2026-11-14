@@ -8,21 +8,20 @@
  * agent-repl-tests skill, "Synchronization: events, never time").
  */
 import type { SessionPushes } from "../src/engine/pushes.js";
+import { Waiters } from "./waiters.js";
 
-type Waiter = () => void;
+/** The waits on each hub whose push has been wrapped. */
+const waiting = new WeakMap<SessionPushes, Waiters>();
 
-/** The waiters of each hub whose push has been wrapped. */
-const waiting = new WeakMap<SessionPushes, Set<Waiter>>();
-
-function waitersOf(pushes: SessionPushes): Set<Waiter> {
+function waitersOf(pushes: SessionPushes): Waiters {
   const known = waiting.get(pushes);
   if (known !== undefined) return known;
-  const waiters = new Set<Waiter>();
+  const waiters = new Waiters("the hub");
   waiting.set(pushes, waiters);
   const push = pushes.push.bind(pushes);
   pushes.push = (update) => {
     const accepted = push(update);
-    for (const waiter of [...waiters]) waiter();
+    waiters.notify();
     return accepted;
   };
   return waiters;
@@ -38,27 +37,7 @@ export function untilPushed(
   check: () => boolean,
 ): Promise<void> {
   if (check()) return Promise.resolve();
-  const waiters = waitersOf(pushes);
-  return new Promise<void>((resolve, reject) => {
-    const waiter = (): void => {
-      let held: boolean;
-      try {
-        held = check();
-      } catch (err) {
-        // A check that THROWS is a broken test, not a state not reached yet:
-        // the wait ends on it at once.
-        waiters.delete(waiter);
-        reject(
-          new Error(`waiting for ${what}: the check threw: ${String(err)}`),
-        );
-        return;
-      }
-      if (!held) return;
-      waiters.delete(waiter);
-      resolve();
-    };
-    waiters.add(waiter);
-  });
+  return waitersOf(pushes).until(what, check);
 }
 
 /**
