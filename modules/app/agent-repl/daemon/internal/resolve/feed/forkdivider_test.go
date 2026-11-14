@@ -1,12 +1,14 @@
 package feed
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/feedid"
+	"agent-repld/internal/ids"
 )
 
 // forkPointRow is the fork-point divider's row id for the generation whose
@@ -40,8 +42,68 @@ func TestAForksWalkDrawsAGreyDividerBetweenInheritedAndOwnRows(t *testing.T) {
 	if _, ok := separation.GetKind().(*frontendv1.FeedSessionSeparation_Forked); !ok {
 		t.Fatalf("divider kind = %T, want forked", separation.GetKind())
 	}
-	if separation.GetLabel().GetText() != forkPointLabel || separation.GetTokens() != nil {
-		t.Fatalf("divider = %v, want the fork-point label and no token figure", separation)
+	if separation.GetTokens() != nil {
+		t.Fatalf("divider = %v, want no token figure", separation)
+	}
+}
+
+func TestAForkPointDividerNamesTheWorkspaceItWasInheritedFrom(t *testing.T) {
+	// Arrange
+	h, _ := forkHarness(t, 10, bookTurn(mainAgent(), "own-1", "own-answer"),
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "parent-1", "parent-answer")})
+	h.names = map[ids.WorkspaceID]string{"ws-parent": "parent-workspace"}
+
+	// Act
+	rows := h.walkRows("reader-1")
+
+	// Assert
+	got := rowIDs(rows)
+	separation := rows[slices.Index(got, forkPointRow(parentBook.GetValue()))].GetSeparation()
+	source := separation.GetForked().GetSource()
+	if separation.GetLabel().GetText() != "forked parent-workspace"+forkPointLabelTail ||
+		source.GetName() != "parent-workspace" || source.GetWorkspace().GetId() != "ws-parent" {
+		t.Fatalf("divider = %v, want the label and source naming ws-parent as parent-workspace", separation)
+	}
+}
+
+func TestAForkPointDividerWithAnUnreadableSourceNameDrawsUnnamedAndRecordsAnError(t *testing.T) {
+	// Arrange
+	h, _ := forkHarness(t, 10, bookTurn(mainAgent(), "own-1", "own-answer"),
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "parent-1", "parent-answer")})
+	h.nameErr = errors.New("name store down")
+
+	// Act
+	rows := h.walkRows("reader-1")
+
+	// Assert
+	got := rowIDs(rows)
+	separation := rows[slices.Index(got, forkPointRow(parentBook.GetValue()))].GetSeparation()
+	if separation.GetLabel().GetText() != "forked"+forkPointLabelTail || separation.GetForked().GetSource() != nil {
+		t.Fatalf("divider = %v, want an unnamed label and no source", separation)
+	}
+	if !h.hasRecordWith("error", "daemon.feed.fork_source_name_failed", "other_workspace", "ws-parent") {
+		t.Fatalf("records = %v, want the failed fork-source name read recorded at error", h.records())
+	}
+}
+
+func TestAForkPointDividerWithAnEmptySourceNameDrawsUnnamedAndRecordsAnError(t *testing.T) {
+	// Arrange
+	h, _ := forkHarness(t, 10, bookTurn(mainAgent(), "own-1", "own-answer"),
+		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
+		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "parent-1", "parent-answer")})
+	h.names = map[ids.WorkspaceID]string{"ws-parent": ""}
+
+	// Act
+	rows := h.walkRows("reader-1")
+
+	// Assert
+	got := rowIDs(rows)
+	separation := rows[slices.Index(got, forkPointRow(parentBook.GetValue()))].GetSeparation()
+	if separation.GetForked().GetSource() != nil ||
+		!h.hasRecordWith("error", "daemon.feed.fork_source_name_empty", "other_workspace", "ws-parent") {
+		t.Fatalf("divider = %v, want no source and the empty name recorded at error", separation)
 	}
 }
 

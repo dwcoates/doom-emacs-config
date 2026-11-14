@@ -5,6 +5,12 @@ import {
   FeedSessionSeparationSchema,
   type FeedSessionSeparation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import {
+  SelectWorkspaceResponseSchema,
+  type SelectWorkspaceRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { scriptedAppContext } from "../../rpc/app-context.js";
+import { RecordingSink, WORKSPACE } from "../harness.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   SEPARATION_ARMS,
@@ -121,6 +127,70 @@ describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
     const forked = drawFeedSessionSeparation(separation({ case: "forked", value: {} }), ctxFor());
     expect(forked.querySelector(".sep-rule")?.className).toContain("sep-accent-forked");
     expect(forked.querySelector(".sep-compacted, .sep-worktree")).toBeNull();
+  });
+
+  describe("the fork point's source workspace", () => {
+    const named = (name: string, label = `forked ${name} context above`) =>
+      separation(
+        { case: "forked", value: { source: { name, workspace: { id: "ws-parent", dir: "/p" } } } },
+        { label },
+      );
+
+    it("draws the source's name as its own element inside the label", () => {
+      const el = drawFeedSessionSeparation(named("parent-ws"), ctxFor());
+      expect(el.querySelector(".sep-label .sep-fork-source")?.textContent).toBe("parent-ws");
+    });
+
+    it("keeps the words around the name, so the label reads whole", () => {
+      const el = drawFeedSessionSeparation(named("parent-ws"), ctxFor());
+      expect(el.querySelector(".sep-label")?.textContent).toBe("forked parent-ws context above");
+    });
+
+    it("makes the name a button, so a click can select the workspace", () => {
+      const el = drawFeedSessionSeparation(named("parent-ws"), ctxFor());
+      expect(el.querySelector(".sep-fork-source")?.getAttribute("role")).toBe("button");
+    });
+
+    it("selects the source workspace on a click", async () => {
+      const calls: SelectWorkspaceRequest[] = [];
+      const ctx = scriptedAppContext(
+        {
+          selectWorkspace: (req) => {
+            calls.push(req);
+            return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+          },
+        },
+        { workspace: WORKSPACE, failures: new RecordingSink() },
+      );
+      const el = drawFeedSessionSeparation(named("parent-ws"), rowContext(ctx, userPromptRow("x", "y")));
+
+      (el.querySelector(".sep-fork-source") as HTMLElement).click();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls.map((c) => c.workspace?.id)).toEqual(["ws-parent"]);
+    });
+
+    it("draws the label as plain text when the daemon named no source", () => {
+      const el = drawFeedSessionSeparation(
+        separation({ case: "forked", value: {} }, { label: "forked context above" }),
+        ctxFor(),
+      );
+      expect(el.querySelector(".sep-fork-source")).toBeNull();
+    });
+
+    it("refuses a label that does not hold the source's name", () => {
+      expect(() => drawFeedSessionSeparation(named("parent-ws", "forked context above"), ctxFor())).toThrow(
+        MalformedView,
+      );
+    });
+
+    it("refuses a source with no workspace to select", () => {
+      const msg = separation(
+        { case: "forked", value: { source: { name: "parent-ws" } } },
+        { label: "forked parent-ws context above" },
+      );
+      expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
+    });
   });
 
   it("refuses an unset arm", () => {
