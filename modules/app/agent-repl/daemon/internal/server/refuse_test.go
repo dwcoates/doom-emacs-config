@@ -8,7 +8,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,6 +27,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -1113,21 +1113,15 @@ func TestAnUnlandedHandoverRefusalNamesItsSuccessorInItsMetadata(t *testing.T) {
 // and answerResolution are the renderings that know both.
 func TestNoResolutionFailureIsRenderedThroughFail(t *testing.T) {
 	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
-	}
+	files := sourcescan.Production(t)
 	fset := token.NewFileSet()
 	var sites, offenders []string
 
 	// Act.
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		parsed, parseErr := parser.ParseFile(fset, file, nil, 0)
+		parsed, parseErr := parser.ParseFile(fset, file.Name, file.Source, 0)
 		if parseErr != nil {
-			t.Fatalf("parse %s: %v", file, parseErr)
+			t.Fatalf("parse %s: %v", file.Name, parseErr)
 		}
 		ast.Inspect(parsed, func(n ast.Node) bool {
 			block, ok := n.(*ast.BlockStmt)
