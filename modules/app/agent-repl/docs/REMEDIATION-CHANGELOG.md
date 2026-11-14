@@ -1464,3 +1464,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Queue bypass mode gates every landing on the full suite, run on the branch rebased onto the main branch
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): The persistent-wifi helper's sources are placed in the test roster, so every merge queue gate's placement check passes again
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Queue bypass mode keeps the merge queue running: a holder pauses it only to land a change, and taking the mode no longer stops it
+- 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Every noticed deficiency is fixed at once, and the todo table holds only fixes waiting on a decision or on other work
