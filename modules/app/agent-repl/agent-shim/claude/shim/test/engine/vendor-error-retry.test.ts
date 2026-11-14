@@ -1107,6 +1107,25 @@ describe("networkRecovered", () => {
   });
 });
 
+describe("the network latch", () => {
+  it("leaves an unreachable failure and a fault opened over an interval in the same latched state", async () => {
+    // Arrange: one chain latched by its unreachable failure, one moved onto
+    // the latch when the fault opened over its interval.
+    const unreachable = harness();
+    unreachable.faultStanding = true;
+    const moved = harness();
+    await failedTurnEnds(moved, "turn-1");
+
+    // Act
+    await failedTurnEnds(unreachable, "turn-1", UNREACHABLE);
+    moved.retry.networkFaultOpened();
+
+    // Assert
+    const latched = (h: Harness): unknown[] => [h.scheduler.pendingTimeout(), h.retry.awaitingNetwork(), h.states.at(-1)];
+    expect(latched(moved)).toEqual(latched(unreachable));
+  });
+});
+
 describe("networkFaultOpened", () => {
   it("cancels the timer of a vendor-error retry waiting out its interval", async () => {
     // Arrange

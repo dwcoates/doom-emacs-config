@@ -406,15 +406,11 @@ export class VendorErrorRetry {
       );
       return;
     }
-    this.cancelTimer();
-    chain.mode = { kind: "network" };
-    this.latched = true;
+    this.latch(chain);
     LOGGER.info(
       { chain: chain.id, attempt: chain.retries + 1 },
       "the network fault opened while a retry waited out its interval; agent-repl makes it when the fault resolves, on no timer",
     );
-    this.pending = { awaitingNetwork: true, attempt: chain.retries + 1, status: chain.status };
-    this.deps.state(this.pending);
   }
 
   /**
@@ -468,13 +464,23 @@ export class VendorErrorRetry {
       );
       this.deps.network.standFault(failure.status);
     }
-    this.cancelTimer();
-    chain.mode = { kind: "network" };
-    this.latched = true;
+    this.latch(chain);
     LOGGER.info(
       { chain: chain.id, turn_id: failure.turnId ?? "", retries: chain.retries, unreachable: failure.unreachable, fault_stood: faultStands },
       "the turn failed because the API could not be reached; agent-repl retries it when the network fault resolves, on no timer",
     );
+  }
+
+  /**
+   * Put CHAIN's next retry on the network latch: no timer, the network mode,
+   * and the schedule stated as waiting for the network. The one way a retry
+   * comes to wait for the network, whether its turn failed unreachable or the
+   * fault opened while it waited out its interval.
+   */
+  private latch(chain: Chain): void {
+    this.cancelTimer();
+    chain.mode = { kind: "network" };
+    this.latched = true;
     this.pending = { awaitingNetwork: true, attempt: chain.retries + 1, status: chain.status };
     this.deps.state(this.pending);
   }
