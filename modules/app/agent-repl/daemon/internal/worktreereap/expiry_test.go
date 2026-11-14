@@ -281,6 +281,43 @@ func TestPreservedRef(t *testing.T) {
 	}
 }
 
+func TestRefInstantIsTheUTCSecond(t *testing.T) {
+	// Arrange: an instant in a zone an hour ahead of UTC.
+	at := time.Date(2026, 10, 7, 9, 30, 15, 999, time.FixedZone("x", 3600))
+
+	// Act.
+	got := refInstant(at)
+
+	// Assert.
+	if want := "20261007T083015Z"; got != want {
+		t.Fatalf("refInstant = %q, want %q", got, want)
+	}
+}
+
+// TestEveryPreservationRefEndsInItsRefInstant pins that both kinds of
+// preservation ref share refInstant, so they sort and read alike.
+func TestEveryPreservationRefEndsInItsRefInstant(t *testing.T) {
+	at := time.Date(2026, 10, 7, 9, 30, 15, 0, time.FixedZone("x", 3600))
+	cases := []struct {
+		name  string
+		owner *wsm.Workspace
+	}{
+		{name: "a workspace's tree", owner: &wsm.Workspace{ID: "0123456789abcdef"}},
+		{name: "a tree no workspace names", owner: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := preservedRef(tc.owner, "/repo/.git/worktrees/feat-x1", at)
+
+			// Assert.
+			if !strings.HasSuffix(got, "/"+refInstant(at)) {
+				t.Fatalf("preservedRef = %q, want it to end in %q", got, refInstant(at))
+			}
+		})
+	}
+}
+
 func TestPreservedRefsIsTheWorkspacesOwnPrefix(t *testing.T) {
 	// Act.
 	got := PreservedRefs("0123456789abcdef")

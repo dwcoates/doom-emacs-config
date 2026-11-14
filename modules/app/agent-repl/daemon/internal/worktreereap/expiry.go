@@ -195,7 +195,7 @@ func bornAt(admin string) (time.Time, error) {
 // at: its admin directory's name (git's own unique id for the worktree) and
 // the sweep's instant, so two expiries never claim one ref.
 func reapedRef(admin string, at time.Time) string {
-	return reapedRefPrefix + filepath.Base(admin) + "/" + at.UTC().Format("20060102T150405Z")
+	return reapedRefPrefix + filepath.Base(admin) + "/" + refInstant(at)
 }
 
 // preservedRef is the ref an expired worktree's preservation commit is
@@ -205,5 +205,11 @@ func preservedRef(owner *wsm.Workspace, admin string, at time.Time) string {
 	if owner == nil {
 		return reapedRef(admin, at)
 	}
-	return PreservedRefs(owner.ID) + at.UTC().Format("20060102T150405Z")
+	return PreservedRefs(owner.ID) + refInstant(at)
+}
+
+// refInstant is an instant as the last component of a preservation ref: its
+// UTC second, which sorts by name in the order the expiries happened.
+func refInstant(at time.Time) string {
+	return at.UTC().Format("20060102T150405Z")
 }
