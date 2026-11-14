@@ -622,6 +622,34 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (= (string-to-number (match-string 1 request)) (length body))))))
 
 
+(ert-deftest agent-repl-test-connect-request-carries-a-given-request-id ()
+  "A given request id rides in `X-Agent-Repl-Request-Id'."
+  ;; Arrange / Act
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:1" "AdoptHostWorkspace" "application/json" "{}" "emacs-7-3")))
+    ;; Assert
+    (should (string-match-p "\r\nX-Agent-Repl-Request-Id: emacs-7-3\r\n" request))))
+
+(ert-deftest agent-repl-test-connect-request-without-a-request-id-sends-no-header ()
+  "No request id sends no `X-Agent-Repl-Request-Id' header at all."
+  ;; Arrange / Act
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:1" "WatchDaemon" "application/connect+json" "{}")))
+    ;; Assert
+    (should-not (string-match-p "X-Agent-Repl-Request-Id" request))))
+
+(ert-deftest agent-repl-test-connect-mint-request-id-names-the-process-and-counts ()
+  "Each minted id names this Emacs and differs from the one before it."
+  ;; Arrange
+  (let ((agent-repl-connect--request-count 41))
+    ;; Act
+    (let ((first (agent-repl-connect--mint-request-id))
+          (second (agent-repl-connect--mint-request-id)))
+      ;; Assert
+      (should (equal first (format "emacs-%d-42" (emacs-pid))))
+      (should (equal second (format "emacs-%d-43" (emacs-pid)))))))
+
+
 ;;;; ---- Tests: connection lifecycle ----
 
 (ert-deftest agent-repl-test-connect-open-records-the-address ()
@@ -753,6 +781,39 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       ;; Assert
       (should (agent-repl-test-connect--logs-matching
                'warn "unary-timeout method=\"AdoptHostWorkspace\" .* status=nil received=0")))))
+
+(ert-deftest agent-repl-test-connect-unary-timeout-names-the-request-id-it-sent ()
+  "A timeout names the request id the call sent, so the daemon's record of
+the same call can be found."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (agent-repl-connect--request-count 8)
+          (fire nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat fn &rest _) (setq fire fn) nil)))
+        (agent-repl-connect-unary conn "AdoptHostWorkspace" "{}"))
+      (let ((id (format "emacs-%d-9" (emacs-pid))))
+        ;; Act
+        (funcall fire)
+        ;; Assert
+        (should (string-match-p (concat "\r\nX-Agent-Repl-Request-Id: " id "\r\n")
+                                (plist-get (agent-repl-test-connect--last-spawn) :request)))
+        (should (agent-repl-test-connect--logs-matching
+                 'warn (concat "unary-timeout .* request-id=\"" id "\"")))))))
+
+(ert-deftest agent-repl-test-connect-unary-failure-names-the-request-id-it-sent ()
+  "A failed call names the request id the call sent."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (agent-repl-connect--request-count 20))
+      (agent-repl-connect-unary conn "AdoptHostWorkspace" "{}" :on-failure #'ignore)
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (agent-repl-test-connect--logs-matching
+               'warn (format "unary-failure .* request-id=\"emacs-%d-21\"" (emacs-pid)))))))
 
 (ert-deftest agent-repl-test-connect-unary-timeout-states-a-partial-answer ()
   "A timeout after the status line states the status and the body bytes."

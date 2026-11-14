@@ -467,13 +467,14 @@ dialing something else."
                    :malformed-addr
                    (format "unsplittable daemon address: %S" address)))))))
 
-(defun agent-repl-connect--request-bytes (address method content-type body)
+(defun agent-repl-connect--request-bytes (address method content-type body &optional request-id)
   "Return the whole HTTP/1.1 POST of BODY to METHOD at ADDRESS as unibyte bytes.
 CONTENT-TYPE selects unary protojson or the streaming envelope framing.
 BODY is ALREADY ENCODED — UTF-8 for a unary protojson body, the framed
 envelope for a stream — and its byte length is what `Content-Length'
-carries, so no request size or byte value can be mangled.  Pure: it
-composes bytes and touches nothing.
+carries, so no request size or byte value can be mangled.  REQUEST-ID,
+when given, rides in `X-Agent-Repl-Request-Id', which the daemon's records
+of the call carry.  Pure: it composes bytes and touches nothing.
 
 `Connection: close' is asked for on every exchange so an answer always
 ends in an end-of-file the sentinel sees, whichever body framing the
@@ -484,11 +485,24 @@ server picks."
             "Host: " address "\r\n"
             "Content-Type: " content-type "\r\n"
             "Connect-Protocol-Version: 1\r\n"
+            (if request-id (concat "X-Agent-Repl-Request-Id: " request-id "\r\n") "")
             "Content-Length: " (number-to-string (length body)) "\r\n"
             "Connection: close\r\n"
             "\r\n")
     'utf-8 t)
    body))
+
+(defvar agent-repl-connect--request-count 0
+  "How many request ids this Emacs has minted (`agent-repl-connect--mint-request-id').")
+
+(defun agent-repl-connect--mint-request-id ()
+  "Return a request id no other call from any Emacs has carried.
+The id names the Emacs process and counts its calls, so a call's records on
+both sides of the socket can be matched: on the 2026-11-14 handover seven
+`AdoptHostWorkspace' calls timed out with nothing received while the daemon
+recorded answering adoptions, and no record said which call it answered."
+  (format "emacs-%d-%d" (emacs-pid)
+          (setq agent-repl-connect--request-count (1+ agent-repl-connect--request-count))))
 
 (defun agent-repl-connect--transport-message (method address event)
   "Return the text of a socket that ended METHOD without an HTTP answer.
@@ -670,9 +684,11 @@ the call is idempotent.  Returns the socket process."
     (agent-repl-connect--check-alive conn method log-scope)
     (let* ((address (agent-repl-connect-connection-address conn))
          (host-port (agent-repl-connect--split-address address))
+         (request-id (agent-repl-connect--mint-request-id))
          (request (agent-repl-connect--request-bytes
                    address method agent-repl-connect--unary-content-type
-                   (encode-coding-string json-string 'utf-8 t)))
+                   (encode-coding-string json-string 'utf-8 t)
+                   request-id))
          (reader (agent-repl-connect--reader-create))
          (body "")
          (settled nil)
@@ -686,15 +702,15 @@ the call is idempotent.  Returns the socket process."
              (when timer (cancel-timer timer) (setq timer nil))
              (pcase kind
                (:response
-                (agent-repl--log log-scope "elisp.connect.unary-response method=%S address=%S"
-                                 method address)
+                (agent-repl--log log-scope "elisp.connect.unary-response method=%S address=%S request-id=%S"
+                                 method address request-id)
                 (when on-response (funcall on-response value)))
                (:failure
-                (agent-repl--warn log-scope "elisp.connect.unary-failure method=%S address=%S detail=%S"
-                                  method address value)
+                (agent-repl--warn log-scope "elisp.connect.unary-failure method=%S address=%S detail=%S request-id=%S"
+                                  method address value request-id)
                 (when on-failure (funcall on-failure value)))))))
-      (agent-repl--log log-scope "elisp.connect.unary-send method=%S address=%S bytes=%d"
-                       method address (string-bytes json-string))
+      (agent-repl--log log-scope "elisp.connect.unary-send method=%S address=%S bytes=%d request-id=%S"
+                       method address (string-bytes json-string) request-id)
       (setq process
             (agent-repl-connect--open-socket
              (format "agent-repl-connect-%s" method)
@@ -775,10 +791,11 @@ the call is idempotent.  Returns the socket process."
                                ;; body is one cut mid-way (2026-11-13: 14
                                ;; handover adoptions timed out though the
                                ;; daemon had answered them).
-                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method=%S address=%S status=%S received=%d"
+                               (agent-repl--warn log-scope "elisp.connect.unary-timeout method=%S address=%S status=%S received=%d request-id=%S"
                                                  method address
                                                  (agent-repl-connect--reader-status reader)
-                                                 (string-bytes body))
+                                                 (string-bytes body)
+                                                 request-id)
                                (delete-process process))))))
       process))))
 

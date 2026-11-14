@@ -4,6 +4,8 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 	"context"
+	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -28,6 +30,7 @@ func (s *server) AdoptHostWorkspace(
 	req *connect.Request[agentreplv1.AdoptHostWorkspaceRequest],
 ) (*connect.Response[agentreplv1.AdoptHostWorkspaceResponse], error) {
 	const rpc = "AdoptHostWorkspace"
+	began := s.now()
 	resp := &agentreplv1.AdoptHostWorkspaceResponse{}
 	subject, cerr, done := s.subjectForAdoption(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
@@ -48,7 +51,7 @@ func (s *server) AdoptHostWorkspace(
 		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
-	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", nil)
+	subject.Log.Info("daemon.server.adopt_host", "the host adopted the workspace", s.adoptionCall(req.Header(), began))
 	resp.Result = &agentreplv1.AdoptHostWorkspaceResponse_Success{
 		Success: &agentreplv1.AdoptHostWorkspaceSuccess{},
 	}
@@ -62,6 +65,7 @@ func (s *server) AdoptWebWorkspace(
 	req *connect.Request[agentreplv1.AdoptWebWorkspaceRequest],
 ) (*connect.Response[agentreplv1.AdoptWebWorkspaceResponse], error) {
 	const rpc = "AdoptWebWorkspace"
+	began := s.now()
 	resp := &agentreplv1.AdoptWebWorkspaceResponse{}
 	subject, cerr, done := s.subjectForAdoption(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
@@ -82,11 +86,29 @@ func (s *server) AdoptWebWorkspace(
 		}
 		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
 	}
-	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace", dlog.Context{"thread": subject.Record.IsThread()})
+	subject.Log.Info("daemon.server.adopt_web", "the webview adopted the workspace",
+		dlog.Merge(s.adoptionCall(req.Header(), began), dlog.Context{"thread": subject.Record.IsThread()}))
 	resp.Result = &agentreplv1.AdoptWebWorkspaceResponse_Success{
 		Success: &agentreplv1.AdoptWebWorkspaceSuccess{Page: webPageOf(subject.Record)},
 	}
 	return connect.NewResponse(resp), nil
+}
+
+// adoptionCall names the adoption call an answer's record answers: the
+// caller's request id, which the caller's own records carry, and how long this
+// daemon held the call before answering it.
+//
+// THE ANSWER MUST BE MATCHABLE TO ITS CALL. On the 0.438.1 handover
+// (2026-11-14 18:45) seven of Emacs's AdoptHostWorkspace calls timed out at
+// 10s with nothing received, while this daemon had recorded answering
+// webapp-layer-load-settle-ubs's adoption 3s before Emacs gave up. Neither
+// side's record named the call, so whether that answer was the timed-out
+// call's, and where its bytes went, could not be read from the logs.
+func (s *server) adoptionCall(header http.Header, began time.Time) dlog.Context {
+	return dlog.Context{
+		"request_id": header.Get(requestIDHeader),
+		"held_ms":    s.now().Sub(began).Milliseconds(),
+	}
 }
 
 // subjectForAdoption resolves an adoption call's ref WITHOUT the ownership
