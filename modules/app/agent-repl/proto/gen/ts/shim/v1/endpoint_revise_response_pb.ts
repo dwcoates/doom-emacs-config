@@ -27,7 +27,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { AgentActivityId } from "../../conversation/v1/agent_activity_pb";
+import type { AgentActivityId, AgentResponseProse } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
 import type { UserSaid } from "../../conversation/v1/user_pb";
 import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_revise_response.proto.
  */
 export const file_shim_v1_endpoint_revise_response: GenFile = /*@__PURE__*/
-  fileDesc("CiZzaGltL3YxL2VuZHBvaW50X3JldmlzZV9yZXNwb25zZS5wcm90bxIHc2hpbS52MSJ7ChVSZXZpc2VSZXNwb25zZVJlcXVlc3QSMgoIcmVzcG9uc2UYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEi4KC2luc3RydWN0aW9uGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkIoQBChZSZXZpc2VSZXNwb25zZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zaGltLnYxLlJldmlzZVJlc3BvbnNlU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuc2hpbS52MS5SZXZpc2VSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IiYKFVJldmlzZVJlc3BvbnNlU3VjY2VzcxINCgVtb2RlbBgBIAEoCSKNAgoTUmV2aXNlUmVzcG9uc2VFcnJvchI2Cgpub19zZXNzaW9uGAEgASgLMiAuc2hpbS52MS5SZXZpc2VSZXNwb25zZU5vU2Vzc2lvbkgAEjsKDW5vX2ZvcmtfcG9pbnQYAiABKAsyIi5zaGltLnYxLlJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnRIABI8Cg12ZW5kb3JfZmFpbGVkGAMgASgLMiMuc2hpbS52MS5SZXZpc2VSZXNwb25zZVZlbmRvckZhaWxlZEgAEjoKDGVtcHR5X2Fuc3dlchgEIAEoCzIiLnNoaW0udjEuUmV2aXNlUmVzcG9uc2VFbXB0eUFuc3dlckgAQgcKBWNhdXNlIhkKF1JldmlzZVJlc3BvbnNlTm9TZXNzaW9uIisKGVJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnQSDgoGZGV0YWlsGAEgASgJIiwKGlJldmlzZVJlc3BvbnNlVmVuZG9yRmFpbGVkEg4KBmRldGFpbBgBIAEoCSIbChlSZXZpc2VSZXNwb25zZUVtcHR5QW5zd2VyQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_user]);
+  fileDesc("CiZzaGltL3YxL2VuZHBvaW50X3JldmlzZV9yZXNwb25zZS5wcm90bxIHc2hpbS52MSJ7ChVSZXZpc2VSZXNwb25zZVJlcXVlc3QSMgoIcmVzcG9uc2UYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEi4KC2luc3RydWN0aW9uGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkIoQBChZSZXZpc2VSZXNwb25zZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zaGltLnYxLlJldmlzZVJlc3BvbnNlU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuc2hpbS52MS5SZXZpc2VSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IloKFVJldmlzZVJlc3BvbnNlU3VjY2VzcxINCgVtb2RlbBgBIAEoCRIyCgVwcm9zZRgCIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFJlc3BvbnNlUHJvc2UijQIKE1JldmlzZVJlc3BvbnNlRXJyb3ISNgoKbm9fc2Vzc2lvbhgBIAEoCzIgLnNoaW0udjEuUmV2aXNlUmVzcG9uc2VOb1Nlc3Npb25IABI7Cg1ub19mb3JrX3BvaW50GAIgASgLMiIuc2hpbS52MS5SZXZpc2VSZXNwb25zZU5vRm9ya1BvaW50SAASPAoNdmVuZG9yX2ZhaWxlZBgDIAEoCzIjLnNoaW0udjEuUmV2aXNlUmVzcG9uc2VWZW5kb3JGYWlsZWRIABI6CgxlbXB0eV9hbnN3ZXIYBCABKAsyIi5zaGltLnYxLlJldmlzZVJlc3BvbnNlRW1wdHlBbnN3ZXJIAEIHCgVjYXVzZSIZChdSZXZpc2VSZXNwb25zZU5vU2Vzc2lvbiIrChlSZXZpc2VSZXNwb25zZU5vRm9ya1BvaW50Eg4KBmRldGFpbBgBIAEoCSIsChpSZXZpc2VSZXNwb25zZVZlbmRvckZhaWxlZBIOCgZkZXRhaWwYASABKAkiGwoZUmV2aXNlUmVzcG9uc2VFbXB0eUFuc3dlckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_user]);
 
 /**
  * Revise one response of the main agent's conversation.
@@ -113,6 +113,15 @@ export type ReviseResponseSuccess = Message<"shim.v1.ReviseResponseSuccess"> & {
    * @generated from field: string model = 1;
    */
   model: string;
+
+  /**
+   * The revised prose, exactly as the response_revision page line carries
+   * it, so the daemon tells the agent what its response now says without
+   * waiting for the page line to come back to it.
+   *
+   * @generated from field: conversation.v1.AgentResponseProse prose = 2;
+   */
+  prose?: AgentResponseProse | undefined;
 };
 
 /**

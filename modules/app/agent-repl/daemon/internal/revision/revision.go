@@ -18,6 +18,11 @@
 // before it returns, a failure marks it failed with the cause, and the page
 // line ends the pending state when the revised prose lands.
 //
+// THE AGENT IS TOLD. The fork persists nothing, so the vendor transcript keeps
+// the response's original words; a revision that lands is owed to the agent
+// (wsm.OweRevision), and the workspace's next prompt carrying a workspace
+// note tells it what its response now says (prompthandler).
+//
 // THE WORKSPACE READS `updating` WHILE ITS LANE RUNS (owner request,
 // 2026-10-30): the lane raises the status fact when it starts and lowers it
 // when it drains, both under the lane's own lock, so a lane started just as
@@ -26,6 +31,7 @@ package revision
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -40,7 +46,14 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
+
+// Bound is how long one ReviseResponse call may take: just over twice its
+// measured healthy worst case. Five revisions logged on 2026-11-13
+// (daemon.revision.run's duration_ms) took 18.3s, 20.3s, 27.5s, 42.9s and
+// 53.5s; the bound is 2.2 times the slowest.
+const Bound = 120 * time.Second
 
 // Brief is the brief a revision is composed from (prompts/).
 const Brief = "response-revision-from-highlight"
@@ -74,11 +87,24 @@ type Status interface {
 	SetUpdating(ws ids.WorkspaceID, updating bool)
 }
 
+// Owed is the store's side of a revision: what the agent is owed.
+type Owed interface {
+	// OweRevision records a revised response the agent has yet to be told
+	// of.
+	OweRevision(ctx context.Context, id wsm.WorkspaceID, owed wsm.OwedRevision) error
+}
+
 // Deps is what a Reviser needs.
 type Deps struct {
 	Shims  Shims
 	Feed   Feed
 	Status Status
+	// Owed records each landed revision for the agent to be told of.
+	Owed Owed
+	// Bound bounds each ReviseResponse call (Bound in production).
+	Bound time.Duration
+	// Now is the clock a landed revision is stamped with.
+	Now func() time.Time
 	// PromptsDir holds the brief, read at use time.
 	PromptsDir string
 	// Life bounds every revision: the daemon's lifetime.
@@ -110,8 +136,12 @@ type Reviser struct {
 	done func()
 }
 
-// New builds a Reviser.
+// New builds a Reviser. A Reviser with no bound or no record of what the
+// agent is owed is a wiring defect, refused at construction.
 func New(deps Deps) *Reviser {
+	if deps.Bound <= 0 || deps.Owed == nil || deps.Now == nil {
+		panic(fmt.Sprintf("revision: New needs a positive Bound, Owed and Now (bound %v, owed set %v, now set %v)", deps.Bound, deps.Owed != nil, deps.Now != nil))
+	}
 	return &Reviser{deps: deps, lanes: map[ids.WorkspaceID][]Ask{}}
 }
 
@@ -195,26 +225,51 @@ func (r *Reviser) run(ws ids.WorkspaceID, ask Ask) {
 		return
 	}
 	started := time.Now()
-	answer, err := client.ReviseResponse(r.deps.Life, &shimv1.ReviseResponseRequest{
+	ctx, cancel := context.WithTimeout(r.deps.Life, r.deps.Bound)
+	defer cancel()
+	answer, err := client.ReviseResponse(ctx, &shimv1.ReviseResponseRequest{
 		Response:    &conversationv1.AgentActivityId{Value: response.Unit},
 		Instruction: instruction,
 	})
 	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			fail(fmt.Sprintf("the session did not answer within %v (its healthy worst case was 53.5s on 2026-11-13; it ran %dms)", r.deps.Bound, elapsed), "timed_out")
+			return
+		}
 		fail(fmt.Sprintf("the session could not be asked: %v", err), "transport")
 		return
 	}
 	switch result := answer.GetResult().(type) {
 	case *shimv1.ReviseResponseResponse_Success:
+		revised := result.Success.GetProse().GetMarkdown()
+		if revised == "" {
+			fail("the session answered a written revision with no words", "no_prose")
+			return
+		}
 		log.Info(opRun, "the shim wrote the response's revision; the feed draws it from the page line", dlog.Context{
 			"unit": response.Unit, "model": result.Success.GetModel(), "duration_ms": elapsed,
 		})
+		r.owe(ws, response, revised, log)
 	case *shimv1.ReviseResponseResponse_Error:
 		cause, arm := refusalOf(result.Error)
 		fail(cause, arm)
 	default:
 		fail("the session answered no outcome", "unset")
 	}
+}
+
+// owe records the landed revision for the agent to be told of. A record that
+// fails is logged at ERROR: the revision stands on the page, but the agent
+// will build on the words it wrote.
+func (r *Reviser) owe(ws ids.WorkspaceID, response feed.RevisableResponse, revised string, log dlog.Logger) {
+	owed := wsm.OwedRevision{Unit: response.Unit, Original: response.Markdown, Revised: revised, OwedAtNs: r.deps.Now().UnixNano()}
+	if err := r.deps.Owed.OweRevision(r.deps.Life, ws, owed); err != nil {
+		log.Error(opRun, "the revision landed but could not be recorded for the agent; its next prompt will not say what the response now says",
+			dlog.Context{"unit": response.Unit, "cause": err.Error()})
+		return
+	}
+	log.Debug(opRun, "the revision is owed to the agent's next prompt", dlog.Context{"unit": response.Unit, "revised_chars": len(revised)})
 }
 
 // compose is the revision's instruction: the brief, spliced with the response

@@ -393,6 +393,22 @@ type DB interface {
 	// RestoreOwedContextSummary puts back a taken summary whose prompt the
 	// queue refused.
 	RestoreOwedContextSummary(ctx context.Context, id WorkspaceID, summary string) error
+	// OweRevision records a revised final response the workspace's agent has
+	// yet to be told of; a response already owed keeps its original.
+	OweRevision(ctx context.Context, id WorkspaceID, owed OwedRevision) error
+	// TakeOwedRevisions takes every revision the workspace's next prompt
+	// tells the agent of, oldest first, deleting them in the same
+	// transaction.
+	TakeOwedRevisions(ctx context.Context, id WorkspaceID) ([]OwedRevision, error)
+	// RestoreOwedRevisions puts back taken revisions whose prompt the queue
+	// refused; a response revised again meanwhile keeps its newer words.
+	RestoreOwedRevisions(ctx context.Context, id WorkspaceID, owed []OwedRevision) error
+	// TakeOwedRename takes the new name the workspace's next prompt tells its
+	// agent, deleting it in the same transaction.
+	TakeOwedRename(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// RestoreOwedRename puts back a taken name whose prompt the queue
+	// refused; a name owed again meanwhile stands.
+	RestoreOwedRename(ctx context.Context, id WorkspaceID, name string) error
 	// PutPendingFork records that a workspace is to be forked from its parent
 	// at its first bring-up.
 	PutPendingFork(ctx context.Context, fork PendingFork) error
