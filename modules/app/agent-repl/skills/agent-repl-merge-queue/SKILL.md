@@ -233,7 +233,7 @@ Either kind:
   `merge-queue status` answers its advance as `mediating`, naming the
   mediator (`paused` wins while the queue is also paused). Only the mediator
   decides, with
-  `merge-queue mediation approve|escalate -repository here -summary TEXT`;
+  `merge-queue mediation approve|escalate -summary TEXT` (the repository is the mediator's own);
   any other workspace is refused `not_mediator`, and a decision while no
   deploy owes one is refused `no_mediation_owed`.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.

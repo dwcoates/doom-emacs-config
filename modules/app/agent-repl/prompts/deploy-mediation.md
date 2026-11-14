@@ -7,8 +7,8 @@ A deploy of agent-repl began at {{deploy_started}} ({{version}}), and the merge 
 
 Then decide, in this turn:
 
-- Nothing wrong: `agent-repld merge-queue mediation approve -repository here -summary "<one sentence>"`.
-- Something wrong that you cannot fix confidently, or whose fix has a reasonable user-facing alternative the user should choose between: `agent-repld merge-queue mediation escalate -repository here -summary "<what is wrong, in one or two sentences>"`. The user is notified, and the queue moves on.
+- Nothing wrong: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.
+- Something wrong that you cannot fix confidently, or whose fix has a reasonable user-facing alternative the user should choose between: `agent-repld merge-queue mediation escalate -summary "<what is wrong, in one or two sentences>"`. The user is notified, and the queue moves on.
 - Something wrong that you can fix: fix it yourself, as your session's rules say, and deploy it. That deploy is checked by you in turn; the queue stays held until a deploy passes or is escalated.
 
 A turn that ends deciding nothing lets the queue through and tells the user you decided nothing.
