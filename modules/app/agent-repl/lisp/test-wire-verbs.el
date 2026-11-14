@@ -2535,13 +2535,25 @@ workspace's ref and whether it is open."
                              :value (:branch "agent-1/fix" :workspace (:id "ws-2" :dir "/w/two") :open t)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-branch-exists-arm ()
-  "CreateWorkspaceError's `name_branch_exists' arm decodes the branch and its tip."
+  "CreateWorkspaceError's `name_branch_exists' arm decodes the branch and
+its tip, with no landed workspace for a branch cut by hand."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-create-workspace-error
                     (agent-repl-test-wire-verbs--parse
                      "{\"nameBranchExists\":{\"branch\":\"agent-1/fix\",\"head\":\"7fdd54832a\"}}"))
                    '(:cause (:arm :name-branch-exists
-                             :value (:branch "agent-1/fix" :head "7fdd54832a")))))))
+                             :value (:branch "agent-1/fix" :head "7fdd54832a" :landed-workspace nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-name-branch-exists-landed-arm ()
+  "CreateWorkspaceError's `name_branch_exists' arm decodes the landed
+workspace that left the branch."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"nameBranchExists\":{\"branch\":\"agent-1/fix\",\"head\":\"7fdd54832a\",\"landedWorkspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))
+                   '(:cause (:arm :name-branch-exists
+                             :value (:branch "agent-1/fix" :head "7fdd54832a"
+                                     :landed-workspace (:id "ws-2" :dir "/w/two"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-name-reserved-arm ()
   "CreateWorkspaceError's `name_reserved' arm decodes the branch the name resolves to."

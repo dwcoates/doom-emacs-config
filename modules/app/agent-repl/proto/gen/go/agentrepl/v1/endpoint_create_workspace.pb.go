@@ -4337,15 +4337,25 @@ func (x *CreateWorkspaceNameHeld) GetOpen() bool {
 // workspace left behind is deleted by the daemon's landed-branch sweep once
 // its tip is verified landed, after which the same name is free again; a
 // branch the sweep keeps names, in the daemon's log, why it was kept.
+//
+// WHOSE BRANCH IT IS decides whether the refusal is a fault: a branch a landed
+// workspace left behind (`landed_workspace` set) is one the sweep kept, which
+// the repository's main worktree is asked to investigate; a branch no
+// registered workspace ever held (`landed_workspace` unset) was cut by hand,
+// and naming it is the caller's own input to correct, reported to no one.
 type CreateWorkspaceNameBranchExists struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The branch the supplied name resolves to.
 	Branch string `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
 	// The commit the existing branch points at, so the caller can tell which
 	// work it holds before deleting or reusing it.
-	Head          string `protobuf:"bytes,2,opt,name=head,proto3" json:"head,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Head string `protobuf:"bytes,2,opt,name=head,proto3" json:"head,omitempty"`
+	// The landed workspace whose name or branch the existing branch is, which
+	// the landed-branch sweep kept; unset when no registered workspace holds
+	// it, a branch cut by hand.
+	LandedWorkspace *v1.WorkspaceRef `protobuf:"bytes,3,opt,name=landed_workspace,json=landedWorkspace,proto3" json:"landed_workspace,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CreateWorkspaceNameBranchExists) Reset() {
@@ -4390,6 +4400,13 @@ func (x *CreateWorkspaceNameBranchExists) GetHead() string {
 		return x.Head
 	}
 	return ""
+}
+
+func (x *CreateWorkspaceNameBranchExists) GetLandedWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		return x.LandedWorkspace
+	}
+	return nil
 }
 
 // A supplied name (CreateWorkspaceStandard.name) that breaks the naming rule.
@@ -5847,10 +5864,11 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\x17CreateWorkspaceNameHeld\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x128\n" +
 	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
-	"\x04open\x18\x03 \x01(\bR\x04open\"M\n" +
+	"\x04open\x18\x03 \x01(\bR\x04open\"\x94\x01\n" +
 	"\x1fCreateWorkspaceNameBranchExists\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x12\n" +
-	"\x04head\x18\x02 \x01(\tR\x04head\"\xb4\x02\n" +
+	"\x04head\x18\x02 \x01(\tR\x04head\x12E\n" +
+	"\x10landed_workspace\x18\x03 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x0flandedWorkspace\"\xb4\x02\n" +
 	"\x1aCreateWorkspaceInvalidName\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12B\n" +
@@ -6128,21 +6146,22 @@ var file_agentrepl_v1_endpoint_create_workspace_proto_depIdxs = []int32{
 	85,  // 106: agentrepl.v1.CreateWorkspaceForkSourceHasNoFinishedTurn.workspace:type_name -> workspace.v1.WorkspaceRef
 	85,  // 107: agentrepl.v1.CreateWorkspaceUnknownContextWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
 	85,  // 108: agentrepl.v1.CreateWorkspaceNameHeld.workspace:type_name -> workspace.v1.WorkspaceRef
-	56,  // 109: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
-	57,  // 110: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
-	58,  // 111: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
-	85,  // 112: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	85,  // 113: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 114: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 115: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
-	85,  // 116: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
-	85,  // 117: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
-	96,  // 118: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
-	119, // [119:119] is the sub-list for method output_type
-	119, // [119:119] is the sub-list for method input_type
-	119, // [119:119] is the sub-list for extension type_name
-	119, // [119:119] is the sub-list for extension extendee
-	0,   // [0:119] is the sub-list for field type_name
+	85,  // 109: agentrepl.v1.CreateWorkspaceNameBranchExists.landed_workspace:type_name -> workspace.v1.WorkspaceRef
+	56,  // 110: agentrepl.v1.CreateWorkspaceInvalidName.slug:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameSlug
+	57,  // 111: agentrepl.v1.CreateWorkspaceInvalidName.prefix:type_name -> agentrepl.v1.CreateWorkspaceInvalidNamePrefix
+	58,  // 112: agentrepl.v1.CreateWorkspaceInvalidName.reserved:type_name -> agentrepl.v1.CreateWorkspaceInvalidNameReserved
+	85,  // 113: agentrepl.v1.CreateWorkspaceUnknownOwner.owner:type_name -> workspace.v1.WorkspaceRef
+	85,  // 114: agentrepl.v1.CreateWorkspaceUnknownLandingTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	85,  // 115: agentrepl.v1.CreateWorkspaceUnknownRequester.workspace:type_name -> workspace.v1.WorkspaceRef
+	85,  // 116: agentrepl.v1.CreateWorkspaceAsyncMergeUnknownMaker.workspace:type_name -> workspace.v1.WorkspaceRef
+	85,  // 117: agentrepl.v1.CreateWorkspaceAsyncMergeContextNotMaker.maker:type_name -> workspace.v1.WorkspaceRef
+	85,  // 118: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.workspace:type_name -> workspace.v1.WorkspaceRef
+	96,  // 119: agentrepl.v1.CreateWorkspaceAsyncMergeNameOffQueue.cause:type_name -> agentrepl.v1.MergeQueueStatusOffQueueCause
+	120, // [120:120] is the sub-list for method output_type
+	120, // [120:120] is the sub-list for method input_type
+	120, // [120:120] is the sub-list for extension type_name
+	120, // [120:120] is the sub-list for extension extendee
+	0,   // [0:120] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_workspace_proto_init() }
