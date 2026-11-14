@@ -31,6 +31,7 @@ landed arm.
 | UpdateRemoteControlMode | `unspecified` | a `SetSessionRemoteControlFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at. The mode is still recorded as asked | workspace |
 | SetModel | `unspecified` | a `SetSessionModelFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
 | RegisterRepository | `not_a_worktree` | the SHARED registration (`internal/workspace.register`, which RegisterWorkspace runs too) refused the repository's main worktree because it is not a git worktree on disk. `RegisterRepositoryError` carries `not_in_a_repository` and `unreadable_path` only, both of which are about the path the CALLER picked and would say something false about this state. Reached only when git named a main worktree that is gone between the probe and the stat, so it is recorded here rather than landed unasked | workspace |
+| RegisterRepository | `transferring_away` | the SHARED registration refused the repository's main worktree because this daemon handed that workspace to its successor (`internal/workspace` `refuseHandedAway`). `RegisterRepositoryError` has no such arm; the answer's `Agent-Repl-Successor` metadata names the successor. Reached only when the main worktree's row exists and was handed away, which Emacs's onboarding does not re-announce mid-handover | workspace |
 
 `CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
 live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s
@@ -266,3 +267,18 @@ once.
 | --- | --- | --- | --- |
 | CreateWorkspace | `transferring_away` (tag 43) | the gate is closed for a handover; `address` is the successor the create is sent to | server |
 | CreateWorkspace | `standing_down` (tag 44) | the gate is closed with no successor listening (a drain, a restart across a state layout change, a signal) | server |
+
+## `RegisterWorkspaceError.transferring_away` landed, 2026-11-14
+
+During a handover Emacs re-registered, at the incumbent, workspaces the
+incumbent had already handed to its successor (the successor's
+`not_yet_adopted` names the incumbent), and the incumbent answered success, so
+Emacs stayed attached to it. A registration of a workspace this daemon handed
+away is now refused before anything is written (no re-open, no serving claim,
+no resolver binding), and a standing that cannot be read fails the
+registration at ERROR. RegisterWorkspaces answers the same arm per dir in its
+`refused` outcome. Emacs walks the workspace onto the named successor.
+
+| rpc | arm | daemon-side refusal | package |
+| --- | --- | --- | --- |
+| RegisterWorkspace / RegisterWorkspaces | `transferring_away` (tag 4) | the registered row's standing is transferring_away; `address` is the successor the workspace registers at | workspace |

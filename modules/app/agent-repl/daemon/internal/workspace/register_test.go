@@ -1447,21 +1447,32 @@ func claimsOf(f *fixture, ws ids.WorkspaceID) int {
 	return n
 }
 
-// TestReRegisteringAWorkspaceClaimsServingByItsStanding is the 2026-10-31
-// split: a daemon that handed a workspace to its successor kept re-claiming it
-// as Emacs re-registered it there, and both daemons served it. A
-// re-registration claims serving unless the workspace was handed away; a
-// standing that cannot be read claims, as before.
-func TestReRegisteringAWorkspaceClaimsServingByItsStanding(t *testing.T) {
+// TestReRegisteringAWorkspaceByItsStanding is the 2026-10-31 split: a daemon
+// that handed a workspace to its successor kept re-claiming it as Emacs
+// re-registered it there, and both daemons served it. A re-registration of a
+// workspace handed away is REFUSED transferring_away before anything is
+// written, so Emacs walks on to the successor; one whose standing cannot be
+// read fails at ERROR rather than claiming.
+func TestReRegisteringAWorkspaceByItsStanding(t *testing.T) {
 	tests := []struct {
-		name      string
-		standing  Standing
-		err       error
+		name     string
+		standing Standing
+		err      error
+		// closed re-registers a row the registry holds closed.
+		closed bool
+		// wantArm is the refusal's arm; "" for an answer that is no refusal.
+		wantArm string
+		// wantErr says the registration fails without a refusal.
+		wantErr   bool
 		wantClaim bool
+		// wantLevel and wantOp are the record the outcome is logged as.
+		wantLevel string
+		wantOp    string
 	}{
-		{name: "an owned workspace is claimed", standing: StandingOwned, wantClaim: true},
-		{name: "a workspace handed to the successor is not", standing: StandingTransferringAway, wantClaim: false},
-		{name: "an unreadable standing is claimed", err: errors.New("standing unreadable"), wantClaim: true},
+		{name: "an owned workspace is claimed", standing: StandingOwned, wantClaim: true, wantLevel: dlog.LevelDebug, wantOp: opRegister},
+		{name: "a workspace handed to the successor is refused transferring_away", standing: StandingTransferringAway, wantArm: ArmTransferringAway, wantLevel: dlog.LevelInfo, wantOp: opRefusal},
+		{name: "a closed workspace handed to the successor is refused and stays closed", standing: StandingTransferringAway, closed: true, wantArm: ArmTransferringAway, wantLevel: dlog.LevelInfo, wantOp: opRefusal},
+		{name: "an unreadable standing fails the registration", err: errors.New("standing unreadable"), wantErr: true, wantLevel: dlog.LevelError, wantOp: opRegister},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1472,19 +1483,67 @@ func TestReRegisteringAWorkspaceClaimsServingByItsStanding(t *testing.T) {
 			if err != nil {
 				t.Fatalf("first Register: %v", err)
 			}
+			if tt.closed {
+				closed := record
+				closed.Closed = true
+				f.db.with(closed)
+			}
 			before := claimsOf(f, record.ID)
+			f.footer.dirs = nil
 			f.owner.standing, f.owner.err = tt.standing, tt.err
 
 			// Act.
-			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-				t.Fatalf("re-Register: %v", err)
-			}
+			_, err = f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
 
 			// Assert.
+			switch {
+			case tt.wantArm != "":
+				if refusal := asRefusal(t, err, tt.wantArm); refusal.Rpc != "RegisterWorkspace" {
+					t.Fatalf("refusal rpc = %q, want RegisterWorkspace", refusal.Rpc)
+				}
+			case tt.wantErr:
+				if _, refused := AsRefusal(err); err == nil || refused {
+					t.Fatalf("re-Register error = %v, want a failure that is no refusal", err)
+				}
+			case err != nil:
+				t.Fatalf("re-Register: %v", err)
+			}
 			if got := claimsOf(f, record.ID) > before; got != tt.wantClaim {
 				t.Fatalf("re-registration claimed serving = %v, want %v", got, tt.wantClaim)
 			}
+			if tt.wantArm != "" || tt.wantErr {
+				if len(f.db.reopened) != 0 || len(f.footer.dirs) != 0 {
+					t.Fatalf("reopened %v, bound %v; want nothing written for a registration that did not go ahead", f.db.reopened, f.footer.dirs)
+				}
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: tt.wantOp}); !ok {
+				t.Fatalf("records = %+v, want a %s record under %s", f.log.logger.Records(), tt.wantLevel, tt.wantOp)
+			}
 		})
+	}
+}
+
+// TestRegisterAllRefusesAHandedAwayDirAlone pins the batch's half of the
+// handover refusal: the handed-away dir is refused transferring_away, named
+// for RegisterWorkspaces, and the dir beside it still registers.
+func TestRegisterAllRefusesAHandedAwayDirAlone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	handed := worktreeDir(t)
+	if _, err := f.verbs.Register(context.Background(), handed, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	f.owner.standing = StandingTransferringAway
+
+	// Act.
+	answers := f.verbs.RegisterAll(context.Background(), []string{handed, worktreeDir(t)})
+
+	// Assert.
+	if refusal := asRefusal(t, answers[0].Err, ArmTransferringAway); refusal.Rpc != "RegisterWorkspaces" {
+		t.Fatalf("refusal rpc = %q, want RegisterWorkspaces", refusal.Rpc)
+	}
+	if answers[1].Err != nil || answers[1].Record.ID == "" {
+		t.Fatalf("the new dir beside it answered %+v, want it registered", answers[1])
 	}
 }
 
