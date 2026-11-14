@@ -202,7 +202,7 @@ func TestProcfsRefusesMalformedFiles(t *testing.T) {
 			name: "a stat cut short",
 			proc: fixtureProc{pid: 42, stat: "42 (node) S 1 42"},
 			read: func(p procfs) error { _, err := p.Identity(42); return err },
-			want: "no field 14",
+			want: "has no field 22",
 		},
 		{
 			name: "a stat field that is no number",
@@ -220,7 +220,7 @@ func TestProcfsRefusesMalformedFiles(t *testing.T) {
 			name: "an io with no bytes written",
 			proc: fixtureProc{pid: 42, stat: liveStat, status: liveStatus, io: "read_bytes: 1\n"},
 			read: func(p procfs) error { _, err := p.Usage(42); return err },
-			want: "io names no write_bytes",
+			want: "names no write_bytes",
 		},
 	}
 	for _, tt := range tests {
@@ -242,7 +242,7 @@ func TestProcfsRefusesMalformedFiles(t *testing.T) {
 func TestProcfsIdentityRefusesAHostStatWithNoBootTime(t *testing.T) {
 	// Arrange
 	p := newFixture(t, liveProc())
-	if err := os.WriteFile(filepath.Join(p.root, "stat"), []byte("cpu 1 2 3 4\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(p.tree.Root(), "stat"), []byte("cpu 1 2 3 4\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -298,7 +298,7 @@ func TestProcfsMemory(t *testing.T) {
 func TestProcfsMemoryRefusesAMeminfoMissingAState(t *testing.T) {
 	// Arrange
 	p := newFixture(t)
-	if err := os.WriteFile(filepath.Join(p.root, "meminfo"), []byte("MemTotal: 1 kB\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(p.tree.Root(), "meminfo"), []byte("MemTotal: 1 kB\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

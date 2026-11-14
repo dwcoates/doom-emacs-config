@@ -114,7 +114,7 @@ func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
 		if d.IsDir() && d.Name() == "node_modules" {
 			return filepath.SkipDir
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "procstat.go" {
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "procstat" {
 			return nil
 		}
 		src, err := os.ReadFile(path)

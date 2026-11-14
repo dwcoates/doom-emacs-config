@@ -8,130 +8,39 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 
 	"agentrepl/logging/procstat"
 )
 
-// procfs reads Linux's process table from a /proc tree rooted at root. It
+// procfs reads Linux's process table from a /proc tree (procstat.Tree). It
 // is the Linux kernel reader's whole body (reader_linux.go), kept free of a
-// build tag so its parsing is proven on every platform against a fixture
-// tree.
+// build tag so it is proven on every platform against a fixture tree.
 type procfs struct {
-	root string
-	// boot is the host's boot time, read once: btime holds for the boot.
-	boot func() (int64, error)
+	tree procstat.Tree
 }
 
 // newProcfs reads the /proc tree at root.
-func newProcfs(root string) procfs {
-	p := procfs{root: root}
-	p.boot = sync.OnceValues(p.bootUnixSeconds)
-	return p
-}
-
-// userHZ is the unit of /proc's tick counts: the kernel ABI fixes USER_HZ at
-// 100 on every architecture, whatever the kernel's own HZ.
-const userHZ = 100
+func newProcfs(root string) procfs { return procfs{tree: procstat.New(root)} }
 
 // zombie is stat's state of a process that exited and awaits its reap.
 const zombie = "Z"
 
-// pidDir is one process's directory.
-func (p procfs) pidDir(pid int) string { return filepath.Join(p.root, strconv.Itoa(pid)) }
-
-// readPID reads one file of a process, ErrGone once the process exited.
-func (p procfs) readPID(pid int, name string) ([]byte, error) {
-	data, err := os.ReadFile(filepath.Join(p.pidDir(pid), name))
-	if err != nil {
-		if goneErr(err) {
-			return nil, ErrGone
-		}
-		return nil, fmt.Errorf("procmetrics: read %s of pid %d: %w", name, pid, err)
+// goneAs turns procstat's gone process into this package's, and names any
+// other failure for this package.
+func goneAs(err error) error {
+	if errors.Is(err, procstat.ErrGone) {
+		return ErrGone
 	}
-	return data, nil
+	return fmt.Errorf("procmetrics: %w", err)
 }
 
-// goneErr answers whether a read failed because the process exited.
-func goneErr(err error) bool {
-	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH)
-}
-
-// PIDs lists every numeric directory of the tree.
+// PIDs implements Reader.
 func (p procfs) PIDs() ([]int, error) {
-	entries, err := os.ReadDir(p.root)
+	pids, err := p.tree.PIDs()
 	if err != nil {
-		return nil, fmt.Errorf("procmetrics: list the processes in %s: %w", p.root, err)
-	}
-	pids := make([]int, 0, len(entries))
-	for _, e := range entries {
-		if pid, err := strconv.Atoi(e.Name()); err == nil && pid > 0 {
-			pids = append(pids, pid)
-		}
+		return nil, fmt.Errorf("procmetrics: %w", err)
 	}
 	return pids, nil
-}
-
-// procStat is the fields of /proc/<pid>/stat a reader needs.
-type procStat struct {
-	comm      string
-	state     string
-	ppid      int
-	cpuTicks  uint64
-	startTick uint64
-}
-
-// parseStat reads the fields of /proc/<pid>/stat a reader needs, split
-// through procstat.
-func parseStat(data []byte) (procStat, error) {
-	line, err := procstat.ParseStat(string(data))
-	if err != nil {
-		return procStat{}, fmt.Errorf("procmetrics: %w", err)
-	}
-	nums := map[int]uint64{}
-	for _, n := range []int{statPPID, statUtime, statStime, statStarttime} {
-		field, err := line.Field(n)
-		if err != nil {
-			return procStat{}, fmt.Errorf("procmetrics: %w", err)
-		}
-		if nums[n], err = strconv.ParseUint(field, 10, 64); err != nil {
-			return procStat{}, fmt.Errorf("procmetrics: stat field %d %q: %w", n, field, err)
-		}
-	}
-	return procStat{
-		comm:      line.Comm,
-		state:     line.Fields[0],
-		ppid:      int(nums[statPPID]),
-		cpuTicks:  nums[statUtime] + nums[statStime],
-		startTick: nums[statStarttime],
-	}, nil
-}
-
-// The stat fields read, numbered as proc(5) numbers them.
-const (
-	statPPID      = 4
-	statUtime     = 14
-	statStime     = 15
-	statStarttime = 22
-)
-
-// bootUnixSeconds reads the host's boot time, /proc/stat's btime.
-func (p procfs) bootUnixSeconds() (int64, error) {
-	data, err := os.ReadFile(filepath.Join(p.root, "stat"))
-	if err != nil {
-		return 0, fmt.Errorf("procmetrics: read the host's stat: %w", err)
-	}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if v, ok := strings.CutPrefix(line, "btime "); ok {
-			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-			if err != nil {
-				return 0, fmt.Errorf("procmetrics: btime %q: %w", v, err)
-			}
-			return n, nil
-		}
-	}
-	return 0, errors.New("procmetrics: the host's stat names no btime")
 }
 
 // Identity reads stat and the executable. The name is the executable's base
@@ -139,20 +48,20 @@ func (p procfs) bootUnixSeconds() (int64, error) {
 // bytes ("shim-claude-sid"), so it is the name only where the executable
 // cannot be read: a kernel thread, or another user's process.
 func (p procfs) Identity(pid int) (Identity, error) {
-	data, err := p.readPID(pid, "stat")
+	line, err := p.tree.Stat(pid)
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, goneAs(err)
 	}
-	st, err := parseStat(data)
+	ppid, err := line.Uint(procstat.FieldPPID)
 	if err != nil {
-		return Identity{}, fmt.Errorf("pid %d: %w", pid, err)
+		return Identity{}, goneAs(err)
 	}
-	boot, err := p.boot()
+	start, err := p.tree.Start(line)
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, goneAs(err)
 	}
-	name := st.comm
-	exe, err := os.Readlink(filepath.Join(p.pidDir(pid), "exe"))
+	name := line.Comm
+	exe, err := os.Readlink(p.tree.Path(pid, "exe"))
 	switch {
 	case err == nil:
 		name = filepath.Base(strings.TrimSuffix(exe, " (deleted)"))
@@ -162,113 +71,73 @@ func (p procfs) Identity(pid int) (Identity, error) {
 	default:
 		return Identity{}, fmt.Errorf("procmetrics: read the executable of pid %d: %w", pid, err)
 	}
-	return Identity{
-		PID:             pid,
-		PPID:            st.ppid,
-		Name:            name,
-		StartUnixMicros: boot*1e6 + int64(st.startTick)*1e6/userHZ,
-	}, nil
-}
-
-// statusFields parses /proc/<pid>/status's "Key: value" lines.
-func statusFields(data []byte) map[string]string {
-	out := map[string]string{}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if k, v, ok := strings.Cut(line, ":"); ok {
-			out[k] = strings.TrimSpace(v)
-		}
-	}
-	return out
-}
-
-// kibField reads a status or meminfo field written as "<n> kB", in bytes.
-func kibField(fields map[string]string, key string) (uint64, error) {
-	v, ok := fields[key]
-	if !ok {
-		return 0, fmt.Errorf("procmetrics: no %s field", key)
-	}
-	n, err := strconv.ParseUint(strings.TrimSuffix(v, " kB"), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("procmetrics: %s %q: %w", key, v, err)
-	}
-	return n * 1024, nil
-}
-
-// ioFields parses /proc/<pid>/io's "key: value" lines.
-func ioFields(data []byte) (read, written uint64, err error) {
-	fields := statusFields(data)
-	for key, dst := range map[string]*uint64{"read_bytes": &read, "write_bytes": &written} {
-		v, ok := fields[key]
-		if !ok {
-			return 0, 0, fmt.Errorf("procmetrics: io names no %s", key)
-		}
-		if *dst, err = strconv.ParseUint(v, 10, 64); err != nil {
-			return 0, 0, fmt.Errorf("procmetrics: io %s %q: %w", key, v, err)
-		}
-	}
-	return read, written, nil
+	return Identity{PID: pid, PPID: int(ppid), Name: name, StartUnixMicros: start.UnixMicro()}, nil
 }
 
 // Usage reads stat, status, io and the descriptor table. The footprint is
 // the process's private anonymous memory, resident or swapped, which is what
 // macOS's physical footprint counts on Linux's terms. Linux attributes no
-// energy to a process, so EnergyJoules stays zero (Measures says so).
+// energy to a process, so EnergyJoules stays zero (Platform says so).
 func (p procfs) Usage(pid int) (Usage, error) {
-	statData, err := p.readPID(pid, "stat")
+	line, err := p.tree.Stat(pid)
 	if err != nil {
-		return Usage{}, err
+		return Usage{}, goneAs(err)
 	}
-	st, err := parseStat(statData)
-	if err != nil {
-		return Usage{}, fmt.Errorf("pid %d: %w", pid, err)
-	}
-	if st.state == zombie {
+	if line.Fields[0] == zombie {
 		// An exited process its parent has not reaped yet holds no memory,
 		// descriptors or status lines left to read.
 		return Usage{}, ErrGone
 	}
-	statusData, err := p.readPID(pid, "status")
-	if err != nil {
-		return Usage{}, err
+	ticks := uint64(0)
+	for _, n := range []int{procstat.FieldUtime, procstat.FieldStime} {
+		v, err := line.Uint(n)
+		if err != nil {
+			return Usage{}, goneAs(err)
+		}
+		ticks += v
 	}
-	status := statusFields(statusData)
-	resident, err := kibField(status, "VmRSS")
+	status, err := p.tree.Status(pid)
 	if err != nil {
-		return Usage{}, fmt.Errorf("pid %d: %w", pid, err)
+		return Usage{}, goneAs(err)
 	}
-	anon, err := kibField(status, "RssAnon")
-	if err != nil {
-		return Usage{}, fmt.Errorf("pid %d: %w", pid, err)
-	}
-	swapped, err := kibField(status, "VmSwap")
-	if err != nil {
-		return Usage{}, fmt.Errorf("pid %d: %w", pid, err)
+	memory := map[string]uint64{}
+	for _, key := range []string{"VmRSS", "RssAnon", "VmSwap"} {
+		if memory[key], err = procstat.KiB(status, key); err != nil {
+			return Usage{}, goneAs(fmt.Errorf("status of pid %d: %w", pid, err))
+		}
 	}
 	threads, err := strconv.Atoi(status["Threads"])
 	if err != nil {
 		return Usage{}, fmt.Errorf("procmetrics: pid %d threads %q: %w", pid, status["Threads"], err)
 	}
-	ioData, err := p.readPID(pid, "io")
+	ioData, err := p.tree.Read(pid, "io")
 	if err != nil {
-		return Usage{}, err
+		return Usage{}, goneAs(err)
 	}
-	read, written, err := ioFields(ioData)
-	if err != nil {
-		return Usage{}, fmt.Errorf("pid %d: %w", pid, err)
+	io := procstat.ParseKeyed(ioData)
+	disk := map[string]uint64{}
+	for _, key := range []string{"read_bytes", "write_bytes"} {
+		v, ok := io[key]
+		if !ok {
+			return Usage{}, fmt.Errorf("procmetrics: io of pid %d names no %s", pid, key)
+		}
+		if disk[key], err = strconv.ParseUint(v, 10, 64); err != nil {
+			return Usage{}, fmt.Errorf("procmetrics: io of pid %d %s %q: %w", pid, key, v, err)
+		}
 	}
-	fds, err := os.ReadDir(filepath.Join(p.pidDir(pid), "fd"))
+	fds, err := os.ReadDir(p.tree.Path(pid, "fd"))
 	if err != nil {
-		if goneErr(err) {
+		if procstat.Gone(err) {
 			return Usage{}, ErrGone
 		}
 		return Usage{}, fmt.Errorf("procmetrics: list the descriptors of pid %d: %w", pid, err)
 	}
 	return Usage{
-		CPUSeconds:     float64(st.cpuTicks) / userHZ,
-		ResidentBytes:  resident,
-		FootprintBytes: anon + swapped,
-		DiskReadBytes:  read,
-		DiskWriteBytes: written,
+		CPUSeconds:     float64(ticks) / procstat.UserHZ,
+		ResidentBytes:  memory["VmRSS"],
+		FootprintBytes: memory["RssAnon"] + memory["VmSwap"],
+		DiskReadBytes:  disk["read_bytes"],
+		DiskWriteBytes: disk["write_bytes"],
 		Threads:        threads,
 		OpenFDs:        len(fds),
 	}, nil
@@ -276,11 +145,11 @@ func (p procfs) Usage(pid int) (Usage, error) {
 
 // Args reads cmdline.
 func (p procfs) Args(pid int) ([]string, error) {
-	data, err := p.readPID(pid, "cmdline")
+	args, err := p.tree.Cmdline(pid)
 	if err != nil {
-		return nil, err
+		return nil, goneAs(err)
 	}
-	return procstat.ParseCmdline(data), nil
+	return args, nil
 }
 
 // meminfoStates maps /proc/meminfo's fields to the memory states the host's
@@ -295,20 +164,20 @@ var meminfoStates = map[string]string{
 
 // Memory reads /proc/meminfo: the states and the total.
 func (p procfs) Memory() (map[string]uint64, uint64, error) {
-	data, err := os.ReadFile(filepath.Join(p.root, "meminfo"))
+	data, err := os.ReadFile(filepath.Join(p.tree.Root(), "meminfo"))
 	if err != nil {
 		return nil, 0, fmt.Errorf("procmetrics: read meminfo: %w", err)
 	}
-	fields := statusFields(data)
+	fields := procstat.ParseKeyed(data)
 	states := make(map[string]uint64, len(meminfoStates))
 	for key, state := range meminfoStates {
-		if states[state], err = kibField(fields, key); err != nil {
-			return nil, 0, fmt.Errorf("meminfo: %w", err)
+		if states[state], err = procstat.KiB(fields, key); err != nil {
+			return nil, 0, fmt.Errorf("procmetrics: meminfo: %w", err)
 		}
 	}
-	total, err := kibField(fields, "MemTotal")
+	total, err := procstat.KiB(fields, "MemTotal")
 	if err != nil {
-		return nil, 0, fmt.Errorf("meminfo: %w", err)
+		return nil, 0, fmt.Errorf("procmetrics: meminfo: %w", err)
 	}
 	return states, total, nil
 }
