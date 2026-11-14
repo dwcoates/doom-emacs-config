@@ -643,7 +643,7 @@ func TestUpdateQueueBypassModeRestatesRemoteControlRightAfterEachHold(t *testing
 			f, steps := bypassFixture(t, tc.holds)
 
 			// Act
-			_, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, QueueBypassContextFullMain)
+			_, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, contextFor(tc.change))
 
 			// Assert
 			if err != nil {
@@ -673,7 +673,7 @@ func TestUpdateQueueBypassModeRestatesNothingWhenTheHoldCannotBeWritten(t *testi
 			tc.break_(f.db)
 
 			// Act
-			holds, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, QueueBypassContextFullMain)
+			holds, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", tc.change, contextFor(tc.change))
 
 			// Assert
 			if err == nil || holds != tc.holds {
@@ -708,4 +708,12 @@ func TestAFailedRemoteControlRestateLeavesTheTransitionStanding(t *testing.T) {
 	if !ok || record.Context["transition"] != queueBypassEntered || record.Context["cause"] != "the vendor refused the bridge" {
 		t.Fatalf("record = %+v (%v), want the transition and its cause", record, ok)
 	}
+}
+
+// contextFor is the context a change names: one only when the mode is taken.
+func contextFor(change QueueBypassChange) QueueBypassContext {
+	if change == QueueBypassOn {
+		return QueueBypassContextFullMain
+	}
+	return QueueBypassContextDefault
 }
