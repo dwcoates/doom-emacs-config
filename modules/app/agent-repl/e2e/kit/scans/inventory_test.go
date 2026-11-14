@@ -40,9 +40,17 @@ type e2ePackage struct {
 
 func parseE2EPackage(t *testing.T) e2ePackage {
 	t.Helper()
-	entries, err := os.ReadDir(".")
+	return parseTestPackage(t, ".")
+}
+
+// parseTestPackage reads the Go package in DIR (relative to the e2e package)
+// as parseE2EPackage reads the e2e package, following the harness's
+// functions as it does.
+func parseTestPackage(t *testing.T, dir string) e2ePackage {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read the e2e package: %v", err)
+		t.Fatalf("read the package %s: %v", dir, err)
 	}
 	pkg := e2ePackage{tests: map[string]string{}, steps: map[string]string{}, scenarios: map[string][]string{}, refs: map[string][]string{}, docs: map[string]string{}}
 	fset := token.NewFileSet()
@@ -51,12 +59,12 @@ func parseE2EPackage(t *testing.T) e2ePackage {
 		if e.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
-		if ok, err := build.Default.MatchFile(".", name); err != nil {
+		if ok, err := build.Default.MatchFile(dir, name); err != nil {
 			t.Fatalf("match %s: %v", name, err)
 		} else if !ok {
 			continue
 		}
-		f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
