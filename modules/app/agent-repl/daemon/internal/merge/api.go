@@ -423,6 +423,10 @@ type Names interface {
 	// branch, an occupied worktree directory, a reservation or a claim answers
 	// TAKEN with no claim.
 	ClaimMergeName(ctx context.Context, repoDir, name string) (branch string, release func(), taken bool, err error)
+	// MergeBranch resolves NAME (unprefixed) to the name its merge workspace
+	// would stand under, claiming nothing: the name a merge off its queue is
+	// matched against.
+	MergeBranch(name string) string
 }
 
 // Banners raises the merge queue's desktop banners

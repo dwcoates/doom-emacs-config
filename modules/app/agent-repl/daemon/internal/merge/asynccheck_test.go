@@ -242,6 +242,7 @@ func TestEnqueueAnswersWhatTheRequestReserved(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			h.names.prefix = "agent"
 
 			// Act
 			got, err := h.o.Enqueue(context.Background(), tt.req)

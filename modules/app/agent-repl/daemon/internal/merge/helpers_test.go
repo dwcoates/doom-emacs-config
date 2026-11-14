@@ -2141,6 +2141,8 @@ func (g *fakeGit) seen(call string) bool {
 // fakeNames stands for the async merge name check: a name in taken is
 // refused, every claim's release is counted, and err fails the check.
 type fakeNames struct {
+	// prefix is the workspace prefix names resolve under; unset is none.
+	prefix   string
 	mu       sync.Mutex
 	taken    map[string]bool
 	err      error
@@ -2148,10 +2150,19 @@ type fakeNames struct {
 	releases int
 }
 
+// MergeBranch resolves NAME as the workspace verbs do: a name that already
+// carries a prefix component stands as it is, any other takes the prefix.
+func (n *fakeNames) MergeBranch(name string) string {
+	if n.prefix == "" || strings.Contains(name, "/") {
+		return name
+	}
+	return n.prefix + "/" + name
+}
+
 func (n *fakeNames) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
+	branch := n.MergeBranch(name)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	branch := "agent/" + name
 	if n.err != nil {
 		return "", nil, false, n.err
 	}
