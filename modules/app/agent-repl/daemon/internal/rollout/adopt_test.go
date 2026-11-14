@@ -776,22 +776,26 @@ func TestASecondManifestReadKeepsAPartialRendezvousLedger(t *testing.T) {
 	}
 }
 
-// writeHeadlessManifest lays down an intent manifest naming one workspace that
+// writeHeadlessManifest lays down an intent manifest naming workspaces that
 // nobody holds the streams of, WITHOUT joining from it.
-func writeHeadlessManifest(t *testing.T, h *harness, ws ids.WorkspaceID) {
+func writeHeadlessManifest(t *testing.T, h *harness, workspaces ...ids.WorkspaceID) {
 	t.Helper()
-	record, err := h.db.Workspace(context.Background(), ws)
-	if err != nil {
-		t.Fatalf("Workspace: %v", err)
+	sessions := make([]ManifestSession, 0, len(workspaces))
+	for _, ws := range workspaces {
+		record, err := h.db.Workspace(context.Background(), ws)
+		if err != nil {
+			t.Fatalf("Workspace: %v", err)
+		}
+		sessions = append(sessions, ManifestSession{
+			Workspace: ws, Dir: record.Dir, ShimPID: 4242,
+			VendorSessionID: "vendor-1", Intent: IntentPreserve,
+		})
 	}
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
 		Successor: "127.0.0.1:7788",
 		WrittenAt: instant,
-		Sessions: []ManifestSession{{
-			Workspace: ws, Dir: record.Dir, ShimPID: 4242,
-			VendorSessionID: "vendor-1", Intent: IntentPreserve,
-		}},
+		Sessions:  sessions,
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
 	}
@@ -843,6 +847,63 @@ func TestHeadlessWorkspaceIsAdoptedOnceAcrossTwoReads(t *testing.T) {
 	// Assert
 	if got := h.fleet.Adoptions(); len(got) != 1 {
 		t.Fatalf("adoptions = %v, want exactly one across the two manifest reads", got)
+	}
+}
+
+// TestEveryHeadlessAdoptionRunsWhileAnotherIsUnfinished pins the line that
+// cost a deploy two take-backs (2026-11-14 16:10): headless workspaces were
+// adopted one after another, so one adoption still waiting held every
+// headless workspace behind it until their 30s adoption windows expired.
+// Each adoption here blocks until released, so only adoptions that run side
+// by side can all begin.
+func TestEveryHeadlessAdoptionRunsWhileAnotherIsUnfinished(t *testing.T) {
+	// Arrange
+	release := make(chan struct{})
+	began := make(chan ids.WorkspaceID, 2)
+	h := newHarness(t, func(d *Deps) {
+		inner := d.PublishViews
+		d.PublishViews = func(ctx context.Context, ws ids.WorkspaceID) error {
+			began <- ws
+			<-release
+			return inner(ctx, ws)
+		}
+	})
+	first, _ := h.workspace(t)
+	second, _ := h.workspace(t)
+	writeHeadlessManifest(t, h, first, second)
+	joined := make(chan error, 1)
+
+	// Act
+	go func() { joined <- h.c.Join(context.Background()) }()
+
+	// Assert
+	seen := map[ids.WorkspaceID]bool{}
+	for len(seen) < 2 {
+		select {
+		case ws := <-began:
+			seen[ws] = true
+		case err := <-joined:
+			t.Fatalf("Join returned %v before every headless adoption began", err)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("adoptions begun = %v, want both headless workspaces adopting while neither has finished", seen)
+		}
+	}
+	select {
+	case err := <-joined:
+		t.Fatalf("Join returned %v while its headless adoptions were unfinished, want it to wait for them", err)
+	default:
+	}
+	close(release)
+	select {
+	case err := <-joined:
+		if err != nil {
+			t.Fatalf("Join: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Join never returned once its headless adoptions were released")
+	}
+	if got := h.fleet.Adoptions(); len(got) != 2 {
+		t.Fatalf("adoptions = %v, want both headless workspaces adopted", got)
 	}
 }
 
