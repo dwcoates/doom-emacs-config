@@ -28,10 +28,6 @@ import (
 // `acme=T0123ABCD`.
 const EnvSlackTeams = "AGENT_REPL_SLACK_TEAMS"
 
-// SlackOpenBinary is the program a Slack deep link is handed to. `open` hands
-// a `slack://` url to the application registered for the scheme.
-const SlackOpenBinary = "/usr/bin/open"
-
 // SlackTeams is the team ID of each Slack subdomain, keyed by the subdomain.
 type SlackTeams map[string]string
 

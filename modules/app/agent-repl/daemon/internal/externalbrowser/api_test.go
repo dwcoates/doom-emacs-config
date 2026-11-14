@@ -84,7 +84,7 @@ func TestDefaultLauncherConfiguredAtRejectsADirectory(t *testing.T) {
 func TestDefaultLauncherConfiguredAsksAboutThePinnedBinary(t *testing.T) {
 	// Arrange: the composition root's question is exactly this one applied to
 	// the pinned default, whatever this particular host has installed.
-	want := externalbrowser.DefaultLauncherConfiguredAt(externalbrowser.DefaultBinary)
+	want := externalbrowser.DefaultLauncherConfiguredAt(externalbrowser.Host.Binary)
 
 	// Act.
 	got := externalbrowser.DefaultLauncherConfigured()

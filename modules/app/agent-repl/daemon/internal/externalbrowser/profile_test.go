@@ -1,8 +1,6 @@
 package externalbrowser_test
 
 import (
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/externalbrowser"
@@ -93,18 +91,5 @@ func TestProfileForEmail(t *testing.T) {
 				t.Fatalf("ProfileForEmail(%q) = %q, want %q", tc.email, profile, tc.wantProfile)
 			}
 		})
-	}
-}
-
-func TestDefaultLocalStatePathNamesChromeUserData(t *testing.T) {
-	// Arrange, Act.
-	got := externalbrowser.DefaultLocalStatePath()
-
-	// Assert: on a host with a home dir it points at Chrome's own Local State.
-	if got == "" {
-		t.Skip("no home directory on this host; the empty answer is the fallback case")
-	}
-	if want := filepath.Join("Google", "Chrome", "Local State"); !strings.Contains(got, want) {
-		t.Fatalf("DefaultLocalStatePath() = %q, want it under %q", got, want)
 	}
 }

@@ -2,28 +2,9 @@ package externalbrowser
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
-
-// DefaultLocalStatePath is Chrome's own `Local State` file under the standard
-// macOS user-data dir. It is the authority on which on-disk profile directory
-// belongs to which signed-in account, so the account→profile routing reads it
-// rather than hardcoding a mapping that drifts the moment the operator adds or
-// reorders a profile.
-//
-// An empty answer (no discoverable home) is not a failure here: the opener
-// fails a link whose account cannot be routed, so a host where the path cannot
-// even be formed fails exactly as a host whose file is missing does.
-func DefaultLocalStatePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(home, "Library", "Application Support", "Google", "Chrome", "Local State")
-}
 
 // localState is the narrow slice of Chrome's `Local State` document the routing
 // needs. Chrome's file is a large, evolving vendor document; naming only
