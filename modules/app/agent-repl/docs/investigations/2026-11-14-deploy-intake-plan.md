@@ -69,7 +69,7 @@ written for review: nothing below is built yet.
    - CREATES a fresh remediation workspace when the defect is unrelated to
      the earlier fix, so it inherits no irrelevant context or approach.
    - The intake states which, and why, in its dispatch. The bound on
-     remediations in a row (owner question 2) is what stops a restored
+     remediations in a row (4, ruling 2) is what stops a restored
      workspace whose approach is the problem from trying again.
 
 ### The intake's decision
@@ -86,9 +86,9 @@ Each deploy's check ends in exactly one of:
 - Every defect the deploy did NOT cause (it predates the window's deploy, or
   it is noise of the rollout the harness already owns) does not hold the
   queue: the intake files it as a one-shot through the queue, or as a todo
-  row, and decides the deploy on what remains. (Owner question 1.)
+  row, and decides the deploy on what remains (ruling 1).
 
-A chain whose remediation count reaches the bound (owner question 2) is
+A chain whose remediation count reaches the bound (4, ruling 2) is
 escalated by the intake's own rule, stated in its brief from the chain's
 count.
 
@@ -168,16 +168,36 @@ restored by a later dispatch of its chain as above.
   rounds in `agentrepl_merge_rounds`-style counts.
 - The chain series stand as built.
 
-## Owner questions
+## Owner rulings (2026-11-14)
 
-1. Scope of the hold: may a defect the deploy did not cause be fixed
-   without holding the queue (a one-shot through the queue, or a todo row)?
-   Recommended: yes. It is what keeps the chain converging, and the defect is
-   still fixed.
-2. The bound on remediations in a row before the intake must escalate.
-   Recommended: 3.
-3. The intake's model: opus at medium effort, as the mediator runs.
-4. The remediation's model: opus at medium effort.
+1. A defect the deploy did not cause never holds the queue. It is still
+   fixed: the intake files it as a one-shot through the queue, or as a todo
+   row.
+2. The bound is 4 remediations in a row: at the fourth's deploy still
+   broken, the intake escalates instead of dispatching.
+3. Models:
+   - THE REMEDIATION: opus at medium effort. It researches, designs and
+     fixes.
+   - THE INTAKE: sonnet at low effort. It NEVER researches a cause or
+     prescribes a fix: it states the problems that need remediating, each
+     with its evidence (the records), and decides only approve, escalate,
+     dispatch, and restore or fresh. The stronger model does the rest.
+
+Because the intake is the weaker model, the daemon does the sorting it
+would otherwise reason out, and hands it facts, not questions:
+
+- The window's warnings and errors come grouped by `operation` and
+  message, each group marked NEW (not seen in the same span before the
+  deploy) or SEEN BEFORE (with its count then). Only NEW groups can hold the
+  queue; SEEN BEFORE groups are filed (ruling 1).
+- `--doctor`'s faults, and the latencies against the versions before, come
+  as the same NEW or SEEN BEFORE facts.
+- The chain so far: each earlier deploy, what the intake dispatched for it,
+  the remediation's landed commits and the files they touched. The intake
+  restores the last remediation when a NEW group's records name those files
+  or that change, and creates a fresh one otherwise.
+- The chain's count against the bound, so escalation at the bound is a rule
+  it reads, not a judgement it makes.
 
 ## Order of work
 
@@ -189,7 +209,8 @@ restored by a later dispatch of its chain as above.
 3. Daemon: the intake's lifecycle per chain; dispatch; the remediation's
    finish (gate and fix loop, direct landing, deploy, owed check); the
    speculative-work gate during a dispatch.
-4. Briefs: the intake's and the remediation's.
+4. Briefs: the intake's (facts sorted NEW or SEEN BEFORE by the daemon)
+   and the remediation's.
 5. Sidebar: the third label, clickable labels.
 6. Metrics and the catalog.
 7. Retire the standing mediator and its brief.
