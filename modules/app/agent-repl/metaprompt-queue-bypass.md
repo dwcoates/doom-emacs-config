@@ -60,10 +60,11 @@
 - Every test run is governed by default: the CPU governor holds it to its share of the host.
   - Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.
   - An ungoverned run takes every core, which the user feels on their machine.
-- Run no gate before each landing: no gate runs while the queue is paused, and each change lands on its own review.
-  - Run only the tests a change adds or changes while writing it, and keep every test it touches compiling.
+- While writing a change, run only the tests it adds or changes, and keep every test it touches compiling.
+- Before each landing, run the full suite on the branch, already rebased onto the main branch: `agent-repld test run -every-suite`.
+  - Land only when it passes: a failure is fixed on the branch, and the full suite runs again.
+  - If the main branch moved after the run, rebase onto it and run the full suite again before landing.
+  - A change can break a test it never touches, which no targeted run sees (2026-11-14: 0.436.0 landed a broken test this way).
+  - The full suite took 4m47s, measured 2026-11-14.
 - Bypass queue mode never leaves the main branch broken.
-  - Once every change planned for this bypass session has landed, run the full suite once on the main branch: `agent-repld test run -every-suite`.
-  - Run it once for the whole session, after the last planned landing, never after each landing.
-  - Fix every failure it finds, land each fix the same way, and rerun only the cases that failed, until all of them pass.
   - Never call the session's work done, or ask for the mode to be released, while the main branch fails a tracked test.
