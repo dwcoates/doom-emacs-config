@@ -144,7 +144,7 @@ func (s *server) watchChat(ctx context.Context, msg *agentreplv1.WatchChatReques
 	if err := validateWorkspaceRef("thread", msg.GetThread()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetThread())
+	subject, r, err := s.resolveRef(ctx, rpc, msg.GetThread())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}

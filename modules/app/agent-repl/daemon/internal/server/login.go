@@ -66,7 +66,7 @@ func (s *server) watchLoginTerminal(
 	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
+	subject, r, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}

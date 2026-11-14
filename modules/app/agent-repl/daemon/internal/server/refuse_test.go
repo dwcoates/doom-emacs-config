@@ -556,6 +556,54 @@ func TestResolveRefDecidesTheStandingBeforeReadingState(t *testing.T) {
 	}
 }
 
+// TestATypedStandingRefusalIsRecordedOnceAtInfo pins that a handover's
+// standing refusal, answered by an rpc whose error carries the arm, is an
+// ordinary answer: on 2026-11-14 a page's OpenFeed reaching the outgoing
+// daemon 11ms after the transfer was answered OpenFeedError.transferring_away
+// AND warned as an unlanded arm.
+func TestATypedStandingRefusalIsRecordedOnceAtInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing workspace.Standing
+		arm      string
+	}{
+		{name: "a transferred workspace", standing: workspace.StandingTransferringAway, arm: "transferring_away"},
+		{name: "an unadopted workspace", standing: workspace.StandingNotYetAdopted, arm: "not_yet_adopted"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			h.Ownership.standing = test.standing
+
+			// Act.
+			resp, err := h.Client.OpenFeed(context.Background(),
+				connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("OpenFeed answered an error rather than a typed arm: %v", err)
+			}
+			if resp.Msg.GetError() == nil {
+				t.Fatalf("OpenFeed answered %v, want the %s arm", resp.Msg.GetResult(), test.arm)
+			}
+			if warns := log.at("WARN"); len(warns) != 0 {
+				t.Fatalf("OpenFeed warned %+v, want no WARN for a typed standing refusal", warns)
+			}
+			var infos int
+			for _, rec := range log.at("INFO") {
+				if rec.Operation == "OpenFeed" && rec.Context["arm"] == test.arm {
+					infos++
+				}
+			}
+			if infos != 1 {
+				t.Fatalf("OpenFeed recorded %d INFO records naming %s, want 1: %+v", infos, test.arm, log.records)
+			}
+		})
+	}
+}
+
 // TestResolveRefFailsAnOwnedWorkspaceOnAClosedState pins that the reordering
 // does NOT swallow a genuine state failure: a workspace this daemon still
 // serves surfaces the read's error.

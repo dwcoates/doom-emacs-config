@@ -38,7 +38,7 @@ type Opens interface {
 // request is InvalidArgument and a registry that cannot be read ends the
 // stream with its error, so an open never half-starts. A workspace this daemon
 // will not open is answered `refused` with the same checks every
-// per-workspace rpc takes (resolveStreamRef); one that is not visible is
+// per-workspace rpc takes (resolveRef); one that is not visible is
 // answered `hidden` and nothing is started for it.
 func (s *server) OpenTabs(
 	ctx context.Context,
@@ -100,7 +100,7 @@ func (s *server) resolveOpens(ctx context.Context, rpc string, asked []*agentrep
 	for i, w := range asked {
 		ref := w.GetWorkspace()
 		out[i] = opentabs.Workspace{Ref: ref, Name: ref.GetId(), Page: w.GetLoading() != nil}
-		subject, r, err := s.resolveStreamRef(ctx, rpc, ref)
+		subject, r, err := s.resolveRef(ctx, rpc, ref)
 		if err != nil {
 			return nil, failResolution(s.log, rpc, err)
 		}
@@ -109,7 +109,7 @@ func (s *server) resolveOpens(ctx context.Context, rpc string, asked []*agentrep
 			if !setArm(refused.ProtoReflect(), r.Arm, r.Fields) {
 				s.log.Error(rpc, "a workspace was refused with an arm OpenTabs does not carry", dlog.Context{
 					"workspace": ref.GetId(), "arm": r.Arm, "reason": r.Reason,
-					"invariant_violation": "every refusal resolveStreamRef answers is an OpenTabsOpenedRefused arm",
+					"invariant_violation": "every refusal resolveRef answers is an OpenTabsOpenedRefused arm",
 				})
 				return nil, connect.NewError(connect.CodeInternal,
 					fmt.Errorf("%s: workspace %q: refusal arm %q has no OpenTabs arm", rpc, ref.GetId(), r.Arm))

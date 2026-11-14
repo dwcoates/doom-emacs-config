@@ -61,7 +61,7 @@ type subscriptionScenario struct {
 // WatchWebWorkspace has none: its only push arm is `transferred`, fired
 // exactly once per handover, and by the time it fires the workspace's
 // standing on THIS daemon has already become transferring_away —
-// resolveStreamRef (internal/server/refuse.go) refuses every FURTHER
+// resolveRef (internal/server/refuse.go) refuses every FURTHER
 // per-workspace open on this daemon before it ever reaches the topic. There
 // is no window in which "subscribe late on the daemon holding the published
 // transferred view" is even reachable, so the late-subscribe half of the

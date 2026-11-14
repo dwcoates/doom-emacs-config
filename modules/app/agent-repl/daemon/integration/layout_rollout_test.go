@@ -243,7 +243,6 @@ func TestAnAdditiveLayoutChangeIsHandedOverRatherThanRestarted(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	selfRepo, d := drainSelfRepoDaemon(t)
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()

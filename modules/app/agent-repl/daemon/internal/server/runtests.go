@@ -316,9 +316,9 @@ type testWorktree struct {
 // does not serve, a *noTestScriptError for a worktree with no test script, or
 // the resolution's own failure (already answered through failResolution).
 func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *workspacev1.WorkspaceRef) (testWorktree, error) {
-	// THE STANDING IS ANSWERED HERE, not warned by the resolution: a handover's
+	// THE STANDING IS ANSWERED HERE: a handover's
 	// transfer is a typed arm of both test endpoints, so it is no unlanded one.
-	subject, refused, err := s.resolveRefLogging(ctx, rpc, ref, false)
+	subject, refused, err := s.resolveRef(ctx, rpc, ref)
 	if err != nil {
 		return testWorktree{}, failResolution(s.log, rpc, err)
 	}

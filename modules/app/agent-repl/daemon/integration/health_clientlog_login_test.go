@@ -342,7 +342,7 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is a LANDED SessionHealthError arm
-	// (endpoint_session_health.proto): server.resolveRefLogging fills its Arm
+	// (endpoint_session_health.proto): server.resolveRef fills its Arm
 	// and answers it in band, so it is logged at DEBUG, never WARN
 	// (internal/server/refuse.go refuse()).
 
@@ -352,7 +352,7 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	}))
 
 	// Assert: the arm is LANDED, so the answer is always the in-band typed
-	// arm, never a transport error (settled by reading resolveRefLogging in
+	// arm, never a transport error (settled by reading resolveRef in
 	// internal/server/refuse.go, per critique 22).
 	if err != nil {
 		t.Fatalf("SessionHealth(unknown) = error %v, want a success carrying error{unknown_workspace}", err)
