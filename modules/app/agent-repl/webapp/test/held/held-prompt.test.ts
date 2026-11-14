@@ -2779,7 +2779,7 @@ describe("the fold above control", () => {
     );
   });
 
-  it("logs a refusal through the canonical logger", async () => {
+  it("logs a refusal through the canonical logger at info, since a typed refusal is an expected answer", async () => {
     // Arrange
     const capture = captureLogRecords();
     const { tc } = foldContext(foldRefusal("aboveMoved"));
@@ -2792,7 +2792,7 @@ describe("the fold above control", () => {
       capture,
       "held.held-prompt.action-refused",
     );
-    expect(record.level.case).toBe("warn");
+    expect(record.level.case).toBe("info");
   });
 
   it("re-enables the row after a refusal so it can be retried", async () => {
