@@ -5603,6 +5603,13 @@ name or closed flag is roster.el's, so the two files cannot disagree."
                             :value (:parent (:id "p" :dir "/w/parent") :state (:arm :closed :value nil)))))
                  "register refused: its parent parent is closed; reopen the parent first")))
 
+(ert-deftest agent-repl-verbs-register-words-a-transferring-away ()
+  "An announcement refused for a workspace handed to the successor names the
+successor and when to try again."
+  (should (equal (agent-repl-verbs-register-refusal-sentence
+                  "/w/x" '(:cause (:arm :transferring-away :value (:address "127.0.0.1:7001"))))
+                 "/w/x is being handed over to the successor daemon at 127.0.0.1:7001; add it again once the handover ends")))
+
 (ert-deftest agent-repl-verbs-a-swap-of-two-workspaces-that-are-not-siblings-is-said-in-words ()
   "A swap refused not_siblings is an answer, said in words."
   (let (said)

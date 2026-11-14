@@ -488,7 +488,7 @@ there to say it."
                                   dir (plist-get response :value))
                 (funcall on-refused (plist-get response :value)))
             (funcall on-done (agent-repl-host--record-registration
-                              log-scope dir :refused (plist-get response :value)))))
+                              log-scope dir :refused (plist-get response :value) workspace))))
          (arm
           (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
           (funcall on-done nil))))
@@ -503,6 +503,11 @@ ARM is `:registered' (VALUE the decoded `RegisterWorkspaceSuccess'),
 \(VALUE what broke).  A registration of the existing workspace WS also
 records the page the daemon last knew it to hold
 \(`agent-repl-host-last-known-page').
+A registration of WS refused `transferring_away' is HANDOVER NEWS, not a
+failure: the daemon handed WS to the successor it names, so it is
+recorded at INFO and handed to `agent-repl-host-handle-refusal', which
+walks WS onto that successor; it still answers nil, since this daemon
+registered nothing.
 THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
 \(`agent-repl-host-register') and each dir of a RegisterWorkspaces
 \(`agent-repl-host--outcome-ref') alike, so a reader asks for one
@@ -517,7 +522,13 @@ registration\='s outcome the same way however it was sent."
                          dir (plist-get ref :id) page)
        ref))
     (:refused
-     (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)
+     (let ((cause (plist-get value :cause)))
+       (if (and ws (eq (plist-get cause :arm) :transferring-away))
+           (progn
+             (agent-repl--info scope "elisp.host.register-transferring-away dir=%S fields=%S"
+                               dir (plist-get cause :value))
+             (agent-repl-host-handle-refusal ws cause))
+         (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)))
      nil)
     (:failed
      (agent-repl--error scope "elisp.host.register-failed dir=%S detail=%S" dir value)
@@ -576,7 +587,7 @@ registration\='s own."
       (:registered
        (agent-repl-host--record-registration ws dir :registered value ws))
       (:refused
-       (agent-repl-host--record-registration ws dir :refused value))
+       (agent-repl-host--record-registration ws dir :refused value ws))
       (:failed
        (agent-repl-host--record-registration ws dir :failed (plist-get value :cause)))
       (other
@@ -1874,6 +1885,16 @@ severed until a hand-triggered walk."
   (cond
    ((not (agent-repl-host--reattach-current-p ws token))
     (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+   ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
+   ;; waiting for that successor to be accepted (`:adopt-pending',
+   ;; `agent-repl-host--adopt-on-acceptance').  WS is not detached: the
+   ;; acceptance walks it, so this walk ends without arming another.  A
+   ;; successor already accepted took a NEW walk at once, and the branch
+   ;; above dropped this one as superseded.
+   ((and (null ref) (plist-get (agent-repl-host--entry ws) :adopt-pending))
+    (agent-repl-host--put ws :reattach nil)
+    (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
+                      ws dir (agent-repl-connect-connection-address new)))
    ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
    ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
    ;; vocabulary, so a reader can ask for one edge's walks alone.
