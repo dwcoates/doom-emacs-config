@@ -748,6 +748,12 @@ var ReadByNoSuite = []string{
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
 	// The agents' sandbox's own state, which no suite reads.
 	"/.agents-sandbox/",
+	// The persistent-wifi helper app's sources: built by the installer and run
+	// only on the user's Mac (CoreWLAN under Location Services), which no
+	// suite can grant. The daemon's side of it is tested through a fake app
+	// (daemon/internal/persistentwifi); the helper itself is untested
+	// (org/todo.md).
+	"wifi-helper/",
 	// The repository's prose.
 	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
 }
