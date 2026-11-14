@@ -69,6 +69,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
 		Exists: func(p string) bool { return h.exists[p] },
+		ScanDir: t.TempDir(),
 		OnChange: func(s *agentreplv1.PersistentWifiState) {
 			h.changes = append(h.changes, s)
 			h.published <- s
@@ -87,6 +88,10 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 	// test says otherwise.
 	h.r.on(argRadioOff, answer{})
 	h.r.on(argRadioOn, answer{})
+	// The hotspot is out of reach, and every scan sees nothing with the
+	// machine on no hotspot, unless a test says otherwise.
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.sight(inSight(""))
 	return h
 }
 

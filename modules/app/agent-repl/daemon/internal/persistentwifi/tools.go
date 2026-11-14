@@ -71,6 +71,14 @@ type Tools struct {
 	Brightness string
 	// Ps lists the process table for the application freezer.
 	Ps string
+	// Open launches the Wi-Fi helper app (WifiApp) as its own app, so macOS
+	// attributes its Location Services permission to the helper and not to
+	// the daemon.
+	Open string
+	// WifiApp is agent-repl's Wi-Fi helper app (wifi-helper/), the one
+	// reader of the joined network's name and the visible networks' names:
+	// macOS names Wi-Fi networks only to an app allowed Location Services.
+	WifiApp string
 }
 
 // DefaultTools is the production layout: the system tools where macOS ships
@@ -85,8 +93,18 @@ func DefaultTools() Tools {
 		Caffeinate:   "/usr/bin/caffeinate",
 		Brightness:   "/opt/homebrew/bin/mac-brightness",
 		Ps:           "/bin/ps",
+		Open:         "/usr/bin/open",
 	}
 }
+
+// WifiAppIn is where agent-repl installs its Wi-Fi helper app under HOME
+// (wifi-helper/build.sh's default).
+func WifiAppIn(home string) string {
+	return filepath.Join(home, ".cache", "agent-repl", wifiAppName)
+}
+
+// wifiAppName is the Wi-Fi helper app's bundle name.
+const wifiAppName = "AgentReplWifi.app"
 
 // ToolsIn is every tool resolved from one directory by its base name.
 func ToolsIn(dir string) Tools {
@@ -101,6 +119,8 @@ func ToolsIn(dir string) Tools {
 		Caffeinate:   in(d.Caffeinate),
 		Brightness:   in(d.Brightness),
 		Ps:           in(d.Ps),
+		Open:         in(d.Open),
+		WifiApp:      filepath.Join(dir, wifiAppName),
 	}
 }
 
@@ -153,6 +173,14 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
 		}
 		cfg.Tools = ToolsIn(dir)
+	} else {
+		// THE WI-FI HELPER IS INSTALLED UNDER HOME (WifiAppIn); a HOME that
+		// is not absolute would name it relative to the daemon's directory.
+		home := getenv("HOME")
+		if !filepath.IsAbs(home) {
+			return Config{}, fmt.Errorf("persistentwifi: HOME=%q is not an absolute path, so the Wi-Fi helper app cannot be found", home)
+		}
+		cfg.Tools.WifiApp = WifiAppIn(home)
 	}
 	switch {
 	case lid != "" && getenv(appfreeze.EnvApps) == "":

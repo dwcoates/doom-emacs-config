@@ -29,6 +29,36 @@ type fakeRunner struct {
 	// before runs, outside the fake's own lock, before argv's call is
 	// answered: the controller acting while one of its calls is in flight.
 	before map[string]func(ctx context.Context)
+	// prefixed answers an argv no exact script names that starts with one of
+	// its keys, handed the argv: a call whose last argument varies (a scan's
+	// answer file).
+	prefixed map[string]func(argv []string) answer
+	// blocking are prefixes whose calls wait for their context to end, then
+	// answer its error: a tool that never answers.
+	blocking map[string]bool
+}
+
+// onPrefix answers every argv starting with PREFIX through FN.
+func (f *fakeRunner) onPrefix(prefix string, fn func(argv []string) answer) *fakeRunner {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.prefixed == nil {
+		f.prefixed = map[string]func(argv []string) answer{}
+	}
+	f.prefixed[prefix] = fn
+	return f
+}
+
+// hangPrefix makes every argv starting with PREFIX wait until its context
+// ends, then answer the context's error.
+func (f *fakeRunner) hangPrefix(prefix string) *fakeRunner {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.blocking == nil {
+		f.blocking = map[string]bool{}
+	}
+	f.blocking[prefix] = true
+	return f
 }
 
 // whileRunning makes HOOK run as argv's call is in flight, handed the call's
@@ -56,7 +86,18 @@ func (f *fakeRunner) on(argv string, answers ...answer) *fakeRunner {
 func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
 	f.mu.Lock()
 	hook := f.before[strings.Join(argv, " ")]
+	hang := false
+	for prefix := range f.blocking {
+		hang = hang || strings.HasPrefix(strings.Join(argv, " "), prefix)
+	}
+	if hang {
+		f.calls = append(f.calls, strings.Join(argv, " "))
+	}
 	f.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return "", 0, ctx.Err()
+	}
 	if hook != nil {
 		hook(ctx)
 	}
@@ -68,6 +109,14 @@ func (f *fakeRunner) Run(ctx context.Context, dir string, argv []string) (string
 	key := strings.Join(argv, " ")
 	f.calls = append(f.calls, key)
 	queue, ok := f.answers[key]
+	if !ok {
+		for prefix, fn := range f.prefixed {
+			if strings.HasPrefix(key, prefix) {
+				a := fn(argv)
+				return a.out, a.code, a.err
+			}
+		}
+	}
 	if !ok || len(queue) == 0 {
 		f.t.Errorf("unscripted run: %q", key)
 		return "", 0, errors.New("unscripted")

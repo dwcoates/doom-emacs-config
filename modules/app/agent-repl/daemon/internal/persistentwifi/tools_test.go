@@ -15,18 +15,28 @@ func TestConfigFromEnv(t *testing.T) {
 		wantErr bool
 	}{
 		{
+			name:    "a HOME that is not absolute is refused: the Wi-Fi helper could not be found",
+			env:     map[string]string{"HOME": "home/owner"},
+			wantErr: true,
+		},
+		{
+			name:    "no HOME is refused",
+			env:     map[string]string{},
+			wantErr: true,
+		},
+		{
 			name: "unset is the production layout and no hotspot",
-			env:  map[string]string{},
-			want: Config{Tools: DefaultTools(), FreezeApps: appfreeze.DefaultApps},
+			env:  map[string]string{"HOME": "/home/owner"},
+			want: Config{Tools: homeTools(), FreezeApps: appfreeze.DefaultApps},
 		},
 		{
 			name: "the freeze list names the applications",
-			env:  map[string]string{appfreeze.EnvApps: "Slack, Discord"},
-			want: Config{Tools: DefaultTools(), FreezeApps: []string{"Slack", "Discord"}},
+			env:  map[string]string{"HOME": "/home/owner", appfreeze.EnvApps: "Slack, Discord"},
+			want: Config{Tools: homeTools(), FreezeApps: []string{"Slack", "Discord"}},
 		},
 		{
 			name:    "a freeze list naming a terminal is refused",
-			env:     map[string]string{appfreeze.EnvApps: "Slack,Terminal"},
+			env:     map[string]string{"HOME": "/home/owner", appfreeze.EnvApps: "Slack,Terminal"},
 			wantErr: true,
 		},
 		{
@@ -46,6 +56,7 @@ func TestConfigFromEnv(t *testing.T) {
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Caffeinate: "/fake/bin/caffeinate", Brightness: "/fake/bin/mac-brightness", Ps: "/fake/bin/ps",
+				Open: "/fake/bin/open", WifiApp: "/fake/bin/AgentReplWifi.app",
 			}, FakeLid: "/fake/lid"},
 		},
 		{
@@ -70,8 +81,8 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name: "a hotspot override names the hotspot",
-			env:  map[string]string{EnvHotspot: "Other Phone"},
-			want: Config{Tools: DefaultTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
+			env:  map[string]string{"HOME": "/home/owner", EnvHotspot: "Other Phone"},
+			want: Config{Tools: homeTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
 		},
 		{
 			name:    "a relative tools dir is refused",
@@ -80,7 +91,7 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name:    "a blank hotspot is refused",
-			env:     map[string]string{EnvHotspot: "   "},
+			env:     map[string]string{"HOME": "/home/owner", EnvHotspot: "   "},
 			wantErr: true,
 		},
 	}
@@ -137,4 +148,11 @@ func TestPreferredNetworksParsesTheIndentedSSIDs(t *testing.T) {
 	if len(got) != 2 || got[0] != "Home" || got[1] != "Someone’s iPhone" {
 		t.Fatalf("preferredNetworks = %q, want the two saved SSIDs", got)
 	}
+}
+
+// homeTools is the production layout for HOME /home/owner.
+func homeTools() Tools {
+	t := DefaultTools()
+	t.WifiApp = WifiAppIn("/home/owner")
+	return t
 }

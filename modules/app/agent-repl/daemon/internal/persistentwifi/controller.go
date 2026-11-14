@@ -65,6 +65,9 @@ type Deps struct {
 	// EnergyRecord keeps the energy mode the quiet state recorded on
 	// entering it, for its restore (energy.go). REQUIRED.
 	EnergyRecord EnergyStore
+	// ScanDir is where the Wi-Fi helper writes each scan's answer
+	// (scanWifi); the system temporary directory when empty.
+	ScanDir string
 }
 
 // Controller reads, publishes and changes the persistent-wifi standing. One
@@ -110,6 +113,18 @@ type Controller struct {
 	// failover is the Wi-Fi failover's retry schedule since Wi-Fi was lost;
 	// the zero value while the failover stands down (failoverDueLocked).
 	failover failoverSchedule
+	// scanDir is where the Wi-Fi helper writes its answers (Deps.ScanDir).
+	scanDir string
+	// scanBound bounds each scan (scanBound, the constant; a test shortens it).
+	scanBound time.Duration
+	// scanSeq names each scan's answer file apart from the last's.
+	scanSeq int
+	// scanCause is why the last Wi-Fi scan named no networks; empty while
+	// scans name them (recordStandingCause).
+	scanCause string
+	// hotspot is the hotspot dwell: while the quiet state stands on the
+	// hotspot, when each known network was first seen (hotspotdwell.go).
+	hotspot hotspotDwell
 	// failoverCancel cancels the failover attempt in flight; nil while none
 	// runs (attemptFailover).
 	failoverCancel context.CancelFunc
@@ -157,6 +172,10 @@ func New(d Deps) (*Controller, error) {
 		exists: exists, onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
+		scanDir: d.ScanDir, scanBound: scanBound,
+	}
+	if c.scanDir == "" {
+		c.scanDir = os.TempDir()
 	}
 	d.Freezer.OnChange(c.frozenChanged)
 	return c, nil

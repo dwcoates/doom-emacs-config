@@ -441,6 +441,18 @@ exit 0
 printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : ` + FakeHostNetwork + `\n}\n'
 `,
 	"wifi-util": "#!/bin/sh\nexit 0\n",
+	// The Wi-Fi helper's launch (persistentwifi's scan): it answers, in the
+	// file --out names, joined to FakeHostNetwork with it alone in sight.
+	"open": `#!/bin/sh
+while [ $# -gt 0 ]; do
+  if [ "$1" = --out ]; then
+    printf '{"authorization":"authorized","current":"%s","visible":[{"ssid":"%s","rssi":-40}]}' "` + FakeHostNetwork + `" "` + FakeHostNetwork + `" > "$2"
+    exit 0
+  fi
+  shift
+done
+exit 1
+`,
 	// The display's level, read with no argument and set with one; it starts
 	// at FakeBrightness.
 	"mac-brightness": `#!/bin/sh
