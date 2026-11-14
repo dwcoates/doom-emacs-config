@@ -1459,3 +1459,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 deploy-mediator (landed in queue bypass mode): Record a deploy-mediation round a handover cuts at INFO, and run it again if the handover ends with this daemon serving
 - 2026-11-14 deploy-mediator (landed in queue bypass mode): Adopt every headless workspace side by side at a handover, so one unfinished adoption no longer holds the rest past their adoption window
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Merge queue and deploy mediation metrics: each round and its outcome, rounds per merge, queue changes, how each deploy check ended, and remediations deployed in a row; the mediation labels read "hot reloading" and "assessing reload"; the metrics skill documents every metric
+- 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): The pick timing test reads only durations, beside the new queue change counts
