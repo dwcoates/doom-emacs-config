@@ -1455,3 +1455,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): a session that owes a retry after a network failure stays busy until the retry runs, so a deploy's bounce never kills the retry
 - 2026-11-14 deploy-mediator (landed in queue bypass mode): The worktree reaper probes a landing target as any ref, so a landing into origin/master is no longer judged gone
 - 2026-11-14 deploy-mediator (landed in queue bypass mode): Refuse a second merge request beside one standing off its queue, cut the deploy mediation at exit, keep the queue held when a mediation round's await fails, and read an incumbent cut mid-frame as gone
+- 2026-11-14 deploy-mediator (landed in queue bypass mode): Record a typed handover refusal of a unary once at INFO instead of warning it as an unlanded arm
