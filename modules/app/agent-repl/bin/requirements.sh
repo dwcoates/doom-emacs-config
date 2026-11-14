@@ -27,6 +27,12 @@
 #                            (`configuration_features`, and the platform block's)
 #   env                      an environment variable the user sets
 #   notification_permission  macOS lets a banner program notify
+#   app_build                a macOS app built from the module (`build.module`, a
+#                            script taking the app's path, which answers its
+#                            sources' hash under `--source-hash`) into the cache
+#                            (`app`), rebuilt only when that hash changed
+#   location_permission      macOS lets a helper app (`app`, in the cache) name
+#                            Wi-Fi networks: Location Services allowed
 #   skill_link               a Claude Code skill linked into the skills directory of
 #                            every Claude config root agent-repl runs sessions under
 #                            (`"retired": true`: our link is removed instead)
@@ -319,6 +325,9 @@ validate_entries() {
                  | "\($e._file): \($e.id): an emacs install.source.darwin needs \"app\"")))
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
+       elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
+         (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
+       elif $e.kind == "location_permission" then need($e; ["app", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
        elif $e.kind == "command_link" then need($e; ["name", "source"]),
          (select($e.source != null and $e.source.repo == null) | "\($e._file): \($e.id): a command_link source is a path in the repository (\"repo\")")
@@ -496,6 +505,56 @@ check_notification_permission() {
   else
     STATUS=missing; DETAIL="$cmd may not notify: $(printf '%s\n' "$out" | grep -iE 'authoriz|problem' | tr '\n' ' ')"
   fi
+}
+
+# app_path ENTRY: where an app_build or location_permission entry's app is
+# installed, in the cache.
+app_path() { printf '%s/%s\n' "$CACHE_ROOT" "$(field "$1" .app)"; }
+
+# app_build_script ENTRY: the app_build entry's build script, in the module.
+app_build_script() { printf '%s/%s\n' "$MODULE_DIR" "$(field "$1" .build.module)"; }
+
+check_app_build() {
+  local e="$1" app script want have
+  app="$(app_path "$e")"
+  script="$(app_build_script "$e")"
+  FIX="install builds it: $script $app"
+  if [ ! -d "$app" ]; then
+    STATUS=missing; DETAIL="$app is not built"; return
+  fi
+  if ! want="$("$script" --source-hash </dev/null 2>&1)"; then
+    STATUS=failed; DETAIL="$script --source-hash failed: $want"; return
+  fi
+  have="$(cat "$app/Contents/Resources/source-sha256" 2>/dev/null || true)"
+  if [ "$have" = "$want" ]; then
+    STATUS=ok; DETAIL="$app"
+  else
+    STATUS=outdated; DETAIL="$app was built from other sources than the checkout's"
+  fi
+}
+
+# check_location_permission: the helper's own scan names its standing
+# (wifi-helper/main.swift); only "authorized" names networks.
+check_location_permission() {
+  local e="$1" app out standing
+  app="$(app_path "$e")"
+  FIX="install asks once; then allow \"agent-repl Wi-Fi\" in System Settings → Privacy & Security → Location Services"
+  if [ ! -d "$app" ]; then
+    STATUS=missing; DETAIL="$app is not built"; return
+  fi
+  out="$(mktemp "${TMPDIR:-/tmp}/agent-repl-wifi-check.XXXXXX")"
+  # </dev/null: the install loop reads its entries from stdin.
+  if ! open -W -n -g -a "$app" --args scan --out "$out" </dev/null >/dev/null 2>&1; then
+    rm -f "$out"
+    STATUS=failed; DETAIL="$app could not be run"; return
+  fi
+  standing="$(jq -r '.authorization // empty' "$out" 2>/dev/null || true)"
+  rm -f "$out"
+  case "$standing" in
+    authorized) STATUS=ok; DETAIL="$app may name Wi-Fi networks" ;;
+    "") STATUS=failed; DETAIL="$app answered no standing" ;;
+    *) STATUS=missing; DETAIL="$app may not name Wi-Fi networks: $standing" ;;
+  esac
 }
 
 # link_source ENTRY: the canonical source path of a link entry (a skill link or
@@ -1062,6 +1121,25 @@ install_notification_permission() {
   # state the re-check reports.
   "$cmd" -title "agent-repl" -message "agent-repl can now post desktop banners" -group agent-repl:requirements >/dev/null 2>&1 \
     || say "install: $cmd's first banner was refused; macOS asks once, and System Settings → Notifications allows it"
+  return 0
+}
+
+install_app_build() {
+  local e="$1"
+  # </dev/null: the install loop reads its entries from stdin, which a build
+  # must never consume.
+  "$(app_build_script "$e")" "$(app_path "$e")" </dev/null
+}
+
+install_location_permission() {
+  local app
+  app="$(app_path "$1")"
+  [ -d "$app" ] || return 1
+  # The helper's authorize verb is what makes macOS ask; it waits for the
+  # owner's answer, so it is left running, and the re-check reports the
+  # permission until it is given.
+  open -n -g -a "$app" --args authorize --out "$(mktemp "${TMPDIR:-/tmp}/agent-repl-wifi-authorize.XXXXXX")" </dev/null >/dev/null 2>&1 \
+    || say "install: $app could not ask for Location Services"
   return 0
 }
 

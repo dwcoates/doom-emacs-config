@@ -902,6 +902,102 @@ test_install_asks_for_an_unauthorized_notifiers_permission() {
 }
 
 # ---------------------------------------------------------------------------
+# app_build and location_permission.
+# ---------------------------------------------------------------------------
+
+APP_BUILD='{"id": "helper", "kind": "app_build", "why": "w", "profile": "run", "platforms": ["darwin"], "app": "Helper.app", "build": {"module": "helper/build.sh"}}'
+LOCATION='{"id": "helper-location", "kind": "location_permission", "why": "w", "profile": "run", "platforms": ["darwin"], "app": "Helper.app"}'
+
+# helper_build HASH: the case's helper build script, answering HASH under
+# --source-hash and otherwise building the app stamped with it.
+helper_build() {
+  mkdir -p "$CASE/module/helper"
+  printf '#!/bin/bash
+printf "%%s %%s\n" helper-build "$*" >>"%s/transcript"
+if [ "$1" = --source-hash ]; then echo %s; exit 0; fi
+mkdir -p "$1/Contents/Resources"
+echo %s >"$1/Contents/Resources/source-sha256"
+' \
+    "$CASE" "$1" "$1" >"$CASE/module/helper/build.sh"
+  chmod +x "$CASE/module/helper/build.sh"
+}
+
+# built_helper HASH: the helper already built in the cache, stamped HASH.
+built_helper() {
+  mkdir -p "$CASE/home/.cache/agent-repl/Helper.app/Contents/Resources"
+  echo "$1" >"$CASE/home/.cache/agent-repl/Helper.app/Contents/Resources/source-sha256"
+}
+
+# helper_open STANDING: an `open` that answers a scan with STANDING in the
+# file --out names, and records an authorize.
+helper_open() {
+  write_stub open '
+out=""; verb=""
+while [ $# -gt 0 ]; do
+  case "$1" in --args) verb="$2" ;; --out) out="$2" ;; esac
+  shift
+done
+[ -n "$out" ] && printf "{\"verb\":\"%s\",\"authorization\":\"'"$1"'\",\"visible\":[]}" "$verb" >"$out"
+exit 0'
+}
+
+test_an_app_built_from_the_checkouts_sources_is_ok() {
+  new_case; manifest "[$APP_BUILD]"; helper_build abc; built_helper abc
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          helper:"; then pass "an app built from the checkout's sources is ok"; else fail "app built from the sources" "rc=$RC" "$OUT"; fi
+}
+
+test_an_app_not_built_is_missing_and_install_builds_it() {
+  new_case; manifest "[$APP_BUILD]"; helper_build abc
+  run install
+  if [ "$RC" -eq 0 ] && has "helper is missing" && ran "helper-build $CASE/home/.cache/agent-repl/Helper.app" && has "ok          helper:"; then
+    pass "install builds an app that is not built"
+  else fail "app not built" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_an_app_built_from_other_sources_is_outdated_and_rebuilt() {
+  new_case; manifest "[$APP_BUILD]"; helper_build new; built_helper old
+  run install
+  if [ "$RC" -eq 0 ] && has "helper is outdated" && ran "helper-build $CASE/home/.cache/agent-repl/Helper.app"; then
+    pass "install rebuilds an app built from other sources"
+  else fail "app from other sources" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_an_app_built_from_the_same_sources_is_never_rebuilt() {
+  new_case; manifest "[$APP_BUILD]"; helper_build abc; built_helper abc
+  run install
+  if [ "$RC" -eq 0 ] && ! ran "helper-build $CASE/home"; then
+    pass "install leaves an app built from the same sources alone, so macOS keeps its permission"
+  else fail "same sources rebuilt" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_an_app_build_with_no_module_path_is_refused() {
+  new_case; manifest '[{"id": "helper", "kind": "app_build", "why": "w", "profile": "run", "platforms": ["darwin"], "app": "Helper.app", "build": {"repo": "x"}}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'an app_build build is a path in the module'; then pass "an app build with no module path is refused"; else fail "app build path" "rc=$RC" "$OUT"; fi
+}
+
+test_an_authorized_helper_is_ok() {
+  new_case; manifest "[$LOCATION]"; built_helper abc; helper_open authorized
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          helper-location:" && has "may name Wi-Fi networks"; then pass "an authorized helper is ok"; else fail "authorized helper" "rc=$RC" "$OUT"; fi
+}
+
+test_install_asks_for_an_unauthorized_helpers_location_services() {
+  new_case; manifest "[$LOCATION]"; built_helper abc; helper_open not_determined
+  run install
+  if [ "$RC" -eq 1 ] && ran "--args authorize" && has "may not name Wi-Fi networks: not_determined"; then
+    pass "install asks once, and reports the still-missing permission"
+  else fail "unauthorized helper" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_location_permission_for_an_app_not_built_is_missing() {
+  new_case; manifest "[$LOCATION]"; helper_open authorized
+  run check
+  if [ "$RC" -eq 1 ] && has "Helper.app is not built"; then pass "a permission for an app not built is missing"; else fail "permission without app" "rc=$RC" "$OUT"; fi
+}
+
+# ---------------------------------------------------------------------------
 # service.
 # ---------------------------------------------------------------------------
 
