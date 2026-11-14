@@ -743,9 +743,14 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 
 	// Assert.
 	assertNames(t, got, []string{
-		"topbar.OnSessionStarted", "footer.OnSessionStarted", "sidebar.OnSessionStarted", "feed.OnSessionStarted",
-		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"footer.OnSessionStarted", "feed.OnSessionStarted",
+		"footer.OnLink", "lifecycle.OnLinkChanged",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		// The roster and the topbar take theirs once Start releases the
+		// watcher's lock, in the order they were queued (viewedges.go).
+		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
+		"topbar.OnLink", "sidebar.OnLink",
+		"sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
 		t.Fatal("a started session is not connected")
@@ -1349,9 +1354,10 @@ func TestSinkCallsAreSerializedPerWorkspace(t *testing.T) {
 	go send(sub.stream, "sub-1")
 	wg.Wait()
 
-	// Assert: per agent, the feed saw its activities in the order they were
-	// sent, with nothing interleaved inside one frame's routing. Each frame
-	// reaches four sinks: the feed, the footer, the roster and the topbar.
+	// Assert: per agent, every view saw its activities in the order they were
+	// sent, with nothing interleaved between one frame's feed and footer
+	// calls. Each frame reaches four sinks: the feed, the footer, the roster
+	// and the topbar.
 	got := h.collect(t, 2*frames*4)
 	assertPerAgentOrder(t, got, "main-1", frames)
 	assertPerAgentOrder(t, got, "sub-1", frames)
@@ -3251,8 +3257,9 @@ func (f *fakeStalls) Watch(m *lockwatch.Mutex, lock string, ws ids.WorkspaceID, 
 	}
 }
 
-// TestStartWatchesTheWatcherMutex pins that an open watcher's mutex is
-// registered with the stall watchdog under its name and its workspace.
+// TestStartWatchesTheWatcherMutex pins that an open watcher's mutex, and the
+// lock its view edges are delivered under, are registered with the stall
+// watchdog under their names and its workspace.
 func TestStartWatchesTheWatcherMutex(t *testing.T) {
 	// Arrange.
 	stalls := &fakeStalls{}
@@ -3261,7 +3268,10 @@ func TestStartWatchesTheWatcherMutex(t *testing.T) {
 	h := startHarnessWatched(t, Session{}, nil, stalls)
 
 	// Assert.
-	want := []watchedLock{{m: &h.w.mu, lock: "sessionwatcher.watcher", ws: "ws-1"}}
+	want := []watchedLock{
+		{m: &h.w.mu.Mutex, lock: "sessionwatcher.watcher", ws: "ws-1"},
+		{m: &h.w.mu.delivering, lock: "sessionwatcher.views", ws: "ws-1"},
+	}
 	if !reflect.DeepEqual(stalls.watched, want) {
 		t.Fatalf("watched = %+v, want %+v", stalls.watched, want)
 	}
@@ -3280,8 +3290,8 @@ func TestCloseUnwatchesTheWatcherMutex(t *testing.T) {
 	}
 
 	// Assert.
-	if stalls.unwatched != 1 {
-		t.Fatalf("unwatched = %d, want 1", stalls.unwatched)
+	if stalls.unwatched != 2 {
+		t.Fatalf("unwatched = %d, want 2: the watcher's mutex and its view-delivery lock", stalls.unwatched)
 	}
 }
 
@@ -3728,7 +3738,7 @@ func TestAnAskOpenAtAttachStandsOnTheGateViews(t *testing.T) {
 			name: "an open consent ask",
 			ask: &conversationv1.SessionOpenAsk{Agent: agentID("main-1"), Ask: &conversationv1.SessionOpenAsk_Permission{
 				Permission: permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file").GetPermission()}},
-			want: []string{"footer.OnPermission", "sidebar.OnPermission", "merge.OnPermission"},
+			want: []string{"footer.OnPermission", "merge.OnPermission", "sidebar.OnPermission"},
 		},
 		{
 			name: "an open question batch",
