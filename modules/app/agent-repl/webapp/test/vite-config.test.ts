@@ -58,15 +58,43 @@ function recordingLogger(warnings: string[]): Logger {
   return logger;
 }
 
+/**
+ * The Rollup warnings Vite drops rather than print (its `warningIgnoreList`,
+ * vite/dist/node/chunks/dep-*.js `onRollupWarning`): a build that raises only
+ * these prints nothing.
+ */
+const VITE_DROPPED_WARNINGS = ["CIRCULAR_DEPENDENCY", "THIS_IS_UNDEFINED"];
+
+/**
+ * Records every Rollup warning a build prints. VITE HANDS ROLLUP'S WARNINGS
+ * TO ROLLUP'S OWN PRINTER, NOT ITS LOGGER: a `Circular chunk` warning reached
+ * stderr while the recording logger saw nothing (2026-11-01). Each warning is
+ * still passed on to Vite's handler, which drops what it drops and throws on
+ * an unresolved import.
+ */
+function recordingOnwarn(warnings: string[]): Rollup.WarningHandlerWithDefault {
+  return (warning, viteWarn) => {
+    if (!VITE_DROPPED_WARNINGS.includes(warning.code ?? "")) warnings.push(`${warning.code ?? "rollup"}: ${warning.message}`);
+    viteWarn(warning);
+  };
+}
+
 /** Runs the real build over vite.config.ts into outDir, recording every warning. */
 async function recordBuild(outDir: string, overrides: InlineConfig["build"] = {}): Promise<RecordedBuild> {
   const warnings: string[] = [];
+  const { rollupOptions, ...rest } = overrides;
   const result = await build({
     ...buildConfig,
     configFile: false,
     root: webappDir,
     customLogger: recordingLogger(warnings),
-    build: { ...buildConfig.build, outDir, emptyOutDir: true, ...overrides },
+    build: {
+      ...buildConfig.build,
+      outDir,
+      emptyOutDir: true,
+      ...rest,
+      rollupOptions: { ...buildConfig.build?.rollupOptions, ...rollupOptions, onwarn: recordingOnwarn(warnings) },
+    },
   });
   if (Array.isArray(result) || !("output" in result)) {
     throw new Error("vite build returned no single RollupOutput; the config grew a second output or a watcher");
@@ -336,6 +364,44 @@ describe("vite.config.ts build", () => {
 
       // Assert.
       expect(cycles).toEqual([]);
+    });
+  });
+
+  // THE ERROR PATH OF ROLLUP'S OWN WARNINGS: a chunk cycle is reported by
+  // Rollup, not Vite, and the zero-warning check above has to see it.
+  // Splitting the app's feed and sidebar from the rest forces one: each
+  // imports the other's modules.
+  describe("when the chunks import each other in a cycle", () => {
+    let cyclicBuild: RecordedBuild;
+
+    beforeAll(async () => {
+      cyclicBuild = await recordBuild(tempOutDir(), {
+        rollupOptions: {
+          output: {
+            manualChunks(id) {
+              if (id.includes("/src/feed/")) return "feed";
+              if (id.includes("/src/sidebar/")) return "side";
+              return id.includes("/src/") ? "core" : undefined;
+            },
+          },
+        },
+      });
+    }, BUILD_TIMEOUT_MS);
+
+    it("records Rollup's circular chunk warning", () => {
+      // Act.
+      const warnings = cyclicBuild.warnings;
+
+      // Assert.
+      expect(warnings).toContainEqual(expect.stringMatching(/^CIRCULAR_CHUNK: Circular chunk: /));
+    });
+
+    it("records no circular dependency between modules, which Vite drops rather than print", () => {
+      // Act.
+      const warnings = cyclicBuild.warnings;
+
+      // Assert.
+      expect(warnings.filter((w) => w.startsWith("CIRCULAR_DEPENDENCY"))).toEqual([]);
     });
   });
 
