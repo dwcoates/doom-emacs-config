@@ -3,11 +3,10 @@ package gitclient
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/inflight"
-	"agent-repld/internal/recordlock"
 )
 
 // This file holds the daemon's ONE network git: FetchBranch.
@@ -28,7 +27,13 @@ import (
 // the repository's common dir (fetchLockName): a create's fetch and the
 // divergence sweep's, or two daemons' across a handover, would otherwise race
 // each other on the same private ref. The lock is the kernel's and dies with
-// its holder (internal/recordlock).
+// its holder, the fetch's own git, which takes it through a helper process
+// that holds no other lock (fetchlock.go).
+//
+// A GIT THAT PRUNES REFS (`git pack-refs`, `git gc`) LOCKS THE PRIVATE REF too,
+// for as long as its pruning runs, and a fetch meeting that lock waits for it
+// in git's own lock acquisition (core.filesRefLockTimeout, fetchRefLockWait)
+// rather than failing at once on git's default bound.
 
 // privateRefRoot is the namespace every daemon fetch writes into.
 const privateRefRoot = "refs/agent-repl/"
@@ -36,6 +41,24 @@ const privateRefRoot = "refs/agent-repl/"
 // fetchLockName is the record lock, in the repository's common dir, that one
 // daemon fetch of the repository holds at a time.
 const fetchLockName = "agent-repl-fetch.lock"
+
+// fetchRefLockWait is how long a fetch's git waits for a ref lock another git
+// holds (core.filesRefLockTimeout, milliseconds): three times the slowest
+// `git pack-refs --all` measured over this repository's 22,618 packed refs and
+// 200 loose ones on a host about half busy (60ms of 40-60ms, 2026-11-14).
+const fetchRefLockWait = "180"
+
+// fetchEnv is the environment a fetch's git runs under beyond the scrubbed
+// one: the helper's lock file and git, and the ref lock wait.
+func fetchEnv(lockPath string) []string {
+	return []string{
+		fetchLockEnv + "=" + lockPath,
+		fetchGitEnv + "=" + gitBinary,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=core.filesRefLockTimeout",
+		"GIT_CONFIG_VALUE_0=" + fetchRefLockWait,
+	}
+}
 
 // PrivateRemoteRef is the ref FetchBranch writes remote's branch into: the one
 // ref the daemon reads origin's view of that branch from.
@@ -52,9 +75,11 @@ func fetchRefspec(remote, branch string) string {
 
 // FetchBranch fetches remote's branch into PrivateRemoteRef(remote, branch) and
 // answers that ref. GIT_TERMINAL_PROMPT=0 (pinned on every git) makes a remote
-// that wants a credential fail rather than wait. A failure is git's, recorded
+// that wants a credential fail rather than wait. The fetch's git runs through
+// the fetch lock's helper (this executable), which holds the repository's
+// fetch lock for git's whole run. A failure is git's or the helper's, recorded
 // at ERROR by run with the directory, the argument vector (the refspec) and
-// git's own stderr.
+// the stderr that says which.
 func (c *client) FetchBranch(ctx context.Context, repoDir, remote, branch string) (string, error) {
 	const operation = "daemon.gitclient.fetch_branch"
 	refspec := fetchRefspec(remote, branch)
@@ -62,48 +87,16 @@ func (c *client) FetchBranch(ctx context.Context, repoDir, remote, branch string
 	if err != nil {
 		return "", err
 	}
-	lock, err := holdFetchLock(ctx, filepath.Join(common, fetchLockName))
+	helper, err := os.Executable()
 	if err != nil {
-		c.log.Global().Error(operation, "the repository's fetch lock could not be taken", dlog.Context{
+		c.log.Global().Error(operation, "the fetch lock's helper (this executable) could not be located", dlog.Context{
 			"dir": repoDir, "refspec": refspec, "lock": filepath.Join(common, fetchLockName), "cause": err.Error(),
 		})
-		return "", fmt.Errorf("gitclient: fetching %s in %s: %w", refspec, repoDir, err)
+		return "", fmt.Errorf("gitclient: fetching %s in %s: locating the fetch lock's helper: %w", refspec, repoDir, err)
 	}
-	defer lock.Release()
-	if _, err := c.run(ctx, operation, repoDir, "fetch", "--no-tags", "--no-write-fetch-head",
+	if _, err := c.runVia(ctx, operation, helper, repoDir, fetchEnv(filepath.Join(common, fetchLockName)), "fetch", "--no-tags", "--no-write-fetch-head",
 		"--recurse-submodules=no", "--no-auto-maintenance", remote, refspec); err != nil {
 		return "", err
 	}
 	return PrivateRemoteRef(remote, branch), nil
-}
-
-// holdFetchLock waits for the exclusive record lock at PATH, or for CTX to
-// end. A wait CTX abandons goes on in the background and releases the lock the
-// moment it is granted, so an abandoned wait never keeps the lock.
-func holdFetchLock(ctx context.Context, path string) (*recordlock.Record, error) {
-	f, err := recordlock.OpenFile(path)
-	if err != nil {
-		return nil, err
-	}
-	type granted struct {
-		rec *recordlock.Record
-		err error
-	}
-	wait := make(chan granted, 1)
-	// inflight: joined: the function that starts it waits for it.
-	go func() {
-		rec, err := recordlock.BlockExclusive(f, path)
-		wait <- granted{rec, err}
-	}()
-	select {
-	case g := <-wait:
-		return g.rec, g.err
-	case <-ctx.Done():
-		inflight.Standing(func() {
-			if g := <-wait; g.err == nil {
-				g.rec.Release()
-			}
-		})
-		return nil, ctx.Err()
-	}
 }
