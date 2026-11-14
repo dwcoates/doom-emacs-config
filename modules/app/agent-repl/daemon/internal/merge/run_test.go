@@ -1340,3 +1340,36 @@ func TestAwaitFreeFailsWhenTheAwaitedWorkspacesNameCannotBeRead(t *testing.T) {
 	}
 }
 
+// TestTheHarnessAwaitTurnEndAnswersAWaitCutBeforeItBegan pins the harness's
+// AwaitTurnEnd to production's: a wait whose context is already cut answers
+// the cut, gate or no gate, never the turn completed.
+func TestTheHarnessAwaitTurnEndAnswersAWaitCutBeforeItBegan(t *testing.T) {
+	tests := []struct {
+		name  string
+		gated bool
+	}{
+		{name: "no gate"},
+		{name: "a gate", gated: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.gated {
+				h.mu.Lock()
+				h.awaitGate = make(chan struct{})
+				h.mu.Unlock()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act.
+			_, err := h.o.deps.AwaitTurnEnd(ctx, theWorkspace, "turn-1")
+
+			// Assert.
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("AwaitTurnEnd = %v, want the cut answered", err)
+			}
+		})
+	}
+}

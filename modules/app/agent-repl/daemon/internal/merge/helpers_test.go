@@ -3383,6 +3383,12 @@ func (h *harness) deps() Deps {
 			if failed != nil {
 				return 0, failed
 			}
+			// A WAIT CUT BEFORE THE TURN ENDS ANSWERS THE CUT, as production's
+			// (sessionwatcher.watcher.AwaitTurnEnd) does: a fake that answered
+			// the turn completed let a run that never read its own cut pass.
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			if gate != nil {
 				select {
 				case <-gate:
