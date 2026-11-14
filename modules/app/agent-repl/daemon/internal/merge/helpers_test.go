@@ -1635,6 +1635,14 @@ func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error
 	return ok, nil
 }
 
+func (g *fakeGit) RefExists(_ context.Context, _, ref string) (bool, error) {
+	g.record("ref_exists")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok := g.refs[ref]
+	return ok, nil
+}
+
 func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 	g.record("resolve_ref")
 	g.mu.Lock()

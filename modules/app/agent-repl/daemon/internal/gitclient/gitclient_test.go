@@ -272,6 +272,158 @@ func TestBranchExistsVerifiesUnderRefsHeadsOnly(t *testing.T) {
 	fake.assertSubject(0, "show-ref", "--verify", "--quiet", "refs/heads/v1")
 }
 
+// --- RefExists ----------------------------------------------------------
+
+// TestRefExistsAsksRevParseForAnyCommitRef pins that the probe is not confined
+// to refs/heads: a remote-tracking target such as origin/master must be found.
+func TestRefExistsAsksRevParseForAnyCommitRef(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("abc123\n", "rev-parse"))
+
+	// Act.
+	if _, err := git.RefExists(context.Background(), "/repo", "origin/master"); err != nil {
+		t.Fatalf("RefExists: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "rev-parse", "--verify", "--quiet", "--end-of-options", "origin/master^{commit}")
+}
+
+func TestRefExistsAnswers(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		want    bool
+	}{
+		{name: "exit 0 is a ref naming a commit", fixture: ok("abc123\n", "rev-parse"), want: true},
+		{name: "exit 1 is no such ref", fixture: fails(1, "", "rev-parse"), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tc.fixture)
+
+			// Act.
+			got, err := git.RefExists(context.Background(), "/repo", "fix/parent")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("RefExists = %v, %v; want %v with no error", got, err, tc.want)
+			}
+			if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.ref_exists"); found {
+				t.Fatal("an answer was recorded at ERROR; both exits are ordinary answers")
+			}
+		})
+	}
+}
+
+func TestRefExistsThatCannotTellIsARecordedFailure(t *testing.T) {
+	// Arrange: a broken repository is neither answer.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n", "rev-parse"))
+
+	// Act.
+	_, err := git.RefExists(context.Background(), "/repo", "fix/parent")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("RefExists error = %v (%T), want git's own exit-128 failure", err, err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.ref_exists"); !found {
+		t.Fatal("git failing to tell was not recorded at ERROR under daemon.gitclient.ref_exists")
+	}
+}
+
+// --- yesNo --------------------------------------------------------------
+
+func TestYesNoReadsTheExitCodeAsTheAnswer(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		want    bool
+	}{
+		{name: "exit 0 is yes", fixture: ok("", "probe"), want: true},
+		{name: "exit 1 is no", fixture: fails(1, "", "probe"), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			fake := newFakeGit(t, tc.fixture)
+
+			// Act.
+			got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("yesNo = %v, %v; want %v with no error", got, err, tc.want)
+			}
+			fake.assertSubject(0, "probe", "x")
+			if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.test_probe"); found {
+				t.Fatal("an answer was recorded at ERROR")
+			}
+		})
+	}
+}
+
+func TestYesNoThatCannotTellFailsAndRecordsOnce(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: broken\n", "probe"))
+
+	// Act.
+	got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+
+	// Assert.
+	var failure *Error
+	if got || !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("yesNo = %v, %v (%T); want false and git's exit-128 failure", got, err, err)
+	}
+	errs := dlog.FilterRecords(surfaces.records(), dlog.RecordQuery{Level: "error", Operation: "daemon.gitclient.test_probe"})
+	if len(errs) != 1 || errs[0].Message != "cannot tell" {
+		t.Fatalf("want one ERROR record carrying the cannot-tell message, got %+v", errs)
+	}
+}
+
+// TestEveryExitCodeProbeSharesYesNo pins that each exit-code probe goes
+// through yesNo: an exit git uses for neither answer must surface as a
+// recorded failure under the probe's own operation, never as yes or no.
+func TestEveryExitCodeProbeSharesYesNo(t *testing.T) {
+	probes := []struct {
+		name      string
+		operation string
+		message   string
+		call      func(Git) (bool, error)
+	}{
+		{name: "RefExists", operation: "daemon.gitclient.ref_exists", message: "git could not tell whether a ref names a commit",
+			call: func(g Git) (bool, error) { return g.RefExists(context.Background(), "/repo", "fix/parent") }},
+		{name: "IsAncestor", operation: "daemon.gitclient.is_ancestor", message: "git could not tell whether one commit is an ancestor of another",
+			call: func(g Git) (bool, error) { return g.IsAncestor(context.Background(), "/repo", "feature", "abc123") }},
+	}
+	for _, tc := range probes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, fails(2, "fatal: odd\n"))
+
+			// Act.
+			got, err := tc.call(git)
+
+			// Assert.
+			if got || err == nil {
+				t.Fatalf("%s = %v, %v; want a failure for exit 2", tc.name, got, err)
+			}
+			errs := dlog.FilterRecords(surfaces.records(), dlog.RecordQuery{Level: "error", Operation: tc.operation})
+			if len(errs) != 1 || errs[0].Message != tc.message {
+				t.Fatalf("want one ERROR %s record %q, got %+v", tc.operation, tc.message, errs)
+			}
+		})
+	}
+}
+
 // --- RepositoryOf -------------------------------------------------------
 
 func TestRepositoryOfAnswersTheMainWorktree(t *testing.T) {

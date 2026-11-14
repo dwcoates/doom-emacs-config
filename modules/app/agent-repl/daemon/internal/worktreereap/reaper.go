@@ -111,6 +111,7 @@ type Git interface {
 	RemoveWorktree(ctx context.Context, repoDir, worktreeDir string) error
 	CommonDir(ctx context.Context, dir string) (string, error)
 	BranchExists(ctx context.Context, repoDir, branch string) (bool, error)
+	RefExists(ctx context.Context, repoDir, ref string) (bool, error)
 	IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error)
 	PreserveWorktree(ctx context.Context, repoDir, worktreeDir, ref, message string) (string, error)
 	DeleteBranchAt(ctx context.Context, repoDir, branch, head string) error

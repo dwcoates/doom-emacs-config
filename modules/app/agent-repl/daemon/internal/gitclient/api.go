@@ -35,6 +35,11 @@ type Git interface {
 	// answer and never an error record, which is what a naming collision
 	// check asks of it.
 	BranchExists(ctx context.Context, repoDir, branch string) (bool, error)
+	// RefExists reports whether ref names a commit: a local branch, a
+	// remote-tracking ref, a tag or a sha. Like BranchExists it is a PROBE:
+	// a ref that names nothing is an ordinary answer and never an error
+	// record.
+	RefExists(ctx context.Context, repoDir, ref string) (bool, error)
 	// CreateWorktree creates branch at baseRef and checks it out at
 	// worktreeDir.
 	CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error
