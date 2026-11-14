@@ -1299,7 +1299,9 @@ deletion that follows."
            (agent-repl-window--delete-where
             (lambda (win)
               (agent-repl--sweepable-panel-p
-               (buffer-name (window-buffer win)))))))
+               (buffer-name (window-buffer win))))
+            :caller "sync-panels"
+            :predicate-name "another workspace's orphaned panel")))
       (agent-repl--log-verbose ws "sync-panels: closed %d orphans"
                                 (length deleted)))))
 
@@ -1421,7 +1423,9 @@ side-window skip explicit and parameter-independent."
   (let* ((ws (agent-repl--ws-current-name))
          (selected (selected-window))
          (deleted (agent-repl-window--delete-where
-                   (lambda (win) (not (eq win selected))))))
+                   (lambda (win) (not (eq win selected)))
+                   :caller "clear-main-area-for-panels"
+                   :predicate-name "every window but the selected one")))
     (agent-repl--log ws "clear-main-area-for-panels: ws=%s selected=%s deleted-count=%d"
                       ws selected (length deleted))
     deleted))
@@ -2048,4 +2052,6 @@ real main-area window — see
       (setq agent-repl--window-fullscreen-config (agent-repl-window--save-configuration))
       (let ((keep (selected-window)))
         (agent-repl-window--delete-where
-         (lambda (win) (not (eq win keep))))))))
+         (lambda (win) (not (eq win keep)))
+         :caller "fullscreen-and-focus"
+         :predicate-name "every window but the selected one")))))

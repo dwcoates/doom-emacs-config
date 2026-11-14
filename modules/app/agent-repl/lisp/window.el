@@ -44,6 +44,7 @@
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--warn "core")
+(declare-function agent-repl--fatal "core")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-log-scope "workspace" (ws))
@@ -510,12 +511,18 @@ two layers that label buffers in their records, and both call this."
 ;;;; --- Subset deletion ---------------------------------------------------
 
 (cl-defun agent-repl-window--delete-where
-    (predicate &key (skip-side-windows t) frame ws)
+    (predicate &key (skip-side-windows t) frame ws caller predicate-name)
   "Delete each live window for which PREDICATE returns non-nil.
 
 PREDICATE is called with the window as its single argument.  Returns
 the list of windows that were deleted (useful for callers wanting to
 verify the sweep took effect).
+
+CALLER names the sweep that asked (\"sync-panels\"), and PREDICATE-NAME
+says in words which windows PREDICATE matches; both are required and
+every record of the sweep carries them.  2026-10-26: a delete of an
+`*agent-frontend-...*' window failed with \"Deletion failed\", and its
+record named neither, so nothing said which sweep had asked for it.
 
 The minibuffer window is ALWAYS preserved and never passed to
 PREDICATE: it is undeletable and only appears in `window-list'
@@ -544,9 +551,14 @@ opted into specificity)."
   (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
          (windows (window-list frame))
          (deleted '()))
+    (unless (and (stringp caller) (not (string-empty-p caller))
+                 (stringp predicate-name) (not (string-empty-p predicate-name)))
+      (agent-repl--fatal resolved-ws
+                         "window--delete-where: unnamed sweep caller=%S predicate=%S"
+                         caller predicate-name))
     (agent-repl--log resolved-ws
-                     "window--delete-where: begin frame=%S skip-side-windows=%S windows=%d"
-                     frame skip-side-windows (length windows))
+                     "window--delete-where: begin caller=%s predicate=%s frame=%S skip-side-windows=%S windows=%d"
+                     caller predicate-name frame skip-side-windows (length windows))
     (dolist (win windows)
       (cond
        ((not (window-live-p win))
@@ -578,7 +590,7 @@ opted into specificity)."
               (delete-window win)
               (push win deleted)
               (agent-repl--log resolved-ws
-                               "window--delete-where: deleted window=%S" win))
+                               "window--delete-where: deleted caller=%s window=%S" caller win))
           (error
            ;; Three structural delete-window errors are benign here —
            ;; they fire when prior iterations have already collapsed the
@@ -591,14 +603,17 @@ opted into specificity)."
            ;; is still surfaced.
            (if (agent-repl-window--benign-undeletable-error-p err resolved-ws)
                (agent-repl--log resolved-ws
-                                "window--delete-where: skip-undeletable %s: %S" win err)
+                                "window--delete-where: skip-undeletable caller=%s predicate=%s window=%s error=%S"
+                                caller predicate-name win err)
              (agent-repl--warn resolved-ws
-                               "window--delete-where: could not delete %s: %S"
-                               win err)))))))
+                               "window--delete-where: could not delete caller=%s predicate=%s window=%s buffer=%s error=%S"
+                               caller predicate-name win
+                               (agent-repl--safe-buffer-name (window-buffer win))
+                               err)))))))
     (setq deleted (nreverse deleted))
     (agent-repl--log resolved-ws
-                     "window--delete-where: complete deleted-count=%d deleted=%S"
-                     (length deleted) deleted)
+                     "window--delete-where: complete caller=%s deleted-count=%d deleted=%S"
+                     caller (length deleted) deleted)
     deleted))
 
 (defun agent-repl-window--benign-undeletable-error-p (err &optional ws)
