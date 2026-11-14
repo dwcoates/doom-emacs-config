@@ -76,8 +76,14 @@ func (c *Controller) checkHotspot(attempt failoverAttempt, rd reading) {
 		return
 	}
 	if err != nil {
+		// A SCAN THAT NAMES NOTHING ENDS THE DWELL for this quiet state: the
+		// next would fail the same way (the helper unauthorized, its scan
+		// failing) at a helper launch every hotspotCheckEvery while the lid
+		// stays closed, on battery. A loss is still answered by the failover,
+		// which joins the hotspot. The deferred reschedule finds no dwell.
 		c.mu.Lock()
 		c.recordScanCauseLocked(err)
+		c.hotspot = hotspotDwell{}
 		c.mu.Unlock()
 		return
 	}

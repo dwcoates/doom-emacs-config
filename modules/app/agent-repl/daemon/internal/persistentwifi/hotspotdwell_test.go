@@ -198,3 +198,24 @@ func TestTheQuietStatesEdgesResetTheDwell(t *testing.T) {
 		t.Fatalf("dwell after the lid opened = %+v, want it cleared", d)
 	}
 }
+
+func TestAScanThatNamesNothingEndsTheDwellForTheQuietState(t *testing.T) {
+	// Arrange: the quiet state began joined; the helper is not authorized.
+	h := newHarness(t).standing(pmsetOn, summary(true, "")).withLid(lidClosed)
+	h.c.quiet = true
+	h.c.hotspot = hotspotDwell{unknown: true}
+	h.sight(wifiScan{Authorization: "not_determined"})
+
+	// Act: the first check, then a long closed lid.
+	for d := time.Duration(0); d <= 10*hotspotCheckEvery; d += hotspotCheckEvery {
+		h.tickAt(d)
+	}
+
+	// Assert
+	if n := h.scanCount(); n != 1 {
+		t.Fatalf("scans = %d, want the one that found no names", n)
+	}
+	if errs := h.failoverRecords("error", "the visible Wi-Fi networks could not be read; only the hotspot can be joined"); len(errs) != 1 {
+		t.Fatalf("error records = %d, want one", len(errs))
+	}
+}
