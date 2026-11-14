@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // theMergeWorkspace is the merge workspace the switches below name.
@@ -164,5 +166,99 @@ func TestMarkMergeWorkspaceRemovedReachesARestartedDaemonsRestoredRows(t *testin
 	// Assert
 	if marked != 1 || feedRows(second, rootFeed())[0].GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch().GetRemoved() == nil {
 		t.Fatalf("marked = %d, want the restored head restated as removed", marked)
+	}
+}
+
+// recordedSwitch decodes the switch WS's durable record holds for ROW.
+func recordedSwitch(t *testing.T, store *fakeDurableRows, ws ids.WorkspaceID, row string) *frontendv1.FeedMergeWorkspaceSwitch {
+	t.Helper()
+	recorded, ok := store.recorded(ws, row)
+	if !ok {
+		t.Fatalf("no durable record of %s", row)
+	}
+	decoded := &frontendv1.FeedRow{}
+	if err := proto.Unmarshal(recorded.Row, decoded); err != nil {
+		t.Fatalf("decode %s: %v", row, err)
+	}
+	return decoded.GetActivity().GetMerge().GetHead().GetMode().GetAsync().GetWorkspaceSwitch()
+}
+
+func TestMarkMergeWorkspaceRemovedRestatesAnUnheldWorkspacesRecordWithoutWakingItsFeed(t *testing.T) {
+	// Arrange: the first daemon drew the head; the second holds no feed state
+	// for the workspace, and its directory is gone.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	head := switchingHeadRow(theMergeWorkspace)
+	first.UpsertDurable(testWorkspace, rootFeed(), head)
+	first.UpsertDurable(testWorkspace, rootFeed(), func() *frontendv1.FeedRow {
+		other := switchingHeadRow("ws-other")
+		other.Id = &frontendv1.FeedId{Value: head.GetId().GetValue() + "-other"}
+		return other
+	}())
+	lookedUp := 0
+	second, log := daemonOverWith(t, store, func(d *Deps) {
+		d.WorkspaceDir = func(ids.WorkspaceID) (string, error) { lookedUp++; return "/gone", nil }
+	})
+
+	// Act
+	marked := second.MarkMergeWorkspaceRemoved(testWorkspace, theMergeWorkspace, 77)
+
+	// Assert
+	if marked != 1 {
+		t.Fatalf("marked = %d, want the one switch to the removed workspace", marked)
+	}
+	if got := recordedSwitch(t, store, testWorkspace, head.GetId().GetValue()); got.GetRemoved().GetRemovedAtMs() != 77 || got.GetLabel().GetText() != removedSwitchLabel {
+		t.Fatalf("recorded switch = %+v, want removed at 77", got)
+	}
+	if got := recordedSwitch(t, store, testWorkspace, head.GetId().GetValue()+"-other"); got.GetAvailable() == nil {
+		t.Fatalf("other switch = %+v, want it left available", got)
+	}
+	if _, held := second.workspaces[testWorkspace]; held {
+		t.Fatal("the workspace's feed state was brought up; a feed nobody reads was woken")
+	}
+	if lookedUp != 0 {
+		t.Fatalf("workspace directory looked up %d times, want none", lookedUp)
+	}
+	if !hasRecordIn(log, "info", "daemon.feed.merge_workspace_removed") {
+		t.Fatalf("records = %+v, want the restatement recorded", log.Records())
+	}
+}
+
+func TestMarkMergeWorkspaceRemovedInAnUnheldRecordFailsLoudly(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(store *fakeDurableRows)
+		op      string
+	}{
+		{name: "the record is unreadable", arrange: func(s *fakeDurableRows) { s.readErr = errors.New("disk I/O error") }, op: "daemon.feed.merge_workspace_removed_unread"},
+		{name: "the restated row cannot be recorded", arrange: func(s *fakeDurableRows) { s.putErr = errors.New("disk I/O error") }, op: "daemon.feed.merge_workspace_removed_unrecorded"},
+		{name: "a recorded row cannot be decoded", arrange: func(s *fakeDurableRows) {
+			s.rows[testWorkspace]["row|garbage"] = wsm.DurableFeedRow{Workspace: testWorkspace, RowID: "row|garbage", OrderKey: "2zzzz", Row: []byte{0xff, 0xff, 0xff}}
+		}, op: "daemon.feed.merge_workspace_removed_undecoded"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeDurableRows()
+			first, _ := daemonOver(t, store)
+			head := switchingHeadRow(theMergeWorkspace)
+			first.UpsertDurable(testWorkspace, rootFeed(), head)
+			tc.arrange(store)
+			second, log := daemonOver(t, store)
+
+			// Act
+			marked := second.MarkMergeWorkspaceRemoved(testWorkspace, theMergeWorkspace, 77)
+
+			// Assert
+			if !hasRecordIn(log, "error", tc.op) {
+				t.Fatalf("records = %+v, want %s at ERROR", log.Records(), tc.op)
+			}
+			if tc.op != "daemon.feed.merge_workspace_removed_undecoded" && marked != 0 {
+				t.Fatalf("marked = %d, want none", marked)
+			}
+			if tc.op == "daemon.feed.merge_workspace_removed_undecoded" && marked != 1 {
+				t.Fatalf("marked = %d, want the decodable switch still restated", marked)
+			}
+		})
 	}
 }
