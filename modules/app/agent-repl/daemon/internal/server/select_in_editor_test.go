@@ -336,7 +336,7 @@ func TestSelectInEditorRelayedNamingNoRowRevealsNothing(t *testing.T) {
 	stream := openWeb(t, h)
 
 	// Act.
-	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242", true)
 
 	// Assert.
 	if push := receiveWebEvent(t, stream); push.GetTransferred() == nil {

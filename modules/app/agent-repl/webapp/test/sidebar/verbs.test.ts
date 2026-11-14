@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createControl, type Control } from "../../src/control.js";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -81,6 +81,7 @@ import {
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
 import { codeOf } from "../source-text.js";
+import { filesUnder } from "../files-under.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
@@ -1049,12 +1050,9 @@ describe("the in-flight lockout", () => {
   });
 });
 
-/** Every webapp source file under DIR, recursively, as paths relative to the webapp's src. */
-function sourcesUnder(dir: string, prefix = ""): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.isDirectory()) return sourcesUnder(join(dir, entry.name), `${prefix}${entry.name}/`);
-    return entry.name.endsWith(".ts") ? [`${prefix}${entry.name}`] : [];
-  });
+/** Every webapp source file under DIR, recursively, as paths relative to DIR. */
+function sourcesUnder(dir: string): string[] {
+  return filesUnder(dir).map((file) => relative(dir, file));
 }
 
 // SELECTING IS ONE ACT (AGENTS.md "Selecting a workspace is one act"): every
