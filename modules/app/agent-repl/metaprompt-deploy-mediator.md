@@ -16,7 +16,10 @@
 - Escalate a deploy with something wrong that this workspace cannot fix confidently: `agent-repld merge-queue mediation escalate -summary "<what is wrong>"`.
   - Escalate too when a fix has a reasonable user-facing alternative, such as a choice about how something looks or behaves for the user.
   - The user is notified, and the queue moves on.
-- Remediate everything else, in the same turn (below).
+- Judge only what the deploy being checked caused (owner ruling, 2026-11-14).
+  - A defect that also shows before the deploy began, or comes from code it did not change, never holds the queue, and is never fixed here.
+  - Name each one in the decision's summary, and send it with its records to `merge-queue-stall-triage` (`agent-repld workspace prompt merge-queue-stall-triage "<the defect and its records>"`), which dispatches its fix through the queue.
+- Remediate everything else this deploy caused, in the same turn (below).
   - A defect whose cause the logs do not show yet is remediated too: land the logging that would show it, and deploy.
     - The next round reads what that logging recorded, and fixes the cause it shows.
     - "It needs more logging before a fix" is never a reason to escalate.
