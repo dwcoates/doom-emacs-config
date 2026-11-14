@@ -93,6 +93,7 @@ func TestSpawnSetsTheContractedEnvironment(t *testing.T) {
 		envc.EnvStateDir:          spec.StateDir,
 		EnvShimBuildSHA:           spec.ShimBuildSHA,
 		EnvSessionID:              spec.SessionID,
+		EnvWorkspaceDir:           spec.WorkspaceDir,
 		envc.EnvForbidVendorCalls: "1",
 	}
 	for name, value := range want {
@@ -123,21 +124,35 @@ func TestSpawnInheritsArbitraryEnvironment(t *testing.T) {
 }
 
 // TestSpawnOverridesInheritedContractedValue asserts a contracted name the
-// daemon's own environment already carries is OVERRIDDEN, exactly once.
+// daemon's own environment already carries is OVERRIDDEN with the Spec's
+// value: a daemon started from a workspace's own shell never hands that
+// workspace's directory on to another workspace's shim.
 func TestSpawnOverridesInheritedContractedValue(t *testing.T) {
-	// Arrange.
-	dir := shortDir(t)
-	f, uds := startFakeShim(t, dir)
-	t.Setenv(EnvConfigDir, "/inherited/account")
-	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	tests := []struct {
+		name string
+		env  string
+		want func(Spec) string
+	}{
+		{name: "account root", env: EnvConfigDir, want: func(s Spec) string { return s.ConfigDir }},
+		{name: "workspace dir", env: EnvWorkspaceDir, want: func(s Spec) string { return s.WorkspaceDir }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			t.Setenv(tt.env, "/inherited/value")
+			spec, sink := newTestSpec(t, dir, uds, helperIdle)
 
-	// Act.
-	_ = spawnReady(t, f, spec)
-	record := sink.record(t)
+			// Act.
+			_ = spawnReady(t, f, spec)
+			record := sink.record(t)
 
-	// Assert.
-	if got := record.Env[EnvConfigDir]; got != spec.ConfigDir {
-		t.Fatalf("child %s = %q, want the Spec's %q", EnvConfigDir, got, spec.ConfigDir)
+			// Assert.
+			if got, want := record.Env[tt.env], tt.want(spec); got != want {
+				t.Fatalf("child %s = %q, want the Spec's %q", tt.env, got, want)
+			}
+		})
 	}
 }
 
