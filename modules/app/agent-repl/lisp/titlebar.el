@@ -26,8 +26,13 @@
 ;;
 ;; The paint follows Emacs's focus on every event that can change what a
 ;; frame should show: a settled focus change, a new frame, and a theme
-;; load.  Child frames (posframes) and frames on other platforms have no
-;; title bar Emacs could color, and are never touched.
+;; load.  Child frames (posframes) have no title bar Emacs could color, and
+;; are never touched.
+;;
+;; IT IS macOS's ALONE.  No other platform draws its title bar in the
+;; frame's background: on Linux the window manager draws it.  There the
+;; module installs nothing and says so in the log at load, so a missing
+;; orange bar is a recorded fact rather than a mystery.
 
 ;;; Code:
 
@@ -36,6 +41,7 @@
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-status--color-value "status" (color))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl-frame-border-set-pinned "frame-border" (frame color))
 (defvar agent-repl--focus-log-scope)
 (defvar agent-repl-focus-settled-hook)
@@ -108,12 +114,23 @@ unpainted before the paint is taken afresh."
     (agent-repl--titlebar-unpaint frame))
   (agent-repl-titlebar-sync))
 
-(add-hook 'agent-repl-focus-settled-hook #'agent-repl-titlebar-sync)
-(add-hook 'after-make-frame-functions #'agent-repl-titlebar-sync)
-(add-hook 'enable-theme-functions #'agent-repl--titlebar-on-theme)
-;; An Emacs started behind another application (`open -gj') sees no focus
-;; change until it is brought forward, so its frames are painted now.
-(agent-repl-titlebar-sync)
+(defun agent-repl--titlebar-install (system)
+  "Install the title bar\='s paint on SYSTEM, a `system-type\='.
+On macOS the paint follows every settled focus change, new frame and
+theme load, and the frames are painted now: an Emacs started behind
+another application (`open -gj\=') sees no focus change until it is
+brought forward.  Anywhere else nothing is installed, and the log says
+the title bar is unavailable and why."
+  (if (eq system 'darwin)
+      (progn
+        (add-hook 'agent-repl-focus-settled-hook #'agent-repl-titlebar-sync)
+        (add-hook 'after-make-frame-functions #'agent-repl-titlebar-sync)
+        (add-hook 'enable-theme-functions #'agent-repl--titlebar-on-theme)
+        (agent-repl-titlebar-sync))
+    (agent-repl--info nil "elisp.titlebar.unavailable system-type=%s: the unfocused orange title bar is macOS's alone; this window manager draws the title bar, so it keeps the window manager's color"
+                      system)))
+
+(agent-repl--titlebar-install system-type)
 
 (provide 'titlebar)
 ;;; titlebar.el ends here
