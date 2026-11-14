@@ -46,6 +46,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
 	"agent-repld/internal/resolve/ladder"
+	"agent-repld/internal/transportcut"
 )
 
 // Op is every record's operation.
@@ -190,11 +191,15 @@ func (m *Mirror) end(ctx context.Context, fields dlog.Context, message string, e
 		reason := m.stopReason
 		m.mu.Unlock()
 		m.deps.Log.Debug(Op, "the mirror's subscription ended with the mirror", dlog.WithCause(dlog.Merge(fields, dlog.Context{"stopped_because": reason}), err))
-	case connect.CodeOf(err) == connect.CodeUnavailable:
-		// THE INCUMBENT IS GONE: its connection was refused or reset. That is
-		// a daemon that died mid-handover, which the takeover recovers and
-		// records itself (2026-11-13, the orphan-recovery tests); for the
-		// mirror it only ends the joining window early.
+	case transportcut.Is(err):
+		// THE INCUMBENT IS GONE: its connection was refused, reset, or cut
+		// partway through a frame. That is a daemon that died mid-handover,
+		// which the takeover recovers and records itself (2026-11-13, the
+		// orphan-recovery tests); for the mirror it only ends the joining
+		// window early. MEASURED, merge gate 2026-11-14:
+		// TestTheTakeoversOrphanRecoveryReconcilesItsOpenTurn caught the cut
+		// read as ERROR "invalid_argument: protocol error: incomplete
+		// envelope: unexpected EOF" when only unavailable was judged gone.
 		m.deps.Log.Info(Op, "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own", dlog.WithCause(fields, err))
 	default:
 		m.deps.Log.Error(Op, message, dlog.WithCause(fields, err))
