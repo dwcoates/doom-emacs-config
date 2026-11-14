@@ -2065,7 +2065,7 @@ describe("SetSessionModel's cold gate", () => {
 });
 
 describe("a stand-down with an ask still open", () => {
-  test("SIGTERM settles the open ask DENIED and concludes the turn", async () => {
+  test("SIGTERM settles the open ask ABANDONED and concludes the turn", async () => {
     // A PENDING CALLBACK IS A LIVE PROMISE INSIDE THE VENDOR. A teardown that
     // simply exited would leave the vendor's `canUseTool` awaiting an answer
     // that can never come, and the shim's own exit code would say the session
@@ -2090,8 +2090,8 @@ describe("a stand-down with an ask still open", () => {
     const exit = await shim.standDown();
 
     expect(exit.code).toBe(0);
-    // THE ASK SETTLED DENIED, on the record. DENIED and not merely "settled":
-    // once nobody is left to decide, deny is the only answer that is true.
+    // THE ASK SETTLED ABANDONED, on the record. ABANDONED and not merely
+    // "settled" or denied: nobody decided, and the stored card says so.
     const decisions = writtenEntries(shim.store?.writes() ?? [])
       .filter((entry) => entry.upsertKey.startsWith("permission:"))
       .map((entry) => pageLineOf(entry)?.agentItem?.item)
@@ -2104,7 +2104,7 @@ describe("a stand-down with an ask still open", () => {
         const outcome = update.value.result;
         return outcome.case === "success" ? [outcome.value.decision.case ?? "unset"] : [];
       });
-    expect(decisions).toContain("denied");
+    expect(decisions).toContain("abandoned");
     // ...AND THE TURN GOT ITS TERMINAL, rather than being left open forever.
     const terminals = writtenEntries(shim.store?.writes() ?? []).filter((entry) =>
       entry.upsertKey.startsWith(`terminal:${started.vendorSessionId}:`),
