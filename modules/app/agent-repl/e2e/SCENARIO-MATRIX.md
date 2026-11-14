@@ -161,7 +161,7 @@ Two further limits, stated rather than hidden:
 | `!hook-failed` | grounded | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!hook-success` | grounded | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
 | `!ide-diagnostics` | grounded | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestSubagents/BashForegroundCompleted. | covered |
-| `!ide-diagnostics-write` | grounded | — | — | — | — | — | No counted e2e layer drives this scenario, and its halves are not both pinned with a wired seam. | uncovered |
+| `!ide-diagnostics-write` | grounded | — | — | — | — | — | Retired from e2e (section (f)); both halves are proven at the integration tier by `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=the vendor's diagnostics report after a Write arrives as AgentWrite.diagnostics on the write call's own activity, after its settled success`, `-go daemon/integration=TestDiagnosticsAfterTheirWriteCardLandOnThatCard`. | covered |
 | `!interrupt` | grounded | interrupt_e2e_test.go | — | ✓ | ✓ | interrupt-live-tool | Go: TestTurns/InterruptAfterTextDelta asserts InterruptedTurn!=nil, terminal specifically Interrupted. | covered |
 | `!keepalive` | ungrounded | — | — | ✓ | ✓ | keepalive-marker | Both halves are pinned by its goldens (frames.json, feed.json); the `keepalive-marker` seam is wired by TestKeepAlive/KeepAliveStoresNothingOnEitherPlane. | covered |
 | `!max-tokens` | grounded | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestFaults/ApiRateLimitedCarriesTheVendorWait. | covered |
@@ -254,9 +254,9 @@ wrong: the by-layer lines once read 33 and 5 where the table's columns held
 - Shim half pinned: 125 scenarios
 - Daemon half pinned: 125 scenarios
 - Seam families: 18, each wired by its e2e test
-- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam, or a retired step's replacements proving both): **138**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam, or a retired step's replacements proving both): **139**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **2**
-- Uncovered (no counted layer drives the scenario, its halves are not both pinned with a wired seam, and no retired step's replacements prove both): **17**
+- Uncovered (no counted layer drives the scenario, its halves are not both pinned with a wired seam, and no retired step's replacements prove both): **16**
 - Total canonical scenarios: 157
 
 By layer, scenarios with at least one hit:
@@ -279,7 +279,6 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 - `!bash-rereported`
 - `!chess-board`
 - `!cron-create`
-- `!ide-diagnostics-write`
 - `!mcp-tool`
 - `!perm-answered-remotely`
 - `!perm-no-standing`
@@ -396,6 +395,34 @@ counts its scenario covered (owner ruling, 2026-11-13).
 | Retired step | Scenario | Replacement tests |
 |---|---|---|
 | `TestFaults/QueryEofMidAskDeniesTheOpenAsk` | `!query-eof-mid-ask` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a query that dies with a permission ask open opens the ask, then settles it abandoned before the turn ends`, `-go daemon/integration=TestAQueryThatDiesWithAnAskOpenDrawsTheAskDeniedAndTheTurnErrored` |
+| `TestFaults/HookBlocked` | `!hook-blocked` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a blocking PostToolUse hook around an Edit announces its firing and then states the refusal on the same activity`, `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a blocking PostToolUse hook around an Edit settles the gated Edit as a failure while the turn still concludes`, `-go daemon/integration=TestABlockingHookDrawsOneCardCarryingItsReason` |
+| `TestFaults/HookFailed` | `!hook-failed` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a failing SessionStart hook states a non-blocking error carrying its exit code and its stderr`, `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a failing SessionStart hook blocks nothing: the turn concludes`, `-go daemon/integration=TestAFailedHookDrawsOneCardCarryingItsExitCodeAndOutput` |
+| `TestTurns/IdeDiagnosticsAfterWrite` | `!ide-diagnostics-write` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=the vendor's diagnostics report after a Write arrives as AgentWrite.diagnostics on the write call's own activity, after its settled success`, `-go daemon/integration=TestDiagnosticsAfterTheirWriteCardLandOnThatCard` |
+
+## (g) Steps retired to one system's tier
+
+A step whose replacements sit in one system's tier proves one half, so it
+counts nothing covered: its scenario's verdict comes from table (a)'s other
+columns. It is pinned here all the same, in section (f)'s form, so a
+renamed or deleted replacement fails the check
+(`e2e/kit/scans/retired_test.go`, `checkOneTier`) instead of going
+unnoticed. A row whose pins prove both halves belongs in section (f). A
+retired step that drove no scenario of the mocked vendor (a merge's
+handback, a footer line's wording, a refused vendor start under the default
+prose) has no row in either section; its replacement is named in the commit
+that retired it.
+
+| Retired step | Scenario | Replacement tests |
+|---|---|---|
+| `TestTurns/ContextUsage` | `!context-usage-drift` | `-go daemon/integration=TestContextPanelAnswersAComposedHeaderAndSectionsFromThePushedUsage`, `-go daemon/integration=TestContextPanelHeaderMovesWhenTheShimPushesGrowingUsage` |
+| `TestTurns/McpToolCall` | `!mcp-tool` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=an MCP server's tool call is an AgentMcpToolCall that starts and settles with the tool's name and its returned text`, `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=an MCP server's tool call is never an unmodeled activity` |
+| `TestTurns/CronCreateSetsTheFootersCronsChip` | `!cron-create` | `-go daemon/integration=TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded` |
+| `TestTurns/SlashShapeAUnnamed` | `!slash-shape-a-unnamed` | `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a withheld-unnamed slash-command record puts nothing of the record on the stream: the turn's prose and its terminal are all it carries`, `-vitest agent-shim/claude/shim/test/integration/scenario-frames.test.ts=a withheld-unnamed slash-command record lands in the vendor's own transcript as a user record naming no command` |
+| `TestTurns/ChessBoard` | `!chess-board` | `-go daemon/integration=TestABoardCallOnADaemonWithNoCheckoutDrawsTheBoardUnavailable` |
+| `TestTurns/AnOpenQuestionIsNamedAndGreenOnTheStripAndTheRail` | `!ask-single` | `-go daemon/integration=TestRosterAndFooterAgreeOnAnOpenQuestion`, `-go daemon/integration=TestQuestionAnsweredRepushesWithEchoedLabels` |
+| `TestFaults/UnknownAgentOnUpdateAgent` | `!subagent-detached-live` | `-go daemon/integration=TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm` |
+| `TestFaults/BubbleRefusedAgentBusy` | `!subagent-detached-utterance` | `-go daemon/integration=TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal` |
+| `TestFaults/BubbleRefusedNotDeliverable` | `!subagent` | `-go daemon/integration=TestASubmitToASettledSubagentBubbleAnswersTheShimsNotDeliverableRefusal` |
 
 ## Sidecar mock-scenario reconciliation (context only — not counted coverage)
 

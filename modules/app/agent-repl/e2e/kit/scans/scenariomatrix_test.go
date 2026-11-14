@@ -1492,6 +1492,7 @@ func TestScenarioMatrixMatchesReality(t *testing.T) {
 	// (viii) Every retired step's pins name tests that exist, in both
 	// halves' tiers, for a scenario the vendor registers.
 	retired := checkRetired(t, parseRetired(t, doc.lines), canonical, liveStep(t), repo.repoDir)
+	checkOneTier(t, parseRetiredUnder(t, doc.lines, oneTierHeading), canonical, liveStep(t), repo.repoDir)
 
 	if os.Getenv(matrixWriteEnv) == "1" {
 		rewriteMatrix(t, r, derived, halves, wiring, retired, doc)
