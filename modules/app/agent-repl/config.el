@@ -276,6 +276,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; stale-sink.el asks the daemon whether a registered workspace whose
 ;; directory is gone is still open, and warns only then.
 (agent-repl--load-module "stale-sink")
+;; heap-census.el measures what holds the editor's heap on an idle timer; it
+;; needs only core.el's logging ladder.
+(agent-repl--load-module "heap-census")
 ;; WHY: mutation-progress.el is the correlation seat the daemon-link's push
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.
@@ -558,7 +561,12 @@ LOG RETENTION.  Every log file Emacs writes is deleted once its last write
 is `agent-repl-log-retention-seconds' (three days) old.  The first sweep
 is armed on an IDLE timer, never run from the startup hook: unlinking
 files before the first redisplay would hold the frame off screen to tidy
-a directory.  Then it repeats hourly."
+a directory.  Then it repeats hourly.
+
+THE HEAP CENSUS.  What holds the editor\='s heap is measured once Emacs is
+idle, at most every half hour (heap-census.el), armed from the startup
+hook like the retention sweep, so nothing runs before the first
+redisplay."
   (if batch
       (agent-repl--boot-info "lifecycle: nothing registered batch=%s" batch)
     (if (and (boundp 'agent-repl-frontend-auto-start)
@@ -569,7 +577,9 @@ a directory.  Then it repeats hourly."
     (agent-repl--register-lifecycle-hook
      'kill-emacs-hook #'agent-repl-input-save-all-on-shutdown -50 "composer save")
     (agent-repl--register-lifecycle-hook
-     'emacs-startup-hook #'agent-repl-schedule-log-retention-sweep nil "log retention sweep")))
+     'emacs-startup-hook #'agent-repl-schedule-log-retention-sweep nil "log retention sweep")
+    (agent-repl--register-lifecycle-hook
+     'emacs-startup-hook #'agent-repl-heap-census-schedule nil "heap census")))
 
 (defun agent-repl--report-load-errors (errors)
   "Report ERRORS, the modules that failed to load, loudly, then signal.
