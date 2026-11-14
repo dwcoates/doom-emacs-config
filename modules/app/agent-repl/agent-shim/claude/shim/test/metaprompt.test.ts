@@ -180,15 +180,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.");
   });
 
-  it("gives the deploy mediator its own section: decide every deploy, and remediate without children", () => {
+  it("gives the deploy intake its own section: state problems, never fix them, and decide every deploy", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
-    const text = readLandingSection("mediating", home);
-    // Assert — owner request 2026-11-13.
-    expect(text).toContain("This session is its repository's deploy mediator");
-    expect(text).toContain("It never creates a workspace, a child, a one-shot or an async merge, and never only suggests a fix.");
+    const text = readLandingSection("deploy_intake", home);
+    // Assert — owner rulings 2026-11-14.
+    expect(text).toContain("This session is the deploy intake of one chain of its repository's deploys");
+    expect(text).toContain("It never researches a cause and never prescribes a fix.");
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
+    expect(text).toContain("agent-repld merge-queue mediation dispatch -fresh");
   });
 
   it("has the deploy mediator hold the queue only for what the deploy it checks caused", () => {
