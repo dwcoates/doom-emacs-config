@@ -1458,8 +1458,14 @@ otherwise the record is a routing invariant violation.")
        :error))))
 
 (defconst agent-repl--central-log-fallback-format
-  "elisp.core.log-central-fallback workspace=%S class=%s reason=%s"
-  "Format of the once-per-workspace record announcing a central fallback.")
+  "elisp.core.log-central-fallback workspace=%S class=%s operation=%s level=%s written=%s reason=%s"
+  "Format of the once-per-workspace record announcing a central fallback.
+THE RECORD NAMES THE CALLER THAT MET THE FALLBACK: OPERATION is the
+operation of the record that fell back, LEVEL its level, and WRITTEN
+whether that record itself is persisted beside this one -- a debug record
+under an info file level is not, and without its operation nothing said
+which site was still logging for the workspace (2026-11-14,
+`filtered-workspace-recency-sort').")
 
 (defvar agent-repl--departed-log-workspaces (make-hash-table :test #'equal)
   "Names of workspaces whose departure THIS EDITOR ordered.
@@ -1520,6 +1526,7 @@ announcement, and the same popup, as any other."
 (declare-function agent-repl-roster-row-for-ws "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
 (declare-function agent-repl-host--live-composer-arm "agent-repl-host" (ws))
 
 (defun agent-repl--log-workspace-merge-departing-p (ws)
@@ -1534,12 +1541,24 @@ said by then is that the merge is under way: WS's roster row is `:merging'
 or `:merged' from the merge's admission on, its host composer is
 `:merging', and the closed row follows.  Any of those makes the missing
 directory the merge's own work.  Read through roster.el and host.el only
-when they are loaded; core.el is below both."
+when they are loaded; core.el is below both.
+
+THE LANDING OUTLIVES THE STATUS ARM.  A workspace that finishes itself
+stays open, its worktree already removed, until the deploy after its
+landing closes it, and the session stand-down at the landing moves its
+row\='s status on to `:dead' and `:inactive' within milliseconds.  The
+row\='s when-column keeps the durable fact that its merge landed
+\(`agent-repl-roster-row-merged-at'), so that counts too.  Regression,
+2026-11-14: `filtered-workspace-recency-sort' landed at 11:49:28, its row
+read `:inactive', and a page-unload record 40s later was announced as a
+`stale-registration' WARN."
   (or (and (fboundp 'agent-repl-roster-row-for-ws)
            (let ((row (agent-repl-roster-row-for-ws ws)))
              (and row
                   (or (memq (agent-repl-roster-row-status row) '(:merging :merged))
-                      (agent-repl-roster-row-closed-p row))
+                      (agent-repl-roster-row-closed-p row)
+                      (and (fboundp 'agent-repl-roster-row-merged-at)
+                           (agent-repl-roster-row-merged-at row)))
                   t)))
       (and (fboundp 'agent-repl-host--live-composer-arm)
            (eq (agent-repl-host--live-composer-arm ws) :merging))))
@@ -2688,7 +2707,15 @@ formatted message and the display text are not built."
              (agent-repl--do-log-to-file
               (agent-repl--log-record nil fallback-level "normal"
                                       agent-repl--central-log-fallback-format
-                                      (list unroutable class reason)
+                                      (list unroutable class
+                                            (agent-repl--log-operation (or operation-fmt fmt))
+                                            level
+                                            (if (and agent-repl-log-to-file
+                                                     (agent-repl--log-record-persists-p
+                                                      level verbosity))
+                                                "t"
+                                              "nil")
+                                            reason)
                                       nil nil unroutable)
               fallback-level nil)))))
     (let* ((agent-repl--log-dir-confirmed (list :confirmed))

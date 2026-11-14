@@ -4265,6 +4265,59 @@ Only the daemon saying the workspace is still open makes it a WARN, and
         (should (eq (agent-repl--central-log-fallback-class "class-merged-ws")
                     'merge-departure))))))
 
+(ert-deftest agent-repl-test-a-gone-directory-of-a-landed-row-is-a-merge-departure ()
+  "A worktree gone after the merge landed is the merge\='s, whatever the status says.
+2026-11-14: the landing\='s session stand-down moved the row to `:inactive'
+while it stayed open for the deploy, and its records warned stale-registration."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-gone-workspace "class-landed-ws"
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) (list :status (list :arm :inactive :value nil)
+                                     :closed (list :closed nil)
+                                     :when (list :arm :merged :value (list :at-ms 1000))))))
+        ;; Act / Assert
+        (should (eq (agent-repl--central-log-fallback-class "class-landed-ws")
+                    'merge-departure))))))
+
+(ert-deftest agent-repl-test-a-landed-row-detaches-the-workspace-sink ()
+  "A workspace whose merge landed is detached: its sink touches nothing in the tree."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+               (lambda (_ws) (list :status (list :arm :inactive :value nil)
+                                   :closed (list :closed nil)
+                                   :when (list :arm :merged :value (list :at-ms 1000))))))
+      ;; Act / Assert
+      (should (agent-repl--log-workspace-detached-p "class-landed-ws")))))
+
+(ert-deftest agent-repl-test-a-fallback-names-the-operation-that-met-it ()
+  "The fallback record names the operation and level of the record that fell back."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl-test--with-gone-workspace "class-caller-ws"
+          (cl-letf (((symbol-function 'display-warning) #'ignore))
+            ;; Act
+            (agent-repl--info "class-caller-ws" "elisp.test.caller-site ws=%s" "class-caller-ws")))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (string-search "operation=agent-repl.elisp-test-caller-site-ws-s level=info written=t"
+                                 (alist-get 'message record))))))))
+
+(ert-deftest agent-repl-test-a-fallback-says-when-the-record-that-met-it-is-dropped ()
+  "A fallback met by a record the file level drops says it was not written."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl-test--with-gone-workspace "class-dropped-ws"
+          (cl-letf (((symbol-function 'display-warning) #'ignore))
+            (let ((agent-repl-log-file-level 'info))
+              ;; Act
+              (agent-repl--log "class-dropped-ws" "elisp.test.dropped-site"))))
+        ;; Assert
+        (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
+          (should (string-search "operation=agent-repl.elisp-test-dropped-site level=debug written=nil"
+                                 (alist-get 'message record))))))))
+
 (ert-deftest agent-repl-test-a-gone-directory-of-a-closed-row-is-a-merge-departure ()
   "A worktree gone with a row the daemon closed is that departure finishing."
   (agent-repl-test--with-clean-state
