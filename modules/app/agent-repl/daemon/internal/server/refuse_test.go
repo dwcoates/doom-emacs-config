@@ -18,6 +18,8 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
@@ -1169,4 +1171,65 @@ func resolvesAWorkspace(stmt ast.Stmt) bool {
 	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	return ok && (sel.Sel.Name == "resolveRef" || sel.Sel.Name == "resolveRegistered")
+}
+
+// handoverArmsLacking answers every agentrepl.v1 error arm named ARM whose
+// message carries no string `address` field (or, when OPTIONAL, no optional
+// one), as "<Error message>.<arm>".
+func handoverArmsLacking(arm protoreflect.Name, optional bool) []string {
+	var lacking []string
+	protoregistry.GlobalFiles.RangeFilesByPackage("agentrepl.v1", func(file protoreflect.FileDescriptor) bool {
+		messages := file.Messages()
+		for i := 0; i < messages.Len(); i++ {
+			field := messages.Get(i).Fields().ByName(arm)
+			if field == nil || field.ContainingOneof() == nil || field.Kind() != protoreflect.MessageKind {
+				continue
+			}
+			address := field.Message().Fields().ByName("address")
+			if address == nil || address.Kind() != protoreflect.StringKind || (optional && !address.HasOptionalKeyword()) {
+				lacking = append(lacking, string(messages.Get(i).FullName())+"."+string(arm))
+			}
+		}
+		return true
+	})
+	return lacking
+}
+
+// TestEveryHandoverArmCarriesTheServingAddress pins the shape every verb's
+// handover refusals share, so no endpoint's contract can miss it: a
+// transferring_away arm names the successor, and a not_yet_adopted arm the
+// incumbent (optional, since none may live). fill puts both on the arm by
+// name, so an arm without the field silently answers no address.
+func TestEveryHandoverArmCarriesTheServingAddress(t *testing.T) {
+	tests := []struct {
+		arm      protoreflect.Name
+		optional bool
+	}{
+		{arm: workspace.ArmTransferringAway, optional: false},
+		{arm: workspace.ArmNotYetAdopted, optional: true},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.arm), func(t *testing.T) {
+			// Act.
+			lacking := handoverArmsLacking(tt.arm, tt.optional)
+
+			// Assert.
+			if len(lacking) != 0 {
+				t.Fatalf("arms with no address field: %v", lacking)
+			}
+		})
+	}
+}
+
+// TestHandoverArmScanFindsAnArmWithNoAddress pins that the scan reads the arms
+// at all: every arm it walks is one setArm fills by name, and one it finds is
+// one the verb's error message really carries.
+func TestHandoverArmScanFindsAnArmWithNoAddress(t *testing.T) {
+	// Act: an arm name every error message carries, with no address field.
+	lacking := handoverArmsLacking("unknown_workspace", false)
+
+	// Assert.
+	if len(lacking) == 0 {
+		t.Fatalf("the scan found no unknown_workspace arm; it reads no error message")
+	}
 }
