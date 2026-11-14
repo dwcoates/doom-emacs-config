@@ -4021,6 +4021,18 @@ func (f *fakeMeter) CountQueueChange(change, cause string) {
 	f.got = append(f.got, "change:"+change+":"+cause)
 }
 
+// timed answers every duration the orchestrator recorded, in order: all of
+// them but the queue's change counts and the remediation gauge.
+func (f *fakeMeter) timed() []string {
+	var out []string
+	for _, m := range f.all() {
+		if !strings.HasPrefix(m, "change:") && !strings.HasPrefix(m, "in_a_row:") {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func (f *fakeMeter) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
