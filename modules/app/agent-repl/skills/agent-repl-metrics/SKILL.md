@@ -1,12 +1,12 @@
 ---
 name: agent-repl-metrics
-description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), how long restarts take (deploys and their phases, daemon boots, store and sidecar restarts, each workspace's session start, shim replacements, handover transfers), CPU, memory, disk, energy and descriptors per process group, host load, and the deployed version — from the 30 days of history the metrics store keeps; find the version where a latency or a restart regressed or the day a process started to climb; and add a new metric the right way. Use when the user investigates performance or asks how fast, heavy or hot something is, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /agent-repl-metrics.
+description: Read agent-repl's always-on runtime metrics — user-facing latencies (workspace switches, page boots, vendor first output), how long restarts take (deploys and their phases, daemon boots, store and sidecar restarts, each workspace's session start, shim replacements, handover transfers), CPU, memory, disk, energy and descriptors per process group, host load, the deployed version, and the merge queue (merges landed and failed, each step and round, repairs per merge, queue changes) and its deploy mediation (how each check ended, remediations deployed in a row) — from the 30 days of history the metrics store keeps; find the version where a latency or a restart regressed or the day a process started to climb; and add a new metric the right way. Its CATALOG.md documents every agent-repl metric, and every change that adds or changes a metric updates that catalog in the same change. Use when the user investigates performance or asks how fast, heavy or hot something is, asks how often merges land or fail, how long they or their steps take, or how the deploy mediator is doing, when a latency or resource question needs history rather than a live profile, when the user wants a feature or UI element measured, or invokes /agent-repl-metrics.
 allowed-tools: Bash(<skill_base_dir>/run.sh:*)
 ---
 
 ## What This Skill Does
 
-Answers performance questions about agent-repl from stored history: what a latency or resource figure is now, how it moved, and which deployed version or day it changed on. Also says how to add a metric, when to offer one, and when to bring the metrics up unasked.
+Answers performance questions about agent-repl from stored history: what a latency or resource figure is now, how it moved, and which deployed version or day it changed on. Also says how to add a metric, when to offer one, and when to bring the metrics up unasked. `<skill_base_dir>/CATALOG.md` documents every agent-repl metric: its series, type, labels and source.
 
 ## Arguments
 
@@ -39,7 +39,8 @@ Answers performance questions about agent-repl from stored history: what a laten
   - c. A process group's CPU or memory over time: call `<skill_base_dir>/run.sh --process-trend <process> [days]`.
   - d. How long restarts take, or which phase of a restart is slow: call `<skill_base_dir>/run.sh --restarts [window]`; right after a landing, a window such as `30m` reads only its own restarts.
   - e. When a restart phase got slow: call `<skill_base_dir>/run.sh --restart-by-version <restart> <phase> [days]`.
-  - f. Anything else: call `<skill_base_dir>/run.sh --catalog` to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
+  - f. The merge queue or its deploy mediation: call `<skill_base_dir>/run.sh --query <promql>` with the matching recipe below, or `--range <promql> <hours> <step>` for it over time.
+  - g. Anything else: read `<skill_base_dir>/CATALOG.md` (or call `<skill_base_dir>/run.sh --catalog` for what the running runtimes expose) to find the metric, then `--query <promql>`, or `--range <promql> <hours> <step>` for a series over time.
   - React to every verb above:
     - `EXIT CODE 0:` the answer is printed as a table. Continue to step 2.
     - `EXIT CODE 1:` nothing matched: no series, no runtime advertising a surface, or no version over the threshold (the versions seen are printed). Say so plainly, then continue to step 3.
@@ -47,6 +48,16 @@ Answers performance questions about agent-repl from stored history: what a laten
   - *NOTE*: latency names are the `latency` label: `switch_repeat`, `switch_first`, `page_boot`, `prompt_echo`, `workspace_open`, `vendor_first_output`, `shim_event_loop_delay`. Process groups are the `process` label: `daemon`, `daemon_tools`, `store`, `sidecar`, `shim`, `shim_tools`, `emacs`, `webkit_webcontent`, `webkit_networking`, `webkit_gpu`.
   - *NOTE*: restarts are the `restart` label, each with its `phase` label: `deploy` (`build`, `install`, `restart_services`, `decide`, `handover`, `total`), `daemon_boot` (`claim`, `reconciled`, `serving`, `sessions_up`, each from the process start), `service_restart` (`store`, `sidecar`), `workspace_start` (`start`, `wake`), `session_start` (`shim`, `slot_wait`, `vendor`, `watch`, `total`, each its own duration; cause `fresh`, `resume`, `wake`, `adopted`, `relaunch` or `cold_answer`), `editor_start` (`init`, `daemon_linked`, `first_tab`, `all_tabs`, each from the Emacs process's start; cause `spawned` or `running`), `shim_restart` (`wait`, `prelaunch`, `stand_down`, `resume`, `run`), `handover_transfer` (`wait`, `run`) and `workspace_reconnect` (`host`, `web`; cause `cold`, `successor` or `webapp_reload`), each workspace's Emacs and webview streams coming back after a restart. The slowest workspaces of the latest restart are `topk(5, agentrepl_workspace_restart_last_seconds{restart="workspace_reconnect"})` through `--query`, and the time every workspace took to come back is the largest of them.
   - *NOTE*: in a `--query` or `--range` of an `agentrepl_*` counter or histogram, ALWAYS use `increase_pure(...)`, NEVER `rate(...)` or `increase(...)`: those skip a series' first sample, so counts taken before the first scrape (a boot's, a takeover's) read as nothing. For a per-second figure, divide `increase_pure` by the window's seconds.
+  - *NOTE*: merge queue and deploy mediation recipes, each over a window `W` such as `7d`:
+    - Merges landed and failed: `sum by (change) (increase_pure(agentrepl_merge_queue_changes_total{change=~"landed|failed"}[W]))`.
+    - Why merges left the queue without landing: `sum by (cause) (increase_pure(agentrepl_merge_queue_changes_total{change=~"failed|dequeued"}[W]))`.
+    - How long merges take end to end: `histogram_quantile(0.9, sum by (le, outcome) (increase_pure(agentrepl_merge_seconds_bucket{span="total"}[W])))`.
+    - Which step is slow: `histogram_quantile(0.9, sum by (le, round) (increase_pure(agentrepl_merge_round_seconds_bucket[W])))`.
+    - How often a step fails: `sum by (round, outcome) (increase_pure(agentrepl_merge_round_seconds_count[W]))`.
+    - Repairs per merge: `sum by (round, outcome) (increase_pure(agentrepl_merge_rounds_sum[W])) / sum by (round, outcome) (increase_pure(agentrepl_merge_rounds_count[W]))`.
+    - How the mediator's checks ended: `sum by (outcome) (increase_pure(agentrepl_deploy_mediation_seconds_count{span="total"}[W]))`; `approved` found nothing, `redeployed` fixed and deployed, `escalated` handed the deploy to the user.
+    - How long checks take: `histogram_quantile(0.9, sum by (le, span, outcome) (increase_pure(agentrepl_deploy_mediation_seconds_bucket[W])))`; `rollout` is the hot reload, `assessment` the mediator's work.
+    - Remediations deployed in a row before the queue advanced: `histogram_quantile(0.9, sum by (le) (increase_pure(agentrepl_deploy_remediation_chain_redeploys_bucket[W])))`, and right now: `agentrepl_deploy_remediations_in_a_row`.
   - *NOTE*: a version reads `0.129.0` for a landing and `0.129.0+<commit>` for a build between landings; `git log` between two versions names the changes to read.
 
 2. Report.
@@ -68,11 +79,12 @@ Answers performance questions about agent-repl from stored history: what a laten
   - c. A store or sidecar metric: register it on that service's own registry.
   - d. Labels: only `program`, `process`, `workspace` (by id), `latency`, `method`, `outcome`, `model`. NEVER a prompt, a path, a session id or a version.
   - e. Tests: one for the recorded value, one per error path asserting the record the runtime's canonical logger writes, and the vocabulary test for a latency.
-  - f. Record the addition in `docs/PLAN-runtime-metrics.md`'s catalog.
+  - f. Add or change the metric's row in `<skill_base_dir>/CATALOG.md` in the same change: its series, type, labels with their values, and source. A change to a label, a label value, a bucket set, a restart or a phase updates its row too.
 
 ## Notes
 
 - **CRITICAL NOTE: Check the stored series before reaching for a profile.** In any performance investigation, step 1 comes first: it answers when and where in seconds, and a profile session costs CPU on a battery.
+- **CRITICAL NOTE: `CATALOG.md` is the one home of every metric.** Every change that adds or changes a metric updates it in the same change; NEVER land a metric without its row.
 - **IMPORTANT NOTE: Offer a metric, never add one unasked.** A missing metric is an offer at step 3; adding one is step 4 only on the user's word.
 - **IMPORTANT NOTE: No series is not no problem.** Say "not measured" when the store is down or a runtime is not scraped (step 0), never "nothing happened".
 - **IMPORTANT NOTE: Vendor bytes are not measured yet.** The traffic is made by the agent SDK's own child process; say so if asked rather than querying for it.
