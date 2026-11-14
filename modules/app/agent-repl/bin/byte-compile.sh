@@ -10,7 +10,10 @@ set -uo pipefail
 MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$MODULE_DIR" || exit 1
 
-mapfile -t SOURCES < <(ls lisp/*.el | grep -v '/test-')
+SOURCES=()
+for f in lisp/*.el; do
+  case "$f" in lisp/test-*) ;; *) SOURCES+=("$f") ;; esac
+done
 
 status=0
 for f in "${SOURCES[@]}"; do
