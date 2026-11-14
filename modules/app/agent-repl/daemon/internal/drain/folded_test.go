@@ -2,6 +2,7 @@ package drain
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -281,5 +282,171 @@ func (h *harness) inCollapsedSubsection(t *testing.T, ws ids.WorkspaceID) {
 	}
 	if err := h.db.SetSubsectionFolded(ctx, sub.ID, true); err != nil {
 		t.Fatalf("SetSubsectionFolded: %v", err)
+	}
+}
+
+// resumeFailingDB fails one of the reads ResumeFolded makes.
+type resumeFailingDB struct {
+	wsm.DB
+	list, arrangement, sessions error
+}
+
+func (d resumeFailingDB) ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error) {
+	if d.list != nil {
+		return nil, d.list
+	}
+	return d.DB.ListWorkspaces(ctx)
+}
+
+func (d resumeFailingDB) ReadArrangement(ctx context.Context) (wsm.Arrangement, error) {
+	if d.arrangement != nil {
+		return wsm.Arrangement{}, d.arrangement
+	}
+	return d.DB.ReadArrangement(ctx)
+}
+
+func (d resumeFailingDB) Sessions(ctx context.Context) ([]wsm.Session, error) {
+	if d.sessions != nil {
+		return nil, d.sessions
+	}
+	return d.DB.Sessions(ctx)
+}
+
+func TestResumeFoldedWaitsTheDelayForEveryRunningSessionAFoldWithholds(t *testing.T) {
+	// Arrange: a folded workspace whose session outlived the daemon that
+	// started its wait.
+	f := newFoldedHarness(t)
+	ws := f.collapsed(t)
+
+	// Act
+	f.c.ResumeFolded(context.Background())
+	waited := f.awaitWait(t)
+	f.settle(0)
+
+	// Assert
+	if waited != FoldStandDownDelay {
+		t.Fatalf("waited %v, want the fold's delay %v", waited, FoldStandDownDelay)
+	}
+	if killed := f.stand.Killed(); len(killed) != 1 || killed[0].WS != ws || killed[0].Force {
+		t.Fatalf("kills = %+v, want one graceful stand-down of %s", killed, ws)
+	}
+	rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opFolded, Message: "resumed the folds' stand-downs for the running sessions they withhold"})
+	if !ok {
+		t.Fatal("no record of the resumed folds")
+	}
+	if resumed, _ := rec.Context["resumed"].([]string); len(resumed) != 1 || resumed[0] != string(ws) {
+		t.Fatalf("resumed = %v, want [%s]", rec.Context["resumed"], ws)
+	}
+}
+
+func TestResumeFoldedResumesNothingForASessionAFoldDoesNotWithhold(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, f *foldedHarness) ids.WorkspaceID
+		spared  bool
+	}{
+		{
+			name: "a workspace no fold withholds",
+			arrange: func(t *testing.T, f *foldedHarness) ids.WorkspaceID {
+				return f.workspace(t, instant)
+			},
+		},
+		{
+			name: "a folded workspace whose session already ended",
+			arrange: func(t *testing.T, f *foldedHarness) ids.WorkspaceID {
+				ws := f.collapsed(t)
+				if err := f.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalParked, Detail: "parked", At: instant}); err != nil {
+					t.Fatalf("SetSessionTerminal: %v", err)
+				}
+				return ws
+			},
+		},
+		{
+			name: "a folded one-shot, which a fold spares",
+			arrange: func(t *testing.T, f *foldedHarness) ids.WorkspaceID {
+				// A one-shot is a created workspace, so a linked worktree.
+				ws := f.fold(t, f.linkedWorkspace(t, instant))
+				f.oneShot(t, ws)
+				return ws
+			},
+			spared: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFoldedHarness(t)
+			ws := tc.arrange(t, f)
+
+			// Act
+			f.c.ResumeFolded(context.Background())
+
+			// Assert
+			select {
+			case d := <-f.waits.asked:
+				t.Fatalf("a %v wait was asked for, want none", d)
+			default:
+			}
+			rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opFolded, Message: "resumed the folds' stand-downs for the running sessions they withhold"})
+			if !ok {
+				t.Fatal("no record of the resumed folds")
+			}
+			if resumed, _ := rec.Context["resumed"].([]string); len(resumed) != 0 {
+				t.Fatalf("resumed = %v, want none", resumed)
+			}
+			spared, _ := rec.Context["spared"].(map[string]string)
+			if _, got := spared[string(ws)]; got != tc.spared {
+				t.Fatalf("spared = %v, want %s spared: %v", spared, ws, tc.spared)
+			}
+		})
+	}
+}
+
+func TestResumeFoldedRecordsAFailedReadAndResumesNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		db      func(wsm.DB) wsm.DB
+		message string
+	}{
+		{
+			name:    "the workspaces cannot be listed",
+			db:      func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, list: errors.New("list failed")} },
+			message: "could not list the workspaces to resume the folds' stand-downs; none is resumed",
+		},
+		{
+			name:    "the folds cannot be read",
+			db:      func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, arrangement: errors.New("arrangement failed")} },
+			message: "could not read the folds to resume their stand-downs; none is resumed",
+		},
+		{
+			name:    "the sessions cannot be read",
+			db:      func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, sessions: errors.New("sessions failed")} },
+			message: "could not read the sessions to resume the folds' stand-downs; none is resumed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a folded workspace with a running session.
+			f := newFoldedHarness(t)
+			f.collapsed(t)
+			f.c.deps.DB = tc.db(f.c.deps.DB)
+
+			// Act
+			f.c.ResumeFolded(context.Background())
+
+			// Assert
+			select {
+			case d := <-f.waits.asked:
+				t.Fatalf("a %v wait was asked for, want none", d)
+			default:
+			}
+			rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: opFolded, Message: tc.message})
+			if !ok {
+				t.Fatalf("no error record %q; records = %+v", tc.message, f.log.Records())
+			}
+			if rec.Context["cause"] == nil {
+				t.Fatalf("record context = %+v, want the cause", rec.Context)
+			}
+		})
 	}
 }

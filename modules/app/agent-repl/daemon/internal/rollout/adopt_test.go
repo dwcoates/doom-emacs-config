@@ -2611,3 +2611,44 @@ func TestADaemonBootedAsTheIncumbentOpensNoRosterMirror(t *testing.T) {
 		t.Fatal("a daemon given no incumbent opened a roster mirror")
 	}
 }
+
+// awaitServingSettled waits, bounded, for one ServingSettled call.
+func awaitServingSettled(t *testing.T, h *harness) {
+	t.Helper()
+	select {
+	case <-h.servingSettled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ServingSettled was never called")
+	}
+}
+
+func TestAFreshBootsSettleTellsServingSettled(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	h.c.SettleBoot(context.Background())
+
+	// Assert
+	awaitServingSettled(t, h)
+}
+
+func TestASettledTakeoverTellsServingSettledAfterItsLatch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first, _ := joinedWithOneOfTwo(t, h)
+	if err := h.c.AdoptHost(context.Background(), first); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+	h.awaitAdoptionEnded(t, first)
+
+	// Act
+	h.c.becomeIncumbent(nil)
+
+	// Assert: told once the takeover-settled latch closed.
+	awaitServingSettled(t, h)
+	if err := h.c.awaitTakeoverSettled(context.Background(), nil); err != nil {
+		t.Fatalf("awaitTakeoverSettled: %v", err)
+	}
+}

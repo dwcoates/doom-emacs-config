@@ -1330,6 +1330,7 @@ func (c *controller) settleTakeover(fields dlog.Context) {
 		c.bringUps.Wait()
 		c.log.Info(opAdopt, "the takeover settled: every adoption and session bring-up it started has finished", fields)
 		close(latch)
+		c.deps.ServingSettled(c.lifetime(context.Background()))
 	})
 }
 
@@ -1486,6 +1487,7 @@ func (c *controller) SettleBoot(ctx context.Context) {
 	fields := dlog.Context{"why": "fresh_boot"}
 	c.judgeLiveShims(fields)
 	c.deps.Reports.PayOwed(ctx, false, nil)
+	c.deps.ServingSettled(ctx)
 }
 
 // judgeLiveShims judges every live shim against the installed build, and

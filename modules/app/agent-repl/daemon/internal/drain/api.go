@@ -73,6 +73,10 @@ type Controller interface {
 	// latest collapse that folded the workspace (folded.go). It returns at
 	// once.
 	StandDownFolded(ws ids.WorkspaceID)
+	// ResumeFolded starts the fold's wait again for every running session a
+	// fold withholds, once this daemon owns the workspaces it serves: a
+	// restart or a handover loses the waits held in memory (folded.go).
+	ResumeFolded(ctx context.Context)
 	// RetryWithheld is the daemon's own edge for a workspace (the free edge
 	// a turn's end raises, a session coming up): a stand-down pending on it --
 	// a withheld one or a keep-alive cycle's -- is asked again.

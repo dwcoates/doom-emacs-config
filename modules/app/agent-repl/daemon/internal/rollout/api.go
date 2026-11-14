@@ -373,6 +373,12 @@ type Deps struct {
 	// as starting rather than idle and usable while nothing is behind it.
 	// Required.
 	BringingUp func(ws ids.WorkspaceID, underWay bool)
+	// ServingSettled is told once this daemon owns every workspace it serves
+	// and the sessions it started are up: at a fresh boot's settle
+	// (SettleBoot) and once a successor's takeover settled. What a previous
+	// daemon held only in memory is derived again there from the durable
+	// state (drain.Controller.ResumeFolded). Required.
+	ServingSettled func(ctx context.Context)
 	// PublishViews republishes a workspace's whole views once it is owned.
 	PublishViews PublishViewsFunc
 	// StateUnreported tells every status surface whether a shim taken back
@@ -795,6 +801,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StartSession == nil {
 		return nil, errors.New("rollout: a session starter is required; a successor that serves an open workspace with no shim must start its session")
+	}
+	if deps.ServingSettled == nil {
+		return nil, errors.New("rollout: the serving-settled hook is required; what the previous daemon held only in memory is derived again there")
 	}
 	if deps.Merges == nil {
 		return nil, errors.New("rollout: the merge mover is required; a workspace whose merge runs must carry it across a handover")
