@@ -61,7 +61,7 @@ func (s *server) OpenFeed(
 	resp := &agentreplv1.OpenFeedResponse{}
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
@@ -331,7 +331,7 @@ func (s *server) GetFeedPage(
 	resp := &agentreplv1.GetFeedPageResponse{}
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))

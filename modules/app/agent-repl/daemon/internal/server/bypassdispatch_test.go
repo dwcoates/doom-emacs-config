@@ -53,7 +53,9 @@ func TestEveryCreateAskedWhileHoldingTheBypassModeIsMade(t *testing.T) {
 		name string
 		req  func(h *harness) *agentreplv1.CreateWorkspaceRequest
 	}{
-		{name: "a peer", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest { return bypassStandardCreate(h, peerRelationship()) }},
+		{name: "a peer", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
+			return bypassStandardCreate(h, peerRelationship())
+		}},
 		{name: "a child", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
 			return bypassStandardCreate(h, childRelationship(ref()))
 		}},

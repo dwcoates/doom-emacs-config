@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -1102,4 +1103,70 @@ func TestAnUnlandedHandoverRefusalNamesItsSuccessorInItsMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNoResolutionFailureIsRenderedThroughFail fails a handler that renders a
+// workspace resolution's error through fail. resolveRef already recorded that
+// error where it was decided, and a cancelled caller is no failure, so fail's
+// ERROR re-recorded it and named the caller leaving a daemon failure (an
+// OpenFeed cancelled during the 0.439.1 handover). failResolution, endStream
+// and answerResolution are the renderings that know both.
+func TestNoResolutionFailureIsRenderedThroughFail(t *testing.T) {
+	// Arrange.
+	files := sourcescan.Production(t)
+	fset := token.NewFileSet()
+	var sites, offenders []string
+
+	// Act.
+	for _, file := range files {
+		parsed, parseErr := parser.ParseFile(fset, file.Name, file.Source, 0)
+		if parseErr != nil {
+			t.Fatalf("parse %s: %v", file.Name, parseErr)
+		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			block, ok := n.(*ast.BlockStmt)
+			if !ok {
+				return true
+			}
+			for i, stmt := range block.List {
+				if !resolvesAWorkspace(stmt) || i+1 == len(block.List) {
+					continue
+				}
+				site := fset.Position(stmt.Pos()).String()
+				sites = append(sites, site)
+				ast.Inspect(block.List[i+1], func(m ast.Node) bool {
+					if call, ok := m.(*ast.CallExpr); ok {
+						if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "fail" {
+							offenders = append(offenders, site)
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+	}
+
+	// Assert.
+	if len(sites) == 0 {
+		t.Fatal("found no workspace resolution call site; the scan no longer matches the code")
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("these resolutions render their error through fail, want failResolution: %v", offenders)
+	}
+}
+
+// resolvesAWorkspace reports whether stmt assigns the answer of s.resolveRef or
+// s.resolveRegistered.
+func resolvesAWorkspace(stmt ast.Stmt) bool {
+	assign, ok := stmt.(*ast.AssignStmt)
+	if !ok || len(assign.Rhs) != 1 {
+		return false
+	}
+	call, ok := assign.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && (sel.Sel.Name == "resolveRef" || sel.Sel.Name == "resolveRegistered")
 }

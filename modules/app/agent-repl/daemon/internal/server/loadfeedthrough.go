@@ -47,7 +47,7 @@ func (s *server) LoadFeedThrough(
 	resp := &agentreplv1.LoadFeedThroughResponse{}
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return sendTerminal(out, resp, s.refuse(s.log, rpc, resp, *r))
