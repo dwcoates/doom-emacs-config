@@ -507,6 +507,10 @@ func (q *queue) decideDeparture(ws ids.WorkspaceID, departed Watcher, departure 
 	q.mu.Lock()
 	pending := state.bounce
 	q.mu.Unlock()
+	// THE DEBT IS RECORDED UNDER THE DELIVERY LOCK, before anything below
+	// brings a session up: the next session-up's release claims under the same
+	// lock, so it finds the debt whichever revival or bounce serves it.
+	q.oweRetry(ctx, ws, departed, departure, pending != nil, log)
 	switch {
 	case pending == nil:
 		d.unlock()

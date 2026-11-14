@@ -3966,3 +3966,67 @@ func TestAVendorStartedAdoptionCarriesItsOrigin(t *testing.T) {
 		t.Fatalf("adopted = %+v, want the vendor-started origin and no words", adopted)
 	}
 }
+
+// retryStated is a vendor-error retry statement whose arm is STATED, nil for none.
+func retryStated(stated any) *conversationv1.SessionUpdate {
+	retry := &conversationv1.SessionVendorErrorRetry{}
+	switch arm := stated.(type) {
+	case *conversationv1.SessionVendorErrorRetryScheduled:
+		retry.Stated = &conversationv1.SessionVendorErrorRetry_Scheduled{Scheduled: arm}
+	case *conversationv1.SessionVendorErrorRetryAwaitingNetwork:
+		retry.Stated = &conversationv1.SessionVendorErrorRetry_AwaitingNetwork{AwaitingNetwork: arm}
+	case *conversationv1.SessionVendorErrorRetryAttempting:
+		retry.Stated = &conversationv1.SessionVendorErrorRetry_Attempting{Attempting: arm}
+	}
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{VendorErrorRetry: retry}}
+}
+
+func TestRetryOwedFollowsTheLatestVendorErrorRetryStatement(t *testing.T) {
+	tests := []struct {
+		name    string
+		updates []*conversationv1.SessionUpdate
+		want    bool
+	}{
+		{name: "no statement owes no retry", want: false},
+		{
+			name:    "a scheduled retry is owed",
+			updates: []*conversationv1.SessionUpdate{retryStated(&conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1})},
+			want:    true,
+		},
+		{
+			name:    "a retry waiting for the network is owed",
+			updates: []*conversationv1.SessionUpdate{retryStated(&conversationv1.SessionVendorErrorRetryAwaitingNetwork{Attempt: 1})},
+			want:    true,
+		},
+		{
+			name:    "a retry being made is carried by its own turn, so none is owed",
+			updates: []*conversationv1.SessionUpdate{retryStated(&conversationv1.SessionVendorErrorRetryAttempting{Attempt: 1})},
+			want:    false,
+		},
+		{
+			name: "a statement of none after a scheduled retry owes nothing",
+			updates: []*conversationv1.SessionUpdate{
+				retryStated(&conversationv1.SessionVendorErrorRetryScheduled{Attempt: 1}),
+				retryStated(nil),
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+
+			// Act.
+			for _, update := range tt.updates {
+				h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(update) })
+			}
+
+			// Assert.
+			if got := h.w.RetryOwed(); got != tt.want {
+				t.Fatalf("RetryOwed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

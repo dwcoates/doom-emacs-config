@@ -707,6 +707,12 @@ type Watcher interface {
 	NoteHistoryLoaded(agent *conversationv1.AgentId, page *conversationv1.HistoryPage, newest bool)
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// RetryOwed reports that the shim's latest statement of its vendor-error
+	// retry (conversation.v1.SessionVendorErrorRetry) is a retry still to be
+	// made: scheduled at an instant, or waiting for the network. A retry
+	// being made, or none, owes nothing the session's own turns do not carry.
+	// It stays readable after the shim departs, which is when it is asked.
+	RetryOwed() bool
 	// Free reports freeness: no turn in flight AND an empty live-work set.
 	// Never judged except while holding the workspace's lease.
 	Free() bool

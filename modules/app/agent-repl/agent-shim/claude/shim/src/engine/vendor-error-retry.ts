@@ -73,7 +73,11 @@
  * - THE CHAIN ENDS on the first retry turn that ends any other way (answered,
  *   interrupted, a failure neither rule retries), on a prompt someone else
  *   submits (the session is theirs again; a prompt of theirs that fails the
- *   same way opens a fresh chain), and at stand-down.
+ *   same way opens a fresh chain), and at stand-down. A chain the shim's
+ *   stand-down or death cuts is not lost: the daemon reads the schedule this
+ *   shim stated, and a departure it did not leave to the user owes the
+ *   workspace the failed turn's resumption, which the next session pays
+ *   (daemon promptqueue `oweRetry`).
  * - ONE TIMER, and it exists only while a retry is due at an instant.
  */
 import { create } from "@bufbuild/protobuf";

@@ -592,6 +592,8 @@ func (w *fakeWatcher) AwaitMainWatching(context.Context) error { return nil }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return w.turn }
 
+func (w *fakeWatcher) RetryOwed() bool { return false }
+
 func (w *fakeWatcher) OnTurnOpening(ids.WorkspaceID, ids.TurnID) {}
 
 func (w *fakeWatcher) OnTurnJoining(ids.WorkspaceID, ids.TurnID) bool { return false }

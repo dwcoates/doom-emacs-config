@@ -732,6 +732,9 @@ type WatcherFunc func(ws ids.WorkspaceID) (Watcher, bool)
 type Watcher interface {
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// RetryOwed reports that the shim's latest vendor-error retry statement is
+	// a retry still to be made (sessionwatcher.Watcher.RetryOwed).
+	RetryOwed() bool
 	// Departed reports that the watched shim is gone. A departed watcher's
 	// turn and live work ended with the shim, so a bounce never waits on them.
 	Departed() (sessionwatcher.Departure, bool)
