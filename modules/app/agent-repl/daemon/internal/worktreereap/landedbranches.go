@@ -28,6 +28,14 @@ const opLandedBranch = "daemon.worktreereap.landed_branch"
 // its landing belongs to the workspace that reused it, and a closed workspace
 // that never landed is restored from its branch when it is reopened.
 //
+// A LANDING TARGET THAT IS GONE IS JUDGED BY THE DEFAULT BRANCH: a workspace
+// that landed into its parent's branch outlives that branch once the parent
+// lands and retires it, and every landing chain ends in the default branch,
+// so a tip inside it has landed whatever ref it targeted. Asking git about the
+// deleted ref failed every sweep and kept the branch for good (2026-11-14:
+// `merge-queue/successor-role-flags-landing`, landed into the since-retired
+// `fix/successor-role-flags`).
+//
 // A dry run judges nothing here: a deletion is the one thing the pass does,
 // and Retire judges and deletes in one step.
 func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
@@ -62,6 +70,21 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 		landing := landedbranch.Landing{Into: ws.ParentBranch}
 		if landing.Into == "" {
 			landing.Into = s.defaultBranch
+		} else if landing.Into != s.defaultBranch {
+			present, err := s.r.deps.Git.BranchExists(ctx, s.repo.Dir, landing.Into)
+			if err != nil {
+				s.r.deps.Log.Error(opLandedBranch, "could not probe the branch a landed branch landed into; the branch is kept",
+					dlog.WithCause(dlog.Context{"repo": s.repo.Dir, "branch": branch, "into": landing.Into,
+						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)}, err))
+				s.report.Failures++
+				continue
+			}
+			if !present {
+				s.r.deps.Log.Info(opLandedBranch, "the branch a landed branch landed into is gone; judging it by the default branch",
+					dlog.Context{"repo": s.repo.Dir, "branch": branch, "gone_into": landing.Into, "into": s.defaultBranch,
+						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)})
+				landing.Into = s.defaultBranch
+			}
 		}
 		if ws.Landed != nil {
 			landing.Head = ws.Landed.Head

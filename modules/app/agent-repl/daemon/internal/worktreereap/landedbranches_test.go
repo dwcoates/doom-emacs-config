@@ -15,7 +15,8 @@ import (
 const landedHead = "1a2d000000000000000000000000000000000001"
 
 // landedWorkspace registers a MERGED workspace whose worktree is gone, on
-// BRANCH, cut from PARENT, and makes its branch exist at landedHead.
+// BRANCH, cut from PARENT, and makes its branch exist at landedHead and its
+// parent exist.
 func landedWorkspace(w *world, repoDir, name, branch, parent string) wsm.Workspace {
 	w.t.Helper()
 	return landedWorkspaceAt(w, repoDir, name, branch, parent, longAgo.Add(time.Hour), nil)
@@ -29,6 +30,9 @@ func landedWorkspaceAt(w *world, repoDir, name, branch, parent string, merged ti
 		Name: name, Branch: branch, ParentBranch: parent, Closed: true, MergedAt: &merged, Landed: landed,
 	})
 	w.git.branches[branch] = true
+	if parent != "" {
+		w.git.branches[parent] = true
+	}
 	w.git.branchHeads["refs/heads/"+branch] = landedHead
 	return ws
 }
@@ -99,6 +103,24 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 			wantDeleted:  true,
 			wantInto:     "main",
 			wantJudgedBy: "ancestry",
+		},
+		{
+			name: "a landed branch whose parent branch is gone is judged against the default branch",
+			arrange: func(w *world, repoDir string) {
+				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/retired-parent")
+				w.git.branches["fix/retired-parent"] = false
+			},
+			wantDeleted:  true,
+			wantInto:     "main",
+			wantJudgedBy: "ancestry",
+		},
+		{
+			name: "a landed branch whose parent branch is gone and that is not inside the default branch is kept",
+			arrange: func(w *world, repoDir string) {
+				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/retired-parent")
+				w.git.branches["fix/retired-parent"] = false
+				w.git.notInside[landedHead] = true
+			},
 		},
 		{
 			name: "a landed branch holding commits its parent does not is kept",
@@ -199,6 +221,36 @@ func TestTheSweepCountsALandedBranchItCouldNotJudge(t *testing.T) {
 	}
 	if got := dlog.FilterRecords(w.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opLandedBranch}); len(got) != 1 {
 		t.Fatalf("want exactly one ERROR %s record, got %+v", opLandedBranch, got)
+	}
+}
+
+// TestTheSweepCountsALandedBranchWhoseTargetItCouldNotProbe covers a git
+// failure probing the branch a landed branch landed into: the branch is kept
+// unjudged, the failure is counted and recorded once at ERROR with the
+// branch and its target, and the sweep goes on.
+func TestTheSweepCountsALandedBranchWhoseTargetItCouldNotProbe(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	repoDir := w.addRepo("doom")
+	landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/parent")
+	w.git.branchExistsErr = map[string]error{"fix/parent": errors.New("git could not answer")}
+
+	// Act
+	report := w.sweep()
+
+	// Assert
+	if w.git.saw("delete_branch ramdisk-leak-investigation "+landedHead) || w.git.saw("is_ancestor "+landedHead+" main") {
+		t.Fatalf("a branch whose target could not be probed was judged or deleted: %v", w.git.called())
+	}
+	if report.Failures != 1 {
+		t.Fatalf("Failures = %d, want 1", report.Failures)
+	}
+	got := dlog.FilterRecords(w.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opLandedBranch})
+	if len(got) != 1 {
+		t.Fatalf("want exactly one ERROR %s record, got %+v", opLandedBranch, got)
+	}
+	if got[0].Context["branch"] != "ramdisk-leak-investigation" || got[0].Context["into"] != "fix/parent" || got[0].Context["cause"] == nil {
+		t.Fatalf("the ERROR record's context is %v, want the branch, its target and the cause", got[0].Context)
 	}
 }
 
