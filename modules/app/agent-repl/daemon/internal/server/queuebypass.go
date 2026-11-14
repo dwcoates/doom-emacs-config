@@ -102,34 +102,21 @@ func (s *requestLoggingServer) UpdateQueueBypassMode(
 	return serveUnary(s, ctx, "UpdateQueueBypassMode", req, s.server.UpdateQueueBypassMode)
 }
 
-// ArmRequesterBypassingQueue refuses a one-shot, an async merge or a one-shot
-// mark asked by a workspace that holds its repository's queue bypass mode.
+// ArmRequesterBypassingQueue refuses marking a workspace a one-shot while it
+// holds its repository's queue bypass mode.
 const ArmRequesterBypassingQueue = "requester_bypassing_queue"
 
-// bypassReminder is what a refused dispatch reminds its workspace to do.
-const bypassReminder = "this workspace holds its repository's queue bypass mode, which pauses the merge queue while it works " +
-	"and exists for this one workspace to fix things itself. It creates no one-shot, no async merge and no child workspace: " +
-	"do the work here and land it on the main branch with land-direct.sh"
+// bypassReminder is what the refused mark reminds its workspace to do.
+const bypassReminder = "this workspace holds its repository's queue bypass mode, so it lands its own work on the main branch " +
+	"with land-direct.sh and never finishes through the queue; the workspaces it creates and the async merges it asks for land through the queue as usual"
 
-// bypassRefusedCreate names the create SPEC asks for that a workspace holding
-// the queue bypass mode may not make, or "" for one it may: a one-shot lands
-// through the queue the holder pauses whenever it works, and a child is the
-// orchestration the mode skips.
-func bypassRefusedCreate(spec workspace.CreateSpec) string {
-	switch {
-	case spec.OneShot:
-		return "a one-shot workspace"
-	case spec.Parent != nil:
-		return "a child workspace"
-	}
-	return ""
-}
-
-// refuseWhileBypassing answers the refusal for WS dispatching WHAT while WS
-// holds its repository's queue bypass mode (owner ruling, 2026-11-10: a
-// workspace in the mode lands everything directly, so nothing it dispatches
-// may land through the queue it pauses), and false when WS holds no such mode.
-// A failed read of the standing is the rpc's failure.
+// refuseWhileBypassing answers the refusal for WS doing WHAT while WS holds
+// its repository's queue bypass mode, and false when WS holds no such mode:
+// a workspace in the mode lands its own work directly, so it never becomes a
+// one-shot that would finish through the queue. Its dispatches (a create, an
+// async merge) are not refused (owner ruling, 2026-11-14: the queue keeps
+// running while the mode is held, so they land through it as usual). A
+// failed read of the standing is the rpc's failure.
 func (s *server) refuseWhileBypassing(ctx context.Context, log dlog.Logger, rpc string, resp proto.Message, ws ids.WorkspaceID, what string) (*connect.Error, bool, error) {
 	standing, err := s.deps.DB.QueueBypass(ctx, ws)
 	if err != nil {

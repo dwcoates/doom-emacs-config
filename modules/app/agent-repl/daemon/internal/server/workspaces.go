@@ -165,17 +165,6 @@ func (s *server) CreateWorkspace(
 				dlog.Context{"selected": spec.ContextSelection != nil})
 		}
 	}
-	// A WORKSPACE IN BYPASS MODE DOES ITS WORK ITSELF (owner ruling,
-	// 2026-11-12): it creates neither a one-shot, which would land through the
-	// stopped queue, nor a child, which is orchestration the mode exists to
-	// skip. A peer, and the user's own create, are not its dispatch.
-	if what := bypassRefusedCreate(spec); what != "" && spec.Requester != nil {
-		if cerr, refused, err := s.refuseWhileBypassing(ctx, s.log, rpc, resp, *spec.Requester, what); err != nil {
-			return nil, err
-		} else if refused {
-			return answer(resp, cerr)
-		}
-	}
 	if req.Msg.Model != nil {
 		spec.Model = req.Msg.GetModel()
 	}
