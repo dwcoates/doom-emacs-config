@@ -18,3 +18,19 @@ export interface BoxInit {
 export function boxRect({ left = 0, top = 0, width = 0, height = 0 }: BoxInit = {}): DOMRect {
   return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) };
 }
+
+/**
+ * Give EL a `scrollTop` that keeps what is written to it, starting at
+ * INITIAL: jsdom scrolls nothing, so its own reads 0 whatever was set. The
+ * value is kept as written, never clamped to a scroll range.
+ */
+export function settableScrollTop(el: HTMLElement, initial = 0): void {
+  let scrollTop = initial;
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+    },
+  });
+}

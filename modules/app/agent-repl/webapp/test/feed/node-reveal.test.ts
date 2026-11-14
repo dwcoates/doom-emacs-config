@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
 import { linesSpan, revealInBubbles } from "../../src/feed/node-reveal.js";
-import { boxRect } from "../dom-rect.js";
+import { boxRect, settableScrollTop } from "../dom-rect.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 afterEach(() => {
@@ -18,13 +18,7 @@ function bubbleBox(top: number, height: number, child: HTMLElement): HTMLElement
   const box = document.createElement("div");
   box.className = BUBBLE_SCROLL_CLASS;
   box.getBoundingClientRect = () => boxRect({ top, height });
-  let scrollTop = 0;
-  Object.defineProperty(box, "scrollTop", {
-    get: () => scrollTop,
-    set: (value: number) => {
-      scrollTop = value;
-    },
-  });
+  settableScrollTop(box);
   box.append(child);
   return box;
 }

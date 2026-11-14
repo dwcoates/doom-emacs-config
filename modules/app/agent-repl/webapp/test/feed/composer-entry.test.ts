@@ -16,7 +16,7 @@ import {
 } from "../../src/feed/composer-entry.js";
 import { TailFollow } from "../../src/scroll.js";
 import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
-import { boxRect } from "../dom-rect.js";
+import { boxRect, settableScrollTop } from "../dom-rect.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -358,8 +358,7 @@ describe("composerBoxGeometry", () => {
     const bubble = document.createElement("div");
     bubble.className = BUBBLE_SCROLL_CLASS;
     bubble.getBoundingClientRect = () => boxRect({ top: 0, height: 290 });
-    let scrolled = 0;
-    Object.defineProperty(bubble, "scrollTop", { get: () => scrolled, set: (value: number) => (scrolled = value) });
+    settableScrollTop(bubble);
     document.body.replaceChildren(bubble);
     bubble.append(row);
     layOut(row, [["1.1", 280, 20], ["1.1.1", 300, 25]]);
@@ -369,7 +368,7 @@ describe("composerBoxGeometry", () => {
     // Act
     const got = composerBoxGeometry(document, box);
     // Assert: the bubble moved by 325 - 290, and the stubbed lines, which do not move, are clipped at 290.
-    expect([scrolled, got]).toEqual([35, { boxTop: 0, boxHeight: 300, nodeTop: 280, nodeHeight: 10 }]);
+    expect([bubble.scrollTop, got]).toEqual([35, { boxTop: 0, boxHeight: 300, nodeTop: 280, nodeHeight: 10 }]);
   });
 
   it("is null when no boxed line is laid out", () => {

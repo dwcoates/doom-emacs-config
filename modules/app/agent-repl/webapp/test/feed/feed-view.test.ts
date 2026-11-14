@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { isStill } from "../bubble/still.js";
+import { boxRect as scriptedRect } from "../dom-rect.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -2308,7 +2309,7 @@ describe("createFeedController: the feed selection", () => {
       line.setAttribute("data-node", node);
       line.setAttribute("data-label-at", "0ch");
       line.setAttribute("data-text-end", "9ch");
-      line.getBoundingClientRect = () => ({ top, bottom: top + 20, height: 20 }) as DOMRect;
+      line.getBoundingClientRect = () => scriptedRect({ top, height: 20 });
       tree.append(line);
     }
     row.append(tree);
