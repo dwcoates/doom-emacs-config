@@ -841,6 +841,22 @@ func (o *orchestrator) Drain(ctx context.Context) {
 			return
 		}
 	}
+	// THE DEPLOY MEDIATION IN FLIGHT IS CUT AND FINISHES TOO, and none
+	// starts after this (mediationlife.go): its pass and rounds read the
+	// state client, which closes once the drain returns.
+	if mediated := o.stopMediation(); mediated != nil {
+		select {
+		case <-mediated:
+		case <-expired.C:
+			log.Error(op, "the deploy mediation outlived the drain's bound; the state client closes under it",
+				dlog.Context{"bound": bound.String()})
+			return
+		case <-ctx.Done():
+			log.Error(op, "the drain was cancelled while the deploy mediation was ending; the state client closes under it",
+				dlog.Context{"bound": bound.String()})
+			return
+		}
+	}
 	// THE ADMISSION STEPS ALREADY IN FLIGHT FINISH FIRST. The ones that began
 	// before the drain are a few store reads, and the state client must
 	// outlive them.

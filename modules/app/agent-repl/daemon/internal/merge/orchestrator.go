@@ -92,6 +92,9 @@ type orchestrator struct {
 	// mediating marks the repositories whose mediation round runs now
 	// (Mediate): one round per repository at a time. Guarded by mu.
 	mediating map[wsm.RepoKey]bool
+	// mediationLife is the lifetime of the deploy mediation's pass and
+	// rounds, which the daemon's exit stops (mediationlife.go).
+	mediationLife mediationLife
 	// pauseWrites serializes every change of a queue's pause (Pause, HardStop,
 	// Unpause, ResumeOwnPause), so a resume that first reads whose pause
 	// stands never resumes a pause written after its read.
