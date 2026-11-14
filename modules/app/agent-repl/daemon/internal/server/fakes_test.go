@@ -1479,6 +1479,9 @@ type fakeRollout struct {
 	rollout.Controller
 	adoptHostErr error
 	adoptWebErr  error
+	// adopting, when set, runs inside each adoption, as the daemon's own
+	// adoption runs while the call is held.
+	adopting func()
 }
 
 // fakeMakers answers which workspace spawned a subagent: the workspace
@@ -1529,9 +1532,19 @@ func (f *fakeDeployer) Deploy(_ context.Context, force bool) (deploy.Result, err
 	return f.result, f.err
 }
 
-func (f *fakeRollout) AdoptHost(context.Context, ids.WorkspaceID) error { return f.adoptHostErr }
+func (f *fakeRollout) AdoptHost(context.Context, ids.WorkspaceID) error {
+	if f.adopting != nil {
+		f.adopting()
+	}
+	return f.adoptHostErr
+}
 
-func (f *fakeRollout) AdoptWeb(context.Context, ids.WorkspaceID) error { return f.adoptWebErr }
+func (f *fakeRollout) AdoptWeb(context.Context, ids.WorkspaceID) error {
+	if f.adopting != nil {
+		f.adopting()
+	}
+	return f.adoptWebErr
+}
 
 // fakeHealth answers the two health reports.
 type fakeHealth struct {

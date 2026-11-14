@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -324,6 +325,67 @@ func TestARolloutRefusalOfAnAdoptionIsRecordedAtInfo(t *testing.T) {
 			}
 			if !seen {
 				t.Fatalf("%s recorded %+v, want an INFO naming the not_yet_adopted arm", tc.rpc, log.records)
+			}
+		})
+	}
+}
+
+// TestAdoptionAnswerRecordNamesItsCall pins that each adoption's answer record
+// names the call it answers -- the caller's request id -- and how long the
+// daemon held it, so a caller's timeout can be matched to this daemon's answer
+// (adoptionCall).
+func TestAdoptionAnswerRecordNamesItsCall(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation string
+		invoke    func(context.Context, *harness, string) error
+	}{
+		{name: "host", operation: "daemon.server.adopt_host", invoke: func(ctx context.Context, h *harness, id string) error {
+			req := connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ref()})
+			req.Header().Set(requestIDHeader, id)
+			_, err := h.Client.AdoptHostWorkspace(ctx, req)
+			return err
+		}},
+		{name: "web", operation: "daemon.server.adopt_web", invoke: func(ctx context.Context, h *harness, id string) error {
+			req := connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ref()})
+			req.Header().Set(requestIDHeader, id)
+			_, err := h.Client.AdoptWebWorkspace(ctx, req)
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) {
+				deps.Log = &fakeSurfaces{global: log, workspace: log}
+			})
+			current := time.Unix(1_800_000_000, 0)
+			h.Server.(*server).now = func() time.Time { return current }
+			h.Rollout.adopting = func() { current = current.Add(1500 * time.Millisecond) }
+			requestID := "adopt-" + test.name
+
+			// Act.
+			err := test.invoke(context.Background(), h, requestID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("adoption call: %v", err)
+			}
+			var answer *logRecord
+			for i := range log.records {
+				if log.records[i].Operation == test.operation {
+					answer = &log.records[i]
+				}
+			}
+			if answer == nil {
+				t.Fatalf("records = %v, want one %s", log.records, test.operation)
+			}
+			if answer.Context["request_id"] != requestID {
+				t.Errorf("request_id = %v, want %q", answer.Context["request_id"], requestID)
+			}
+			if answer.Context["held_ms"] != int64(1500) {
+				t.Errorf("held_ms = %v (%T), want 1500", answer.Context["held_ms"], answer.Context["held_ms"])
 			}
 		})
 	}
