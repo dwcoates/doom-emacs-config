@@ -100,9 +100,12 @@ func closedAt(ws wsm.Workspace) *time.Time {
 }
 
 // IsAgentWorkspace reports whether WS is a piece of work an agent looks for:
-// neither a zettel chat thread nor the hidden workspace an async merge runs in.
+// any workspace but a zettel chat thread. The hidden workspace an async merge
+// runs in IS one (its record is answered marked as a merge workspace): the
+// agent that asked for the merge reads it, and the agent CLI resolves the
+// merge workspace's own worktree to it.
 func IsAgentWorkspace(ws wsm.Workspace) bool {
-	return !ws.IsThread() && ws.MergeOf == nil
+	return !ws.IsThread()
 }
 
 // Find answers the agent workspaces among WORKSPACES that match Q, each with
