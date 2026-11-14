@@ -46,7 +46,8 @@ func HostDeps(module, self, profileDir string, log Logger) (Deps, error) {
 	}
 	return Deps{
 		Repo: repo, Module: realModule, DenyRoots: roots, Ignored: ignored, Bindings: bindings,
-		Store: Store{Dir: storeDir}, GoList: MemoGoList(ExecGoList), Hashes: NewHashCache(),
+		ListIgnored: func() (Ignored, error) { return ExecIgnored(repo) },
+		Store:       Store{Dir: storeDir}, GoList: MemoGoList(ExecGoList), Hashes: NewHashCache(),
 		Toolchain: hostToolchain(), Environ: os.Environ(),
 		Self: self, ProfileDir: profileDir,
 		Probe: func() error {

@@ -61,6 +61,12 @@ type Deps struct {
 	// Ignored is what git ignores in the checkout (ExecIgnored): session
 	// state and build output, which no input tree's key reads.
 	Ignored Ignored
+	// ListIgnored lists what git ignores in the checkout NOW (ExecIgnored).
+	// A run's subjects are re-keyed with it, beside Ignored, when they are
+	// recorded: a path git ignores that a unit made while the run ran (an
+	// npm install's node_modules) is never an input, though Ignored, read
+	// before the run, could not name it. REQUIRED to record.
+	ListIgnored func() (Ignored, error)
 	// Bindings is the generated protobuf code's symbols (ExecBindings),
 	// which every key reads that code by.
 	Bindings *Bindings
