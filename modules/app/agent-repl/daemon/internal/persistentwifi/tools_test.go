@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
 
 	"agent-repld/internal/appfreeze"
@@ -27,12 +28,12 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "unset is the production layout and no hotspot",
 			env:  map[string]string{"HOME": "/home/owner"},
-			want: Config{Tools: homeTools(), FreezeApps: appfreeze.DefaultApps},
+			want: Config{Platform: "darwin", Tools: homeTools(), FreezeApps: appfreeze.DefaultApps},
 		},
 		{
 			name: "the freeze list names the applications",
 			env:  map[string]string{"HOME": "/home/owner", appfreeze.EnvApps: "Slack, Discord"},
-			want: Config{Tools: homeTools(), FreezeApps: []string{"Slack", "Discord"}},
+			want: Config{Platform: "darwin", Tools: homeTools(), FreezeApps: []string{"Slack", "Discord"}},
 		},
 		{
 			name:    "a freeze list naming a terminal is refused",
@@ -42,17 +43,17 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "a fake host freezes nothing unless told to",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
+			want: Config{Platform: "darwin", Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
 		},
 		{
 			name: "a fake host freezes what it is told to",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac", appfreeze.EnvApps: "Slack"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac", FreezeApps: []string{"Slack"}},
+			want: Config{Platform: "darwin", Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac", FreezeApps: []string{"Slack"}},
 		},
 		{
 			name: "a tools dir resolves every tool there by its base name, with its fake lid",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "/fake/lid", EnvPowerSource: "ac"},
-			want: Config{Tools: Tools{
+			want: Config{Platform: "darwin", Tools: Tools{
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Caffeinate: "/fake/bin/caffeinate", Brightness: "/fake/bin/mac-brightness", Ps: "/fake/bin/ps",
@@ -82,12 +83,12 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "a power source state is a fixed power source",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "battery"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "battery"},
+			want: Config{Platform: "darwin", Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "battery"},
 		},
 		{
 			name: "an absolute power source socket is a socket power source",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "/fake/power"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "/fake/power"},
+			want: Config{Platform: "darwin", Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "/fake/power"},
 		},
 		{
 			name:    "a relative power source socket is refused",
@@ -97,7 +98,7 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "a lid state is a fixed lid",
 			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
+			want: Config{Platform: "darwin", Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
 		},
 		{
 			name:    "a relative lid socket is refused",
@@ -107,7 +108,7 @@ func TestConfigFromEnv(t *testing.T) {
 		{
 			name: "a hotspot override names the hotspot",
 			env:  map[string]string{"HOME": "/home/owner", EnvHotspot: "Other Phone"},
-			want: Config{Tools: homeTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
+			want: Config{Platform: "darwin", Tools: homeTools(), Hotspot: "Other Phone", FreezeApps: appfreeze.DefaultApps},
 		},
 		{
 			name:    "a relative tools dir is refused",
@@ -126,20 +127,20 @@ func TestConfigFromEnv(t *testing.T) {
 			getenv := func(k string) string { return tc.env[k] }
 
 			// Act.
-			got, err := ConfigFromEnv(getenv)
+			got, err := configFromEnv("darwin", getenv)
 
 			// Assert.
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("ConfigFromEnv() = %+v, want a refusal", got)
+					t.Fatalf("configFromEnv() = %+v, want a refusal", got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("ConfigFromEnv() error = %v", err)
+				t.Fatalf("configFromEnv() error = %v", err)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("ConfigFromEnv() = %+v, want %+v", got, tc.want)
+				t.Fatalf("configFromEnv() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
@@ -180,4 +181,19 @@ func homeTools() Tools {
 	t := DefaultTools()
 	t.WifiApp = WifiAppIn("/home/owner")
 	return t
+}
+
+func TestConfigFromEnvNamesThisPlatform(t *testing.T) {
+	// Act
+	got, err := ConfigFromEnv(func(k string) string {
+		if k == "HOME" {
+			return "/home/u"
+		}
+		return ""
+	})
+
+	// Assert
+	if err != nil || got.Platform != runtime.GOOS {
+		t.Fatalf("ConfigFromEnv() = (%+v, %v), want the platform %s", got, err, runtime.GOOS)
+	}
 }

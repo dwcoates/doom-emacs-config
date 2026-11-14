@@ -8,7 +8,7 @@ import (
 	"agent-repld/internal/usersetup"
 )
 
-func TestPmsetAllRunsTheGrantedInvocation(t *testing.T) {
+func TestPmsetWriteRunsTheGrantedInvocation(t *testing.T) {
 	cases := []struct {
 		name    string
 		answer  answer
@@ -25,7 +25,7 @@ func TestPmsetAllRunsTheGrantedInvocation(t *testing.T) {
 			h.r.on(argPower("womp", "1"), tc.answer)
 
 			// Act.
-			err := h.c.pmsetAll(context.Background(), "womp", "1")
+			err := pmsetWrite(context.Background(), h.r, tools, "womp", "1")
 
 			// Assert.
 			if got := h.r.ran(); len(got) != 1 || got[0] != argPower("womp", "1") {
@@ -33,28 +33,28 @@ func TestPmsetAllRunsTheGrantedInvocation(t *testing.T) {
 			}
 			switch {
 			case tc.wantErr == "" && err != nil:
-				t.Fatalf("pmsetAll() error = %v, want nil", err)
+				t.Fatalf("pmsetWrite() error = %v, want nil", err)
 			case tc.wantErr != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.wantErr)):
-				t.Fatalf("pmsetAll() error = %v, want one starting %q", err, tc.wantErr)
+				t.Fatalf("pmsetWrite() error = %v, want one starting %q", err, tc.wantErr)
 			}
 		})
 	}
 }
 
-// TestApplyPowerWritesEverySettingThroughPmsetAll pins that the power step's
-// writes are each the one granted shape, so a hand-rolled write that drifts
-// from the sudoers grant fails here.
-func TestApplyPowerWritesEverySettingThroughPmsetAll(t *testing.T) {
+// TestDarwinSleepDisabledWritesEverySettingThroughPmsetWrite pins that the
+// power step's writes are each the one granted shape, so a hand-rolled write
+// that drifts from the sudoers grant fails here.
+func TestDarwinSleepDisabledWritesEverySettingThroughPmsetWrite(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	scriptPower(h.r, "1")
 
 	// Act.
-	err := h.c.applyPower(context.Background(), true)
+	err := h.c.host.SetSleepDisabled(context.Background(), true)
 
 	// Assert.
 	if err != nil {
-		t.Fatalf("applyPower() error = %v", err)
+		t.Fatalf("SetSleepDisabled() error = %v", err)
 	}
 	var want []string
 	for _, s := range powerSettings {

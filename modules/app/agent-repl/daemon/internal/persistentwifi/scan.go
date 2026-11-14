@@ -2,10 +2,8 @@ package persistentwifi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -104,15 +102,10 @@ func helperLaunch(tools Tools, wait helperWait, verb, out string) []string {
 // did not answer in time, failed, or names no network for want of the
 // permission is an error naming why. It runs OFF the lock.
 func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
-	c.mu.Lock()
-	c.scanSeq++
-	out := filepath.Join(c.scanDir, fmt.Sprintf("agent-repl-wifi-scan-%d-%d.json", os.Getpid(), c.scanSeq))
-	c.mu.Unlock()
-	defer os.Remove(out)
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
 	start := c.clock.Now()
-	_, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperWaits, verbScan, out)...)
+	scan, err := c.host.Scan(bounded)
 	took := c.clock.Now().Sub(start)
 	switch {
 	case ctx.Err() != nil:
@@ -120,24 +113,10 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 	case bounded.Err() != nil:
 		return wifiScan{}, fmt.Errorf("the Wi-Fi scan did not answer within %s (measured %s): %w", c.scanBound, scanMeasured, bounded.Err())
 	case err != nil:
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper could not be run: %w", err)
-	}
-	raw, err := os.ReadFile(out)
-	if err != nil {
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper wrote no answer to %s: %w", out, err)
-	}
-	var scan wifiScan
-	if err := json.Unmarshal(raw, &scan); err != nil {
-		return wifiScan{}, fmt.Errorf("the Wi-Fi helper's answer could not be read: %w", err)
-	}
-	if scan.Error != "" {
-		return scan, fmt.Errorf("the Wi-Fi helper's %s", scan.Error)
-	}
-	if !scan.authorized() {
 		if scan.Authorization == standingNotDetermined {
 			c.askAuthorization(ctx)
 		}
-		return scan, fmt.Errorf("%w (its standing: %s)", errScanUnauthorized, scan.Authorization)
+		return scan, err
 	}
 	// AN ALLOWED STANDING ENDS THE ASK: a deploy that installs a rebuilt
 	// helper re-signs it, macOS may forget the answer, and the next
@@ -174,12 +153,11 @@ func (c *Controller) askAuthorization(ctx context.Context) {
 		return
 	}
 	c.authorizeAsked = true
-	out := filepath.Join(c.scanDir, fmt.Sprintf("agent-repl-wifi-authorize-%d.json", os.Getpid()))
 	c.mu.Unlock()
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
-	fields := dlog.Context{"app": c.cfg.Tools.WifiApp, "answer": out}
-	if _, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperLeftRunning, verbAuthorize, out)...); err != nil {
+	fields, err := c.host.AskScanPermission(bounded)
+	if err != nil {
 		c.log.Error(opFailover, "could not ask macOS for the Wi-Fi helper's Location Services permission", dlog.WithCause(fields, err))
 		return
 	}

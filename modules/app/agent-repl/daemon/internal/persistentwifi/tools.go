@@ -27,6 +27,7 @@ package persistentwifi
 
 import (
 	"fmt"
+	"runtime"
 
 	"agent-repld/internal/appfreeze"
 	"path/filepath"
@@ -137,6 +138,9 @@ func ToolsIn(dir string) Tools {
 // Config is the environment's say over the package: which tools, which
 // hotspot, and where the lid is heard from.
 type Config struct {
+	// Platform is the GOOS whose Host drives the tools (NewHost).
+	Platform string
+	// Tools are macOS's tools.
 	Tools   Tools
 	Hotspot string
 	// FreezeApps are the applications the quiet state freezes
@@ -170,7 +174,12 @@ func (c Config) PowerSource() PowerSourceWatcher {
 // to write; a fake lid or power source is likewise refused without fake
 // tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
-	cfg := Config{Tools: DefaultTools()}
+	return configFromEnv(runtime.GOOS, getenv)
+}
+
+// configFromEnv is ConfigFromEnv on the platform goos.
+func configFromEnv(goos string, getenv func(string) string) (Config, error) {
+	cfg := Config{Platform: goos, Tools: DefaultTools()}
 	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
 	if err := fakeFact(EnvLid, lid, dir, parseLidLine); err != nil {
 		return Config{}, err

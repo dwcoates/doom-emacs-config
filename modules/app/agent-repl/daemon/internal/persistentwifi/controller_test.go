@@ -71,7 +71,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		network:   newFakeNetwork(), power: newFakePower(),
 	}
 	c, err := New(Deps{
-		Config: Config{Tools: tools, Hotspot: configured},
+		Config: Config{Platform: "darwin", Tools: tools, Hotspot: configured},
 		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, PowerSource: h.source, LegacyLidDims: h.dims,
 		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
@@ -131,7 +131,7 @@ func update(action string) *agentreplv1.UpdatePersistentWifiModeRequest {
 
 func TestNewRefusesAnIncompleteDeps(t *testing.T) {
 	full := func() Deps {
-		return Deps{Config: Config{Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
+		return Deps{Config: Config{Platform: "darwin", Tools: tools, Hotspot: hotspot}, Runner: newFakeRunner(t), Clock: newFakeClock(), Log: dlog.NewTestLogger(),
 			Lid: newFakeLidWatcher(), PowerSource: newFakePowerSourceWatcher(), LegacyLidDims: &fakeLidDims{},
 			Freezer: &fakeFreezer{}, Views: viewquiet.New(nil), EnergyRecord: &fakeEnergyStore{},
 			NetworkChanged: newFakeNetwork().changed, PowerChanges: newFakePower().source}

@@ -60,15 +60,9 @@ func (c *Controller) joinHotspot(ctx context.Context, before reading) *agentrepl
 		// byte for byte, and an iPhone names its hotspot with a curly
 		// apostrophe the configured name may spell straight.
 		ssid, note := c.savedHotspot(ctx, before.device)
-		// `networksetup -setairportnetwork` prints nothing on success and a
-		// sentence on failure, whatever its exit code, so both are read.
-		out, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-setairportnetwork", before.device, ssid)
-		switch {
-		case err != nil:
+		if err := c.host.JoinNetwork(ctx, before.device, ssid); err != nil {
 			h.Outcome = hotspotFailed(ssid, withNote(err.Error(), note))
-		case strings.TrimSpace(out) != "":
-			h.Outcome = hotspotFailed(ssid, withNote(strings.TrimSpace(out), note))
-		default:
+		} else {
 			h.Outcome = &agentreplv1.UpdatePersistentWifiModeHotspot_Joined{
 				Joined: &agentreplv1.UpdatePersistentWifiModeHotspotJoined{NetworkName: ssid},
 			}
@@ -82,11 +76,11 @@ func (c *Controller) joinHotspot(ctx context.Context, before reading) *agentrepl
 // cannot be read or names no match, the configured name is tried as given, and
 // the note says why, for the failed outcome's detail.
 func (c *Controller) savedHotspot(ctx context.Context, device string) (ssid, note string) {
-	out, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-listpreferredwirelessnetworks", device)
+	networks, err := c.host.PreferredNetworks(ctx, device)
 	if err != nil {
 		return c.cfg.Hotspot, "the saved networks could not be read (" + err.Error() + "), so the configured name was tried as given"
 	}
-	for _, saved := range preferredNetworks(out) {
+	for _, saved := range networks {
 		if sameNetwork(saved, c.cfg.Hotspot) {
 			return saved, ""
 		}
@@ -159,15 +153,15 @@ func (c *Controller) leaveHotspot(ctx context.Context, before reading) *agentrep
 	}
 
 	var attempts []string
-	if c.exists(c.cfg.Tools.WifiUtil) {
-		if _, err := run(ctx, c.runner, c.cfg.Tools.WifiUtil, "disconnect"); err != nil {
+	if why := c.host.CanDisconnect(); why == nil {
+		if err := c.host.Disconnect(ctx, before.device); err != nil {
 			attempts = append(attempts, err.Error())
 		}
 		if c.stillOnHotspot(ctx, before.device, &attempts) {
 			c.restartRadio(ctx, before.device, &attempts)
 		}
 	} else {
-		attempts = append(attempts, c.cfg.Tools.WifiUtil+" is not installed")
+		attempts = append(attempts, why.Error())
 		c.restartRadio(ctx, before.device, &attempts)
 	}
 	if c.stillOnHotspot(ctx, before.device, &attempts) {
@@ -183,8 +177,8 @@ func (c *Controller) leaveHotspot(ctx context.Context, before reading) *agentrep
 
 // restartRadio powers the Wi-Fi radio off and on, recording a failed step.
 func (c *Controller) restartRadio(ctx context.Context, device string, attempts *[]string) {
-	for _, power := range []string{"off", "on"} {
-		if _, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-setairportpower", device, power); err != nil {
+	for _, on := range []bool{false, true} {
+		if err := c.host.SetRadio(ctx, device, on); err != nil {
 			*attempts = append(*attempts, err.Error())
 		}
 	}
@@ -194,12 +188,12 @@ func (c *Controller) restartRadio(ctx context.Context, device string, attempts *
 // hotspot. A link that cannot be re-read is recorded and answered as still on
 // it: leaving cannot be claimed without seeing it.
 func (c *Controller) stillOnHotspot(ctx context.Context, device string, attempts *[]string) bool {
-	summary, err := run(ctx, c.runner, c.cfg.Tools.Ipconfig, "getsummary", device)
+	l, _, err := c.host.ReadLink(ctx, device)
 	if err != nil {
 		*attempts = append(*attempts, err.Error())
 		return true
 	}
-	return sameNetwork(parseSummary(summary).name, c.cfg.Hotspot)
+	return sameNetwork(l.name, c.cfg.Hotspot)
 }
 
 // hotspotFailed is the failed arm.
@@ -207,26 +201,6 @@ func hotspotFailed(name, detail string) *agentreplv1.UpdatePersistentWifiModeHot
 	return &agentreplv1.UpdatePersistentWifiModeHotspot_Failed{
 		Failed: &agentreplv1.UpdatePersistentWifiModeHotspotFailed{NetworkName: name, Detail: detail},
 	}
-}
-
-// applyPower writes the three power settings through `sudo -n`, stopping at
-// the first refusal: the mode is then whatever it was.
-func (c *Controller) applyPower(ctx context.Context, on bool) error {
-	value := "0"
-	if on {
-		value = "1"
-	}
-	for _, setting := range powerSettings {
-		if err := c.pmsetAll(ctx, setting, value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// pmsetAll is the controller's privileged power write (pmsetWrite).
-func (c *Controller) pmsetAll(ctx context.Context, setting, value string) error {
-	return pmsetWrite(ctx, c.runner, c.cfg.Tools, setting, value)
 }
 
 // pmsetWrite is THE ONE privileged power write: `sudo -n pmset -a <setting>

@@ -180,6 +180,11 @@ func runThawGuard(args []string, stderr io.Writer) int {
 		log.Error("daemon.appfreeze.guard", "the thaw guard could not build its tool runner", dlog.Context{"cause": err.Error()})
 		return 1
 	}
+	host, err := persistentwifi.NewHost(wifiConfig, runner, nil, "")
+	if err != nil {
+		log.Error("daemon.appfreeze.guard", "the thaw guard could not build the persistent-wifi host", dlog.Context{"cause": err.Error()})
+		return 1
+	}
 	dir := freezeDir(*stateDir)
 	err = appfreeze.RunGuard(appfreeze.GuardDeps{
 		DaemonGone: appfreeze.PipeGone(pipe),
@@ -191,8 +196,7 @@ func runThawGuard(args []string, stderr io.Writer) int {
 		// energy mode it recorded is restored as well as the frozen set
 		// thawed, since the lid may open with no daemon to restore it.
 		AlsoRestore: func() error {
-			return persistentwifi.GuardRestoreEnergy(context.Background(), runner, wifiConfig.Tools,
-				energyRecord(*stateDir), log)
+			return persistentwifi.GuardRestoreEnergy(context.Background(), host, energyRecord(*stateDir), log)
 		},
 	})
 	if err != nil {
