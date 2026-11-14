@@ -110,3 +110,230 @@ func describeRetargetRefusal(ws string, e *agentreplv1.SetWorkspaceParentError) 
 	}
 	return "", fmt.Errorf("%w: retargeting %s: %v", errUndescribedWorkspaceRefusal, ws, e)
 }
+
+// describeHiddenRefusal says in one plain sentence why WS was not hidden or
+// shown. Every SetWorkspaceHiddenError arm has its own sentence.
+func describeHiddenRefusal(ws string, e *agentreplv1.SetWorkspaceHiddenError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspaceHiddenError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspaceHiddenError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspaceHiddenError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set it again"), nil
+	case *agentreplv1.SetWorkspaceHiddenError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "set it again"), nil
+	case *agentreplv1.SetWorkspaceHiddenError_HasOpenChildren:
+		return sayOpenChildren(ws, r.HasOpenChildren, "hide it again"), nil
+	case *agentreplv1.SetWorkspaceHiddenError_ParentNotOpen:
+		return sayParentNotOpen(r.ParentNotOpen, "show "+ws+" again")
+	}
+	return "", undescribed("hiding or showing "+ws, e)
+}
+
+// describePriorityRefusal says in one plain sentence why WS's priority was not
+// set. Every SetWorkspacePriorityError arm has its own sentence.
+func describePriorityRefusal(ws string, e *agentreplv1.SetWorkspacePriorityError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspacePriorityError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspacePriorityError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspacePriorityError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set it again"), nil
+	case *agentreplv1.SetWorkspacePriorityError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "set it again"), nil
+	}
+	return "", undescribed("the priority of "+ws, e)
+}
+
+// describeNameRefusal says in one plain sentence why WS was not renamed.
+// Every SetWorkspaceNameError arm has its own sentence.
+func describeNameRefusal(ws string, e *agentreplv1.SetWorkspaceNameError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspaceNameError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspaceNameError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspaceNameError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "rename it again"), nil
+	case *agentreplv1.SetWorkspaceNameError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "rename it again"), nil
+	case *agentreplv1.SetWorkspaceNameError_InvalidName:
+		n := r.InvalidName
+		switch n.GetRule().(type) {
+		case *agentreplv1.SetWorkspaceNameInvalidName_Slug:
+			return sayInvalidName(n.GetName(), n.GetComponent(), true), nil
+		case *agentreplv1.SetWorkspaceNameInvalidName_Prefix:
+			return sayInvalidName(n.GetName(), n.GetComponent(), false), nil
+		}
+	case *agentreplv1.SetWorkspaceNameError_NameTaken:
+		t := r.NameTaken
+		switch h := t.GetHolder().(type) {
+		case *agentreplv1.SetWorkspaceNameTaken_Workspace:
+			return fmt.Sprintf("the name %s is already the name or branch of the workspace at %s", t.GetName(), h.Workspace.GetDir()), nil
+		case *agentreplv1.SetWorkspaceNameTaken_Pending:
+			return fmt.Sprintf("the name %s is reserved by a pending async merge or claimed by a create in flight", t.GetName()), nil
+		}
+	}
+	return "", undescribed("renaming "+ws, e)
+}
+
+// describeRemoteControlRefusal says in one plain sentence why WS's remote
+// control mode was not set. Every UpdateRemoteControlModeError arm has its
+// own sentence.
+func describeRemoteControlRefusal(ws string, e *agentreplv1.UpdateRemoteControlModeError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.UpdateRemoteControlModeError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.UpdateRemoteControlModeError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.UpdateRemoteControlModeError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set it again"), nil
+	case *agentreplv1.UpdateRemoteControlModeError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "set it again"), nil
+	case *agentreplv1.UpdateRemoteControlModeError_VendorRefused:
+		return fmt.Sprintf("the vendor refused %s's remote-control bridge (%s); the mode is still recorded as asked, and the refusal rides its warning strip", ws, r.VendorRefused.GetDetail()), nil
+	}
+	return "", undescribed("the remote control of "+ws, e)
+}
+
+// describeQueueBypassRefusal says in one plain sentence why WS's queue bypass
+// mode was not set. Every UpdateQueueBypassModeError arm has its own
+// sentence.
+func describeQueueBypassRefusal(ws string, e *agentreplv1.UpdateQueueBypassModeError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.UpdateQueueBypassModeError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.UpdateQueueBypassModeError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.UpdateQueueBypassModeError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set it again"), nil
+	case *agentreplv1.UpdateQueueBypassModeError_WorkAccount:
+		return fmt.Sprintf("%s's session spends as a work account, which never holds the queue bypass mode", ws), nil
+	case *agentreplv1.UpdateQueueBypassModeError_HeldElsewhere:
+		return fmt.Sprintf("the workspace at %s already holds its repository's queue bypass mode", r.HeldElsewhere.GetWorkspace().GetDir()), nil
+	case *agentreplv1.UpdateQueueBypassModeError_TurnInFlight:
+		return fmt.Sprintf("%s has a turn in flight; end or interrupt it, then set the mode again", ws), nil
+	case *agentreplv1.UpdateQueueBypassModeError_SwitchFailed:
+		return fmt.Sprintf("%s's conversation switch did not complete (%s)", ws, r.SwitchFailed.GetDetail()), nil
+	case *agentreplv1.UpdateQueueBypassModeError_NoBypassConversation:
+		return fmt.Sprintf("the context named %s's parked bypass conversation, and it parks none; nothing changed", ws), nil
+	case *agentreplv1.UpdateQueueBypassModeError_CompactionFailed:
+		return fmt.Sprintf("the compaction or summary the context asked for did not complete (%s); %s holds the mode with its bypass conversation bound, and its next start asks for the compaction again", r.CompactionFailed.GetDetail(), ws), nil
+	}
+	return "", undescribed("the queue bypass mode of "+ws, e)
+}
+
+// describeCorrespondenceRefusal says in one plain sentence why what WS awaits
+// was not marked. Every SetWorkspaceCorrespondenceError arm has its own
+// sentence.
+func describeCorrespondenceRefusal(ws string, e *agentreplv1.SetWorkspaceCorrespondenceError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspaceCorrespondenceError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspaceCorrespondenceError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspaceCorrespondenceError_Closed:
+		return fmt.Sprintf("%s is closed, so it runs no agent to wait", ws), nil
+	case *agentreplv1.SetWorkspaceCorrespondenceError_UnknownAwaited:
+		return fmt.Sprintf("the awaited workspace %s is not registered, or is %s itself", r.UnknownAwaited.GetAwaited().GetDir(), ws), nil
+	case *agentreplv1.SetWorkspaceCorrespondenceError_RequesterMayNotSet:
+		return fmt.Sprintf("the requester is neither %s nor the user, so it may not mark what %s awaits", ws, ws), nil
+	}
+	return "", undescribed("what "+ws+" awaits", e)
+}
+
+// describeSummaryRefusal says in one plain sentence why WS's summary was not
+// set. Every SetWorkspaceSummaryError arm has its own sentence.
+func describeSummaryRefusal(ws string, e *agentreplv1.SetWorkspaceSummaryError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.SetWorkspaceSummaryError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.SetWorkspaceSummaryError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.SetWorkspaceSummaryError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "set the summary again"), nil
+	case *agentreplv1.SetWorkspaceSummaryError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "set the summary again"), nil
+	case *agentreplv1.SetWorkspaceSummaryError_InvalidSummary:
+		return fmt.Sprintf("the summary %q is not one plain sentence of two to fifteen words (%s)", r.InvalidSummary.GetSummary(), r.InvalidSummary.GetReason()), nil
+	}
+	return "", undescribed("the summary of "+ws, e)
+}
+
+// describeLinksRefusal says in one plain sentence why WS's links were not
+// changed. Every ChangeWorkspaceLinksError arm has its own sentence.
+func describeLinksRefusal(ws string, e *agentreplv1.ChangeWorkspaceLinksError) (string, error) {
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.ChangeWorkspaceLinksError_UnknownWorkspace:
+		return sayNoWorkspace(ws), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(ws, r.WorkspaceRefMismatch.GetRegistryDir(), "the request"), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "change the links again"), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_NotYetAdopted:
+		return sayNotYetAdopted(ws, "change the links again"), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_InvalidLink:
+		return fmt.Sprintf("%s is not a link the browser opens (%s)", r.InvalidLink.GetUrl(), r.InvalidLink.GetReason()), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_InvalidLabel:
+		return fmt.Sprintf("the label %q is not two to eight words in one sentence (%s)", r.InvalidLabel.GetLabel(), r.InvalidLabel.GetReason()), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_UnknownLink:
+		return fmt.Sprintf("%s holds no link %s", ws, r.UnknownLink.GetUrl()), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_TooManyShown:
+		return fmt.Sprintf("the menu shows at most %d links, and %d were named", r.TooManyShown.GetLimit(), r.TooManyShown.GetNamed()), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_UnknownAnnouncedLink:
+		return fmt.Sprintf("the link announces %s, which %s does not hold", r.UnknownAnnouncedLink.GetUrl(), ws), nil
+	case *agentreplv1.ChangeWorkspaceLinksError_PullRequestOwnedElsewhere:
+		o := r.PullRequestOwnedElsewhere
+		return fmt.Sprintf("the pull request %s is already owned by %s at %s, and a pull request has one owning workspace", o.GetUrl(), o.GetOwnerName(), o.GetOwner().GetDir()), nil
+	}
+	return "", undescribed("the links of "+ws, e)
+}
+
+// describeFindRefusal says in one plain sentence why no workspaces were
+// found. Every FindWorkspacesError arm has its own sentence.
+func describeFindRefusal(e *agentreplv1.FindWorkspacesError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.FindWorkspacesError_UnknownRepository:
+		return "the daemon has no repository by the one -repository named", nil
+	case *agentreplv1.FindWorkspacesError_UnknownCreator:
+		return "the daemon has no workspace by the one -created-by named", nil
+	case *agentreplv1.FindWorkspacesError_UnknownCaller:
+		return "the daemon has no workspace for the calling directory", nil
+	}
+	return "", undescribed("finding workspaces", e)
+}
+
+// describeArrangeRefusal says in one plain sentence why the sidebar was not
+// rearranged. Every ArrangeSidebarError arm has its own sentence.
+func describeArrangeRefusal(e *agentreplv1.ArrangeSidebarError) (string, error) {
+	const named = "a workspace the change named"
+	switch r := e.GetCause().(type) {
+	case *agentreplv1.ArrangeSidebarError_UnknownRepository:
+		return "the daemon has no repository by the one the change named", nil
+	case *agentreplv1.ArrangeSidebarError_UnknownSubsection:
+		return fmt.Sprintf("the repository has no subsection %s", r.UnknownSubsection.GetSubsection().GetId()), nil
+	case *agentreplv1.ArrangeSidebarError_UnknownWorkspace:
+		return sayNoWorkspace(r.UnknownWorkspace.GetWorkspace().GetDir()), nil
+	case *agentreplv1.ArrangeSidebarError_WorkspaceRefMismatch:
+		return sayLivesElsewhere(r.WorkspaceRefMismatch.GetWorkspace().GetId(), r.WorkspaceRefMismatch.GetRegistryDir(), "the change"), nil
+	case *agentreplv1.ArrangeSidebarError_TransferringAway:
+		return sayHandedOver(named, r.TransferringAway.GetAddress(), "place it again"), nil
+	case *agentreplv1.ArrangeSidebarError_NotYetAdopted:
+		return sayNotYetAdopted(named, "place it again"), nil
+	case *agentreplv1.ArrangeSidebarError_BlankName:
+		return "a subsection's name is blank", nil
+	case *agentreplv1.ArrangeSidebarError_OtherRepository:
+		return "the change relates workspaces or subsections of different repositories", nil
+	case *agentreplv1.ArrangeSidebarError_AnchorElsewhere:
+		return "what the change placed things before moved since the sidebar was read; read it again and place them again", nil
+	case *agentreplv1.ArrangeSidebarError_NoOpenWorkspace:
+		return "the new subsection would hold no open workspace, so the change that created it would delete it", nil
+	case *agentreplv1.ArrangeSidebarError_MainWorkspaceNotSortable:
+		return "the change would move a repository's main workspace, or the family it roots, which agents never sort", nil
+	case *agentreplv1.ArrangeSidebarError_NoRepositoryBlock:
+		return "the change named a repository block the parent does not have", nil
+	}
+	return "", undescribed("arranging the sidebar", e)
+}
