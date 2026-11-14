@@ -337,7 +337,10 @@ type fakeDB struct {
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
 	forgetErr    error
-	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
+	// owedNukes is every nuke OweNuke recorded, in order; oweNukeErr fails it.
+	owedNukes  []ids.WorkspaceID
+	oweNukeErr error
+	terminals  map[ids.WorkspaceID]wsm.SessionTerminal
 	// clearTerminalErr fails the terminal RETIREMENT, which the fake's own map
 	// cannot, so the live-shim invariant's failure arm is reachable.
 	clearTerminalErr error
@@ -1207,6 +1210,18 @@ func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLaps
 
 func (d *fakeDB) SetPriority(_ context.Context, id ids.WorkspaceID, p *wsm.Priority) error {
 	d.priorities[id] = p
+	return nil
+}
+
+func (d *fakeDB) OweNuke(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.oweNukeErr != nil {
+		return d.oweNukeErr
+	}
+	d.owedNukes = append(d.owedNukes, id)
+	if ws, ok := d.workspaces[id]; ok {
+		ws.NukeOwedAt = &at
+		d.workspaces[id] = ws
+	}
 	return nil
 }
 

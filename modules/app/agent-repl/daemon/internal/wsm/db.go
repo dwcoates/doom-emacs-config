@@ -85,6 +85,8 @@ type DB interface {
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
+	// OweNuke records that a nuke of the workspace began (owednuke.go).
+	OweNuke(ctx context.Context, id WorkspaceID, at time.Time) error
 	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
 	// closed or closing, nil when it is open (family.go).
 	RequireOpenParent(ctx context.Context, parent WorkspaceID) error

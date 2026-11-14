@@ -101,6 +101,39 @@ func TestSettleMissingDirectory(t *testing.T) {
 	}
 }
 
+// TestSettleMissingDirectoryLeavesAWorkspaceThatOwesANuke pins the guard: a
+// workspace whose tree a stopped nuke set aside is neither recreated from the
+// branch the nuke has yet to delete nor closed; it is left for the nuke.
+func TestSettleMissingDirectoryLeavesAWorkspaceThatOwesANuke(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	owed := time.Unix(5, 0)
+	ws = f.db.workspaces["w1"]
+	ws.NukeOwedAt = &owed
+	f.db.with(ws)
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if err != nil || restored {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, nil)", restored, err)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none for a workspace that owes a nuke", closures)
+	}
+	for _, call := range f.git.gitCalls {
+		if strings.HasPrefix(call, "restore ") {
+			t.Fatalf("git calls = %v, want no restore", f.git.gitCalls)
+		}
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: testMissingDirOp, Message: "the workspace directory is gone because a nuke is under way; it is left for the nuke to finish"}); !ok {
+		t.Fatalf("records = %+v, want the owed nuke recorded", f.log.logger.Records())
+	}
+}
+
 func TestSettleMissingDirectorySurfacesAFailedClose(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

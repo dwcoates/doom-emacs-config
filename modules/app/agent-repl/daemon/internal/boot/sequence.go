@@ -73,6 +73,17 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		})
 		return Report{}, fmt.Errorf("boot: bind the workspaces' views: %w", err)
 	}
+	// A NUKE THAT STOPPED PART WAY IS FINISHED BEFORE THE REGISTRY IS READ,
+	// so no step below reads a row it forgets. A joining daemon writes
+	// nothing, so it leaves them to the incumbent's next boot.
+	if !s.Joining() {
+		if err := s.deps.FinishOwedNukes(ctx); err != nil {
+			log.Error("daemon.boot.run", "the owed nukes could not be finished", dlog.Context{
+				"error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: finish the owed nukes: %w", err)
+		}
+	}
 	workspaces, err := s.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		log.Error("daemon.boot.run", "the workspace registry could not be read", dlog.Context{
