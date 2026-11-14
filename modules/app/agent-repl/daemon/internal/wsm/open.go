@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 133
+const LayoutVersion = 134
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -689,6 +689,14 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		var queued *MergeQueuedError
 		if errors.As(err, &queued) {
 			s.log.Debug(op, "the workspace is already in its merge queue; the request was refused", withError(fields, err))
+			return err
+		}
+		// A WORKSPACE WHOSE REQUEST STANDS OFF ITS QUEUE is the store
+		// answering what was asked; the orchestrator turns it into the
+		// request's merge-off-queue arm and records it at its own level.
+		var offQueue *MergeOffQueueError
+		if errors.As(err, &offQueue) {
+			s.log.Debug(op, "the workspace's merge stands off its queue; the request was refused", withError(fields, err))
 			return err
 		}
 		// A THREAD NAME ALREADY TAKEN is the store answering what was asked;

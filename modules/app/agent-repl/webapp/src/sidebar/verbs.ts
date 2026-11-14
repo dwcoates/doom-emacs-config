@@ -820,6 +820,8 @@ export function finishWorkspaceRefusal(cause: CauseOf<FinishWorkspaceError>): st
       return `the repository's deploy config ${cause.value.path} is unusable: ${cause.value.detail}`;
     case "placementBehindNotInLine":
       return `no merge named ${cause.value.behind} is in the queue to go behind`;
+    case "mergeOffQueue":
+      return "this workspace's merge left the queue without landing and still stands; requeue or discard it in the merge queue";
     default:
       return unreachableArm("FinishWorkspaceError.cause", cause.case);
   }

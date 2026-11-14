@@ -32,6 +32,12 @@ const (
 	// ArmAlreadyQueued refuses a second enqueue of a merge that is already
 	// waiting: a merge is queued once.
 	ArmAlreadyQueued = "already_queued"
+	// ArmMergeOffQueue refuses a merge request from a workspace whose merge
+	// left its queue without landing and whose request still stands: it is
+	// requeued or discarded, never asked for again
+	// (FinishWorkspaceError.merge_off_queue). Its `cause` field says why it
+	// left.
+	ArmMergeOffQueue = "merge_off_queue"
 	// ArmAlreadyMerging refuses an enqueue for the workspace whose merge is
 	// running right now.
 	ArmAlreadyMerging = "already_merging"

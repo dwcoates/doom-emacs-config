@@ -194,6 +194,23 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		log.Error(op, "could not read whether the merge closes a workspace with open children", withField(fields, "error", err.Error()))
 		return Enqueued{}, err
 	}
+	// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT (offqueue.go). Asked
+	// before anything is flushed or recorded, so a refused request changes
+	// nothing; the request's own transaction checks again, which is the
+	// guarantee. An async request lands under its own merge workspace, whose
+	// name refuseNameOffQueue checks.
+	if req.Detached == nil {
+		rec, found, err := o.deps.DB.OffQueueMergeOf(ctx, ws)
+		if err != nil {
+			log.Error(op, "could not read whether the workspace's merge stands off its queue", withField(fields, "error", err.Error()))
+			return Enqueued{}, err
+		}
+		if found {
+			refusal := mergeOffQueueRefusal(record, rec.Cause)
+			logRefusal(log, op, "refused a merge request beside the request standing off its queue", fields, refusal)
+			return Enqueued{}, refusal
+		}
+	}
 	session, found, err := o.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(op, "could not read the requesting workspace's session", withField(fields, "error", err.Error()))
@@ -253,6 +270,12 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			// A TYPED REFUSAL THE CALLER ACTS ON, not a condition to remediate:
 			// the merge it asked for already stands, and the answer says so.
 			logRefusal(log, op, "refused a duplicate merge request", withField(fields, "repo", string(repo)), refusal)
+			return Enqueued{}, refusal
+		}
+		var offQueue *wsm.MergeOffQueueError
+		if errors.As(err, &offQueue) {
+			refusal := mergeOffQueueRefusal(record, offQueue.Cause)
+			logRefusal(log, op, "refused a merge request beside the request standing off its queue", withField(fields, "repo", string(repo)), refusal)
 			return Enqueued{}, refusal
 		}
 		if wsm.IsFamilyRefusal(err) {

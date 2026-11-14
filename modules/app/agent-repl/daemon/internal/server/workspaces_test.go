@@ -1539,6 +1539,11 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 			got: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetPlacementBehindNotInLine().GetBehind() == "two"
 			}},
+		{name: "its merge stands off its queue", refusal: &merge.RefusalError{Arm: merge.ArmMergeOffQueue, Reason: "left",
+			Fields: map[string]any{"cause": merge.OffQueueCause("failed")}},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool {
+				return e.GetMergeOffQueue().GetCause().GetFailed() != nil
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

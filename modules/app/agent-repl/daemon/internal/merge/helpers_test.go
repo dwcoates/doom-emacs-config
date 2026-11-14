@@ -796,6 +796,9 @@ func (f *fakeDB) requestMergeLocked(repo wsm.RepoKey, id ids.WorkspaceID, source
 			return &wsm.MergeQueuedError{Repo: repo, Workspace: id, Position: i + 1, State: entry.State}
 		}
 	}
+	if rec, ok := f.offQueue[id]; ok {
+		return &wsm.MergeOffQueueError{Workspace: id, Cause: rec.Cause}
+	}
 	f.seq++
 	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
 		Repo: repo, Workspace: id, State: wsm.MergeRequested, Source: source, EnqueuedAt: at,

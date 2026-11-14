@@ -75,6 +75,78 @@ func TestRequeuePutsAnEvictedMergeBackInLineAsItself(t *testing.T) {
 	}
 }
 
+// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT: a request from a
+// workspace whose merge stands off its queue is refused with the cause, and
+// changes nothing, whether the orchestrator's own read or the store's
+// transaction finds the record.
+func TestARequestBesideAMergeOffItsQueueIsRefused(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T, h *harness)
+		wantCause string
+	}{
+		{name: "found before anything is recorded", arrange: func(t *testing.T, h *harness) { evicted(t, h) }, wantCause: "evicted"},
+		{name: "found by the store's transaction", arrange: func(t *testing.T, h *harness) {
+			h.db.enqueueErr = &wsm.MergeOffQueueError{Workspace: theWorkspace, Cause: causeFailed}
+		}, wantCause: "failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(t, h)
+			recBefore, keptBefore, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace)
+
+			// Act
+			err := h.request(t, ownBranch, RequestedByAgent)
+
+			// Assert: refused with why it left, nothing in line, the record
+			// as it stood, and the refusal recorded as an answer.
+			refusal, refused := Refused(err)
+			if !refused || refusal.Arm != ArmMergeOffQueue {
+				t.Fatalf("Enqueue = %v, want merge_off_queue", err)
+			}
+			if got := refusal.Fields["cause"]; !reflect.DeepEqual(got, OffQueueCause(tt.wantCause)) {
+				t.Fatalf("cause = %v, want the %s arm", got, tt.wantCause)
+			}
+			if !strings.Contains(err.Error(), "agent-repld merge-queue requeue") {
+				t.Fatalf("refusal %q does not name the requeue", err)
+			}
+			if _, ok := h.entryOf(theWorkspace); ok {
+				t.Fatal("the refused request stands in the queue")
+			}
+			if recAfter, keptAfter, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); keptAfter != keptBefore || !reflect.DeepEqual(recAfter, recBefore) {
+				t.Fatalf("the refusal changed the record: %+v -> %+v", recBefore, recAfter)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.enqueue",
+				Message: "refused a merge request beside the request standing off its queue"}); !ok {
+				t.Fatalf("the refusal was not recorded: %v", h.logs.Records())
+			}
+		})
+	}
+}
+
+func TestARequestWhoseOffQueueReadFailsIsARecordedError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.offQueueErr = errors.New("the store is gone")
+
+	// Act
+	err := h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert: an error, not a refusal, recorded once, and nothing in line.
+	if _, refused := Refused(err); err == nil || refused {
+		t.Fatalf("Enqueue = %v, want the read's error", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.enqueue",
+		Message: "could not read whether the workspace's merge stands off its queue"}); !ok {
+		t.Fatalf("the failed read was not recorded: %v", h.logs.Records())
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("a request stands in the queue")
+	}
+}
+
 func TestRequeuePutsAnAsyncMergeBackOnItsOwnMergeWorkspace(t *testing.T) {
 	// Arrange: an async merge handed off and evicted.
 	h := newHarness(t)

@@ -2046,12 +2046,41 @@ The merge a placement asked to stand behind is in no queue."
     (agent-repl-wire-verbs--check-keys message json '(behind))
     (list :behind (agent-repl-wire-verbs--decode-string message 'behind json))))
 
+(defconst agent-repl-wire-verbs--off-queue-cause-arms
+  '((evicted . :evicted) (dequeued . :dequeued) (failed . :failed)
+    (restartFailed . :restart-failed) (daemonShutdown . :daemon-shutdown)
+    (pickFailed . :pick-failed) (finishFailed . :finish-failed)
+    (aheadDidNotLand . :ahead-did-not-land)
+    (hiddenAtColdGate . :hidden-at-cold-gate) (adopted . :adopted))
+  "Every arm of MergeQueueStatusOffQueueCause, as (WIRE-SYMBOL . KEYWORD).
+Each arm is an empty message: the arm is the cause.")
+
+(defun agent-repl-wire-decode-finish-workspace-merge-off-queue (json)
+  "Decode FinishWorkspaceMergeOffQueue from JSON into (:cause CAUSE).
+The workspace's merge left its queue without landing and its request
+stands, so it is requeued or discarded rather than asked for again.
+CAUSE is the arm of MergeQueueStatusOffQueueCause as a keyword (such as
+`:failed'), or nil when the daemon set none."
+  (let ((message "FinishWorkspaceMergeOffQueue"))
+    (agent-repl-wire-verbs--check-keys message json '(cause))
+    (list :cause
+          (let ((cause (alist-get 'cause json)))
+            (when cause
+              (plist-get
+               (agent-repl-wire-verbs--decode-oneof
+                "MergeQueueStatusOffQueueCause" "cause" cause
+                (mapcar (lambda (arm)
+                          (list (car arm) (cdr arm)
+                                (agent-repl-wire-verbs--empty-arm "MergeQueueStatusOffQueueCause")))
+                        agent-repl-wire-verbs--off-queue-cause-arms))
+               :arm))))))
+
 (defun agent-repl-wire-decode-finish-workspace-error (json)
   "Decode FinishWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "FinishWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyDeploying versionIncrementRequired versionIncrementUnexpected requesterMayNotLand noBranchCheckedOut hasOpenChildren noDeployConfig deployConfigInvalid placementBehindNotInLine mergeOffQueue))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -2071,7 +2100,9 @@ arm this codec does not know is refused as an unknown field."
                  (list 'noDeployConfig :no-deploy-config #'agent-repl-wire-decode-deploy-config-missing)
                  (list 'deployConfigInvalid :deploy-config-invalid #'agent-repl-wire-decode-deploy-config-invalid)
                  (list 'placementBehindNotInLine :placement-behind-not-in-line
-                       #'agent-repl-wire-decode-merge-queue-placement-behind-not-in-line))))))
+                       #'agent-repl-wire-decode-merge-queue-placement-behind-not-in-line)
+                 (list 'mergeOffQueue :merge-off-queue
+                       #'agent-repl-wire-decode-finish-workspace-merge-off-queue))))))
 
 (defun agent-repl-wire-decode-finish-workspace-response-success (json)
   "Decode FinishWorkspaceResponse's `success' arm from JSON."

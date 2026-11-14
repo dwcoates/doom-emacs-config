@@ -3090,7 +3090,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_finish_workspace.pb.go" "FinishWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyDeploying" "versionIncrementRequired" "versionIncrementUnexpected" "requesterMayNotLand" "noBranchCheckedOut" "hasOpenChildren" "noDeployConfig" "deployConfigInvalid" "placementBehindNotInLine" "mergeOffQueue")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-finish-error-placement-behind-not-in-line-arm ()
@@ -3101,6 +3101,37 @@ the placement named."
                     (agent-repl-test-wire-verbs--parse
                      "{\"placementBehindNotInLine\":{\"behind\":\"two\"}}"))
                    '(:cause (:arm :placement-behind-not-in-line :value (:behind "two")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-merge-off-queue-arm ()
+  "FinishWorkspaceError's `merge_off_queue' arm decodes why the merge left."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"mergeOffQueue\":{\"cause\":{\"failed\":{}}}}"))
+                   '(:cause (:arm :merge-off-queue :value (:cause :failed)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-merge-off-queue-arm-without-cause ()
+  "FinishWorkspaceError's `merge_off_queue' arm with no cause decodes nil."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-finish-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"mergeOffQueue\":{}}"))
+                   '(:cause (:arm :merge-off-queue :value (:cause nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-off-queue-cause-arms-cover-the-proto ()
+  "The off-queue cause codec names every MergeQueueStatusOffQueueCause arm."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/merge_queue_status.pb.go" "MergeQueueStatusOffQueueCause")
+                       #'string<)
+                 (sort (mapcar (lambda (arm) (symbol-name (car arm)))
+                               agent-repl-wire-verbs--off-queue-cause-arms)
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-error-merge-off-queue-unknown-cause ()
+  "FinishWorkspaceError's `merge_off_queue' arm refuses a cause it does not know."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-finish-workspace-error
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"mergeOffQueue\":{\"cause\":{\"someday\":{}}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-workspace-arm ()
   "RestartWorkspaceError's `unknown_workspace' arm decodes with everything it

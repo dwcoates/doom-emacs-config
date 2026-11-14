@@ -27,7 +27,8 @@ func normalizeRepoKey(repo RepoKey) (RepoKey, error) {
 // merge is recorded the moment it is asked for, so a daemon exit before the
 // turn that asked for it ends does not lose it; it takes its place in line
 // only at QueueMerge. A workspace already in that queue in ANY state is
-// REFUSED with the place it holds: a merge is asked for once.
+// REFUSED with the place it holds, and one whose request stands off its
+// queue with MergeOffQueueError: a merge is asked for once.
 func (s *store) RequestMerge(ctx context.Context, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time) error {
 	return s.requestMerge(ctx, "daemon.wsm.request_merge", repo, id, source, at, nil)
 }
@@ -70,7 +71,8 @@ func (s *store) RequestOneShotMerge(ctx context.Context, repo RepoKey, id Worksp
 
 // requestMerge is the one body every merge request is recorded through:
 // the key normalized, the source validated, a workspace already in the queue
-// refused with the place it holds, a request whose landing would close a
+// refused with the place it holds, a workspace whose request stands off its
+// queue refused with why it left (MergeOffQueueError), a request whose landing would close a
 // workspace with open children refused (HasOpenChildrenError, family.go),
 // then the request row written and MARK (when non-nil) run in the same
 // transaction.
@@ -106,6 +108,13 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 			return &MergeQueuedError{Repo: key, Workspace: id, Position: existing, State: MergeQueueState(state)}
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT (offqueue.go): a
+		// request standing off its queue is requeued or discarded, never
+		// asked for again, so a second request beside it is refused here,
+		// in the transaction that would write it.
+		if err := refuseOffQueue(ctx, tx, id); err != nil {
 			return err
 		}
 		// A MERGE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN (family.go):

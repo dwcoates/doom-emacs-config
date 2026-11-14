@@ -88,6 +88,22 @@ SELECT w.id, '` + MergeLeftAdopted + `', CAST(strftime('%s', 'now') AS INTEGER) 
    AND NOT EXISTS (SELECT 1 FROM async_merge_requests r WHERE r.request_id = w.merge_request_id);
 `
 
+// endOffQueueBesideAQueueRowDML is the layout-134 step: it ends every
+// record standing off its queue beside a queue row of the same workspace.
+// Before layout 134 a second request was recorded beside a record
+// (requestMerge refused only a queue row), so a workspace could hold two
+// merges, one in line and one off it, and a requeue of the one off it
+// failed as already queued. The request in line is the later ask and the
+// one in flight, so it is kept and the record it superseded ends.
+//
+// IT IS ADDITIVE: the build before it reads a workspace with no record as
+// the one it always read a queued merge as, and writes nothing this build
+// refuses to read.
+const endOffQueueBesideAQueueRowDML = `
+DELETE FROM off_queue_merges
+ WHERE EXISTS (SELECT 1 FROM merge_queue q WHERE q.workspace_id = off_queue_merges.workspace_id);
+`
+
 // MergeLeftAdopted is the cause an adopted record carries: a merge workspace
 // found open with no request standing, its request's values lost.
 const MergeLeftAdopted = "adopted"
@@ -384,6 +400,20 @@ func refuseQueued(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) 
 		return err
 	}
 	return &MergeQueuedError{Repo: key, Workspace: id, Position: existing, State: MergeQueueState(state)}
+}
+
+// refuseOffQueue refuses, with why it left, a workspace whose request
+// stands off its queue.
+func refuseOffQueue(ctx context.Context, tx *sql.Tx, id WorkspaceID) error {
+	var cause string
+	err := tx.QueryRowContext(ctx, `SELECT cause FROM off_queue_merges WHERE workspace_id = ?`, id).Scan(&cause)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return &MergeOffQueueError{Workspace: id, Cause: cause}
 }
 
 // DiscardOffQueueMerge ends workspace ID's request off its queue without

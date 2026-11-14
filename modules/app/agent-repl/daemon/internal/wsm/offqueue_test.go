@@ -397,6 +397,100 @@ func TestRequeueOffQueueMergeRefusals(t *testing.T) {
 	}
 }
 
+// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT: a second request beside a
+// request off its queue is refused in the transaction that would write it,
+// whichever request verb asks.
+func TestARequestBesideARequestOffItsQueueIsRefused(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester func(t *testing.T, s *store) WorkspaceID
+		request   func(s *store, repo RepoKey, ws WorkspaceID) error
+	}{
+		{name: "a merge request", requester: func(t *testing.T, s *store) WorkspaceID { return testWorkspace(t, s).ID },
+			request: func(s *store, repo RepoKey, ws WorkspaceID) error {
+				return s.RequestMerge(context.Background(), repo, ws, ownBranch, instant.Add(time.Hour))
+			}},
+		{name: "a one-shot merge request", requester: func(t *testing.T, s *store) WorkspaceID { return oneShotRequester(t, s).ID },
+			request: func(s *store, repo RepoKey, ws WorkspaceID) error {
+				return s.RequestOneShotMerge(context.Background(), repo, ws, ownBranch, instant.Add(time.Hour))
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := tt.requester(t, s)
+			repo := RepoKey(t.TempDir())
+			offQueued(t, s, repo, ws)
+			recBefore, _, _ := s.OffQueueMergeOf(context.Background(), ws)
+
+			// Act
+			err := tt.request(s, repo, ws)
+
+			// Assert: refused with why it left, and nothing changed.
+			var refusal *MergeOffQueueError
+			if !errors.As(err, &refusal) || refusal.Workspace != ws || refusal.Cause != "evicted" {
+				t.Fatalf("request = %v, want a *MergeOffQueueError naming the workspace and its cause", err)
+			}
+			if entries, _ := s.MergeQueue(context.Background(), repo); len(entries) != 0 {
+				t.Fatalf("the refused request wrote a queue row: %+v", entries)
+			}
+			if recAfter, found, _ := s.OffQueueMergeOf(context.Background(), ws); !found || !reflect.DeepEqual(recAfter, recBefore) {
+				t.Fatalf("the refused request changed the record: %+v -> %+v (found %v)", recBefore, recAfter, found)
+			}
+			// The refusal is an answer the orchestrator turns into the
+			// request's merge-off-queue arm, so the store records it at debug
+			// and never as an error.
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug,
+				Message: "the workspace's merge stands off its queue; the request was refused"}); !ok {
+				t.Fatalf("the refusal was not recorded at debug: %v", log.Records())
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); ok {
+				t.Fatalf("the refusal was recorded as an error: %v", log.Records())
+			}
+		})
+	}
+}
+
+// Layout 134 ends a record that stood off its queue beside a queue row of
+// the same workspace, and keeps every other record.
+func TestTheMigrationEndsARecordBesideAQueueRow(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  string
+		wantKept bool
+	}{
+		{name: "a record beside a queue row of its workspace", wantKept: false,
+			arrange: `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_pre_deploy_hooks, source_post_deploy_hooks) VALUES ('/tmp/repo-1', 'ws-layout3', 1, 1, 1, 0, '[]', '[]')`},
+		{name: "a record with no queue row", wantKept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a layout-133 file whose one workspace holds a record
+			// off its queue.
+			path := fixtureAt(t, 133)
+			execRaw(t, path, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+requestColumns+`)
+				VALUES (?, 'failed', 1, 0, 1, 0, 0, NULL, 'feature', NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, '[]', '[]', NULL, 0)`, string(fixtureWorkspaceID))
+			if tt.arrange != "" {
+				execRaw(t, path, tt.arrange)
+			}
+
+			// Act
+			handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer handle.Close()
+			kept := rawScalar[int](t, path, `SELECT count(*) FROM off_queue_merges WHERE workspace_id = ?`, string(fixtureWorkspaceID))
+
+			// Assert
+			if (kept == 1) != tt.wantKept {
+				t.Fatalf("kept %d records, want kept %v", kept, tt.wantKept)
+			}
+		})
+	}
+}
+
 func TestRequeueOffQueueMergeGivesAnAdoptedRequestTheVersionSupplied(t *testing.T) {
 	// Arrange: an adopted record, as the migration writes one.
 	s, _ := testStore(t)
