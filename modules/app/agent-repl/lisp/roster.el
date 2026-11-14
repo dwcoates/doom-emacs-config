@@ -893,6 +893,25 @@ back to the central sink, with the name kept in the message text."
                "a roster row whose reconcile failed may own no workspace sink"))
          fmt args))
 
+(defun agent-repl-roster--purge-foreign-tombstone (name id)
+  "Purge the tombstone under NAME when it is not the workspace ID's.
+THE DAEMON NAMES WORKSPACES, and it frees a name once its workspace is
+forgotten or nuked, so a row the roster names NAME is the one workspace
+holding it.  A tombstone Emacs keeps under NAME for another workspace --
+its ref names another id, or none -- is one the daemon no longer knows by
+that name, and kept it refused the rename onto NAME
+\(`agent-repl--ws-rename-state') and revived the wrong identity on an open
+\(`agent-repl-roster--open-tab'), leaving the tab on its old name while the
+sidebar and the CLI used the new one.  A tombstone of ID itself is the row
+coming back, which the open revives, and is left alone."
+  (when (agent-repl--ws-tombstoned-p name)
+    (let ((tombstone-id (plist-get (agent-repl--ws-get name :ref) :id)))
+      (unless (equal tombstone-id id)
+        (agent-repl--info name
+                          "elisp.roster.tombstone-purged: ws=%s tombstone-id=%s row-id=%s"
+                          name tombstone-id id)
+        (agent-repl--ws-forget name)))))
+
 (defun agent-repl-roster--reconcile-row (want wanted-ids)
   "Reconcile one roster row WANT, recording its id in WANTED-IDS.
 Returns the tab name the row settled on, or nil when the row FAILED.
@@ -911,6 +930,8 @@ and every other row is still opened and ordered."
          (existing (agent-repl--ws-by-ref-id id)))
     (condition-case err
         (let ((settled
+               (progn
+                 (agent-repl-roster--purge-foreign-tombstone name id)
                (cond
                 ((null existing)
                  (agent-repl-roster--open-tab want))
@@ -920,7 +941,7 @@ and every other row is still opened and ordered."
                                            name "elisp.roster.tab-kept: ws=%s id=%s" name id)
                  name)
                 (t
-                 (agent-repl-roster--rename-tab existing name (plist-get want :ref))))))
+                 (agent-repl-roster--rename-tab existing name (plist-get want :ref)))))))
           ;; WHETHER THE WORKSPACE IS A CHAT THREAD is the roster's to say,
           ;; and is stated on every reconcile (`agent-repl-roster-thread-p').
           (when settled
