@@ -1,9 +1,10 @@
 # agent-repl todo
 
-Deficiencies in agent-repl's code or its agent harness that an agent noticed
-while working on something else, and that its work did not address. The
-metaprompt's "Noticed deficiencies" section says when a row is added. One row
-per deficiency; a row is removed when the work that fixes it lands.
+Deficiencies in agent-repl's code or its agent harness whose fix cannot start
+yet: it turns on a decision that is the user's, or it waits on other work. A
+deficiency that can be fixed now is fixed now, never recorded here (the
+metaprompt's "Noticed deficiencies" section). One row per deficiency; a row
+is removed when the work that fixes it lands.
 
 | Noticed | Area | Deficiency | Where | Noticed while |
 |---|---|---|---|---|
@@ -284,3 +285,4 @@ per deficiency; a row is removed when the work that fixes it lands.
 | 2026-11-14 | daemon / merge | A deploy that installs nothing (every component \`up-to-date\`) still owes a deploy mediation, so the queue is held for a check of a deploy that changed nothing | `daemon/internal/merge/mediation.go` (`OweMediations`), `cmd/agent-repld/mediationhook.go` | resuming the queue after the 0.436.1 test-only landing (`merge-queue-stall-triage`) |
 | 2026-11-14 | harness / landing | The full-suite gate before a direct landing is only a rule, stated in both `metaprompt-queue-bypass.md` and `metaprompt-deploy-mediator.md`: `bin/land-direct.sh` lands whatever it is given, so a skipped run lands untested and the rule lives in two homes. `land-direct.sh` should refuse a branch not rebased onto the main branch and run `agent-repld test run -every-suite` on its worktree itself, landing only on a pass, with a harness test over the fake git; both metaprompts then point at it | `bin/land-direct.sh`, `bin/fake-git.go`, both metaprompts | updating the bypass test rule after 0.436.0 landed a broken test (`merge-queue-stall-triage`) |
 | 2026-11-14 | wifi helper | The persistent-wifi helper app (`wifi-helper/main.swift`, `build.sh`, `Info.plist`) has no test: its `scan` and `authorize` verbs and `build.sh --source-hash` run only on the user's Mac, and the roster lists it as read by no suite | `wifi-helper/`, `testrun/roster/roster.go` | placing the helper after its unplaced files failed every merge queue gate (`merge-queue-stall-triage`) |
+| 2026-11-14 | daemon / agent CLI | `-repository here` (and every `here`) resolves a worktree nested inside the main checkout (`~/.config/doom/.claude/worktrees/agent-*`, an Agent tool worktree) to the main workspace, so a subagent's queue pause was recorded as `main (doom)`'s and the user blamed the wrong workspace | the agent CLI's `here` resolution | tracing an 18:04 queue pause `main (doom)` never made (`merge-queue-stall-triage`) |

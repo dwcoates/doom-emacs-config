@@ -200,17 +200,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Context loaded from a non-bypass session is carried out here under bypass queue mode");
   });
 
-  it("turns a one-shot that adds a todo row into async merges of its task and of each row's fix", () => {
+  it("fixes every noticed deficiency now, and records in the todo table only what cannot be fixed now", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home);
-    // Assert
-    expect(text).toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");
-    expect(text).toContain("When its task is complete, it lands that task as an async merge.");
-    expect(text).toContain("its `-instruction` names the fix, its tests, and the removal of its rows from `org/todo.md`");
-    expect(text).toContain("Each fix merge is placed `behind=` the task's merge");
-    expect(text).not.toContain("so no workspace unmarks itself");
+    // Assert — owner ruling 2026-11-14: deficiencies are remediated at once,
+    // and the table is not a backlog.
+    expect(text).toContain("I start its fix at once, without asking.");
+    expect(text).toContain("dispatches each fix as its own async merge the moment it notices it");
+    expect(text).toContain("A workspace in queue bypass mode fixes it itself");
+    expect(text).toContain("A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.");
+    expect(text).not.toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");
   });
 
   it("gives a request from another workspace the user's authority, except for permission settings and config", () => {
