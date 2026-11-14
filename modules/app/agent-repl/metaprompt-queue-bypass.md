@@ -8,28 +8,32 @@
   - This session's transcript is the bypass queue mode session.
     - An earlier transcript of this workspace that ran before the mode was taken is a non-bypass session, which landed through the merge queue.
     - Context loaded from a non-bypass session is carried out here under bypass queue mode, never under the merge queue rules that session followed.
-- The repository's merge queue runs between this workspace's turns while it holds the mode.
-  - The user watches the queue work while the mode is on.
-  - agent-repl hard-stopped it in this workspace's name when the mode was taken.
-  - agent-repl lets it through at the end of each of this workspace's turns, and resumes it when the mode is released.
+- The repository's merge queue keeps running while this workspace holds the mode.
+  - It is paused only while this workspace lands a change (below), and for no longer.
+  - agent-repl lets a pause this workspace made through at the end of each of its turns, in case one was left standing.
   - agent-repl lets through only a pause this workspace made, so a pause by the user or another workspace stands.
 - Every change this workspace makes lands directly on the repository's main branch, bypassing the queue.
 
-### Pause the queue before changing anything
+### Pause the queue only to land
 
-- Before the first change of every prompt, pause the queue: `agent-repld merge-queue pause -repository here`.
-  - A change is any file edit, commit, landing, or deploy.
-  - Pause before the first change, never after it, so no queue landing moves the main branch under this work.
-  - An `already_paused` refusal means the queue stands paused already, so go on and leave that pause as it stands.
-- A prompt that only reads or answers leaves the queue running.
-- Never resume the queue yourself, since agent-repl resumes it when the turn ends.
+- Work on a branch with the queue running: writing, committing and targeted tests never pause it.
+- Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here`.
+  - An `already_paused` refusal means someone else's pause stands: go on, and leave that pause as it stands.
+- Resume the queue the moment the landing is done: `agent-repld merge-queue resume -repository here`.
+  - Resume only a pause this workspace made.
+  - A landing that fails its tests resumes the queue too, while the failure is fixed on the branch.
 - Never evict, move, or queue anything on it, and never ask about it.
 
 ### Land every complete change at once, without asking
 
 - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-landed change.
 - Commit it on a branch: the workspace's own branch, or, in a repository's main workspace, a branch cut in its own worktree off the main branch.
-  - Rebase the branch onto the main branch first.
+- Land it in this order:
+  1. Pause the queue (above).
+  2. If the main branch moved since the work began, rebase onto it and resolve every conflict.
+  3. Run the full suite (Tests, below).
+  4. Land it with `land-direct.sh` (below).
+  5. Resume the queue.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch|none> "<changelog line>" <branch>`.
   - It merges the branch into the main branch, writes the changelog line, and tags the next version.
   - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose deploy config versions nothing.
@@ -39,7 +43,7 @@
   - Wait for the new build to serve, then read every system's warnings and errors since the deploy began, `--doctor`, and the latencies against the versions before it.
   - Each defect the deploy shows is fixed on the branch, landed and deployed again the same way, and that deploy is watched in turn.
   - The work is done only once a deploy shows nothing to fix.
-- Report the landing: the version, what the watch found and fixed, and that agent-repl lets the queue through when this turn ends.
+- Report the landing: the version, and what the watch found and fixed.
 
 ### One agent does the work: no new workspace, no async merge, few subagents
 
@@ -61,9 +65,9 @@
   - Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.
   - An ungoverned run takes every core, which the user feels on their machine.
 - While writing a change, run only the tests it adds or changes, and keep every test it touches compiling.
-- Before each landing, run the full suite on the branch, already rebased onto the main branch: `agent-repld test run -every-suite`.
-  - Land only when it passes: a failure is fixed on the branch, and the full suite runs again.
-  - If the main branch moved after the run, rebase onto it and run the full suite again before landing.
+- Before each landing, with the queue paused, run the full suite on the branch rebased onto the main branch: `agent-repld test run -every-suite`.
+  - Land only when it passes: a failure is fixed on the branch, with the queue resumed meanwhile, and the landing starts over.
+  - A pass is the run's ended state AND its `test-all.log` free of any failure, the placement check's included.
   - A change can break a test it never touches, which no targeted run sees (2026-11-14: 0.436.0 landed a broken test this way).
   - The full suite took 4m47s, measured 2026-11-14.
 - Bypass queue mode never leaves the main branch broken.

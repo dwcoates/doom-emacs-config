@@ -154,16 +154,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This workspace lands that branch with `land-direct.sh`, as it lands its own.");
   });
 
-  it("has a queue-bypass session pause the queue before its first change and leave the resume to agent-repl", () => {
+  it("has a queue-bypass session pause the queue only to land, and resume it at once", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("bypassing_queue", home);
-    // Assert — owner request 2026-11-13: the queue runs between the
-    // holder's turns, so the session pauses it before it changes anything.
-    expect(text).toContain("Before the first change of every prompt, pause the queue: `agent-repld merge-queue pause -repository here`.");
-    expect(text).toContain("Never resume the queue yourself, since agent-repl resumes it when the turn ends.");
-    expect(text).not.toContain("hard-stopped while this workspace holds the mode");
+    // Assert — owner ruling 2026-11-14: the queue is paused for no longer
+    // than a landing needs, and a moved main branch is rebased onto first.
+    expect(text).toContain("Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here`.");
+    expect(text).toContain("Resume the queue the moment the landing is done: `agent-repld merge-queue resume -repository here`.");
+    expect(text).toContain("If the main branch moved since the work began, rebase onto it and resolve every conflict.");
+    expect(text).not.toContain("Before the first change of every prompt");
+    expect(text).not.toContain("hard-stopped");
   });
 
   it("governs a queue-bypass session's test runs unless the user asks for an ungoverned one", () => {
