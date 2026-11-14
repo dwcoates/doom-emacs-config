@@ -114,8 +114,15 @@ the chain is escalated.
   stopping them would add the assessment to every merge's wait. Once the
   intake dispatches, they start no NEW rebase, conflict resolution or gate
   until the fix lands, since its landing would make that work stale;
-  whatever is running finishes its step. (Verify first what the hold stops
-  today.)
+  whatever is running finishes its step.
+- TODAY (verified 2026-11-14): the mediation hold is one input of
+  `merge.queueHeld`, the same gate a pause and a handover are. It suspends
+  no running merge (only a pause and a handover do, `suspendHeld`), but it
+  stops everything new for the whole check, assessment included: no
+  admission, no chain extension behind the head, no background rebase of
+  waiting merges, no resume. So the change is to split the gate: the
+  assessment holds only the head's advance, and a dispatch adds the stop on
+  new speculative work.
 
 ### Deploys that fail
 
@@ -123,10 +130,14 @@ the chain is escalated.
   that never owed its check, a released queue that does not advance within
   its bound) is a fact in the intake's next brief, and is dispatched like
   any other defect.
-- A deploy after which no daemon serves cannot be seen by any intake. It is
-  the deploy's own rollback that must restore a serving daemon, which then
-  owes the check with the failure as its fact. (Verify first that a daemon
-  that never comes up rolls back today.)
+- A deploy after which no daemon serves cannot be seen by any intake.
+  TODAY (verified 2026-11-14) the rollout already makes that impossible
+  for a handover or a restart: a successor that does not prove it serves
+  leaves the incumbent serving with the `successor_spawn_failed` fault
+  open, and a restart that cannot finish takes its workspaces back rather
+  than exit into nothing (`rollout/preflight.go`, `rollout/restart.go`).
+  The serving daemon still owes the check, so the fault is a fact in the
+  intake's brief.
 
 ### The sidebar
 
@@ -158,8 +169,8 @@ the chain is escalated.
 
 ## Order of work
 
-1. Verify what the hold stops today, and that a daemon that never comes up
-   rolls back.
+1. (Done) Verify what the hold stops today, and that a daemon that never
+   comes up leaves one serving.
 2. Proto and store: the intake and remediation roles on a chain, the hold's
    owner, the `dispatch` decision, the remediation's durable finish steps,
    the third label and its selection.
