@@ -45,17 +45,18 @@ func newFixture(t *testing.T) fixture {
 	log := &logLines{}
 	d := Deps{
 		Repo: root, Module: module, DenyRoots: []string{root},
-		Store:      Store{Dir: t.TempDir()},
-		GoList:     fakeGoList,
-		Toolchain:  func(roster.Kind) (map[string]string, error) { return map[string]string{"go": "go1.24"}, nil },
-		Environ:    []string{"PATH=/bin", "TMPDIR=/t"},
-		Self:       "/bin/testrun",
-		ProfileDir: t.TempDir(),
-		Probe:      func() error { return nil },
-		Head:       func() (string, string, bool, error) { return "feature", "c0ffee", false, nil },
-		Now:        func() time.Time { return time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC) },
-		Log:        log,
-		Hashes:     NewHashCache(),
+		Store:       Store{Dir: t.TempDir()},
+		GoList:      fakeGoList,
+		Toolchain:   func(roster.Kind) (map[string]string, error) { return map[string]string{"go": "go1.24"}, nil },
+		Environ:     []string{"PATH=/bin", "TMPDIR=/t"},
+		Self:        "/bin/testrun",
+		ProfileDir:  t.TempDir(),
+		Probe:       func() error { return nil },
+		Head:        func() (string, string, bool, error) { return "feature", "c0ffee", false, nil },
+		Now:         func() time.Time { return time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC) },
+		Log:         log,
+		Hashes:      NewHashCache(),
+		ListIgnored: func() (Ignored, error) { return nil, nil },
 	}
 	return fixture{d: d, log: log}
 }

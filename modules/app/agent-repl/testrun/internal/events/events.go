@@ -102,9 +102,12 @@ func testResultOf(t testtimes.Test) *testrunv1.TestRunTestResult {
 	return r
 }
 
-// Ended states how the run ended, from every unit's result and the suites
-// that could not even be planned.
-func (e *Emitter) Ended(results []run.Result, unplannable int) {
+// Ended states how the run ended, from every unit's result, the suites that
+// could not even be planned, and the run's own failures apart from any unit's
+// (runFailures, each for a person). A run with a failure of its own ended
+// failed though every unit passed, so the ended state always agrees with the
+// run's exit status.
+func (e *Emitter) Ended(results []run.Result, unplannable int, runFailures []string) {
 	var passed, failed, cancelled int32
 	for _, r := range results {
 		switch r.Outcome {
@@ -118,10 +121,12 @@ func (e *Emitter) Ended(results []run.Result, unplannable int) {
 	}
 	failed += int32(unplannable)
 	ended := &testrunv1.TestRunEnded{}
-	if failed+cancelled == 0 {
+	if failed+cancelled == 0 && len(runFailures) == 0 {
 		ended.Outcome = &testrunv1.TestRunEnded_Passed{Passed: &testrunv1.TestRunEndedPassed{PassedUnits: passed}}
 	} else {
-		ended.Outcome = &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{FailedUnits: failed, CancelledUnits: cancelled, PassedUnits: passed}}
+		ended.Outcome = &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{
+			FailedUnits: failed, CancelledUnits: cancelled, PassedUnits: passed, RunFailures: runFailures,
+		}}
 	}
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: ended}})
 }

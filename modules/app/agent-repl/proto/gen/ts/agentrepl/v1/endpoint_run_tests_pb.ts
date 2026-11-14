@@ -299,7 +299,10 @@ export const RunTestsErrorSchema: GenMessage<RunTestsError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_run_tests, 4);
 
 /**
- * The daemon handed the workspace to a successor mid-handover.
+ * The daemon handed the workspace to a successor mid-handover, before the run
+ * started or while it ran: a daemon exiting for a handover stops each run it
+ * is running and ends its stream with this arm, after whatever events the run
+ * had already sent.
  *
  * @generated from message agentrepl.v1.RunTestsTransferringAway
  */

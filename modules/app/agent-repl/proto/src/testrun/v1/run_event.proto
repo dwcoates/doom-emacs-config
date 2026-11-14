@@ -158,7 +158,8 @@ message TestRunEndedPassed {
   reserved "declined_units";
 }
 
-// At least one unit failed or was cancelled.
+// At least one unit failed or was cancelled, or the run itself failed a check
+// of its own after its units ended.
 message TestRunEndedFailed {
   // How many units failed.
   int32 failed_units = 1;
@@ -166,6 +167,13 @@ message TestRunEndedFailed {
   int32 cancelled_units = 2;
   // How many units passed.
   int32 passed_units = 3;
+  // Each failure of the run itself rather than of a unit, for a person: a
+  // full run's placement check (a file no suite reads and the roster lists
+  // nowhere), its timings or passes that could not be recorded, or the run's
+  // script exiting non-zero after its units passed. A run with any of these
+  // ended failed though every unit passed: the ended state always agrees with
+  // the run's exit status.
+  repeated string run_failures = 4;
 }
 
 // The run stopped before it planned, on a failure of the runner's own rather

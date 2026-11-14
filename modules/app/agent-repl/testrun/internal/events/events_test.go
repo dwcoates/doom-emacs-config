@@ -43,7 +43,7 @@ func TestTheEventsOfARunReadBackInOrder(t *testing.T) {
 	// Act
 	e.Planned([]run.Spec{{Unit: sched.Unit{ID: "u1", Suite: "s"}}}, "/tmp/run.log")
 	e.UnitEnded(result("u1", run.Passed, testtimes.Test{Name: "TestA", Outcome: testtimes.Pass, Seconds: 0.25}), nil)
-	e.Ended([]run.Result{result("u1", run.Passed)}, 0)
+	e.Ended([]run.Result{result("u1", run.Passed)}, 0, nil)
 
 	// Assert
 	evs := readAll(t, &buf)
@@ -108,6 +108,7 @@ func TestEnded(t *testing.T) {
 		name        string
 		results     []run.Result
 		unplannable int
+		runFailures []string
 		check       func(*testrunv1.TestRunEnded) bool
 	}{
 		{name: "passed units pass", results: []run.Result{result("a", run.Passed), result("b", run.Passed)}, check: func(e *testrunv1.TestRunEnded) bool {
@@ -120,6 +121,11 @@ func TestEnded(t *testing.T) {
 		{name: "a suite that could not be planned fails", results: []run.Result{result("a", run.Passed)}, unplannable: 1, check: func(e *testrunv1.TestRunEnded) bool {
 			return e.GetFailed().GetFailedUnits() == 1
 		}},
+		{name: "a run failure fails a run whose every unit passed", results: []run.Result{result("a", run.Passed)}, runFailures: []string{"placement: 1 file(s) are read by no suite and listed nowhere"}, check: func(e *testrunv1.TestRunEnded) bool {
+			f := e.GetFailed()
+			return f.GetFailedUnits() == 0 && f.GetPassedUnits() == 1 && len(f.GetRunFailures()) == 1 &&
+				f.GetRunFailures()[0] == "placement: 1 file(s) are read by no suite and listed nowhere"
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,7 +134,7 @@ func TestEnded(t *testing.T) {
 			e := New(&buf, &run.Log{Out: io.Discard, Err: io.Discard})
 
 			// Act
-			e.Ended(tc.results, tc.unplannable)
+			e.Ended(tc.results, tc.unplannable, tc.runFailures)
 
 			// Assert
 			if got := readAll(t, &buf)[0].GetEnded(); !tc.check(got) {

@@ -320,38 +320,78 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if runErr != nil {
 		log.Errorf("the run was interrupted: %v", runErr)
 		// The units it never ran are failures of the run, so it ended failed.
-		ev.Ended(results, len(unbuilt)+1)
+		ev.Ended(results, len(unbuilt)+1, nil)
 		return 130
 	}
-	ev.Ended(results, len(unbuilt))
-	suiteResults = inRosterOrder(append(unbuilt, suiteResults...))
+	// THE RUN'S END IS STATED ONLY ONCE IT IS DECIDED. Every check after the
+	// units (the history, the metrics store, the reuse record, the placement
+	// check, the staged timing record) can still fail the run, and a run that
+	// exits 1 must never have said it passed: on 2026-11-14 every merge gate
+	// failed its placement check while `agent-repld test run -every-suite`
+	// reported ended passed.
+	code, runFailure := settleRun(ctx, d, a, settleInputs{
+		results: results, suiteResults: inRosterOrder(append(unbuilt, suiteResults...)),
+		verdicts: verdicts, mode: mode, hist: hist,
+		times:  runTimes{start: start, end: end, predicted: p.Makespan, verdicts: verdicts},
+		placed: placed, unplaced: unplaced,
+		repo: layout.Repo, startBranch: startBranch, startCommit: startCommit,
+	})
+	var runFailures []string
+	if runFailure != "" {
+		runFailures = []string{runFailure}
+	}
+	ev.Ended(results, len(unbuilt), runFailures)
+	return code
+}
 
-	if err := hist.Record(plan.Measurements(results)); err != nil {
-		log.Errorf("recording this run's timings in the host history failed: %v", err)
-		return 1
-	}
-	runTimes := runTimes{start: start, end: end, predicted: p.Makespan, verdicts: verdicts}
-	if err := pushTimes(ctx, d, results, suiteResults, runTimes); err != nil {
-		log.Errorf("recording this run's test times in the metrics store failed: %v", err)
-		return 1
-	}
-	if err := d.Reuse.Record(mode, verdicts, results); err != nil {
-		log.Errorf("recording this run's passes failed: %v", err)
-		return 1
-	}
-	reuse.Summarize(log, verdicts)
+// settleInputs are what a run's checks after its units read.
+type settleInputs struct {
+	results      []run.Result
+	suiteResults []run.SuiteResult
+	verdicts     []reuse.SuiteVerdict
+	mode         reuse.Mode
+	hist         *history.Store
+	times        runTimes
+	placed       bool
+	unplaced     []string
+	repo         string
+	startBranch  string
+	startCommit  string
+}
 
-	printUnitSummary(log, results, d.Slots, start, end, p.Makespan)
-	passed, failed := partition(suiteResults)
+// settleRun records a run whose units have ended, judges it, and answers its
+// exit status with the run's own failure, if any, for a person: a failure
+// apart from any unit's, which the ended event carries (run_failures). A
+// failed unit is no run failure: the ended event counts it.
+func settleRun(ctx context.Context, d Deps, a Args, in settleInputs) (int, string) {
+	log := d.Log
+	fail := func(format string, args ...any) (int, string) {
+		detail := fmt.Sprintf(format, args...)
+		log.Errorf("%s", detail)
+		return 1, detail
+	}
+	if err := in.hist.Record(plan.Measurements(in.results)); err != nil {
+		return fail("recording this run's timings in the host history failed: %v", err)
+	}
+	if err := pushTimes(ctx, d, in.results, in.suiteResults, in.times); err != nil {
+		return fail("recording this run's test times in the metrics store failed: %v", err)
+	}
+	if err := d.Reuse.Record(in.mode, in.verdicts, in.results); err != nil {
+		return fail("recording this run's passes failed: %v", err)
+	}
+	reuse.Summarize(log, in.verdicts)
+
+	printUnitSummary(log, in.results, d.Slots, in.times.start, in.times.end, in.times.predicted)
+	passed, failed := partition(in.suiteResults)
 	printSuiteSummaries(log, passed, failed)
 	if len(failed) > 0 {
-		return 1
+		return 1, ""
 	}
-	if !placed && !a.Targeted {
+	if !in.placed && !a.Targeted {
 		// A targeted run ran only what it named: the whole checkout's
 		// placement is the full runs' to enforce.
-		log.Errorf("placement: %d file(s) are read by no suite and listed nowhere; place each in testrun/roster", len(unplaced))
-		return 1
+		return fail("placement: %d file(s) are read by no suite and listed nowhere (%s); place each in testrun/roster",
+			len(in.unplaced), strings.Join(in.unplaced, ", "))
 	}
 
 	if a.Record {
@@ -365,14 +405,14 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		// and test-all.sh runs it only after the net has already taken its
 		// clean post-run snapshot, so the write never lands inside the
 		// window the net inspects.
-		if code := stageRecord(d, layout.Repo, a.RecordOut, startBranch, startCommit, passed); code != 0 {
-			return code
+		if err := stageRecord(d, in.repo, a.RecordOut, in.startBranch, in.startCommit, passed); err != nil {
+			return fail("staging this run's timing record failed: %v", err)
 		}
 	} else {
 		log.Infof("timings were not recorded, pass --record only for a canonical history run")
 	}
 	printClosing(log, a)
-	return 0
+	return 0, ""
 }
 
 // repoRoot is the checkout root a module root sits three directories under
@@ -532,20 +572,17 @@ func printSuiteSummaries(log *run.Log, passed, failed []run.SuiteResult) {
 // suite run, then stages this run's timing rows at recordOut for a later
 // `testrun finish-record` to commit. It never touches test_time.csv: see
 // Run's "testrun run only STAGES --record" above.
-func stageRecord(d Deps, repo, recordOut, startBranch, startCommit string, passed []run.SuiteResult) int {
+func stageRecord(d Deps, repo, recordOut, startBranch, startCommit string, passed []run.SuiteResult) error {
 	log := d.Log
 	endBranch, endCommit, err := d.Git(repo)
 	if err != nil {
-		log.Errorf("could not resolve the final git branch and commit: %v", err)
-		return 1
+		return fmt.Errorf("could not resolve the final git branch and commit: %w", err)
 	}
 	if endBranch != startBranch {
-		log.Errorf("git branch changed during tests: %s -> %s", startBranch, endBranch)
-		return 1
+		return fmt.Errorf("git branch changed during tests: %s -> %s", startBranch, endBranch)
 	}
 	if endCommit != startCommit {
-		log.Errorf("git commit changed during tests: %s -> %s", startCommit, endCommit)
-		return 1
+		return fmt.Errorf("git commit changed during tests: %s -> %s", startCommit, endCommit)
 	}
 	now := d.Clock.Now()
 	runID := RunID(now, startCommit, d.Pid)
@@ -558,11 +595,10 @@ func stageRecord(d Deps, repo, recordOut, startBranch, startCommit string, passe
 		})
 	}
 	if err := WritePendingRecord(recordOut, PendingRecord{RunID: runID, Branch: startBranch, Commit: startCommit, Rows: rows}); err != nil {
-		log.Errorf("%v", err)
-		return 1
+		return err
 	}
 	log.Infof("staged %d suite timings at %s for `testrun finish-record` to commit", len(rows), recordOut)
-	return 0
+	return nil
 }
 
 // FinishRecord is the second half of a --record run: it commits a prior

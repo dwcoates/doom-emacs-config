@@ -186,6 +186,10 @@ func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) 
 	defer stream.Close() //nolint:errcheck // the stream has ended either way
 	code, failed := exitFailure, false
 	var aborted *testrunv1.TestRunAborted
+	// runFailures are the failures of a run itself rather than of its units
+	// (its placement check, its script failing after its units passed),
+	// each said on stderr so a run that failed with every unit passing says why.
+	var runFailures []string
 	for stream.Receive() {
 		frame := stream.Msg()
 		if successor := frame.GetError().GetTransferringAway().GetAddress(); follow && successor != "" {
@@ -208,6 +212,7 @@ func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) 
 			code = exitSuccess
 		case frame.GetEvent().GetEnded().GetFailed() != nil:
 			code, failed = exitTestsFailed, true
+			runFailures = append(runFailures, frame.GetEvent().GetEnded().GetFailed().GetRunFailures()...)
 		}
 	}
 	if failed && code == exitSuccess {
@@ -217,6 +222,9 @@ func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) 
 	if err := stream.Err(); err != nil && !errors.Is(err, io.EOF) {
 		c.failed("the run's stream broke: %v", err)
 		return exitFailure, ""
+	}
+	for _, f := range runFailures {
+		c.failed("the run failed: %s", f)
 	}
 	switch {
 	case aborted != nil:

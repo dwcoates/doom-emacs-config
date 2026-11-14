@@ -432,6 +432,21 @@ func TestTestRunSaysWhatAnAbortedRunWasAskedToRunAndWhy(t *testing.T) {
 	}
 }
 
+func TestTestRunSaysWhyARunWhoseUnitsPassedFailed(t *testing.T) {
+	// Arrange
+	failure := "placement: 1 file(s) are read by no suite and listed nowhere (wifi-helper/main.go); place each in testrun/roster"
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+		Outcome: &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{PassedUnits: 3, RunFailures: []string{failure}}}}}})}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-every-suite")
+
+	// Assert
+	if code != exitTestsFailed || !strings.Contains(errOut, "the run failed: "+failure) {
+		t.Fatalf("exit %d, stderr %q; want exit %d naming the run's failure", code, errOut, exitTestsFailed)
+	}
+}
+
 func TestTestRunWithoutAWorktreeNamesNone(t *testing.T) {
 	// Arrange
 	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}

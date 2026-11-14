@@ -1017,7 +1017,8 @@ func (x *TestRunEndedPassed) GetPassedUnits() int32 {
 	return 0
 }
 
-// At least one unit failed or was cancelled.
+// At least one unit failed or was cancelled, or the run itself failed a check
+// of its own after its units ended.
 type TestRunEndedFailed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How many units failed.
@@ -1025,7 +1026,14 @@ type TestRunEndedFailed struct {
 	// How many units were cancelled by an earlier failure.
 	CancelledUnits int32 `protobuf:"varint,2,opt,name=cancelled_units,json=cancelledUnits,proto3" json:"cancelled_units,omitempty"`
 	// How many units passed.
-	PassedUnits   int32 `protobuf:"varint,3,opt,name=passed_units,json=passedUnits,proto3" json:"passed_units,omitempty"`
+	PassedUnits int32 `protobuf:"varint,3,opt,name=passed_units,json=passedUnits,proto3" json:"passed_units,omitempty"`
+	// Each failure of the run itself rather than of a unit, for a person: a
+	// full run's placement check (a file no suite reads and the roster lists
+	// nowhere), its timings or passes that could not be recorded, or the run's
+	// script exiting non-zero after its units passed. A run with any of these
+	// ended failed though every unit passed: the ended state always agrees with
+	// the run's exit status.
+	RunFailures   []string `protobuf:"bytes,4,rep,name=run_failures,json=runFailures,proto3" json:"run_failures,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1079,6 +1087,13 @@ func (x *TestRunEndedFailed) GetPassedUnits() int32 {
 		return x.PassedUnits
 	}
 	return 0
+}
+
+func (x *TestRunEndedFailed) GetRunFailures() []string {
+	if x != nil {
+		return x.RunFailures
+	}
+	return nil
 }
 
 // The run stopped before it planned, on a failure of the runner's own rather
@@ -1365,11 +1380,12 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\x06failed\x18\x02 \x01(\v2\x1e.testrun.v1.TestRunEndedFailedH\x00R\x06failedB\t\n" +
 	"\aoutcome\"M\n" +
 	"\x12TestRunEndedPassed\x12!\n" +
-	"\fpassed_units\x18\x01 \x01(\x05R\vpassedUnitsJ\x04\b\x02\x10\x03R\x0edeclined_units\"\x83\x01\n" +
+	"\fpassed_units\x18\x01 \x01(\x05R\vpassedUnitsJ\x04\b\x02\x10\x03R\x0edeclined_units\"\xa6\x01\n" +
 	"\x12TestRunEndedFailed\x12!\n" +
 	"\ffailed_units\x18\x01 \x01(\x05R\vfailedUnits\x12'\n" +
 	"\x0fcancelled_units\x18\x02 \x01(\x05R\x0ecancelledUnits\x12!\n" +
-	"\fpassed_units\x18\x03 \x01(\x05R\vpassedUnits\"F\n" +
+	"\fpassed_units\x18\x03 \x01(\x05R\vpassedUnits\x12!\n" +
+	"\frun_failures\x18\x04 \x03(\tR\vrunFailures\"F\n" +
 	"\x0eTestRunAborted\x12\x1c\n" +
 	"\tselection\x18\x01 \x01(\tR\tselection\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\"(\n" +

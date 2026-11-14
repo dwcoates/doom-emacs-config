@@ -186,6 +186,29 @@ func TestTheRecorderRecordsNothingForInputsThatMoved(t *testing.T) {
 	}
 }
 
+// A path git ignores that a unit made while the run ran (an npm install's
+// node_modules inside an input tree) is no input, so the pass is recorded
+// (2026-11-14: tree-sitter-tldr/node_modules/ refused a testrun unit's pass).
+func TestTheRecorderRecordsPastAnIgnoredPathMadeWhileTheRunRan(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	set, facts := keyedSubject(t, f)
+	dec, err := decideKeyed(f.d, "subject", set, facts, NoReuse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, f.d.Repo, fixtureModule+"/prompts/node_modules/.bin/tool", "installed mid-run")
+	f.d.ListIgnored = func() (Ignored, error) { return Ignored{fixtureModule + "/prompts/node_modules/"}, nil }
+
+	// Act
+	ok, err := newRecorder(f.d).record("subject", "the subject", set, facts, dec.Key, 1, false)
+
+	// Assert
+	if err != nil || !ok || len(f.log.errs) != 0 {
+		t.Fatalf("record = %v, %v, errors %q; want the pass recorded", ok, err, f.log.errs)
+	}
+}
+
 func TestTheRecorderFails(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -198,6 +221,12 @@ func TestTheRecorderFails(t *testing.T) {
 		{"a store that cannot be written", func(t *testing.T, f *fixture) {
 			f.d.Store.Dir = filepath.Join(f.d.Repo, fixtureModule, "prompts", "p.md")
 		}, "reuse: create "},
+		{"no way to read what git ignores now", func(t *testing.T, f *fixture) {
+			f.d.ListIgnored = nil
+		}, "no ListIgnored to read what git ignores now"},
+		{"what git ignores now cannot be read", func(t *testing.T, f *fixture) {
+			f.d.ListIgnored = func() (Ignored, error) { return nil, errors.New("ls-files failed") }
+		}, "reuse: re-key subject after its run: ls-files failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

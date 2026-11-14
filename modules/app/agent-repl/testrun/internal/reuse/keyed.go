@@ -83,6 +83,9 @@ type recorder struct {
 	cache          *HashCache
 	branch, commit string
 	dirty, read    bool
+	// ignored is what git ignored before the run and what it ignores at the
+	// first record, together; nil until the first record lists it.
+	ignored Ignored
 }
 
 // newRecorder is a recorder over d with an empty cache.
@@ -94,7 +97,25 @@ func newRecorder(d Deps) *recorder { return &recorder{d: d, cache: NewHashCache(
 // inputs moved, or that passed on a node_modules its lock did not install,
 // records nothing, and label names it in the run's log.
 func (r *recorder) record(name, label string, set *InputSet, facts Facts, key Key, units int, failed bool) (bool, error) {
-	after, err := ComputeKeyCached(r.d.Repo, set, facts, r.d.keyEnv(r.cache))
+	// WHAT GIT IGNORES IS RE-READ AFTER THE RUN. An ignored path a unit made
+	// while it ran is no input either, and the list read before the run
+	// cannot name it: on 2026-11-14 the tree-sitter-tldr suite's npm install
+	// made tree-sitter-tldr/node_modules/ while the testrun unit that reads
+	// tree-sitter-tldr/ ran, and that unit's pass was refused as "its inputs
+	// changed while it ran", at ERROR.
+	if r.ignored == nil {
+		if r.d.ListIgnored == nil {
+			return false, fmt.Errorf("reuse: re-key %s after its run: no ListIgnored to read what git ignores now", name)
+		}
+		now, err := r.d.ListIgnored()
+		if err != nil {
+			return false, fmt.Errorf("reuse: re-key %s after its run: %w", name, err)
+		}
+		r.ignored = append(append(Ignored{}, r.d.Ignored...), now...)
+	}
+	env := r.d.keyEnv(r.cache)
+	env.Ignored = r.ignored
+	after, err := ComputeKeyCached(r.d.Repo, set, facts, env)
 	if err != nil {
 		return false, fmt.Errorf("reuse: re-key %s after its run: %w", name, err)
 	}

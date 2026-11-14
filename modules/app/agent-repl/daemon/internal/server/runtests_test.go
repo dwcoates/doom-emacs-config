@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,9 +45,12 @@ type fakeTests struct {
 	lines     []string
 	exit      int
 	err       error
+	// running, when set, is closed once the run wrote its events; the run
+	// then lasts until its context ends, as a script the daemon stops does.
+	running chan struct{}
 }
 
-func (f *fakeTests) RunLinesWith(_ context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
+func (f *fakeTests) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.argv, f.dir = argv, dir
@@ -91,6 +95,11 @@ func (f *fakeTests) RunLinesWith(_ context.Context, dir string, argv []string, o
 		if _, err := protodelim.MarshalTo(pipe, ev); err != nil {
 			return scriptrunner.Run{}, err
 		}
+	}
+	if f.running != nil {
+		close(f.running)
+		<-ctx.Done()
+		return scriptrunner.Run{}, fmt.Errorf("scriptrunner: run %s: %w", argv[0], ctx.Err())
 	}
 	if f.garbage {
 		if _, err := pipe.Write([]byte{0xff, 0xff, 0xff, 0xff, 0x0f, 1, 2}); err != nil {
@@ -274,6 +283,123 @@ func TestRunTestsRefuses(t *testing.T) {
 			}
 			if h.Tests.argv != nil {
 				t.Fatalf("the runner ran %v for a refused request", h.Tests.argv)
+			}
+		})
+	}
+}
+
+// THE RELAYED END AGREES WITH THE SCRIPT'S EXIT: a script that exits non-zero
+// after its runner ended passed (its git-state net, its timing record) is
+// relayed as ended failed, naming the exit and the script's last output.
+func TestRunTestsRelaysAnEndThatAgreesWithTheScriptsExit(t *testing.T) {
+	endedFailed := &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+		Outcome: &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{FailedUnits: 1}}}}}
+	cases := []struct {
+		name        string
+		ended       *testrunv1.TestRunEvent
+		exit        int
+		want        *testrunv1.TestRunEnded
+		wantFailure string
+		wantError   bool
+	}{
+		{name: "a passed end with a clean exit is relayed passed", ended: endedPassed(), want: endedPassed().GetEnded()},
+		{
+			name: "a passed end the script then fails is relayed failed", ended: endedPassed(), exit: 1,
+			wantFailure: "the run's script exited 1 after its runner said every unit passed; its last output:\nDRIFT DETECTED", wantError: true,
+		},
+		{name: "a failed end is relayed as the runner said it", ended: endedFailed, exit: 1, want: endedFailed.GetEnded()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			log := dlog.NewTestLogger()
+			h.Surfaces.workspace, h.Surfaces.global = log, log
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.Tests.events = []*testrunv1.TestRunEvent{tc.ended}
+			h.Tests.exit, h.Tests.lines = tc.exit, []string{"DRIFT DETECTED"}
+
+			// Act
+			frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+
+			// Assert
+			if len(frames) != 1 || frames[0].GetEvent().GetEnded() == nil {
+				t.Fatalf("frames = %v, want the run's one end", frames)
+			}
+			got := frames[0].GetEvent().GetEnded()
+			if tc.want != nil && !proto.Equal(got, tc.want) {
+				t.Fatalf("ended = %v, want %v", got, tc.want)
+			}
+			if tc.wantFailure != "" {
+				f := got.GetFailed()
+				if f.GetPassedUnits() != 1 || !slices.Equal(f.GetRunFailures(), []string{tc.wantFailure}) {
+					t.Fatalf("ended = %v, want failed with its passed unit and the run failure %q", got, tc.wantFailure)
+				}
+			}
+			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opRunTests}); found != tc.wantError {
+				t.Fatalf("error record found = %v, want %v: %+v", found, tc.wantError, log.Records())
+			}
+		})
+	}
+}
+
+// THE DAEMON'S EXIT STOPS A RUNNING TEST RUN AND HANDS IT ON: the surface's
+// Close (the exit's end of every stream) stops the run, and the stream ends
+// with transferring_away naming the successor, or runner_failed when none
+// serves, never a connection cut at the exit's deadline (2026-11-14: a
+// deploy cut two agents' full runs, "RunTests=2").
+func TestRunTestsStoppedByTheDaemonsExitHandsTheRunOn(t *testing.T) {
+	cases := []struct {
+		name      string
+		successor string
+		check     func(*agentreplv1.RunTestsError) bool
+	}{
+		{name: "a handover names its successor", successor: "127.0.0.1:9999", check: func(e *agentreplv1.RunTestsError) bool {
+			return e.GetTransferringAway().GetAddress() == "127.0.0.1:9999"
+		}},
+		{name: "a stop with no successor says the run must be run again", check: func(e *agentreplv1.RunTestsError) bool {
+			return strings.Contains(e.GetRunnerFailed().GetDetail(), "the daemon stopped before the run ended")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) {
+				deps.Log = &fakeSurfaces{global: log, workspace: log}
+				deps.SuccessorAddress = func() string { return tc.successor }
+			})
+			ref := testsWorkspace(t, h, testsDeploy)
+			planned := &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Planned{Planned: &testrunv1.TestRunPlanned{}}}
+			h.Tests.events = []*testrunv1.TestRunEvent{planned}
+			h.Tests.running = make(chan struct{})
+			stream, err := h.Client.RunTests(context.Background(), connect.NewRequest(&agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			if !stream.Receive() || stream.Msg().GetEvent().GetPlanned() == nil {
+				t.Fatalf("first frame = %v (%v), want the run's plan", stream.Msg(), stream.Err())
+			}
+
+			// Act
+			if err := h.Server.(*server).Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert
+			var frames []*agentreplv1.RunTestsResponse
+			for stream.Receive() {
+				frames = append(frames, stream.Msg())
+			}
+			if err := stream.Err(); err != nil {
+				t.Fatalf("stream: %v, want an ended stream", err)
+			}
+			if len(frames) != 1 || !tc.check(frames[0].GetError()) {
+				t.Fatalf("frames after the exit = %v, want the one answer handing the run on", frames)
+			}
+			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); found {
+				t.Fatalf("records = %+v, want no error: the exit stopped the run on purpose", log.Records())
 			}
 		})
 	}

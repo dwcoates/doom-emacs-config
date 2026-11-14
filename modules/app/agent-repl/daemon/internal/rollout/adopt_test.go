@@ -2495,11 +2495,21 @@ func TestAParticipantIsAnsweredOnceTheWorkspaceIsOwnedNotOnceTheAdoptionsTailEnd
 }
 
 // joiningMirror is a joining harness whose manifest names WS with a host
-// participant (so it is adopted only when the host calls), and the roster
-// stream its mirror opened on the incumbent.
+// participant, adopted only when the host calls, and the roster stream its
+// mirror opened on the incumbent.
+//
+// THE PARTICIPANT SEAM HOLDS THE NOT-YET-ADOPTED GAP OPEN. Without it the
+// daemon adopts WS itself the moment Join claims it (adoptClaimed), racing
+// the test's first roster frame: an adoption that wins leaves WS owned before
+// the mirror takes the frame, so its thinking arm is never published. Merge
+// gate 2026-11-14 17:41, TestAJoiningDaemonsRowNotYetAdoptedFollowsTheIncumbentUntilItIsAdopted:
+// "the mirror never installed the incumbent's thinking arm" after 5s.
 func joiningMirror(t *testing.T) (*harness, ids.WorkspaceID, *rostermirrortest.Stream) {
 	t.Helper()
-	h := newHarness(t, func(d *Deps) { d.IncumbentAddress = "127.0.0.1:7788" })
+	h := newHarness(t, func(d *Deps) {
+		d.IncumbentAddress = "127.0.0.1:7788"
+		d.AdoptAwaitsParticipants = true
+	})
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Host: true})
 	select {
