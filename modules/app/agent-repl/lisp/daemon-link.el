@@ -282,6 +282,17 @@ handover\='s end, so nothing goes down: the acceptance runs the handover
 hooks and then promotes (`agent-repl-link--accept-successor'), and a
 successor that dies unaccepted takes the link down instead.")
 
+(defvar agent-repl-link--promotions 0
+  "How many successor promotions this Emacs has made: the promotion epoch.
+It only ever counts up, in `agent-repl-link--promote-successor', BEFORE the
+promote hooks run, so a walk a promotion starts already reads the new
+count.  A consumer that recorded the count when it began some work reads
+whether a promotion passed while that work was in flight
+\(`agent-repl-link-promotions'), rather than guessing it from which
+connections happen to stand.  Deliberately NOT reset by
+`agent-repl-link-teardown': an epoch that went back would answer \"no
+promotion passed\" for work begun before the teardown.")
+
 (defvar agent-repl-link--reconnect-timer nil
   "The pending reconnect timer, or nil when no reconnect is scheduled.")
 
@@ -293,6 +304,12 @@ successor that dies unaccepted takes the link down instead.")
 (defun agent-repl-link-primary ()
   "Return the connection to the daemon currently serving Emacs, or nil."
   agent-repl-link--primary)
+
+(defun agent-repl-link-promotions ()
+  "Return the promotion epoch: how many successor promotions Emacs made.
+Compare a count recorded earlier with this one to know whether a
+promotion passed since (`agent-repl-link--promotions')."
+  agent-repl-link--promotions)
 
 (defun agent-repl-link-ending-p (conn)
   "Return non-nil when CONN\='s daemon announced its own planned ending.
@@ -704,7 +721,8 @@ the reconnect hooks would re-register a fleet that is already registered."
           agent-repl-link--primary-stream agent-repl-link--successor-stream
           agent-repl-link--successor nil
           agent-repl-link--successor-stream nil
-          agent-repl-link--primary-ended nil)
+          agent-repl-link--primary-ended nil
+          agent-repl-link--promotions (1+ agent-repl-link--promotions))
     (when (eq agent-repl-link--ending-conn old)
       (setq agent-repl-link--ending-conn nil))
     (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-promoted address=%S"

@@ -85,6 +85,7 @@
 
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-promotions "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
 (declare-function agent-repl-link-serving-conn "daemon-link" (address))
 (declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
@@ -1901,7 +1902,11 @@ and superseded one way.  TRIGGER is recorded."
   (let ((token (setq agent-repl-host--reattach-tokens
                      (1+ agent-repl-host--reattach-tokens)))
         (was (plist-get (agent-repl-host--entry ws) :reattach)))
-    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger))
+    ;; THE WALK RECORDS THE PROMOTION EPOCH IT BEGAN IN, so its outcome can
+    ;; read whether a promotion passed while it was in flight
+    ;; (`agent-repl-host--register-settled').
+    (agent-repl-host--put ws :reattach (list :token token :conn new :claim claim :trigger trigger
+                                             :promotions (agent-repl-link-promotions)))
     ;; A NEWER WALK THAT IS NOT AN ADOPT ONTO THE SAME DAEMON ENDS THE HOLD:
     ;; the superseded adopt's answer is dropped, so nothing else would send
     ;; what it held.
@@ -2024,35 +2029,61 @@ link-up (`agent-repl-host-on-link-up'), the next promotion
 \(`agent-repl-host-on-link-promote') and its own selection
 \(`agent-repl-host-select').  Regression, 2026-11-03: a failed walk
 cleared its walk and left nothing armed, and seven workspaces stayed
-severed until a hand-triggered walk."
-  (cond
-   ((not (agent-repl-host--reattach-current-p ws token))
-    (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
-   ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
-   ;; waiting for that successor to be accepted (`:adopt-pending',
-   ;; the adopt on the primary link).  WS is not detached: the
-   ;; acceptance walks it, so this walk ends without arming another.  A
-   ;; successor already accepted took a NEW walk at once, and the branch
-   ;; above dropped this one as superseded.
-   ((and (null ref) (plist-get (agent-repl-host--entry ws) :adopt-pending))
-    (agent-repl-host--put ws :reattach nil)
-    (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
-                      ws dir (agent-repl-connect-connection-address new)))
-   ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
-   ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
-   ;; vocabulary, so a reader can ask for one edge's walks alone.
-   ((null ref)
-    (agent-repl-host--put ws :reattach nil)
-    (agent-repl-host--put ws :detached t)
-    (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
-                       ws dir (agent-repl-connect-connection-address new))
-    (agent-repl--info ws "elisp.host.reattach-armed ws=%s trigger=%s edges=link-up,promotion,select"
-                      ws trigger))
-   (t
-    (agent-repl-host--reattached ws new ref trigger)
-    (agent-repl-frontend-reload-webview ws)
-    (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
-                      ws (agent-repl-connect-connection-address new)))))
+severed until a hand-triggered walk.
+
+A WALK THAT FAILED AFTER A PROMOTION PASSED WALKS AT ONCE onto the live
+daemon (`agent-repl-host--follow-live-daemon'): the promotion edge it
+would be armed for has already run, and walked only the workspaces
+detached or standing on the old daemon then, which WS, mid-walk, was
+neither.  Whether a promotion passed is read from the link\='s promotion
+epoch the walk recorded when it began (`agent-repl-link-promotions').
+Regression, 2026-11-06: a `not_yet_adopted' re-registration onto the
+incumbent failed after the successor was promoted, and `main
+\(explanation-engine)' stood with no host stream for 20 minutes."
+  (let ((walk (plist-get (agent-repl-host--entry ws) :reattach)))
+    (cond
+     ((not (agent-repl-host--reattach-current-p ws token))
+      (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+     ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
+     ;; waiting for that successor to be accepted (`:adopt-pending',
+     ;; the adopt on the primary link).  WS is not detached: the
+     ;; acceptance walks it, so this walk ends without arming another.  A
+     ;; successor already accepted took a NEW walk at once, and the branch
+     ;; above dropped this one as superseded.
+     ((and (null ref) (plist-get (agent-repl-host--entry ws) :adopt-pending))
+      (agent-repl-host--put ws :reattach nil)
+      (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
+                        ws dir (agent-repl-connect-connection-address new)))
+     ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
+     ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
+     ;; vocabulary, so a reader can ask for one edge's walks alone.
+     ((null ref)
+      (agent-repl-host--put ws :reattach nil)
+      (agent-repl-host--put ws :detached t)
+      (agent-repl--error ws (format "elisp.host.%s-register-failed ws=%%s dir=%%S address=%%S" trigger)
+                         ws dir (agent-repl-connect-connection-address new))
+      (if (agent-repl-host--promoted-since-p ws walk)
+          (progn
+            (agent-repl--info ws "elisp.host.reattach-after-promotion ws=%s trigger=%s promotions=%d..%d"
+                              ws trigger (plist-get walk :promotions) (agent-repl-link-promotions))
+            (agent-repl-host--follow-live-daemon ws "promotion-passed"))
+        (agent-repl--info ws "elisp.host.reattach-armed ws=%s trigger=%s edges=link-up,promotion,select"
+                          ws trigger)))
+     (t
+      (agent-repl-host--reattached ws new ref trigger)
+      (agent-repl-frontend-reload-webview ws)
+      (agent-repl--info ws (format "elisp.host.%s-webview-repointed ws=%%s address=%%S" trigger)
+                        ws (agent-repl-connect-connection-address new))))))
+
+(defun agent-repl-host--promoted-since-p (ws walk)
+  "Return non-nil when a promotion passed since WS\='s reattach WALK began.
+WALK is the plist `agent-repl-host--begin-walk' recorded, whose
+`:promotions' is the link\='s promotion epoch then.  A walk with no epoch
+recorded is an invariant breach, failed hard."
+  (let ((began (plist-get walk :promotions)))
+    (unless (integerp began)
+      (agent-repl--fatal ws "elisp.host.walk-without-promotion-epoch ws=%s walk=%S" ws walk))
+    (/= began (agent-repl-link-promotions))))
 
 (defun agent-repl-host--follow-live-daemon (ws trigger)
   "Re-attach WS, which lost its daemon, to the LIVE one -- or wait for it.
