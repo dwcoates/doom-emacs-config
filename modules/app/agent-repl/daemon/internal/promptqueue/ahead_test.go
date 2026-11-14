@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -393,5 +394,27 @@ func TestTheQueueAsksHoldfoldWhetherAHoldIsSeen(t *testing.T) {
 	// Assert
 	if len(found) > 0 {
 		t.Fatalf("these files read a hold as unseen by hand instead of holdfold.Seen: %v", found)
+	}
+}
+
+// TestTheQueueReadsTheLineThroughHoldfold pins itemAhead to holdfold.InLine,
+// the reading the fold and the tray's "fold above" share: an ahead.go that
+// tests a cold gate's kept prompt or an unseen origin by hand fails here
+// rather than drifting from the tray.
+func TestTheQueueReadsTheLineThroughHoldfold(t *testing.T) {
+	// Arrange
+	var source string
+	for _, file := range sourcescan.Production(t) {
+		if file.Name == "ahead.go" {
+			source = string(file.Source)
+		}
+	}
+
+	// Act
+	handRolled := regexp.MustCompile(`HoldColdGateAnswered|holdfold\.Seen\(`).FindAllString(source, -1)
+
+	// Assert
+	if !strings.Contains(source, "holdfold.InLine(") || len(handRolled) != 0 {
+		t.Fatalf("ahead.go calls holdfold.InLine: %v, hand-rolls %v; want the one reading", strings.Contains(source, "holdfold.InLine("), handRolled)
 	}
 }

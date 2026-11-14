@@ -51,18 +51,14 @@ func (q *queue) itemAhead(ctx context.Context, ws ids.WorkspaceID, turn ids.Turn
 		if standing[i].Turn == turn {
 			break
 		}
-		// A PROMPT KEPT AT A COLD GATE'S ANSWER STANDS OUTSIDE THE LINE: only
-		// the user sends it, so nothing is judged against it, folded into it or
-		// queued behind it (gatefate.go).
-		if standing[i].Hold != nil && *standing[i].Hold == wsm.HoldColdGateAnswered {
-			continue
-		}
-		// A PROMPT DRAWN NOWHERE STANDS OUTSIDE THE LINE TOO (holdfold.Seen):
-		// the user never saw it, so nothing is judged against it or folded
-		// into it. Folded in, the user's words would run under its origin,
-		// drawn nowhere (2026-10-31: a user's prompt coalesced into the
-		// subsection placement brief queued behind the prompt ahead of it).
-		if !holdfold.Seen(standing[i]) {
+		// ONLY A HOLD IN LINE IS JUDGED AGAINST (holdfold.InLine), the same
+		// reading the fold and the tray's "fold above" take: a prompt kept at a
+		// cold gate's answer is the user's alone to send (gatefate.go), and a
+		// prompt drawn nowhere was never seen, so a user's words folded into
+		// it would run under its origin, drawn nowhere (2026-10-31: a user's
+		// prompt coalesced into the subsection placement brief queued behind
+		// the prompt ahead of it).
+		if !holdfold.InLine(standing[i]) {
 			continue
 		}
 		prev = &standing[i]
