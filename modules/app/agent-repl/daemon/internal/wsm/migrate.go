@@ -256,6 +256,8 @@ var migrations = []migration{
 	// the step's triggers.
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
+	// IT IS ADDITIVE: see mediationRolesDDL.
+	{To: 137, Name: "merge_queue_mediation_roles", Kind: MigrationAdditive, DDL: mediationRolesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

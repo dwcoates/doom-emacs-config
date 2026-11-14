@@ -172,17 +172,18 @@ func TestTheMediationChainCountsRemediationsInARow(t *testing.T) {
 	}{
 		{name: "a first deploy begins its chain", wantStart: instant,
 			arrange: func(t *testing.T, s *store, repo RepoKey) { oweAt(t, s, repo, instant) }},
-		{name: "a deploy replacing a told mediation counts a remediation", wantStart: instant, wantRedeploys: 2,
+		{name: "a deploy replacing a dispatched mediation counts a remediation", wantStart: instant, wantRedeploys: 2,
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				dispatchAt(t, s, repo, instant)
+				oweAt(t, s, repo, second)
+				dispatchAt(t, s, repo, second)
+				oweAt(t, s, repo, third)
+			}},
+		{name: "a deploy replacing a told mediation nothing was dispatched for counts none", wantStart: instant,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
 				tellAt(t, s, repo, instant)
-				oweAt(t, s, repo, second)
-				tellAt(t, s, repo, second)
-				oweAt(t, s, repo, third)
-			}},
-		{name: "a deploy replacing an untold mediation counts none", wantStart: instant,
-			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				oweAt(t, s, repo, instant)
 				oweAt(t, s, repo, second)
 			}},
 		{name: "a release ends the chain, so the next deploy begins another", wantStart: third,
@@ -272,6 +273,134 @@ func oweAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
 	t.Helper()
 	if _, err := s.OweMediation(context.Background(), repo, at, ""); err != nil {
 		t.Fatalf("OweMediation: %v", err)
+	}
+}
+
+// dispatchAt records a fix for REPO's mediation owed at OWED dispatched to
+// workspace "remedy".
+func dispatchAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
+	t.Helper()
+	if ok, err := s.DispatchMediation(context.Background(), repo, owed, "remedy"); err != nil || !ok {
+		t.Fatalf("DispatchMediation = (%v, %v), want it recorded", ok, err)
+	}
+}
+
+// TestTheChainsRolesPassAlongItAndEndWithIt covers the chain's intake and
+// remediation workspaces: recorded once, carried to each newer deploy of the
+// chain, the dispatch owed afresh for each deploy, and all cleared by the
+// release.
+func TestTheChainsRolesPassAlongItAndEndWithIt(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repo RepoKey)
+		want    *Mediation
+	}{
+		{name: "the intake and the dispatch are recorded on the owed mediation",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				if ok, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil || !ok {
+					t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
+				}
+				dispatchAt(t, s, repo, instant)
+			},
+			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: true}},
+		{name: "a newer deploy carries the roles and owes its own dispatch",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
+					t.Fatal(err)
+				}
+				dispatchAt(t, s, repo, instant)
+				oweAt(t, s, repo, instant.Add(time.Minute))
+			},
+			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: false}},
+		{name: "the release clears the roles", want: nil,
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.ReleaseMediation(context.Background(), repo, instant); err != nil {
+					t.Fatal(err)
+				}
+				oweAt(t, s, repo, instant.Add(time.Minute))
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+
+			// Act
+			tt.arrange(t, s, repo)
+
+			// Assert: the roles, or none after a release (the next deploy
+			// begins a new chain with none).
+			m, err := s.MediationOf(context.Background(), repo)
+			want := tt.want
+			if want == nil {
+				want = &Mediation{}
+			}
+			if err != nil || m == nil || m.Intake != want.Intake || m.Remediation != want.Remediation || m.Dispatched != want.Dispatched {
+				t.Fatalf("MediationOf = (%+v, %v), want roles %+v", m, err, want)
+			}
+		})
+	}
+}
+
+// TestTheChainsRoleWritesRefuseWhatTheyCannotRecord covers the writes'
+// refusals: a stale mediation, a second intake, a second dispatch, and no
+// workspace.
+func TestTheChainsRoleWritesRefuseWhatTheyCannotRecord(t *testing.T) {
+	tests := []struct {
+		name      string
+		write     func(s *store, repo RepoKey) (bool, error)
+		wantOK    bool
+		wantError bool
+	}{
+		{name: "an intake for a mediation no longer owed",
+			write: func(s *store, repo RepoKey) (bool, error) {
+				return s.RecordMediationIntake(context.Background(), repo, instant.Add(-time.Minute), "intake")
+			}},
+		{name: "a second intake for the chain",
+			write: func(s *store, repo RepoKey) (bool, error) {
+				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "first"); err != nil {
+					return false, err
+				}
+				return s.RecordMediationIntake(context.Background(), repo, instant, "second")
+			}},
+		{name: "a second dispatch for one deploy",
+			write: func(s *store, repo RepoKey) (bool, error) {
+				if _, err := s.DispatchMediation(context.Background(), repo, instant, "first"); err != nil {
+					return false, err
+				}
+				return s.DispatchMediation(context.Background(), repo, instant, "second")
+			}},
+		{name: "an intake that names no workspace", wantError: true,
+			write: func(s *store, repo RepoKey) (bool, error) {
+				return s.RecordMediationIntake(context.Background(), repo, instant, "")
+			}},
+		{name: "a dispatch that names no workspace", wantError: true,
+			write: func(s *store, repo RepoKey) (bool, error) {
+				return s.DispatchMediation(context.Background(), repo, instant, "")
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			oweAt(t, s, repo, instant)
+
+			// Act
+			ok, err := tt.write(s, repo)
+
+			// Assert
+			if ok != tt.wantOK || (err != nil) != tt.wantError {
+				t.Fatalf("write = (%v, %v), want ok %v, error %v", ok, err, tt.wantOK, tt.wantError)
+			}
+		})
 	}
 }
 

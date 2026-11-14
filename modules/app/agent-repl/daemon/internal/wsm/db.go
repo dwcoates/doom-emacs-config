@@ -660,6 +660,12 @@ type DB interface {
 	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time, turn TurnID) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
+	// RecordMediationIntake records a chain's intake workspace on the
+	// mediation owed at OWED (mediation.go).
+	RecordMediationIntake(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
+	// DispatchMediation records a fix dispatched to remediation workspace WS
+	// for the mediation owed at OWED (mediation.go).
+	DispatchMediation(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers
 	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.
