@@ -68,7 +68,7 @@ func newHarnessFor(t *testing.T, configured string) *harness {
 		Runner: h.r, Clock: h.clock, Log: h.log, Lid: h.lid, LegacyLidDims: h.dims,
 		Freezer: h.freezer, Views: h.views, Telemetry: h.telemetry, EnergyRecord: h.energy,
 		NetworkChanged: h.network.changed, PowerChanges: h.power.source,
-		Exists: func(p string) bool { return h.exists[p] },
+		Exists:  func(p string) bool { return h.exists[p] },
 		ScanDir: t.TempDir(),
 		OnChange: func(s *agentreplv1.PersistentWifiState) {
 			h.changes = append(h.changes, s)

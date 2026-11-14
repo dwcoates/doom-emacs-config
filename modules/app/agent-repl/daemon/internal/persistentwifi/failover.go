@@ -173,7 +173,6 @@ func (c *Controller) abandonFailoverLocked() {
 	}
 }
 
-
 // joinVisibleKnown is the failover's FIRST STEP: join a network macOS knows
 // (`networksetup -listpreferredwirelessnetworks`, the owner's saved networks
 // in preference order) THAT A SCAN SEES NOW (scanWifi), the configured

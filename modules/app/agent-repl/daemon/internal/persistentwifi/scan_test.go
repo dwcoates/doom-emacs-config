@@ -17,7 +17,7 @@ func TestScanWifi(t *testing.T) {
 		wantNames []string
 	}{
 		{name: "an authorized scan names what it saw, joined and in sight",
-			answer: writing(`{"authorization":"authorized","current":"Home","visible":[{"ssid":"Home","rssi":-40},{"ssid":"Cafe","rssi":-70}]}`),
+			answer:    writing(`{"authorization":"authorized","current":"Home","visible":[{"ssid":"Home","rssi":-40},{"ssid":"Cafe","rssi":-70}]}`),
 			wantNames: []string{"Home", "Cafe"}},
 		{name: "a helper not allowed Location Services names nothing",
 			answer:  writing(`{"authorization":"denied","visible":[]}`),
