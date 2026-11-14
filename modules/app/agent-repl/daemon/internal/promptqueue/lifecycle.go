@@ -588,12 +588,18 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	}
 
 	changed := false
+	// own counts the lease holder's own standing entries, which the lease
+	// leaves deliverable under it.
+	own := 0
 	for _, h := range standing {
 		// THE LEASE HOLDER'S OWN ENTRY IS NEVER STAMPED BY ITS LEASE, by the
 		// rule the submission path applies (exemptFromLease).
 		target := want
 		if held && exemptFromLease(lease, submissionOf(h).Origin) {
 			target = nil
+			if h.Tombstone == nil {
+				own++
+			}
 		}
 		if h.Tombstone != nil || sameHold(h, target) {
 			continue
@@ -630,8 +636,9 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		// entry with nothing running, which an older build stranded (doom,
 		// 2026-10-10) and which a handover's drain reaches through here with
 		// no session-up edge of its own. With no lease holding it, it is
-		// delivered as a turn end would deliver it.
-		if want == nil {
+		// delivered as a turn end would deliver it, and so is the lease
+		// holder's own entry under its lease.
+		if want == nil || own > 0 {
 			q.popIfIdle(ctx, d, log)
 		}
 		return
@@ -648,7 +655,14 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 
 	// A hold the lease no longer projects is deliverable the moment nothing is
 	// running.
-	if want != nil {
+	//
+	// SO IS THE LEASE HOLDER'S OWN ENTRY UNDER ITS LEASE. A merge's brief a
+	// drain held was un-stamped here as the handover's successor drained its
+	// intake under the merge's lease, and then left undelivered: the merge
+	// resumed on the successor waits for that brief's turn ("still held in
+	// the prompt queue"), and nothing else would pop it. The pop delivers
+	// only what the lease exempts (nextDeliverable).
+	if want != nil && own == 0 {
 		return
 	}
 	q.popIfIdle(ctx, d, log)

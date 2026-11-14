@@ -1096,3 +1096,52 @@ func TestDeliverHeldWithATurnRunningLeavesItToThatTurnsEnd(t *testing.T) {
 		t.Fatalf("records = %+v, want the deferral recorded", h.log.Records())
 	}
 }
+
+// A HANDOVER'S SUCCESSOR DRAINS ITS INTAKE UNDER THE MERGE'S LEASE: the
+// merge's brief another holder held is un-stamped there, and is delivered,
+// since the merge resumed on the successor waits for that brief's turn and
+// nothing else would pop it. Anyone else's prompt waits for the merge.
+func TestOnLeaseChangedUnderAMergeLeaseDeliversOnlyTheMergesOwnEntry(t *testing.T) {
+	tests := []struct {
+		name        string
+		origin      conversationv1.PromptOrigin
+		wantStarted []ids.TurnID
+		wantHold    *wsm.HoldKind
+	}{
+		{
+			name:        "the merge's own brief",
+			origin:      conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
+			wantStarted: []ids.TurnID{"t1"},
+		},
+		{
+			name:     "the user's prompt",
+			origin:   conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+			wantHold: kindPtr(wsm.HoldMerge),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a prompt another holder's lease held, then the merge's
+			// lease is what stands.
+			h := newHarness(t)
+			h.lease(wsm.HolderRestart, wsm.PolicyHold)
+			sub := submission("t1", "repair the tests")
+			sub.Origin = tc.origin
+			if _, err := h.q.Submit(context.Background(), sub); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.lease(wsm.HolderMerge, wsm.PolicyHold)
+
+			// Act
+			h.q.OnLeaseChanged(theWorkspace)
+
+			// Assert
+			if started := h.sender.started(); !slices.Equal(started, tc.wantStarted) {
+				t.Fatalf("started = %v, want %v", started, tc.wantStarted)
+			}
+			if got := h.db.hold("t1").Hold; (got == nil) != (tc.wantHold == nil) || (got != nil && *got != *tc.wantHold) {
+				t.Fatalf("hold = %v, want %v", got, tc.wantHold)
+			}
+		})
+	}
+}
