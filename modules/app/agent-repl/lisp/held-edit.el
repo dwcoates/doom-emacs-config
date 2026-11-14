@@ -57,7 +57,7 @@
 (defvar agent-repl-verbs--handover-arms)
 
 (defconst agent-repl-held-edit-indicator "editing held prompt"
-  "The editor notice a held-prompt edit beginning raises (`agent-repl--input-notify').")
+  "The notice `agent-repl--input-notify' raises as a held-prompt edit begins.")
 
 (defvar-local agent-repl--held-edit nil
   "The held-prompt edit this composer took, or nil when none stands.

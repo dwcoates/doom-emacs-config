@@ -825,7 +825,8 @@ MAIN_SYNC_REPAIR is the daemon's brief asking a repository's main
 workspace to repair a main checkout it could not fast-forward, and
 PULL_REQUEST_NOTICE its notice of a followed pull request's activity.
 GITHUB_MERGE_QUEUE_NOTICE is its notice of a followed GitHub merge queue's
-movement.  FINISH_HOOK is a finish-stage prompt hook the daemon sends a finishing
+movement.  FINISH_HOOK is a finish-stage prompt hook the daemon sends a
+finishing
 workspace before its deploy is put in line.
 None has an elisp spelling at all.")
 

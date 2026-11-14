@@ -1522,7 +1522,7 @@ columns."
 (defconst agent-repl--input-rollback-header
   (propertize (agent-repl--input-rollback-row "#" "Sent" "Tokens" "Prompt")
               'face '(:inherit shadow :weight bold))
-  "The picker's column names, over the columns `agent-repl--input-rollback-row' lays out.")
+  "The picker's column names, over `agent-repl--input-rollback-row''s columns.")
 
 (defun agent-repl--input-rollback-candidate (index entry now)
   "Return the picker line for ENTRY, the INDEXth prompt (1 is the newest).
@@ -3021,6 +3021,7 @@ sends it, and an empty composer sends nothing."
 (defvar company-active-map)
 (declare-function company-abort "company" ())
 (declare-function company-complete-selection "company" ())
+(declare-function agent-repl--completing-read-under-ivy "core" (alist entry prompt table))
 
 (defun agent-repl-input-company-return ()
   "Close company's popup, then run the composer's own `RET' binding.

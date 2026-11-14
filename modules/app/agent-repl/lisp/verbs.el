@@ -2615,7 +2615,8 @@ says where the create stopped, and the caller still sees it stop."
      (signal (car err) (cdr err)))))
 
 (defconst agent-repl-verbs--oneshot-default-model "sonnet"
-  "The model a model-picking one-shot (`SPC TAB C-o\=', `SPC TAB C-O\=') answers on a blank.")
+  "The model a model-picking one-shot answers on a blank.
+Those one-shots are `SPC TAB C-o\=' and `SPC TAB C-O\='.")
 
 (defvar agent-repl-verbs--model-default nil
   "When non-nil, the model `agent-repl-verbs--read-model\=' answers on a blank.

@@ -2636,7 +2636,7 @@ perspective activation funnels through, so the project picker
         (agent-repl--note-workspace-visit name))))))
 
 (defun agent-repl--note-workspace-visit (name)
-  "Record a visit to workspace NAME: stamp it viewed, and put it first in the history.
+  "Record a visit to workspace NAME: stamp it viewed and first in the history.
 Removes any prior occurrence of NAME, so `agent-repl--workspace-history'
 stays most-recently-visited-first with no duplicates.  The one writer of a
 visit, for an activation (`agent-repl--record-workspace-history') and for
