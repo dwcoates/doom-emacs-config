@@ -1,9 +1,10 @@
 # agent-repl todo
 
-Deficiencies in agent-repl's code or its agent harness that an agent noticed
-while working on something else, and that its work did not address. The
-metaprompt's "Noticed deficiencies" section says when a row is added. One row
-per deficiency; a row is removed when the work that fixes it lands.
+Deficiencies in agent-repl's code or its agent harness whose fix cannot start
+yet: it turns on a decision that is the user's, or it waits on other work. A
+deficiency that can be fixed now is fixed now, never recorded here (the
+metaprompt's "Noticed deficiencies" section). One row per deficiency; a row
+is removed when the work that fixes it lands.
 
 | Noticed | Area | Deficiency | Where | Noticed while |
 |---|---|---|---|---|

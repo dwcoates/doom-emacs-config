@@ -52,7 +52,7 @@
   - A one-shot and an async merge land through the merge queue, which this workspace pauses whenever it works, so their landings would contend with this session's own.
   - A child is the orchestration the mode exists to skip.
   - The daemon refuses each one with `requester_bypassing_queue`, and its `detail` repeats this reminder.
-- Every rule that would dispatch one (a handed failure's fix, a todo row's fix, work a main workspace splits off) is carried out here, by this workspace itself.
+- Every rule that would dispatch one (a handed failure's fix, a noticed deficiency's fix, work a main workspace splits off) is carried out here, by this workspace itself.
 - A child workspace that already existed when the mode was taken may still be prompted and answered.
   - It stops when its work is committed and tells this workspace its branch, never finishing or queueing anything.
   - This workspace lands that branch with `land-direct.sh`, as it lands its own.

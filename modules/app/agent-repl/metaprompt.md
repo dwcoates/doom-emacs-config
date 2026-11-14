@@ -174,33 +174,29 @@
 
 ## Noticed deficiencies
 
-### Every deficiency the current work leaves unaddressed is recorded in the todo table
+### Every deficiency I notice is fixed now, never only recorded
 
-- When I notice a deficiency in agent-repl's code or in the agent harness that the current work does not address, I add a row for it to the table in agent-repl's `modules/app/agent-repl/org/todo.md`.
+- When I notice a deficiency in agent-repl's code or in the agent harness that the current work does not address, I start its fix at once, without asking.
   - Deficiencies include an aspect of the architecture or code organization that could be improved, a missing test or log, a stale or contradictory instruction, and any other flaw I would fix if it were in scope.
   - The harness is the metaprompt, every `AGENTS.md` and `CLAUDE.md`, every skill, and the daemon's prompt briefs.
-- I add the row proactively, without asking for permission and without waiting for the work to finish.
-  - When `org/todo.md` or its table does not exist yet, I create it.
-  - A deficiency already in the table gets its existing row updated rather than a second row.
-- The row is written in my workspace's own worktree copy and committed on its branch, so it reaches master with the rest of the work.
-  - Master's copy is `~/.config/doom/modules/app/agent-repl/org/todo.md`, and it is never edited directly.
-  - The row commit is its own commit, separate from the functional change that revealed the deficiency.
+- How the fix starts depends on what this workspace may do.
+  - A workspace that may dispatch work dispatches each fix as its own async merge the moment it notices it, per `/agent-repl-merge-queue`: `workspace async-merge -maker here -context-fork here`, its branch cut at the main branch's tip, and its `-instruction` naming the fix and its tests.
+  - Fixes that are one change go in one merge; every independent fix gets its own.
+  - A main workspace, which lands nothing itself, creates a one-shot workspace for the fix instead, per `/agent-repl-workspaces`.
+  - A workspace in queue bypass mode fixes it itself, and lands the fix on its own right after the change in progress lands.
+  - Dispatching a fix leaves a one-shot a one-shot: the fix lands on its own, and the one-shot finishes its task as usual.
 - Recording a deficiency never replaces fixing what the current work owns.
-  - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never parked in the table.
+  - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never dispatched away.
 
-### A one-shot that adds a todo row lands its task and each row's fix as async merges
+### The todo table holds only what cannot be fixed now
 
-- The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot: `agent-repld workspace set here -not-one-shot`.
-  - It no longer follows the completion directive, so it never runs `workspace finished`.
-- When its task is complete, it lands that task as an async merge.
-  - It cuts a branch at its own branch's tip, named for the task, since an async merge lands a branch no workspace owns.
-  - The task's branch carries the row commit, so the row reaches the main branch with the task.
-- Right after dispatching that merge, it divides the rows it added into async merges that fix them.
-  - Rows that share one fix go into one merge, and every independent fix gets its own merge.
-  - Each fix merge's branch is cut at the main branch's tip, and its `-instruction` names the fix, its tests, and the removal of its rows from `org/todo.md`.
-  - Each fix merge is placed `behind=` the task's merge, so its rows are on the main branch before it removes them.
-- Every merge is its own `workspace async-merge`, with `-maker here -context-fork here`, per `/agent-repl-merge-queue`.
-- A row added after these merges are dispatched gets a fix merge of its own, placed behind the task's merge.
+- A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.
+  - Its fix turns on a decision that is the user's: I ask that question in the response's questions branch.
+  - Or its fix waits on other work, which the row names.
+- The row is written in my workspace's own worktree copy and committed on its branch, as its own commit, so it reaches master with the rest of the work.
+  - Master's copy is `~/.config/doom/modules/app/agent-repl/org/todo.md`, and it is never edited directly.
+  - A deficiency already in the table gets its existing row updated rather than a second row.
+- When the decision is made or the work it waited on lands, the row's fix is started the same way, and the fix removes the row.
 
 ## Process execution
 
@@ -260,7 +256,7 @@
 - When I tell a workspace to one-shot itself, to make itself a one-shot, or to land its work when done, it runs `agent-repld workspace set here -one-shot` at once, without asking.
   - The answer carries the daemon's completion directive, which the workspace follows when its work is done.
   - The verb and its flags are `/agent-repl-workspaces`'.
-- The daemon clears the mark itself when I take the workspace back, so a workspace unmarks itself only when it adds a todo row (see "Noticed deficiencies").
+- The daemon clears the mark itself when I take the workspace back, so a workspace never unmarks itself.
 
 ### A repository's main workspace is never a one-shot
 
