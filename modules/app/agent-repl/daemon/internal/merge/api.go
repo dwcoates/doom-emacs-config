@@ -59,6 +59,10 @@ const (
 	// BriefFixCommit asks a fixing turn that ended with uncommitted changes
 	// to commit them before the merge goes on.
 	BriefFixCommit = "merge-fix-commit"
+	// BriefHookPrompt is what a deploy stage's prompt hook submits: the
+	// configured prompt, and the step that stores a pull request the turn
+	// opens as the workspace's owned link.
+	BriefHookPrompt = "merge-hook-prompt"
 )
 
 // MaxCommitPrompts bounds how many times a fixing turn that ended with

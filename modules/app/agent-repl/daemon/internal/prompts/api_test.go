@@ -391,6 +391,22 @@ func TestTheFixCommitBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 }
 
+func TestTheHookPromptBriefKeepsItsPlaceholderSet(t *testing.T) {
+	// Arrange.
+	want := []string{"prompt"}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-hook-prompt")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := sameSet("placeholders", want, got.Placeholders); err != nil {
+		t.Fatalf("merge-hook-prompt: %v", err)
+	}
+}
+
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
 	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}

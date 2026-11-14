@@ -105,6 +105,10 @@ type fakeDB struct {
 	hasTurnsErr   error
 	drainReadErr  error
 	drainClearErr error
+	// undeployed are the landings recorded as waiting for their deploy, and
+	// undeployedErr fails the next record.
+	undeployed    []wsm.UndeployedLanding
+	undeployedErr error
 
 	mu sync.Mutex
 
@@ -2839,6 +2843,9 @@ type harness struct {
 	// local merge and no hook: a deploy that runs nothing but its terminal.
 	config    *repoconfigv1.LifecycleConfig
 	configErr error
+	// configErrAt fails the read of the checkout at its key alone, so a
+	// rebased branch's config can be unreadable while its target's is not.
+	configErrAt map[string]error
 	// hooks is the scripted hook runner, and every script hook it ran.
 	hooks *fakeHookRunner
 	// repoRoot is the harness repository's main checkout root, which is where
@@ -2975,8 +2982,11 @@ type fakeRollout struct {
 	// handbacksAtFire records how many reports had been handed back when it
 	// fired, which is how "the report is owed before the deploy" is asserted.
 	handbacksAtFire int
-	db              *fakeDB
-	detached        *fakeDetached
+	// landingsAtFire records how many landings were recorded as waiting for
+	// their deploy when it fired.
+	landingsAtFire int
+	db             *fakeDB
+	detached       *fakeDetached
 }
 
 func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
@@ -2985,11 +2995,22 @@ func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
 	t.landed = landed
 	t.db.mu.Lock()
 	t.leasesAtFire = len(t.db.releasedLeases)
+	t.landingsAtFire = len(t.db.undeployed)
 	t.db.mu.Unlock()
 	if t.detached != nil {
 		t.handbacksAtFire = len(t.detached.sent())
 	}
 	t.mu.Unlock()
+}
+
+func (d *fakeDB) RecordUndeployedLanding(_ context.Context, landing wsm.UndeployedLanding) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.undeployedErr != nil {
+		return d.undeployedErr
+	}
+	d.undeployed = append(d.undeployed, landing)
+	return nil
 }
 
 // theWorkspace is the workspace every harness merges.
@@ -3004,9 +3025,12 @@ const theRepository = ids.RepoID("repo-1")
 // exactly the config the harness holds, and nothing touches a disk.
 type harnessConfig struct{ h *harness }
 
-func (c harnessConfig) Load(string) (*repoconfigv1.LifecycleConfig, error) {
+func (c harnessConfig) Load(root string) (*repoconfigv1.LifecycleConfig, error) {
 	c.h.mu.Lock()
 	defer c.h.mu.Unlock()
+	if err := c.h.configErrAt[root]; err != nil {
+		return nil, err
+	}
 	if c.h.configErr != nil {
 		return nil, c.h.configErr
 	}
@@ -3228,6 +3252,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
+	h.briefs[BriefHookPrompt] = []string{"prompt"}
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
@@ -3917,6 +3942,22 @@ func attemptsUpTo(n int) []int {
 type fakeQueueEvents struct {
 	mu      sync.Mutex
 	changes []QueueChange
+	// subscribed is every subscription told, in order.
+	subscribed []subscribedAt
+}
+
+// subscribedAt is one Subscribed call.
+type subscribedAt struct {
+	subscriber ids.WorkspaceID
+	repo       wsm.RepoKey
+	through    uint64
+}
+
+// Subscribed records the subscription.
+func (f *fakeQueueEvents) Subscribed(subscriber ids.WorkspaceID, repo wsm.RepoKey, through uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subscribed = append(f.subscribed, subscribedAt{subscriber, repo, through})
 }
 
 // QueueChanged records CHANGE.

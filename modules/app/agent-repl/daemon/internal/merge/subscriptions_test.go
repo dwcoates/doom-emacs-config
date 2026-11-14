@@ -3,10 +3,13 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -175,6 +178,29 @@ func TestRepublishingTheSameStepReportsNothing(t *testing.T) {
 	// Assert.
 	if got := len(h.events.reported()); got != before {
 		t.Fatalf("changes = %v, want nothing more reported for the same step", h.events.kinds())
+	}
+}
+
+func TestAMergingStateWithNoStepFailsHard(t *testing.T) {
+	// Arrange: a merge in line whose facts this daemon already published.
+	h := newHarness(t)
+	rawInLine(t, h, theWorkspace)
+	h.o.publish(h.repoKey(), theWorkspace, merging(h, footer.StepTesting))
+	before := len(h.events.reported())
+
+	// Act.
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		h.o.publish(h.repoKey(), theWorkspace, merging(h, ""))
+	}()
+
+	// Assert.
+	if msg := fmt.Sprint(recovered); !strings.Contains(msg, "published a merging state with no step") || !strings.Contains(msg, `after step "testing"`) {
+		t.Fatalf("recovered = %v, want the step-less merging state named", recovered)
+	}
+	if got := len(h.events.reported()); got != before {
+		t.Fatalf("changes = %v, want no step change told", h.events.kinds())
 	}
 }
 
@@ -665,6 +691,82 @@ func TestSubscribingAgainAnswersReplaced(t *testing.T) {
 	}
 }
 
+func TestASubscriptionIsToldToTheObserverAfterTheLastChangeMade(t *testing.T) {
+	// Arrange: one change made before the subscription.
+	h := newHarness(t)
+	enqueue(t, h)
+	made := lastChange(t, h)
+
+	// Act.
+	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	// Assert.
+	h.events.mu.Lock()
+	defer h.events.mu.Unlock()
+	want := []subscribedAt{{theWorkspace, wsm.EveryRepository, made.Seq}}
+	if made.Seq == 0 || !reflect.DeepEqual(h.events.subscribed, want) {
+		t.Fatalf("subscribed = %+v, want %+v after change %d", h.events.subscribed, want, made.Seq)
+	}
+}
+
+func TestAReplacedSubscriptionIsNotToldAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	enqueue(t, h)
+
+	// Act.
+	if _, err := h.o.Subscribe(context.Background(), theWorkspace, nil); err != nil {
+		t.Fatalf("second Subscribe: %v", err)
+	}
+
+	// Assert.
+	h.events.mu.Lock()
+	defer h.events.mu.Unlock()
+	if len(h.events.subscribed) != 1 || h.events.subscribed[0].through != 0 {
+		t.Fatalf("subscribed = %+v, want the first subscription alone, its place kept", h.events.subscribed)
+	}
+}
+
+func TestEachChangeTakesTheNextPlaceInTheOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	changes := h.events.reported()
+	if len(changes) < 2 {
+		t.Fatalf("changes = %v, want several", h.events.kinds())
+	}
+	for i, change := range changes {
+		if change.Seq != uint64(i+1) {
+			t.Fatalf("change %d (%s) is at %d, want %d", i, change.Kind, change.Seq, i+1)
+		}
+	}
+}
+
+func TestADeploysEndTakesItsPlaceInTheOrder(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	before := lastChange(t, h).Seq
+
+	// Act.
+	h.o.ReportDeploy(context.Background(), h.targetD, DeployEnd{})
+
+	// Assert.
+	if got := lastChange(t, h); got.Kind != QueueChangeDeployed || got.Seq != before+1 {
+		t.Fatalf("change = %+v, want the deploy's end at %d", got, before+1)
+	}
+}
+
 func TestSubscribeRefusesAnUnknownRepository(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -773,10 +875,30 @@ func TestUnsubscribeRecordsAStoreFailure(t *testing.T) {
 	}
 }
 
-// recordingObserver records the kinds it is told.
-type recordingObserver struct{ kinds []QueueChangeKind }
+// recordingObserver records the kinds it is told, and the subscribers.
+type recordingObserver struct {
+	kinds       []QueueChangeKind
+	subscribers []ids.WorkspaceID
+}
 
 func (r *recordingObserver) QueueChanged(change QueueChange) { r.kinds = append(r.kinds, change.Kind) }
+
+func (r *recordingObserver) Subscribed(subscriber ids.WorkspaceID, _ wsm.RepoKey, _ uint64) {
+	r.subscribers = append(r.subscribers, subscriber)
+}
+
+func TestQueueObserversTellEveryObserverEachSubscription(t *testing.T) {
+	// Arrange
+	a, b := &recordingObserver{}, &recordingObserver{}
+
+	// Act
+	QueueObservers{a, b}.Subscribed("ws-a", wsm.EveryRepository, 3)
+
+	// Assert
+	if !reflect.DeepEqual(a.subscribers, []ids.WorkspaceID{"ws-a"}) || !reflect.DeepEqual(b.subscribers, []ids.WorkspaceID{"ws-a"}) {
+		t.Fatalf("told %v and %v, want the subscription told to each", a.subscribers, b.subscribers)
+	}
+}
 
 func TestQueueObserversTellEveryObserverEachChange(t *testing.T) {
 	// Arrange

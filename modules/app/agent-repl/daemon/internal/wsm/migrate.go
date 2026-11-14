@@ -90,9 +90,8 @@ func (k MigrationKind) String() string {
 }
 
 // migrations is the ordered list of every step this build can apply, ascending
-// by To. The last entry's To IS LayoutVersion; a build that bumps
-// LayoutVersion without appending its step here refuses every older file,
-// which is the defect this list exists to prevent.
+// by To, each one past the step before it. The last entry's To IS
+// LayoutVersion, which is derived from it.
 //
 // EACH STEP REUSES THE FRESH-FILE DDL rather than restating it, so a migrated
 // file and a created one cannot drift into two different shapes. The one
@@ -256,6 +255,10 @@ var migrations = []migration{
 	// the step's triggers.
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
+	// undeployed_landings: every landing in the daemon's own checkout until
+	// the deploy that carries it ends, so its notice names one-shots too.
+	// IT IS ADDITIVE: the build before it neither reads nor writes the table.
+	{To: 137, Name: "undeployed_landings", Kind: MigrationAdditive, DDL: undeployedLandingsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

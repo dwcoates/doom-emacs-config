@@ -257,7 +257,12 @@ func (s *Service) CoverOwed(ctx context.Context) error {
 		log.Error(op, "could not mark the owed landing reports covered by the deploy; they wait for the next one", dlog.WithCause(nil, err))
 		return err
 	}
-	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered})
+	landings, err := s.deps.DB.CoverUndeployedLandings(ctx)
+	if err != nil {
+		log.Error(op, "could not mark the landings waiting for a deploy covered by it; the next deploy's notice names them", dlog.WithCause(dlog.Context{"covered": covered}, err))
+		return err
+	}
+	log.Info(op, "the deploy covers the landing reports owed before it", dlog.Context{"covered": covered, "landings": landings})
 	return nil
 }
 
@@ -277,13 +282,22 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 	// subscribers are told once the reports are handed back, naming the
 	// landings it carries.
 	defer func() { s.deps.Deploys.DeployEnded(end) }()
+	// THE NOTICE NAMES EVERY LANDING THE BUILD CARRIES, whether or not a
+	// report waits on it: a one-shot's landing owes none (wsm
+	// undeployed_landings).
+	landings, err := s.deps.DB.TakeDeployedLandings(ctx, coveredOnly)
+	if err != nil {
+		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not take the landings the deploy carries; its notice names none of them", dlog.Context{"covered_only": coveredOnly}, err)
+	}
+	for _, landing := range landings {
+		end.Carried = append(end.Carried, landing.MergeName)
+	}
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {
 		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not read the owed landing reports; they stay owed", dlog.Context{"covered_only": coveredOnly}, err)
 		return
 	}
 	for _, report := range owed {
-		end.Carried = append(end.Carried, report.MergeName)
 		fields := dlog.Context{"requester": string(report.Requester), "merge_workspace": string(report.MergeWorkspace),
 			"outcome": merge.DetachedLanded.String(), "branch": report.Branch, "covered": report.Covered}
 		label, text := landedText(report.Branch, report.MergeName, report.Summary, deployedNote(deployErr))

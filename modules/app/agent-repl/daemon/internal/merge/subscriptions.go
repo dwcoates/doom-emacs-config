@@ -190,6 +190,11 @@ type QueueChange struct {
 	Queue QueueSnapshot
 	// Deploy is how the deploy ended, for QueueChangeDeployed alone.
 	Deploy DeployEnd
+	// Seq is the change's place in the one order this daemon makes queue
+	// changes and takes subscriptions in (queueEvents.seq): a subscription
+	// taken at Seq or later was taken after the change, and is never told
+	// it. Zero for a change no queue write made (a deploy's end).
+	Seq uint64
 }
 
 // DeployEnd is how one deploy of the daemon's own checkout ended.
@@ -200,8 +205,9 @@ type DeployEnd struct {
 	// Boot marks a fresh boot on a new build (the daemon restarted), rather
 	// than a deploy a running daemon carried out.
 	Boot bool
-	// Carried are the merges whose landing reports this deploy paid: the
-	// reported landings its build carries, by merge name.
+	// Carried are the landings this deploy's build carries, by the name of
+	// the workspace each merge ran in: every one, whether or not a report
+	// waited on it (wsm undeployed_landings).
 	Carried []string
 }
 
@@ -219,13 +225,17 @@ func (o *orchestrator) ReportDeploy(ctx context.Context, checkout string, end De
 	}
 	o.events.mu.Lock()
 	queue, err := o.readQueue(ctx, o.deps.DB, repo)
+	change := QueueChange{Kind: QueueChangeDeployed, Queue: queue, Deploy: end}
+	if err == nil {
+		o.events.stamp(&change)
+	}
 	o.events.mu.Unlock()
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), opQueueEvents, "could not read the deployed checkout's queue; its subscribers are not told of the deploy",
 			"the deployed checkout's queue read ended when its context was cancelled; its subscribers are not told of the deploy", dlog.Merge(fields, dlog.Context{"repo": string(repo)}), err)
 		return
 	}
-	o.tell(QueueChange{Kind: QueueChangeDeployed, Queue: queue, Deploy: end})
+	o.tell(change)
 }
 
 // QueueObserver is told every change of every merge queue this daemon makes,
@@ -234,6 +244,12 @@ func (o *orchestrator) ReportDeploy(ctx context.Context, checkout string, end De
 // own writes.
 type QueueObserver interface {
 	QueueChanged(change QueueChange)
+	// Subscribed is told every merge queue subscription taken, with the Seq
+	// of the last change made before it (THROUGH): the subscription is told
+	// only changes after it. A replaced subscription is not told again, since
+	// it stood through the changes in between. The same rules as
+	// QueueChanged's hold: it is called under the events lock.
+	Subscribed(subscriber ids.WorkspaceID, repo wsm.RepoKey, through uint64)
 }
 
 // QueueObservers tells every observer each change, in order.
@@ -243,6 +259,13 @@ type QueueObservers []QueueObserver
 func (o QueueObservers) QueueChanged(change QueueChange) {
 	for _, observer := range o {
 		observer.QueueChanged(change)
+	}
+}
+
+// Subscribed implements QueueObserver.
+func (o QueueObservers) Subscribed(subscriber ids.WorkspaceID, repo wsm.RepoKey, through uint64) {
+	for _, observer := range o {
+		observer.Subscribed(subscriber, repo, through)
 	}
 }
 
@@ -265,6 +288,18 @@ type queueEvents struct {
 	// steps is the step each merge running here last published, present
 	// only while its facts say it is merging.
 	steps map[ids.WorkspaceID]footer.MergeStep
+	// seq is the Seq of the last change this daemon made (QueueChange.Seq):
+	// every change and every subscription takes its place in one order
+	// under this lock, so a subscription is told exactly the changes made
+	// after it, however late the notifier delivers them (2026-10-31: a
+	// subscription taken just after a depletion was ended by it).
+	seq uint64
+}
+
+// stamp gives CHANGE the next place in the order. Called under the lock.
+func (e *queueEvents) stamp(change *QueueChange) {
+	e.seq++
+	change.Seq = e.seq
 }
 
 // newQueueEvents builds the empty event state.
@@ -438,6 +473,7 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 	change, ok, err := d.describe(ctx, repo, w, before)
 	if ok {
 		d.o.events.fillSteps(&change)
+		d.o.events.stamp(&change)
 	}
 	d.o.events.mu.Unlock()
 	if err != nil {
@@ -603,7 +639,9 @@ func (o *orchestrator) noteFacts(ws ids.WorkspaceID, repo wsm.RepoKey, hadFacts 
 	ctx := context.Background()
 	o.events.mu.Lock()
 	prev, had := o.events.steps[ws]
-	if facts.State != StateMerging {
+	// A FINISHING DEPLOY IS NOT IN LINE YET (finish.go): its step is no
+	// queue's change, so it is reported to no subscriber.
+	if facts.State != StateMerging || facts.Step == footer.StepFinishing {
 		delete(o.events.steps, ws)
 		o.events.mu.Unlock()
 		return
@@ -612,6 +650,14 @@ func (o *orchestrator) noteFacts(ws ids.WorkspaceID, repo wsm.RepoKey, hadFacts 
 	if !hadFacts || (had && prev == facts.Step) {
 		o.events.mu.Unlock()
 		return
+	}
+	// A STEP CHANGE NAMES THE STEP IT MOVED TO: a started merge's facts
+	// always carry one (setStep is handed its step), so a merge moving to no
+	// step is a defect in whatever published it, never a change to tell
+	// (2026-10-27: a notice said a merge "moved to its  step").
+	if facts.Step == "" {
+		o.events.mu.Unlock()
+		panic(fmt.Sprintf("merge: %s's merge in %s published a merging state with no step, after step %q", ws, repo, prev))
 	}
 	fields := dlog.Context{"repo": string(repo), "change": QueueChangeStepped.String(), "workspace": string(ws), "step": string(facts.Step)}
 	queue, err := o.readQueue(ctx, o.deps.DB, repo)
@@ -629,6 +675,7 @@ func (o *orchestrator) noteFacts(ws ids.WorkspaceID, repo wsm.RepoKey, hadFacts 
 	}
 	change := QueueChange{Kind: QueueChangeStepped, Subject: subject, Queue: queue}
 	o.events.fillSteps(&change)
+	o.events.stamp(&change)
 	o.events.mu.Unlock()
 	o.tell(change)
 }
@@ -642,9 +689,17 @@ func (o *orchestrator) Subscribe(ctx context.Context, subscriber ids.WorkspaceID
 	}
 	log := o.log(ctx, subscriber)
 	fields := dlog.Context{"subscriber": string(subscriber), "repo": string(repo), "scoped": scope != nil}
+	// THE SUBSCRIPTION TAKES ITS PLACE IN THE CHANGES' ORDER, under the
+	// events lock, so the notifier tells it only the changes after it.
+	o.events.mu.Lock()
 	replaced, err := o.deps.DB.SubscribeMergeQueue(ctx, wsm.MergeQueueSubscription{
 		Subscriber: subscriber, Repo: repo, SubscribedAt: o.deps.Now(),
 	})
+	if err == nil && !replaced {
+		o.deps.QueueEvents.Subscribed(subscriber, repo, o.events.seq)
+	}
+	fields["through"] = o.events.seq
+	o.events.mu.Unlock()
 	if errors.Is(err, wsm.ErrSubscriberClosed) {
 		log.Info(op, "refused a merge queue subscription of a closed workspace", withField(fields, "arm", ArmSubscriberClosed))
 		return false, &RefusalError{Arm: ArmSubscriberClosed, Workspace: subscriber, Reason: "a closed workspace cannot subscribe to a merge queue"}

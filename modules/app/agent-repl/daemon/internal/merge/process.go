@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -833,6 +834,9 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		if err != nil {
 			return "", nil, fmt.Errorf("merge: resolving %s: %w", r.subject.branch, err)
 		}
+		if out, err := r.branchConfigUnreadable(ctx, head); err != nil || out != nil {
+			return "", out, err
+		}
 		if attempt == fromAttempt && !resumeTests {
 			reused, err := r.reuseTested(ctx, tip, head)
 			if err != nil {
@@ -894,6 +898,41 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		}
 		r.fixesUsed = attempt + 1
 	}
+}
+
+// branchConfigUnreadable fails a merge whose rebased branch carries a
+// lifecycle config the daemon running its queue cannot read, before it is
+// tested or lands.
+//
+// THE CONFIG A LANDING COMMITS IS READ BY THIS BUILD UNTIL THE NEXT ONE
+// SERVES: a field added to repoconfig.v1.LifecycleConfig and named by the
+// repository's config in the same landing would leave this daemon refusing
+// the whole config (deploy_config_invalid) for every merge it admits after
+// it. So the field's support lands first, and a later change names it; this
+// check makes the order the gate's, not the author's memory. A branch whose
+// config is missing is refused the same way, since landing it would leave
+// the repository stating no lifecycle at all.
+func (r *run) branchConfigUnreadable(ctx context.Context, head string) (*outcome, error) {
+	const op = "daemon.merge.branch_config"
+	_, err := r.o.deps.DeployConfig.Load(r.subject.dir)
+	if err == nil {
+		return nil, nil
+	}
+	var missing *lifecycleconfig.MissingError
+	var invalid *lifecycleconfig.InvalidError
+	var why string
+	switch {
+	case errors.As(err, &missing):
+		why = fmt.Sprintf("the branch has no lifecycle config at %s, so landing it would leave the repository stating no lifecycle", missing.Path)
+	case errors.As(err, &invalid):
+		why = fmt.Sprintf("the branch's lifecycle config %s is one the daemon running this queue cannot read (%s); land the support for a new field first, and name the field in a later change", invalid.Path, invalid.Detail)
+	default:
+		return nil, fmt.Errorf("merge: reading the lifecycle config of %s at %s: %w", r.subject.dir, short(head), err)
+	}
+	r.o.log(ctx, r.ws).Warn(op, "the rebased branch's lifecycle config cannot be read by this daemon; the merge fails before its gate", dlog.Context{
+		"workspace": string(r.ws), "dir": r.subject.dir, "head": head, "error": err.Error()})
+	out := failedIn(footer.FailedOther, why)
+	return &out, nil
 }
 
 // fixesExhausted fails a merge whose last fixing attempt left suites failing:
