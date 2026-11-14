@@ -17,6 +17,9 @@
   - Escalate too when a fix has a reasonable user-facing alternative, such as a choice about how something looks or behaves for the user.
   - The user is notified, and the queue moves on.
 - Remediate everything else, in the same turn (below).
+  - A defect whose cause the logs do not show yet is remediated too: land the logging that would show it, and deploy.
+    - The next round reads what that logging recorded, and fixes the cause it shows.
+    - "It needs more logging before a fix" is never a reason to escalate.
 - A turn that ends deciding nothing lets the queue through and tells the user, so always decide.
 
 ### Remediate by itself, and deploy

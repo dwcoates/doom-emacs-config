@@ -43,8 +43,8 @@
    hidden, opus/medium, on the repository's main branch tip), compact it, and
    prompt it with the mediation brief (the window's start, the version, how to
    decide). Record `prompted_at`.
-5. DECISION. `agent-repld merge-queue mediation approve|escalate -repository
-   here` from the mediator workspace (rpc `UpdateMergeQueueMediation`). Both
+5. DECISION. `agent-repld merge-queue mediation approve|escalate -summary
+   TEXT` from the mediator workspace, whose own repository it decides (rpc `UpdateMergeQueueMediation`). Both
    clear the debt and kick the queue; escalate also notifies the user.
    Remediation needs no verb: the mediator's own deploy owes the next round.
 6. A TURN THAT DECIDES NOTHING. At the mediator's turn end, a debt still owed
