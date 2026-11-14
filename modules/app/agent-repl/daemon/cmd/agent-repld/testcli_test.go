@@ -13,7 +13,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
-	frontendv1 "agentrepl/proto/frontend/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
 )
 
@@ -46,9 +45,7 @@ func runTestCLI(t *testing.T, daemon *testRunsDaemon, args ...string) (int, stri
 		client: func(string, ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL)
 		},
-		roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
-			return roster(cliRow("ws-caller", "/wt/caller", "caller")), nil
-		},
+		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
 		getwd:   func() (string, error) { return "/wt/caller/src", nil },
 		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
 	}
@@ -127,9 +124,7 @@ func runTestCLIAcrossHandover(t *testing.T, incumbent, successor *testRunsDaemon
 		client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
 		},
-		roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
-			return roster(cliRow("ws-caller", "/wt/caller", "caller")), nil
-		},
+		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
 		getwd:   func() (string, error) { return "/wt/caller/src", nil },
 		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
 	}

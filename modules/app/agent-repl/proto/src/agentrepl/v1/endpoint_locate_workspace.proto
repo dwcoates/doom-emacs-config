@@ -1,0 +1,62 @@
+// endpoint_locate_workspace.proto — LocateWorkspace: which workspace a name or
+// a directory names. AGENT API section. The agent CLI's one resolution of its
+// WORKSPACE arguments (`here`, a directory, a name) and of the workspace it is
+// called from.
+//
+// THE REGISTRY ANSWERS, NOT THE ROSTER. The roster draws what the sidebar
+// shows, and it leaves out workspaces an agent still works in: a hidden
+// merge workspace (an async merge's, whose fixing turn must rerun its failing
+// tests), and any open workspace the sidebar does not draw. A caller resolved
+// off the roster was refused "inside no workspace the daemon serves" from its
+// own worktree (2026-10-25 to 2026-11-14). A workspace is located when it is
+// open, hidden ones included, or when the roster draws it (a recently merged
+// or closed row the sidebar still shows). Threads share their workspace's
+// directory and are never located.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message LocateWorkspaceRequest {
+  // What names the workspace. Exactly one arm is set.
+  oneof by {
+    // Every located workspace of this name.
+    LocateWorkspaceNamed named = 1;
+    // The located workspace whose worktree is exactly this directory.
+    LocateWorkspaceAt at = 2;
+    // The located workspace whose worktree contains this directory, the
+    // deepest when worktrees nest: the workspace a command run there is
+    // called from.
+    LocateWorkspaceContaining containing = 3;
+  }
+}
+message LocateWorkspaceNamed {
+  // The workspace's name, as `workspace list` shows it. Not blank.
+  string name = 1;
+}
+message LocateWorkspaceAt {
+  // An absolute directory, symlinks resolved by the caller.
+  string dir = 1;
+}
+message LocateWorkspaceContaining {
+  // An absolute directory, symlinks resolved by the caller.
+  string dir = 1;
+}
+
+// THE ARM IS THE OUTCOME. Validation failures (no arm, a blank name, a
+// relative directory) are Connect InvalidArgument, never an arm.
+message LocateWorkspaceResponse {
+  oneof result {
+    LocateWorkspaceSuccess success = 1;
+  }
+}
+// The located workspaces: none when nothing matches, one for `at` and
+// `containing` when one does, and every match for `named`, in registry order,
+// which the caller refuses as ambiguous when there is more than one.
+message LocateWorkspaceSuccess {
+  repeated workspace.v1.WorkspaceRef workspaces = 1;
+}

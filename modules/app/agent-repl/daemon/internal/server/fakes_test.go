@@ -169,6 +169,8 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// listWorkspacesErr fails ListWorkspaces.
+	listWorkspacesErr error
 	// subsections are the subsections ReadArrangement answers.
 	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
@@ -3017,6 +3019,9 @@ func (f *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (boo
 
 // ListWorkspaces answers every registered workspace, by id.
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	if d.listWorkspacesErr != nil {
+		return nil, d.listWorkspacesErr
+	}
 	out := make([]wsm.Workspace, 0, len(d.workspaces))
 	for _, ws := range d.workspaces {
 		out = append(out, ws)

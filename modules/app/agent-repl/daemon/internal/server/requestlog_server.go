@@ -895,6 +895,13 @@ func (s *requestLoggingServer) FindWorkspaces(
 	return serveUnary(s, ctx, "FindWorkspaces", req, s.server.FindWorkspaces)
 }
 
+func (s *requestLoggingServer) LocateWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.LocateWorkspaceRequest],
+) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "LocateWorkspace", req, s.server.LocateWorkspace)
+}
+
 func (s *requestLoggingServer) GetWorkspaceStatus(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.GetWorkspaceStatusRequest],

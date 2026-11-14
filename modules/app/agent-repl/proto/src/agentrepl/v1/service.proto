@@ -57,6 +57,7 @@ import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
 import "agentrepl/v1/endpoint_get_sidebar_arrangement.proto";
 import "agentrepl/v1/endpoint_get_workspace_memory.proto";
 import "agentrepl/v1/endpoint_get_workspace_status.proto";
+import "agentrepl/v1/endpoint_locate_workspace.proto";
 import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
@@ -729,6 +730,13 @@ service AgentRepl {
   // status. `workspace find` and `workspace list` both answer its records. See
   // endpoint_find_workspaces.proto.
   rpc FindWorkspaces(FindWorkspacesRequest) returns (FindWorkspacesResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Which workspace a name, a directory, or a directory inside a worktree
+  // names, read off the registry so hidden merge workspaces are found. See
+  // endpoint_locate_workspace.proto.
+  rpc LocateWorkspace(LocateWorkspaceRequest) returns (LocateWorkspaceResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }

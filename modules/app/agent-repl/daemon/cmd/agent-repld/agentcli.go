@@ -93,6 +93,8 @@ type cliDeps struct {
 	client func(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient
 	// roster reads the daemon's roster once.
 	roster func(ctx context.Context, client agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error)
+	// locate answers the workspaces a LocateWorkspace request names.
+	locate func(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error)
 	getwd  func() (string, error)
 	// mintKey mints an idempotency key.
 	mintKey func(prefix string) (string, error)
@@ -112,6 +114,7 @@ func productionCLIDeps() cliDeps {
 		},
 		client:  newDaemonClient,
 		roster:  readRoster,
+		locate:  locateWorkspaces,
 		getwd:   os.Getwd,
 		mintKey: prompthandler.MintKey,
 		now:     time.Now,
@@ -135,6 +138,21 @@ func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) 
 		return nil, err
 	}
 	return nil, errors.New("the roster stream ended before its first frame")
+}
+
+// locateWorkspaces asks the daemon which workspaces REQ names. The registry
+// answers, not the roster, so a hidden merge workspace and an open workspace
+// the sidebar does not draw are found (agentrepl.v1.LocateWorkspace).
+func locateWorkspaces(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
+	resp, err := client.LocateWorkspace(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		return nil, errors.New("the daemon's locate answer carried no outcome")
+	}
+	return success.GetWorkspaces(), nil
 }
 
 // cliCommand is one subcommand of a noun.
@@ -346,53 +364,69 @@ func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
 }
 
 // callingRef answers the ref of the workspace whose worktree contains the
-// working directory, nil when none does, with that directory.
+// working directory, nil when none does, with that directory. The registry
+// answers (locate), so a hidden merge workspace's own worktree is its caller's.
 func (c *cliCall) callingRef() (*workspacev1.WorkspaceRef, string, bool) {
 	cwd, err := c.deps.getwd()
 	if err != nil {
 		return nil, "", c.failed("read the working directory: %v", err)
 	}
-	roster, ok := c.readRoster()
+	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{
+		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: canonicalDir(cwd)}}})
 	if !ok {
 		return nil, cwd, false
 	}
-	row := callingRow(roster, canonicalDir(cwd))
-	if row == nil {
+	switch len(refs) {
+	case 0:
 		return nil, cwd, true
+	case 1:
+		return refs[0], cwd, true
 	}
-	return row.GetWorkspace().GetWorkspace(), cwd, true
+	return nil, cwd, c.failed("the daemon located %d workspaces containing %s, where a directory lies in at most one", len(refs), cwd)
 }
 
-// named answers the workspace NAME names: `here`, a directory, or a roster
-// name, which must name exactly one workspace.
+// named answers the workspace NAME names: `here`, a directory, or a name,
+// which must name exactly one workspace. The registry answers (locate), so a
+// hidden merge workspace is named by its directory or its name.
 func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	if name == here {
 		return c.calling()
 	}
-	roster, ok := c.readRoster()
+	if strings.Contains(name, "/") {
+		dir := canonicalDir(name)
+		refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}})
+		if !ok {
+			return nil, false
+		}
+		switch len(refs) {
+		case 0:
+			return nil, c.failed("the daemon holds no workspace at %s", dir)
+		case 1:
+			return refs[0], true
+		}
+		return nil, c.failed("%d workspaces are at %s", len(refs), dir)
+	}
+	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}})
 	if !ok {
 		return nil, false
 	}
-	if strings.Contains(name, "/") {
-		row := findRosterRow(roster, canonicalDir(name))
-		if row == nil {
-			return nil, c.failed("the daemon's roster holds no workspace at %s", name)
-		}
-		return row.GetWorkspace().GetWorkspace(), true
-	}
-	var found []*frontendv1.RosterRow
-	for _, row := range rosterwalk.AllRows(roster) {
-		if row.GetName().GetText() == name {
-			found = append(found, row)
-		}
-	}
-	switch len(found) {
+	switch len(refs) {
 	case 0:
-		return nil, c.failed("the daemon's roster holds no workspace named %q", name)
+		return nil, c.failed("the daemon holds no workspace named %q", name)
 	case 1:
-		return found[0].GetWorkspace().GetWorkspace(), true
+		return refs[0], true
 	}
-	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(found), name)
+	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(refs), name)
+}
+
+// locate asks the daemon which workspaces REQ names, failing the call when
+// the daemon cannot answer.
+func (c *cliCall) locate(req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, bool) {
+	refs, err := c.deps.locate(c.ctx, c.client, req)
+	if err != nil {
+		return nil, c.failed("locate the workspace: %v", err)
+	}
+	return refs, true
 }
 
 // requester answers who asks: the user when ASUSER, else the calling

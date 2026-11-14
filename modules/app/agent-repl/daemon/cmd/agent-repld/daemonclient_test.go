@@ -111,6 +111,19 @@ func (d *standingDaemon) WatchWorkspaceRoster(ctx context.Context, _ *connect.Re
 	return ctx.Err()
 }
 
+// LocateWorkspace answers the roster's rows at the request's exact directory,
+// as the registry would.
+func (d *standingDaemon) LocateWorkspace(_ context.Context, req *connect.Request[agentreplv1.LocateWorkspaceRequest]) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
+	var refs []*workspacev1.WorkspaceRef
+	for _, row := range rosterwalk.AllRows(d.roster) {
+		if ref := row.GetWorkspace().GetWorkspace(); ref.GetDir() == req.Msg.GetAt().GetDir() {
+			refs = append(refs, ref)
+		}
+	}
+	return connect.NewResponse(&agentreplv1.LocateWorkspaceResponse{Result: &agentreplv1.LocateWorkspaceResponse_Success{
+		Success: &agentreplv1.LocateWorkspaceSuccess{Workspaces: refs}}}), nil
+}
+
 func (d *standingDaemon) WatchFooter(ctx context.Context, _ *connect.Request[agentreplv1.WatchFooterRequest], out *connect.ServerStream[agentreplv1.WatchFooterResponse]) error {
 	if err := out.Send(&agentreplv1.WatchFooterResponse{
 		Footer: d.footer,
@@ -179,7 +192,7 @@ func TestReadRosterReturnsFromAStandingRosterStream(t *testing.T) {
 	got, err := readRoster(ctx, newDaemonClient(address))
 
 	// Assert.
-	if err != nil || findRosterRow(got, dir) == nil {
+	if err != nil || len(rosterwalk.AllRows(got)) != 1 || rosterwalk.AllRows(got)[0].GetWorkspace().GetWorkspace().GetDir() != dir {
 		t.Fatalf("readRoster = %v, %v; want the roster holding ws-1", got, err)
 	}
 	assertStreamEnded(t, daemon)
