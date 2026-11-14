@@ -7335,7 +7335,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * refused `already_started`: the daemon stands this shim down and starts the
    * answer on a new one.
    */
-  function promoteParked(bridge: ParkedBridge, request: shimv1.StartSessionRequest): shimv1.StartSessionResponse {
+  async function promoteParked(bridge: ParkedBridge, request: shimv1.StartSessionRequest): Promise<shimv1.StartSessionResponse> {
     const source = request.source;
     // A PAY ANSWER CARRYING A SUMMARY IS NOT THE BRIDGE'S: the bridge resumed
     // the conversation alone, so the answer starts on a new shim, which
@@ -7372,7 +7372,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       },
       "the cold gate's pay answer took the parked session; the bridge's vendor process is the session's",
     );
-    return startSessionStarted(announcedStart);
+    // THE OPENING AS IT STANDS NOW, not as it stood when the bridge opened: a
+    // remote prompt's turn adopted before the pay answer arrived is the
+    // turn in flight, and an opening from before it named none, so the
+    // daemon's watcher met that turn's terminal as a turn it never knew
+    // (0.439.1, main (vivian)).
+    const now = await reannounceStart();
+    if (now === undefined) {
+      throw new Error("shim session: a promoted parked session re-stated no opening");
+    }
+    return startSessionStarted(now);
   }
 
   /**

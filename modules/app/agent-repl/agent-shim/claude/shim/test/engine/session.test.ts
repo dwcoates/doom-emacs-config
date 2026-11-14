@@ -19020,6 +19020,33 @@ describe("HoldParkedBridge", () => {
     ).toEqual([conversationv1.PromptOrigin.REMOTE_CONTROL]);
   });
 
+  it("answers the pay StartSession with the remote prompt's turn already adopted as its turn in flight", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+    await h.engine.onSdkMessage(remoteEcho("fix the build"));
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Assert
+    const inFlight = response.result.case === "success" ? response.result.value.session?.turnInFlight?.value : undefined;
+    expect(inFlight?.startsWith("adopted-")).toBe(true);
+  });
+
+  it("answers the pay StartSession with no turn in flight when no remote prompt started one", async () => {
+    // Arrange
+    const h = parkedHarness();
+    await opened(h);
+
+    // Act
+    const response = await h.engine.startSession(resumeRequest("resume-1", pay()));
+
+    // Assert
+    expect(response.result.case === "success" ? response.result.value.session?.turnInFlight : "unanswered").toBeUndefined();
+  });
+
   it("refuses any other answer already_started, keeping the bridge", async () => {
     // Arrange
     const h = parkedHarness();
