@@ -3056,8 +3056,10 @@ the workspaces it merges.
 untracked files (ignored files excepted) staged through a PRIVATE index into
 one commit on top of HEAD -- at a create-only ref:
 `refs/agent-repl/expired/<workspace id>/<UTC instant>` for a tree a workspace
-names (the id outlives the worktree, so a reopen lists them with
-`worktreereap.PreservedRefs`), `refs/agent-repl/reaped/<worktree id>/<UTC
+names (the id outlives the worktree, so the open that restores the worktree
+from its kept branch lists them with `worktreereap.PreservedRefs` and names
+them at INFO under `daemon.workspace.open`, reapplying none; an open with no
+branch left to restore from is refused, `OpenWorkspaceWorktreeUnrestorable`), `refs/agent-repl/reaped/<worktree id>/<UTC
 instant>` for a tree no workspace names. The expiry's INFO record carries the
 workspace's id and name, the worktree, its branch, the rule
 (`expiry_rule`) and the ref. Only then is the tree
