@@ -328,3 +328,21 @@ func TestEverySuiteDeclaresItsInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestTheWifiHelperIsReadByNoSuite pins the Wi-Fi helper app's placement: no
+// suite builds or runs it, so its sources sit in ReadByNoSuite and nowhere
+// else. Unplaced, they failed every run's placement check (2026-11-14).
+func TestTheWifiHelperIsReadByNoSuite(t *testing.T) {
+	// Assert
+	if !slices.Contains(ReadByNoSuite, "wifi-helper/") {
+		t.Fatalf("ReadByNoSuite = %v, want wifi-helper/ among them", ReadByNoSuite)
+	}
+	if slices.Contains(AlwaysRunRegions, "wifi-helper/") {
+		t.Fatalf("wifi-helper/ is in AlwaysRunRegions too, but no suite reads it")
+	}
+	for _, s := range Suites {
+		if s.Reuse != nil && slices.Contains(s.Reuse.Inputs, "wifi-helper/") {
+			t.Fatalf("%s declares wifi-helper/ among its inputs, but no suite reads it", s.Name)
+		}
+	}
+}
