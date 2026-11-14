@@ -89,6 +89,12 @@ func reportCreateStage(spec CreateSpec, stage CreateStage) {
 }
 
 func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, err error) {
+	// A PANIC IN THE CREATE IS TRAPPED AT EVERY UNDO (trapCreatePanic): each
+	// undo below is deferred with a trap after it, so the panic becomes the
+	// create's error before the undo reads it, and the undo runs as it does
+	// for any failure. RunCreate records it, answers the create failed, and
+	// panics again. This first trap covers what panics before any undo.
+	defer trapCreatePanic(&err)
 	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
 
 	if err := v.validateCreate(global, spec); err != nil {
@@ -369,6 +375,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 			err = v.dropCreationJob(context.WithoutCancel(ctx), global, err, workspaceID, branch)
 		}
 	}()
+	defer trapCreatePanic(&err)
 
 	// A MERGE WORKSPACE IS CUT AT ITS FORK HEAD, never at wherever its
 	// requester's branch has moved to since: the head it records is then
@@ -416,10 +423,25 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 	// create is reported as failed, so a worktree it left would be a
 	// workspace nobody asked for and nothing would ever finish.
 	defer func() {
-		if err != nil {
-			err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
+		if err == nil {
+			return
 		}
+		// A PANIC CAN CUT A REGISTRATION AFTER ITS ROW IS WRITTEN (the roster's
+		// republish inside Register), before `made` is set: the registry,
+		// not `made`, then says whether the workspace was registered, so the
+		// undo nukes the row rather than leaving it naming a worktree it
+		// destroyed.
+		if made == nil && errors.As(err, new(*CreatePanicError)) {
+			registered, lookupErr := v.registeredByPanickedCreate(context.WithoutCancel(ctx), global, workspaceID, branch)
+			if lookupErr != nil {
+				err = errors.Join(err, lookupErr)
+				return
+			}
+			made = registered
+		}
+		err = v.unmaterialize(context.WithoutCancel(ctx), global, err, repoDir, worktreeDir, branch, made)
 	}()
+	defer trapCreatePanic(&err)
 
 	// THE WORKTREE EXISTS; everything from here to the terminal outcome —
 	// registration, a fork's record, the session bring-up and the
@@ -589,6 +611,28 @@ func (v *verbs) unmaterialize(ctx context.Context, log dlog.Logger, cause error,
 	}
 	log.Info(opCreate, "undid the failed create: its worktree, branch and registration are gone", fields)
 	return cause
+}
+
+// registeredByPanickedCreate answers the workspace a create that PANICKED
+// after materializing its worktree registered under ID, read from the
+// registry; nil when the panic came before the row was written. A read that
+// fails is recorded and answered, and the caller undoes nothing, since it
+// cannot tell what was built.
+func (v *verbs) registeredByPanickedCreate(ctx context.Context, log dlog.Logger, id wsm.WorkspaceID, branch string) (*wsm.Workspace, error) {
+	record, err := v.deps.DB.Workspace(ctx, id)
+	if errors.Is(err, wsm.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		log.Error(opCreate, "could not read whether the panicked create registered its workspace; nothing it built is undone", dlog.Context{
+			"workspace": string(id), "branch": branch, "cause": err.Error(),
+		})
+		return nil, fmt.Errorf("create %q: read the panicked create's registration: %w", branch, err)
+	}
+	log.Info(opCreate, "the panicked create had registered its workspace; the undo nukes it", dlog.Context{
+		"workspace": string(id), "branch": branch,
+	})
+	return &record, nil
 }
 
 // dropCreationJob removes the creation job of a create that failed with CAUSE
