@@ -432,14 +432,17 @@ func (s *server) responseKind(ws ids.WorkspaceID, row *frontendv1.FeedId) select
 }
 
 // selectBranch answers a click on the node LABEL of ROW's tree by asking the
-// host to open an entry answering LABEL in the composer. A click in the
-// NEWEST final response selects the entry, never the bubble (owner ruling,
-// 2026-10-25): the selection stands as it was and the success names it
-// (unchanged). A click in any OLDER response also selects that response
-// (owner request, 2026-10-30), held under the click as a bubble click's
-// selection is, so the next prompt replies to it without a separate click on
-// the bubble (branchClickSelects). selectable is false (and nothing is asked
-// of the host) for a row that is no selectable response holding the node.
+// host to open an entry answering LABEL in the composer, bound to ROW. A
+// click in the NEWEST final response selects the entry, never the bubble
+// (owner ruling, 2026-10-25): any other selection ends, so the entry binds to
+// ROW, and the success names the selection left (unchanged). A click in any
+// OLDER response, or in the newest final response whose label a later
+// response reuses, selects that response (owner request, 2026-10-30), held
+// under the click as a bubble click's selection is, so the next prompt
+// replies to it without a separate click on the bubble. A click in the
+// selected response leaves it selected. selectable is false (and nothing is
+// asked of the host) for a row that is no selectable response holding the
+// node.
 func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId, label string) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
 	if !s.deps.Feed.ResponseNode(ws, row, label) {
 		log.Info(opSelectFeedRow, "a clicked branch is not a node of a response's tree", dlog.Context{"row": row.GetValue(), "label": label})
@@ -449,35 +452,49 @@ func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 		log.Info(opSelectFeedRow, "a clicked branch's response is not selectable", dlog.Context{"row": row.GetValue(), "label": label})
 		return nil, false, nil
 	}
-	if s.branchClickSelects(ws, row) {
+	// THE ENTRY A CLICK OPENS ANSWERS THE CLICKED RESPONSE. The composer binds
+	// an entry by its one target rule (resolve/feed entryTarget): the
+	// selected response's tree, else the nearest response holding the label.
+	// So the click leaves the selection where that rule lands on ROW.
+	selected, _, held := s.currentSelection(ws)
+	switch {
+	case held && selected.GetValue() == row.GetValue():
+		log.Info(opSelectFeedRow, "asked the host to open an entry answering a branch of the selected response; the selection is unchanged",
+			dlog.Context{"row": row.GetValue(), "label": label})
+	case s.unselectedEntryAnswers(ws, row, label):
+		// THE NEWEST FINAL RESPONSE is the one a prompt with nothing
+		// selected replies to, and nothing after it holds the label, so the
+		// entry binds to it once any other selection ends.
+		if held {
+			s.endSelection(log, ws, selected, holdUnderClickNone(), "branch_click")
+		}
+		log.Info(opSelectFeedRow, "asked the host to open an entry answering a branch of the newest final response",
+			dlog.Context{"row": row.GetValue(), "label": label, "ended": selected.GetValue()})
+	default:
 		kind := s.responseKind(ws, row)
 		return s.selectClicked(ws, kind, row, holdUnderClick(), func() {
-			log.Info(opSelectFeedRow, "selected the older response a clicked branch is in, and asked the host to open an entry answering the node",
+			log.Info(opSelectFeedRow, "selected the response a clicked branch is in, and asked the host to open an entry answering the node",
 				dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
 			s.composeEntry(ws, label)
 		})
 	}
+	s.composeEntry(ws, label)
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
-	sel := s.selections[ws].GetSelection()
-	selected, _, _ := selectedRow(sel)
-	log.Info(opSelectFeedRow, "asked the host to open an entry answering a clicked branch; the selection is unchanged",
-		dlog.Context{"row": row.GetValue(), "label": label, "selected": selected.GetValue()})
-	s.composeEntry(ws, label)
-	return unchanged(sel), true, nil
+	return unchanged(s.selections[ws].GetSelection()), true, nil
 }
 
-// branchClickSelects reports whether a click on a node of ROW's tree selects
-// ROW too: ROW is not the newest final response (the one an unselected
-// prompt already replies to) and is not already selected, so the click never
-// toggles a selection off.
-func (s *server) branchClickSelects(ws ids.WorkspaceID, row *frontendv1.FeedId) bool {
+// unselectedEntryAnswers reports whether an entry answering LABEL in a prompt
+// with nothing selected binds to ROW: ROW is the newest final response (the
+// one an unselected prompt replies to) and the target rule finds no later
+// response holding LABEL.
+func (s *server) unselectedEntryAnswers(ws ids.WorkspaceID, row *frontendv1.FeedId, label string) bool {
 	finals := s.deps.Feed.FinalResponses(ws)
-	if len(finals) > 0 && finals[len(finals)-1].GetValue() == row.GetValue() {
+	if len(finals) == 0 || finals[len(finals)-1].GetValue() != row.GetValue() {
 		return false
 	}
-	selected, _, held := s.currentSelection(ws)
-	return !held || selected.GetValue() != row.GetValue()
+	targets := s.deps.Feed.ComposerTargets(ws, nil, []string{label})
+	return len(targets) == 1 && targets[0].GetValue() == row.GetValue()
 }
 
 // composeEntry pushes compose_entry onto the workspace's host stream: Emacs
