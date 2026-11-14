@@ -102,6 +102,9 @@ type Serving struct {
 	// make the h2 server write a GOAWAY on every connection it holds, the
 	// hook http2.ConfigureServer registers on it. See sendGoAway.
 	goAwaySender *http.Server
+	// startGoAway starts goAwaySender's GOAWAY: its Shutdown, and a test's
+	// failing stand-in, so the failure's record is pinned.
+	startGoAway func(context.Context) error
 
 	mu       sync.Mutex
 	inFlight int
@@ -140,6 +143,7 @@ func H2C(h http.Handler, log dlog.Logger) *Serving {
 	if err := http2.ConfigureServer(s.goAwaySender, h2); err != nil {
 		panic(fmt.Sprintf("server: configuring the h2 server for its GOAWAY: %v", err))
 	}
+	s.startGoAway = s.goAwaySender.Shutdown
 	s.handler = h2c.NewHandler(s.counted(h), h2)
 	return s
 }
@@ -165,7 +169,7 @@ func (s *Serving) sendGoAway() {
 	if s.log != nil {
 		s.log.Info("daemon.server.go_away", "refusing every new stream: a GOAWAY is sent on every h2 connection", nil)
 	}
-	if err := s.goAwaySender.Shutdown(context.Background()); err != nil {
+	if err := s.startGoAway(context.Background()); err != nil {
 		if s.log == nil {
 			panic(fmt.Sprintf("server: the h2 server's GOAWAY could not be started, and there is no logger to say so: %v", err))
 		}

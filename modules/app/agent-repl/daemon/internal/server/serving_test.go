@@ -4,12 +4,15 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/server/servertest"
+	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -682,5 +685,51 @@ func TestAConnectionOwingItsGoAwayAtTheDeadlineIsRecordedAtError(t *testing.T) {
 	if left != 1 || len(got) != 1 || got[0].Context["connections"] != 1 ||
 		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
 		t.Fatalf("GoAway() = %d, records = %+v, want 1 and one ERROR naming the one connection and the deadline", left, got)
+	}
+}
+
+// TestAGoAwayThatCannotStartIsRecordedAtError pins the GOAWAY's own failure:
+// its connections keep admitting calls the exit will cut, said loudly with
+// its cause, and with no logger to say it the daemon panics.
+func TestAGoAwayThatCannotStartIsRecordedAtError(t *testing.T) {
+	cases := []struct {
+		name   string
+		logged bool
+	}{
+		{name: "recorded at ERROR with its cause", logged: true},
+		{name: "a panic when there is no logger", logged: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			serving, _, _, _ := goAwayServing(t, log)
+			serving.startGoAway = func(context.Context) error { return errors.New("shutdown refused") }
+			if !tc.logged {
+				serving.log = nil
+			}
+
+			// Act
+			panicked := func() (p any) {
+				defer func() { p = recover() }()
+				serving.sendGoAway()
+				return nil
+			}()
+
+			// Assert
+			if !tc.logged {
+				if msg, _ := panicked.(string); !strings.Contains(msg, "shutdown refused") {
+					t.Fatalf("panic = %v, want one naming the cause", panicked)
+				}
+				return
+			}
+			if panicked != nil {
+				t.Fatalf("panicked %v, want the failure recorded", panicked)
+			}
+			got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.go_away", Level: dlog.LevelError})
+			if len(got) != 1 || got[0].Context["cause"] != "shutdown refused" {
+				t.Fatalf("records = %+v, want one ERROR naming the cause", log.Records())
+			}
+		})
 	}
 }
