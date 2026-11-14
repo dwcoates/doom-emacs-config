@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
@@ -752,34 +753,20 @@ func (v *verbs) BindViews(ctx context.Context) error {
 // deliver, and the first client would wait for a workspace to change before it
 // saw the roster at all — including the EMPTY roster, which is a roster.
 //
-// IT HOLDS THE SELECTION LOCK FROM ITS READ TO ITS INSTALL, as every whole
-// registry install does (installRegistry), so the registry it read can never
-// be installed after a select's push that came later.
+// ITS WALK HOLDS NO LOCK, AND ITS INSTALL IS EVERY OTHER'S (installRegistry).
+// The walk can restore a missing worktree (SettleMissingDirectory, a git
+// `worktree add`), and a select made meanwhile used to wait for the restore
+// behind the selection lock. The roster it installs is read after the walk,
+// so it carries every row the walk settled, and installRegistry never
+// installs a read a select overtook.
 func (v *verbs) PublishRegistry(ctx context.Context) error {
-	v.selection.Lock()
-	defer v.selection.Unlock()
 	log := v.deps.Log.Global()
 	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
 		log.Error(opRegister, "could not read the workspaces, repositories and subsections for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: read the arrangement: %w", err)
 	}
-	workspaces, repositories := arrangement.Workspaces, arrangement.Repositories
-	tasks, err := v.deps.DB.Tasks(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not list the tasks for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: list the tasks: %w", err)
-	}
-	current, err := v.deps.DB.Current(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not read the current workspace for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: read the current workspace: %w", err)
-	}
-	view, err := v.deps.DB.SidebarView(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not read the sidebar's view state for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: read the sidebar's view state: %w", err)
-	}
+	workspaces := arrangement.Workspaces
 	// Every workspace the registry already holds is bound too: a daemon that
 	// has just restarted did not run Register for the rows it inherited, and
 	// an unbound resolver cannot serve their views.
@@ -810,10 +797,11 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 				}
 				// A RECREATED WORKSPACE IS PUBLISHED OPEN: the restore bound
 				// its views and published its naming.
+				// An unrestored one was closed in WSM, which the roster
+				// installed below reads.
 				if restored {
 					continue
 				}
-				ws.Closed = true
 			}
 			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
 				"workspace": string(ws.ID), "dir": ws.Dir,
@@ -827,16 +815,15 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}
-	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
+	err = v.installRegistry(ctx, log, opRegister, func(reg sidebar.Registry) {
+		v.deps.Sidebar.SetRegistry(reg)
+		log.Debug(opRegister, "published the opening roster", dlog.Context{
+			"workspaces": len(reg.Workspaces), "repositories": len(reg.Repositories), "tasks": len(reg.Tasks),
+			"sessions": len(reg.Sessions),
+		})
+	})
 	if err != nil {
-		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: %w", err)
 	}
-	arrangement.Workspaces = workspaces
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, arrangement, tasks, sessions, current, view))
-	log.Debug(opRegister, "published the opening roster", dlog.Context{
-		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
-		"sessions": len(sessions),
-	})
 	return nil
 }

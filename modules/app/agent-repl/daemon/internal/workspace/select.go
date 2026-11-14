@@ -101,6 +101,7 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Error(opSelect, "could not record the selection", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("select %q: %w", ws, err)
 	}
+	v.selected()
 
 	// RE-SELECTION CHANGES NO VIEW. The selection instant is a roster column,
 	// so re-stamping it on the workspace already being looked at would push a
@@ -156,7 +157,7 @@ func (v *verbs) publishSelection(ctx context.Context, log dlog.Logger, sel wsm.S
 		log.Info(opSelect, "published the selection to the roster from the store's answer", fields)
 		return
 	}
-	if reg, ok := v.readRegistry(ctx, log, opSelect); ok {
+	if reg, err := v.readRegistry(ctx, log, opSelect); err == nil {
 		v.deps.Sidebar.SetRegistrySelected(reg, sel.Current, stamp)
 		logRepublished(log, opSelect, reg)
 		return
@@ -204,13 +205,14 @@ func (v *verbs) FollowStoredSelection(ctx context.Context) error {
 		log.Debug(opFollowSelected, "the roster already names the stored selection", dlog.Context{"workspace": string(shown)})
 		return nil
 	}
-	reg, readable := v.readRegistry(ctx, log, opFollowSelected)
-	if !readable {
+	reg, err := v.readRegistry(ctx, log, opFollowSelected)
+	if err != nil {
 		// readRegistry recorded why; the roster keeps the selection it had
 		// until the next commit tries again.
-		return fmt.Errorf("follow the stored selection %q: the registry could not be read", *stored)
+		return fmt.Errorf("follow the stored selection %q: %w", *stored, err)
 	}
 	v.deps.Sidebar.SetRegistrySelected(reg, *stored, sidebar.SelectStamp{})
+	v.selected()
 	previous := ""
 	if ok {
 		previous = string(shown)
@@ -335,9 +337,9 @@ func (v *verbs) BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLap
 // selection lock, so a switch the user made meanwhile stands. With no other
 // drawn tab the selection stays where it is, and the record says so.
 func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids.WorkspaceID) error {
-	reg, ok := v.readRegistry(ctx, log, opSetHidden)
-	if !ok {
-		return fmt.Errorf("land after hiding %q: the registry could not be read", hidden)
+	reg, err := v.readRegistry(ctx, log, opSetHidden)
+	if err != nil {
+		return fmt.Errorf("land after hiding %q: %w", hidden, err)
 	}
 	// THE BAR IS THE ONE THE USER SAW: a hidden workspace's tab follows its
 	// run's drawn tabs, so the candidates (and, among never-selected ones,

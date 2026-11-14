@@ -525,9 +525,9 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp S
 // a selection. The store makes at most one workspace current, and the
 // change names it, so every other row the roster holds stops being current.
 //
-// THE CALLER ORDERS IT AGAINST EVERY WHOLE REGISTRY READ (the workspace
-// verbs' selection lock): a read taken before this select's write can
-// never be installed after it.
+// THE CALLER ORDERS IT AGAINST EVERY WHOLE REGISTRY INSTALL (the workspace
+// verbs' selection lock and select count): a read taken before this select's
+// write can never be installed after it.
 func (r *resolver) SetSelection(sel wsm.Selection, stamp SelectStamp) bool {
 	ctx := stampContext(dlog.Context{"workspace_id": string(sel.Current), "again": sel.Again, "rows": len(sel.Workspaces)}, stamp)
 	applied := false
