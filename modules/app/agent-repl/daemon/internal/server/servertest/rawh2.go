@@ -61,8 +61,8 @@ func Dial(t testing.TB, addr string) *Conn {
 		t.Fatalf("write the client preface: %v", err)
 	}
 	c.write(t, func(fr *http2.Framer) error { return fr.WriteSettings() })
-	// inflight: joined: the test's cleanup closes the connection and waits
-	// for the reader to return.
+	// The test's cleanup closes the connection and waits for the reader.
+	// inflight: joined: the cleanup above waits for it.
 	go c.read()
 	return c
 }
