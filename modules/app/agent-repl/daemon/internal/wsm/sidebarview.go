@@ -34,8 +34,8 @@ CREATE TABLE sidebar_view (
 `
 
 // maturityFoldsDDL is the layout-29 addition: each maturity stage's section
-// fold, for the stage grouping retired on 2026-10-15. Nothing reads or writes
-// these columns any more (retiredGroupingColumn).
+// fold, for the stage grouping retired on 2026-10-15. Layout 137 drops them
+// (retiredColumnsDDL).
 //
 // Like the other column-add steps it is an ALTER, applied after sidebar_view
 // on a fresh file and as its own step on a migrated one.
@@ -85,9 +85,7 @@ ALTER TABLE sidebar_view ADD COLUMN merge_queue_folded INTEGER NOT NULL DEFAULT 
 // files carry it: what the open-workspaces section's repository sections
 // showed, their open workspaces (0) or their merge queues (1). THE TOGGLE WAS
 // RETIRED (owner request, 2026-10-26): the merge queues are drawn in the merge
-// queue section, so this build neither reads nor writes the column. Dropping
-// it is a breaking step (the layout-76 build names it), so it ships as its own
-// later deploy, as MigrationKind describes.
+// queue section. Layout 137 drops the column (retiredColumnsDDL).
 //
 // Like the other column-add steps it is an ALTER, applied after sidebar_view
 // on a fresh file and as its own step on a migrated one. IT IS ADDITIVE: the
@@ -123,20 +121,11 @@ UPDATE workspaces SET hidden_at = CAST(strftime('%s', 'now') AS INTEGER) * 10000
 // (workspaces.result_read_at) and the fold of the roster's viewed band
 // (sidebar_view.viewed_folded). THE BAND WAS RETIRED: viewed workspaces stay
 // in their grouping, so this build neither reads nor writes either column.
-// Dropping them is a breaking step (the layout-40 build names them), so it
-// ships as its own later deploy, as MigrationKind describes.
+// Layout 137 drops viewed_folded (retiredColumnsDDL); result_read_at stands.
 const viewedWorkspacesDDL = `
 ALTER TABLE workspaces ADD COLUMN result_read_at INTEGER;
 ALTER TABLE sidebar_view ADD COLUMN viewed_folded INTEGER NOT NULL DEFAULT 0;
 `
-
-// retiredGroupingColumn is what every sidebar_view row writes to its
-// `grouping` column. The column is NOT NULL with no default, and it is read by
-// nothing since the task and stage groupings were deleted (owner ruling,
-// 2026-10-15): the rail draws one grouping, by repository. Dropping the
-// column, with the stage folds' and tasks.folded, is a breaking step, so it
-// ships as its own later migration (MigrationKind).
-const retiredGroupingColumn = "repository"
 
 // SidebarView is the sidebar's durable view state that belongs to no row.
 type SidebarView struct {
@@ -189,8 +178,8 @@ func (s *store) SetOpenSectionFolded(ctx context.Context, folded bool) error {
 func (s *store) updateSidebarView(ctx context.Context, op string, fields dlog.Context, update string, value any) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO sidebar_view (id, merged_folded, grouping) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING`,
-			DefaultSidebarView.MergedFolded, retiredGroupingColumn); err != nil {
+			`INSERT INTO sidebar_view (id, merged_folded) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`,
+			DefaultSidebarView.MergedFolded); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, update, value)

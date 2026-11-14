@@ -256,6 +256,8 @@ var migrations = []migration{
 	// the step's triggers.
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
+	// IT IS BREAKING: see retiredColumnsDDL.
+	{To: 137, Name: "retired_columns_dropped", Kind: MigrationBreaking, DDL: retiredColumnsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
