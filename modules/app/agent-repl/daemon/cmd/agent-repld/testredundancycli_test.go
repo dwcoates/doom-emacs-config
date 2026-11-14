@@ -49,9 +49,11 @@ func runRedundancyCLI(t *testing.T, daemon *redundancyDaemon, args ...string) (i
 		client: func(string, ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL)
 		},
-		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-		getwd:   func() (string, error) { return "/wt/caller/src", nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+		locate:         locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
+		getwd:          func() (string, error) { return "/wt/caller/src", nil },
+		getenv:         noSessionEnv,
+		isWorktreeRoot: worktreeRoots("/wt/caller"),
+		mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
 	}
 	code := runNoun(context.Background(), testNoun, append([]string{"redundancy"}, args...), deps, &out, &errOut)
 	return code, out.String(), errOut.String()
@@ -231,9 +233,11 @@ func TestTestRedundancyRefusedAsHandedOverIsSentNowhereElse(t *testing.T) {
 				client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 					return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
 				},
-				locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-				getwd:   func() (string, error) { return "/wt/caller/src", nil },
-				mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+				locate:         locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
+				getwd:          func() (string, error) { return "/wt/caller/src", nil },
+				getenv:         noSessionEnv,
+				isWorktreeRoot: worktreeRoots("/wt/caller"),
+				mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
 			}
 
 			// Act

@@ -47,9 +47,11 @@ func runTestCLI(t *testing.T, daemon *testRunsDaemon, args ...string) (int, stri
 		client: func(_ string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL, options...)
 		},
-		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-		getwd:   func() (string, error) { return "/wt/caller/src", nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+		locate:         locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
+		getwd:          func() (string, error) { return "/wt/caller/src", nil },
+		getenv:         noSessionEnv,
+		isWorktreeRoot: worktreeRoots("/wt/caller"),
+		mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
 	}
 	code := runNoun(context.Background(), testNoun, args, deps, &out, &errOut)
 	return code, out.String(), errOut.String()
@@ -128,9 +130,11 @@ func runTestCLIAcrossHandover(t *testing.T, incumbent, successor *testRunsDaemon
 		client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
 		},
-		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-		getwd:   func() (string, error) { return "/wt/caller/src", nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+		locate:         locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
+		getwd:          func() (string, error) { return "/wt/caller/src", nil },
+		getenv:         noSessionEnv,
+		isWorktreeRoot: worktreeRoots("/wt/caller"),
+		mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
 	}
 	code := runNoun(context.Background(), testNoun, args, deps, &out, &errOut)
 	return code, out.String(), errOut.String()

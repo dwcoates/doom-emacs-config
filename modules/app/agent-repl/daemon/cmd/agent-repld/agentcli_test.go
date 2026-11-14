@@ -22,6 +22,7 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/prwatch"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacefind"
@@ -329,6 +330,11 @@ type cliFixture struct {
 	locateErr error
 	// stdin is what the command reads from standard input.
 	stdin string
+	// sessionDir is the session's AGENT_REPL_WORKSPACE_DIR, empty for none.
+	sessionDir string
+	// worktrees are the git worktrees' roots beyond the workspaces' own
+	// directories, every one of which is a root.
+	worktrees []string
 }
 
 // cliNow is the instant the fixture's commands read as now.
@@ -361,6 +367,15 @@ func locateOver(rows ...*frontendv1.RosterRow) func(context.Context, agentreplv1
 	}
 }
 
+// rowDirs are ROWS' workspace directories.
+func rowDirs(rows []*frontendv1.RosterRow) []string {
+	var dirs []string
+	for _, row := range rows {
+		dirs = append(dirs, row.GetWorkspace().GetWorkspace().GetDir())
+	}
+	return dirs
+}
+
 // cliRows are the fixture's rostered workspaces: the caller, its peer and two
 // twins.
 func cliRows() []*frontendv1.RosterRow {
@@ -385,10 +400,17 @@ func (f *cliFixture) run(noun string, args ...string) int {
 			}
 			return locateOver(append(cliRows(), f.unrostered...)...)(ctx, client, req)
 		},
-		getwd:   func() (string, error) { return f.cwd, nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
-		now:     func() time.Time { return cliNow },
-		stdin:   strings.NewReader(f.stdin),
+		getwd: func() (string, error) { return f.cwd, nil },
+		getenv: func(name string) string {
+			if name == shimclient.EnvWorkspaceDir {
+				return f.sessionDir
+			}
+			return ""
+		},
+		isWorktreeRoot: worktreeRoots(append(rowDirs(append(cliRows(), f.unrostered...)), f.worktrees...)...),
+		mintKey:        func(prefix string) (string, error) { return prefix + "-1", nil },
+		now:            func() time.Time { return cliNow },
+		stdin:          strings.NewReader(f.stdin),
 	}
 	return runNoun(context.Background(), noun, args, deps, &f.out, &f.errOut)
 }
@@ -2580,6 +2602,83 @@ func TestReleaseEscalationRefusesNoOneRepository(t *testing.T) {
 				t.Fatalf("exit %d, sent %d; want a usage failure and nothing sent", code, len(f.client.requests))
 			}
 		})
+	}
+}
+
+// TestHereNamesOnlyTheCallersOwnWorktree pins the 2026-11-13
+// misattribution: a subagent in an Agent-tool worktree nested under the main
+// checkout paused the queue, and the pause was recorded as the main
+// checkout's workspace's.
+func TestHereNamesOnlyTheCallersOwnWorktree(t *testing.T) {
+	const nested = "/wt/caller/.claude/worktrees/agent-1"
+	tests := []struct {
+		name           string
+		cwd            string
+		sessionDir     string
+		wantCode       int
+		wantRequesters []string
+		wantStderr     []string
+	}{
+		{name: "the exact workspace dir names it", cwd: "/wt/caller", wantCode: exitSuccess, wantRequesters: []string{"ws-caller"}},
+		{name: "a subdirectory of the workspace's own worktree names it", cwd: "/wt/caller/src/deep", wantCode: exitSuccess, wantRequesters: []string{"ws-caller"}},
+		{name: "the workspace's own worktree wins over the session's", cwd: "/wt/caller/src", sessionDir: "/wt/peer", wantCode: exitSuccess, wantRequesters: []string{"ws-caller"}},
+		{name: "a nested worktree names the session's workspace", cwd: nested + "/src", sessionDir: "/wt/peer", wantCode: exitSuccess, wantRequesters: []string{"ws-peer"},
+			wantStderr: []string{"no workspace's own worktree", "/wt/peer", shimclient.EnvWorkspaceDir}},
+		{name: "a nested worktree with no session is refused naming it", cwd: nested + "/src", wantCode: exitFailure,
+			wantStderr: []string{nested, "separate git worktree", "/wt/caller", shimclient.EnvWorkspaceDir}},
+		{name: "a session naming no served workspace is refused", cwd: nested, sessionDir: "/wt/closed", wantCode: exitFailure,
+			wantStderr: []string{"/wt/closed", "no workspace the daemon serves"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.cwd = tt.cwd
+			f.sessionDir = tt.sessionDir
+			f.worktrees = []string{nested}
+
+			// Act
+			code := f.run(mergeQueueNoun, "pause", "-repository", "here")
+
+			// Assert
+			if code != tt.wantCode {
+				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.wantCode)
+			}
+			for _, want := range tt.wantStderr {
+				if !strings.Contains(f.errOut.String(), want) {
+					t.Fatalf("stderr %q, want it to name %q", f.errOut.String(), want)
+				}
+			}
+			var requesters []string
+			for _, req := range f.client.requests {
+				if update, ok := req.(*agentreplv1.UpdateMergeQueueRequest); ok {
+					requesters = append(requesters, update.GetRequester().GetWorkspace().GetWorkspace().GetId())
+				}
+			}
+			if !slices.Equal(requesters, tt.wantRequesters) {
+				t.Fatalf("queue actions sent by %v, want %v", requesters, tt.wantRequesters)
+			}
+		})
+	}
+}
+
+// TestListFromANestedWorktreeNamesNoCaller asserts a read that marks its
+// caller answers a nested worktree's caller with no session as no
+// workspace's, never the outer one's.
+func TestListFromANestedWorktreeNamesNoCaller(t *testing.T) {
+	// Arrange
+	const nested = "/wt/caller/.claude/worktrees/agent-1"
+	f := newCLIFixture()
+	f.cwd = nested
+	f.worktrees = []string{nested}
+
+	// Act
+	code := f.run(workspaceNoun, "list")
+
+	// Assert
+	req := only[*agentreplv1.FindWorkspacesRequest](t, f)
+	if code != exitSuccess || req.GetCaller() != nil {
+		t.Fatalf("exit %d, caller %v; want no caller named", code, req.GetCaller())
 	}
 }
 
