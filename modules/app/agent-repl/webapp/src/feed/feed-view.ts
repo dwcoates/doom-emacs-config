@@ -1836,7 +1836,8 @@ export function createFeedController(
    * Ask for the page above the oldest row this feed holds; a feed holding no
    * row (its opening was served none) asks for the newest page instead. A
    * refusal is drawn beside AT, the face that asked, and every face rests,
-   * whatever the answer was (an unreadable one included).
+   * whatever the answer was (an unreadable one included). Only a page that
+   * placed rows rearms the walk's faces.
    */
   async function loadOlder(at: Control): Promise<void> {
     const oldest = oldestHeld();
@@ -1863,6 +1864,18 @@ export function createFeedController(
     }
     if (page === null) return;
     applyPage(page, "prepend");
+    // AN ANSWER THAT PLACED NO ROW IS NOT REARMED, as a refusal is not: a
+    // daemon with no source up serves nothing older and keeps the walk open,
+    // and a face still in view would ask it again at once, in a loop. The
+    // walk waits for the reader's click, or for a face to come into view anew.
+    const result = page.result;
+    if (result.case === "success" && result.value.rows.length === 0) {
+      log.info("an older page served no row; the walk waits for the reader rather than asking again", {
+        operation: "feed.load-older-empty",
+        context: { feed: feedName(), edge: walkEdge ?? "none" },
+      });
+      return;
+    }
     walkFaces.rearm();
   }
 

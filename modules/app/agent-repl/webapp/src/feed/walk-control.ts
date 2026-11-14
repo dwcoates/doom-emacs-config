@@ -20,9 +20,10 @@
  * stays in view after its page lands (the page was short) reports nothing new.
  * The feed calls `rearm` after a page lands, and the observer's fresh first
  * report for the control's current place decides whether the next page is
- * taken. A walk that FAILED is not rearmed: its refusal stands at the control
- * until the reader clicks it or scrolls it out of view and back in, so a daemon
- * that refuses is never asked again in a loop.
+ * taken. A walk that FAILED, or one answered with no row (a daemon with no
+ * source up to read older history from), is not rearmed: the control stands
+ * until the reader clicks it or scrolls it out of view and back in, so a
+ * daemon that refuses or serves nothing is never asked again in a loop.
  */
 import { createControl, type Control } from "../control.js";
 import { pageIntersectionObserver } from "../dom.js";

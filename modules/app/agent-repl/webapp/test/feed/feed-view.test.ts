@@ -3410,6 +3410,60 @@ describe("createFeedController: the walk control on sight", () => {
     observe.mockRestore();
   });
 
+  it("does not re-ask the observer after an older page that served no row, so a daemon with no source is not asked in a loop", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "success", value: page([], { hasMore: true }) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const control = controlOf(host);
+    const observe = vi.spyOn(globalThis.IntersectionObserver.prototype, "observe");
+
+    // Act
+    fireIntersection(control, true);
+    await settle();
+
+    // Assert
+    expect(observe.mock.calls.filter(([el]) => el === control)).toEqual([]);
+    observe.mockRestore();
+  });
+
+  it("records an older page that served no row", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "success", value: page([], { hasMore: true }) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    const capture = captureLogRecords();
+
+    // Act
+    fireIntersection(controlOf(host), true);
+
+    // Assert
+    const record = await forwardedRecord(capture, "feed.load-older-empty");
+    expect(record.context).toMatchObject({ edge: "hasMore" });
+  });
+
+  it("asks again when the reader clicks the control after an older page served no row", async () => {
+    // Arrange
+    const h = harness({
+      getFeedPage: () => create(GetFeedPageResponseSchema, { result: { case: "success", value: page([], { hasMore: true }) } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    fireIntersection(controlOf(host), true);
+    await settle();
+
+    // Act
+    controlOf(host).click();
+    await settle();
+
+    // Assert
+    expect(h.calls.getFeedPage).toHaveLength(2);
+  });
+
   it("re-asks the observer once a compaction's re-anchor lands", async () => {
     // Arrange
     const h = harness({
