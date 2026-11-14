@@ -185,7 +185,15 @@ func (c *client) BranchExists(ctx context.Context, repoDir, branch string) (bool
 // which is never read as either answer.
 func (c *client) RefExists(ctx context.Context, repoDir, ref string) (bool, error) {
 	const operation = "daemon.gitclient.ref_exists"
-	in, err := c.runRaw(ctx, operation, repoDir, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	return c.yesNo(ctx, operation, repoDir, "git could not tell whether a ref names a commit",
+		"rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+}
+
+// yesNo runs a git command whose exit code IS its answer: exit 0 is yes and
+// exit 1 is no. Any other exit is git failing to tell, recorded once at ERROR
+// under operation with cannotTell, and never read as either answer.
+func (c *client) yesNo(ctx context.Context, operation, dir, cannotTell string, args ...string) (bool, error) {
+	in, err := c.runRaw(ctx, operation, dir, args...)
 	if err != nil {
 		return false, err
 	}
@@ -196,7 +204,7 @@ func (c *client) RefExists(ctx context.Context, repoDir, ref string) (bool, erro
 		return false, nil
 	}
 	failure := in.fail()
-	c.log.Global().Error(operation, "git could not tell whether a ref names a commit", in.logContext())
+	c.log.Global().Error(operation, cannotTell, in.logContext())
 	return false, failure
 }
 
@@ -325,19 +333,8 @@ func lines(out string) []string {
 // which is never read as either answer.
 func (c *client) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
 	const operation = "daemon.gitclient.is_ancestor"
-	in, err := c.runRaw(ctx, operation, dir, "merge-base", "--is-ancestor", ancestor, descendant)
-	if err != nil {
-		return false, err
-	}
-	switch in.exitCode {
-	case 0:
-		return true, nil
-	case 1:
-		return false, nil
-	}
-	failure := in.fail()
-	c.log.Global().Error(operation, "git could not tell whether one commit is an ancestor of another", in.logContext())
-	return false, failure
+	return c.yesNo(ctx, operation, dir, "git could not tell whether one commit is an ancestor of another",
+		"merge-base", "--is-ancestor", ancestor, descendant)
 }
 
 // RemoveWorktree removes a worktree and leaves its branch alone.

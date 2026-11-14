@@ -337,6 +337,93 @@ func TestRefExistsThatCannotTellIsARecordedFailure(t *testing.T) {
 	}
 }
 
+// --- yesNo --------------------------------------------------------------
+
+func TestYesNoReadsTheExitCodeAsTheAnswer(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		want    bool
+	}{
+		{name: "exit 0 is yes", fixture: ok("", "probe"), want: true},
+		{name: "exit 1 is no", fixture: fails(1, "", "probe"), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			fake := newFakeGit(t, tc.fixture)
+
+			// Act.
+			got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("yesNo = %v, %v; want %v with no error", got, err, tc.want)
+			}
+			fake.assertSubject(0, "probe", "x")
+			if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.test_probe"); found {
+				t.Fatal("an answer was recorded at ERROR")
+			}
+		})
+	}
+}
+
+func TestYesNoThatCannotTellFailsAndRecordsOnce(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: broken\n", "probe"))
+
+	// Act.
+	got, err := git.(*client).yesNo(context.Background(), "daemon.gitclient.test_probe", "/repo", "cannot tell", "probe", "x")
+
+	// Assert.
+	var failure *Error
+	if got || !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("yesNo = %v, %v (%T); want false and git's exit-128 failure", got, err, err)
+	}
+	errs := dlog.FilterRecords(surfaces.records(), dlog.RecordQuery{Level: "error", Operation: "daemon.gitclient.test_probe"})
+	if len(errs) != 1 || errs[0].Message != "cannot tell" {
+		t.Fatalf("want one ERROR record carrying the cannot-tell message, got %+v", errs)
+	}
+}
+
+// TestEveryExitCodeProbeSharesYesNo pins that each exit-code probe goes
+// through yesNo: an exit git uses for neither answer must surface as a
+// recorded failure under the probe's own operation, never as yes or no.
+func TestEveryExitCodeProbeSharesYesNo(t *testing.T) {
+	probes := []struct {
+		name      string
+		operation string
+		message   string
+		call      func(Git) (bool, error)
+	}{
+		{name: "RefExists", operation: "daemon.gitclient.ref_exists", message: "git could not tell whether a ref names a commit",
+			call: func(g Git) (bool, error) { return g.RefExists(context.Background(), "/repo", "fix/parent") }},
+		{name: "IsAncestor", operation: "daemon.gitclient.is_ancestor", message: "git could not tell whether one commit is an ancestor of another",
+			call: func(g Git) (bool, error) { return g.IsAncestor(context.Background(), "/repo", "feature", "abc123") }},
+	}
+	for _, tc := range probes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, fails(2, "fatal: odd\n"))
+
+			// Act.
+			got, err := tc.call(git)
+
+			// Assert.
+			if got || err == nil {
+				t.Fatalf("%s = %v, %v; want a failure for exit 2", tc.name, got, err)
+			}
+			errs := dlog.FilterRecords(surfaces.records(), dlog.RecordQuery{Level: "error", Operation: tc.operation})
+			if len(errs) != 1 || errs[0].Message != tc.message {
+				t.Fatalf("want one ERROR %s record %q, got %+v", tc.operation, tc.message, errs)
+			}
+		})
+	}
+}
+
 // --- RepositoryOf -------------------------------------------------------
 
 func TestRepositoryOfAnswersTheMainWorktree(t *testing.T) {
