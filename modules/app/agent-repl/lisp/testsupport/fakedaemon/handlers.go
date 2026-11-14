@@ -297,14 +297,6 @@ func (s *fakeServer) UpdateQueueBypassMode(ctx context.Context, req *connect.Req
 	return handleUnary[v1.UpdateQueueBypassModeRequest, v1.UpdateQueueBypassModeResponse](ctx, s, "UpdateQueueBypassMode", req.Msg)
 }
 
-func (s *fakeServer) GatherWorkspaces(ctx context.Context, req *connect.Request[v1.GatherWorkspacesRequest]) (*connect.Response[v1.GatherWorkspacesResponse], error) {
-	return handleUnary[v1.GatherWorkspacesRequest, v1.GatherWorkspacesResponse](ctx, s, "GatherWorkspaces", req.Msg)
-}
-
-func (s *fakeServer) GetGatherStatus(ctx context.Context, req *connect.Request[v1.GetGatherStatusRequest]) (*connect.Response[v1.GetGatherStatusResponse], error) {
-	return handleUnary[v1.GetGatherStatusRequest, v1.GetGatherStatusResponse](ctx, s, "GetGatherStatus", req.Msg)
-}
-
 func (s *fakeServer) RetryVendorError(ctx context.Context, req *connect.Request[v1.RetryVendorErrorRequest]) (*connect.Response[v1.RetryVendorErrorResponse], error) {
 	return handleUnary[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse](ctx, s, "RetryVendorError", req.Msg)
 }
