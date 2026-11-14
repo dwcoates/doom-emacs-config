@@ -95,19 +95,7 @@ func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id Wo
 		return fmt.Errorf("wsm: merge request for %s: %w", id, err)
 	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		var (
-			seq   int64
-			state int64
-		)
-		err := tx.QueryRowContext(ctx, `SELECT seq, state FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&seq, &state)
-		if err == nil {
-			existing, err := positionOf(ctx, tx, key, seq)
-			if err != nil {
-				return err
-			}
-			return &MergeQueuedError{Repo: key, Workspace: id, Position: existing, State: MergeQueueState(state)}
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if err := refuseQueued(ctx, tx, key, id); err != nil {
 			return err
 		}
 		// A WORKSPACE HOLDS ONE MERGE, IN LINE OR OFF IT (offqueue.go): a

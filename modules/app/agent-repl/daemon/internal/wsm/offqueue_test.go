@@ -194,6 +194,22 @@ func TestNoQueueRowIsDeletedOutsideTheOneTransition(t *testing.T) {
 	}
 }
 
+// Every refusal of a workspace already on its queue is refuseQueued's, so a
+// request and a requeue answer the same place in the same words.
+func TestOneReadRefusesAWorkspaceAlreadyOnItsQueue(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "SELECT seq, state FROM merge_queue WHERE repo_key = ? AND workspace_id = ?")
+	callers := sourcescan.Sites(t, "refuseQueued(ctx, tx, key, id)")
+
+	// Assert
+	if want := []string{"offqueue.go"}; !slices.Equal(sites, want) {
+		t.Fatalf("a workspace's queue row is read for a refusal in %v, want only refuseQueued's %v", sites, want)
+	}
+	if want := []string{"mergequeue.go", "offqueue.go"}; !slices.Equal(callers, want) {
+		t.Fatalf("refuseQueued is called in %v, want the request and the requeue (%v)", callers, want)
+	}
+}
+
 // TestBothQueueReadersDecodeARequestThroughTheOneScan pins the shared
 // requestScan: the queue's reader and the off-queue reader answer the same
 // request for the same row.
