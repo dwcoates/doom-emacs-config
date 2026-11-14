@@ -99,8 +99,9 @@ func TestParseCmdline(t *testing.T) {
 
 // TestEveryProcFileIsParsedByProcstat pins that no other Go source of
 // agent-repl splits a /proc stat line at its command name by hand, and that
-// every source reading a cmdline decodes it here: every program reads them
-// through this package.
+// every source reading a cmdline decodes it here, and that none joins a pid
+// onto "/proc/" itself (Tree.Path does): every program reads them through
+// this package.
 func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
 	// Arrange: this package sits at agent-shim/logging/go/procstat.
 	root := filepath.Join("..", "..", "..", "..")
@@ -129,7 +130,8 @@ func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
 			return nil
 		}
 		for line := range strings.SplitSeq(text, "\n") {
-			if strings.Contains(line, "LastIndexByte(") && strings.Contains(line, "')'") {
+			if strings.Contains(line, "LastIndexByte(") && strings.Contains(line, "')'") ||
+				strings.Contains(line, `"/proc/" +`) {
 				offenders = append(offenders, path)
 				break
 			}
