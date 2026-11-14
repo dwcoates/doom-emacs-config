@@ -1,6 +1,8 @@
+//go:build darwin || linux
+
 package reap
 
-import "syscall"
+import "golang.org/x/sys/unix"
 
 // Getsid is getsid(2).
-func Getsid(pid int) (int, error) { return syscall.Getsid(pid) }
+func Getsid(pid int) (int, error) { return unix.Getsid(pid) }

@@ -205,8 +205,9 @@ func TestReapStopsEveryMemberBeforeKillingAny(t *testing.T) {
 		t.Fatalf("Reap() error = %v", err)
 	}
 
-	// Assert.
-	want := []string{"suspended (signal):501", "suspended (signal):502", "killed:501", "killed:502"}
+	// Assert: each signal by the platform's own name for it.
+	stop, kill := syscall.SIGSTOP.String(), syscall.SIGKILL.String()
+	want := []string{stop + ":501", stop + ":502", kill + ":501", kill + ":502"}
 	got := slices.Clone(table.signals)
 	slices.Sort(got[2:])
 	if !slices.Equal(got, want) {
