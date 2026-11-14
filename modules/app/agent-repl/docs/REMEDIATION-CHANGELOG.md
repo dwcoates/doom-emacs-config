@@ -1448,3 +1448,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-13 merge-queue-stall-triage (landed in queue bypass mode): a new daemon's merge queue no longer flips between served and held while it reads the predecessor's handover manifest, which suspended running merges
 - 2026-11-13 merge-queue-stall-triage (landed in queue bypass mode): deploy mediation: merge-queue status says mediating while the mediator holds the queue; a fresh mediator is not compacted; a mediation no configured mediator decides is released
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): deploy mediator: remediates a cause it cannot see yet by landing logging, and its brief names the verb it has
+- 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): merge queue: every conflicted merge resolves its conflicts at once; only the head and fixing tests hold one merge each
