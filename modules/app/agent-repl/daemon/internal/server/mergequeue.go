@@ -191,9 +191,6 @@ func awaitedSlotOf(repair sidebar.QueueRepair) *agentreplv1.MergeQueueStatusEntr
 	case sidebar.RepairAwaitingFixingTests:
 		return &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot{Slot: &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests{
 			FixingTests: &agentreplv1.MergeQueueStatusEntryStageFixingTests{}}}
-	case sidebar.RepairAwaitingResolvingConflicts:
-		return &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot{Slot: &agentreplv1.MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts{
-			ResolvingConflicts: &agentreplv1.MergeQueueStatusEntryStageResolvingConflicts{}}}
 	}
 	panic(fmt.Sprintf("server: a merge out of line awaits no repair slot (%s)", repair))
 }

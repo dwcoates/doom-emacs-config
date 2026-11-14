@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestMergeSlotsOf(t *testing.T) {
 		{name: "a merge resolving conflicts holds the resolving slot", rows: []row{admitted, conflicts}, want: []MergeSlot{MergeSlotHead, MergeSlotResolvingConflicts}},
 		{name: "a waiting merge's conflict holds the resolving slot", rows: []row{admitted, waitingConflicts}, want: []MergeSlot{MergeSlotHead, MergeSlotResolvingConflicts}},
 		{name: "a second merge fixing tests awaits the slot the first holds", rows: []row{admitted, tests, tests}, want: []MergeSlot{MergeSlotHead, MergeSlotFixingTests, MergeSlotAwaitingFixingTests}},
-		{name: "a conflict of either origin awaits the resolving slot another holds", rows: []row{conflicts, waitingConflicts, conflicts}, want: []MergeSlot{MergeSlotResolvingConflicts, MergeSlotAwaitingResolvingConflicts, MergeSlotAwaitingResolvingConflicts}},
+		{name: "every conflict of either origin resolves at once", rows: []row{conflicts, waitingConflicts, conflicts}, want: []MergeSlot{MergeSlotResolvingConflicts, MergeSlotResolvingConflicts, MergeSlotResolvingConflicts}},
 		{name: "the two repair slots are held at once", rows: []row{queued, tests, conflicts, queued}, want: []MergeSlot{MergeSlotHead, MergeSlotFixingTests, MergeSlotResolvingConflicts, MergeSlotWaiting}},
 	}
 	for _, tc := range cases {
@@ -359,14 +360,13 @@ func TestTheThreeSlotMigrationRestampsEveryQueue(t *testing.T) {
 	}
 }
 
-func TestTheStoreRefusesASecondHolderOfAnActiveSlot(t *testing.T) {
+func TestTheStoreRefusesASecondHolderOfAnExclusiveSlot(t *testing.T) {
 	cases := []struct {
 		name string
 		slot MergeSlot
 	}{
 		{name: "a second head", slot: MergeSlotHead},
 		{name: "a second merge fixing tests", slot: MergeSlotFixingTests},
-		{name: "a second merge resolving conflicts", slot: MergeSlotResolvingConflicts},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -423,5 +423,86 @@ func TestSlotsOfDerivesWhatTheStoreStamps(t *testing.T) {
 		if got[i] != entry.Slot {
 			t.Fatalf("SlotsOf = %v, want the stamped slot %s for %s", got, entry.Slot, entry.Workspace)
 		}
+	}
+}
+
+func TestExclusive(t *testing.T) {
+	cases := []struct {
+		slot MergeSlot
+		want bool
+	}{
+		{slot: MergeSlotNone},
+		{slot: MergeSlotWaiting},
+		{slot: MergeSlotHead, want: true},
+		{slot: MergeSlotFixingTests, want: true},
+		{slot: MergeSlotResolvingConflicts},
+		{slot: MergeSlotAwaitingFixingTests},
+	}
+	for _, tc := range cases {
+		t.Run(tc.slot.String(), func(t *testing.T) {
+			// Act
+			got := tc.slot.Exclusive()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("%s.Exclusive() = %v, want %v", tc.slot, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheMigrationLetsEveryConflictedMergeResolveAtOnce(t *testing.T) {
+	// Arrange: a layout-132 file with one merge holding the resolving slot and
+	// one awaiting it (slot 7).
+	path := fixtureAt(t, 132)
+	for i := 0; i < 6; i++ {
+		execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at, place)
+			VALUES (?, 'repo-1', ?, ?, ?, 'master', 0, 0, 0, 1, ?)`,
+			fmt.Sprintf("ws-%d", i), fmt.Sprintf("/tmp/conflicted-%d", i), fmt.Sprintf("ws-%d", i), fmt.Sprintf("ws-%d", i), 60+i)
+	}
+	for i, slot := range []MergeSlot{MergeSlotResolvingConflicts, MergeSlot(7)} {
+		execRaw(t, path, `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since, source_pre_deploy_hooks, source_post_deploy_hooks)
+			VALUES ('/tmp/repo-1', ?, ?, ?, 7, ?, ?, 1, '[]', '[]')`,
+			fmt.Sprintf("ws-%d", i), i+1, int(MergeRemediating), int(MergeAsideConflicts), int(slot))
+	}
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-132 database: %v", err)
+	}
+	defer handle.Close()
+	s := handle.(*store)
+
+	// Assert: both resolve, and a second resolver is no second holder.
+	if n := scalar[int](t, s, `SELECT count(*) FROM merge_queue WHERE slot = 5`); n != 2 {
+		t.Fatalf("%d merges resolve conflicts, want both", n)
+	}
+	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since, source_pre_deploy_hooks, source_post_deploy_hooks)
+		VALUES ('/tmp/repo-1', 'ws-3', 3, ?, 7, ?, 5, 1, '[]', '[]')`, int(MergeRemediating), int(MergeAsideConflicts)); err != nil {
+		t.Fatalf("a third merge resolving conflicts was refused: %v", err)
+	}
+	if _, err := s.db().ExecContext(context.Background(), `INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, aside, slot, slot_since, source_pre_deploy_hooks, source_post_deploy_hooks)
+		VALUES ('/tmp/repo-1', 'ws-4', 4, ?, 7, ?, 4, 1, '[]', '[]'), ('/tmp/repo-1', 'ws-5', 5, ?, 7, ?, 4, 1, '[]', '[]')`,
+		int(MergeRemediating), int(MergeAsideTests), int(MergeRemediating), int(MergeAsideTests)); err == nil {
+		t.Fatal("two holders of the fixing-tests slot were accepted")
+	}
+}
+
+func TestTheOneHolderIndexCoversExactlyTheExclusiveSlots(t *testing.T) {
+	// Arrange
+	var exclusive []string
+	for slot := MergeSlotNone; slot <= MergeSlotAwaitingFixingTests; slot++ {
+		if slot.valid() && slot.Exclusive() {
+			exclusive = append(exclusive, fmt.Sprint(int(slot)))
+		}
+	}
+
+	// Act
+	want := "WHERE slot IN (" + strings.Join(exclusive, ", ") + ");"
+
+	// Assert
+	if !strings.Contains(mergeQueueConflictsUnslottedDDL, want) {
+		t.Fatalf("the one-holder index does not cover exactly the exclusive slots: want %q in\n%s", want, mergeQueueConflictsUnslottedDDL)
 	}
 }

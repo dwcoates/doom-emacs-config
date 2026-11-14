@@ -82,10 +82,6 @@ func TestGetMergeQueueStatusListsEachRepairSlotAfterTheLine(t *testing.T) {
 			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool {
 				return s.GetAwaitingRepair().GetSlot().GetFixingTests() != nil && s.GetAwaitingRepair().GetPlace() == 1
 			}},
-		{name: "a merge awaiting the resolving-conflicts slot", repair: sidebar.RepairAwaitingResolvingConflicts,
-			want: func(s *agentreplv1.MergeQueueStatusEntryStage) bool {
-				return s.GetAwaitingRepair().GetSlot().GetResolvingConflicts() != nil && s.GetAwaitingRepair().GetPlace() == 1
-			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

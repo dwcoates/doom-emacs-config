@@ -277,9 +277,9 @@ func TestRecoverRemediatingRefusesARecordOfAnotherRepair(t *testing.T) {
 	}
 }
 
-func TestRecoverRemediatingRegistersAWaitingMergesConflictWithNoRecord(t *testing.T) {
+func TestRecoverRemediatingArmsAWaitingMergesConflictWithNoRecord(t *testing.T) {
 	// Arrange
-	h := resumeWorld(t, []wsm.MergeQueueEntry{remediatingEntry("ws-c", wsm.MergeAsideWaitingConflicts, wsm.MergeSlotAwaitingResolvingConflicts)})
+	h := resumeWorld(t, []wsm.MergeQueueEntry{remediatingEntry("ws-c", wsm.MergeAsideWaitingConflicts, wsm.MergeSlotResolvingConflicts)})
 	entry := h.db.queues[h.repoKey()][0]
 
 	// Act
@@ -292,8 +292,8 @@ func TestRecoverRemediatingRegistersAWaitingMergesConflictWithNoRecord(t *testin
 	h.o.mu.Lock()
 	rem := h.o.remediating["ws-c"]
 	h.o.mu.Unlock()
-	if rem == nil || !rem.waiting || rem.armed {
-		t.Fatalf("remediation = %+v, want a waiting merge's conflict registered, unarmed while it awaits the slot", rem)
+	if rem == nil || !rem.waiting || !rem.armed {
+		t.Fatalf("remediation = %+v, want a waiting merge's conflict registered and resolving at once, as every conflict does", rem)
 	}
 }
 
@@ -359,7 +359,6 @@ func TestRosterRepair(t *testing.T) {
 		{slot: wsm.MergeSlotFixingTests, want: sidebar.RepairFixingTests},
 		{slot: wsm.MergeSlotResolvingConflicts, want: sidebar.RepairResolvingConflicts},
 		{slot: wsm.MergeSlotAwaitingFixingTests, want: sidebar.RepairAwaitingFixingTests},
-		{slot: wsm.MergeSlotAwaitingResolvingConflicts, want: sidebar.RepairAwaitingResolvingConflicts},
 	}
 	for _, tc := range cases {
 		t.Run(tc.slot.String(), func(t *testing.T) {

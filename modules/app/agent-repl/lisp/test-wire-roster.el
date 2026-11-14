@@ -2069,7 +2069,7 @@ queue, nothing off the queue, no deploy mediation."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
                  '(:head nil :waiting nil :paused nil :fixing-tests nil :resolving-conflicts nil
-                         :awaiting-fixing-tests nil :awaiting-resolving-conflicts nil :github nil
+                         :awaiting-fixing-tests nil :github nil
                          :off-queue nil :mediation nil))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-off-its-queue-decodes-its-cause-and-controls ()
@@ -2151,23 +2151,28 @@ is checking the deploy."
                   :head-since-ms)
                  7)))
 
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-each-repair-slot-and-its-line ()
-  "A queue carries the one merge holding each repair slot and the merges
-awaiting each, each with when it took its slot or began awaiting it."
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-decodes-each-repair-and-its-line ()
+  "A queue carries the one merge fixing tests, every merge resolving
+conflicts, and the merges awaiting the fixing-tests slot, each with when it
+stepped aside."
   (let ((queue (agent-repl-test-wire-roster--decode
                 #'agent-repl-wire-decode-roster-repo-merge-queue
                 (format (concat "{\"fixingTests\":{\"subject\":%s,\"sinceMs\":\"1\"},"
-                                "\"resolvingConflicts\":{\"subject\":%s,\"sinceMs\":\"2\"},"
-                                "\"awaitingFixingTests\":[{\"subject\":%s,\"sinceMs\":\"3\"}],"
-                                "\"awaitingResolvingConflicts\":[{\"subject\":%s,\"sinceMs\":\"4\"},{\"subject\":%s,\"sinceMs\":\"5\"}]}")
+                                "\"resolvingConflicts\":[{\"subject\":%s,\"sinceMs\":\"2\"},{\"subject\":%s,\"sinceMs\":\"3\"}],"
+                                "\"awaitingFixingTests\":[{\"subject\":%s,\"sinceMs\":\"4\"}]}")
                         agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject
-                        agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject
-                        agent-repl-test-wire-roster--subject))))
+                        agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject))))
     (should (equal (list (plist-get (plist-get queue :fixing-tests) :since-ms)
-                         (plist-get (plist-get queue :resolving-conflicts) :since-ms)
-                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-fixing-tests))
-                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-resolving-conflicts)))
-                   '(1 2 (3) (4 5))))))
+                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :resolving-conflicts))
+                         (mapcar (lambda (m) (plist-get m :since-ms)) (plist-get queue :awaiting-fixing-tests)))
+                   '(1 (2 3) (4))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-refuses-the-retired-awaiting-resolving-list ()
+  "Tag 10, the merges awaiting the resolving-conflicts slot, is retired:
+a queue carrying it is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-repo-merge-queue "{\"awaitingResolvingConflicts\":[]}")
+                 '("RosterRepoMergeQueue" awaitingResolvingConflicts "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-refuses-the-retired-remediating-list ()
   "Tag 5, the uncapped list of merges out of line, is retired: a queue

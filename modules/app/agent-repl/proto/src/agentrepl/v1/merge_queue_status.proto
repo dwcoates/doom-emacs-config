@@ -227,13 +227,15 @@ message MergeQueueStatusEntryStageAwaitingRepair {
 }
 // WHICH REPAIR SLOT A MERGE AWAITS. THE ARM IS THE SLOT.
 message MergeQueueStatusEntryStageAwaitingRepairSlot {
-  // The fixing-tests slot, or the resolving-conflicts slot.
+  // The fixing-tests slot, the one repair slot a merge waits for. Tag 2
+  // (`resolving_conflicts`) is RETIRED (owner ruling, 2026-11-14):
+  // resolving conflicts takes no slot, so no merge waits for it.
   oneof slot {
     // Its whole suite failed at the head; it fixes its tests once granted.
     MergeQueueStatusEntryStageFixingTests fixing_tests = 1;
-    // Its rebase conflicted; it resolves the conflicts once granted.
-    MergeQueueStatusEntryStageResolvingConflicts resolving_conflicts = 2;
   }
+  reserved 2;
+  reserved "resolving_conflicts";
 }
 // Waiting. No fields.
 message MergeQueueStatusEntryStageWaiting {}

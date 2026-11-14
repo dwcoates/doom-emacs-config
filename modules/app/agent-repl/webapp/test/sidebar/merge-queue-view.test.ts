@@ -73,7 +73,6 @@ import {
   fixingTestsMerge,
   resolvingConflictsMerge,
   awaitingFixingTestsMerge,
-  awaitingResolvingConflictsMerge,
   sidebarContext,
   waitingMerge,
 } from "./harness.js";
@@ -136,13 +135,12 @@ describe("pausedText", () => {
 });
 
 describe("queueLine", () => {
-  it("lists the head, then each repair slot and the merges awaiting each, then each waiting, by workspace", () => {
+  it("lists the head, then fixing tests, every merge resolving conflicts and those awaiting fixing tests, then each waiting, by workspace", () => {
     const queue = create(RosterRepoMergeQueueSchema, {
       head: mergingHead("w1"),
       fixingTests: fixingTestsMerge("w2", NOW),
-      resolvingConflicts: resolvingConflictsMerge("w3", NOW),
-      awaitingFixingTests: [awaitingFixingTestsMerge("w4", NOW)],
-      awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w5", NOW)],
+      resolvingConflicts: [resolvingConflictsMerge("w3", NOW), resolvingConflictsMerge("w4", NOW)],
+      awaitingFixingTests: [awaitingFixingTestsMerge("w5", NOW)],
       waiting: [waitingMerge("w6"), waitingMerge("w7")],
     });
     expect(queueLine(queue)).toBe("w1 w2 w3 w4 w5 w6 w7");
@@ -324,15 +322,14 @@ describe("drawRosterMergeQueue", () => {
     expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), sc, "queue")).toThrow(MalformedView);
   });
 
-  it("draws the merges out of line between the head and the waiting merges: each slot's holder, then those awaiting each", () => {
+  it("draws the merges out of line between the head and the waiting merges: fixing tests, every merge resolving conflicts, then those awaiting fixing tests", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
         head: mergingHead("w1"),
         fixingTests: fixingTestsMerge("w2", NOW),
-        resolvingConflicts: resolvingConflictsMerge("w3", NOW),
-        awaitingFixingTests: [awaitingFixingTestsMerge("w4", NOW)],
-        awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w5", NOW)],
+        resolvingConflicts: [resolvingConflictsMerge("w3", NOW), resolvingConflictsMerge("w4", NOW)],
+        awaitingFixingTests: [awaitingFixingTestsMerge("w5", NOW)],
         waiting: [waitingMerge("w6")],
       }),
       sc,
@@ -353,7 +350,7 @@ describe("drawRosterMergeQueue", () => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(
       create(RosterRepoMergeQueueSchema, {
-        resolvingConflicts: resolvingConflictsMerge("w2", NOW),
+        resolvingConflicts: [resolvingConflictsMerge("w2", NOW)],
       }),
       sc,
       "queue",
@@ -422,9 +419,8 @@ describe("drawRosterMergeQueue", () => {
 
   it.each([
     ["the fixing-tests slot's holder", { fixingTests: fixingTestsMerge("w2", NOW) }, "fixing tests"],
-    ["the resolving-conflicts slot's holder", { resolvingConflicts: resolvingConflictsMerge("w2", NOW) }, "resolving conflicts"],
+    ["a merge resolving conflicts", { resolvingConflicts: [resolvingConflictsMerge("w2", NOW)] }, "resolving conflicts"],
     ["a merge awaiting the fixing-tests slot", { awaitingFixingTests: [awaitingFixingTestsMerge("w2", NOW)] }, "waiting to fix tests"],
-    ["a merge awaiting the resolving-conflicts slot", { awaitingResolvingConflicts: [awaitingResolvingConflictsMerge("w2", NOW)] }, "waiting to resolve conflicts"],
   ])("says the repair after the name of %s", (_name, slots, want) => {
     const { sc } = daemon();
     const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), ...slots }), sc, "queue");

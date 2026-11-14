@@ -212,7 +212,7 @@ func TestAWaitingMergesConflictStepsItAsideForTheResolvingSlot(t *testing.T) {
 	}
 }
 
-func TestASecondWaitingConflictWaitsForTheResolvingSlot(t *testing.T) {
+func TestEveryWaitingConflictResolvesAtOnce(t *testing.T) {
 	// Arrange: C's and D's commits both conflict with what the head lands.
 	w := newWaitingWorld(t, "ws-c", "ws-d")
 	w.git.conflict("w1", "a1", "x.go")
@@ -222,15 +222,14 @@ func TestASecondWaitingConflictWaitsForTheResolvingSlot(t *testing.T) {
 	w.land(t)
 	w.awaitPass(t)
 
-	// Assert
-	if got := w.entryOf(t, "ws-c").Slot; got != wsm.MergeSlotResolvingConflicts {
-		t.Fatalf("C = %s, want it holding the resolving-conflicts slot", got)
+	// Assert: neither waits for the other (owner ruling, 2026-11-14).
+	for _, ws := range []ids.WorkspaceID{"ws-c", "ws-d"} {
+		if got := w.entryOf(t, ws).Slot; got != wsm.MergeSlotResolvingConflicts {
+			t.Fatalf("%s = %s, want it resolving its conflicts", ws, got)
+		}
 	}
-	if got := w.entryOf(t, "ws-d").Slot; got != wsm.MergeSlotAwaitingResolvingConflicts {
-		t.Fatalf("D = %s, want it awaiting the resolving-conflicts slot", got)
-	}
-	if !w.recorded("info", "daemon.merge.rebase_waiting", "waits out of line for the resolving-conflicts slot") {
-		t.Fatal("the wait for the slot was not recorded")
+	if w.recorded("info", "daemon.merge.rebase_waiting", "waits out of line for the resolving-conflicts slot") {
+		t.Fatal("a conflicted merge was recorded waiting for another to resolve")
 	}
 }
 

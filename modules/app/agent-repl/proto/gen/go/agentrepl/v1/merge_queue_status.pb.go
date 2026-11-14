@@ -1597,12 +1597,13 @@ func (x *MergeQueueStatusEntryStageAwaitingRepair) GetPlace() uint32 {
 // WHICH REPAIR SLOT A MERGE AWAITS. THE ARM IS THE SLOT.
 type MergeQueueStatusEntryStageAwaitingRepairSlot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The fixing-tests slot, or the resolving-conflicts slot.
+	// The fixing-tests slot, the one repair slot a merge waits for. Tag 2
+	// (`resolving_conflicts`) is RETIRED (owner ruling, 2026-11-14):
+	// resolving conflicts takes no slot, so no merge waits for it.
 	//
 	// Types that are valid to be assigned to Slot:
 	//
 	//	*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests
-	//	*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts
 	Slot          isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot `protobuf_oneof:"slot"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1654,15 +1655,6 @@ func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) GetFixingTests() *MergeQu
 	return nil
 }
 
-func (x *MergeQueueStatusEntryStageAwaitingRepairSlot) GetResolvingConflicts() *MergeQueueStatusEntryStageResolvingConflicts {
-	if x != nil {
-		if x, ok := x.Slot.(*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts); ok {
-			return x.ResolvingConflicts
-		}
-	}
-	return nil
-}
-
 type isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot interface {
 	isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot()
 }
@@ -1672,15 +1664,7 @@ type MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests struct {
 	FixingTests *MergeQueueStatusEntryStageFixingTests `protobuf:"bytes,1,opt,name=fixing_tests,json=fixingTests,proto3,oneof"`
 }
 
-type MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts struct {
-	// Its rebase conflicted; it resolves the conflicts once granted.
-	ResolvingConflicts *MergeQueueStatusEntryStageResolvingConflicts `protobuf:"bytes,2,opt,name=resolving_conflicts,json=resolvingConflicts,proto3,oneof"`
-}
-
 func (*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests) isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot() {
-}
-
-func (*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts) isMergeQueueStatusEntryStageAwaitingRepairSlot_Slot() {
 }
 
 // Waiting. No fields.
@@ -1850,11 +1834,10 @@ const file_agentrepl_v1_merge_queue_status_proto_rawDesc = "" +
 	",MergeQueueStatusEntryStageResolvingConflicts\"\x90\x01\n" +
 	"(MergeQueueStatusEntryStageAwaitingRepair\x12N\n" +
 	"\x04slot\x18\x01 \x01(\v2:.agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlotR\x04slot\x12\x14\n" +
-	"\x05place\x18\x02 \x01(\rR\x05place\"\xff\x01\n" +
+	"\x05place\x18\x02 \x01(\rR\x05place\"\xab\x01\n" +
 	",MergeQueueStatusEntryStageAwaitingRepairSlot\x12X\n" +
-	"\ffixing_tests\x18\x01 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageFixingTestsH\x00R\vfixingTests\x12m\n" +
-	"\x13resolving_conflicts\x18\x02 \x01(\v2:.agentrepl.v1.MergeQueueStatusEntryStageResolvingConflictsH\x00R\x12resolvingConflictsB\x06\n" +
-	"\x04slot\"#\n" +
+	"\ffixing_tests\x18\x01 \x01(\v23.agentrepl.v1.MergeQueueStatusEntryStageFixingTestsH\x00R\vfixingTestsB\x06\n" +
+	"\x04slotJ\x04\b\x02\x10\x03R\x13resolving_conflicts\"#\n" +
 	"!MergeQueueStatusEntryStageWaiting\"N\n" +
 	"!MergeQueueStatusEntryStageRunning\x12)\n" +
 	"\x10step_description\x18\x01 \x01(\tR\x0fstepDescriptionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1939,12 +1922,11 @@ var file_agentrepl_v1_merge_queue_status_proto_depIdxs = []int32{
 	24, // 31: agentrepl.v1.MergeQueueStatusEntryStage.awaiting_repair:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
 	25, // 32: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair.slot:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
 	22, // 33: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
-	23, // 34: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.resolving_conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_merge_queue_status_proto_init() }
@@ -1982,7 +1964,6 @@ func file_agentrepl_v1_merge_queue_status_proto_init() {
 	}
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[25].OneofWrappers = []any{
 		(*MergeQueueStatusEntryStageAwaitingRepairSlot_FixingTests)(nil),
-		(*MergeQueueStatusEntryStageAwaitingRepairSlot_ResolvingConflicts)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

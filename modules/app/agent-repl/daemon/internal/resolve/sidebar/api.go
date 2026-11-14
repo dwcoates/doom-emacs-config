@@ -376,12 +376,11 @@ const (
 	RepairNone QueueRepair = iota
 	// RepairFixingTests holds the fixing-tests slot.
 	RepairFixingTests
-	// RepairResolvingConflicts holds the resolving-conflicts slot.
+	// RepairResolvingConflicts resolves its rebase's conflicts, beside every
+	// other merge doing so.
 	RepairResolvingConflicts
 	// RepairAwaitingFixingTests awaits the fixing-tests slot.
 	RepairAwaitingFixingTests
-	// RepairAwaitingResolvingConflicts awaits the resolving-conflicts slot.
-	RepairAwaitingResolvingConflicts
 )
 
 // String names the repair in log records.
@@ -395,8 +394,6 @@ func (r QueueRepair) String() string {
 		return "resolving_conflicts"
 	case RepairAwaitingFixingTests:
 		return "awaiting_fixing_tests"
-	case RepairAwaitingResolvingConflicts:
-		return "awaiting_resolving_conflicts"
 	}
 	return fmt.Sprintf("repair(%d)", int(r))
 }

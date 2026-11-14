@@ -10,12 +10,13 @@ import (
 )
 
 // MergeSlot is the place a merge queue entry holds, as the roster draws it.
-// A queue has THREE ACTIVE SLOTS, each held by at most one merge (owner
+// A queue has TWO EXCLUSIVE SLOTS, each held by at most one merge (owner
 // rulings, 2026-11-11): the HEAD, the one merge that runs the test gate and
-// lands; FIXING TESTS, the one merge fixing its failing tests out of line;
-// and RESOLVING CONFLICTS, the one merge resolving its rebase's conflicts out
-// of line. A merge that steps aside while its repair slot is taken AWAITS
-// that slot, in order, and is granted it by the holder's release.
+// lands, and FIXING TESTS, the one merge fixing its failing tests out of
+// line. A merge that steps aside for its tests while that slot is taken
+// AWAITS it, in order, and is granted it by the holder's release. RESOLVING
+// CONFLICTS is held by every merge resolving its rebase's conflicts out of
+// line, all at once, and nobody awaits it (owner ruling, 2026-11-14).
 //
 // THE SLOT IS DERIVED, NEVER CHOSEN (mergeSlotsOf), from the entry's state,
 // its aside reason and its order, and stored beside the moment the entry took
@@ -28,6 +29,8 @@ type MergeSlot int
 // The merge slots. The zero value is the slot of a merge only requested, in
 // nobody's line. Slot 3 is retired: it was the slot of a merge racing behind
 // the head, which no queue has any more, and layout 126 restamped every row.
+// Slot 7 is retired: it was a merge awaiting the resolving-conflicts slot,
+// which nobody awaits any more, and layout 133 restamped every row.
 const (
 	// MergeSlotNone is a merge only requested: in no line.
 	MergeSlotNone MergeSlot = 0
@@ -38,15 +41,12 @@ const (
 	MergeSlotHead MergeSlot = 2
 	// MergeSlotFixingTests is the merge fixing its failing tests out of line.
 	MergeSlotFixingTests MergeSlot = 4
-	// MergeSlotResolvingConflicts is the merge resolving its rebase's
-	// conflicts out of line.
+	// MergeSlotResolvingConflicts is a merge resolving its rebase's
+	// conflicts out of line, beside every other merge doing so.
 	MergeSlotResolvingConflicts MergeSlot = 5
 	// MergeSlotAwaitingFixingTests is a merge out of line waiting for the
 	// fixing-tests slot.
 	MergeSlotAwaitingFixingTests MergeSlot = 6
-	// MergeSlotAwaitingResolvingConflicts is a merge out of line waiting for
-	// the resolving-conflicts slot.
-	MergeSlotAwaitingResolvingConflicts MergeSlot = 7
 )
 
 // String names the slot in log records and errors.
@@ -64,8 +64,6 @@ func (s MergeSlot) String() string {
 		return "resolving_conflicts"
 	case MergeSlotAwaitingFixingTests:
 		return "awaiting_fixing_tests"
-	case MergeSlotAwaitingResolvingConflicts:
-		return "awaiting_resolving_conflicts"
 	}
 	return fmt.Sprintf("slot(%d)", int(s))
 }
@@ -73,23 +71,29 @@ func (s MergeSlot) String() string {
 func (s MergeSlot) valid() bool {
 	switch s {
 	case MergeSlotNone, MergeSlotWaiting, MergeSlotHead, MergeSlotFixingTests, MergeSlotResolvingConflicts,
-		MergeSlotAwaitingFixingTests, MergeSlotAwaitingResolvingConflicts:
+		MergeSlotAwaitingFixingTests:
 		return true
 	}
 	return false
 }
 
-// Active reports whether the slot is one of the queue's three active slots:
-// the head, fixing tests, or resolving conflicts. The roster draws a slot
-// clock for each.
+// Active reports whether the slot is worked in: the head, fixing tests, or
+// resolving conflicts. The roster draws a slot clock for each.
 func (s MergeSlot) Active() bool {
 	return s == MergeSlotHead || s == MergeSlotFixingTests || s == MergeSlotResolvingConflicts
+}
+
+// Exclusive reports whether at most one merge of a queue holds the slot:
+// the head and fixing tests. Resolving conflicts is held by every merge
+// resolving at once.
+func (s MergeSlot) Exclusive() bool {
+	return s == MergeSlotHead || s == MergeSlotFixingTests
 }
 
 // Awaiting reports whether the slot is a merge out of line waiting for a
 // repair slot another merge holds.
 func (s MergeSlot) Awaiting() bool {
-	return s == MergeSlotAwaitingFixingTests || s == MergeSlotAwaitingResolvingConflicts
+	return s == MergeSlotAwaitingFixingTests
 }
 
 // MergeAside is why a remediating entry is out of line: the repair it waits
@@ -132,13 +136,14 @@ func (a MergeAside) String() string {
 func (a MergeAside) valid() bool { return a >= MergeAsideNone && a <= MergeAsideWaitingConflicts }
 
 // slots answers the repair slot a remediating entry of this aside holds, and
-// the one it awaits while another holds that.
+// the one it awaits while another holds that: MergeSlotNone for a repair any
+// number of merges work at once (resolving conflicts), which nobody awaits.
 func (a MergeAside) slots() (holds, awaits MergeSlot, err error) {
 	switch a {
 	case MergeAsideTests:
 		return MergeSlotFixingTests, MergeSlotAwaitingFixingTests, nil
 	case MergeAsideConflicts, MergeAsideWaitingConflicts:
-		return MergeSlotResolvingConflicts, MergeSlotAwaitingResolvingConflicts, nil
+		return MergeSlotResolvingConflicts, MergeSlotNone, nil
 	}
 	return 0, 0, fmt.Errorf("wsm: a remediating merge queue entry carries the aside %s, which names no repair slot", a)
 }
@@ -175,6 +180,19 @@ UPDATE merge_queue SET
 // most one holder: a write that would record a second fails its transaction.
 const mergeQueueOneHolderDDL = `
 CREATE UNIQUE INDEX merge_queue_one_slot_holder ON merge_queue (repo_key, slot) WHERE slot IN (2, 4, 5);
+`
+
+// mergeQueueConflictsUnslottedDDL is the layout-133 step: resolving
+// conflicts takes no exclusive slot (owner ruling, 2026-11-14). Every merge
+// awaiting the resolving-conflicts slot (7) holds it (5), and the one-holder
+// index covers the head (2) and fixing tests (4) only.
+//
+// IT IS BREAKING: the build before it reads two holders of slot 5 as a
+// repair slot with a second merge at work, and fails hard on it.
+const mergeQueueConflictsUnslottedDDL = `
+DROP INDEX merge_queue_one_slot_holder;
+UPDATE merge_queue SET slot = 5 WHERE slot = 7;
+CREATE UNIQUE INDEX merge_queue_one_slot_holder ON merge_queue (repo_key, slot) WHERE slot IN (2, 4);
 `
 
 // mergeQueueReturnedDDL is the layout-125 addition, kept for the migration
@@ -248,9 +266,9 @@ type slotRow struct {
 
 // mergeSlotsOf answers the slot each of ROWS (one queue, in sequence order)
 // holds: the first entry in line is the head and every other one in line
-// waits; the first remediating entry of each repair holds that repair's slot
-// and every later one awaits it, in sequence order; a requested one holds
-// none. It is the ONE definition of a slot, so the store's stamp, the
+// waits; the first remediating entry fixing tests holds that slot and every
+// later one awaits it, in sequence order; every entry resolving conflicts
+// holds the resolving-conflicts slot; a requested one holds none. It is the ONE definition of a slot, so the store's stamp, the
 // roster's line and the grant of a released repair slot can never disagree.
 //
 // THE GRANT IS FIFO BY CONSTRUCTION: a merge steps aside to the back of the
@@ -273,7 +291,7 @@ func mergeSlotsOf(rows []slotRow) ([]MergeSlot, error) {
 			if err != nil {
 				return nil, fmt.Errorf("%w (workspace %s)", err, row.workspace)
 			}
-			if held[holds] {
+			if awaits != MergeSlotNone && held[holds] {
 				out[i] = awaits
 				continue
 			}

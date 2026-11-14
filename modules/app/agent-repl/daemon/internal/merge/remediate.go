@@ -354,9 +354,11 @@ func (o *orchestrator) registerRemediation(ws ids.WorkspaceID, rem *remediation)
 // resolving rebase (startResolving). It is called after every write that can
 // grant a slot, so a release is acted on as it is made.
 //
-// A SECOND HOLDER IS A DEFECT, never a second wait: the store refuses one
-// (wsm's one-holder index), and an arming that finds a wait already armed
-// for another merge of the same slot records it at ERROR and fails hard.
+// A SECOND HOLDER OF AN EXCLUSIVE SLOT IS A DEFECT, never a second wait: the
+// store refuses one (wsm's one-holder index), and an arming that finds a wait
+// already armed for another merge of fixing tests records it at ERROR and
+// fails hard. Every merge resolving conflicts is armed at once (owner ruling,
+// 2026-11-14).
 func (o *orchestrator) armRepairs(ctx context.Context, repo wsm.RepoKey) {
 	const op = opRemediate
 	// THE DAEMON'S EXIT STARTS NO REPAIR: the boot's take-back arms the slot
@@ -387,6 +389,9 @@ func (o *orchestrator) armRepairs(ctx context.Context, repo wsm.RepoKey) {
 			continue
 		}
 		for other, standing := range o.remediating {
+			if !entry.Slot.Exclusive() {
+				break
+			}
 			if other == entry.Workspace || standing.repo != repo || !standing.armed {
 				continue
 			}

@@ -435,7 +435,7 @@ func QueueState(queue merge.QueueSnapshot) string {
 func awaitingRepair(outOfLine []merge.QueueMember) int {
 	n := 0
 	for _, member := range outOfLine {
-		if member.Repair == sidebar.RepairAwaitingFixingTests || member.Repair == sidebar.RepairAwaitingResolvingConflicts {
+		if member.Repair == sidebar.RepairAwaitingFixingTests {
 			n++
 		}
 	}

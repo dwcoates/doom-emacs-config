@@ -212,9 +212,10 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 }
 
 // drawRepair draws ENTRY, a merge out of line drawn as SUB, at the repair
-// slot it holds or awaits. A repair slot holds one merge (wsm's one-holder
-// index): a second holder is a defect, recorded at ERROR and not drawn, and
-// so is a merge out of line naming no repair slot.
+// slot it holds or awaits. The fixing-tests slot holds one merge (wsm's
+// one-holder index): a second holder is a defect, recorded at ERROR and not
+// drawn, and so is a merge out of line naming no repair slot. Every merge
+// resolving conflicts is drawn, in order (owner ruling, 2026-11-14).
 func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *frontendv1.RosterMergeQueueSubject, log dlog.Logger) {
 	const op = "daemon.sidebar.merge_queue"
 	since := entry.SlotSince.UnixMilli()
@@ -231,15 +232,9 @@ func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *fro
 		}
 		out.FixingTests = &frontendv1.RosterMergeQueueFixingTests{Subject: sub, SinceMs: since}
 	case RepairResolvingConflicts:
-		if out.ResolvingConflicts != nil {
-			second(out.ResolvingConflicts.Subject)
-			return
-		}
-		out.ResolvingConflicts = &frontendv1.RosterMergeQueueResolvingConflicts{Subject: sub, SinceMs: since}
+		out.ResolvingConflicts = append(out.ResolvingConflicts, &frontendv1.RosterMergeQueueResolvingConflicts{Subject: sub, SinceMs: since})
 	case RepairAwaitingFixingTests:
 		out.AwaitingFixingTests = append(out.AwaitingFixingTests, &frontendv1.RosterMergeQueueAwaitingFixingTests{Subject: sub, SinceMs: since})
-	case RepairAwaitingResolvingConflicts:
-		out.AwaitingResolvingConflicts = append(out.AwaitingResolvingConflicts, &frontendv1.RosterMergeQueueAwaitingResolvingConflicts{Subject: sub, SinceMs: since})
 	default:
 		log.Error(op, "a merge out of line names no repair slot, so it is not drawn", dlog.Context{
 			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(),

@@ -1035,20 +1035,24 @@ message RosterRepoMergeQueue {
   // fixing turn ends, when it returns next after the merge being worked on.
   // Drawn under the head, reading "fixing tests".
   optional RosterMergeQueueFixingTests fixing_tests = 7;
-  // THE RESOLVING-CONFLICTS SLOT (owner ruling, 2026-11-11): the one merge
+  // Tags 8 (`resolving_conflicts`, the one merge holding the
+  // resolving-conflicts slot) and 10 (`awaiting_resolving_conflicts`, the
+  // merges waiting for it) are RETIRED (owner ruling, 2026-11-14): resolving
+  // conflicts takes no slot, so every conflicted merge resolves at once and
+  // none waits.
+  reserved 8, 10;
+  reserved "awaiting_resolving_conflicts";
+  // EVERY MERGE RESOLVING CONFLICTS (owner ruling, 2026-11-14): each merge
   // whose rebase conflicted -- at the head, or in the background while it
-  // waited -- and whose session resolves the conflicts out of line. UNSET
-  // while nobody holds the slot. Drawn under the head, reading "resolving
-  // conflicts".
-  optional RosterMergeQueueResolvingConflicts resolving_conflicts = 8;
+  // waited -- and whose session resolves the conflicts out of line, all at
+  // once, in the order each stepped aside. Drawn under the head, each
+  // reading "resolving conflicts".
+  repeated RosterMergeQueueResolvingConflicts resolving_conflicts = 13;
   // Every merge out of line WAITING FOR THE FIXING-TESTS SLOT, in the order
   // it will be granted it: the holder's return grants the slot to the first.
   // Nothing is handed their sessions while they wait. Empty while the slot is
   // free (a merge stepping aside to a free slot takes it at once).
   repeated RosterMergeQueueAwaitingFixingTests awaiting_fixing_tests = 9;
-  // Every merge out of line WAITING FOR THE RESOLVING-CONFLICTS SLOT, in the
-  // order it will be granted it. Empty while the slot is free.
-  repeated RosterMergeQueueAwaitingResolvingConflicts awaiting_resolving_conflicts = 10;
   // THE GITHUB MERGE QUEUE'S SHARE: every workspace of this repository whose
   // owned pull request stands in a GitHub merge queue, in the order GitHub
   // will merge them. The daemon follows each owned pull request's queue and
@@ -1155,21 +1159,13 @@ message RosterMergeQueueFixingTests {
 // The merge holding the resolving-conflicts slot.
 message RosterMergeQueueResolvingConflicts {
   RosterMergeQueueSubject subject = 1;
-  // WHEN THE MERGE TOOK THE SLOT, epoch ms, as RosterMergeQueueFixingTests
-  // .since_ms is. Never zero.
+  // WHEN THE MERGE STEPPED ASIDE TO RESOLVE, epoch ms, as
+  // RosterMergeQueueFixingTests.since_ms is. Never zero.
   int64 since_ms = 2;
 }
 
 // One merge out of line waiting for the fixing-tests slot.
 message RosterMergeQueueAwaitingFixingTests {
-  RosterMergeQueueSubject subject = 1;
-  // When it stepped aside to wait for the slot, epoch ms: its durable slot
-  // moment. Its clock ticks from here. Never zero.
-  int64 since_ms = 2;
-}
-
-// One merge out of line waiting for the resolving-conflicts slot.
-message RosterMergeQueueAwaitingResolvingConflicts {
   RosterMergeQueueSubject subject = 1;
   // When it stepped aside to wait for the slot, epoch ms: its durable slot
   // moment. Its clock ticks from here. Never zero.
