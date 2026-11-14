@@ -1962,6 +1962,25 @@ the web host loads it at once rather than in a lane\='s turn
 \(`agent-repl--webhost-replay')."
   (eq :adopt (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :claim)))
 
+(defun agent-repl-host-handover-awaits-page-p (ws)
+  "Non-nil while the attached successor\='s rendezvous still awaits WS\='s page.
+THE RENDEZVOUS AWAITS A WORKSPACE NOT YET ADOPTED ONTO THE SUCCESSOR: its
+expected participants are the streams that stood on WS at the
+announcement, carried to its transfer (`daemon/internal/rollout/adopt.go',
+`rendezvousCall'), so WS\='s page is awaited while WS still stands on the
+outgoing daemon, while its transfer waits for the successor\='s acceptance
+\(`:adopt-pending'), and while its adopt is unanswered
+\(`agent-repl-host-adopting-p').  A workspace adopted onto the successor
+has had its rendezvous, and a page with no successor attached is awaited by
+nobody.  Regression, 2026-11-10: every page was held while ANY successor
+was attached, and a stalled handover grew the loaded pages to 78."
+  (let ((successor (agent-repl-link-successor)))
+    (and successor
+         (or (agent-repl-host-adopting-p ws)
+             (plist-get (agent-repl-host--entry ws) :adopt-pending)
+             (not (eq (agent-repl-host--recorded-conn ws) successor)))
+         t)))
+
 (defun agent-repl-host--reattach-current-p (ws token)
   "Return non-nil when TOKEN is WS\='s newest reattach walk."
   (equal token (plist-get (plist-get (agent-repl-host--entry ws) :reattach) :token)))

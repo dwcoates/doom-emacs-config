@@ -54,8 +54,11 @@
 (defvar agent-repl-test-pu--removals nil
   "Each page removal the pass made, newest first: (WS . UNLOADING).")
 
-(defvar agent-repl-test-pu--successor nil
-  "The handover successor the harness's link answers, nil outside a handover.")
+(defvar agent-repl-test-pu--awaited nil
+  "The workspaces whose page a handover\='s rendezvous awaits, per the harness.")
+
+(defvar agent-repl-test-pu--debug nil
+  "The debug records the current scenario made, newest first.")
 
 (defvar agent-repl-test-pu--scheduled nil
   "Every judgement a switch away scheduled, newest first: (SECONDS FUNCTION ARG TIMER).")
@@ -96,7 +99,8 @@
            (agent-repl-test-pu--current nil)
            (agent-repl-test-pu--opening nil)
            (agent-repl-test-pu--residencies nil)
-           (agent-repl-test-pu--successor nil)
+           (agent-repl-test-pu--awaited nil)
+           (agent-repl-test-pu--debug nil)
            (agent-repl-test-pu--last-known nil)
            (agent-repl-test-pu--removals nil)
            (agent-repl-test-pu--scheduled nil)
@@ -127,7 +131,10 @@
                        ((symbol-function 'agent-repl--ws-current-name)
                         (lambda () agent-repl-test-pu--current))
                        ((symbol-function 'agent-repl--webhost-id) (lambda (ws) (concat "id-" ws)))
-                       ((symbol-function 'agent-repl-link-successor) (lambda () agent-repl-test-pu--successor))
+                       ((symbol-function 'agent-repl-host-handover-awaits-page-p)
+                        (lambda (ws) (and (member ws agent-repl-test-pu--awaited) t)))
+                       ((symbol-function 'agent-repl--log)
+                        (agent-repl-test--record-into agent-repl-test-pu--debug))
                        ((symbol-function 'agent-repl-host-last-known-page)
                         (lambda (ws) (cdr (assoc ws agent-repl-test-pu--last-known))))
                        ((symbol-function 'agent-repl-host-report-page-residency)
@@ -841,25 +848,49 @@ of 111 reports timed out in the deploy of 2026-11-17 23:52."
     ;; Assert
     (should (equal agent-repl-test-pu--removals '(("alpha" . unloading))))))
 
-(ert-deftest agent-repl-test-pu-nothing-is-unloaded-during-a-handover ()
-  "While a handover's successor is attached, no page is unloaded: the successor awaits it."
+(ert-deftest agent-repl-test-pu-a-page-a-handover-awaits-is-not-unloaded ()
+  "A page the successor\='s rendezvous awaits is not unloaded."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (setq agent-repl-test-pu--status '(("alpha" . :inactive))
-          agent-repl-test-pu--successor 'successor-connection)
+          agent-repl-test-pu--awaited '("alpha"))
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
 
+(ert-deftest agent-repl-test-pu-a-page-held-for-a-handover-is-recorded ()
+  "A page kept for the handover\='s rendezvous says so at debug."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :inactive))
+          agent-repl-test-pu--awaited '("alpha"))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (member "elisp.page-unload.held-for-handover ws=alpha" agent-repl-test-pu--debug))))
+
+(ert-deftest agent-repl-test-pu-a-page-no-handover-awaits-is-unloaded-during-one ()
+  "During a handover a page its rendezvous does not await is unloaded as ever.
+2026-11-10: every page was held while any successor was attached, and a
+stalled handover grew the loaded pages to 78."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--status '(("alpha" . :inactive) ("beta" . :inactive))
+          agent-repl-test-pu--awaited '("beta"))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
 (ert-deftest agent-repl-test-pu-a-drop-a-handover-overtook-is-kept ()
-  "A drop whose report lands after a handover's successor attached keeps the page."
+  "A drop whose report lands after a handover came to await the page keeps it."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (setq agent-repl-test-pu--status '(("alpha" . :severed))
           agent-repl-test-pu--report 'pending)
     (agent-repl-page-unload-pass)
-    (setq agent-repl-test-pu--successor 'successor-connection)
+    (setq agent-repl-test-pu--awaited '("alpha"))
     ;; Act
     (funcall (nth 1 (car agent-repl-test-pu--pending)))
     ;; Assert

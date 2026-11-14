@@ -5423,6 +5423,61 @@ Registering on a daemon that is handing over would only fail."
         ;; Assert
         (should-not (agent-repl-host-adopting-p "ws-1"))))))
 
+;; Which pages an attached successor's rendezvous awaits: those of the
+;; workspaces not yet adopted onto it (2026-11-10: every page was held
+;; while any successor was attached).
+
+(ert-deftest agent-repl-test-host-handover-awaits-no-page-without-a-successor ()
+  "With no successor attached no rendezvous awaits any page."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should-not (agent-repl-host-handover-awaits-page-p "ws-1"))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-a-workspace-on-the-incumbent ()
+  "A workspace still standing on the outgoing daemon has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:58175"))
+    ;; Act / Assert
+    (should (agent-repl-host-handover-awaits-page-p "ws-1"))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-an-adopt-in-flight ()
+  "A workspace whose adopt onto the successor is unanswered has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:61043"))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-host--put "ws-1" :conn successor)
+      (cl-letf (((symbol-function 'agent-repl-host--adopt-onto) #'ignore))
+        (agent-repl-host--reattach "ws-1" successor :adopt "transferred"))
+      ;; Act / Assert
+      (should (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-the-page-of-an-adopt-pending-acceptance ()
+  "A transfer waiting for the successor\='s acceptance has its page awaited."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" successor)
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-host--put "ws-1" :adopt-pending t)
+      ;; Act / Assert
+      (should (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
+(ert-deftest agent-repl-test-host-handover-awaits-no-page-of-an-adopted-workspace ()
+  "A workspace adopted onto the successor has had its rendezvous."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:58175")))
+      (agent-repl-test-host--subscribe "ws-1" successor)
+      (setq agent-repl-test-host--successor successor)
+      ;; Act / Assert
+      (should-not (agent-repl-host-handover-awaits-page-p "ws-1")))))
+
 (ert-deftest agent-repl-test-host-planned-end-during-an-adopt-registers-nothing ()
   "A planned end while an adopt onto the successor is in flight calls nothing."
   (agent-repl-test-host--with-harness
