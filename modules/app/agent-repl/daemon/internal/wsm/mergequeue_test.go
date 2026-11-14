@@ -2400,7 +2400,7 @@ func TestStepAsideMergeAnswersTheSlotItTook(t *testing.T) {
 		{name: "a merge fixing tests takes the free fixing slot", aside: MergeAsideTests, want: MergeSlotFixingTests},
 		{name: "a merge resolving conflicts takes the free resolving slot", aside: MergeAsideConflicts, want: MergeSlotResolvingConflicts},
 		{name: "a merge fixing tests awaits the fixing slot another holds", before: []MergeAside{MergeAsideTests}, aside: MergeAsideTests, want: MergeSlotAwaitingFixingTests},
-		{name: "a merge resolving conflicts awaits the resolving slot another holds", before: []MergeAside{MergeAsideConflicts}, aside: MergeAsideConflicts, want: MergeSlotAwaitingResolvingConflicts},
+		{name: "a merge resolving conflicts resolves beside another that resolves", before: []MergeAside{MergeAsideConflicts}, aside: MergeAsideConflicts, want: MergeSlotResolvingConflicts},
 		{name: "a merge fixing tests takes its slot while another resolves conflicts", before: []MergeAside{MergeAsideConflicts}, aside: MergeAsideTests, want: MergeSlotFixingTests},
 		{name: "a merge resolving conflicts takes its slot while another fixes tests", before: []MergeAside{MergeAsideTests}, aside: MergeAsideConflicts, want: MergeSlotResolvingConflicts},
 	}

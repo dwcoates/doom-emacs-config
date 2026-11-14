@@ -403,11 +403,12 @@ export interface QueueRepair {
 }
 
 /**
- * The queue's merges out of line, in the order they are drawn (owner ruling,
- * 2026-11-11): the merge holding the fixing-tests slot, the one holding the
- * resolving-conflicts slot, then the merges awaiting each slot, each line in
- * the order it is granted it. A queue holds at most one merge per slot, which
- * its shape already says (frontend.v1.RosterRepoMergeQueue.fixing_tests).
+ * The queue's merges out of line, in the order they are drawn (owner rulings,
+ * 2026-11-11 and 2026-11-14): the merge holding the fixing-tests slot, every
+ * merge resolving conflicts (all at once, in the order each stepped aside),
+ * then the merges awaiting the fixing-tests slot, in the order each is
+ * granted it. The queue holds at most one merge fixing tests, which its shape
+ * already says (frontend.v1.RosterRepoMergeQueue.fixing_tests).
  */
 export function repairsOf(u: RosterRepoMergeQueue, path = "queue"): QueueRepair[] {
   const out: QueueRepair[] = [];
@@ -415,17 +416,13 @@ export function repairsOf(u: RosterRepoMergeQueue, path = "queue"): QueueRepair[
     out.push({ subject: u.fixingTests.subject, sinceMs: u.fixingTests.sinceMs, words: "fixing tests",
       title: "fixing its tests out of line", path: `${path}.fixing_tests` });
   }
-  if (u.resolvingConflicts !== undefined) {
-    out.push({ subject: u.resolvingConflicts.subject, sinceMs: u.resolvingConflicts.sinceMs, words: "resolving conflicts",
-      title: "resolving its conflicts out of line", path: `${path}.resolving_conflicts` });
-  }
+  u.resolvingConflicts.forEach((r, index) => {
+    out.push({ subject: r.subject, sinceMs: r.sinceMs, words: "resolving conflicts",
+      title: "resolving its conflicts out of line", path: `${path}.resolving_conflicts[${index}]` });
+  });
   u.awaitingFixingTests.forEach((a, index) => {
     out.push({ subject: a.subject, sinceMs: a.sinceMs, words: "waiting to fix tests",
       title: "waiting out of line for the fixing-tests slot", path: `${path}.awaiting_fixing_tests[${index}]` });
-  });
-  u.awaitingResolvingConflicts.forEach((a, index) => {
-    out.push({ subject: a.subject, sinceMs: a.sinceMs, words: "waiting to resolve conflicts",
-      title: "waiting out of line for the resolving-conflicts slot", path: `${path}.awaiting_resolving_conflicts[${index}]` });
   });
   return out;
 }

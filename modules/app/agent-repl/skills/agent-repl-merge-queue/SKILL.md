@@ -186,29 +186,29 @@ Either kind:
   is left to finish. A queue already paused is not refused. On resume, each
   interrupted step is prompted again without spending an attempt.
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
-- Each queue holds at most three active merges, one per slot: the HEAD (the
-  one merge running the test gate and landing), FIXING TESTS (one merge fixing
-  its failing tests out of line) and RESOLVING CONFLICTS (one merge resolving
-  its rebase's conflicts out of line).
+- Each queue has two exclusive slots, each held by at most one merge: the
+  HEAD (the one merge running the test gate and landing) and FIXING TESTS (one
+  merge fixing its failing tests out of line).
+  - RESOLVING CONFLICTS takes no slot: every merge whose rebase conflicted
+    resolves its conflicts out of line at once, and none waits for another.
 - A merge whose next step waits on an agent turn of its own STEPS ASIDE, for
   one of two reasons: its WHOLE test suite finished with any failure (its
   session fixes them), or its rebase onto the target's tip hit conflicts (its
   session resolves them).
   - The head steps aside for either reason; no other member steps aside.
-  - It takes the repair's slot, or waits for it out of line, in order, when
-    another merge holds it; the next merge in line takes the head at once.
-  - Its repairing brief is delivered once it holds the slot, not before
-    stepping aside; nothing is handed its session until the holder's return
-    grants it the slot.
+  - A merge fixing tests takes the fixing-tests slot, or waits for it out of
+    line, in order, when another merge holds it; a merge resolving conflicts
+    starts at once. The next merge in line takes the head at once.
+  - A merge waiting for the fixing-tests slot has its brief delivered once it
+    holds the slot, not before; nothing is handed its session until the
+    holder's return grants it the slot.
   - `merge-queue status` lists it at stage `fixing_tests`,
-    `resolving_conflicts` or `awaiting_repair` (with the slot awaited and its
-    1-based place). The sidebar draws the holders "fixing tests" and
-    "resolving conflicts", and the waiters "waiting to fix tests" and
-    "waiting to resolve conflicts", under the head.
+    `resolving_conflicts` or `awaiting_repair` (the fixing-tests slot awaited,
+    and its 1-based place). The sidebar draws "fixing tests", each
+    "resolving conflicts", and each "waiting to fix tests", under the head.
   - A waiting merge's background rebase runs git only: a conflict aborts the
-    rebase and steps the merge aside for the resolving-conflicts slot
-    (holding it or waiting for it); the slot's holder then runs the resolving
-    rebase in its session and returns to the line.
+    rebase and steps the merge aside to resolve; it runs the resolving
+    rebase in its session at once and returns to the line.
   - Once its turn ends it goes back in line at the first waiting place, next
     after the merge being worked on, never evicting it. It then rebases onto
     the tip and reruns its whole suite when it heads the queue.

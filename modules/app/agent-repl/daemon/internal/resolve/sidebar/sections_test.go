@@ -1737,9 +1737,12 @@ func TestAMergeOutOfLineIsDrawnAtTheRepairSlotItHoldsOrAwaits(t *testing.T) {
 	}{
 		{name: "the merge holding the fixing-tests slot", repair: sidebar.RepairFixingTests,
 			want: func(q *frontendv1.RosterRepoMergeQueue) string { return q.GetFixingTests().GetSubject().GetName() }},
-		{name: "the merge holding the resolving-conflicts slot", repair: sidebar.RepairResolvingConflicts,
+		{name: "a merge resolving conflicts", repair: sidebar.RepairResolvingConflicts,
 			want: func(q *frontendv1.RosterRepoMergeQueue) string {
-				return q.GetResolvingConflicts().GetSubject().GetName()
+				if len(q.GetResolvingConflicts()) != 1 {
+					return ""
+				}
+				return q.GetResolvingConflicts()[0].GetSubject().GetName()
 			}},
 		{name: "a merge awaiting the fixing-tests slot", repair: sidebar.RepairAwaitingFixingTests,
 			want: func(q *frontendv1.RosterRepoMergeQueue) string {
@@ -1747,13 +1750,6 @@ func TestAMergeOutOfLineIsDrawnAtTheRepairSlotItHoldsOrAwaits(t *testing.T) {
 					return ""
 				}
 				return q.GetAwaitingFixingTests()[0].GetSubject().GetName()
-			}},
-		{name: "a merge awaiting the resolving-conflicts slot", repair: sidebar.RepairAwaitingResolvingConflicts,
-			want: func(q *frontendv1.RosterRepoMergeQueue) string {
-				if len(q.GetAwaitingResolvingConflicts()) != 1 {
-					return ""
-				}
-				return q.GetAwaitingResolvingConflicts()[0].GetSubject().GetName()
 			}},
 	}
 	for _, tc := range cases {
@@ -1815,7 +1811,7 @@ func TestAMergeOutOfLineNamingNoRepairSlotIsRecordedAndNotDrawn(t *testing.T) {
 
 	// Assert
 	queue := queuedGroups(latest(t, r))[0].GetQueue()
-	if queue.FixingTests != nil || queue.ResolvingConflicts != nil || len(queue.AwaitingFixingTests) != 0 || len(queue.AwaitingResolvingConflicts) != 0 {
+	if queue.FixingTests != nil || len(queue.ResolvingConflicts) != 0 || len(queue.AwaitingFixingTests) != 0 {
 		t.Fatalf("queue = %v, want the merge drawn at no slot", queue)
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",

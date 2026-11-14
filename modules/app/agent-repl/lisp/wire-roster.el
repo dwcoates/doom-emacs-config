@@ -1464,15 +1464,14 @@ them), and t for a hard stop."
   "Decode VALUE as `RosterRepoMergeQueue'.
 A plist `(:head HEAD :waiting WAITING :paused PAUSED :fixing-tests FIXING
 :resolving-conflicts RESOLVING :awaiting-fixing-tests AWAITING-FIXING
-:awaiting-resolving-conflicts AWAITING-RESOLVING :github GITHUB
-:off-queue OFF-QUEUE :mediation MEDIATION)': the
+:github GITHUB :off-queue OFF-QUEUE :mediation MEDIATION)': the
 merge at the head (nil only while the line is empty and a merge stands out
 of line or a workspace stands in a GitHub merge queue), the merges waiting
 behind it, the queue's pause
 \(`agent-repl-wire-decode-roster-merge-queue-paused'), nil while it runs,
-the one merge holding each repair slot (nil while it is free), the merges
-awaiting each slot in the order each is granted it
-\(`agent-repl-wire-decode-roster-merge-queue-repair'), and the workspaces
+the one merge fixing tests (nil while none does), every merge resolving
+conflicts, and the merges awaiting the fixing-tests slot in the order each is
+granted it \(`agent-repl-wire-decode-roster-merge-queue-repair'), the workspaces
 standing in a GitHub merge queue
 \(`agent-repl-wire-decode-roster-merge-queue-github-entry'), and the merges
 that left the queue without landing
@@ -1482,8 +1481,7 @@ mediation the queue waits on, nil while it waits on none
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
     (agent-repl-wire--check-keys "RosterRepoMergeQueue" object
                                  '(head waiting paused fixingTests resolvingConflicts
-                                        awaitingFixingTests awaitingResolvingConflicts github offQueue
-                                        mediation))
+                                        awaitingFixingTests github offQueue mediation))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1496,15 +1494,12 @@ mediation the queue waits on, nil while it waits on none
            :fixing-tests (agent-repl-wire--decode-optional-message
                           "RosterRepoMergeQueue" 'fixingTests object
                           (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueFixingTests" v)))
-           :resolving-conflicts (agent-repl-wire--decode-optional-message
+           :resolving-conflicts (agent-repl-wire--decode-repeated
                                  "RosterRepoMergeQueue" 'resolvingConflicts object
                                  (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueResolvingConflicts" v)))
            :awaiting-fixing-tests (agent-repl-wire--decode-repeated
                                    "RosterRepoMergeQueue" 'awaitingFixingTests object
                                    (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingFixingTests" v)))
-           :awaiting-resolving-conflicts (agent-repl-wire--decode-repeated
-                                          "RosterRepoMergeQueue" 'awaitingResolvingConflicts object
-                                          (lambda (v) (agent-repl-wire-decode-roster-merge-queue-repair "RosterMergeQueueAwaitingResolvingConflicts" v)))
            :github (agent-repl-wire--decode-repeated
                     "RosterRepoMergeQueue" 'github object
                     #'agent-repl-wire-decode-roster-merge-queue-github-entry)
@@ -1608,10 +1603,9 @@ and how many entries the queue holds."
 
 (defun agent-repl-wire-decode-roster-merge-queue-repair (message value)
   "Decode VALUE as MESSAGE, one merge at or awaiting a repair slot.
-MESSAGE is one of the four shapes that share it:
-`RosterMergeQueueFixingTests', `RosterMergeQueueResolvingConflicts',
-`RosterMergeQueueAwaitingFixingTests' and
-`RosterMergeQueueAwaitingResolvingConflicts'.  A plist `(:subject SUBJECT
+MESSAGE is one of the three shapes that share it:
+`RosterMergeQueueFixingTests', `RosterMergeQueueResolvingConflicts' and
+`RosterMergeQueueAwaitingFixingTests'.  A plist `(:subject SUBJECT
 :since-ms MS)': the merge, and when it took its slot or began awaiting it."
   (let ((object (agent-repl-wire--object message value)))
     (agent-repl-wire--check-keys message object '(subject sinceMs))

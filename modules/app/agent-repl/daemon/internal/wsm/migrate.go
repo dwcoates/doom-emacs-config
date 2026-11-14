@@ -248,6 +248,8 @@ var migrations = []migration{
 	{To: 130, Name: "merge_queue_return_rank", Kind: MigrationAdditive, DDL: returnRankDDL},
 	{To: 131, Name: "merge_queue_pauser_workspace", Kind: MigrationAdditive, DDL: mergeQueuePauserWorkspaceDDL},
 	{To: 132, Name: "merge_queue_mediation", Kind: MigrationAdditive, DDL: mediationDDL},
+	// IT IS BREAKING: see mergeQueueConflictsUnslottedDDL.
+	{To: 133, Name: "merge_queue_conflicts_unslotted", Kind: MigrationBreaking, DDL: mergeQueueConflictsUnslottedDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -29,7 +29,6 @@ import {
   RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueResolvingConflictsSchema,
   RosterMergeQueueAwaitingFixingTestsSchema,
-  RosterMergeQueueAwaitingResolvingConflictsSchema,
   RosterRepoMergeQueueSchema,
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
@@ -577,11 +576,6 @@ export function resolvingConflictsMerge(ws: string, since: number) {
 /** A merge awaiting the fixing-tests slot, since SINCE. */
 export function awaitingFixingTestsMerge(ws: string, since: number) {
   return create(RosterMergeQueueAwaitingFixingTestsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
-}
-
-/** A merge awaiting the resolving-conflicts slot, since SINCE. */
-export function awaitingResolvingConflictsMerge(ws: string, since: number) {
-  return create(RosterMergeQueueAwaitingResolvingConflictsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
 }
 
 /** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */

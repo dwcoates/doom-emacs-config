@@ -102,9 +102,9 @@ type fakeDB struct {
 	// listWorkspacesErr fails ListWorkspaces.
 	listWorkspacesErr error
 	// hasTurnsErr fails HasTurns.
-	hasTurnsErr error
-	drainReadErr      error
-	drainClearErr     error
+	hasTurnsErr   error
+	drainReadErr  error
+	drainClearErr error
 
 	mu sync.Mutex
 

@@ -367,8 +367,6 @@ func rosterRepair(slot wsm.MergeSlot) sidebar.QueueRepair {
 		return sidebar.RepairResolvingConflicts
 	case wsm.MergeSlotAwaitingFixingTests:
 		return sidebar.RepairAwaitingFixingTests
-	case wsm.MergeSlotAwaitingResolvingConflicts:
-		return sidebar.RepairAwaitingResolvingConflicts
 	}
 	return sidebar.RepairNone
 }
