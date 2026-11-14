@@ -17559,15 +17559,30 @@ describe("the vendor-error retry", () => {
     expect(submitted.map((record) => record.context["prompt"])).toEqual([VENDOR_ERROR_RETRY_SOURCE.label]);
   });
 
-  it("makes the scheduled retry at once when the probe finds the API reachable again", async () => {
+  it("moves a retry waiting out its interval onto the network latch when the network fault opens", async () => {
+    // Arrange: the retry waits out its interval.
+    const h = harness();
+    await started(h);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Act: a request fails below an answer, standing the network fault.
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+
+    // Assert
+    expect([h.retryScheduler.pendingTimeout(), (await replayedSchedule(h))?.stated.case]).toEqual([
+      undefined,
+      "awaitingNetwork",
+    ]);
+  });
+
+  it("makes the retry at once when the probe finds the API reachable again", async () => {
     // Arrange: the turn failed below an answer, standing the network fault
-    // and its probe loop, and the retry waits out its interval.
+    // and its probe loop, which moved the retry onto the latch.
     const delivered: string[] = [];
     const h = harness({ drainPrompts: delivered });
     await started(h);
     await failedTurn(h, "turn-1", [], OVERLOADED);
     await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
-    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
 
     // Act: the API answers the loop's probe.
     h.networkScheduler.fire(0);

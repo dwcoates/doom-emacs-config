@@ -55,7 +55,9 @@
  *   yet ({@link VendorErrorRetryDeps.network}), and a standing fault is
  *   probed until it resolves (engine/network-resume.ts). The wait counts
  *   against no window: the fault has none, and the vendor-error window
- *   restarts at the next failure that reached the API.
+ *   restarts at the next failure that reached the API. A retry already
+ *   waiting out its interval when the fault opens moves onto the latch too
+ *   ({@link VendorErrorRetry.networkFaultOpened}).
  * - A PROMPT SUBMITTED DURING THE WAIT TAKES THE SESSION (as below), and is
  *   sent at once: the daemon holds no prompt behind a retry agent-repl owns
  *   (daemon resolve/footer/vendorblock.go). It fails the same way while the
@@ -378,6 +380,37 @@ export class VendorErrorRetry {
     this.cancelTimer();
     LOGGER.info({ chain: chain.id, attempt: chain.retries + 1 }, "the API is reachable again; agent-repl makes the scheduled retry at once");
     void this.retry(chain);
+  }
+
+  /**
+   * The session's network fault OPENED. A vendor-error retry waiting out its
+   * interval moves onto the latch: its timer would fire one retry into the
+   * outage, which could only fail unreachable and then wait on the latch
+   * anyway, and while it ran the workspace read as a running turn instead of
+   * its network fault. The retry is made when the fault resolves. A
+   * usage-limit retry keeps its instant, since what it waits for is the
+   * allowance's reset, and a retry already running as a turn, or one already
+   * on the latch, has no timer to move.
+   */
+  networkFaultOpened(): void {
+    const chain = this.chain;
+    if (this.stopped || chain === undefined || this.handle === undefined) return;
+    if (chain.mode?.kind !== "vendor_error") {
+      LOGGER.debug(
+        { chain: chain.id, mode: chain.mode?.kind ?? "" },
+        "the network fault opened; a retry not on the vendor-error cadence keeps its instant",
+      );
+      return;
+    }
+    this.cancelTimer();
+    chain.mode = { kind: "network" };
+    this.latched = true;
+    LOGGER.info(
+      { chain: chain.id, attempt: chain.retries + 1 },
+      "the network fault opened while a retry waited out its interval; agent-repl makes it when the fault resolves, on no timer",
+    );
+    this.pending = { awaitingNetwork: true, attempt: chain.retries + 1, status: chain.status };
+    this.deps.state(this.pending);
   }
 
   /**
