@@ -1699,18 +1699,20 @@ func (g *fakeGit) ResolveRef(_ context.Context, dir, ref string) (string, error)
 	return "sha-of-" + ref, nil
 }
 
-// RemoteURL answers the arranged origin of DIR.
-func (g *fakeGit) RemoteURL(_ context.Context, dir, remote string) (string, error) {
+// RemoteURL answers the arranged origin of DIR; an empty one is a
+// repository with no origin.
+func (g *fakeGit) RemoteURL(_ context.Context, dir, remote string) (string, bool, error) {
 	if remote != "origin" {
-		return "", fmt.Errorf("fakeGit: no remote %q", remote)
+		return "", false, fmt.Errorf("fakeGit: no remote %q", remote)
 	}
 	if g.originErr != nil {
-		return "", g.originErr
+		return "", false, g.originErr
 	}
-	if origin, ok := g.origins[dir]; ok {
-		return origin, nil
+	origin, ok := g.origins[dir]
+	if !ok {
+		origin = g.defaultOrigin
 	}
-	return g.defaultOrigin, nil
+	return origin, origin != "", nil
 }
 
 func (g *fakeGit) IsClean(context.Context, string) (bool, error) {

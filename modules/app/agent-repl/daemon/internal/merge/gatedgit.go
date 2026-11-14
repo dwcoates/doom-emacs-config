@@ -529,9 +529,9 @@ func (g *gatedGit) AnyPatchEquivalent(ctx context.Context, dir, upstream, head s
 	return g.inner.AnyPatchEquivalent(ctx, dir, upstream, head)
 }
 
-func (g *gatedGit) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
+func (g *gatedGit) RemoteURL(ctx context.Context, repoDir, remote string) (string, bool, error) {
 	if err := g.enter("RemoteURL"); err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer g.leave()
 	return g.inner.RemoteURL(ctx, repoDir, remote)

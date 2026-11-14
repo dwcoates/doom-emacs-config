@@ -51,11 +51,18 @@ func (v *verbs) bindPullTarget(ctx context.Context, log dlog.Logger, record wsm.
 	// name read off the directory linked every `#n` to the wrong repository.
 	_, name, remote, onGithub, err := prwatch.OriginRepository(ctx, v.deps.Git, repo.Dir)
 	if err != nil {
-		// A repository with no readable origin (a local-only repository) has
-		// no GitHub repository to link into: an ordinary fact, never a
-		// failure of the registration.
+		// THE READ FAILED (the git leaf recorded why at ERROR): the
+		// references link nowhere, and the registration goes on, since a
+		// link target is no part of a workspace's being registered.
 		log.Info(opPullTarget, "could not read the repository's origin remote; its references link nowhere", dlog.Context{
 			"workspace": string(record.ID), "repository_dir": repo.Dir, "cause": err.Error(),
+		})
+		v.deps.Feed.SetPullTarget(record.ID, nil)
+		return nil
+	}
+	if !onGithub && remote == "" {
+		log.Debug(opPullTarget, "the repository has no origin remote; its references link nowhere", dlog.Context{
+			"workspace": string(record.ID), "repository_dir": repo.Dir,
 		})
 		v.deps.Feed.SetPullTarget(record.ID, nil)
 		return nil

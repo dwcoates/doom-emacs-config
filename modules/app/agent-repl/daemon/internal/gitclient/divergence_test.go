@@ -196,27 +196,47 @@ func TestRemoteURLAnswersWhatGitPrints(t *testing.T) {
 	fake := newFakeGit(t, ok("git@github.com:/dwcoates/doom-emacs-config.git\n"))
 
 	// Act.
-	got, err := git.RemoteURL(context.Background(), "/repo", "origin")
+	got, set, err := git.RemoteURL(context.Background(), "/repo", "origin")
 
 	// Assert.
-	if err != nil || got != "git@github.com:/dwcoates/doom-emacs-config.git" {
-		t.Fatalf("RemoteURL = %q, %v; want the url without its newline", got, err)
+	if err != nil || !set || got != "git@github.com:/dwcoates/doom-emacs-config.git" {
+		t.Fatalf("RemoteURL = %q, %v, %v; want the url without its newline", got, set, err)
 	}
 	fake.assertSubject(0, "remote", "get-url", "origin")
 }
 
-func TestRemoteURLOfAMissingRemoteIsGitsFailure(t *testing.T) {
+func TestRemoteURLOfAMissingRemoteIsAnAnswer(t *testing.T) {
 	// Arrange.
-	git, _ := newTestClient(t)
+	git, surfaces := newTestClient(t)
 	newFakeGit(t, fails(2, "error: No such remote 'origin'\n"))
 
 	// Act.
-	_, err := git.RemoteURL(context.Background(), "/repo", "origin")
+	got, set, err := git.RemoteURL(context.Background(), "/repo", "origin")
+
+	// Assert: no remote, no failure, and nothing recorded as git failing.
+	if err != nil || set || got != "" {
+		t.Fatalf("RemoteURL = %q, %v, %v; want no remote and no error", got, set, err)
+	}
+	if record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.remote_url"); found {
+		t.Fatalf("a missing remote was recorded at ERROR: %+v", record)
+	}
+}
+
+func TestRemoteURLThatGitCannotTellIsAFailure(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n"))
+
+	// Act.
+	_, set, err := git.RemoteURL(context.Background(), "/repo", "origin")
 
 	// Assert.
 	var gitErr *Error
-	if !errors.As(err, &gitErr) || gitErr.ExitCode != 2 {
-		t.Fatalf("RemoteURL = %v, want git's exit-2 failure", err)
+	if set || !errors.As(err, &gitErr) || gitErr.ExitCode != 128 {
+		t.Fatalf("RemoteURL = %v, %v; want git's exit-128 failure", set, err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.remote_url"); !found {
+		t.Fatalf("the failure was not recorded at ERROR: %+v", surfaces.records())
 	}
 }
 

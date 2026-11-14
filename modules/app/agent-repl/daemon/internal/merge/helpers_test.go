@@ -3955,9 +3955,9 @@ func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int
 	return 0, 0, errors.New("fakeGit: the merge never counts ahead/behind")
 }
 
-func (g *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
+func (g *fakeGit) RemoteURL(context.Context, string, string) (string, bool, error) {
 	g.record("remote_url")
-	return "", errors.New("fakeGit: the merge never reads a remote's url")
+	return "", false, errors.New("fakeGit: the merge never reads a remote's url")
 }
 
 // everyAttemptLeaves scripts every conflict resolution attempt the bound

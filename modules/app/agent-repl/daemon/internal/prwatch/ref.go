@@ -68,20 +68,24 @@ func repositoryOfRemote(remote string) (owner, repo string, ok bool) {
 
 // RemoteReader is the part of the git leaf a `#<number>` reference reads.
 type RemoteReader interface {
-	RemoteURL(ctx context.Context, repoDir, remote string) (string, error)
+	RemoteURL(ctx context.Context, repoDir, remote string) (url string, set bool, err error)
 }
 
 // OriginRepository reads the `origin` remote of the repository whose checkout
 // is REPODIR and answers the GitHub owner and name it names, ONGITHUB false
-// (with the remote, for the caller to name) for one off github.com. A remote
-// that cannot be read is the git leaf's error. It is the one reading of a
+// (with the remote, for the caller to name) for one off github.com, and false
+// with no remote for a repository that has no origin at all. A remote that
+// cannot be read is the git leaf's error. It is the one reading of a
 // repository's GitHub identity off its origin, so a `#<number>` reference, a
 // merge-queue subscription and a feed's pull request links name the same
 // repository.
 func OriginRepository(ctx context.Context, git RemoteReader, repoDir string) (owner, repo, remote string, onGithub bool, err error) {
-	remote, err = git.RemoteURL(ctx, repoDir, "origin")
+	remote, set, err := git.RemoteURL(ctx, repoDir, "origin")
 	if err != nil {
 		return "", "", "", false, fmt.Errorf("prwatch: read the origin remote of %s: %w", repoDir, err)
+	}
+	if !set {
+		return "", "", "", false, nil
 	}
 	owner, repo, onGithub = repositoryOfRemote(remote)
 	return owner, repo, remote, onGithub, nil
@@ -120,6 +124,9 @@ func Resolve(ctx context.Context, git RemoteReader, repoDir, text string) (wsm.P
 	owner, repo, remote, ok, err := OriginRepository(ctx, git, repoDir)
 	if err != nil {
 		return wsm.PullRequestKey{}, err
+	}
+	if !ok && remote == "" {
+		return wsm.PullRequestKey{}, &UnparsableError{Text: text, Reason: "the repository has no origin remote"}
 	}
 	if !ok {
 		return wsm.PullRequestKey{}, &UnparsableError{Text: text, Reason: fmt.Sprintf("the repository's origin %q is not on github.com", remote)}
