@@ -411,3 +411,75 @@ func tellAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 		t.Fatalf("MarkMediationPrompted: %v", err)
 	}
 }
+
+func TestMediationRoleOfAnswersTheChainAWorkspaceWorksOn(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws         WorkspaceID
+		wantRole   bool
+		wantIntake bool
+	}{
+		{name: "the chain's intake", ws: "intake", wantRole: true, wantIntake: true},
+		{name: "the chain's last remediation", ws: "remedy", wantRole: true},
+		{name: "a workspace with no role", ws: "bystander"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			oweAt(t, s, repo, instant)
+			if _, err := s.RecordMediationIntake(ctx, repo, instant, "intake"); err != nil {
+				t.Fatal(err)
+			}
+			dispatchAt(t, s, repo, instant)
+
+			// Act
+			role, err := s.MediationRoleOf(ctx, tt.ws)
+
+			// Assert
+			if err != nil || (role != nil) != tt.wantRole {
+				t.Fatalf("MediationRoleOf = (%+v, %v), want a role: %v", role, err, tt.wantRole)
+			}
+			if role != nil && (role.Intake != tt.wantIntake || !role.Mediation.OwedAt.Equal(instant) || !role.Mediation.Dispatched) {
+				t.Fatalf("role = %+v, want intake %v on the dispatched mediation", role, tt.wantIntake)
+			}
+		})
+	}
+}
+
+func TestMediationRoleOfAnswersNoneOnceTheChainIsReleased(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	oweAt(t, s, repo, instant)
+	if _, err := s.RecordMediationIntake(ctx, repo, instant, "intake"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReleaseMediation(ctx, repo, instant); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	role, err := s.MediationRoleOf(ctx, "intake")
+
+	// Assert
+	if err != nil || role != nil {
+		t.Fatalf("MediationRoleOf = (%+v, %v), want none", role, err)
+	}
+}
+
+func TestMediationRoleOfRefusesNoWorkspace(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.MediationRoleOf(context.Background(), "")
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.mediation_role_of", "error") {
+		t.Fatalf("MediationRoleOf(\"\") = %v, want a refusal recorded at ERROR: %v", err, log.Records())
+	}
+}

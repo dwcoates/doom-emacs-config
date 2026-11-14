@@ -269,3 +269,45 @@ func (s *store) DispatchMediation(ctx context.Context, repo RepoKey, owed time.T
 	return s.mediationWrite(ctx, "daemon.wsm.dispatch_mediation", repo, owed,
 		`UPDATE merge_queue_repos SET mediation_remediation = ?, mediation_dispatched = 1 WHERE mediation_dispatched = 0 AND repo_key = ? AND mediation_owed_at = ?`, string(ws))
 }
+
+// MediationRole is the owed mediation a workspace holds a role in: its
+// queue, the mediation, and which role.
+type MediationRole struct {
+	Repo      RepoKey
+	Mediation Mediation
+	// Intake reports the workspace is the chain's intake; otherwise it is
+	// the chain's last remediation.
+	Intake bool
+}
+
+// MediationRoleOf answers the owed mediation WS is the intake or the last
+// remediation of, nil when it holds neither role. A workspace holds a role
+// only on the chain that recorded it, so one row answers.
+func (s *store) MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error) {
+	const op = "daemon.wsm.mediation_role_of"
+	if ws == "" {
+		err := errors.New("wsm: a mediation role is asked of a workspace")
+		s.log.Error(op, "refused a mediation role read that names no workspace", withError(nil, err))
+		return nil, err
+	}
+	var out *MediationRole
+	err := s.read(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context) error {
+		var repo string
+		err := s.q(ctx).QueryRowContext(ctx,
+			`SELECT repo_key FROM merge_queue_repos WHERE mediation_owed_at IS NOT NULL AND (mediation_intake = ? OR mediation_remediation = ?)`,
+			string(ws), string(ws)).Scan(&repo)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		m, err := scanMediation(repo, s.q(ctx).QueryRowContext(ctx, mediationQuery, repo))
+		if err != nil || m == nil {
+			return err
+		}
+		out = &MediationRole{Repo: RepoKey(repo), Mediation: *m, Intake: m.Intake == ws}
+		return nil
+	})
+	return out, err
+}

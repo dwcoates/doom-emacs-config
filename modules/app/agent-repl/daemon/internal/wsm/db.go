@@ -666,6 +666,22 @@ type DB interface {
 	// DispatchMediation records a fix dispatched to remediation workspace WS
 	// for the mediation owed at OWED (mediation.go).
 	DispatchMediation(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
+	// MediationRoleOf answers the owed mediation a workspace is the intake
+	// or the last remediation of, nil for neither (mediation.go).
+	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// BeginRemediationFinish records a remediation workspace's finish at its
+	// gate (remediationfinish.go).
+	BeginRemediationFinish(ctx context.Context, f RemediationFinish) (RemediationFinish, error)
+	// AdvanceRemediationFinish moves a remediation finish from one step to
+	// the next, if it still stands at the first.
+	AdvanceRemediationFinish(ctx context.Context, ws WorkspaceID, from, to RemediationStep, at time.Time) (bool, error)
+	// RemediationFinishOf answers one workspace's remediation finish, nil for
+	// none.
+	RemediationFinishOf(ctx context.Context, ws WorkspaceID) (*RemediationFinish, error)
+	// RemediationFinishes answers every remediation finish recorded.
+	RemediationFinishes(ctx context.Context) ([]RemediationFinish, error)
+	// EndRemediationFinish removes a workspace's remediation finish.
+	EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers
 	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.
