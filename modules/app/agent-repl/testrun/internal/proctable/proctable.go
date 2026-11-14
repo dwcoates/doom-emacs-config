@@ -1,5 +1,6 @@
 // Package proctable reads the host's process table IN PROCESS, through the
-// kernel's proc_info call and kern.procargs2, never by running ps.
+// kernel's proc_info call and kern.procargs2 on macOS and /proc on Linux
+// (procfs.go), never by running ps.
 //
 // WHY NOT ps (2026-10-23). A `timeout 10 docker info` child wedged inside
 // execve (state U, unkillable even by SIGKILL) while the host was swapping 20

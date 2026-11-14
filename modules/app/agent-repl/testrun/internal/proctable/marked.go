@@ -39,7 +39,7 @@ type Usage struct {
 type markedKernel struct {
 	listPids func() ([]int, error)
 	record   func(pid int) (procRecord, error)
-	procArgs func(pid int) ([]byte, error)
+	args func(pid int) (argv, env []string, err error)
 	// rusage is the process's own and reaped children's CPU seconds.
 	rusage func(pid int) (own, children float64, err error)
 }
@@ -69,7 +69,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 	}
 	pids, err := m.k.listPids()
 	if err != nil {
-		return nil, fmt.Errorf("list the processes (proc_info listpids): %w", err)
+		return nil, fmt.Errorf("list the processes: %w", err)
 	}
 	alive := make(map[int]bool, len(pids))
 	var out []Usage
@@ -83,7 +83,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 			// Gone since the list, or another user's.
 			continue
 		case err != nil:
-			return nil, fmt.Errorf("read pid %d's record (proc_info bsdinfo): %w", pid, err)
+			return nil, fmt.Errorf("read pid %d's record: %w", pid, err)
 		}
 		if rec.UID != m.UID {
 			continue
@@ -102,7 +102,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("read pid %d's CPU (proc_pid_rusage): %w", pid, err)
+			return nil, fmt.Errorf("read pid %d's CPU: %w", pid, err)
 		}
 		out = append(out, Usage{Pid: pid, Ppid: rec.Ppid, Start: rec.Start, Own: own, Children: children})
 	}
@@ -123,16 +123,12 @@ func (m *Marked) marked(pid int, rec procRecord) (bool, error) {
 	if known, ok := m.marks[pid]; ok && known.start.Equal(rec.Start) {
 		return known.marked, nil
 	}
-	buf, err := m.k.procArgs(pid)
+	_, env, err := m.k.args(pid)
 	switch {
 	case err == nil:
 	case errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.ESRCH), errors.Is(err, syscall.EIO):
 		return false, nil
 	default:
-		return false, fmt.Errorf("read pid %d's environment (sysctl kern.procargs2): %w", pid, err)
-	}
-	_, env, err := ParseProcArgs(buf)
-	if err != nil {
 		return false, fmt.Errorf("read pid %d's environment: %w", pid, err)
 	}
 	marked := false
