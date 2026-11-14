@@ -920,7 +920,7 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   const name = requireMessage(header.label, `${path}.header.label`).text;
   const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, { key, name }, sc, queuePath), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
-  if (queue.mediation !== undefined) head.appendChild(drawQueueMediationLabel(queue.mediation, `${queuePath}.mediation`));
+  if (queue.mediation !== undefined) head.appendChild(drawQueueMediationLabel(queue.mediation, sc, `${queuePath}.mediation`));
   head.appendChild(drawQueueCount(queueCount(queue)));
   drawQueuedGroupHead(group, head, queue, key, sc, queuePath);
   tickPaint(sc, (nowMs) => {
