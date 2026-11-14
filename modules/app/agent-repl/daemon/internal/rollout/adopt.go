@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -208,23 +209,33 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 // workspace back and offered it again six times, and neither daemon could
 // finish -- the incumbent never exited and the successor stayed joining.
 //
-// A WORKSPACE WITH PARTICIPANTS IS ADOPTED ON ITS OWN GOROUTINE: its serving
-// release comes at that workspace's freeness, so adopting it in line would
-// hold every other workspace behind the busiest. A headless workspace is
-// adopted in line, as it always was: its row is released before the manifest
-// names it.
+// EVERY WORKSPACE IS ADOPTED ON ITS OWN GOROUTINE: each serving release comes
+// at that workspace's own freeness, and each adoption ends by taking the
+// workspace's merges, so adopting one after another holds every workspace
+// behind the slowest before it. Headless workspaces were adopted in line, on
+// the belief that their rows were released before the manifest named them;
+// a deploy releases each row at its transfer, and on 2026-11-14 16:10 the
+// line waited on a busy workspace and then on 37 merge adoptions until
+// linux-runtime-port and linux-wifi-port, last in it, outlived their 30s
+// adoption window and were taken back.
+//
+// The call still returns once every headless adoption has ended, as the line
+// did; a workspace with participants is answered through its rendezvous and
+// is not waited on here.
 func (c *controller) adoptClaimed(ctx context.Context, claimed []ids.WorkspaceID) {
-	var inline []ids.WorkspaceID
+	var headless sync.WaitGroup
 	for _, ws := range claimed {
 		if c.ExpectedParticipants(ws) == 0 {
-			inline = append(inline, ws)
+			headless.Add(1)
+			inflight.Go(func() {
+				defer headless.Done()
+				c.adoptOne(ctx, ws)
+			})
 			continue
 		}
 		inflight.Go(func() { c.adoptOne(ctx, ws) })
 	}
-	for _, ws := range inline {
-		c.adoptOne(ctx, ws)
-	}
+	headless.Wait()
 }
 
 // adoptOne adopts one claimed workspace, and on failure releases its claim and
