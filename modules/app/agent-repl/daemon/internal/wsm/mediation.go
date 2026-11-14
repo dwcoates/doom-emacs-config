@@ -39,7 +39,41 @@ type Mediation struct {
 	// Version is the build the deploy installed, as its version names it;
 	// empty when the deploy named none.
 	Version string
+	// ChainStartedAt is when the CHAIN this mediation belongs to began: the
+	// deploy whose mediation no earlier one was owed beside. A mediation a
+	// newer deploy replaces hands its chain on, so the chain lasts until the
+	// queue advances, however many deploys remediated in between.
+	ChainStartedAt time.Time
+	// ChainRedeploys is how many mediations of the chain were replaced while
+	// their mediator was told of them: the remediations deployed in a row
+	// before the queue advanced.
+	ChainRedeploys int
 }
+
+// mediationChainDDL is the layout-135 addition: each owed mediation carries
+// its chain (Mediation.ChainStartedAt, ChainRedeploys), so remediations
+// deployed in a row are counted across the daemon restarts each one makes. A
+// mediation already owed begins its chain at its own deploy.
+//
+// THE TRIGGERS KEEP EVERY OWED MEDIATION CHAINED, whichever build wrote it: a
+// build from before the chain (the outgoing daemon of a handover) owes a
+// mediation without one, and the trigger begins its chain at its own deploy,
+// so no owed mediation is ever left without a chain (scanMediation).
+const mediationChainDDL = `
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_chain_started_at INTEGER;
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_chain_redeploys INTEGER NOT NULL DEFAULT 0;
+UPDATE merge_queue_repos SET mediation_chain_started_at = mediation_owed_at WHERE mediation_owed_at IS NOT NULL;
+CREATE TRIGGER merge_queue_mediation_chained_on_insert AFTER INSERT ON merge_queue_repos
+WHEN NEW.mediation_owed_at IS NOT NULL AND NEW.mediation_chain_started_at IS NULL
+BEGIN
+  UPDATE merge_queue_repos SET mediation_chain_started_at = NEW.mediation_owed_at WHERE repo_key = NEW.repo_key;
+END;
+CREATE TRIGGER merge_queue_mediation_chained_on_update AFTER UPDATE OF mediation_owed_at ON merge_queue_repos
+WHEN NEW.mediation_owed_at IS NOT NULL AND NEW.mediation_chain_started_at IS NULL
+BEGIN
+  UPDATE merge_queue_repos SET mediation_chain_started_at = NEW.mediation_owed_at WHERE repo_key = NEW.repo_key;
+END;
+`
 
 // Prompted reports whether the mediator was told of this mediation.
 func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
@@ -66,16 +100,27 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 	fields := dlog.Context{"repo": string(key), "owed_at": nanos(at), "version": version}
 	var replaced *Mediation
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		prior, err := scanMediation(tx.QueryRowContext(ctx, mediationQuery, key))
+		prior, err := scanMediation(string(key), tx.QueryRowContext(ctx, mediationQuery, key))
 		if err != nil {
 			return err
 		}
 		replaced = prior
+		// THE CHAIN PASSES TO THE NEWER DEPLOY: it begins only where no
+		// mediation was owed, and counts a replaced mediation whose mediator
+		// was told of it as one remediation deployed.
+		chainStart, redeploys := at, 0
+		if prior != nil {
+			chainStart, redeploys = prior.ChainStartedAt, prior.ChainRedeploys
+			if prior.Prompted() {
+				redeploys++
+			}
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn) VALUES (?, 0, ?, NULL, ?, '')
+			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys) VALUES (?, 0, ?, NULL, ?, '', ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at,
-			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = ''`,
-			key, nanos(at), version)
+			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = '',
+			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys`,
+			key, nanos(at), version, nanos(chainStart), redeploys)
 		return err
 	})
 	if err != nil {
@@ -85,21 +130,27 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 }
 
 // mediationQuery reads one repository's mediation columns, keyed by repo.
-const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn FROM merge_queue_repos WHERE repo_key = ?`
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys FROM merge_queue_repos WHERE repo_key = ?`
 
-// scanMediation decodes ROW of mediationQuery: nil when the repository has
-// no row or owes no mediation. It is the one mediation decoding path.
-func scanMediation(row *sql.Row) (*Mediation, error) {
-	var owed, prompted sql.NullInt64
+// scanMediation decodes ROW of mediationQuery, REPO's: nil when the
+// repository has no row or owes no mediation. It is the one mediation
+// decoding path. An owed mediation with no chain is a DecodeError: every
+// write that owes one records its chain.
+func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
+	var owed, prompted, chainStart sql.NullInt64
 	var version, turn string
-	err := row.Scan(&owed, &prompted, &version, &turn)
+	var redeploys int
+	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil || !owed.Valid {
 		return nil, err
 	}
-	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn)}
+	if !chainStart.Valid {
+		return nil, &DecodeError{Table: "merge_queue_repos", Row: repo, Field: "mediation_chain_started_at", Err: errors.New("an owed mediation records no chain")}
+	}
+	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn), ChainStartedAt: fromNanos(chainStart.Int64), ChainRedeploys: redeploys}
 	if prompted.Valid {
 		at := fromNanos(prompted.Int64)
 		m.PromptedAt = &at
@@ -117,7 +168,7 @@ func (s *store) MediationOf(ctx context.Context, repo RepoKey) (*Mediation, erro
 	}
 	var out *Mediation
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		m, err := scanMediation(s.q(ctx).QueryRowContext(ctx, mediationQuery, key))
+		m, err := scanMediation(string(key), s.q(ctx).QueryRowContext(ctx, mediationQuery, key))
 		out = m
 		return err
 	})
@@ -137,7 +188,7 @@ func (s *store) MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, a
 // releases nothing a newer deploy owes.
 func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error) {
 	return s.mediationWrite(ctx, "daemon.wsm.release_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '' WHERE repo_key = ? AND mediation_owed_at = ?`)
+		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_chain_started_at = NULL, mediation_chain_redeploys = 0 WHERE repo_key = ? AND mediation_owed_at = ?`)
 }
 
 // mediationWrite runs QUERY against the mediation of REPO owed at OWED, its
