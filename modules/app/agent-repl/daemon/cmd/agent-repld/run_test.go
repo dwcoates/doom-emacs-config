@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/server"
+	"agent-repld/internal/server/servertest"
 	"agent-repld/internal/wsm"
 
 	"agentrepl/logging/metrics"
@@ -999,6 +1000,13 @@ func (g *recordingGate) AwaitStreamsEnded(time.Time) int {
 	return 0
 }
 
+func (g *recordingGate) GoAway(time.Time) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, "GoAway")
+	return 0
+}
+
 func (g *recordingGate) Listener(inner net.Listener) net.Listener { return inner }
 
 func (g *recordingGate) recorded() []string {
@@ -1031,9 +1039,9 @@ func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T)
 
 	// Assert
 	got := gate.recorded()
-	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "AwaitStreamsEnded"}
+	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "AwaitStreamsEnded", "GoAway", "AwaitStreamsEnded"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("the exit's waits = %v, want %v — the answers produced first, then the standing streams' own last pushes sent, then every stream's end awaited onto the socket", got, want)
+		t.Fatalf("the exit's waits = %v, want %v — the answers produced first, then the standing streams' own last pushes sent, then every stream's end awaited onto the socket, then every new stream refused and the ones admitted before awaited too", got, want)
 	}
 }
 
@@ -1068,7 +1076,7 @@ func TestTheExitEndsEveryStandingStreamBeforeShuttingDown(t *testing.T) {
 
 	// Assert
 	got := gate.recorded()
-	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "end", "AwaitStreamsEnded"}
+	want := []string{"AwaitQuiet", "AwaitPushesSent", "EndStreams", "end", "AwaitStreamsEnded", "GoAway", "AwaitStreamsEnded"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("the exit's steps = %v, want %v — the last pushes out, then every stream ended and its end frame awaited", got, want)
 	}
@@ -1826,5 +1834,104 @@ func TestServeWaitsForTheCreatesBeforeAnyAnswerOrStreamIsEnded(t *testing.T) {
 	want := []string{"withdraw", "await_creates", "AwaitQuiet", "AwaitPushesSent"}
 	if !slices.Equal(got[:min(len(got), len(want))], want) {
 		t.Fatalf("the exit's steps = %v, want %v first", got, want)
+	}
+}
+
+// exitListener hands out connections a test can close all at once, standing
+// in for the process exit that follows serve's return.
+type exitListener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func (l *exitListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	l.conns = append(l.conns, conn)
+	l.mu.Unlock()
+	return conn, nil
+}
+
+// exit closes every connection, as the process exit does.
+func (l *exitListener) exit() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, conn := range l.conns {
+		_ = conn.Close()
+	}
+}
+
+// TestACallReachingAnOpenConnectionAfterTheExitsWaitsIsAnswered reproduces
+// the merge-gate failure of
+// `TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`: a call
+// that reached the daemon on an h2c connection the client already held,
+// after the exit's waits had ended, was admitted and then cut by the process
+// exit, so the caller read `unexpected EOF` instead of its answer. The call
+// is made from inside the exit, once its last wait before the http shutdown
+// has ended, and parks in its handler; it is released only once the client
+// has been sent the GOAWAY, which is the exit saying it waits for what it
+// admitted. An exit that returns first is the cut.
+func TestACallReachingAnOpenConnectionAfterTheExitsWaitsIsAnswered(t *testing.T) {
+	// Arrange: an h2 connection the server already holds, its first call
+	// answered.
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	listener := &exitListener{Listener: tcp}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	log := dlog.NewTestLogger()
+	gate := server.H2C(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/late" {
+			close(entered)
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}), log)
+	ctx, cancel := context.WithCancel(context.Background())
+	conn := (*servertest.Conn)(nil)
+	mark := func(step string, _ time.Time) {
+		if step != "serve_end_streams" {
+			return
+		}
+		conn.Request(t, 3, "/late")
+		<-entered
+	}
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate, serveExit{Mark: mark, Log: log}) }()
+	conn = servertest.Dial(t, tcp.Addr().String())
+	conn.Request(t, 1, "/first")
+	if _, err := conn.Await(servertest.Ended(1)); err != nil {
+		t.Fatalf("the first call was never answered: %v", err)
+	}
+
+	// Act
+	cancel()
+	sawGoAway := make(chan servertest.Frame, 1)
+	go func() {
+		goAway, _ := conn.Await(servertest.GoAway)
+		sawGoAway <- goAway
+	}()
+	var goAway servertest.Frame
+	select {
+	case serveErr := <-served:
+		listener.exit()
+		close(release)
+		t.Fatalf("serve() = %v returned with the late call parked in its handler and no GOAWAY sent (%+v): the exit cuts what it admitted", serveErr, <-sawGoAway)
+	case goAway = <-sawGoAway:
+	}
+	close(release)
+	answer, answerErr := conn.Await(servertest.Ended(3))
+	serveErr := <-served
+	listener.exit()
+
+	// Assert
+	if serveErr != nil || goAway.LastStream != 3 || answerErr != nil {
+		t.Fatalf("serve() = %v, GOAWAY = %+v, answer = %+v (%v); want an orderly exit whose GOAWAY admits the late call and which answers it before returning", serveErr, goAway, answer, answerErr)
 	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/server/servertest"
 	"io"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	neturl "net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -556,5 +558,129 @@ func TestAwaitStreamsEndedWithNoStreamSettlesAtOnce(t *testing.T) {
 	// Assert.
 	if left != 0 {
 		t.Fatalf("AwaitStreamsEnded = %d with no stream open, want 0", left)
+	}
+}
+
+// goAwayServing serves a handler that answers every call at once and counts
+// the calls it was given, through the gate's own listener, and answers its
+// address. Every accepted connection is reported on accepted.
+func goAwayServing(t *testing.T, log dlog.Logger) (serving *Serving, addr string, calls *atomic.Int32, accepted chan struct{}) {
+	t.Helper()
+	calls = &atomic.Int32{}
+	serving = H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}), log)
+	accepted = make(chan struct{}, 8)
+	httpServer := httptest.NewUnstartedServer(serving)
+	httpServer.Listener = serving.Listener(httpServer.Listener)
+	httpServer.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			accepted <- struct{}{}
+		}
+	}
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+	return serving, httpServer.Listener.Addr().String(), calls, accepted
+}
+
+// answeredConn is an h2 connection on which stream 1 was answered, so the
+// h2 server holds it.
+func answeredConn(t *testing.T, addr string) *servertest.Conn {
+	t.Helper()
+	conn := servertest.Dial(t, addr)
+	conn.Request(t, 1, "/agentrepl.v1.AgentRepl/SelectWorkspace")
+	if _, err := conn.Await(servertest.Ended(1)); err != nil {
+		t.Fatalf("stream 1 was never answered: %v", err)
+	}
+	return conn
+}
+
+// TestGoAwaySendsAnOpenConnectionItsGoAway pins the refusal's frame: a
+// connection the server already holds is told which streams it admitted.
+func TestGoAwaySendsAnOpenConnectionItsGoAway(t *testing.T) {
+	// Arrange
+	serving, addr, _, _ := goAwayServing(t, dlog.NewTestLogger())
+	conn := answeredConn(t, addr)
+
+	// Act
+	left := serving.GoAway(time.Now().Add(time.Minute))
+
+	// Assert
+	got, err := conn.Await(servertest.GoAway)
+	if left != 0 || err != nil || got.LastStream != 1 {
+		t.Fatalf("GoAway() = %d, frame = %+v (%v), want 0 and a GOAWAY admitting stream 1", left, got, err)
+	}
+}
+
+// TestAStreamOpenedAfterTheGoAwayIsNeverAdmitted pins that the GOAWAY closes
+// admission: a stream its client opens after it never reaches a handler, so
+// the exit has nothing of it to cut.
+func TestAStreamOpenedAfterTheGoAwayIsNeverAdmitted(t *testing.T) {
+	// Arrange
+	serving, addr, calls, _ := goAwayServing(t, dlog.NewTestLogger())
+	conn := answeredConn(t, addr)
+	serving.GoAway(time.Now().Add(time.Minute))
+	if _, err := conn.Await(servertest.GoAway); err != nil {
+		t.Fatalf("no GOAWAY: %v", err)
+	}
+
+	// Act: a call after the GOAWAY, then a PING whose answer proves the
+	// server read past it.
+	conn.Request(t, 3, "/agentrepl.v1.AgentRepl/SelectWorkspace")
+	conn.Ping(t, [8]byte{1})
+	if _, err := conn.Await(servertest.PingAck); err != nil {
+		t.Fatalf("no PING acknowledgement: %v", err)
+	}
+
+	// Assert
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls handled = %d, want 1: the stream opened after the GOAWAY was admitted", got)
+	}
+	if open, _ := serving.barrier.Open(); open != 0 {
+		t.Fatalf("streams owed = %d, want 0: a stream never admitted is owed nothing", open)
+	}
+}
+
+// TestGoAwayIsRecordedAtInfo pins that the refusal is not an invisible act.
+func TestGoAwayIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	serving, _, _, _ := goAwayServing(t, log)
+
+	// Act
+	serving.GoAway(time.Now().Add(time.Minute))
+
+	// Assert
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.go_away"})
+	if len(got) != 1 || got[0].Level != dlog.LevelInfo {
+		t.Fatalf("records = %+v, want one INFO saying every new stream is refused", got)
+	}
+}
+
+// TestAConnectionOwingItsGoAwayAtTheDeadlineIsRecordedAtError pins the loud
+// half: a connection whose GOAWAY never reached the socket can still admit a
+// call the exit cuts, and the exit says so.
+func TestAConnectionOwingItsGoAwayAtTheDeadlineIsRecordedAtError(t *testing.T) {
+	// Arrange: a connection accepted that has sent nothing, so it could still
+	// turn out to be h2.
+	log := dlog.NewTestLogger()
+	serving, addr, _, accepted := goAwayServing(t, log)
+	silent, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = silent.Close() })
+	<-accepted
+	deadline := time.Now()
+
+	// Act
+	left := serving.GoAway(deadline)
+
+	// Assert
+	got := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Operation: "daemon.server.go_away", Level: dlog.LevelError})
+	if left != 1 || len(got) != 1 || got[0].Context["connections"] != 1 ||
+		got[0].Context["deadline"] != deadline.Format(time.RFC3339Nano) {
+		t.Fatalf("GoAway() = %d, records = %+v, want 1 and one ERROR naming the one connection and the deadline", left, got)
 	}
 }
