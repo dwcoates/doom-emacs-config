@@ -140,12 +140,10 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		return queueSubject(credited, entry), true
 	}
 	if m := q.mediation; m != nil {
-		if sub, ok := subject(QueueEntry{Workspace: m.Mediator, Credited: m.Mediator}); ok {
-			out.Mediation = &frontendv1.RosterMergeQueueMediation{Subject: sub,
-				Standing: &frontendv1.RosterMergeQueueMediation_Waiting{Waiting: &frontendv1.RosterMergeQueueMediationWaiting{}}}
-			if m.Told {
-				out.Mediation.Standing = &frontendv1.RosterMergeQueueMediation_Checking{Checking: &frontendv1.RosterMergeQueueMediationChecking{}}
-			}
+		out.Mediation = &frontendv1.RosterMergeQueueMediation{
+			Standing: &frontendv1.RosterMergeQueueMediation_Waiting{Waiting: &frontendv1.RosterMergeQueueMediationWaiting{}}}
+		if m.Told {
+			out.Mediation.Standing = &frontendv1.RosterMergeQueueMediation_Checking{Checking: &frontendv1.RosterMergeQueueMediationChecking{}}
 		}
 	}
 	for _, entry := range q.remediating {
@@ -372,20 +370,14 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			rq.pause = q.pause
 			out[ws.Repo] = rq
 		}
-		// THE MEDIATION IS THE MEDIATOR'S REPOSITORY'S, whose queue it holds.
-		if q.mediation != nil {
-			ws, ok := byID[q.mediation.Mediator]
-			if !ok {
-				log.Error(op, "a deploy mediation names a mediator the registry does not carry, so it is not drawn", dlog.Context{
-					"repo": string(key), "workspace_id": string(q.mediation.Mediator),
-					"invariant_violation": "a deploy mediation's mediator is a registered workspace"})
-				continue
-			}
-			claim(key, ws.Repo, ws.ID)
-			rq := out[ws.Repo]
-			rq.mediation = q.mediation
+		// THE MEDIATION NAMES THE REPOSITORY whose queue it holds: the
+		// mediator is no workspace the sidebar draws.
+		if m := q.mediation; m != nil {
+			claim(key, m.Repo, "")
+			rq := out[m.Repo]
+			rq.mediation = m
 			rq.pause = q.pause
-			out[ws.Repo] = rq
+			out[m.Repo] = rq
 		}
 	}
 	for _, entry := range r.state.github {

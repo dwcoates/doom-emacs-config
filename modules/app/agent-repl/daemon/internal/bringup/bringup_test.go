@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -495,6 +496,72 @@ func TestRunDoesNotTimeAStartItNeverRanOrCutShort(t *testing.T) {
 			// Assert
 			if got := f.restarts.Observations(); len(got) != 0 {
 				t.Fatalf("observations = %+v, want none", got)
+			}
+		})
+	}
+}
+
+func TestRunStartsNoMoreThanItsWidthAtOnce(t *testing.T) {
+	// Arrange: five workspaces, two starts at once; each start holds until
+	// the test releases it.
+	f := newFixture()
+	deps := f.deps()
+	deps.Width = 2
+	entered := make(chan ids.WorkspaceID, 5)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	running, most := 0, 0
+	deps.StartSession = func(_ context.Context, ws ids.WorkspaceID) error {
+		mu.Lock()
+		running++
+		most = max(most, running)
+		mu.Unlock()
+		entered <- ws
+		<-release
+		mu.Lock()
+		running--
+		mu.Unlock()
+		return nil
+	}
+	done := make(chan Report, 1)
+
+	// Act
+	go func() { done <- Run(context.Background(), deps, workspaces("a", "b", "c", "d", "e")) }()
+	first := []ids.WorkspaceID{<-entered, <-entered}
+	select {
+	case ws := <-entered:
+		t.Fatalf("a third start (%s) began while two held the width", ws)
+	default:
+	}
+	close(release)
+	report := <-done
+
+	// Assert
+	if most != 2 || len(report.Started) != 5 {
+		t.Fatalf("at most %d starts ran at once and %d started (first %v), want 2 and 5", most, len(report.Started), first)
+	}
+}
+
+func TestDepsWidth(t *testing.T) {
+	cases := []struct {
+		name    string
+		width   int
+		pending int
+		want    int
+	}{
+		{name: "a set width", width: 3, pending: 10, want: 3},
+		{name: "no more than the workspaces", width: 8, pending: 2, want: 2},
+		{name: "unset is the processor count", width: 0, pending: 1000, want: runtime.NumCPU()},
+		{name: "nothing pending starts no worker", width: 4, pending: 0, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := Deps{Width: tc.width}.width(tc.pending)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("width(%d) = %d, want %d", tc.pending, got, tc.want)
 			}
 		})
 	}

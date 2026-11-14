@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -75,6 +76,9 @@ type Deps struct {
 	// it ends rather than when the whole bring-up does. The editor's OpenTabs
 	// (internal/opentabs) is the one caller that waits on single workspaces.
 	Done func(ws ids.WorkspaceID, err error)
+	// Width is how many starts run at once; zero is the machine's processor
+	// count (runtime.NumCPU).
+	Width int
 }
 
 // Outcome is what one workspace's bring-up came to.
@@ -151,19 +155,34 @@ func (d Deps) Validate() error {
 // and states the dead link on every surface, and the summary counts it.
 func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 	outcomes := make([]Outcome, len(pending))
+	// AT MOST deps.width() STARTS AT ONCE (owner report, 2026-11-14): a boot
+	// that started 102 sessions together spawned 102 shims and opened 102
+	// books on the store in the same second; the prompt queue's drain lock
+	// was then held 6-7s sixteen times and the store's page reads ran over
+	// their budget, which is the minute the editor stopped answering after
+	// every restart. Each start spawns a Node shim, so the bound is the
+	// machine's processors. The workspaces are started in pending order.
 	var wg sync.WaitGroup
-	for i, ws := range pending {
+	next := make(chan int)
+	for range deps.width(len(pending)) {
 		wg.Add(1)
 		// inflight: joined: the function that starts it waits for it.
 		go func() {
 			defer wg.Done()
-			var err error
-			outcomes[i], err = one(ctx, deps, ws)
-			if deps.Done != nil {
-				deps.Done(ws.ID, err)
+			for i := range next {
+				ws := pending[i]
+				var err error
+				outcomes[i], err = one(ctx, deps, ws)
+				if deps.Done != nil {
+					deps.Done(ws.ID, err)
+				}
 			}
 		}()
 	}
+	for i := range pending {
+		next <- i
+	}
+	close(next)
 	wg.Wait()
 	report := Report{}
 	for i, ws := range pending {
@@ -198,6 +217,16 @@ func Run(ctx context.Context, deps Deps, pending []wsm.Workspace) Report {
 // shim then refused this daemon's start. It is the other daemon's workspace,
 // not a failed bring-up, so it is recorded as stood down.
 var ErrNotServed = errors.New("bringup: the workspace is no longer served by this daemon")
+
+// width answers how many starts run at once for PENDING workspaces: Width, or
+// the processor count, and never more than there are workspaces.
+func (d Deps) width(pending int) int {
+	w := d.Width
+	if w <= 0 {
+		w = runtime.NumCPU()
+	}
+	return max(min(w, pending), 0)
+}
 
 // one brings one pending workspace's session up and says what came of it,
 // logging the per-workspace record Run's summary counts.

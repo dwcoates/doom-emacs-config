@@ -811,6 +811,63 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }
 
+func TestALinkEdgeReleasesTheQueuesReconnectHoldsOnlyWhenItComesBack(t *testing.T) {
+	cases := []struct {
+		name  string
+		edges []bool
+		want  int
+	}{
+		{name: "a link coming back after it went down releases them", edges: []bool{false, true}, want: 1},
+		{name: "a link's first attachment releases nothing", edges: []bool{true}},
+		{name: "a link going down releases nothing", edges: []bool{true, false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			queue := &releaseQueue{released: make(chan ids.WorkspaceID, 4)}
+			var ran []string
+			sink := &lifecycleSink{queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger(),
+				async: func(f func()) { ran = append(ran, "off the caller"); f() }}
+
+			// Act
+			for _, attached := range tc.edges {
+				sink.OnLinkChanged("ws-1", attached)
+			}
+
+			// Assert
+			if got := len(queue.released); got != tc.want || len(ran) != tc.want {
+				t.Fatalf("reconnect releases = %d, %d of them off the caller, want %d", got, len(ran), tc.want)
+			}
+		})
+	}
+}
+
+// releaseQueue counts the reconnect releases a sink asked of it.
+type releaseQueue struct {
+	promptqueue.Queue
+	released chan ids.WorkspaceID
+}
+
+func (q *releaseQueue) ReleaseReconnectHolds(ws ids.WorkspaceID) { q.released <- ws }
+
+func TestALinkComingBackBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{relay: &relayForwarder{}, log: log}
+
+	// Act
+	sink.OnLinkChanged("ws-1", false)
+	sink.OnLinkChanged("ws-1", true)
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError && r.Operation == "daemon.cmd.lifecycle" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
+}
+
 // fakeCaches records every session-up the sink told the cache keeper.
 type fakeCaches struct {
 	up, free []ids.WorkspaceID

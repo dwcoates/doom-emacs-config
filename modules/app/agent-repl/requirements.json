@@ -365,6 +365,29 @@
       "command": "terminal-notifier"
     },
     {
+      "id": "wifi-helper",
+      "kind": "app_build",
+      "why": "persistent wifi's failover reads the joined and visible Wi-Fi networks' names, which macOS gives only to an app allowed Location Services (wifi-helper/, daemon/internal/persistentwifi/scan.go)",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "app": "AgentReplWifi.app",
+      "build": {
+        "module": "wifi-helper/build.sh"
+      }
+    },
+    {
+      "id": "wifi-helper-location",
+      "kind": "location_permission",
+      "why": "without Location Services the Wi-Fi helper names no network, and persistent wifi's failover can join only the hotspot",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "app": "AgentReplWifi.app"
+    },
+    {
       "id": "notify-send",
       "kind": "program",
       "why": "the daemon's desktop banners on Linux (daemon/internal/desktopnotify)",

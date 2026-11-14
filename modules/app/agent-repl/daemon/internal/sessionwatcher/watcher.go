@@ -145,6 +145,11 @@ type watcher struct {
 	// so the LinkConnected that would have re-opened the fleet has already
 	// been consumed, with degraded still false (severedLocked).
 	fleetConnections uint64
+	// paced counts the paced re-opens run for a fleet severed under a live
+	// shim (armPacedReopenLocked) since an agent watch last opened; zero
+	// while none ran. A severing after one is recorded at INFO, the first at
+	// ERROR.
+	paced int
 
 	link LinkState
 	// linkNow mirrors link for the lock-free readers; every write to link
@@ -1477,7 +1482,14 @@ func (w *watcher) severedLocked(operation, detail string, err error, extra ...dl
 			ctx[k] = v
 		}
 	}
-	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	if w.paced > 0 {
+		// A PACED RE-OPEN THAT DID NOT TAKE is the outage still standing,
+		// recorded once at ERROR by the severing that began it.
+		ctx["paced_reopen"] = w.paced
+		w.log.Info("daemon.sessionwatcher."+operation, "a paced re-open of a fleet severed under a live shim did not take; the next follows", ctx)
+	} else {
+		w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	}
 	// THE LINK MAY ALREADY BE BACK. A transport break ends the client's own
 	// liveness stream and this fleet's streams at once, but the client's
 	// redial reaches runLink on the connectivity feed while this ending
@@ -1503,6 +1515,70 @@ func (w *watcher) severedLocked(operation, detail string, err error, extra ...dl
 	}
 	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
+	w.armPacedReopenLocked()
+}
+
+// pacedTookLocked ends a pacing of re-opens once an agent watch opened again:
+// its open reads the store, so the shim serves its streams once more, and a
+// later severing is a new outage, recorded at ERROR. Caller holds mu.
+func (w *watcher) pacedTookLocked() {
+	if w.paced == 0 {
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.paced_reopen_took", "a paced re-open took: the shim serves its watches again", dlog.Context{"attempts": w.paced})
+	w.paced = 0
+}
+
+// reopenPace is how long a fleet severed under a live shim waits before each
+// paced re-open. Measured: a store restart under live shims took 10.2s from
+// its SIGTERM to its socket listening again (2026-11-14 12:56:12 to
+// 12:56:22), and every shim's read gave up inside it; at one restart's length
+// the first re-open usually meets the store back.
+const reopenPace = 10 * time.Second
+
+// armPacedReopenLocked re-opens, after reopenPace, a fleet a stream severed
+// while its shim still runs (owner report, 2026-11-14: a store restart ended
+// every shim's agent stream, the shims stayed up and connected, and every
+// session sat severed until it was stopped by hand).
+//
+// THE CLIENT'S REDIAL DOES NOT COVER IT. A severed fleet is mended by the
+// client's next connection (runLink), but a stream that a LIVE shim ended --
+// its own read of the store giving up -- breaks no connection, so no new one
+// ever comes. The re-open is the probe: a shim whose store is still down
+// refuses it after its own read retry schedule, which severs the fleet again
+// and arms the next. A redial, a close, an ordered teardown or a death ends
+// the pacing: each changes the generation or the link this checks.
+// Caller holds mu.
+func (w *watcher) armPacedReopenLocked() {
+	if w.closed || w.endingLocked() {
+		return
+	}
+	if _, reaped := w.client.Reaped(); reaped {
+		return
+	}
+	gen := w.gen
+	inflight.Go(func() {
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-w.clock.After(reopenPace):
+		}
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.closed || w.gen != gen || !w.degraded || w.link != shimclient.LinkRedialing || w.endingLocked() {
+			return
+		}
+		if _, reaped := w.client.Reaped(); reaped {
+			return
+		}
+		w.paced++
+		w.log.Info("daemon.sessionwatcher.paced_reopen", "re-opening a fleet a stream severed under a live shim", dlog.Context{
+			"attempt": w.paced, "pace": reopenPace.String(), "shim_pid": w.client.PID()})
+		// AS A RECONNECT DOES (runLink): the link is drawn connected and the
+		// fleet re-opened; an open that fails severs it again.
+		w.setLinkLocked(shimclient.LinkConnected)
+		w.reopenLocked("a paced re-open of a fleet severed under a live shim")
+	})
 }
 
 // reopenLocked tears the fleet down and opens it again, each watch catching up
@@ -1824,6 +1900,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	w.refusalsEndedLocked("watch_agent", watchKey(a.id), a.refusals)
 	a.refusals = 0
 	a.stream = installed
+	w.pacedTookLocked()
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
 		"agent_id": a.id.GetValue(), "opening": openingName(req),
 	})

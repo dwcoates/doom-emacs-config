@@ -212,11 +212,6 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext
   // THE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
   const repairs = repairsOf(u, path);
-  // THE DEPLOY MEDIATION IS PINNED ABOVE THE HEAD: the queue waits on it
-  // (frontend.v1.RosterRepoMergeQueue.mediation).
-  if (u.mediation !== undefined) {
-    body.appendChild(drawRosterMergeQueueMediation(u.mediation, sc, `${path}.mediation`));
-  }
   if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0 && u.mediation === undefined)) {
     body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
   }
@@ -443,33 +438,27 @@ export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): 
   return line;
 }
 
-/** The class the deploy mediation's line wears. */
+/** The class the deploy mediation's label beside the repository's name wears. */
 export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
 
 /**
- * The deploy mediation the queue waits on, pinned above its head: the
- * mediator's name and where it stands, as a queue label (`checking deploy`
- * once it was told of the deploy, `awaiting deploy` while the deploy rolls
- * out). A click selects the mediator.
+ * The deploy mediation the queue waits on, as a purple label beside the
+ * repository's name in its group header (owner ruling, 2026-11-14): `checking
+ * deploy` once the mediator was told of the deploy, `awaiting deploy` while
+ * the deploy rolls out. The mediator is never drawn as a workspace, nor named.
  */
-export function drawRosterMergeQueueMediation(u: RosterMergeQueueMediation, sc: SidebarContext, path: string): HTMLElement {
-  const subject = requireMessage(u.subject, `${path}.subject`);
-  const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_MEDIATION_CLASS}`, `${path}.subject`);
-  line.append(drawSubjectName(subject, `${path}.subject`));
+export function drawQueueMediationLabel(u: RosterMergeQueueMediation, path: string): HTMLElement {
   const standing = requireCase(u.standing, `${path}.standing`);
   switch (standing.case) {
     case "checking":
-      line.appendChild(drawQueueLabel("checking deploy", MERGE_QUEUE_REASON_CLASS, "the deploy mediator is checking the last deploy; the queue waits on it"));
-      break;
+      return drawQueueLabel("checking deploy", MERGE_QUEUE_MEDIATION_CLASS, "the last deploy is being checked; the queue waits for it");
     case "waiting":
-      line.appendChild(drawQueueLabel("awaiting deploy", MERGE_QUEUE_REASON_CLASS, "the deploy mediator checks the last deploy once it has rolled out; the queue waits on it"));
-      break;
+      return drawQueueLabel("awaiting deploy", MERGE_QUEUE_MEDIATION_CLASS, "the last deploy is checked once it has rolled out; the queue waits for it");
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);
     }
   }
-  return line;
 }
 
 /** The class every queue label wears: the repair a merge out of line makes or awaits, a GitHub place. */

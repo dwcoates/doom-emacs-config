@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -4073,5 +4074,102 @@ func TestARefusedMainWatchArmsNothingOnTheClock(t *testing.T) {
 	// is where a re-open would have been armed.
 
 	// Assert.
+	h.clock.noneArmed(t)
+}
+
+// TestAFleetSeveredUnderALiveShimReopensOnItsPace covers a stream a LIVE shim
+// ended (its store read gave up during a store restart): no connection broke,
+// so no reconnect will ever come, and the fleet re-opens itself after
+// reopenPace instead of sitting severed until the session is stopped by hand
+// (owner report, 2026-11-14).
+func TestAFleetSeveredUnderALiveShimReopensOnItsPace(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.session.fail(errors.New("store unreachable"))
+	awaitLinkChanged(t, h, false)
+
+	// Act
+	if pace := h.clock.awaitArmed(t); pace != reopenPace {
+		t.Fatalf("armed %s, want the re-open pace %s", pace, reopenPace)
+	}
+	h.clock.fireLast()
+
+	// Assert
+	h.client.nextSessionOpen(t)
+	awaitLinkChanged(t, h, true)
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.paced_reopen")
+}
+
+// TestAPacedReopenThatDoesNotTakeArmsTheNextAtInfo covers an outage that
+// outlasts one pace: the re-open's severing is the outage still standing,
+// recorded at INFO (the first severing was the ERROR), and the next re-open is
+// armed.
+func TestAPacedReopenThatDoesNotTakeArmsTheNextAtInfo(t *testing.T) {
+	// Arrange: one severing; the store is still down, so the shim refuses
+	// the re-open's agent watch.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.session.fail(errors.New("store unreachable"))
+	awaitLinkChanged(t, h, false)
+	h.clock.awaitArmed(t)
+	h.client.setAgentErr(errors.New("connect ENOENT store.sock"))
+
+	// Act
+	h.clock.fireLast()
+
+	// Assert
+	if pace := h.clock.awaitArmed(t); pace != reopenPace {
+		t.Fatalf("armed %s, want the next re-open on the pace", pace)
+	}
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+	errs := 0
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && strings.HasPrefix(r.Operation, "daemon.sessionwatcher.watch_") {
+			errs++
+		}
+	}
+	if errs != 1 {
+		t.Fatalf("ERROR records of the severing = %d, want the first only", errs)
+	}
+}
+
+// TestAReconnectBeforeThePaceLeavesThePacedReopenNothingToDo covers the two
+// menders racing: the client's reconnect re-opens the fleet first, so the
+// paced timer finds a newer generation and opens nothing more.
+func TestAReconnectBeforeThePaceLeavesThePacedReopenNothingToDo(t *testing.T) {
+	// Arrange: a severing, then the reconnect that re-opens the fleet.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.session.fail(errors.New("connection reset"))
+	awaitLinkChanged(t, h, false)
+	h.clock.awaitArmed(t)
+	h.client.linkBack()
+	h.client.nextSessionOpen(t)
+	awaitLinkChanged(t, h, true)
+
+	// Act: the paced timer fires late.
+	h.clock.fireLast()
+
+	// Assert
+	h.client.noSessionOpen(t)
+	if h.hasRecord("info", "daemon.sessionwatcher.paced_reopen") {
+		t.Fatal("the paced re-open ran over a fleet the reconnect had already re-opened")
+	}
+}
+
+// TestAReapedShimArmsNoPacedReopen: a shim that is gone has no streams to
+// re-open; its revival is a new client and a new watcher.
+func TestAReapedShimArmsNoPacedReopen(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{Code: 1})
+
+	// Act
+	h.session.fail(errors.New("the shim exited"))
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_session")
+
+	// Assert
 	h.clock.noneArmed(t)
 }

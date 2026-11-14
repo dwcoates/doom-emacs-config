@@ -2,7 +2,9 @@ package persistentwifi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -20,7 +22,52 @@ func lostClosed(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t).standing(pmsetOn, summary(false, "")).withLid(lidClosed)
 	h.c.quiet = true
+	// The hotspot is out of reach unless a test says otherwise.
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
 	return h
+}
+
+// argScan is the prefix of every Wi-Fi scan's argv; its answer file follows.
+const argScan = "/t/open -W -n -g -a /t/AgentReplWifi.app --args scan --out "
+
+// sight scripts every scan to answer SCANS in turn, repeating the last: the
+// helper's answer written to the file the scan names.
+func (h *harness) sight(scans ...wifiScan) *harness {
+	t := h.r.t
+	i := 0
+	h.r.onPrefix(argScan, func(argv []string) answer {
+		scan := scans[min(i, len(scans)-1)]
+		i++
+		raw, err := json.Marshal(scan)
+		if err != nil {
+			t.Fatalf("marshal a scan: %v", err)
+		}
+		if err := os.WriteFile(argv[len(argv)-1], raw, 0o600); err != nil {
+			t.Fatalf("write a scan's answer: %v", err)
+		}
+		return answer{}
+	})
+	return h
+}
+
+// inSight is an authorized scan seeing NAMES, joined to CURRENT.
+func inSight(current string, names ...string) wifiScan {
+	scan := wifiScan{Authorization: "authorized", Current: current}
+	for i, n := range names {
+		scan.Visible = append(scan.Visible, visibleNetwork{SSID: n, RSSI: -40 - i})
+	}
+	return scan
+}
+
+// scanCount answers how many scans ran.
+func (h *harness) scanCount() int {
+	n := 0
+	for _, c := range h.r.ran() {
+		if strings.HasPrefix(c, argScan) {
+			n++
+		}
+	}
+	return n
 }
 
 // joinCalls answers every network join and radio power call, in order.
@@ -38,91 +85,63 @@ func TestTheFailoverNeverActsWithTheLidOpen(t *testing.T) {
 	// Arrange: Wi-Fi lost with the mode on, the lid open.
 	h := newHarness(t).standing(pmsetOn, summary(false, "")).withLid(lidOpen)
 
-	// Act: a beat at the loss and one long past the grace.
+	// Act: a beat at the loss and one long after.
 	h.tickAt(0)
-	h.tickAt(10 * failoverLossGrace)
+	h.tickAt(10 * time.Minute)
 
 	// Assert.
-	if calls := h.joinCalls(); len(calls) != 0 {
-		t.Fatalf("join and radio calls = %v, want none with the lid open", calls)
+	if calls := h.joinCalls(); len(calls) != 0 || h.scanCount() != 0 {
+		t.Fatalf("join and radio calls = %v and %d scans, want none with the lid open", calls, h.scanCount())
 	}
 	if n := len(h.lossRecords()); n != 0 {
 		t.Fatalf("loss records = %d, want none: the failover does not watch an open lid", n)
 	}
 }
 
-func TestALossThatEndsWithinTheGraceDoesNothing(t *testing.T) {
-	// Arrange: lost at the first beat, joined again by macOS ten seconds on.
+func TestTheFirstAttemptIsAtTheBeatThatFindsTheLoss(t *testing.T) {
+	// Arrange: lost with the lid closed.
 	h := lostClosed(t)
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, "Home")})
 
 	// Act.
 	h.tickAt(0)
-	h.tickAt(failoverLossGrace / 2)
 
-	// Assert.
-	if calls := h.joinCalls(); len(calls) != 0 {
-		t.Fatalf("join and radio calls = %v, want none for a loss macOS ended itself", calls)
-	}
-	ended := h.failoverRecords("debug", "a Wi-Fi loss ended before the failover's grace, so nothing was done")
-	if len(ended) != 1 || ended[0]["grace"] != failoverLossGrace.String() {
-		t.Fatalf("debug records = %+v, want the short loss recorded once", ended)
+	// Assert: no grace (owner ruling, 2026-11-14).
+	if n := h.r.count(argJoin); n != 1 {
+		t.Fatalf("hotspot joins at the loss = %d, want the first attempt at once", n)
 	}
 }
 
-func TestTheFailoverWaitsOutItsGrace(t *testing.T) {
-	cases := []struct {
-		name     string
-		at       time.Duration
-		wantJoin bool
-	}{
-		{name: "just short of the grace", at: failoverLossGrace - time.Second, wantJoin: false},
-		{name: "at the grace", at: failoverLossGrace, wantJoin: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: lost at the first beat.
-			h := lostClosed(t)
-			h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
-			h.tickAt(0)
-
-			// Act.
-			h.tickAt(tc.at)
-
-			// Assert.
-			if got := h.r.count(argJoin) == 1; got != tc.wantJoin {
-				t.Fatalf("hotspot joined = %t, want %t (calls %v)", got, tc.wantJoin, h.joinCalls())
-			}
-		})
-	}
-}
-
-func TestSavedNetworksAreTriedInOrderAndStopAtTheFirstJoin(t *testing.T) {
-	// Arrange: two saved networks before the hotspot; the first is out of
-	// range, the second joins.
+func TestOnlyKnownNetworksInSightAreTriedInOrderAndStopAtTheFirstJoin(t *testing.T) {
+	// Arrange: three saved networks before the hotspot. Home is out of sight;
+	// Office is in sight but will not join; Cafe joins; Stranger is in sight
+	// but unknown.
 	h := lostClosed(t)
-	h.r.on(argPreferred, answer{out: preferred("Home", "Office", hotspot)})
-	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
-	h.r.on(argJoinNamed("Office"), answer{})
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, "Office")})
-	h.tickAt(0)
+	h.r.on(argPreferred, answer{out: preferred("Home", "Office", "Cafe", hotspot)})
+	h.sight(inSight("", "Stranger", "Cafe", "Office"))
+	h.r.on(argJoinNamed("Office"), answer{out: "Could not find network Office."})
+	h.r.on(argJoinNamed("Cafe"), answer{})
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, "")})
 
 	// Act.
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert.
-	want := []string{argJoinNamed("Home"), argJoinNamed("Office")}
+	want := []string{argJoinNamed("Office"), argJoinNamed("Cafe")}
 	if calls := h.joinCalls(); !slices.Equal(calls, want) {
-		t.Fatalf("join calls = %v, want %v and no hotspot", calls, want)
+		t.Fatalf("join calls = %v, want %v: only known networks in sight, in preference order, and no hotspot", calls, want)
 	}
-	rejoined := h.failoverRecords("info", "a saved Wi-Fi network was rejoined after Wi-Fi was lost")
-	if len(rejoined) != 1 || rejoined[0]["index"] != 1 || rejoined[0]["saved"] != 2 {
-		t.Fatalf("rejoined records = %+v, want the second of two saved networks", rejoined)
+	joined := h.failoverRecords("info", "a known Wi-Fi network in sight was joined after Wi-Fi was lost")
+	if len(joined) != 1 || joined[0]["index"] != 1 || joined[0]["visible_known"] != 2 || joined[0]["saved"] != 3 {
+		t.Fatalf("joined records = %+v, want the second of two known networks in sight", joined)
+	}
+	tries := h.failoverRecords("info", "joined a Wi-Fi network, or tried to")
+	if len(tries) != 2 || tries[0]["joined"] != false || tries[1]["joined"] != true || tries[1]["took_ms"] == nil {
+		t.Fatalf("join records = %+v, want each join recorded with its outcome and duration", tries)
 	}
 	for _, level := range []string{"debug", "info", "warn", "error"} {
 		for _, r := range h.records(level, opFailover) {
 			for _, v := range r.Context {
-				if s, ok := v.(string); ok && (strings.Contains(s, "Home") || strings.Contains(s, "Office")) {
+				if s, ok := v.(string); ok && (strings.Contains(s, "Office") || strings.Contains(s, "Cafe") || strings.Contains(s, "Home")) {
 					t.Fatalf("failover record %q names a saved network: %+v", r.Message, r.Context)
 				}
 			}
@@ -130,30 +149,32 @@ func TestSavedNetworksAreTriedInOrderAndStopAtTheFirstJoin(t *testing.T) {
 	}
 }
 
-func TestTheHotspotIsTriedAfterTheSavedNetworksAndOnlyOnce(t *testing.T) {
+func TestTheHotspotIsTriedAfterTheKnownNetworksInSightAndOnlyOnce(t *testing.T) {
 	cases := []struct {
-		name  string
-		saved string
-		want  []string
+		name   string
+		saved  string
+		inView []string
+		want   []string
 	}{
-		{name: "a saved network out of range, then the hotspot", saved: preferred("Home", hotspot),
-			want: []string{argJoinNamed("Home"), argJoin}},
+		{name: "a known network in sight that will not join, then the hotspot", saved: preferred("Home", hotspot),
+			inView: []string{"Home"}, want: []string{argJoinNamed("Home"), argJoin}},
+		{name: "a known network out of sight is never tried", saved: preferred("Home", hotspot),
+			inView: []string{"Stranger"}, want: []string{argJoin}},
 		{name: "no saved network goes straight to the hotspot", saved: preferred(),
 			want: []string{argJoin}},
 		{name: "a hotspot saved first is still tried once, last", saved: preferred(hotspot, "Home"),
-			want: []string{argJoinNamed("Home"), argJoin}},
+			inView: []string{"Home", hotspot}, want: []string{argJoinNamed("Home"), argJoin}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := lostClosed(t)
 			h.r.on(argPreferred, answer{out: tc.saved})
+			h.sight(inSight("", tc.inView...))
 			h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
-			h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
-			h.tickAt(0)
 
 			// Act.
-			h.tickAt(failoverLossGrace)
+			h.tickAt(0)
 
 			// Assert.
 			if calls := h.joinCalls(); !slices.Equal(calls, tc.want) {
@@ -163,15 +184,48 @@ func TestTheHotspotIsTriedAfterTheSavedNetworksAndOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestAJoinedHotspotEndsTheFailover(t *testing.T) {
+func TestAScanThatNamesNoNetworkIsAnErrorOnceAndTheHotspotIsStillTried(t *testing.T) {
+	cases := []struct {
+		name      string
+		scan      wifiScan
+		wantCause string
+	}{
+		{name: "the helper is not allowed Location Services", scan: wifiScan{Authorization: "not_determined"},
+			wantCause: errScanUnauthorized.Error() + " (its standing: not_determined)"},
+		{name: "the helper's scan failed", scan: wifiScan{Authorization: "authorized", Error: "the scan failed: busy"},
+			wantCause: "the Wi-Fi helper's the scan failed: busy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a saved network, and scans that name nothing on both attempts.
+			h := lostClosed(t)
+			h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
+			h.sight(tc.scan)
+
+			// Act: two attempts.
+			h.tickAt(0)
+			h.tickAt(5 * time.Second)
+
+			// Assert.
+			errs := h.failoverRecords("error", "the visible Wi-Fi networks could not be read; only the hotspot can be joined")
+			if len(errs) != 1 || errs[0]["cause"] != tc.wantCause {
+				t.Fatalf("error records = %+v, want one naming %q", errs, tc.wantCause)
+			}
+			if h.r.count(argJoinNamed("Home")) != 0 || h.r.count(argJoin) != 2 {
+				t.Fatalf("join calls = %v, want the hotspot once per attempt and no saved network", h.joinCalls())
+			}
+		})
+	}
+}
+
+func TestAJoinedHotspotEndsTheFailoverAndStartsTheDwell(t *testing.T) {
 	// Arrange: no saved network but the hotspot, which joins.
 	h := lostClosed(t)
-	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
 	h.r.on(argJoin, answer{})
-	h.tickAt(0)
 
 	// Act.
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert.
 	joined := h.failoverRecords("info", "the hotspot was joined after Wi-Fi was lost")
@@ -181,6 +235,9 @@ func TestAJoinedHotspotEndsTheFailover(t *testing.T) {
 	if h.c.failover.attempts != 0 || !h.c.failover.lost.IsZero() {
 		t.Fatalf("failover = %+v, want it cleared", h.c.failover)
 	}
+	if !h.c.hotspot.on || h.c.hotspot.check != time.Unix(0, 0).Add(hotspotCheckEvery) {
+		t.Fatalf("dwell = %+v, want it on the hotspot, its first check one cadence on", h.c.hotspot)
+	}
 }
 
 func TestUnreadableSavedNetworksAreAnErrorOnceAndTheHotspotIsStillTried(t *testing.T) {
@@ -188,11 +245,10 @@ func TestUnreadableSavedNetworksAreAnErrorOnceAndTheHotspotIsStillTried(t *testi
 	h := lostClosed(t)
 	h.r.on(argPreferred, answer{out: "denied", code: 1})
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
-	h.tickAt(0)
 
 	// Act: two attempts.
-	h.tickAt(failoverLossGrace)
-	h.tickAt(failoverLossGrace + 5*time.Second)
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
 
 	// Assert.
 	errs := h.failoverRecords("error", "the saved Wi-Fi networks could not be read to rejoin one; the hotspot is tried")
@@ -210,10 +266,10 @@ func TestTheFailoverNeverPowerCyclesTheRadio(t *testing.T) {
 	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
 	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.sight(inSight("", "Home"))
 
 	// Act: the loss, then attempts over ten minutes.
-	h.tickAt(0)
-	for d := failoverLossGrace; d < 10*time.Minute; d += 5 * time.Second {
+	for d := time.Duration(0); d < 10*time.Minute; d += 5 * time.Second {
 		h.tickAt(d)
 	}
 
@@ -231,11 +287,10 @@ func TestTheLidOpeningStandsTheFailoverDown(t *testing.T) {
 	h := lostClosed(t)
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
 	h.tickAt(0)
-	h.tickAt(failoverLossGrace)
 
 	// Act: the lid opens, Wi-Fi still lost.
 	h.c.quiet = false
-	h.tickAt(failoverLossGrace + time.Minute)
+	h.tickAt(time.Minute)
 
 	// Assert.
 	if n := h.r.count(argJoin); n != 1 {
@@ -252,12 +307,11 @@ func TestAFailedAttemptIsRetriedOnTheScheduleAndWarnsOnce(t *testing.T) {
 	h := lostClosed(t)
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
 	h.tickAt(0)
-	h.tickAt(failoverLossGrace)
 
 	// Act: a beat before the retry is due, then the beat it falls due.
-	h.tickAt(failoverLossGrace + 4*time.Second)
+	h.tickAt(4 * time.Second)
 	before := h.r.count(argJoin)
-	h.tickAt(failoverLossGrace + 5*time.Second)
+	h.tickAt(5 * time.Second)
 
 	// Assert.
 	if before != 1 || h.r.count(argJoin) != 2 {
@@ -274,11 +328,10 @@ func TestWithNoHotspotConfiguredTheFaultIsAnErrorOnce(t *testing.T) {
 	h := newHarnessFor(t, "").standing(pmsetOn, summary(false, "")).withLid(lidClosed)
 	h.c.quiet = true
 	h.r.on(argPreferred, answer{out: preferred()})
-	h.tickAt(0)
 
 	// Act: two attempts.
-	h.tickAt(failoverLossGrace)
-	h.tickAt(failoverLossGrace + 5*time.Second)
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
 
 	// Assert.
 	errs := h.failoverRecords("error", "Wi-Fi was lost with the lid closed, no saved network could be rejoined, and no hotspot is configured to join")
@@ -288,10 +341,8 @@ func TestWithNoHotspotConfiguredTheFaultIsAnErrorOnce(t *testing.T) {
 }
 
 func TestTickAbandonedByItsCallerJoinsNothing(t *testing.T) {
-	// Arrange: lost, the grace passed.
+	// Arrange: lost with the lid closed.
 	h := lostClosed(t)
-	h.tickAt(0)
-	h.clock.set(failoverLossGrace)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -488,6 +539,7 @@ func TestAFailoverJoinRunsWithTheControllerLockFree(t *testing.T) {
 	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
 	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
+	h.sight(inSight("", "Home"))
 	var held []string
 	for _, argv := range []string{argJoinNamed("Home"), argJoin} {
 		h.r.whileRunning(argv, func(context.Context) {
@@ -498,10 +550,9 @@ func TestAFailoverJoinRunsWithTheControllerLockFree(t *testing.T) {
 			h.c.mu.Unlock()
 		})
 	}
-	h.tickAt(0)
 
 	// Act
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert
 	if len(held) != 0 {
@@ -518,12 +569,12 @@ func TestALidOpeningMidAttemptEndsTheAttemptBeforeItsNextJoin(t *testing.T) {
 	h := lostClosed(t)
 	h.r.on(argPreferred, answer{out: preferred("Home", "Office", hotspot)})
 	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.sight(inSight("", "Home", "Office"))
 	h.r.on(argDisplayWake, answer{})
 	h.r.whileRunning(argJoinNamed("Home"), func(context.Context) { h.hear(LidOpen) })
-	h.tickAt(0)
 
 	// Act
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert
 	if calls := h.joinCalls(); !slices.Equal(calls, []string{argJoinNamed("Home")}) {
@@ -543,16 +594,16 @@ func TestALidOpeningCancelsTheJoinInFlight(t *testing.T) {
 	h := lostClosed(t)
 	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
 	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.sight(inSight("", "Home"))
 	h.r.on(argDisplayWake, answer{})
 	var joinErr error
 	h.r.whileRunning(argJoinNamed("Home"), func(ctx context.Context) {
 		h.hear(LidOpen)
 		joinErr = ctx.Err()
 	})
-	h.tickAt(0)
 
 	// Act
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert
 	if !errors.Is(joinErr, context.Canceled) {
@@ -569,14 +620,13 @@ func TestEachFailoverAttemptRecordsItsStart(t *testing.T) {
 	// Arrange
 	h := lostClosed(t)
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
-	h.tickAt(0)
 
 	// Act
-	h.tickAt(failoverLossGrace)
+	h.tickAt(0)
 
 	// Assert
 	started := h.failoverRecords("info", "a Wi-Fi failover attempt starts")
-	if len(started) != 1 || started[0]["attempt"] != 1 || started[0]["lost_for"] != failoverLossGrace.String() {
-		t.Fatalf("start records = %+v, want the first attempt at the grace", started)
+	if len(started) != 1 || started[0]["attempt"] != 1 || started[0]["lost_for"] != "0s" {
+		t.Fatalf("start records = %+v, want the first attempt at the loss", started)
 	}
 }

@@ -35,7 +35,11 @@
   - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose deploy config versions nothing.
   - Exit 1 is a branch that did not merge cleanly; resolve it on the branch and land again.
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
-- Report the landing: the version, and that agent-repl lets the queue through when this turn ends.
+- Watch every deploy until it has settled, and fix what it broke before calling it done.
+  - Wait for the new build to serve, then read every system's warnings and errors since the deploy began, `--doctor`, and the latencies against the versions before it.
+  - Each defect the deploy shows is fixed on the branch, landed and deployed again the same way, and that deploy is watched in turn.
+  - The work is done only once a deploy shows nothing to fix.
+- Report the landing: the version, what the watch found and fixed, and that agent-repl lets the queue through when this turn ends.
 
 ### One agent does the work: no new workspace, no async merge, few subagents
 
