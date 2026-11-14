@@ -1093,13 +1093,19 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 		f.onAdmit(id)
 	}
 	for i, entry := range f.queues[repo] {
-		if entry.Workspace == id {
-			f.queues[repo][i].State = wsm.MergeAdmitted
-			f.drainOwed[repo] = true
-			return nil
+		if entry.Workspace != id {
+			continue
 		}
+		// ONLY A WAITING ENTRY IS ADMITTED, as the durable queue refuses any
+		// other prior state (wsm.AdmitMerge).
+		if entry.State != wsm.MergeQueued {
+			return fmt.Errorf("admit %s while %s, not %s", id, entry.State, wsm.MergeQueued)
+		}
+		f.queues[repo][i].State = wsm.MergeAdmitted
+		f.drainOwed[repo] = true
+		return nil
 	}
-	return fmt.Errorf("no queue entry for %s", id)
+	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
 // StartMergePick stands for the durable pick start: the merge workspace's

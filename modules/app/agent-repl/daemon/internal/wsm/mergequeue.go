@@ -655,10 +655,13 @@ func nullableText(v string) any {
 	return v
 }
 
-// setMergeQueueState is the one state-write path for a queue entry, refusing an
-// entry that is not in the queue rather than affecting no rows. ALSO runs in
-// the same transaction once the entry is written.
-func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey, id WorkspaceID, state MergeQueueState, fields dlog.Context, also func(context.Context, *sql.Tx, RepoKey) error) error {
+// setMergeQueueState is the one state-write path for a queue entry, moving it
+// from FROM to STATE. An entry that is not in the queue is refused
+// (ErrNotFound) rather than affecting no rows, and one in any state but FROM
+// is refused rather than overwritten: a write that met an entry in another
+// state (a remediating merge admitted) would silently pull it back into line.
+// ALSO runs in the same transaction once the entry is written.
+func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey, id WorkspaceID, from, state MergeQueueState, fields dlog.Context, also func(context.Context, *sql.Tx, RepoKey) error) error {
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
@@ -667,17 +670,21 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 	fields["repo"] = string(key)
 	fields["workspace"] = string(id)
 	fields["state"] = state.String()
+	fields["from"] = from.String()
 	if !state.valid() {
 		err := fmt.Errorf("wsm: undeclared merge queue state %d", int(state))
 		s.log.Error(op, "refused an undeclared merge queue state", withError(fields, err))
 		return err
 	}
 	return s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(state), key, id)
+		_, prior, err := entryPlace(ctx, tx, key, id)
 		if err != nil {
 			return err
 		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key)); err != nil {
+		if prior != from {
+			return fmt.Errorf("wsm: workspace %s in repo %q moves to %s while %s, not %s", id, key, state, prior, from)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(state), key, id); err != nil {
 			return err
 		}
 		return also(ctx, tx, key)
@@ -820,9 +827,11 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 
 // AdmitMerge marks the entry the orchestrator is running now, and marks its
 // repository as owing its queue_drained scripts IN THE SAME WRITE, so no
-// admitted merge leaves the repository without the debt.
+// admitted merge leaves the repository without the debt. Only a waiting
+// (queued) entry is admitted; any other state is a refusal, as StepAsideMerge
+// and ReturnRemediatedMerge refuse a wrong prior state.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
-	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{}, oweQueueDrain)
+	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeQueued, MergeAdmitted, dlog.Context{}, oweQueueDrain)
 }
 
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
