@@ -295,7 +295,7 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, repository: QueueR
   u.waiting.forEach((waiting, index) => {
     const waitingPath = `${path}.waiting[${index}]`;
     const line = drawRosterMergeQueueWaiting(waiting, index + 1, sc, waitingPath);
-    refs.set(line, requireMessage(requireMessage(waiting.subject, `${waitingPath}.subject`).workspace, `${waitingPath}.subject.workspace`));
+    refs.set(line, waitingMergeRef(waiting, waitingPath));
     body.appendChild(line);
   });
   u.github.forEach((github, index) => {
@@ -310,6 +310,16 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, repository: QueueR
     if (spec !== null) pressToDrag(sc.arrange, spec, event);
   });
   return body;
+}
+
+/**
+ * The ref every move of the waiting merge WAITING names, it or its anchor:
+ * the merge itself (`RosterMergeQueueSubject.merge`), never the workspace it is
+ * credited to, since an async merge's credit is its requester, which several
+ * of its async merges share.
+ */
+export function waitingMergeRef(waiting: RosterMergeQueueWaiting, path: string): WorkspaceRef {
+  return requireMessage(requireMessage(waiting.subject, `${path}.subject`).merge, `${path}.subject.merge`);
 }
 
 /**

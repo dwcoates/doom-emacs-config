@@ -534,14 +534,16 @@ export function drawnEntries(list: Element): string[] {
 
 /**
  * A merge queue subject credited to workspace ID, named NAME (ID unless
- * said), running sync unless ASYNC, revealing REVEAL when given.
+ * said), running sync unless ASYNC, revealing REVEAL when given, and standing
+ * on its queue as MERGE (ID unless said).
  */
-export function queueSubject(id: string, init: { name?: string; async?: boolean; reveal?: string } = {}): RosterMergeQueueSubject {
+export function queueSubject(id: string, init: { name?: string; async?: boolean; reveal?: string; merge?: string } = {}): RosterMergeQueueSubject {
   return create(RosterMergeQueueSubjectSchema, {
     workspace: { id, dir: `/w/${id}` },
     name: init.name ?? id,
     reveal: init.reveal === undefined ? undefined : { value: init.reveal },
     mode: { mode: init.async === true ? { case: "async", value: {} } : { case: "sync", value: {} } },
+    merge: { id: init.merge ?? id },
   });
 }
 

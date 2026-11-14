@@ -1248,6 +1248,13 @@ message RosterMergeQueueSubject {
   optional FeedId reveal = 3;
   // How the merge runs: in place, or in a hidden merge workspace.
   RosterMergeQueueMode mode = 4;
+  // THE MERGE ITSELF, as its queue holds it: the workspace its queue entry
+  // stands under. For a sync merge that is `workspace`; for an async merge
+  // it is its hidden merge workspace, never its requester, so one of several
+  // async merges one workspace asked for can be told apart. Every ask the
+  // sidebar makes about this merge (agentrepl.v1.UpdateMergeQueueMoveTo, its
+  // anchor included) names it; a click still selects `workspace`.
+  workspace.v1.WorkspaceRef merge = 5;
 }
 
 // How a merge in the queue runs. THE ARM IS THE MODE.

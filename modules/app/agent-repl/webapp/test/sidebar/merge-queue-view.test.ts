@@ -62,6 +62,7 @@ import {
   MERGE_QUEUE_POSITION_CLASS,
   pausedText,
   queueDrag,
+  waitingMergeRef,
   queueHoverText,
   queueCount,
   queueLine,
@@ -757,6 +758,19 @@ describe("dragging a waiting merge", () => {
     queueDrag(sc, body, lines[1], refs as never)?.dropped(body, lines[0]);
     await settled();
     expect([sc.arrange.status.parentElement?.querySelector('.refusal[data-arm="noSuchQueuedMerge"]') !== null || sc.arrange.status.querySelector('.refusal[data-arm="noSuchQueuedMerge"]') !== null, sc.arrange.hold.holding()]).toEqual([true, false]);
+  });
+});
+
+describe("waitingMergeRef", () => {
+  it("names the merge itself, never the requester two async merges share", () => {
+    const first = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-a", merge: "merge-a" }) });
+    const second = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-b", merge: "merge-b" }) });
+    expect([waitingMergeRef(first, "w[0]").id, waitingMergeRef(second, "w[1]").id]).toEqual(["merge-a", "merge-b"]);
+  });
+
+  it("refuses a subject that names no merge", () => {
+    const subject = create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "sync", value: {} } } });
+    expect(() => waitingMergeRef(waitingMerge("w1", { subject }), "w[0]")).toThrow(MalformedView);
   });
 });
 
