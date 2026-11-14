@@ -191,6 +191,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
   });
 
+  it("has the deploy mediator hold the queue only for what the deploy it checks caused", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("mediating", home);
+    // Assert — owner ruling 2026-11-14: a defect the deploy did not cause
+    // never holds the queue.
+    expect(text).toContain("Judge only what the deploy being checked caused");
+    expect(text).toContain("never holds the queue, and is never fixed here");
+    expect(text).toContain("`agent-repld workspace prompt merge-queue-stall-triage");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();
