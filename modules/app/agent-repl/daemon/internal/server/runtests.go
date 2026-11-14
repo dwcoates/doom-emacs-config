@@ -136,9 +136,24 @@ func (s *server) RunTests(
 		argv = merge.UngovernedTestArgv(argv)
 		log.Info(opRunTests, "the user asked for an ungoverned run; it takes every core at the test runs' best priority", dlog.Context{"dir": dir, "workspace": string(w.id)})
 	}
+	// THE DAEMON'S EXIT STOPS THE RUN AND HANDS IT ON. A run is this daemon's
+	// child, so a deploy's handover cannot carry it; until 2026-11-14 the exit
+	// cut every running RunTests stream at its deadline ("the exit's deadline
+	// passed with standing streams still open ... RunTests=2"), the caller
+	// read "the run's stream broke: incomplete envelope", and an agent's full
+	// run before a landing was lost to any deploy. The exit's end of the
+	// surface (Close) now stops the run, and its stream ends with
+	// transferring_away naming the successor, which the caller sends the run
+	// to (streamTestRun), or runner_failed when no successor serves.
+	runCtx, stopRun := context.WithCancel(ctx)
+	defer stopRun()
+	defer context.AfterFunc(s.life, stopRun)()
 	runs := max(msg.GetRuns(), 1)
 	for run := uint32(1); run <= runs; run++ {
-		outcome, err := s.relayTestRun(ctx, log, stream, dir, argv, run)
+		outcome, err := s.relayTestRun(runCtx, log, stream, dir, argv, run)
+		if outcome == runCutByExit {
+			return s.answerRunCutByExit(log, stream, dir, run)
+		}
 		if err != nil || outcome != runPassed && (outcome != runFailed || msg.GetStopAtFirstFailure()) {
 			// A send that failed, a run that never said how it ended or was
 			// refused, or the first failure of a run told to stop there: no
@@ -192,10 +207,25 @@ const (
 	// runAborted is a run the runner stopped before it planned, on its own
 	// failure (testrun.v1.TestRunAborted).
 	runAborted
+	// runCutByExit is a run this daemon stopped before its end because it is
+	// exiting (answerRunCutByExit); nothing about its end was sent.
+	runCutByExit
 )
 
 func (o runOutcome) String() string {
-	return [...]string{"unended", "passed", "failed", "refused", "aborted"}[o]
+	return [...]string{"unended", "passed", "failed", "refused", "aborted", "cut_by_exit"}[o]
+}
+
+// answerRunCutByExit ends the stream of run RUN, which this daemon's exit
+// stopped: transferring_away naming the successor the caller sends the run
+// to, or runner_failed when no successor serves (a plain stop).
+func (s *server) answerRunCutByExit(log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, run uint32) error {
+	if successor := s.deps.SuccessorAddress(); successor != "" {
+		log.Info(opRunTests, "this daemon is exiting for a handover; it stopped a test run and hands it to its successor", dlog.Context{"dir": dir, "run": run, "successor": successor})
+		return sendRunTestsError(stream, run, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_TransferringAway{TransferringAway: &agentreplv1.RunTestsTransferringAway{Address: successor}}})
+	}
+	log.Info(opRunTests, "this daemon is stopping; it stopped a test run before its end", dlog.Context{"dir": dir, "run": run})
+	return sendRunnerFailed(stream, run, -1, "the daemon stopped before the run ended, and no successor serves; run it again once the daemon is back")
 }
 
 // relayTestRun runs argv in dir with an events pipe as its fd 3, sending every
@@ -274,6 +304,11 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	}
 	events.Close() //nolint:errcheck // read to its end
 	result := <-done
+	if ended == nil && sendErr == nil && s.life.Err() != nil {
+		// The daemon's exit stopped the run (RunTests); its caller is told
+		// where to send it, not that the run failed.
+		return runCutByExit, nil
+	}
 	if ended != nil {
 		if passed := ended.GetEnded().GetPassed(); passed != nil && result.err == nil && result.run.ExitCode != 0 {
 			failure := fmt.Sprintf("the run's script exited %d after its runner said every unit passed; its last output:\n%s", result.run.ExitCode, tail.String())

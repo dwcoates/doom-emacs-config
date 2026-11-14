@@ -546,7 +546,10 @@ func (*RunTestsError_UserOnlyRefused) isRunTestsError_Cause() {}
 
 func (*RunTestsError_TransferringAway) isRunTestsError_Cause() {}
 
-// The daemon handed the workspace to a successor mid-handover.
+// The daemon handed the workspace to a successor mid-handover, before the run
+// started or while it ran: a daemon exiting for a handover stops each run it
+// is running and ends its stream with this arm, after whatever events the run
+// had already sent.
 type RunTestsTransferringAway struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The successor's `127.0.0.1:<port>`, which the caller sends the run to.
