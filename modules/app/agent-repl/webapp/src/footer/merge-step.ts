@@ -71,6 +71,8 @@ function drawStep(
       return drawMergeStepHook(step.value, `${path}.deploying`);
     case "postDeploy":
       return drawMergeStepHook(step.value, `${path}.post_deploy`);
+    case "finishing":
+      return drawMergeStepHook(step.value, `${path}.finishing`);
     case "rebasing":
       return drawMergeStepRebasing(step.value, `${path}.rebasing`);
     case "conflictResolution":
