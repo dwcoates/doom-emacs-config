@@ -123,6 +123,17 @@ func TestTheSweepDeletesTheBranchesLandedWorkspacesLeftBehind(t *testing.T) {
 			},
 		},
 		{
+			name: "a landed branch whose target is a present remote-tracking ref is judged against that ref",
+			arrange: func(w *world, repoDir string) {
+				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "origin/master")
+				w.git.branches["origin/master"] = false
+				w.git.remoteRefs["origin/master"] = true
+			},
+			wantDeleted:  true,
+			wantInto:     "origin/master",
+			wantJudgedBy: "ancestry",
+		},
+		{
 			name: "a landed branch holding commits its parent does not is kept",
 			arrange: func(w *world, repoDir string) {
 				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "master")
@@ -233,7 +244,7 @@ func TestTheSweepCountsALandedBranchWhoseTargetItCouldNotProbe(t *testing.T) {
 	w := newWorld(t)
 	repoDir := w.addRepo("doom")
 	landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/parent")
-	w.git.branchExistsErr = map[string]error{"fix/parent": errors.New("git could not answer")}
+	w.git.refExistsErr = map[string]error{"fix/parent": errors.New("git could not answer")}
 
 	// Act
 	report := w.sweep()

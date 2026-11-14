@@ -145,6 +145,14 @@ func (g *gatedGit) BranchExists(ctx context.Context, repoDir, branch string) (bo
 	return g.inner.BranchExists(ctx, repoDir, branch)
 }
 
+func (g *gatedGit) RefExists(ctx context.Context, repoDir, ref string) (bool, error) {
+	if err := g.enter("RefExists"); err != nil {
+		return false, err
+	}
+	defer g.leave()
+	return g.inner.RefExists(ctx, repoDir, ref)
+}
+
 func (g *gatedGit) CreateWorktree(ctx context.Context, repoDir, branch, baseRef, worktreeDir string) error {
 	if err := g.enter("CreateWorktree"); err != nil {
 		return err

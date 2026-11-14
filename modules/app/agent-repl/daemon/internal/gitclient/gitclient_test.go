@@ -272,6 +272,71 @@ func TestBranchExistsVerifiesUnderRefsHeadsOnly(t *testing.T) {
 	fake.assertSubject(0, "show-ref", "--verify", "--quiet", "refs/heads/v1")
 }
 
+// --- RefExists ----------------------------------------------------------
+
+// TestRefExistsAsksRevParseForAnyCommitRef pins that the probe is not confined
+// to refs/heads: a remote-tracking target such as origin/master must be found.
+func TestRefExistsAsksRevParseForAnyCommitRef(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("abc123\n", "rev-parse"))
+
+	// Act.
+	if _, err := git.RefExists(context.Background(), "/repo", "origin/master"); err != nil {
+		t.Fatalf("RefExists: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "rev-parse", "--verify", "--quiet", "--end-of-options", "origin/master^{commit}")
+}
+
+func TestRefExistsAnswers(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture gitFixture
+		want    bool
+	}{
+		{name: "exit 0 is a ref naming a commit", fixture: ok("abc123\n", "rev-parse"), want: true},
+		{name: "exit 1 is no such ref", fixture: fails(1, "", "rev-parse"), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tc.fixture)
+
+			// Act.
+			got, err := git.RefExists(context.Background(), "/repo", "fix/parent")
+
+			// Assert.
+			if err != nil || got != tc.want {
+				t.Fatalf("RefExists = %v, %v; want %v with no error", got, err, tc.want)
+			}
+			if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.ref_exists"); found {
+				t.Fatal("an answer was recorded at ERROR; both exits are ordinary answers")
+			}
+		})
+	}
+}
+
+func TestRefExistsThatCannotTellIsARecordedFailure(t *testing.T) {
+	// Arrange: a broken repository is neither answer.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository\n", "rev-parse"))
+
+	// Act.
+	_, err := git.RefExists(context.Background(), "/repo", "fix/parent")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || failure.ExitCode != 128 {
+		t.Fatalf("RefExists error = %v (%T), want git's own exit-128 failure", err, err)
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.ref_exists"); !found {
+		t.Fatal("git failing to tell was not recorded at ERROR under daemon.gitclient.ref_exists")
+	}
+}
+
 // --- RepositoryOf -------------------------------------------------------
 
 func TestRepositoryOfAnswersTheMainWorktree(t *testing.T) {

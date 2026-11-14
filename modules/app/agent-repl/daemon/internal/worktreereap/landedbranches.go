@@ -34,7 +34,9 @@ const opLandedBranch = "daemon.worktreereap.landed_branch"
 // so a tip inside it has landed whatever ref it targeted. Asking git about the
 // deleted ref failed every sweep and kept the branch for good (2026-11-14:
 // `merge-queue/successor-role-flags-landing`, landed into the since-retired
-// `fix/successor-role-flags`).
+// `fix/successor-role-flags`). The target is probed as any ref, not as a
+// local branch, because a landing target may be a remote-tracking ref such
+// as `origin/master`, which is present though no local branch is named so.
 //
 // A dry run judges nothing here: a deletion is the one thing the pass does,
 // and Retire judges and deletes in one step.
@@ -71,7 +73,7 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 		if landing.Into == "" {
 			landing.Into = s.defaultBranch
 		} else if landing.Into != s.defaultBranch {
-			present, err := s.r.deps.Git.BranchExists(ctx, s.repo.Dir, landing.Into)
+			present, err := s.r.deps.Git.RefExists(ctx, s.repo.Dir, landing.Into)
 			if err != nil {
 				s.r.deps.Log.Error(opLandedBranch, "could not probe the branch a landed branch landed into; the branch is kept",
 					dlog.WithCause(dlog.Context{"repo": s.repo.Dir, "branch": branch, "into": landing.Into,

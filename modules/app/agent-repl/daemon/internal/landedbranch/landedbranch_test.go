@@ -36,6 +36,10 @@ func (g *fakeGit) BranchExists(context.Context, string, string) (bool, error) {
 	return g.exists, g.existsErr
 }
 
+func (g *fakeGit) RefExists(context.Context, string, string) (bool, error) {
+	return g.exists, g.existsErr
+}
+
 func (g *fakeGit) ResolveRef(context.Context, string, string) (string, error) {
 	return testHead, g.resolveErr
 }

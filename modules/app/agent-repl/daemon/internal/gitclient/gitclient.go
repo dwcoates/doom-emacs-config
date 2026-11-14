@@ -178,6 +178,28 @@ func (c *client) BranchExists(ctx context.Context, repoDir, branch string) (bool
 	return c.branchExists(ctx, "daemon.gitclient.branch_exists", repoDir, branch)
 }
 
+// RefExists reports whether ref names a commit, through `rev-parse --verify
+// --quiet`: exit 0 is yes and exit 1 is no, both ANSWERS. Unlike
+// BranchExists it is not confined to refs/heads, so a remote-tracking ref
+// such as `origin/master` is found. Any other exit is git failing to tell,
+// which is never read as either answer.
+func (c *client) RefExists(ctx context.Context, repoDir, ref string) (bool, error) {
+	const operation = "daemon.gitclient.ref_exists"
+	in, err := c.runRaw(ctx, operation, repoDir, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return false, err
+	}
+	switch in.exitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	}
+	failure := in.fail()
+	c.log.Global().Error(operation, "git could not tell whether a ref names a commit", in.logContext())
+	return false, failure
+}
+
 // ResolveRef resolves a ref to a full commit sha. The `^{commit}` peel means a
 // tag resolves to the commit it points at rather than to the tag object, and
 // `--verify` means an unknown ref fails loudly instead of being echoed back.
