@@ -46,9 +46,12 @@ Refuses unless AGENT_REPL_STORE_RESET=1 is set in the environment.
 Honored environment:
   AGENT_REPL_STORE_RESET   must be exactly 1, or the script refuses
   XDG_CACHE_HOME           locates the store directory (default ~/.cache)
-  AGENT_REPL_LAUNCHCTL     launchctl to drive (default: the one on PATH)
+  AGENT_REPL_LAUNCHCTL     launchctl to drive on macOS (default: the one on PATH)
+  AGENT_REPL_SYSTEMCTL     systemctl to drive on Linux (default: the one on PATH)
   AGENT_REPL_LAUNCH_AGENTS_DIR  where the installed plists live
                            (default ~/Library/LaunchAgents)
+  AGENT_REPL_SYSTEMD_USER_DIR   where the installed units live
+                           (default ~/.config/systemd/user)
   AGENT_REPL_STORE_SOCK_MAX  seconds to wait for the socket (default 180)
 EOF
 }
@@ -78,53 +81,32 @@ STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 
-# WHERE THE PLISTS LIVE. The same directory the installer (bin/requirements.sh,
-# the service kind) renders each plist into, and the
-# same `$LABEL.plist` naming, because a bootstrap needs the file the service
-# was bootstrapped from originally. Overridable for the hermetic harness, for
-# the same reason AGENT_REPL_LAUNCHCTL is.
-LAUNCH_AGENTS_DIR="${AGENT_REPL_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
-service_plist() { printf '%s/%s.plist' "$LAUNCH_AGENTS_DIR" "$1"; }
+# THE SERVICE MANAGER IS DRIVEN THROUGH lib-service.sh: launchd on macOS,
+# `systemd --user' on Linux, each overridable (AGENT_REPL_LAUNCHCTL,
+# AGENT_REPL_SYSTEMCTL) so the hermetic harness substitutes its stub: reaching
+# the LIVE service manager from a test run is exactly what must never happen.
+# shellcheck source=lib-service.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-service.sh"
+SERVICE_PLATFORM="$(service_host_platform)" || die "this host has no service manager the reset drives"
 
-# Overridable so the hermetic harness can substitute its PATH stub: reaching
-# the LIVE launchd from a test run is exactly what must never happen.
-LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
-
-uid="$(id -u)"
-
-# NOT RUNNING IS AN ANSWER, NOT A FAILURE. `launchctl print` exits non-zero for
-# a label it does not know, and under `set -o pipefail` that would abort the
-# script at the very question it is asking -- so the pipeline's status is
-# discarded and the ABSENCE OF A PID is the whole signal.
-service_pid() { # LABEL -> pid, or empty when launchd reports none
-    { "$LAUNCHCTL" print "gui/$uid/$1" 2>/dev/null || true; } |
-        awk '/^[[:space:]]*pid = /{ gsub(/[^0-9]/, "", $3); print $3; exit }'
-}
-
-# STOP MEANS STOPPED, AND A KEPT-ALIVE SERVICE ONLY STOPS BY LEAVING THE
-# DOMAIN. Both plists set `KeepAlive`, so launchd relaunches the process the
-# instant it exits: a `launchctl kill` -- even SIGKILL -- is answered by a new
-# pid within a second, and a poll for "launchd reports no pid" can never
-# succeed. That is not a hypothetical; it is what this script did three times
-# on 2026-09-13, timing out at 180s per service having stopped nothing. So the
-# stop is `bootout`, which removes the service from the user domain: the
-# process is signalled AND the relaunch is taken away with it. The poll then
-# asks the question bootout can actually answer -- does launchd still KNOW this
-# label -- and `bootstrap` puts it back afterwards.
-service_known() { # LABEL -> 0 when launchd still has the service loaded
-    "$LAUNCHCTL" print "gui/$uid/$1" >/dev/null 2>&1
-}
-
+# STOP MEANS STOPPED. Both services are kept alive, so on macOS launchd
+# relaunches the process the instant it exits: a `launchctl kill` -- even
+# SIGKILL -- is answered by a new pid within a second, and a poll for "launchd
+# reports no pid" can never succeed. That is not a hypothetical; it is what this
+# script did three times on 2026-09-13, timing out at 180s per service having
+# stopped nothing. So the stop takes the service out of the manager's hands
+# (service_stop: a `bootout', or systemd's own stop), and the poll asks the
+# question that stop can answer -- does the manager still hold the label.
 stop_service() { # LABEL
     local label="$1" waited=0 pid
-    if ! service_known "$label"; then
+    if ! service_held "$label"; then
         log "$label: already stopped"
         return 0
     fi
     pid="$(service_pid "$label")"
-    log "$label: booting out (pid ${pid:-none})..."
-    "$LAUNCHCTL" bootout "gui/$uid/$label" >/dev/null 2>&1 || true
-    while service_known "$label"; do
+    log "$label: stopping (pid ${pid:-none})..."
+    service_stop "$label" || true
+    while service_held "$label"; do
         if [ "$waited" -ge "$SOCK_MAX" ]; then
             die "$label did not exit within ${SOCK_MAX}s; nothing was removed and no service was restarted"
         fi
@@ -134,14 +116,11 @@ stop_service() { # LABEL
     log "$label: stopped"
 }
 
-# A BOOTED-OUT SERVICE COMES BACK BY BOOTSTRAPPING ITS PLIST, not by starting a
-# label the domain no longer holds. `RunAtLoad` is set in both plists, so
-# bootstrap runs the process itself and nothing further is needed.
+# A STOPPED SERVICE COMES BACK FROM ITS INSTALLED DEFINITION (service_start: a
+# bootstrap of its plist, which runs it, or systemd's start).
 start_service() { # LABEL
-    local plist
-    plist="$(service_plist "$1")"
-    log "$1: bootstrapping $plist..."
-    "$LAUNCHCTL" bootstrap "gui/$uid" "$plist" >/dev/null
+    log "$1: starting from $(service_definition_path "$1")..."
+    service_start "$1"
 }
 
 wait_for_store_sock() {
@@ -168,14 +147,14 @@ if [ -e "$STORE_DB" ] && [ ! -f "$STORE_DB" ]; then
     die "$STORE_DB exists and is not a regular file; refusing to remove it"
 fi
 
-# THE PLISTS ARE CHECKED BEFORE ANYTHING IS STOPPED. A bootout with no plist to
-# bootstrap back from would leave the host with no store and no sidecar and no
-# way for this script to return them, so a missing file is a refusal taken
-# while everything is still running and nothing has been removed.
+# THE DEFINITIONS ARE CHECKED BEFORE ANYTHING IS STOPPED. A stop with no
+# definition to start back from would leave the host with no store and no
+# sidecar and no way for this script to return them, so a missing file is a
+# refusal taken while everything is still running and nothing has been removed.
 if [ "$KEEP_DOWN" -eq 0 ]; then
     for label in "$STORE_LABEL" "$SIDECAR_LABEL"; do
-        plist="$(service_plist "$label")"
-        [ -f "$plist" ] || die "$plist is missing; this reset boots the services out and needs their plists to bring them back. Nothing was stopped and nothing was removed. Re-run .claude/install.sh to reinstall them."
+        definition="$(service_definition_path "$label")"
+        [ -f "$definition" ] || die "$definition is missing; this reset stops the services and needs their definitions to bring them back. Nothing was stopped and nothing was removed. Re-run .claude/install.sh to reinstall them."
     done
 fi
 

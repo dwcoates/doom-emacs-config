@@ -70,6 +70,18 @@ exit 113
 EOF
 chmod +x "$BIN/launchctl"
 
+# Linux's service manager, likewise: DOCTOR_SYSTEMCTL_PID names the pid an
+# active unit runs as; unset, every unit is inactive.
+cat >"$BIN/systemctl" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = --user ] && shift
+case "$1" in
+  is-active) [ -n "${DOCTOR_SYSTEMCTL_PID:-}" ] || exit 3 ;;
+  show) printf '%s\n' "${DOCTOR_SYSTEMCTL_PID:-0}" ;;
+esac
+EOF
+chmod +x "$BIN/systemctl"
+
 cat >"$BIN/sqlite3" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$DOCTOR_SQLITE_CALLS"
@@ -132,6 +144,7 @@ run_doctor() {
     AGENT_REPL_STATE_ROOT="$STATE" \
     AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT="$PROBE_TIMEOUT" \
     AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 \
+    AGENT_REPL_SERVICE_PLATFORM="${DOCTOR_PLATFORM:-darwin}" \
     PATH="$DOCTOR_PATH" \
     "$DOCTOR" "$@" 2>"$TMP/doctor.err")"
   rc=$?
@@ -304,8 +317,22 @@ export DOCTOR_LAUNCHCTL_PRINT="$PRINT"
 run_doctor --json
 unset DOCTOR_LAUNCHCTL_PRINT
 stop_fake_store
-grep_in "$DOCTOR_OUT" -q '"check":"launchd-shim-store","status":"PASS","detail":"com.agentrepl.shim-store loaded and running (pid 4242)"' ||
+grep_in "$DOCTOR_OUT" -q '"check":"service-shim-store","status":"PASS","detail":"com.agentrepl.shim-store loaded and running (pid 4242)"' ||
   fail "a loaded service's long launchctl print was not read to its pid: $DOCTOR_OUT"
+
+# ---- on Linux the services are read from systemd --user -------------------
+
+start_fake_store healthy
+DOCTOR_PLATFORM=linux DOCTOR_SYSTEMCTL_PID=5151 run_doctor --json
+stop_fake_store
+grep_in "$DOCTOR_OUT" -q '"check":"service-shim-store","status":"PASS","detail":"com.agentrepl.shim-store loaded and running (pid 5151)"' ||
+  fail "an active systemd unit was not read to its pid: $DOCTOR_OUT"
+
+start_fake_store healthy
+DOCTOR_PLATFORM=linux run_doctor --json
+stop_fake_store
+grep_in "$DOCTOR_OUT" -q '"check":"service-shim-claude-sidecar","status":"FAIL","detail":"com.agentrepl.shim-claude-sidecar not held by the service manager"' ||
+  fail "an inactive systemd unit did not fail its check: $DOCTOR_OUT"
 
 [ "$FAIL" -ne 0 ] || pass "doctor probes the store Connect endpoints and bounds integrity scans"
 harness_finish

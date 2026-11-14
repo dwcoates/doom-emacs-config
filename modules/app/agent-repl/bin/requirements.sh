@@ -84,7 +84,8 @@
 # module dir), AGENT_REPL_REQUIREMENTS_PLATFORM, AGENT_REPL_REQUIREMENTS_ARCH,
 # AGENT_REPL_REQUIREMENTS_PACKAGE_MANAGER, AGENT_REPL_REQUIREMENTS_BUILD
 # (bin/build-frontend.sh), AGENT_REPL_LAUNCHCTL, AGENT_REPL_SYSTEMCTL,
-# AGENT_REPL_SYSTEMD_USER_DIR, and HOME / PATH.
+# AGENT_REPL_LAUNCH_AGENTS_DIR and AGENT_REPL_SYSTEMD_USER_DIR (lib-service.sh),
+# and HOME / PATH.
 
 set -euo pipefail
 
@@ -92,8 +93,6 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 MODULE_DIR="${AGENT_REPL_REQUIREMENTS_ROOT:-$(cd "$THIS_DIR/.." && pwd -P)}"
 ROOT_MANIFEST="$MODULE_DIR/requirements.json"
 BUILD_FRONTEND="${AGENT_REPL_REQUIREMENTS_BUILD:-$MODULE_DIR/bin/build-frontend.sh}"
-LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
-SYSTEMCTL="${AGENT_REPL_SYSTEMCTL:-systemctl}"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
 SKILLS_DIR="$HOME/.claude/skills"
 # BIN_DIR is where a command_link puts its command: the user's own bin dir.
@@ -110,10 +109,6 @@ skills_dirs() {
     printf '%s/skills\n' "$MULTI_REPO_CONFIG_DIR"
   fi
 }
-LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
-# SYSTEMD_USER_DIR is where a Linux service's unit is installed: the user's own
-# systemd unit directory, the one the daemon reads too.
-SYSTEMD_USER_DIR="${AGENT_REPL_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 
 # ---------------------------------------------------------------------------
 # Reporting. THE ONE OUTPUT PATH: every line this script prints goes through
@@ -260,6 +255,9 @@ packages() {
 
 # shellcheck source=lib-worktrees.sh
 . "$THIS_DIR/lib-worktrees.sh"
+# shellcheck source=lib-service.sh
+. "$THIS_DIR/lib-service.sh"
+SERVICE_PLATFORM="$(platform)"
 
 # The repository's MAIN worktree. A skill link must never point into a linked
 # worktree, whose path dangles the moment it is pruned, so repo-relative skill
@@ -836,14 +834,9 @@ command_service_path() {
 }
 
 # service_definition ENTRY: where the platform's service manager reads the
-# service's definition from: a launchd plist, or a systemd user unit.
-service_definition() {
-  if [ "$(platform)" = darwin ]; then
-    printf '%s/%s.plist\n' "$LAUNCH_AGENTS_DIR" "$(field "$1" .label)"
-  else
-    printf '%s/%s.service\n' "$SYSTEMD_USER_DIR" "$(field "$1" .label)"
-  fi
-}
+# service's definition from (lib-service.sh): a launchd plist, or a systemd
+# user unit.
+service_definition() { service_definition_path "$(field "$1" .label)"; }
 
 # rendered_service ENTRY: the service's definition for this platform, rendered
 # from the entry, so a plist and a unit can never disagree about a service.
@@ -905,18 +898,6 @@ rendered_service() {
       end | .[]'
 }
 
-# service_held ENTRY: 0 when the platform's service manager is keeping the
-# service running.
-service_held() {
-  local label
-  label="$(field "$1" .label)"
-  if [ "$(platform)" = darwin ]; then
-    "$LAUNCHCTL" print "gui/$(id -u)/$label" >/dev/null 2>&1
-  else
-    "$SYSTEMCTL" --user is-active --quiet "$label.service" >/dev/null 2>&1
-  fi
-}
-
 # service_files ENTRY: one "FROM<tab>TO" line per file a service copies from
 # the module into the cache.
 service_files() { printf '%s\n' "$1" | jq -r '(.files // [])[] | "\(.from)\t\(.to)"'; }
@@ -950,7 +931,7 @@ check_service() {
     STATUS=outdated; DETAIL="$dest differs from the $(field "$e" .id) entry's rendering: ${differs% }"
   elif [ -n "$stale" ]; then
     STATUS=outdated; DETAIL="$CACHE_ROOT lacks the module's copy of$stale"
-  elif ! service_held "$e"; then
+  elif ! service_held "$label"; then
     STATUS=missing; DETAIL="$label is not running under the service manager"
   else
     STATUS=ok; DETAIL="$label running from $dest"
@@ -1274,7 +1255,7 @@ install_git_hook() {
 }
 
 install_service() {
-  local e="$1" label dest uid
+  local e="$1" label dest
   label="$(field "$e" .label)"
   dest="$(service_definition "$e")"
   # THE SERVICES ARE EVERY WORKSPACE'S (owner report, 2026-11-14): an install
@@ -1302,21 +1283,9 @@ install_service() {
     cp "$MODULE_DIR/$from" "$CACHE_ROOT/$to"
   done < <(service_files "$e")
   rendered_service "$e" >"$dest"
-  if [ "$(platform)" = darwin ]; then
-    uid="$(id -u)"
-    if service_held "$e"; then
-      "$LAUNCHCTL" bootout "gui/$uid" "$dest"
-    fi
-    "$LAUNCHCTL" bootstrap "gui/$uid" "$dest"
-    "$LAUNCHCTL" kickstart -k "gui/$uid/$label"
-  else
-    # daemon-reload has systemd read the unit just written; enable starts it
-    # at every login; restart runs it now, from the new unit, whether or not
-    # it was running.
-    "$SYSTEMCTL" --user daemon-reload || { err "install: $(field "$e" .id): systemctl --user daemon-reload failed"; return 1; }
-    "$SYSTEMCTL" --user enable "$label.service" || { err "install: $(field "$e" .id): systemctl --user enable $label.service failed"; return 1; }
-    "$SYSTEMCTL" --user restart "$label.service" || { err "install: $(field "$e" .id): systemctl --user restart $label.service failed"; return 1; }
-  fi
+  # The service manager reads the definition just written, keeps the service
+  # at every login, and runs it now from that definition (lib-service.sh).
+  service_load "$label" || { err "install: $(field "$e" .id): $SERVICE_FAILED_STEP failed"; return 1; }
 }
 
 # fetch_download ENTRY WORK: download and unzip the entry's archive into WORK,
@@ -1393,17 +1362,12 @@ uninstall_entry() {
     service)
       label="$(field "$e" .label)"
       dest="$(service_definition "$e")"
-      if [ "$(platform)" = darwin ]; then
-        if service_held "$e"; then
-          "$LAUNCHCTL" bootout "gui/$(id -u)" "$dest"; say "uninstall: booted out $label"
-        fi
-        if [ -f "$dest" ]; then rm -f "$dest"; say "uninstall: removed $dest"; fi
-      elif [ -f "$dest" ]; then
-        "$SYSTEMCTL" --user disable --now "$label.service" || err "uninstall: systemctl --user disable --now $label.service failed"
-        say "uninstall: stopped and disabled $label"
-        rm -f "$dest"; say "uninstall: removed $dest"
-        "$SYSTEMCTL" --user daemon-reload || err "uninstall: systemctl --user daemon-reload failed"
+      if [ -f "$dest" ] || service_held "$label"; then
+        if service_unload "$label"; then say "uninstall: stopped and unloaded $label"
+        else err "uninstall: $SERVICE_FAILED_STEP failed"; fi
       fi
+      if [ -f "$dest" ]; then rm -f "$dest"; say "uninstall: removed $dest"; fi
+      service_forget || err "uninstall: $SERVICE_FAILED_STEP failed"
       if [ -n "$(field "$e" .binary)" ] && [ -f "$CACHE_ROOT/bin/$(field "$e" .binary)" ]; then
         rm -f "$CACHE_ROOT/bin/$(field "$e" .binary)"; say "uninstall: removed $CACHE_ROOT/bin/$(field "$e" .binary)"
       fi

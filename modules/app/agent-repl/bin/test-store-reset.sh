@@ -81,6 +81,42 @@ esac
 STUB_EOF
 chmod +x "$STUB"
 
+SYSTEMCTL_STUB="$TMP/systemctl"
+cat >"$SYSTEMCTL_STUB" <<'STUB_EOF'
+#!/usr/bin/env bash
+# systemctl --user stub. STATE holds one file per ACTIVE unit's label,
+# containing its pid; TRANSCRIPT records every call as "<verb> <unit>".
+# STUB_IGNORES_STOP models a unit that will not stop, STUB_STORE_DIES_ON_BOOT a
+# store that dies as it starts; STUB_STORE_SOCK is bound by a store start.
+set -euo pipefail
+state="${STUB_STATE:?}"
+[ "$1" = --user ] && shift
+verb="$1"
+unit="${!#}"
+label="${unit%.service}"
+printf '%s %s\n' "$verb" "$unit" >>"${STUB_TRANSCRIPT:?}"
+case "$verb" in
+    is-active) [ -f "$state/$label" ] ;;
+    show) if [ -f "$state/$label" ]; then cat "$state/$label"; else echo 0; fi ;;
+    stop) [ "${STUB_IGNORES_STOP:-0}" = 1 ] || rm -f "$state/$label" ;;
+    start)
+        echo 4242 >"$state/$label"
+        if [ "$label" = com.agentrepl.shim-store ]; then
+            if [ "${STUB_STORE_DIES_ON_BOOT:-0}" = 1 ]; then
+                rm -f "$state/$label"
+            elif [ -n "${STUB_STORE_SOCK:-}" ]; then
+                mkdir -p "$(dirname "$STUB_STORE_SOCK")"
+                rm -f "$STUB_STORE_SOCK"
+                ( cd "$(dirname "$STUB_STORE_SOCK")" &&
+                  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' \
+                      "$(basename "$STUB_STORE_SOCK")" )
+            fi
+        fi
+        ;;
+esac
+STUB_EOF
+chmod +x "$SYSTEMCTL_STUB"
+
 # arrange builds one case's world: a fixture cache home with a populated store
 # directory and both labels running. It echoes the case root.
 arrange() { # CASE-NAME
@@ -114,6 +150,7 @@ act() { # CASE-ROOT [ENV=VAL...] [-- FLAGS...]
     done
     env \
         XDG_CACHE_HOME="$root/cache" \
+        AGENT_REPL_SERVICE_PLATFORM=darwin \
         AGENT_REPL_LAUNCHCTL="$STUB" \
         AGENT_REPL_LAUNCH_AGENTS_DIR="$root/LaunchAgents" \
         STUB_STATE="$root/state" \
@@ -276,6 +313,74 @@ elif [ -f "$root/cache/agent-repl/store/events.db" ]; then
     fail "--keep-down should still remove the database"
 else
     pass "--keep-down needs no plist, because it starts nothing"
+fi
+
+echo "store-reset.sh: on Linux, under systemd --user"
+
+# arrange_linux is arrange with the services' units installed instead of plists.
+arrange_linux() { # CASE-NAME
+    local root
+    root="$(arrange "$1")"
+    mkdir -p "$root/systemd"
+    printf 'unit\n' >"$root/systemd/com.agentrepl.shim-store.service"
+    printf 'unit\n' >"$root/systemd/com.agentrepl.shim-claude-sidecar.service"
+    echo "$root"
+}
+
+# act_linux runs the script on Linux's service manager, through the stub.
+act_linux() { # CASE-ROOT [ENV=VAL...] [-- FLAGS...]
+    local root="$1"; shift
+    act "$root" AGENT_REPL_SERVICE_PLATFORM=linux AGENT_REPL_SYSTEMCTL="$SYSTEMCTL_STUB" \
+        AGENT_REPL_SYSTEMD_USER_DIR="$root/systemd" "$@"
+}
+
+# The whole reset on Linux, in the recorded safe order.
+root="$(arrange_linux linux-happy)"
+if ! act_linux "$root" AGENT_REPL_STORE_RESET=1; then
+    fail "the Linux reset should succeed ($(cat "$root/err"))"
+elif [ -f "$root/cache/agent-repl/store/events.db" ]; then
+    fail "the Linux reset should remove the database"
+else
+    order="$(grep -E '^(stop|start) ' "$root/transcript" | tr '\n' '|')"
+    expected='stop com.agentrepl.shim-claude-sidecar.service|stop com.agentrepl.shim-store.service|start com.agentrepl.shim-store.service|start com.agentrepl.shim-claude-sidecar.service|'
+    if [ "$order" != "$expected" ]; then
+        fail "expected the safe order under systemd, got: $order"
+    elif grep -q -E '^(bootout|bootstrap|print) ' "$root/transcript"; then
+        fail "the Linux reset must never speak launchctl"
+    else
+        pass "on Linux the units are stopped sidecar first and started store first, and the database removed"
+    fi
+fi
+
+# A unit that will not stop fails loudly, before anything is removed.
+root="$(arrange_linux linux-wont-stop)"
+if act_linux "$root" AGENT_REPL_STORE_RESET=1 STUB_IGNORES_STOP=1; then
+    fail "a unit that never stops should fail the Linux reset"
+elif [ ! -f "$root/cache/agent-repl/store/events.db" ]; then
+    fail "nothing may be removed while a unit is still active"
+else
+    pass "on Linux a unit that will not stop fails the reset with the database intact"
+fi
+
+# A store that dies as it starts fails, and the sidecar is never started.
+root="$(arrange_linux linux-store-dies)"
+if act_linux "$root" AGENT_REPL_STORE_RESET=1 STUB_STORE_DIES_ON_BOOT=1; then
+    fail "a store that dies as it starts should fail the Linux reset"
+elif grep -q '^start com.agentrepl.shim-claude-sidecar' "$root/transcript"; then
+    fail "the sidecar must not be started after the store died"
+else
+    pass "on Linux a store that dies as it starts fails and the sidecar is never started"
+fi
+
+# A missing unit is refused while everything is still up.
+root="$(arrange_linux linux-missing-unit)"
+rm -f "$root/systemd/com.agentrepl.shim-store.service"
+if act_linux "$root" AGENT_REPL_STORE_RESET=1; then
+    fail "a missing unit should refuse: the services could not be brought back"
+elif grep -q '^stop ' "$root/transcript"; then
+    fail "nothing may be stopped when a unit is missing"
+else
+    pass "on Linux a missing unit refuses before anything is stopped or removed"
 fi
 
 harness_finish

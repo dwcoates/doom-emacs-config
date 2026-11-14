@@ -16,7 +16,7 @@
 # This script is STRICTLY READ-ONLY. It never starts, stops, restarts, loads,
 # unloads, or otherwise mutates any service, socket, file, or launchd state.
 # It only stats files, opens (and immediately closes) sockets, and issues
-# read-only `launchctl print` / SQLite queries. Full integrity scans of large
+# read-only service-manager reads (bin/lib-service.sh) / SQLite queries. Full integrity scans of large
 # live databases are opt-in because they can run for hours.
 #
 # State root: defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl. Override
@@ -68,6 +68,13 @@ STORE_PROBE_TIMEOUT="${AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT:-2}"
 
 STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
+
+# The services are read through the one driver of the platform's service
+# manager. A host it does not drive leaves SERVICE_PLATFORM empty, and the
+# service checks SKIP saying so.
+# shellcheck source=../bin/lib-service.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd -P)/lib-service.sh"
+SERVICE_PLATFORM="$(service_host_platform 2>/dev/null || true)"
 
 # A log is considered "recently written" if touched within this many seconds.
 # Beyond it the log still PASSes (an idle service writes nothing) but the age
@@ -137,7 +144,7 @@ check_store_socket_present() {
     record "store-socket-present" "PASS" "socket exists at $STORE_SOCK"
   else
     record "store-socket-present" "FAIL" "no socket at $STORE_SOCK" \
-      "shim-store not running; check '$STORE_LABEL' via launchctl or (re)run .claude/install.sh"
+      "shim-store not running; check '$STORE_LABEL' under the service manager or (re)run bin/requirements.sh install"
   fi
 }
 
@@ -241,7 +248,7 @@ check_store_connect_rpc() {
   if [ ! -S "$STORE_SOCK" ]; then
     record "$name" "FAIL" \
       "no store socket at $STORE_SOCK; $procedure unreachable (request_id=$request_id)" \
-      "shim-store is not serving; check '$STORE_LABEL' via launchctl or (re)run .claude/install.sh" \
+      "shim-store is not serving; check '$STORE_LABEL' under the service manager or (re)run bin/requirements.sh install" \
       "$(store_probe_metadata "$request_id" 0 "$procedure" false "missing_socket" "the store socket does not exist" null)" \
       "$instr,\"curl_exit\":null}"
     return 0
@@ -380,28 +387,25 @@ check_session_sockets() {
   fi
 }
 
-# check_launchd_service LABEL — read-only liveness via `launchctl print`.
-check_launchd_service() {
+# check_service LABEL — read-only liveness through the platform's service
+# manager (bin/lib-service.sh): launchd on macOS, `systemd --user' on Linux.
+check_service() {
   local label="$1"
-  local name="launchd-${label##*.}"
-  if ! command -v launchctl >/dev/null 2>&1; then
-    record "$name" "SKIP" "launchctl not available; cannot inspect $label" \
-      "run on macOS to inspect launchd services"
+  local name="service-${label##*.}"
+  if [ -z "$SERVICE_PLATFORM" ]; then
+    record "$name" "SKIP" "this host has no service manager the doctor reads; cannot inspect $label" \
+      "run on macOS or Linux to inspect the services"
     return 0
   fi
-  local out
-  if ! out="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null)"; then
-    record "$name" "FAIL" "$label not loaded in launchd" \
-      "install and load it: .claude/install.sh"
+  if ! service_held "$label"; then
+    record "$name" "FAIL" "$label not held by the service manager" \
+      "install and start it: bin/requirements.sh install"
     return 0
   fi
-  # A loaded-and-running service reports a numeric pid; a loaded-but-dead one
-  # reports "state = not running" with no pid.
+  # A held-and-running service has a pid; a held-but-dead one (crash-looping,
+  # throttled) has none.
   local pid
-  # READ WHOLE, never through a pipe into an awk that exits at its match: under
-  # pipefail the printf writing launchctl's output died of SIGPIPE whenever awk
-  # exited first, and the doctor itself exited 141 (2026-10-06).
-  pid="$(awk -F'= ' '/^\tpid = / && !found {print $2; found = 1}' <<<"$out")"
+  pid="$(service_pid "$label")"
   if [ -n "$pid" ]; then
     record "$name" "PASS" "$label loaded and running (pid $pid)"
   else
@@ -552,8 +556,8 @@ done
 check_store_socket_present
 check_store_connect_rpc GetLiveWork get-live-work "$LIVE_WORK_PROBE_REQUEST"
 check_store_connect_rpc GetSidecarCursors get-sidecar-cursors '{}'
-check_launchd_service "$STORE_LABEL"
-check_launchd_service "$SIDECAR_LABEL"
+check_service "$STORE_LABEL"
+check_service "$SIDECAR_LABEL"
 check_frontend_socket_present
 check_session_sockets
 check_log "shim-store"
