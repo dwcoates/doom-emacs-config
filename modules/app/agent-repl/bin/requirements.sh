@@ -860,7 +860,7 @@ check_service() {
     # THE DIFFERENCE IS NAMED, so an install it causes says why.
     local differs
     # diff answers 1 for files that differ, which is this branch's case.
-    differs="$(rendered_service "$e" | diff "$dest" - | grep -E '^[<>]' | head -2 | tr '\n' ' ' || true)"
+    differs="$(rendered_service "$e" | diff "$dest" - | grep -E '^[<>]' | sed -n '1,2p' | tr '\n' ' ' || true)"
     STATUS=outdated; DETAIL="$dest differs from the $(field "$e" .id) entry's rendering: ${differs% }"
   elif [ -n "$stale" ]; then
     STATUS=outdated; DETAIL="$CACHE_ROOT lacks the module's copy of$stale"

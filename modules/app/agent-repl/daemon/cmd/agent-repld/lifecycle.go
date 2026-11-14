@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
@@ -47,6 +49,12 @@ type lifecycleSink struct {
 	// with its workspace's visibility.
 	caches sessionUpNotifiee
 	log    dlog.Logger
+	// linksMu guards detached: the workspaces whose link is down, so a link
+	// coming back is told from its first attachment (reattached).
+	linksMu  sync.Mutex
+	detached map[ids.WorkspaceID]bool
+	// async runs work off the caller's goroutine: inflight.Go when nil.
+	async func(func())
 }
 
 // sessionUpNotifiee is the slice of the cache keeper the sink tells a session
@@ -146,22 +154,54 @@ func (s *lifecycleSink) SessionUp(ws ids.WorkspaceID) {
 // fleet re-opening on the same shim (sessionwatcher's paced re-open), which
 // brings no session up; the prompts held until the session reconnected are
 // released here, and the release itself re-holds any the session still does
-// not serve (sessionWait).
+// not serve (sessionWait). A link's FIRST attachment releases nothing: the
+// session coming up does that (SessionUp).
+//
+// THE RELEASE RUNS OFF THE CALLER'S GOROUTINE: the watcher publishes a link
+// edge under its own lock, and the release takes the prompt queue's, which
+// asks the watcher back (a deadlock the merge gate caught, 2026-11-14).
 func (s *lifecycleSink) OnLinkChanged(ws ids.WorkspaceID, attached bool) {
 	s.log.Debug("daemon.cmd.lifecycle", "the shim link's attachment changed", dlog.Context{
 		"workspace": string(ws), "attached": attached,
 	})
 	s.relay.PublishHostWorkspace(ws)
-	if !attached {
+	if !s.reattached(ws, attached) {
 		return
 	}
 	if s.queue == nil {
-		s.log.Error("daemon.cmd.lifecycle", "a link attached before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
+		s.log.Error("daemon.cmd.lifecycle", "a link re-attached before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
 			"workspace": string(ws), "invariant_violation": "the queue is bound before any link attaches",
 		})
 		return
 	}
-	s.queue.ReleaseReconnectHolds(ws)
+	queue := s.queue
+	s.offCaller(func() { queue.ReleaseReconnectHolds(ws) })
+}
+
+// offCaller runs F off the caller's goroutine, counted (inflight.Go).
+func (s *lifecycleSink) offCaller(f func()) {
+	if s.async != nil {
+		s.async(f)
+		return
+	}
+	inflight.Go(f)
+}
+
+// reattached records WS's link edge and reports whether it is an attachment
+// after a detachment: a link coming back, not its first attachment.
+func (s *lifecycleSink) reattached(ws ids.WorkspaceID, attached bool) bool {
+	s.linksMu.Lock()
+	defer s.linksMu.Unlock()
+	if s.detached == nil {
+		s.detached = map[ids.WorkspaceID]bool{}
+	}
+	if !attached {
+		s.detached[ws] = true
+		return false
+	}
+	was := s.detached[ws]
+	delete(s.detached, ws)
+	return was
 }
 
 // OnLinkFault records a LOST shim link as the session's own fault, which is

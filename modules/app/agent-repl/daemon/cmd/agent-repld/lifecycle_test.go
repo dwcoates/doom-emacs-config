@@ -811,38 +811,52 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }
 
-func TestALinkEdgeReleasesTheQueuesReconnectHoldsOnlyWhenItAttaches(t *testing.T) {
+func TestALinkEdgeReleasesTheQueuesReconnectHoldsOnlyWhenItComesBack(t *testing.T) {
 	cases := []struct {
-		name     string
-		attached bool
-		want     []ids.WorkspaceID
+		name  string
+		edges []bool
+		want  int
 	}{
-		{name: "a link re-attaching to a live shim releases them", attached: true, want: []ids.WorkspaceID{"ws-1"}},
-		{name: "a link coming down releases nothing", attached: false},
+		{name: "a link coming back after it went down releases them", edges: []bool{false, true}, want: 1},
+		{name: "a link's first attachment releases nothing", edges: []bool{true}},
+		{name: "a link going down releases nothing", edges: []bool{true, false}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			queue := &fakeFreeQueue{}
-			sink := &lifecycleSink{queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger()}
+			queue := &releaseQueue{released: make(chan ids.WorkspaceID, 4)}
+			var ran []string
+			sink := &lifecycleSink{queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger(),
+				async: func(f func()) { ran = append(ran, "off the caller"); f() }}
 
 			// Act
-			sink.OnLinkChanged("ws-1", tc.attached)
+			for _, attached := range tc.edges {
+				sink.OnLinkChanged("ws-1", attached)
+			}
 
 			// Assert
-			if fmt.Sprint(queue.reconnects) != fmt.Sprint(tc.want) {
-				t.Fatalf("reconnect releases = %v, want %v", queue.reconnects, tc.want)
+			if got := len(queue.released); got != tc.want || len(ran) != tc.want {
+				t.Fatalf("reconnect releases = %d, %d of them off the caller, want %d", got, len(ran), tc.want)
 			}
 		})
 	}
 }
 
-func TestALinkAttachingBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
+// releaseQueue counts the reconnect releases a sink asked of it.
+type releaseQueue struct {
+	promptqueue.Queue
+	released chan ids.WorkspaceID
+}
+
+func (q *releaseQueue) ReleaseReconnectHolds(ws ids.WorkspaceID) { q.released <- ws }
+
+func TestALinkComingBackBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	sink := &lifecycleSink{relay: &relayForwarder{}, log: log}
 
 	// Act
+	sink.OnLinkChanged("ws-1", false)
 	sink.OnLinkChanged("ws-1", true)
 
 	// Assert
