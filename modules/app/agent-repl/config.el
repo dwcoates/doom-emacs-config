@@ -286,11 +286,6 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; own needs are core.el's logging ladder and heartbeat assertion.
 (agent-repl--load-module "elisp-build")
 (agent-repl--load-module "bytecode")
-;; WHY: external-browser.el pins `browse-url-browser-function' so every
-;; hyperlink lands in the external Chrome profile instead of an Emacs
-;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
-;; this early so no later module can visit a URL before the handler is in
-;; place.
 ;; WHY: workspace.el owns `agent-repl--workspaces' and the hash
 ;; accessors that nearly every other module uses.  Must load right
 ;; after core.el (which provides the logging primitives workspace.el
