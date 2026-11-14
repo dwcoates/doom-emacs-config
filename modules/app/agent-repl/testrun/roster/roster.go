@@ -626,6 +626,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/sourcescan":                 {"daemon/"},
 	"internal/sweepguard":                 {"daemon/internal/"},
 	"internal/textline":                   {"daemon/internal/"},
+	"internal/transportcut":               {"daemon/"},
 	"internal/clock/clocktest": {"daemon/internal/clock/", "daemon/internal/newsdigest/", "daemon/internal/repodivergence/",
 		"daemon/internal/worktreereap/"},
 	// The scans pinning named call sites in other packages.
