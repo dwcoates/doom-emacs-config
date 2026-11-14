@@ -1318,7 +1318,7 @@ that follows must not care which of the two got there first."
     (should (equal (agent-repl--ws-by-ref-id "b") "gone"))))
 
 (ert-deftest agent-repl-test-roster-an-open-onto-a-freed-name-takes-no-old-identity ()
-  "A new row under a freed name is born fresh, not revived as the old workspace."
+  "A new row under a freed name is born fresh, never the old workspace revived."
   ;; Arrange -- "gone" leaves the roster, so its name is tombstoned.
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
