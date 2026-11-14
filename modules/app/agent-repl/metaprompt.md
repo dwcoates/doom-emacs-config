@@ -53,6 +53,14 @@
 
 - Operating on files outside the current project.
 
+### Never version control a conversation
+
+- NEVER commit a chat thread, an agent transcript, or any other record of a conversation, in any repository, ever.
+  - This covers zettel chats, agent-repl workspace transcripts, Claude Code session files (`projects/*.jsonl`, `history.jsonl`), and a session's prompts copied verbatim into a doc.
+  - A handoff or design doc states its conclusions in its own words and never pastes the conversation that reached them.
+- When a conversation is found tracked, untrack it at once, add its shape to the nearest `.gitignore`, and surface it before merging.
+  - Removing it from the tip leaves it in git history, so tell me so and let me decide whether that history is rewritten.
+
 ## Testing
 
 ### Every repository-tracked test failure is mine
