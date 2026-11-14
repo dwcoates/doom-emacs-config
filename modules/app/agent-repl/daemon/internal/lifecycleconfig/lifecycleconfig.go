@@ -151,8 +151,8 @@ func check(cfg *repoconfigv1.LifecycleConfig) error {
 			return err
 		}
 	}
-	if cfg.DeployMediator != nil && strings.TrimSpace(cfg.GetDeployMediator().GetName()) == "" {
-		return errors.New("deploy_mediator.name is required: the mediator workspace's name")
+	if cfg.DeployChecks != nil && cfg.GetDeployChecks().GetRemediationsBeforeEscalation() == 0 {
+		return errors.New("deploy_checks.remediations_before_escalation is required, at least 1: how many remediations a chain deploys in a row before its intake may only escalate")
 	}
 	if cfg.Concurrent != nil {
 		if cfg.GetConcurrent().GetThrough() == nil {

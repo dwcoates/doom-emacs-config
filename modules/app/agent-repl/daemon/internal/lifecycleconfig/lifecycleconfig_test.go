@@ -53,13 +53,13 @@ func TestParseAcceptsAgentReplsConfig(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsADeployMediator(t *testing.T) {
+func TestParseAcceptsDeployChecks(t *testing.T) {
 	// Act
-	cfg, err := Parse("lifecycle.yaml", []byte("pre_deploy: {}\ndeploy_mediator:\n  name: deploy-mediator\n"))
+	cfg, err := Parse("lifecycle.yaml", []byte("pre_deploy: {}\ndeploy_checks:\n  remediations_before_escalation: 4\n"))
 
 	// Assert
-	if err != nil || cfg.GetDeployMediator().GetName() != "deploy-mediator" {
-		t.Fatalf("Parse = (%v, %v), want the mediator named deploy-mediator", cfg.GetDeployMediator(), err)
+	if err != nil || cfg.GetDeployChecks().GetRemediationsBeforeEscalation() != 4 {
+		t.Fatalf("Parse = (%v, %v), want deploy checks bounded at 4", cfg.GetDeployChecks(), err)
 	}
 }
 
@@ -137,7 +137,8 @@ func TestParseRefusesUnusableConfigs(t *testing.T) {
 		{name: "YAML that does not parse", doc: "pre_deploy: [", want: "yaml"},
 		{name: "an unknown key", doc: "pre_deploy: {}\nmerge_before: x\n", want: "merge_before"},
 		{name: "no pre_deploy", doc: "post_deploy: {}\n", want: "pre_deploy is required"},
-		{name: "a deploy mediator with no name", doc: "pre_deploy: {}\ndeploy_mediator: {}\n", want: "deploy_mediator.name is required"},
+		{name: "deploy checks with no bound", doc: "pre_deploy: {}\ndeploy_checks: {}\n", want: "deploy_checks.remediations_before_escalation is required"},
+		{name: "the retired deploy mediator", doc: "pre_deploy: {}\ndeploy_mediator:\n  name: deploy-mediator\n", want: "deploy_mediator"},
 		{name: "a local merge with no test kind", doc: "pre_deploy:\n  local_merge:\n    tests: {}\n", want: "names no test kind"},
 		{name: "a test kind with no script", doc: "pre_deploy:\n  local_merge:\n    tests:\n      agent_repl_suites: {}\n", want: "script_path is required"},
 		{name: "a hook entry with no hook", doc: "pre_deploy: {}\ndeploy:\n  emoji_ack:\n    runs_for:\n      main: {}\n", want: "deploy.emoji_ack.hook is required"},
