@@ -22,6 +22,7 @@ package workspacenotice
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -43,6 +44,10 @@ const (
 	// BriefDerived is the brief a source is told a derived workspace's event
 	// by. Its first line is the notice's headline.
 	BriefDerived = "derived-workspace-notice"
+	// BriefSibling is the brief an open child is told a new sibling by.
+	BriefSibling = "workspace-sibling-notice"
+	// BriefChild is the brief a new child is told its parent and siblings by.
+	BriefChild = "workspace-child-notice"
 )
 
 // The notices' prompt origins.
@@ -60,6 +65,10 @@ const (
 	Landed
 	// ClosedWithoutLanding: the derived workspace closed and never landed.
 	ClosedWithoutLanding
+	// Adopted: an existing workspace became a child of a parent (retarget).
+	// Only its new siblings are told; the workspace itself is told by the
+	// retarget notice.
+	Adopted
 )
 
 // String is the kind's name in records.
@@ -71,6 +80,8 @@ func (k Kind) String() string {
 		return "landed"
 	case ClosedWithoutLanding:
 		return "closed_without_landing"
+	case Adopted:
+		return "adopted"
 	}
 	panic("workspacenotice: undeclared event kind")
 }
@@ -88,6 +99,7 @@ type Event struct {
 // Workspaces reads the registry.
 type Workspaces interface {
 	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
+	ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error)
 }
 
 // Deps are the service's collaborators: everything but the prompt handler,
@@ -122,6 +134,34 @@ func (s *Service) Report(event Event) { s.loop.Report(event) }
 // ReportCreated implements workspace.DerivedReporter: WS was just created.
 func (s *Service) ReportCreated(ws wsm.Workspace) {
 	s.Report(Event{Kind: Created, Workspace: ws})
+}
+
+// ReportAdopted tells WS's new siblings that WS became their sibling: it was
+// retargeted under a parent. The workspace itself is told by the retarget
+// notice, which carries its sibling list.
+func (s *Service) ReportAdopted(ws ids.WorkspaceID) {
+	s.Report(Event{Kind: Adopted, Workspace: wsm.Workspace{ID: ws}, unread: true})
+}
+
+// SiblingNames names WS's open siblings, for a notice that lists them.
+func (s *Service) SiblingNames(ctx context.Context, ws ids.WorkspaceID) ([]string, error) {
+	record, err := s.deps.Workspaces.Workspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", ws, err)
+	}
+	all, err := s.deps.Workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list siblings of %s: %w", ws, err)
+	}
+	return siblingNames(all, record), nil
+}
+
+func siblingNames(all []wsm.Workspace, ws wsm.Workspace) []string {
+	var names []string
+	for _, sib := range wsm.Siblings(all, ws) {
+		names = append(names, "`"+sib.Name+"`")
+	}
+	return names
 }
 
 // TurnStarted implements wsedges.Observer: a turn is no derived event.
@@ -185,6 +225,9 @@ type Recipient struct {
 //   - its context source (Context).
 func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
 	var out []Recipient
+	if kind == Adopted {
+		return nil
+	}
 	parentFollows := ws.MergeOf == nil && ws.Parent != nil && kind == Landed && ws.OneShot
 	add := func(id *wsm.WorkspaceID, mark func(*Recipient)) {
 		if id == nil || *id == ws.ID || (ws.RequestedBy != nil && *id == *ws.RequestedBy) || (parentFollows && *id == *ws.Parent) {
@@ -223,6 +266,49 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 	}
 	for _, told := range Recipients(event.Workspace, event.Kind) {
 		s.notify(ctx, prompts, told, event)
+	}
+	if (event.Kind == Created || event.Kind == Adopted) && event.Workspace.Parent != nil && event.Workspace.MergeOf == nil {
+		s.tellFamily(ctx, prompts, event)
+	}
+}
+
+// tellFamily tells a child's open siblings about it, and (at creation only,
+// since a retarget notice already tells the adopted child) tells the child its
+// parent and siblings. A child with no siblings needs no notice.
+func (s *Service) tellFamily(ctx context.Context, prompts prompthandler.Submitter, event Event) {
+	log := s.deps.Log.Global()
+	fields := eventFields(event)
+	all, err := s.deps.Workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error(op, "could not list the workspaces to find a child's siblings; they are not told", dlog.WithCause(fields, err))
+		return
+	}
+	ws := event.Workspace
+	siblings := wsm.Siblings(all, ws)
+	if len(siblings) == 0 {
+		return
+	}
+	parent, err := s.deps.Workspaces.Workspace(ctx, *ws.Parent)
+	if err != nil {
+		log.Error(op, "could not read a child's parent; its siblings are not told", dlog.WithCause(fields, err))
+		return
+	}
+	composer := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}
+	submit := func(to ids.WorkspaceID, brief string, values map[string]string) {
+		fields := dlog.Context{"workspace": string(ws.ID), "event": event.Kind.String(), "told": string(to), "brief": brief}
+		turn, err := composer.Submit(ctx, prompts, to, brief, values, "derived-workspace-notice", OriginDerived)
+		if err != nil {
+			log.Error(op, "could not tell a family member about a child; it is not told", dlog.WithCause(fields, err))
+			return
+		}
+		fields["turn"] = string(turn)
+		log.Info(op, "told a family member about a child", fields)
+	}
+	for _, sib := range siblings {
+		submit(sib.ID, BriefSibling, map[string]string{"sibling": ws.Name, "parent": parent.Name})
+	}
+	if event.Kind == Created {
+		submit(ws.ID, BriefChild, map[string]string{"parent": parent.Name, "siblings": strings.Join(siblingNames(all, ws), ", ")})
 	}
 }
 
@@ -276,6 +362,8 @@ func kindWords(k Kind) string {
 		return "landed"
 	case ClosedWithoutLanding:
 		return "closed without landing"
+	case Adopted:
+		return "adopted"
 	}
 	panic("workspacenotice: undeclared event kind")
 }
@@ -308,6 +396,8 @@ func eventSentence(event Event) string {
 		return "Its branch `" + event.Workspace.Branch + "` just landed."
 	case ClosedWithoutLanding:
 		return "It just closed without its branch `" + event.Workspace.Branch + "` landing."
+	case Adopted:
+		return "It was just adopted under a parent."
 	}
 	panic("workspacenotice: undeclared event kind")
 }

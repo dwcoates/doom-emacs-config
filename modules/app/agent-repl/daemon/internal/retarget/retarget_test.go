@@ -43,6 +43,19 @@ func (v *fakeVerbs) RestoreParent(_ context.Context, change wsm.ParentChange) er
 	return v.restoreErr
 }
 
+// fakeFamily answers the sibling names and records the adoptions told.
+type fakeFamily struct {
+	names   []string
+	err     error
+	adopted []ids.WorkspaceID
+}
+
+func (f *fakeFamily) SiblingNames(context.Context, ids.WorkspaceID) ([]string, error) {
+	return f.names, f.err
+}
+
+func (f *fakeFamily) ReportAdopted(ws ids.WorkspaceID) { f.adopted = append(f.adopted, ws) }
+
 // submission is one Submit call.
 type submission struct {
 	ws       ids.WorkspaceID
@@ -74,6 +87,7 @@ type fixture struct {
 	briefs  merge.BriefLoader
 	keyErr  error
 	calls   []string
+	family  *fakeFamily
 	svc     *Service
 }
 
@@ -92,9 +106,10 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{logs: dlog.NewTestSurfaces()}
 	f.verbs = &fakeVerbs{change: toParent(), calls: &f.calls}
 	f.prompts = &fakePrompts{calls: &f.calls}
+	f.family = &fakeFamily{}
 	f.briefs = merge.BriefsFrom("../../../prompts")
 	f.svc = New(Deps{
-		Verbs: f.verbs, Prompts: f.prompts, Log: f.logs,
+		Verbs: f.verbs, Prompts: f.prompts, Family: f.family, Log: f.logs,
 		Briefs: func(name string, values map[string]string) (string, error) { return f.briefs(name, values) },
 		NewKey: func() (string, error) { return "key-1", f.keyErr },
 	})
@@ -308,5 +323,69 @@ func TestRandomKeyIsTheSharedDaemonKeyShape(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^workspace-retargeted-[0-9a-f]{32}$`).MatchString(key) {
 		t.Fatalf("key = %q, want prompthandler.MintKey's shape under the retarget prefix", key)
+	}
+}
+
+func TestRetargetUnderAParentNamesTheSiblingsAndTellsThem(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.family.names = []string{"`a`", "`b`"}
+	parent := ids.WorkspaceID("p1")
+
+	// Act
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(&parent))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Retarget: %v", err)
+	}
+	if !strings.Contains(f.prompts.got[0].text, "Siblings: `a`, `b`.") {
+		t.Errorf("notice = %q, want the sibling list", f.prompts.got[0].text)
+	}
+	if len(f.family.adopted) != 1 || f.family.adopted[0] != "w1" {
+		t.Errorf("adopted = %v, want w1 told to its siblings", f.family.adopted)
+	}
+}
+
+func TestRetargetUnderAParentWithNoSiblingsOmitsTheList(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	parent := ids.WorkspaceID("p1")
+
+	// Act
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(&parent))
+
+	// Assert
+	if err != nil || strings.Contains(f.prompts.got[0].text, "Siblings") {
+		t.Errorf("err = %v, notice = %q, want no sibling list", err, f.prompts.got[0].text)
+	}
+}
+
+func TestRetargetToTopLevelTellsNoSiblings(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.verbs.change = wsm.ParentChange{Workspace: "w1", Before: toParent().After, After: toParent().Before}
+
+	// Act
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil))
+
+	// Assert
+	if err != nil || len(f.family.adopted) != 0 {
+		t.Errorf("err = %v, adopted = %v, want none", err, f.family.adopted)
+	}
+}
+
+func TestRetargetWhoseSiblingsCannotBeNamedUndoesTheRetarget(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.family.err = errors.New("db down")
+	parent := ids.WorkspaceID("p1")
+
+	// Act
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(&parent))
+
+	// Assert
+	if err == nil || len(f.verbs.restored) != 1 || len(f.family.adopted) != 0 || !f.loggedAt(dlog.LevelError) {
+		t.Errorf("err = %v, restored = %d, adopted = %v, want an undone retarget, a logged error and nobody told", err, len(f.verbs.restored), f.family.adopted)
 	}
 }

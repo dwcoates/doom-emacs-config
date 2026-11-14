@@ -58,4 +58,5 @@ Places one harness change in its one home and lands it. Every instruction to age
 - CRITICAL: NEVER put agent-repl's application behavior in an `AGENTS.md`; only contributors to agent-repl's own code read it.
 - IMPORTANT NOTE: A memory change is proposed, never written, by this skill.
 - IMPORTANT NOTE: Editing a file outside the current repository still needs the user's per-use permission; this skill grants none.
+- IMPORTANT NOTE: A notice the daemon sends one workspace about another (a retarget, a new child or sibling, a landing, a close) is written as concisely as it can be: only what the receiver needs to act or to know, no pleasantries, no restating what it already knows, one or two short sentences. Keep the "notice only" line brief and list names rather than describing them.
 - CRITICAL: NEVER merge by hand; the merge queue is the only path to the main branch.

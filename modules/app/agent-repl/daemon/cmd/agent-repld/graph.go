@@ -1593,6 +1593,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	retargeter := retarget.New(retarget.Deps{
 		Verbs:   verbs,
 		Prompts: handler,
+		Family:  derivedNotices,
 		Briefs:  merge.BriefsFrom(paths.PromptsDir),
 		Log:     p.Surfaces,
 	})

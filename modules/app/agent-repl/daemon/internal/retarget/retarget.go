@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -44,6 +45,14 @@ type Verbs interface {
 	RestoreParent(ctx context.Context, change wsm.ParentChange) error
 }
 
+// Family names a workspace's siblings and tells them of a new one.
+type Family interface {
+	// SiblingNames names WS's open siblings, each in backticks.
+	SiblingNames(ctx context.Context, ws ids.WorkspaceID) ([]string, error)
+	// ReportAdopted tells WS's siblings that it became their sibling.
+	ReportAdopted(ws ids.WorkspaceID)
+}
+
 // Prompts is the submission path every prompt takes: SubmitPrompt's own
 // body, the one the command file's `prompt` entry calls.
 type Prompts = prompthandler.Submitter
@@ -60,6 +69,7 @@ type Retargeter interface {
 type Deps struct {
 	Verbs   Verbs
 	Prompts Prompts
+	Family  Family
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
 	Log    dlog.Surfaces
@@ -112,15 +122,29 @@ func (s *Service) Retarget(ctx context.Context, ws ids.WorkspaceID, retarget wsm
 		}
 		return fmt.Errorf("retarget %s: notify: %w", ws, err)
 	}
+	if change.After.Parent != nil {
+		s.deps.Family.ReportAdopted(ws)
+	}
 	log.Info(op, "retargeted the workspace's merge and queued its notice", dlog.Context{"turn": string(turn)})
 	return nil
 }
 
 // notify composes and queues the notice for one change.
 func (s *Service) notify(ctx context.Context, change wsm.ParentChange) (ids.TurnID, error) {
+	siblings := ""
+	if change.After.Parent != nil {
+		names, err := s.deps.Family.SiblingNames(ctx, change.Workspace)
+		if err != nil {
+			return "", fmt.Errorf("name the siblings: %w", err)
+		}
+		if len(names) > 0 {
+			siblings = " Siblings: " + strings.Join(names, ", ") + "."
+		}
+	}
 	text, err := s.deps.Briefs(BriefRetargeted, map[string]string{
 		"target":   Describe(change.After),
 		"previous": Describe(change.Before),
+		"siblings": siblings,
 	})
 	if err != nil {
 		return "", fmt.Errorf("compose: %w", err)
