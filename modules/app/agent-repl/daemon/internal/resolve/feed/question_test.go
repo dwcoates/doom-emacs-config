@@ -3,6 +3,8 @@ package feed
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
@@ -241,6 +243,29 @@ func TestAnUnansweredAskExpiresRatherThanPendingForever(t *testing.T) {
 	// Assert.
 	if h.questionCard().GetExpired() == nil {
 		t.Fatalf("state = %T, want expired", h.questionCard().GetState())
+	}
+}
+
+func TestAnAskAnsweredOnClaudeAiSettlesUnderTheRemoteMarker(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{
+		Batch: batch, StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: claude.ai answered; the vendor relays no answers.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch: batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_AnsweredRemotely{
+			AnsweredRemotely: &conversationv1.AgentQuestionAnsweredRemotely{},
+		},
+	})
+
+	// Assert: settled as answered there, never as expired.
+	remote := h.questionCard().GetAnsweredRemotely()
+	if remote == nil || !proto.Equal(remote.GetMarker(), answeredRemotelyMarker()) {
+		t.Fatalf("state = %v, want answered_remotely under the remote marker", h.questionCard().GetState())
 	}
 }
 

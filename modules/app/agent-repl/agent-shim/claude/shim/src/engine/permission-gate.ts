@@ -44,7 +44,8 @@
  *     about it: the gated call running (its `tool_progress`, or a `tool_result`
  *     that is not an error), the asking agent speaking again, or its turn
  *     ending other than by a user stop each say it was ANSWERED REMOTELY
- *     (`AgentPermissionSuccess.answered_remotely`); the turn ending by a user
+ *     (`AgentPermissionSuccess.answered_remotely`, or for a question
+ *     `AgentQuestionSuccess.answered_remotely`); the turn ending by a user
  *     stop says it was cut by the INTERRUPT, settled as the stand-down's
  *     denial. A stand-down settles it as one too. No interrupt is ever reported
  *     as an answer from claude.ai, because an interrupted turn says nothing
@@ -526,11 +527,21 @@ export type StandDownHow = "denied" | "abandoned";
 /** The settle a question takes when the session that asked it is ending. */
 const ABANDONED_QUESTION = Symbol("abandoned");
 
-/** A question settle's outcome: the answers, nobody answering, or abandoned. */
+/**
+ * The settle a question takes when claude.ai answered it through the Remote
+ * Control bridge: the vendor relays no answers, so only where it was answered
+ * is stated.
+ */
+const REMOTE_QUESTION = Symbol("answered remotely");
+
+/** A question settle's outcome: the answers, nobody answering, abandoned, or answered on claude.ai. */
 function questionOutcome(
-  answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION,
+  answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION | typeof REMOTE_QUESTION,
 ): conversationv1.AgentQuestionSuccess["outcome"] {
   if (answers === ABANDONED_QUESTION) return abandonedQuestionOutcome();
+  if (answers === REMOTE_QUESTION) {
+    return { case: "answeredRemotely", value: create(conversationv1.AgentQuestionAnsweredRemotelySchema, {}) };
+  }
   if (answers === undefined) {
     return { case: "unanswered", value: create(conversationv1.AgentQuestionUnansweredSchema, {}) };
   }
@@ -908,7 +919,7 @@ export class PermissionGate {
 
   private settleQuestion(
     pending: PendingQuestion,
-    answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION,
+    answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION | typeof REMOTE_QUESTION,
   ): void {
     const id = questionId(pending.toolUseId);
     this.deps.persist([
@@ -1296,10 +1307,10 @@ export class PermissionGate {
         continue;
       }
       if (ask.kind === "question") {
-        // NO ARM SAYS WHERE A QUESTION WAS ANSWERED, and the answers are not
-        // relayed: the question settles unanswered HERE, and its tool's own
-        // result carries what claude.ai chose.
-        this.settleQuestion(ask, undefined);
+        // THE ANSWERS ARE NOT RELAYED, so the question settles as answered
+        // on claude.ai with none drawn here; its tool's own result carries
+        // what was chosen.
+        this.settleQuestion(ask, REMOTE_QUESTION);
       } else {
         this.settlePermission(ask, {
           case: "answeredRemotely",
