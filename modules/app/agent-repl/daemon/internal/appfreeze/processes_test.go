@@ -85,9 +85,9 @@ func TestExecutableOf(t *testing.T) {
 	}
 }
 
-func TestAppMatcherFor(t *testing.T) {
+func TestAppMatcherForEachPlatform(t *testing.T) {
 	// Act
-	mac, linux := appMatcherFor("darwin"), appMatcherFor("linux")
+	mac, linux := AppMatcherFor("darwin"), AppMatcherFor("linux")
 
 	// Assert
 	if !mac("/Applications/Slack.app/Contents/MacOS/Slack", "Slack") || mac("/usr/bin/slack", "slack") ||

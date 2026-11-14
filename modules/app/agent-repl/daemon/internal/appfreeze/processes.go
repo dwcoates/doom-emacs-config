@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -94,12 +93,12 @@ func executableOf(path, app string) bool {
 	return filepath.Base(path) == app || strings.Contains(path, "/"+app+"/")
 }
 
-// appOf is this platform's test of whether an executable is an
-// application's: a bundle on macOS, an executable on Linux.
-var appOf = appMatcherFor(runtime.GOOS)
+// AppOf answers whether the executable at path is app's.
+type AppOf func(path, app string) bool
 
-// appMatcherFor answers goos's appOf.
-func appMatcherFor(goos string) func(path, app string) bool {
+// AppMatcherFor answers goos's AppOf: an application is a bundle on macOS and
+// an executable on Linux.
+func AppMatcherFor(goos string) AppOf {
 	if goos == "linux" {
 		return executableOf
 	}
@@ -159,7 +158,7 @@ type Protection struct {
 }
 
 // protected answers the pids Protection covers in table.
-func (p Protection) protected(table []Process) map[int]bool {
+func (p Protection) protected(table []Process, appOf AppOf) map[int]bool {
 	byPID := map[int]Process{}
 	children := map[int][]int{}
 	for _, proc := range table {

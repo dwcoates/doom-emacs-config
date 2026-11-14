@@ -214,7 +214,7 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 	case lid != "" && getenv(appfreeze.EnvApps) == "":
 		cfg.FreezeApps = nil
 	default:
-		apps, err := appfreeze.AppsFromEnv(getenv)
+		apps, err := appfreeze.AppsFromEnv(goos, getenv)
 		if err != nil {
 			return Config{}, fmt.Errorf("persistentwifi: %w", err)
 		}

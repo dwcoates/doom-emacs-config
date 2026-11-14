@@ -34,6 +34,9 @@ type Deps struct {
 	Spawns SpawnSource
 	// Protection names the processes never frozen.
 	Protection Protection
+	// AppOf says which application an executable is (AppMatcherFor).
+	// REQUIRED.
+	AppOf AppOf
 	// Log is the package's canonical logger. REQUIRED.
 	Log dlog.Logger
 	// Telemetry counts freezes and thaws; nil counts nothing.
@@ -108,6 +111,8 @@ func New(d Deps) (*Freezer, error) {
 		return nil, fmt.Errorf("appfreeze: a source of process starts is required")
 	case d.Log == nil:
 		return nil, fmt.Errorf("appfreeze: a logger is required")
+	case d.AppOf == nil:
+		return nil, fmt.Errorf("appfreeze: the platform's naming of an application is required")
 	}
 	return &Freezer{d: d}, nil
 }
@@ -462,7 +467,7 @@ type refusal struct {
 // and those refused because a protected process belongs to them. A refused
 // or skipped pid is answered once per quiet state. Caller holds mu.
 func (f *Freezer) plan(table []Process) (Record, []string, []refusal) {
-	protected := f.d.Protection.protected(table)
+	protected := f.d.Protection.protected(table, f.d.AppOf)
 	held := map[int]bool{}
 	for _, app := range f.held.Apps {
 		for _, pid := range app.PIDs {
@@ -480,7 +485,7 @@ func (f *Freezer) plan(table []Process) (Record, []string, []refusal) {
 		var pids, guarded []int
 		running := false
 		for _, proc := range table {
-			if !appOf(proc.Path, app) {
+			if !f.d.AppOf(proc.Path, app) {
 				continue
 			}
 			running = true

@@ -18,7 +18,6 @@ package appfreeze
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 )
 
@@ -55,15 +54,10 @@ var neverFrozen = []string{
 // AppsFromEnv resolves the configured list. Every entry is trimmed; an empty
 // entry, a duplicate, and an entry naming a bundle that is never frozen
 // (neverFrozen) are REFUSED, so a configuration that would freeze the editor
-// or a terminal never starts.
-func AppsFromEnv(getenv func(string) string) ([]string, error) {
-	return appsFromEnv(runtime.GOOS, getenv)
-}
-
-// appsFromEnv is AppsFromEnv on the platform goos. Linux has no default list:
-// which executables draw for a screen nobody sees is each machine's own, so
-// nothing is frozen until EnvApps names some.
-func appsFromEnv(goos string, getenv func(string) string) ([]string, error) {
+// or a terminal never starts. The list is for the platform goos: Linux has no
+// default list, since which executables draw for a screen nobody sees is each
+// machine's own, so nothing is frozen until EnvApps names some.
+func AppsFromEnv(goos string, getenv func(string) string) ([]string, error) {
 	raw := getenv(EnvApps)
 	if raw == "" {
 		if goos == "linux" {

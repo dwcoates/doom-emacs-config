@@ -82,6 +82,7 @@ func buildFreezer(cfg persistentwifi.Config, runner appfreeze.Runner, stateDir, 
 	freezer, err := appfreeze.New(appfreeze.Deps{
 		Apps:      cfg.FreezeApps,
 		Processes: processes,
+		AppOf:     appfreeze.AppMatcherFor(cfg.Platform),
 		Signal:    signal,
 		Store:     appfreeze.FileStore{Path: filepath.Join(dir, appfreeze.RecordFile)},
 		Spawns:    spawns,
