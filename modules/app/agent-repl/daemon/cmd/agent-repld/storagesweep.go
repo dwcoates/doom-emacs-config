@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
@@ -41,20 +44,26 @@ func buildStorageSweep(registry storagesweep.Registry, logs storagesweep.Logs, l
 		log.Error(graphOperation, "the storage sweep's cache directories could not be resolved", dlog.Context{"cause": err.Error()})
 		return nil, err
 	}
-	bounded, err := storageBoundedDirs(getenv, os.UserCacheDir)
+	buildCache, err := goBuildCacheDir(getenv, os.ReadFile, os.UserConfigDir, os.UserCacheDir)
 	if err != nil {
-		log.Error(graphOperation, "the storage sweep's bounded caches could not be resolved", dlog.Context{"cause": err.Error()})
+		log.Error(graphOperation, "the storage sweep's Go build cache could not be resolved", dlog.Context{"cause": err.Error()})
 		return nil, err
 	}
 	sweeper, err := storagesweep.New(storagesweep.Deps{
-		Registry:    registry,
-		Clock:       clock.System{},
-		LockPath:    filepath.Join(runDir, storageSweepLockName),
-		ShimDir:     layout.ShimDir(),
-		Aged:        aged,
-		Bounded:     bounded,
-		LogsDir:     layout.LogsDir(),
-		Logs:        logs,
+		Registry: registry,
+		Clock:    clock.System{},
+		LockPath: filepath.Join(runDir, storageSweepLockName),
+		ShimDir:  layout.ShimDir(),
+		Aged:     aged,
+		Bounded:  storageBoundedDirs(buildCache),
+		LogsDir:  layout.LogsDir(),
+		Logs:     logs,
+
+		BuildCacheDir:   buildCache,
+		BuildCacheFS:    storagesweep.OSBuildCacheFS{},
+		Zone:            time.Local,
+		BuildCacheEvery: storagesweep.DefaultBuildCacheEvery,
+
 		LandedAfter: storagesweep.DefaultLandedAfter,
 		ClosedAfter: storagesweep.DefaultClosedAfter,
 		LogsAfter:   storagesweep.DefaultLogsAfter,
@@ -66,6 +75,64 @@ func buildStorageSweep(registry storagesweep.Registry, logs storagesweep.Logs, l
 		return nil, fmt.Errorf("agent-repld: build the storage sweep: %w", err)
 	}
 	return sweeper, nil
+}
+
+// goBuildCacheDir is the Go build cache the go command on this host uses,
+// resolved as `go env GOCACHE` resolves it and without running the go command:
+// the GOCACHE variable, else the GOCACHE line of the go command's environment
+// file (the GOENV variable names it, `off` meaning none; by default
+// <user config dir>/go/env), else <user cache dir>/go-build. A GOCACHE of
+// `off` is a host with no build cache, answered as the empty string.
+func goBuildCacheDir(getenv func(string) string, readFile func(string) ([]byte, error), userConfigDir, userCacheDir func() (string, error)) (string, error) {
+	cache := getenv("GOCACHE")
+	if cache == "" {
+		fromFile, err := goEnvFileValue("GOCACHE", getenv, readFile, userConfigDir)
+		if err != nil {
+			return "", err
+		}
+		cache = fromFile
+	}
+	switch cache {
+	case "off":
+		return "", nil
+	case "":
+		dir, err := userCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve the user cache directory the Go build cache lives under: %w", err)
+		}
+		return filepath.Join(dir, "go-build"), nil
+	}
+	return cache, nil
+}
+
+// goEnvFileValue reads one variable out of the go command's environment
+// file, the `KEY=value` lines `go env -w` writes. A file that is not there,
+// or turned off, sets nothing.
+func goEnvFileValue(key string, getenv func(string) string, readFile func(string) ([]byte, error), userConfigDir func() (string, error)) (string, error) {
+	path := getenv("GOENV")
+	switch path {
+	case "off":
+		return "", nil
+	case "":
+		dir, err := userConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve the user config directory the go command's environment file lives under: %w", err)
+		}
+		path = filepath.Join(dir, "go", "env")
+	}
+	body, err := readFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the go command's environment file %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if name, value, found := strings.Cut(line, "="); found && name == key {
+			return value, nil
+		}
+	}
+	return "", nil
 }
 
 // storageAgedDirs are the cache directories swept by age.
@@ -85,22 +152,13 @@ func storageAgedDirs(getenv func(string) string) ([]storagesweep.AgedDir, error)
 }
 
 // storageBoundedDirs are the caches the sweep keeps under a size: the host's
-// Go build cache, where `go env GOCACHE` puts it ($GOCACHE, else go-build
-// under the user cache directory), unless GOCACHE is "off", which keeps no
-// cache to bound.
-func storageBoundedDirs(getenv func(string) string, userCacheDir func() (string, error)) ([]storagesweep.BoundedDir, error) {
-	dir := getenv("GOCACHE")
-	switch dir {
-	case "off":
-		return nil, nil
-	case "":
-		base, err := userCacheDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve the user cache directory the Go build cache lives under: %w", err)
-		}
-		dir = filepath.Join(base, "go-build")
+// Go build cache at buildCache (goBuildCacheDir), or none on a host that has
+// no build cache.
+func storageBoundedDirs(buildCache string) []storagesweep.BoundedDir {
+	if buildCache == "" {
+		return nil
 	}
-	return []storagesweep.BoundedDir{{Name: "go-build", Dir: dir, Bound: storagesweep.DefaultGoBuildCacheBound}}, nil
+	return []storagesweep.BoundedDir{{Name: "go-build", Dir: buildCache, Bound: storagesweep.DefaultGoBuildCacheBound}}
 }
 
 // openProfileSession answers the profiling root's entries kept whatever their

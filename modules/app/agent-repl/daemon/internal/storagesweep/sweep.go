@@ -2,7 +2,7 @@
 // background sweep that deletes agent-repl's own on-disk data once nothing
 // will read it again, run once a day and on demand (agentrepl.v1.PruneStorage).
 //
-// It owns four kinds of data:
+// It owns five kinds of data:
 //
 //   - each workspace's shim state directory (<state root>/shim/<key>, see
 //     shim.go), judged by the workspace's close record in the registry;
@@ -10,9 +10,11 @@
 //     profiling sessions and the test runner's reuse records, judged by age;
 //   - caches kept under a size (BoundedDir): the host's Go build cache, which
 //     test runs fill, measured on every sweep and trimmed of its least
-//     recently used entries past its bound.
+//     recently used entries past its bound;
 //   - the daemon-written logs of each workspace nobody touched for days (see
-//     logs.go), which their writers' last-write retention never reaches.
+//     logs.go), which their writers' last-write retention never reaches;
+//   - the Go build cache's entries nothing used for two business days (see
+//     buildcache.go), which it also trims on its own hourly schedule.
 //
 // Worktrees are the landed-worktree reaper's (internal/worktreereap), and
 // every other log is its writer's own retention's; neither is touched here.
@@ -40,6 +42,8 @@ const (
 	opAged  = "daemon.storagesweep.aged"
 	opLogs  = "daemon.storagesweep.logs"
 	opRun   = "daemon.storagesweep.run"
+
+	opBuildCache = "daemon.storagesweep.build_cache"
 )
 
 // Production windows (owner rulings 2026-10-25 and 2026-11-11: nothing the
@@ -104,6 +108,14 @@ type Deps struct {
 	// write into it.
 	LogsDir string
 	Logs    Logs
+	// BuildCacheDir is the Go build cache (`go env GOCACHE`), walked through
+	// BuildCacheFS; empty on a host that has none. Zone is the zone its
+	// business days are counted in, and BuildCacheEvery the cadence of its
+	// own trims.
+	BuildCacheDir   string
+	BuildCacheFS    BuildCacheFS
+	Zone            *time.Location
+	BuildCacheEvery time.Duration
 	// LandedAfter, ClosedAfter, LogsAfter, StartDelay and Every are the
 	// windows; see the defaults.
 	LandedAfter time.Duration
@@ -136,11 +148,15 @@ func New(deps Deps) (*Sweeper, error) {
 		return nil, errors.New("storagesweep: LogsDir is required")
 	case deps.Logs == nil:
 		return nil, errors.New("storagesweep: Logs is required")
+	case deps.BuildCacheFS == nil:
+		return nil, errors.New("storagesweep: BuildCacheFS is required")
+	case deps.Zone == nil:
+		return nil, errors.New("storagesweep: Zone is required")
 	case deps.Log == nil:
 		return nil, errors.New("storagesweep: Log is required")
-	case deps.LandedAfter <= 0, deps.ClosedAfter <= 0, deps.LogsAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0:
-		return nil, fmt.Errorf("storagesweep: the windows must be positive (landed after %v, closed after %v, logs after %v, start delay %v, every %v)",
-			deps.LandedAfter, deps.ClosedAfter, deps.LogsAfter, deps.StartDelay, deps.Every)
+	case deps.LandedAfter <= 0, deps.ClosedAfter <= 0, deps.LogsAfter <= 0, deps.StartDelay <= 0, deps.Every <= 0, deps.BuildCacheEvery <= 0:
+		return nil, fmt.Errorf("storagesweep: the windows must be positive (landed after %v, closed after %v, logs after %v, start delay %v, every %v, build cache every %v)",
+			deps.LandedAfter, deps.ClosedAfter, deps.LogsAfter, deps.StartDelay, deps.Every, deps.BuildCacheEvery)
 	}
 	for _, a := range deps.Aged {
 		if a.Name == "" || a.Dir == "" || a.After <= 0 {
@@ -163,6 +179,9 @@ type Removal struct {
 	Reason Reason
 	// Bytes is what it held.
 	Bytes int64
+	// Entries is how many entries under Path were deleted when Path itself
+	// stays (the build cache rule); zero when Path is what was deleted.
+	Entries int
 }
 
 // Report is one sweep's account.
@@ -193,9 +212,15 @@ func (r Report) Bytes() int64 {
 // ErrHeldElsewhere while another daemon holds the sweep's kernel lock. A failure on one entry is recorded at ERROR and the sweep goes
 // on; only a registry that cannot be read ends the shim rule early.
 func (s *Sweeper) Sweep(ctx context.Context, dryRun bool) (Report, error) {
+	return s.guarded(dryRun, func(report *Report) error { return s.sweep(ctx, report) })
+}
+
+// guarded runs one pass under the sweep's guard and answers its report: at
+// most one pass runs in this daemon, and at most one daemon runs one.
+func (s *Sweeper) guarded(dryRun bool, pass func(*Report) error) (Report, error) {
 	report := Report{DryRun: dryRun, Kept: map[KeepReason]int{}}
 	var err error
-	ran, guardErr := s.guard.Do(s.deps.Log, func() { err = s.sweep(ctx, &report) })
+	ran, guardErr := s.guard.Do(s.deps.Log, func() { err = pass(&report) })
 	if guardErr != nil {
 		return Report{}, guardErr
 	}
@@ -219,14 +244,19 @@ func (s *Sweeper) sweep(ctx context.Context, report *Report) error {
 		}
 		s.sweepAged(a, now, report)
 	}
+	if ctx.Err() == nil {
+		s.sweepLogs(ctx, now, report)
+	}
+	// THE BUILD CACHE'S AGE RULE RUNS BEFORE ITS SIZE BOUND, so the bound
+	// measures, and trims, only what the age rule left.
+	if ctx.Err() == nil {
+		s.sweepBuildCache(ctx, now, report)
+	}
 	for _, b := range s.deps.Bounded {
 		if ctx.Err() != nil {
 			break
 		}
 		s.sweepBounded(b, report)
-	}
-	if ctx.Err() == nil {
-		s.sweepLogs(ctx, now, report)
 	}
 	if ctx.Err() != nil {
 		s.deps.Log.Info(opSweep, "the sweep stopped with the daemon", summary(*report))
@@ -246,12 +276,20 @@ func summary(r Report) dlog.Context {
 }
 
 // Run drives the schedule for the daemon's whole serving lifetime: one sweep
-// StartDelay after the start, then one every Every. A sweep's failures are
-// recorded inside it and never end the loop.
+// StartDelay after the start, then one every Every, and beside it the build
+// cache's own trims (runBuildCacheTrims). A sweep's failures are recorded
+// inside it and never end the loop. Run returns once both schedules stopped.
 func (s *Sweeper) Run(ctx context.Context) error {
 	s.deps.Log.Debug(opRun, "the storage sweep is scheduled", dlog.Context{
 		"start_delay": s.deps.StartDelay.String(), "every": s.deps.Every.String(),
+		"build_cache_every": s.deps.BuildCacheEvery.String(),
 	})
+	trims := make(chan struct{})
+	go func() {
+		defer close(trims)
+		s.runBuildCacheTrims(ctx)
+	}()
+	defer func() { <-trims }()
 	err := clock.Repeat(ctx, s.deps.Clock, s.deps.StartDelay, s.deps.Every, func(ctx context.Context) {
 		switch _, err := s.Sweep(ctx, false); {
 		case errors.Is(err, ErrSweepRunning):

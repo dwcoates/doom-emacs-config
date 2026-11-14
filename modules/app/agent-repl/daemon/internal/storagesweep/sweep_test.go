@@ -38,11 +38,17 @@ type world struct {
 	// bounded are the caches the sweep keeps under a size.
 	bounded []BoundedDir
 	logs    *fakeLogs
+	// cacheDir is the Go build cache the sweeper is given (none by default),
+	// cache the filesystem it is walked through, and zone the zone its
+	// business days are counted in.
+	cacheDir string
+	cache    *fakeCacheFS
+	zone     *time.Location
 }
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
-	return &world{t: t, root: t.TempDir(), reg: &registry{}, clock: clocktest.New(now), log: dlog.NewTestLogger(), logs: &fakeLogs{}}
+	return &world{t: t, root: t.TempDir(), reg: &registry{}, clock: clocktest.New(now), log: dlog.NewTestLogger(), logs: &fakeLogs{}, cache: newFakeCacheFS(), zone: time.UTC}
 }
 
 func (w *world) logsDir() string { return filepath.Join(w.root, "logs") }
@@ -54,6 +60,7 @@ func (w *world) sweeper() *Sweeper {
 	s, err := New(Deps{
 		Registry: w.reg, Clock: w.clock, LockPath: filepath.Join(w.root, "run", "sweep.lock"),
 		ShimDir: w.shimDir(), Aged: w.aged, Bounded: w.bounded, LogsDir: w.logsDir(), Logs: w.logs,
+		BuildCacheDir: w.cacheDir, BuildCacheFS: w.cache, Zone: w.zone, BuildCacheEvery: DefaultBuildCacheEvery,
 		LandedAfter: DefaultLandedAfter, ClosedAfter: DefaultClosedAfter, LogsAfter: DefaultLogsAfter,
 		StartDelay: DefaultStartDelay, Every: DefaultEvery, Log: w.log,
 	})
@@ -469,6 +476,9 @@ func TestNewRefusesAZeroValue(t *testing.T) {
 		{"no logs directory", func(d *Deps) { d.LogsDir = "" }},
 		{"no log surfaces", func(d *Deps) { d.Logs = nil }},
 		{"no log", func(d *Deps) { d.Log = nil }},
+		{"no build cache filesystem", func(d *Deps) { d.BuildCacheFS = nil }},
+		{"no zone", func(d *Deps) { d.Zone = nil }},
+		{"a zero build cache cadence", func(d *Deps) { d.BuildCacheEvery = 0 }},
 		{"a zero window", func(d *Deps) { d.ClosedAfter = 0 }},
 		{"a zero logs window", func(d *Deps) { d.LogsAfter = 0 }},
 		{"an unnamed aged directory", func(d *Deps) { d.Aged = []AgedDir{{Dir: "/d", After: day}} }},
@@ -483,6 +493,7 @@ func TestNewRefusesAZeroValue(t *testing.T) {
 			deps := Deps{
 				Registry: &registry{}, Clock: clocktest.New(now), LockPath: "/l", ShimDir: "/s",
 				LogsDir: "/logs", Logs: &fakeLogs{},
+				BuildCacheFS: newFakeCacheFS(), Zone: time.UTC, BuildCacheEvery: day,
 				LandedAfter: day, ClosedAfter: day, LogsAfter: day, StartDelay: day, Every: day, Log: dlog.NewTestLogger(),
 			}
 			tt.edit(&deps)

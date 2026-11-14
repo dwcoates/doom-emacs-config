@@ -24,6 +24,7 @@ func TestPruneStorageAnswersTheSweepsReport(t *testing.T) {
 			{Path: "/c/profiles/x", Reason: storagesweep.ReasonAged, Bytes: 1},
 			{Path: "/s/shim/cccc", Reason: storagesweep.ReasonLanded, Bytes: 2},
 			{Path: "/c/go-build", Reason: storagesweep.ReasonOverBound, Bytes: 7},
+			{Path: "/c/go-build/0a", Reason: storagesweep.ReasonUnusedBuildCache, Bytes: 7, Entries: 3},
 		},
 		Kept:     map[storagesweep.KeepReason]int{storagesweep.KeepYoung: 3, storagesweep.KeepOpenWorkspace: 2},
 		Failures: 1,
@@ -37,8 +38,9 @@ func TestPruneStorageAnswersTheSweepsReport(t *testing.T) {
 			{Path: "/c/profiles/x", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_AGED, Bytes: 1},
 			{Path: "/s/shim/cccc", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_LANDED, Bytes: 2},
 			{Path: "/c/go-build", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND, Bytes: 7},
+			{Path: "/c/go-build/0a", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE, Bytes: 7, Entries: 3},
 		},
-		Bytes: 25,
+		Bytes: 32,
 		Kept: []*agentreplv1.PruneStorageKept{
 			{Reason: agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE, Count: 2},
 			{Reason: agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_YOUNG, Count: 3},
@@ -91,12 +93,12 @@ func TestEverySweepReasonHasAWireValue(t *testing.T) {
 	// give is drawn, each as its own value.
 	reasons := []storagesweep.Reason{
 		storagesweep.ReasonNoWorkspace, storagesweep.ReasonLanded, storagesweep.ReasonClosedBackups, storagesweep.ReasonAged,
-		storagesweep.ReasonUntouchedLogs, storagesweep.ReasonOverBound,
+		storagesweep.ReasonUntouchedLogs, storagesweep.ReasonOverBound, storagesweep.ReasonUnusedBuildCache,
 	}
 	keeps := []storagesweep.KeepReason{
 		storagesweep.KeepOpenWorkspace, storagesweep.KeepRecentlyClosed, storagesweep.KeepNotADirectory,
 		storagesweep.KeepNoBackups, storagesweep.KeepYoung, storagesweep.KeepKeptByDirectory,
-		storagesweep.KeepRecentlyTouched, storagesweep.KeepHeldLogs,
+		storagesweep.KeepRecentlyTouched, storagesweep.KeepHeldLogs, storagesweep.KeepRecentlyUsedBuildCache,
 	}
 	seen := map[int32]bool{}
 	for _, r := range reasons {

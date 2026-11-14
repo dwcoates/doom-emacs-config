@@ -2878,7 +2878,9 @@ again. One background loop (`storage_sweep` in `graph.go`): the first sweep
 `10m` after start, then one every `24h`, under `internal/sweepguard` with
 `<lock dir>/storage-sweep.lock`. `agent-repld runtime prune-storage
 [-preview]` (`agentrepl.v1.PruneStorage`) runs one now; `-preview` judges
-exactly as a sweep does and deletes nothing.
+exactly as a sweep does and deletes nothing. Beside it, on its own goroutine
+and under the same guard, the Go build cache is trimmed alone as the daemon
+starts and then every `1h` (below).
 
 **Shim state** (`<state root>/shim/<key>`, `sessionlock.WorkspaceKey` of the
 workspace directory, the shim's identity and transcript backups). The
@@ -2927,9 +2929,40 @@ and holds no lock, so nothing can prove them unheld, and Emacs ages them
 itself. A log of a workspace the registry does not know is left to the
 writers' retention.
 
+**The Go build cache** (`buildcache.go`, owner ruling 2026-11-12). The go
+command trims its cache only of entries unused for five days, and this host's
+grows about 17 GB an hour (measured 2026-11-12: 219 GB, 171 GB of it used
+inside 48 hours). Every entry file (`<hash>-a`, `<hash>-d`) under the cache's
+two-hex-digit subdirectories whose modification time is over 2 business days
+old is deleted, one file at a time (`unused_build_cache`); the modification
+time is the entry's last use, which the go command moves forward as it reads
+an entry. A business day is a weekday in the host's zone (`time.Local`), and
+the cutoff keeps the hour of the day: on a Monday it is the Thursday before
+at the same hour, and on a Saturday or a Sunday that same Thursday; holidays
+are not counted (`businessDaysBefore`). The cache is the one `go env GOCACHE`
+names, resolved at boot without running the go command (`goBuildCacheDir` in
+`cmd/agent-repld/storagesweep.go`: the `GOCACHE` variable, else the go
+command's environment file, else `<user cache dir>/go-build`; `off` is a host
+with no cache). NEVER `go clean -cache` and never the directory itself:
+everything in it but those entry files stays. The whole sweep trims it, and
+so does the trim's own schedule (`Sweeper.TrimBuildCache`: at the daemon's
+start, then every `1h`), because a daily trim alone lets a day of entries past
+the window pile up; a trim that finds a sweep running leaves the cache to it.
+In the whole sweep the cache's size bound (`bounded.go`: past 64 GiB, least
+recently used entries first, `over_bound`) runs AFTER this age rule, so it
+measures and trims only what the age rule left; both read the one cache
+`goBuildCacheDir` resolved.
+Each trim is one INFO record (`daemon.storagesweep.build_cache`) with its
+cutoff, entry count, bytes and kept count; a subdirectory's failures are one
+ERROR record with their count and the first one's path and cause, and an
+entry already gone (the go command trims too) is no failure. The walk goes
+through `storagesweep.BuildCacheFS`, which the unit suite scripts, so no test
+touches a real cache.
+
 Worktrees are the reaper's (below), and every other log is its writer's own
 retention's; the sweep touches neither. Every deletion is INFO with its path
-(or, for logs, its workspace, file count and links), reason and bytes; every
+(or, for logs, its workspace, file count and links; for the build cache, one
+record a trim), reason and bytes; every
 failure is ERROR and the sweep goes on.
 
 ## The landed-worktree reaper (`internal/worktreereap`)

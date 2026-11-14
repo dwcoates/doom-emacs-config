@@ -5,9 +5,11 @@
 // again (daemon/internal/storagesweep): each workspace's shim state directory
 // (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age, and
-// the daemon-written logs of each workspace nobody touched for five days. It
-// also runs on its own once a day; this asks for one now.
+// (profiling sessions, the test runner's reuse records), judged by age, the
+// daemon-written logs of each workspace nobody touched for five days, and the
+// Go build cache's entries nothing used for two business days. It also runs
+// on its own once a day, and trims the build cache alone once an hour; this
+// asks for a whole sweep now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
 // answers is what a sweep at that instant would delete.
@@ -59,6 +61,10 @@ const (
 	// A daemon-written log file of a workspace nobody touched for five days,
 	// that no writer holds.
 	PruneStorageReason_PRUNE_STORAGE_REASON_UNTOUCHED_LOGS PruneStorageReason = 6
+	// Entry files of the Go build cache (`go env GOCACHE`) nothing used for two
+	// business days, counted in the host's zone: one removal per cache
+	// subdirectory, which stays.
+	PruneStorageReason_PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE PruneStorageReason = 7
 )
 
 // Enum value maps for PruneStorageReason.
@@ -71,15 +77,17 @@ var (
 		4: "PRUNE_STORAGE_REASON_AGED",
 		5: "PRUNE_STORAGE_REASON_OVER_BOUND",
 		6: "PRUNE_STORAGE_REASON_UNTOUCHED_LOGS",
+		7: "PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE",
 	}
 	PruneStorageReason_value = map[string]int32{
-		"PRUNE_STORAGE_REASON_UNSPECIFIED":    0,
-		"PRUNE_STORAGE_REASON_NO_WORKSPACE":   1,
-		"PRUNE_STORAGE_REASON_LANDED":         2,
-		"PRUNE_STORAGE_REASON_CLOSED_BACKUPS": 3,
-		"PRUNE_STORAGE_REASON_AGED":           4,
-		"PRUNE_STORAGE_REASON_OVER_BOUND":     5,
-		"PRUNE_STORAGE_REASON_UNTOUCHED_LOGS": 6,
+		"PRUNE_STORAGE_REASON_UNSPECIFIED":        0,
+		"PRUNE_STORAGE_REASON_NO_WORKSPACE":       1,
+		"PRUNE_STORAGE_REASON_LANDED":             2,
+		"PRUNE_STORAGE_REASON_CLOSED_BACKUPS":     3,
+		"PRUNE_STORAGE_REASON_AGED":               4,
+		"PRUNE_STORAGE_REASON_OVER_BOUND":         5,
+		"PRUNE_STORAGE_REASON_UNTOUCHED_LOGS":     6,
+		"PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE": 7,
 	}
 )
 
@@ -132,6 +140,8 @@ const (
 	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED PruneStorageKeepReason = 7
 	// A log file of an untouched workspace that a writer still holds.
 	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_HELD_LOGS PruneStorageKeepReason = 8
+	// A Go build cache entry file something used inside two business days.
+	PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE PruneStorageKeepReason = 9
 )
 
 // Enum value maps for PruneStorageKeepReason.
@@ -146,17 +156,19 @@ var (
 		6: "PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY",
 		7: "PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED",
 		8: "PRUNE_STORAGE_KEEP_REASON_HELD_LOGS",
+		9: "PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE",
 	}
 	PruneStorageKeepReason_value = map[string]int32{
-		"PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED":       0,
-		"PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE":    1,
-		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_CLOSED":   2,
-		"PRUNE_STORAGE_KEEP_REASON_NOT_A_DIRECTORY":   3,
-		"PRUNE_STORAGE_KEEP_REASON_NO_BACKUPS":        4,
-		"PRUNE_STORAGE_KEEP_REASON_YOUNG":             5,
-		"PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY": 6,
-		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED":  7,
-		"PRUNE_STORAGE_KEEP_REASON_HELD_LOGS":         8,
+		"PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED":               0,
+		"PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE":            1,
+		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_CLOSED":           2,
+		"PRUNE_STORAGE_KEEP_REASON_NOT_A_DIRECTORY":           3,
+		"PRUNE_STORAGE_KEEP_REASON_NO_BACKUPS":                4,
+		"PRUNE_STORAGE_KEEP_REASON_YOUNG":                     5,
+		"PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY":         6,
+		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED":          7,
+		"PRUNE_STORAGE_KEEP_REASON_HELD_LOGS":                 8,
+		"PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE": 9,
 	}
 )
 
@@ -484,12 +496,17 @@ func (x *PruneStorageMeasured) GetBound() uint64 {
 // One deleted entry.
 type PruneStorageRemoval struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The absolute path deleted: a directory with everything under it, or a file.
+	// The absolute path deleted: a directory with everything under it, or a
+	// file. Under UNUSED_BUILD_CACHE it is a cache subdirectory that STAYS, and
+	// `entries` counts the entry files deleted from it.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	// The rule that deleted it. Never UNSPECIFIED.
 	Reason PruneStorageReason `protobuf:"varint,2,opt,name=reason,proto3,enum=agentrepl.v1.PruneStorageReason" json:"reason,omitempty"`
 	// What it held, in bytes.
-	Bytes         uint64 `protobuf:"varint,3,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Bytes uint64 `protobuf:"varint,3,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	// How many entry files under `path` were deleted, when `path` itself stays
+	// (UNUSED_BUILD_CACHE); zero when `path` is what was deleted.
+	Entries       uint32 `protobuf:"varint,4,opt,name=entries,proto3" json:"entries,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -541,6 +558,13 @@ func (x *PruneStorageRemoval) GetReason() PruneStorageReason {
 func (x *PruneStorageRemoval) GetBytes() uint64 {
 	if x != nil {
 		return x.Bytes
+	}
+	return 0
+}
+
+func (x *PruneStorageRemoval) GetEntries() uint32 {
+	if x != nil {
+		return x.Entries
 	}
 	return 0
 }
@@ -841,11 +865,12 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03dir\x18\x02 \x01(\tR\x03dir\x12\x14\n" +
 	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\x12\x14\n" +
-	"\x05bound\x18\x04 \x01(\x04R\x05bound\"y\n" +
+	"\x05bound\x18\x04 \x01(\x04R\x05bound\"\x93\x01\n" +
 	"\x13PruneStorageRemoval\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x128\n" +
 	"\x06reason\x18\x02 \x01(\x0e2 .agentrepl.v1.PruneStorageReasonR\x06reason\x12\x14\n" +
-	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\"f\n" +
+	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\x12\x18\n" +
+	"\aentries\x18\x04 \x01(\rR\aentries\"f\n" +
 	"\x10PruneStorageKept\x12<\n" +
 	"\x06reason\x18\x01 \x01(\x0e2$.agentrepl.v1.PruneStorageKeepReasonR\x06reason\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\rR\x05count\"\xff\x01\n" +
@@ -857,7 +882,7 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x1aPruneStorageAlreadyRunning\"\x1b\n" +
 	"\x19PruneStorageHeldElsewhere\",\n" +
 	"\x12PruneStorageFailed\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail*\x98\x02\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail*\xc5\x02\n" +
 	"\x12PruneStorageReason\x12$\n" +
 	" PRUNE_STORAGE_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!PRUNE_STORAGE_REASON_NO_WORKSPACE\x10\x01\x12\x1f\n" +
@@ -865,7 +890,8 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"#PRUNE_STORAGE_REASON_CLOSED_BACKUPS\x10\x03\x12\x1d\n" +
 	"\x19PRUNE_STORAGE_REASON_AGED\x10\x04\x12#\n" +
 	"\x1fPRUNE_STORAGE_REASON_OVER_BOUND\x10\x05\x12'\n" +
-	"#PRUNE_STORAGE_REASON_UNTOUCHED_LOGS\x10\x06*\xa8\x03\n" +
+	"#PRUNE_STORAGE_REASON_UNTOUCHED_LOGS\x10\x06\x12+\n" +
+	"'PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE\x10\a*\xe1\x03\n" +
 	"\x16PruneStorageKeepReason\x12)\n" +
 	"%PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED\x10\x00\x12,\n" +
 	"(PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE\x10\x01\x12-\n" +
@@ -875,7 +901,8 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x1fPRUNE_STORAGE_KEEP_REASON_YOUNG\x10\x05\x12/\n" +
 	"+PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY\x10\x06\x12.\n" +
 	"*PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED\x10\a\x12'\n" +
-	"#PRUNE_STORAGE_KEEP_REASON_HELD_LOGS\x10\bB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"#PRUNE_STORAGE_KEEP_REASON_HELD_LOGS\x10\b\x127\n" +
+	"3PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE\x10\tB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_prune_storage_proto_rawDescOnce sync.Once

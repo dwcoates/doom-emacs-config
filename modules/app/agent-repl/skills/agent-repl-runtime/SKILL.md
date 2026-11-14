@@ -98,11 +98,13 @@ the usage.
 - `runtime prune-storage [-preview]` runs the daemon's storage sweep now
   (it also runs once a day): it deletes forgotten and landed workspaces'
   shim state, the transcript backups of workspaces closed over five days,
-  profiling sessions and test-reuse records over five days old, and the
-  daemon-written logs of workspaces nobody touched for five days, and trims
-  the host's Go build cache back under 64 GiB, least recently used entries
-  first; it prints what went and the cache's size (`measured`). `-preview`
-  prints what a sweep would delete and deletes nothing.
+  profiling sessions and test-reuse records over five days old, the
+  daemon-written logs of workspaces nobody touched for five days, and the Go
+  build cache's entries nothing used for two business days (which the daemon
+  also trims alone at its start and every hour), and then trims that cache
+  back under 64 GiB, least recently used entries first; it prints what went
+  and the cache's size (`measured`). `-preview` prints what a sweep would
+  delete and deletes nothing.
 - `runtime reap-worktrees [-preview] [-force]` runs the daemon's
   landed-worktree reaper now (it also runs once a day): it removes worktrees
   whose changes have landed on the default branch (and their branches),

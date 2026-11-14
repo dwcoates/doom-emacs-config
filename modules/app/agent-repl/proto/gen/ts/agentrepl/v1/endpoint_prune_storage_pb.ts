@@ -5,9 +5,11 @@
 // again (daemon/internal/storagesweep): each workspace's shim state directory
 // (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age, and
-// the daemon-written logs of each workspace nobody touched for five days. It
-// also runs on its own once a day; this asks for one now.
+// (profiling sessions, the test runner's reuse records), judged by age, the
+// daemon-written logs of each workspace nobody touched for five days, and the
+// Go build cache's entries nothing used for two business days. It also runs
+// on its own once a day, and trims the build cache alone once an hour; this
+// asks for a whole sweep now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
 // answers is what a sweep at that instant would delete.
@@ -24,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_prune_storage.proto.
  */
 export const file_agentrepl_v1_endpoint_prune_storage: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQi3wEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNEjQKCG1lYXN1cmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZU1lYXN1cmVkIk8KFFBydW5lU3RvcmFnZU1lYXN1cmVkEgwKBG5hbWUYASABKAkSCwoDZGlyGAIgASgJEg0KBWJ5dGVzGAMgASgEEg0KBWJvdW5kGAQgASgEImQKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEIlcKEFBydW5lU3RvcmFnZUtlcHQSNAoGcmVhc29uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUtlZXBSZWFzb24SDQoFY291bnQYAiABKA0i2AEKEVBydW5lU3RvcmFnZUVycm9yEkMKD2FscmVhZHlfcnVubmluZxgBIAEoCzIoLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZ0gAEkEKDmhlbGRfZWxzZXdoZXJlGAIgASgLMicuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUhlbGRFbHNld2hlcmVIABIyCgZmYWlsZWQYAyABKAsyIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRmFpbGVkSABCBwoFY2F1c2UiHAoaUHJ1bmVTdG9yYWdlQWxyZWFkeVJ1bm5pbmciGwoZUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZSIkChJQcnVuZVN0b3JhZ2VGYWlsZWQSDgoGZGV0YWlsGAEgASgJKpgCChJQcnVuZVN0b3JhZ2VSZWFzb24SJAogUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQUlVORV9TVE9SQUdFX1JFQVNPTl9OT19XT1JLU1BBQ0UQARIfChtQUlVORV9TVE9SQUdFX1JFQVNPTl9MQU5ERUQQAhInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9DTE9TRURfQkFDS1VQUxADEh0KGVBSVU5FX1NUT1JBR0VfUkVBU09OX0FHRUQQBBIjCh9QUlVORV9TVE9SQUdFX1JFQVNPTl9PVkVSX0JPVU5EEAUSJwojUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5UT1VDSEVEX0xPR1MQBiqoAwoWUHJ1bmVTdG9yYWdlS2VlcFJlYXNvbhIpCiVQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1VOU1BFQ0lGSUVEEAASLAooUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9PUEVOX1dPUktTUEFDRRABEi0KKVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fUkVDRU5UTFlfQ0xPU0VEEAISLQopUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9OT1RfQV9ESVJFQ1RPUlkQAxIoCiRQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX05PX0JBQ0tVUFMQBBIjCh9QUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1lPVU5HEAUSLworUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9LRVBUX0JZX0RJUkVDVE9SWRAGEi4KKlBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fUkVDRU5UTFlfVE9VQ0hFRBAHEicKI1BSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fSEVMRF9MT0dTEAhCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQi3wEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNEjQKCG1lYXN1cmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZU1lYXN1cmVkIk8KFFBydW5lU3RvcmFnZU1lYXN1cmVkEgwKBG5hbWUYASABKAkSCwoDZGlyGAIgASgJEg0KBWJ5dGVzGAMgASgEEg0KBWJvdW5kGAQgASgEInUKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEEg8KB2VudHJpZXMYBCABKA0iVwoQUHJ1bmVTdG9yYWdlS2VwdBI0CgZyZWFzb24YASABKA4yJC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlS2VlcFJlYXNvbhINCgVjb3VudBgCIAEoDSLYAQoRUHJ1bmVTdG9yYWdlRXJyb3ISQwoPYWxyZWFkeV9ydW5uaW5nGAEgASgLMiguYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUFscmVhZHlSdW5uaW5nSAASQQoOaGVsZF9lbHNld2hlcmUYAiABKAsyJy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZUgAEjIKBmZhaWxlZBgDIAEoCzIgLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VGYWlsZWRIAEIHCgVjYXVzZSIcChpQcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZyIbChlQcnVuZVN0b3JhZ2VIZWxkRWxzZXdoZXJlIiQKElBydW5lU3RvcmFnZUZhaWxlZBIOCgZkZXRhaWwYASABKAkqxQIKElBydW5lU3RvcmFnZVJlYXNvbhIkCiBQUlVORV9TVE9SQUdFX1JFQVNPTl9VTlNQRUNJRklFRBAAEiUKIVBSVU5FX1NUT1JBR0VfUkVBU09OX05PX1dPUktTUEFDRRABEh8KG1BSVU5FX1NUT1JBR0VfUkVBU09OX0xBTkRFRBACEicKI1BSVU5FX1NUT1JBR0VfUkVBU09OX0NMT1NFRF9CQUNLVVBTEAMSHQoZUFJVTkVfU1RPUkFHRV9SRUFTT05fQUdFRBAEEiMKH1BSVU5FX1NUT1JBR0VfUkVBU09OX09WRVJfQk9VTkQQBRInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9VTlRPVUNIRURfTE9HUxAGEisKJ1BSVU5FX1NUT1JBR0VfUkVBU09OX1VOVVNFRF9CVUlMRF9DQUNIRRAHKuEDChZQcnVuZVN0b3JhZ2VLZWVwUmVhc29uEikKJVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fVU5TUEVDSUZJRUQQABIsCihQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX09QRU5fV09SS1NQQUNFEAESLQopUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9SRUNFTlRMWV9DTE9TRUQQAhItCilQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX05PVF9BX0RJUkVDVE9SWRADEigKJFBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fTk9fQkFDS1VQUxAEEiMKH1BSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fWU9VTkcQBRIvCitQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX0tFUFRfQllfRElSRUNUT1JZEAYSLgoqUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9SRUNFTlRMWV9UT1VDSEVEEAcSJwojUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9IRUxEX0xPR1MQCBI3CjNQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1JFQ0VOVExZX1VTRURfQlVJTERfQ0FDSEUQCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
 
 /**
  * @generated from message agentrepl.v1.PruneStorageRequest
@@ -183,7 +185,9 @@ export const PruneStorageMeasuredSchema: GenMessage<PruneStorageMeasured> = /*@_
  */
 export type PruneStorageRemoval = Message<"agentrepl.v1.PruneStorageRemoval"> & {
   /**
-   * The absolute path deleted: a directory with everything under it, or a file.
+   * The absolute path deleted: a directory with everything under it, or a
+   * file. Under UNUSED_BUILD_CACHE it is a cache subdirectory that STAYS, and
+   * `entries` counts the entry files deleted from it.
    *
    * @generated from field: string path = 1;
    */
@@ -202,6 +206,14 @@ export type PruneStorageRemoval = Message<"agentrepl.v1.PruneStorageRemoval"> & 
    * @generated from field: uint64 bytes = 3;
    */
   bytes: bigint;
+
+  /**
+   * How many entry files under `path` were deleted, when `path` itself stays
+   * (UNUSED_BUILD_CACHE); zero when `path` is what was deleted.
+   *
+   * @generated from field: uint32 entries = 4;
+   */
+  entries: number;
 };
 
 /**
@@ -386,6 +398,15 @@ export enum PruneStorageReason {
    * @generated from enum value: PRUNE_STORAGE_REASON_UNTOUCHED_LOGS = 6;
    */
   UNTOUCHED_LOGS = 6,
+
+  /**
+   * Entry files of the Go build cache (`go env GOCACHE`) nothing used for two
+   * business days, counted in the host's zone: one removal per cache
+   * subdirectory, which stays.
+   *
+   * @generated from enum value: PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE = 7;
+   */
+  UNUSED_BUILD_CACHE = 7,
 }
 
 /**
@@ -461,6 +482,13 @@ export enum PruneStorageKeepReason {
    * @generated from enum value: PRUNE_STORAGE_KEEP_REASON_HELD_LOGS = 8;
    */
   HELD_LOGS = 8,
+
+  /**
+   * A Go build cache entry file something used inside two business days.
+   *
+   * @generated from enum value: PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE = 9;
+   */
+  RECENTLY_USED_BUILD_CACHE = 9,
 }
 
 /**
