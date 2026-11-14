@@ -940,3 +940,40 @@ func TestStillOnHotspotReadsTheOtherSpellingAsStillJoined(t *testing.T) {
 		t.Fatalf("calls = %v, want a radio restart after the refused disconnect", h.r.ran())
 	}
 }
+
+// TestEveryHeardFactSharesFactHeardsShape pins that the lid and the power
+// source take their states through factHeard alike: a change is recorded
+// once with its lock wait, and a repeated state is taken again with nothing
+// recorded.
+func TestEveryHeardFactSharesFactHeardsShape(t *testing.T) {
+	cases := []struct {
+		name string
+		op   string
+		hear func(h *harness)
+	}{
+		{name: "the lid", op: opLid, hear: func(h *harness) { h.hear(LidOpen) }},
+		{name: "the power source", op: opPowerSource, hear: func(h *harness) { h.hearSource(PowerAC) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t).standing(pmsetOff, summary(true, "Home")).withPowerSource(powerSourceUnheard)
+
+			// Act
+			tc.hear(h)
+			tc.hear(h)
+
+			// Assert
+			changes := h.records(dlog.LevelInfo, tc.op)
+			if len(changes) != 1 {
+				t.Fatalf("%s INFO records = %+v, want one change for two hearings of one state", tc.op, changes)
+			}
+			if _, ok := changes[0].Context["lock_wait_ms"]; !ok || changes[0].Context["was"] != "unheard" {
+				t.Fatalf("change record %+v, want it naming its lock wait and the unheard state it left", changes[0])
+			}
+			if n := h.r.count(argPmsetRead); n != 2 {
+				t.Fatalf("pmset reads = %d, want the standing read afresh on each hearing", n)
+			}
+		})
+	}
+}

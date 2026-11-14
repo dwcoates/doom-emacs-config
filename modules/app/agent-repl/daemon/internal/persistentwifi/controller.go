@@ -493,28 +493,39 @@ func (c *Controller) watchEnded(ctx context.Context, err error, op, msg, trigger
 	c.republishLocked()
 }
 
-// lidHeard takes one lid state: the one read at subscription or a change. It
-// reads the standing afresh (so the display decision reads the mode as it is
-// now, not as the last beat left it), then moves the display. A state already
-// held is taken again idempotently: the decision depends on states, never on
-// transitions.
+// lidHeard takes one lid state: the one read at subscription or a change
+// (factHeard), moving the quiet state to it.
 func (c *Controller) lidHeard(ctx context.Context, lid lidFact) {
-	// THE WAIT FOR THE LOCK IS RECORDED: a lid fact held behind the lock
-	// keeps the quiet state, and every page view it gates, standing after the
-	// lid opened (2026-11-13: six minutes behind a failover attempt).
+	c.factHeard(ctx, opLid, "the lid changed", "lid_"+lid.name(), func() (bool, dlog.Context) {
+		was := c.lid
+		c.lid = lid
+		return was != lid, dlog.Context{"was": was.name(), "lid": lid.name()}
+	})
+}
+
+// factHeard takes one state of a heard fact (the lid, the power source): the
+// one read at subscription or a change. take stands the state and answers
+// whether it changed, with the change's record fields; a change is recorded
+// under op with msg. It then reads the standing afresh (so the decision reads
+// the mode as it is now, not as the last beat left it) and holds the quiet
+// state to it, trigger naming the hold. A state already held is taken again
+// idempotently: the decision depends on states, never on transitions.
+func (c *Controller) factHeard(ctx context.Context, op, msg, trigger string, take func() (changed bool, fields dlog.Context)) {
+	// THE WAIT FOR THE LOCK IS RECORDED: a fact held behind the lock keeps
+	// the quiet state, and every page view it gates, as it was after the
+	// fact changed (2026-11-13: six minutes behind a failover attempt).
 	asked := c.clock.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if lid != c.lid {
-		c.log.Info(opLid, "the lid changed", dlog.Context{"was": c.lid.name(), "lid": lid.name(),
-			"lock_wait_ms": c.clock.Now().Sub(asked).Milliseconds()})
+	if changed, fields := take(); changed {
+		fields["lock_wait_ms"] = c.clock.Now().Sub(asked).Milliseconds()
+		c.log.Info(op, msg, fields)
 	}
-	c.lid = lid
 	rd := c.readLocked(ctx)
 	if ctx.Err() != nil {
 		return
 	}
-	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, "lid_"+lid.name())
+	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, trigger)
 	c.republishLocked()
 }
 
@@ -539,22 +550,11 @@ func (c *Controller) WatchPowerSource(ctx context.Context) error {
 }
 
 // powerSourceHeard takes one power source: the one read at subscription or
-// a change. Like lidHeard it reads the standing afresh, then holds the quiet
-// state, whose energy step follows the power source; a source already held
-// is taken again idempotently.
+// a change (factHeard), holding the quiet state's energy step to it.
 func (c *Controller) powerSourceHeard(ctx context.Context, source powerSourceFact) {
-	asked := c.clock.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if source != c.powerSource {
-		c.log.Info(opPowerSource, "the power source changed", dlog.Context{"was": c.powerSource.name(), "power_source": source.name(),
-			"lid": c.lid.name(), "quiet": c.quiet, "lock_wait_ms": c.clock.Now().Sub(asked).Milliseconds()})
-	}
-	c.powerSource = source
-	rd := c.readLocked(ctx)
-	if ctx.Err() != nil {
-		return
-	}
-	c.holdQuietLocked(ctx, modeOf(rd.state), rd.energy, "power_source_"+source.name())
-	c.republishLocked()
+	c.factHeard(ctx, opPowerSource, "the power source changed", "power_source_"+source.name(), func() (bool, dlog.Context) {
+		was := c.powerSource
+		c.powerSource = source
+		return was != source, dlog.Context{"was": was.name(), "power_source": source.name(), "lid": c.lid.name(), "quiet": c.quiet}
+	})
 }
