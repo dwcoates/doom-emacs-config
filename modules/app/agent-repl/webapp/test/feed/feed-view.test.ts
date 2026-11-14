@@ -2295,6 +2295,41 @@ describe("createFeedController: the feed selection", () => {
     expect(acts).toEqual(["selectionMoved"]);
   });
 
+  it("centers the subtree of the node a prompt's entry reveals, not its row", () => {
+    // Arrange: the row draws a tree whose node 3.1 runs 600-640 in a 300-high feed.
+    const { controller, host, shifts } = selecting();
+    controller.upsert(responseRow("r1"));
+    const row = host.querySelector<HTMLElement>('[data-feed-row="r1"]') as HTMLElement;
+    const tree = document.createElement("div");
+    tree.className = "mp-tree";
+    for (const [node, top] of [["3", 560], ["3.1", 600], ["3.1.1", 620], ["3.2", 700]] as const) {
+      const line = document.createElement("div");
+      line.className = "mp-line";
+      line.setAttribute("data-node", node);
+      line.setAttribute("data-label-at", "0ch");
+      line.setAttribute("data-text-end", "9ch");
+      line.getBoundingClientRect = () => ({ top, bottom: top + 20, height: 20 }) as DOMRect;
+      tree.append(line);
+    }
+    row.append(tree);
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "3.1" } }));
+    // Assert: the subtree's top, 600, less half of what the feed shows beside it, (300 - 40) / 2.
+    expect(shifts).toEqual([470]);
+  });
+
+  it("centers the row of a revealed node that is not laid out, and records it", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller, acts } = selecting();
+    controller.upsert(responseRow("r1"));
+    // Act
+    controller.applySelection(selectionOf({ response: "r1", viewport: { revealNode: "3.1" } }));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.selection-node-absent");
+    expect([acts, record.context]).toEqual([["selectionMoved"], expect.objectContaining({ row: "r1", label: "3.1" })]);
+  });
+
   it("stands the node a prompt's entry reveals for as long as its selection does", async () => {
     // Arrange
     const capture = captureLogRecords("debug");

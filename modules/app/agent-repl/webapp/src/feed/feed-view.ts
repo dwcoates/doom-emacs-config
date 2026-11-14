@@ -62,6 +62,9 @@ import {
   stampSelection,
 } from "./bubble-selection.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
+import { revealInBubbles } from "./node-reveal.js";
+import { subtreeSpan } from "./subtree-box.js";
+import { TREE_CLASS } from "../metaprompt-tree.js";
 import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -1162,7 +1165,7 @@ export function createFeedController(
             revealEntry(row, viewport.value.entryLabel);
             return;
           case "revealNode":
-            centerOnRow(row);
+            centerOnNode(row, viewport.value.label);
             return;
           case "hold":
             return;
@@ -1251,6 +1254,38 @@ export function createFeedController(
       return;
     }
     flashEntryOncePainted(node, label);
+  }
+
+  /**
+   * Center the subtree of ROW's node LABEL, the node a prompt's entry
+   * revealed, once a capped bubble it is drawn in has brought it into its own
+   * view (node-reveal.ts). A node not laid out (its row not drawn, its tree
+   * not yet painted) centers its row, as every other selection does.
+   */
+  function centerOnNode(row: FeedId, label: string): void {
+    if (opts.scroll === undefined) return;
+    const node = findRowElement(row);
+    const lines =
+      node === null
+        ? []
+        : queryAll<HTMLElement>(node, `.${TREE_CLASS}`).flatMap((tree) => subtreeSpan(tree, label)?.lines ?? []);
+    const span = revealInBubbles(lines, `the node ${label}`);
+    if (span === null) {
+      log.debug("the revealed node is not laid out; its row is centered", {
+        operation: "feed.selection-node-absent",
+        context: { feed: feedName(), row: row.value, label },
+      });
+      centerOnRow(row);
+      return;
+    }
+    const box = opts.scroll.box;
+    opts.scroll.tail.selectionMoved({
+      nodeOffsetTop: span.top - box.getBoundingClientRect().top + box.scrollTop,
+      nodeHeight: span.bottom - span.top,
+      clientHeight: box.clientHeight,
+      scrollHeight: box.scrollHeight,
+      scrollTop: box.scrollTop,
+    });
   }
 
   function centerOnRow(center: FeedId): void {
