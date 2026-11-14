@@ -2877,6 +2877,8 @@ type harness struct {
 	// awaitGate, when set, holds every AwaitTurnEnd until it is closed or the
 	// wait's context ends: the requesting turn still running.
 	awaitGate chan struct{}
+	// awaitErr, when set, is what every AwaitTurnEnd fails with.
+	awaitErr error
 	// inFlight is the turn TurnInFlight answers, empty for none.
 	inFlight ids.TurnID
 	// script is the gate's script, a real file so the gate's preflight finds
@@ -3314,8 +3316,11 @@ func (h *harness) deps() Deps {
 		},
 		AwaitTurnEnd: func(ctx context.Context, _ ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
 			h.mu.Lock()
-			gate := h.awaitGate
+			gate, failed := h.awaitGate, h.awaitErr
 			h.mu.Unlock()
+			if failed != nil {
+				return 0, failed
+			}
 			if gate != nil {
 				select {
 				case <-gate:

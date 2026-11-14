@@ -160,6 +160,48 @@ func TestATurnThatDecidesNothingLetsTheQueueThroughAndTellsTheUser(t *testing.T)
 	}
 }
 
+func TestARoundWhoseTurnCannotBeAwaitedKeepsTheQueueHeld(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{name: "a mediator told in this round"},
+		{name: "a mediator told before, its turn reattached", arrange: func(t *testing.T, h *harness) {
+			h.db.workspaces["ws-mediator"] = wsm.Workspace{ID: "ws-mediator", Name: "deploy-mediator", Repo: theRepository}
+			if _, err := h.db.MarkMediationPrompted(context.Background(), mediationKey(h), deployStarted, deployStarted, "turn-told"); err != nil {
+				t.Fatalf("MarkMediationPrompted: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			owe(t, h)
+			if tt.arrange != nil {
+				tt.arrange(t, h)
+			}
+			h.awaitErr = errors.New("the session watcher is gone")
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert: recorded at ERROR, and the mediation still owed, so the
+			// queue stays held rather than let through as decided nothing.
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+				Message: "the mediator's turn could not be awaited; the queue stays held until the next round"}); !ok {
+				t.Fatalf("records = %v, want the failed await at ERROR", h.logs.Records())
+			}
+			if m, _ := h.db.MediationOf(context.Background(), mediationKey(h)); m == nil {
+				t.Fatal("the failed await released the mediation and let the queue through")
+			}
+			if h.bannerRaised(desktopnotify.KindDeployMediated) {
+				t.Fatal("the user was told the mediator decided nothing, for a round that could not await")
+			}
+		})
+	}
+}
+
 func TestADecisionInTheTurnLeavesNothingToSettle(t *testing.T) {
 	// Arrange: the mediator approves as its brief is delivered.
 	h := mediated(t)

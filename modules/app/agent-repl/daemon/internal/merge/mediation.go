@@ -255,7 +255,11 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		return
 	}
 	if !m.Prompted() {
-		turn, err := o.tellMediator(ctx, q, ws, m, brief, fields)
+		// THE AWAIT'S ERROR IS THE ROUND'S err, never one scoped to this
+		// branch: a shadowed err dropped a failed await, and the round then
+		// settled the mediation as decided nothing, letting the queue through.
+		var turn ids.TurnID
+		turn, err = o.tellMediator(ctx, q, ws, m, brief, fields)
 		if err != nil || turn == "" {
 			return
 		}
