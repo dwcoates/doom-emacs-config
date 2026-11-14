@@ -247,3 +247,157 @@ func TestAStreamOpenedOnAClosedConnectionIsNotCounted(t *testing.T) {
 		t.Fatalf("open = %d, want 0", got)
 	}
 }
+
+// goAwayFrame is the server's GOAWAY naming last as its last admitted stream.
+func goAwayFrame(last uint32) []byte {
+	out := frame(frameGoAway, 0, 0, 8)
+	binary.BigEndian.PutUint32(out[9:13], last)
+	return out
+}
+
+func TestAGoAwayDropsTheStreamsAboveItsLast(t *testing.T) {
+	tests := []struct {
+		name    string
+		written [][]byte
+		want    int
+	}{
+		{name: "in one write", written: [][]byte{goAwayFrame(1)}, want: 1},
+		{name: "split inside its last-stream id", written: [][]byte{goAwayFrame(1)[:11], goAwayFrame(1)[11:]}, want: 1},
+		{name: "naming every stream", written: [][]byte{goAwayFrame(3)}, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: two streams read, the second of which the server will
+			// not have admitted.
+			var b WriteBarrier
+			c := h2Conn(t, &b, frame(frameHeaders, flagEndHeaders, 1, 0), frame(frameHeaders, flagEndHeaders, 3, 0))
+
+			// Act
+			for _, w := range tt.written {
+				write(t, c, w)
+			}
+
+			// Assert
+			if got := openCount(&b); got != tt.want {
+				t.Fatalf("open = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAStreamOpenedAfterTheGoAwayIsNotCounted(t *testing.T) {
+	// Arrange
+	var b WriteBarrier
+	c := h2Conn(t, &b)
+	write(t, c, goAwayFrame(1))
+
+	// Act: the client opens a stream the server discards.
+	c.readFrames(frame(frameHeaders, flagEndHeaders, 3, 0))
+
+	// Assert
+	if got := openCount(&b); got != 0 {
+		t.Fatalf("open = %d, want 0: the server never admits a stream above its GOAWAY's last", got)
+	}
+}
+
+func TestGoAwaySettlesOnceEveryConnectionWroteItsGoAway(t *testing.T) {
+	// Arrange
+	var b WriteBarrier
+	c := h2Conn(t, &b)
+	write(t, c, frame(0x4, 0, 0, 0)) // the server's SETTINGS: it is serving.
+
+	// Act
+	left := b.GoAway(func() { write(t, c, goAwayFrame(0)) }, time.Now().Add(time.Minute))
+
+	// Assert
+	if left != 0 {
+		t.Fatalf("GoAway() = %d, want 0", left)
+	}
+}
+
+func TestGoAwayAnswersTheConnectionsStillOwingIt(t *testing.T) {
+	// Arrange
+	var b WriteBarrier
+	h2Conn(t, &b)
+
+	// Act
+	left := b.GoAway(func() {}, time.Now())
+
+	// Assert
+	if left != 1 || len(b.Owing()) != 1 {
+		t.Fatalf("GoAway() = %d owing %v, want the one connection that never wrote its GOAWAY", left, b.Owing())
+	}
+}
+
+func TestAConnectionOwesNoGoAway(t *testing.T) {
+	tests := []struct {
+		name   string
+		settle func(t *testing.T, b *WriteBarrier)
+	}{
+		{name: "once it turned out to be HTTP/1.1", settle: func(t *testing.T, b *WriteBarrier) {
+			c := (&barrierListener{barrier: b}).count(&scriptedConn{reads: bytes.NewReader([]byte("GET / HTTP/1.1\r\n\r\n"))})
+			if _, err := io.ReadAll(c); err != nil {
+				t.Fatalf("reading the script: %v", err)
+			}
+		}},
+		{name: "once it closed", settle: func(t *testing.T, b *WriteBarrier) {
+			if err := h2Conn(t, b).Close(); err != nil {
+				t.Fatalf("Close() = %v", err)
+			}
+		}},
+		{name: "once its write failed", settle: func(t *testing.T, b *WriteBarrier) {
+			c := h2Conn(t, b)
+			c.Conn.(*scriptedConn).writeErr = errors.New("broken pipe")
+			if _, err := c.Write(frame(0x4, 0, 0, 0)); err == nil {
+				t.Fatal("Write() = nil, want the socket's failure")
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var b WriteBarrier
+			tt.settle(t, &b)
+
+			// Act
+			left := b.GoAway(func() {}, time.Now())
+
+			// Assert
+			if left != 0 {
+				t.Fatalf("GoAway() = %d, want 0", left)
+			}
+		})
+	}
+}
+
+func TestAConnectionsFirstWriteAfterTheGoAwaySendsItAgain(t *testing.T) {
+	tests := []struct {
+		name string
+		// servingBefore is whether the connection wrote before GoAway.
+		servingBefore bool
+		want          int
+	}{
+		{name: "serving starts after the GoAway", servingBefore: false, want: 2},
+		{name: "serving started before the GoAway", servingBefore: true, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var b WriteBarrier
+			c := h2Conn(t, &b)
+			if tt.servingBefore {
+				write(t, c, frame(0x4, 0, 0, 0))
+			}
+			sends := 0
+			b.GoAway(func() { sends++ }, time.Now())
+
+			// Act: the server writes on the connection.
+			write(t, c, frame(0x4, 0, 0, 0))
+
+			// Assert
+			if sends != tt.want {
+				t.Fatalf("GOAWAY sends = %d, want %d", sends, tt.want)
+			}
+		})
+	}
+}
