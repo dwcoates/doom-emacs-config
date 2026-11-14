@@ -1,13 +1,8 @@
 package persistentwifi
 
 import (
-	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"strings"
-	"sync"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -125,54 +120,14 @@ func (f lidFact) stamp(s *agentreplv1.PersistentWifiState) {
 	}
 }
 
-// SocketLid is the LidWatcher over a Unix socket a harness serves: the
-// server writes each connection the lid's state when it connects, then every
-// change, one per line ("open", "closed" or "none"). EACH WATCH HAS A
-// CONNECTION OF ITS OWN, so two daemons watching at once (a handover's
-// predecessor and successor) never take each other's lines, and closing a
-// watch's own connection is what wakes its read when ctx ends.
+// SocketLid is the LidWatcher over a Unix socket a harness serves
+// (watchSocket), whose lines are "open", "closed" or "none".
 func SocketLid(path string) LidWatcher { return socketLid{path: path} }
 
 type socketLid struct{ path string }
 
 func (s socketLid) Watch(ctx context.Context, heard func(Lid)) error {
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "unix", s.path)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return fmt.Errorf("connect to the lid socket: %w", err)
-	}
-	stopped := make(chan struct{})
-	var closer sync.WaitGroup
-	closer.Add(1)
-	// inflight: joined: the function that starts it waits for it.
-	go func() {
-		defer closer.Done()
-		select {
-		case <-ctx.Done():
-		case <-stopped:
-		}
-		_ = conn.Close()
-	}()
-	defer closer.Wait()
-	defer close(stopped)
-	sc := bufio.NewScanner(conn)
-	for sc.Scan() {
-		l, err := parseLidLine(sc.Text())
-		if err != nil {
-			return err
-		}
-		heard(l)
-	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	if err := sc.Err(); err != nil {
-		return fmt.Errorf("read the lid socket: %w", err)
-	}
-	return errors.New("the lid socket ended")
+	return watchSocket(ctx, s.path, "lid", parseLidLine, heard)
 }
 
 // FixedLid is a lid heard once, in state l, that never changes.
@@ -181,17 +136,10 @@ func FixedLid(l Lid) LidWatcher { return fixedLid{lid: l} }
 type fixedLid struct{ lid Lid }
 
 func (f fixedLid) Watch(ctx context.Context, heard func(Lid)) error {
-	heard(f.lid)
-	<-ctx.Done()
-	return nil
+	return watchFixed(ctx, f.lid, heard)
 }
 
 // parseLidLine reads one lid state's name.
 func parseLidLine(line string) (Lid, error) {
-	for _, l := range []Lid{LidOpen, LidClosed, LidNone} {
-		if strings.TrimSpace(line) == l.String() {
-			return l, nil
-		}
-	}
-	return 0, fmt.Errorf("%q names no lid state", line)
+	return parseState(line, "lid", LidOpen, LidClosed, LidNone)
 }

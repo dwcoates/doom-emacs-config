@@ -450,25 +450,37 @@ const opLid = "daemon.persistentwifi.lid"
 // daemon runs on without the lid.
 func (c *Controller) WatchLid(ctx context.Context) error {
 	err := c.lidWatch.Watch(ctx, func(l Lid) { c.lidHeard(ctx, heardLid(l)) })
+	// A LID NOBODY HEARS IS NEVER CLOSED: a quiet state standing is left, so
+	// nothing stays frozen, and no Low Power Mode stays set, behind a watch
+	// that ended.
+	c.watchEnded(ctx, err, opLid, "the lid is not heard; a closed lid no longer quiets the machine until the daemon restarts",
+		"lid_unwatched", func(cause string) string {
+			was := c.lid.name()
+			c.lid = lidFact{kind: lidUnwatched, cause: cause}
+			return was
+		})
+	return nil
+}
+
+// watchEnded takes a heard fact's watch that answered err: nothing when ctx
+// ended (the daemon standing down), else the fact is stood UNWATCHED by
+// unwatch (which answers what the fact was), recorded once at ERROR under op
+// with msg, and the quiet state held to it, the standing read afresh for the
+// energy mode to restore over. trigger names the hold for its records.
+func (c *Controller) watchEnded(ctx context.Context, err error, op, msg, trigger string, unwatch func(cause string) (was string)) {
 	if ctx.Err() != nil {
-		return nil
+		return
 	}
 	if err == nil {
-		err = errors.New("the lid watch ended on its own")
+		err = errors.New("the watch ended on its own")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.log.Error(opLid, "the lid is not heard; a closed lid no longer quiets the machine until the daemon restarts",
-		dlog.Context{"was": c.lid.name(), "cause": err.Error()})
-	c.lid = lidFact{kind: lidUnwatched, cause: err.Error()}
-	// A LID NOBODY HEARS IS NEVER CLOSED: a quiet state standing is left, so
-	// nothing stays frozen, and no Low Power Mode stays set, behind a watch
-	// that ended. The standing is read afresh for the energy mode to restore
-	// over.
+	was := unwatch(err.Error())
+	c.log.Error(op, msg, dlog.Context{"was": was, "cause": err.Error()})
 	rd := c.readLocked(ctx)
-	c.holdQuietLocked(ctx, modeOf(c.last), rd.energy, "lid_unwatched")
+	c.holdQuietLocked(ctx, modeOf(c.last), rd.energy, trigger)
 	c.republishLocked()
-	return nil
 }
 
 // lidHeard takes one lid state: the one read at subscription or a change. It

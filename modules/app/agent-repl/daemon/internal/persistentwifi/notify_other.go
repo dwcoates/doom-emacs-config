@@ -17,3 +17,4 @@ type otherLid struct{}
 func (otherLid) Watch(context.Context, func(Lid)) error {
 	return fmt.Errorf("persistentwifi: no lid notification for %s", runtime.GOOS)
 }
+
