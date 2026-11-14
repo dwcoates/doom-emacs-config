@@ -865,6 +865,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     state: (stated) => {
       pushes.push(vendorErrorRetryUpdate(stated));
     },
+    standing: (stands) => {
+      retryOwed = stands;
+      refreshVendorActivity(stands ? "a vendor-error retry is owed" : "the vendor-error retry chain ended");
+    },
     readLimits: () => [...rateLimitReadings.values()],
     // A RETRY WAITING FOR THE NETWORK waits on the fault this session's one
     // door stands and resolves (noteNetworkReach), so it is fired by the same
@@ -3911,6 +3915,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * sent nothing, is idle.
    */
   let vendorBusy = false;
+  /**
+   * A RETRY IS OWED while the vendor-error retry chain stands
+   * (engine/vendor-error-retry.ts): the failed turn is not done, it waits for
+   * its retry (owner report, 2026-11-14: a turn failed on a network blip, the
+   * session then read idle, a bounce registered at a deploy's handover took
+   * the shim at that "freeness", and the retry the chain owed died with it).
+   */
+  let retryOwed = false;
   /** The activity last pushed, so an unchanged reading is not logged as a change. */
   let servedVendorBusyLast: boolean | undefined;
 
@@ -3919,10 +3931,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * thing it runs is the shim's own keep-alive. A keep-alive is never a turn in
    * flight to anyone outside this process (servedOpenTurn), and the vendor
    * running it is housekeeping no consumer waits on. Whatever the vendor still
-   * owes once the keep-alive's slot closes reads busy again.
+   * owes once the keep-alive's slot closes reads busy again. A retry the
+   * vendor-error retry chain owes reads busy too (retryOwed), so nothing that
+   * waits for freeness -- a bounce, a stand-down -- takes the shim from under it.
    */
   function servedVendorBusy(): boolean {
-    return vendorBusy && open?.keepalive !== true;
+    return (vendorBusy && open?.keepalive !== true) || retryOwed;
   }
 
   function vendorActivity(): conversationv1.SessionVendorActivity {

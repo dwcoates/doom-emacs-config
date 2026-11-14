@@ -96,6 +96,8 @@ interface Harness {
   delivery: ShimPromptDelivery | Error;
   reading: readonly RateLimitReading[];
   readings: number;
+  /** Every standing the chain told, in order: true as one opens, false as it ends. */
+  readonly standings: boolean[];
   /** Whether the session's network fault stands, as the retry reads it. */
   faultStanding: boolean;
   /** Every network fault the retry stood, by its detail. */
@@ -108,7 +110,9 @@ function harness(): Harness {
   const prompts: string[] = [];
   const states: (StatedRetry | undefined)[] = [];
   const statedAtDelivery: (StatedRetry | undefined)[] = [];
+  const standings: boolean[] = [];
   const h: Harness = {
+    standings,
     scheduler,
     clock,
     prompts,
@@ -128,6 +132,9 @@ function harness(): Harness {
       },
       state: (scheduled) => {
         states.push(scheduled);
+      },
+      standing: (stands) => {
+        standings.push(stands);
       },
       readLimits: () => {
         h.readings += 1;
@@ -377,6 +384,33 @@ describe("the vendor-error cadence", () => {
     expect({ standing: h.retry.standing(), scheduled: h.retry.scheduled() }).toEqual({ standing: false, scheduled: false });
   });
 
+  it("tells its standing as a chain opens and as it ends", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    h.retry.turnEnded("retry-1", COMPLETED);
+
+    // Assert: open once, then ended -- never ended while it stood between attempts.
+    expect(h.standings).toEqual([true, false]);
+  });
+
+  it("tells its end when it gives up", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+    h.clock.now += VENDOR_ERROR_RETRY_WINDOW_MS;
+
+    // Act
+    await failedTurnEnds(h, "retry-1");
+
+    // Assert
+    expect(h.standings).toEqual([true, false]);
+  });
+
   it("ends the chain when the retried turn fails on a refusal", async () => {
     // Arrange
     const h = harness();
@@ -567,6 +601,7 @@ describe("delivering a retry", () => {
     const retry = new VendorErrorRetry({
       deliver: () => pending,
       state: () => undefined,
+      standing: () => undefined,
       readLimits: () => [],
       network: { faultStands: () => false, standFault: () => undefined },
       nowMs: () => START,

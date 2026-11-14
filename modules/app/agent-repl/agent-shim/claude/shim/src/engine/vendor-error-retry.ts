@@ -160,6 +160,11 @@ export interface VendorErrorRetryDeps {
   readonly deliver: (prompt: string) => Promise<ShimPromptDelivery>;
   /** States the schedule on the session stream, whole: the next retry, the one being made, or none. */
   readonly state: (stated: StatedRetry | undefined) => void;
+  /**
+   * Told whenever a chain opens (true) or ends (false): while one stands the
+   * failed turn's work is owed, which the session states as busy.
+   */
+  readonly standing: (stands: boolean) => void;
   /** The newest rate-limit event the session has seen for each window. */
   readonly readLimits: () => readonly RateLimitReading[];
   /** The session's network fault, which a retry waiting for the network waits on. */
@@ -405,6 +410,7 @@ export class VendorErrorRetry {
   private open(failure: Failure): Chain {
     const opened: Chain = { id: this.nextChainId++, mode: undefined, retries: 0, status: failure.status };
     this.chain = opened;
+    this.deps.standing(true);
     LOGGER.info(
       { chain: opened.id, turn_id: failure.turnId ?? "", retryable: failure.retryable, usage_limit: failure.usageLimit },
       "the turn ended on a failure agent-repl retries; a retry chain opened",
@@ -579,6 +585,7 @@ export class VendorErrorRetry {
     this.latched = false;
     this.unschedule();
     this.chain = undefined;
+    this.deps.standing(false);
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
   }
 
@@ -587,6 +594,7 @@ export class VendorErrorRetry {
     this.latched = false;
     this.unschedule();
     this.chain = undefined;
+    this.deps.standing(false);
     LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
   }
 
