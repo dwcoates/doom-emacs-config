@@ -733,26 +733,53 @@ type Deps struct {
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time
-	// Timings records how long each merge stage took (runtimemetrics.Surface):
-	// every step a run leaves, the pick, and each merge's queued, running and
-	// total spans. REQUIRED.
-	Timings Timer
+	// Meter records the merge queue's metrics (runtimemetrics.Surface): how
+	// long each merge stage took, and the deploy mediations. REQUIRED.
+	Meter Meter
 	// Log is the orchestrator's logger.
 	Log dlog.Surfaces
 }
 
-// Timer records merge stage durations. Each call is an atomic add and never
-// blocks the merge.
-type Timer interface {
+// Meter records the merge queue's metrics. Each call is an atomic add and
+// never blocks the merge.
+type Meter interface {
 	// ObserveMergeStep records how long a run spent on one step before it
 	// left it, by the step's footer.MergeStep spelling.
 	ObserveMergeStep(step string, took time.Duration)
 	// ObserveMergeSpan records one span of a merge (SpanPick, SpanQueued,
 	// SpanRunning, SpanTotal) by how it ended.
 	ObserveMergeSpan(span, outcome string, took time.Duration)
+	// ObserveMediationSpan records one span of a deploy mediation
+	// (MediationSpanRollout, MediationSpanAssessment, MediationSpanTotal) by
+	// how it ended (mediation.go's outcomes).
+	ObserveMediationSpan(span, outcome string, took time.Duration)
+	// ObserveMediationChain records a chain of mediations the queue advanced
+	// past, by how its last ended: how many remediations were deployed in a
+	// row, and how long the queue was held from the chain's first deploy.
+	ObserveMediationChain(outcome string, redeploys int, took time.Duration)
+	// SetRemediationsInARow is the chain owed now: how many remediations
+	// were deployed in a row since the queue last advanced, 0 when none is
+	// owed.
+	SetRemediationsInARow(n int)
+	// ObserveMergeRound records one round of a merge's tab (a rebase, a
+	// conflict resolution, a test gate, a fixing attempt) by its ledger
+	// outcome.
+	ObserveMergeRound(kind, outcome string, took time.Duration)
+	// ObserveMergeRounds records how many rounds of one repair tab kind
+	// (RoundCountKinds) a concluded merge took, by how the merge ended.
+	ObserveMergeRounds(kind, outcome string, n int)
+	// CountQueueChange records one change to a queue's line, by its
+	// QueueChangeKind spelling and, for a merge leaving, its cause.
+	CountQueueChange(change, cause string)
 }
 
-// The merge spans a Timer records.
+// RoundCountKinds are the tab kinds a concluded merge's round counts are
+// recorded for, every one of them, 0 for a kind the merge never opened: how
+// many rebases, conflict resolutions, test gates and fixing attempts it
+// took.
+var RoundCountKinds = []string{TabRebasing, TabConflicts, TabTests, TabFixes}
+
+// The merge spans a Meter records.
 const (
 	// SpanPick is the branch's preparation from the request's instruction.
 	SpanPick = "pick"

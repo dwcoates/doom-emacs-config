@@ -251,6 +251,10 @@ var migrations = []migration{
 	// IT IS BREAKING: see mergeQueueConflictsUnslottedDDL.
 	{To: 133, Name: "merge_queue_conflicts_unslotted", Kind: MigrationBreaking, DDL: mergeQueueConflictsUnslottedDDL},
 	{To: 134, Name: "off_queue_merges_beside_a_queue_row_end", Kind: MigrationAdditive, DDL: endOffQueueBesideAQueueRowDML},
+	// IT IS ADDITIVE: the build before it neither reads nor writes the
+	// chain, and an owed mediation it writes after this step is chained by
+	// the step's triggers.
+	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

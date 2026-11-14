@@ -229,8 +229,9 @@ Either kind:
   a deploy that ends after the depletion.
 - A repository whose `.agent-repl/lifecycle.yaml` names a `deploy_mediator`
   holds its queue after every deploy until its mediator decides the deploy;
-  the sidebar labels the repository "checking deploy" (or "awaiting deploy")
-  beside its name in purple, and
+  the sidebar labels the repository "hot reloading" while the build rolls
+  out, then "assessing reload" while the mediator checks it, beside its name
+  in purple, and
   `merge-queue status` answers its advance as `mediating`, naming the
   mediator (`paused` wins while the queue is also paused). Only the mediator
   decides, with

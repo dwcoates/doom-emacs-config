@@ -443,17 +443,18 @@ export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
 
 /**
  * The deploy mediation the queue waits on, as a purple label beside the
- * repository's name in its group header (owner ruling, 2026-11-14): `checking
- * deploy` once the mediator was told of the deploy, `awaiting deploy` while
- * the deploy rolls out. The mediator is never drawn as a workspace, nor named.
+ * repository's name in its group header (owner ruling, 2026-11-14): `hot
+ * reloading` while the landing's build rolls out, `assessing reload` once the
+ * mediator was told of it and checks or remediates it. The mediator is never
+ * drawn as a workspace, nor named.
  */
 export function drawQueueMediationLabel(u: RosterMergeQueueMediation, path: string): HTMLElement {
   const standing = requireCase(u.standing, `${path}.standing`);
   switch (standing.case) {
     case "checking":
-      return drawQueueLabel("checking deploy", MERGE_QUEUE_MEDIATION_CLASS, "the last deploy is being checked; the queue waits for it");
+      return drawQueueLabel("assessing reload", MERGE_QUEUE_MEDIATION_CLASS, "the last landing's reload is being assessed; the queue waits for it");
     case "waiting":
-      return drawQueueLabel("awaiting deploy", MERGE_QUEUE_MEDIATION_CLASS, "the last deploy is checked once it has rolled out; the queue waits for it");
+      return drawQueueLabel("hot reloading", MERGE_QUEUE_MEDIATION_CLASS, "the last landing is rolling out; it is assessed once it has, and the queue waits for it");
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);

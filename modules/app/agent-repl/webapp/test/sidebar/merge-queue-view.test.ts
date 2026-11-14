@@ -445,13 +445,13 @@ function mediation(checking: boolean) {
 }
 
 describe("drawQueueMediationLabel", () => {
-  it("says the deploy is being checked once the mediator was told of it", () => {
+  it("says the reload is being assessed once the mediator was told of it", () => {
     const label = drawQueueMediationLabel(mediation(true), "m");
-    expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual(["checking deploy", true]);
+    expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual(["assessing reload", true]);
   });
 
-  it("says the deploy is awaited before the mediator is told of it", () => {
-    expect(drawQueueMediationLabel(mediation(false), "m").textContent).toBe("awaiting deploy");
+  it("says the landing is hot reloading before the mediator is told of it", () => {
+    expect(drawQueueMediationLabel(mediation(false), "m").textContent).toBe("hot reloading");
   });
 
   it("refuses a mediation with no standing as a malformed view", () => {
@@ -468,7 +468,7 @@ describe("drawQueueMediationLabel", () => {
     const section = mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1"), mediation: mediation(true) } })]);
     const head = drawRosterMergeQueueSection(section, daemon().sc, "p").querySelector(".merged-group-head");
     const label = head?.querySelector(`.${MERGE_QUEUE_MEDIATION_CLASS}`);
-    expect([label?.textContent, label?.nextElementSibling?.classList.contains("sb-open-count")]).toEqual(["checking deploy", true]);
+    expect([label?.textContent, label?.nextElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing reload", true]);
   });
 
   it("draws a queue holding only the mediation with an empty body and no head", () => {

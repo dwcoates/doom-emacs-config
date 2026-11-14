@@ -2289,7 +2289,7 @@ func TestALandedMergeTimesEveryStepItLeftAndItsSpans(t *testing.T) {
 	}
 
 	// Assert: steps were timed as the run left them, and the spans landed.
-	got := h.timings.all()
+	got := h.meter.all()
 	steps := 0
 	for _, g := range got {
 		if strings.HasPrefix(g, "step:") {
@@ -2299,9 +2299,67 @@ func TestALandedMergeTimesEveryStepItLeftAndItsSpans(t *testing.T) {
 	if steps == 0 {
 		t.Fatalf("timings = %v, want the steps the run left", got)
 	}
-	tail := strings.Join(got[len(got)-3:], ",")
-	if tail != "queued:landed,running:landed,total:landed" {
-		t.Fatalf("timings end %q, want the queued, running and total spans of a landing", tail)
+	var spans []string
+	for _, g := range got {
+		if strings.HasPrefix(g, SpanQueued+":") || strings.HasPrefix(g, SpanRunning+":") || strings.HasPrefix(g, SpanTotal+":") {
+			spans = append(spans, g)
+		}
+	}
+	if strings.Join(spans, ",") != "queued:landed,running:landed,total:landed" {
+		t.Fatalf("spans = %v, want the queued, running and total spans of a landing", spans)
+	}
+}
+
+func TestALandedMergeRecordsItsRoundsAndTheirCounts(t *testing.T) {
+	// Arrange: a merge that lands cleanly, one rebase and one gate.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert: each round timed by its outcome, and each repair kind's count
+	// recorded, a kind the merge never opened as 0.
+	got := h.meter.all()
+	for _, want := range []string{
+		"round:rebasing:succeeded", "round:tests:succeeded",
+		"rounds:rebasing:landed:1", "rounds:conflicts:landed:0", "rounds:tests:landed:1", "rounds:fixes:landed:0",
+	} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("metrics = %v, want %s", got, want)
+		}
+	}
+}
+
+func TestEveryQueueChangeIsCountedByItsKindAndCause(t *testing.T) {
+	// Arrange: a merge that lands cleanly.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert: its start and its landing, the landing by its cause.
+	var changes []string
+	for _, g := range h.meter.all() {
+		if strings.HasPrefix(g, "change:") {
+			changes = append(changes, g)
+		}
+	}
+	if !slices.Contains(changes, "change:started:") || !slices.Contains(changes, "change:landed:"+causeMerged) {
+		t.Fatalf("changes = %v, want the start and the landing", changes)
 	}
 }
 
@@ -2318,8 +2376,8 @@ func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
 	_ = h.admit(context.Background())
 
 	// Assert.
-	if !slices.Contains(h.timings.all(), "total:failed") {
-		t.Fatalf("timings = %v, want the total span as failed", h.timings.all())
+	if !slices.Contains(h.meter.all(), "total:failed") {
+		t.Fatalf("timings = %v, want the total span as failed", h.meter.all())
 	}
 }
 

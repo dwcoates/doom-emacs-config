@@ -316,7 +316,7 @@ func (o *orchestrator) settlePick(p *pick, failure string) {
 	if failure != "" {
 		result = OutcomeFailed
 	}
-	o.deps.Timings.ObserveMergeSpan(SpanPick, result, time.Duration(endedMS-p.startedMS)*time.Millisecond)
+	o.deps.Meter.ObserveMergeSpan(SpanPick, result, time.Duration(endedMS-p.startedMS)*time.Millisecond)
 }
 
 // pickFailed ends an async merge whose pick failed: the pick tab and the head

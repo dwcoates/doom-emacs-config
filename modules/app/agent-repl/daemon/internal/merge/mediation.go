@@ -69,6 +69,62 @@ func (d MediationDecision) String() string {
 	return fmt.Sprintf("MediationDecision(%d)", int(d))
 }
 
+// The spans of a deploy mediation a Meter records: how long its deploy rolled
+// out before its mediator was told (the sidebar's "hot reloading"), how long
+// the mediator then worked on it ("assessing reload"), and both together.
+const (
+	MediationSpanRollout    = "rollout"
+	MediationSpanAssessment = "assessment"
+	MediationSpanTotal      = "total"
+)
+
+// The outcomes a mediation's spans end in. The rollout span ends told; the
+// assessment span (when the mediator was told) and the total end in one of
+// the rest, recorded once, at the store write that ended the mediation.
+const (
+	// MediationTold ends the rollout span: the mediator was told.
+	MediationTold = "told"
+	// MediationApproved: the mediator found nothing to fix.
+	MediationApproved = "approved"
+	// MediationEscalated: the mediator put the deploy before the user
+	// rather than handle it.
+	MediationEscalated = "escalated"
+	// MediationRedeployed: a newer deploy replaced the mediation while its
+	// mediator was told of it -- the mediator's remediation, deployed.
+	MediationRedeployed = "redeployed"
+	// MediationSuperseded: a newer deploy replaced the mediation before its
+	// mediator was told of it.
+	MediationSuperseded = "superseded"
+	// MediationUndecided: the mediator's turn ended deciding nothing.
+	MediationUndecided = "undecided"
+	// MediationUnmediated: the repository named no mediator any more.
+	MediationUnmediated = "unmediated"
+)
+
+// observeMediationEnd records how mediation M ended, as OUTCOME, at AT: its
+// assessment span when its mediator was told, and its total. An end that lets
+// the queue advance (all but a replacement) ends M's chain too.
+func (o *orchestrator) observeMediationEnd(m wsm.Mediation, outcome string, at time.Time) {
+	if m.PromptedAt != nil {
+		o.deps.Meter.ObserveMediationSpan(MediationSpanAssessment, outcome, at.Sub(*m.PromptedAt))
+	}
+	o.deps.Meter.ObserveMediationSpan(MediationSpanTotal, outcome, at.Sub(m.OwedAt))
+	if outcome == MediationRedeployed || outcome == MediationSuperseded {
+		return
+	}
+	o.deps.Meter.ObserveMediationChain(outcome, m.ChainRedeploys, at.Sub(m.ChainStartedAt))
+	o.deps.Meter.SetRemediationsInARow(0)
+}
+
+// replacedOutcome is how a mediation a newer deploy replaced ended: redeployed
+// when its mediator was told of it, superseded when not.
+func replacedOutcome(m wsm.Mediation) string {
+	if m.Prompted() {
+		return MediationRedeployed
+	}
+	return MediationSuperseded
+}
+
 // mediatedQueue is a registered repository whose deploys a mediator checks.
 type mediatedQueue struct {
 	registeredQueue
@@ -114,11 +170,19 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 	}
 	var errs []error
 	for _, q := range queues {
-		if err := o.deps.DB.OweMediation(ctx, q.key, at, ""); err != nil {
+		replaced, err := o.deps.DB.OweMediation(ctx, q.key, at, "")
+		if err != nil {
 			o.deps.Log.Global().Error(opMediation, "could not owe a deploy's mediation; the deploy goes unchecked in this repository", dlog.Context{
 				"repo": string(q.key), "mediator": q.mediator, "error": err.Error()})
 			errs = append(errs, err)
 			continue
+		}
+		if replaced != nil {
+			outcome := replacedOutcome(*replaced)
+			o.observeMediationEnd(*replaced, outcome, at)
+			o.deps.Log.Global().Info(opMediation, "a newer deploy replaced the mediation owed", dlog.Context{
+				"repo": string(q.key), "mediator": q.mediator, "outcome": outcome,
+				"replaced_deploy_started": replaced.OwedAt.UTC().Format(time.RFC3339Nano)})
 		}
 		o.deps.Log.Global().Info(opMediation, "the deploy owes a mediation; the queue advances nothing until its mediator decides", dlog.Context{
 			"repo": string(q.key), "mediator": q.mediator, "deploy_started": at.UTC().Format(time.RFC3339Nano)})
@@ -231,6 +295,7 @@ func (o *orchestrator) releaseUnmediated(ctx context.Context, mediated []mediate
 			continue
 		}
 		if released {
+			o.observeMediationEnd(*m, MediationUnmediated, o.deps.Now())
 			o.deps.Log.Global().Info(opMediation, "released a mediation owed by a repository whose lifecycle config names no mediator now; its queue advances", dlog.Context{
 				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 			o.republishMediation(ctx, q.key)
@@ -260,7 +325,11 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		delete(o.mediating, q.key)
 		o.mu.Unlock()
 	}()
-	fields := dlog.Context{"repo": string(q.key), "mediator": q.mediator, "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)}
+	fields := dlog.Context{"repo": string(q.key), "mediator": q.mediator, "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano),
+		"chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano), "chain_redeploys": m.ChainRedeploys}
+	// EVERY ROUND STATES THE CHAIN IT CHECKS, so a daemon that booted on a
+	// remediation's deploy serves the count the chain carries.
+	o.deps.Meter.SetRemediationsInARow(m.ChainRedeploys)
 	ws, err := o.mediatorOf(ctx, q)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the deploy mediator could not be found or made; the queue stays held for it", err)
@@ -322,7 +391,8 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		}
 	}
 	turn := wsm.NewTurnID()
-	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, o.deps.Now(), turn)
+	told := o.deps.Now()
+	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, told, turn)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not record that the mediator is told of the deploy; the queue stays held", err)
 		return "", err
@@ -331,6 +401,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		o.deps.Log.Global().Info(opMediation, "the mediation was replaced or released before its mediator was told; this round ends", fields)
 		return "", nil
 	}
+	o.deps.Meter.ObserveMediationSpan(MediationSpanRollout, MediationTold, told.Sub(m.OwedAt))
 	if _, err := o.submitMediatorPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
 		o.mediationFailed(ctx, fields, "the mediation brief could not be submitted; the queue stays held", err)
 		return "", err
@@ -357,6 +428,14 @@ func (o *orchestrator) submitMediatorPrompt(ctx context.Context, ws ids.Workspac
 // about, let through and put before the user; one replaced by a newer
 // deploy is that deploy's round's; one released was decided.
 func (o *orchestrator) mediationTurnEnded(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, owed time.Time, fields dlog.Context) {
+	// THE RECORD IS READ FOR ITS TOLD INSTANT ONLY: the release below is
+	// keyed on OWED, so a record read here that a decision or a newer deploy
+	// ends meanwhile is never counted by this turn's end.
+	m, err := o.deps.DB.MediationOf(ctx, q.key)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the mediation its turn ended on; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
 	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, owed)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not settle a mediation its turn ended on; the queue stays held", err)
@@ -366,6 +445,12 @@ func (o *orchestrator) mediationTurnEnded(ctx context.Context, q mediatedQueue, 
 		o.deps.Log.Global().Info(opMediation, "the mediator's turn ended with its mediation decided or replaced by a newer deploy", fields)
 		return
 	}
+	// A RELEASE KEYED ON OWED MEANS THE RECORD READ ABOVE WAS THAT MEDIATION:
+	// nothing else releases or replaces it without changing OwedAt.
+	if m == nil || !m.OwedAt.Equal(owed) {
+		panic(fmt.Sprintf("merge: released the mediation of %s owed at %v, which the read before it did not hold (%+v)", q.key, owed, m))
+	}
+	o.observeMediationEnd(*m, MediationUndecided, o.deps.Now())
 	o.deps.Log.Global().Error(opMediation, "the mediator's turn ended deciding nothing about the deploy; the queue is let through and the user is told", fields)
 	o.deps.Banners.Mediated(ws, "the deploy mediator ended its turn without deciding the deploy; the queue moved on")
 	o.republishMediation(ctx, q.key)
@@ -448,11 +533,21 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		o.deps.Log.Global().Warn(opMediation, "refused a mediation decision while no deploy owes one", fields)
 		return refuse(ArmNoMediationOwed, ws, "the repository owes no mediation")
 	}
-	if _, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt); err != nil {
+	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
+	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not release the mediation the decision named", withField(fields, "error", err.Error()))
 		return err
 	}
-	o.deps.Log.Global().Info(opMediation, "the mediator decided the deploy; the queue advances", fields)
+	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
+	// counted that mediation's end, and the newer one is still owed.
+	if released {
+		outcome := MediationApproved
+		if decision == MediationEscalate {
+			outcome = MediationEscalated
+		}
+		o.observeMediationEnd(*m, outcome, o.deps.Now())
+	}
+	o.deps.Log.Global().Info(opMediation, "the mediator decided the deploy; the queue advances", withField(fields, "released", released))
 	if decision == MediationEscalate {
 		o.deps.Banners.Mediated(ws, summary)
 	}

@@ -321,11 +321,21 @@ func newFakeDB() *fakeDB {
 	}
 }
 
-func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) error {
+func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.mediations[repo] = &wsm.Mediation{OwedAt: at, Version: version}
-	return nil
+	// The store's chain rule (wsm.OweMediation): begun where nothing was
+	// owed, passed on, and counting a replaced mediation that was told.
+	replaced := f.mediations[repo]
+	owed := &wsm.Mediation{OwedAt: at, Version: version, ChainStartedAt: at}
+	if replaced != nil {
+		owed.ChainStartedAt, owed.ChainRedeploys = replaced.ChainStartedAt, replaced.ChainRedeploys
+		if replaced.Prompted() {
+			owed.ChainRedeploys++
+		}
+	}
+	f.mediations[repo] = owed
+	return replaced, nil
 }
 
 func (f *fakeDB) MarkMediationPrompted(_ context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
@@ -2784,9 +2794,9 @@ func (r *fakeRunner) runLines(ctx context.Context, dir string, argv []string, on
 
 // harness is one orchestrator with every fake it was built from.
 type harness struct {
-	// timings keeps every merge stage the orchestrator timed.
-	timings *fakeTimings
-	t       *testing.T
+	// meter keeps every metric the orchestrator recorded.
+	meter *fakeMeter
+	t     *testing.T
 
 	// asks are the workspace sessions' open asks, as the watcher reports them.
 	asks *Asks
@@ -3201,7 +3211,7 @@ func newHarness(t *testing.T) *harness {
 		briefs:   map[string][]string{},
 		config:   &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}},
 		freeness: &fakeFreeness{},
-		timings:  &fakeTimings{},
+		meter:    &fakeMeter{},
 	}
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
@@ -3252,7 +3262,7 @@ func newHarness(t *testing.T) *harness {
 // deps assembles the dependency set from the harness's fakes.
 func (h *harness) deps() Deps {
 	return Deps{
-		Timings:     h.timings,
+		Meter:       h.meter,
 		QueueEvents: h.events,
 		DB:          h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
@@ -3953,26 +3963,65 @@ func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID)
 	return f.openChildrenErr
 }
 
-// fakeTimings records every merge stage timing: a step as "step:<name>", a
+// fakeMeter records every metric: a step as "step:<name>", a
 // span as "<span>:<outcome>".
-type fakeTimings struct {
+type fakeMeter struct {
 	mu  sync.Mutex
 	got []string
+	// chainTook is each recorded mediation chain's duration, in order.
+	chainTook []time.Duration
 }
 
-func (f *fakeTimings) ObserveMergeStep(step string, took time.Duration) {
+func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "step:"+step)
 }
 
-func (f *fakeTimings) ObserveMergeSpan(span, outcome string, took time.Duration) {
+func (f *fakeMeter) ObserveMergeSpan(span, outcome string, took time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, span+":"+outcome)
 }
 
-func (f *fakeTimings) all() []string {
+func (f *fakeMeter) ObserveMediationSpan(span, outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediation:"+span+":"+outcome)
+}
+
+func (f *fakeMeter) ObserveMediationChain(outcome string, redeploys int, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("chain:%s:%d", outcome, redeploys))
+	f.chainTook = append(f.chainTook, took)
+}
+
+func (f *fakeMeter) SetRemediationsInARow(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("in_a_row:%d", n))
+}
+
+func (f *fakeMeter) ObserveMergeRound(kind, outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "round:"+kind+":"+outcome)
+}
+
+func (f *fakeMeter) ObserveMergeRounds(kind, outcome string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("rounds:%s:%s:%d", kind, outcome, n))
+}
+
+func (f *fakeMeter) CountQueueChange(change, cause string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "change:"+change+":"+cause)
+}
+
+func (f *fakeMeter) all() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.got...)

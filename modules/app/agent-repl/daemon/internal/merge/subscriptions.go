@@ -424,6 +424,9 @@ func (d queueEventsDB) reported(ctx context.Context, repo wsm.RepoKey, leaves bo
 		d.o.events.mu.Unlock()
 		return err
 	}
+	// THE WRITE IS COUNTED ONCE IT COMMITTED, before any read that could
+	// keep its subscribers from hearing of it.
+	d.o.deps.Meter.CountQueueChange(w.kind.String(), w.cause)
 	fields := dlog.Context{"repo": string(repo), "change": w.kind.String(), "workspace": string(w.subject), "cause": w.cause}
 	if beforeErr != nil {
 		d.o.events.mu.Unlock()
