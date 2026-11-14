@@ -811,6 +811,49 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
 }
 
+func TestALinkEdgeReleasesTheQueuesReconnectHoldsOnlyWhenItAttaches(t *testing.T) {
+	cases := []struct {
+		name     string
+		attached bool
+		want     []ids.WorkspaceID
+	}{
+		{name: "a link re-attaching to a live shim releases them", attached: true, want: []ids.WorkspaceID{"ws-1"}},
+		{name: "a link coming down releases nothing", attached: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			queue := &fakeFreeQueue{}
+			sink := &lifecycleSink{queue: queue, relay: &relayForwarder{}, log: dlog.NewTestLogger()}
+
+			// Act
+			sink.OnLinkChanged("ws-1", tc.attached)
+
+			// Assert
+			if fmt.Sprint(queue.reconnects) != fmt.Sprint(tc.want) {
+				t.Fatalf("reconnect releases = %v, want %v", queue.reconnects, tc.want)
+			}
+		})
+	}
+}
+
+func TestALinkAttachingBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{relay: &relayForwarder{}, log: log}
+
+	// Act
+	sink.OnLinkChanged("ws-1", true)
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError && r.Operation == "daemon.cmd.lifecycle" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unwired queue at ERROR", log.Records())
+}
+
 // fakeCaches records every session-up the sink told the cache keeper.
 type fakeCaches struct {
 	up, free []ids.WorkspaceID

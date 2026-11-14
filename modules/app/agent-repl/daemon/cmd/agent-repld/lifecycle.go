@@ -140,11 +140,28 @@ func (s *lifecycleSink) SessionUp(ws ids.WorkspaceID) {
 
 // OnLinkChanged republishes the workspace's HOST view: `shim_attached` is part
 // of it, and the server cannot see a link edge for itself.
+//
+// A LINK THAT RE-ATTACHES RELEASES THE PROMPTS HELD FOR IT (owner report,
+// 2026-11-14). A session whose watches a live shim severed is mended by the
+// fleet re-opening on the same shim (sessionwatcher's paced re-open), which
+// brings no session up; the prompts held until the session reconnected are
+// released here, and the release itself re-holds any the session still does
+// not serve (sessionWait).
 func (s *lifecycleSink) OnLinkChanged(ws ids.WorkspaceID, attached bool) {
 	s.log.Debug("daemon.cmd.lifecycle", "the shim link's attachment changed", dlog.Context{
 		"workspace": string(ws), "attached": attached,
 	})
 	s.relay.PublishHostWorkspace(ws)
+	if !attached {
+		return
+	}
+	if s.queue == nil {
+		s.log.Error("daemon.cmd.lifecycle", "a link attached before the prompt queue was wired; its reconnect holds were not released", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the queue is bound before any link attaches",
+		})
+		return
+	}
+	s.queue.ReleaseReconnectHolds(ws)
 }
 
 // OnLinkFault records a LOST shim link as the session's own fault, which is
