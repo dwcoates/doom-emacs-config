@@ -74,6 +74,8 @@ SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 # service checks SKIP saying so.
 # shellcheck source=../bin/lib-service.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd -P)/lib-service.sh"
+# shellcheck source=../bin/lib-stat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd -P)/lib-stat.sh"
 SERVICE_PLATFORM="$(service_host_platform 2>/dev/null || true)"
 
 # A log is considered "recently written" if touched within this many seconds.
@@ -113,17 +115,17 @@ record() {
 
 # --- Small helpers ------------------------------------------------------
 
-# now_epoch / file_mtime abstract the platform stat call (BSD stat on macOS).
+# now_epoch / file_mtime / file_size read the clock and stat (bin/lib-stat.sh).
 now_epoch() { date +%s; }
 
 file_mtime() {
   # Prints the file's mtime in epoch seconds, or nothing if stat fails.
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || true
+  stat_mtime "$1" 2>/dev/null || true
 }
 
 file_size() {
   # Prints the file size in bytes, or nothing if stat fails.
-  stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || true
+  stat_size "$1" 2>/dev/null || true
 }
 
 # json_escape STRING — escape for embedding in a JSON string literal.

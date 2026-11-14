@@ -105,6 +105,8 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 
 # shellcheck source=lib-deploy-stamp.sh
 . "$THIS_DIR/lib-deploy-stamp.sh"
+# shellcheck source=lib-stat.sh
+. "$THIS_DIR/lib-stat.sh"
 
 usage() {
     echo "usage: readiness-report.sh [--require-ready SYSTEM]" >&2
@@ -266,7 +268,7 @@ iso8601() { # EPOCH -> UTC ISO8601
 
 file_mtime() {
     if [ -e "$1" ]; then
-        stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"
+        stat_mtime "$1"
     else
         printf '0'
     fi
