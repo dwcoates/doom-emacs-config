@@ -634,6 +634,9 @@ type fakeVerbs struct {
 	// while Create is mid-flight and prove the work is detached from it.
 	createEntered chan struct{}
 	createRelease chan struct{}
+	// createPanic, when set, is what RunCreate panics with, as a create whose
+	// invariant broke does once it is undone (workspace.CreatePanicError).
+	createPanic any
 
 	// beginErr refuses a kill's or a nuke's fast half; teardownErr is what
 	// its teardown answers. teardownRan, when set, receives the error of the
@@ -729,6 +732,9 @@ func (f *fakeVerbs) EnterCreate(spec workspace.CreateSpec) *workspace.CreateTick
 // held for the network when createHeld names one, telling its reporter.
 func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicket) (wsm.Workspace, error) {
 	spec := ticket.Spec()
+	if f.createPanic != nil {
+		panic(f.createPanic)
+	}
 	if f.createTurnHeld != "" {
 		f.createSpecs = append(f.createSpecs, spec)
 		if spec.Progress != nil {

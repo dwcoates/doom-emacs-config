@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -406,7 +407,12 @@ func (s *server) startBackgroundCreate(
 // client does can cancel it; the daemon owns it to completion. A create held
 // for the network has already said so on the op, and its outcome follows on
 // the same op once the network is restored.
+//
+// A CREATE THAT PANICS IS ANSWERED FAILED ON ITS OP before the panic goes on
+// (answerPanickedBackgroundCreate), so its requester reads a failure rather
+// than an op whose stream simply ends.
 func (s *server) runBackgroundCreate(ctx context.Context, ticket *workspace.CreateTicket, reporter workspace.CreateProgress) {
+	defer s.answerPanickedBackgroundCreate(ticket, reporter)
 	created, err := s.deps.Verbs.RunCreate(ctx, ticket)
 	if workspace.IsNetworkWait(err) {
 		s.log.Info("daemon.server.create_workspace", "the background create waits for the network; its outcome follows on its op",
@@ -423,6 +429,25 @@ func (s *server) runBackgroundCreate(ctx context.Context, ticket *workspace.Crea
 		return
 	}
 	reporter.Created(created)
+}
+
+// answerPanickedBackgroundCreate, deferred directly by runBackgroundCreate,
+// answers a create that PANICKED: it records the panic, with the op, the
+// create and the stack, publishes the op's Failed outcome naming the panic,
+// and panics again with the original value. A panic is an invariant
+// violation; the daemon does not carry on as if the create had merely failed.
+// It does nothing for a create that did not panic.
+func (s *server) answerPanickedBackgroundCreate(ticket *workspace.CreateTicket, reporter workspace.CreateProgress) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	panicked := &workspace.CreatePanicError{Value: r, Stack: debug.Stack()}
+	s.log.Error("daemon.server.create_workspace", "a background create panicked: its op is answered failed, and the daemon panics again", dlog.Context{
+		"op_id": reporter.OpID(), "create_id": string(ticket.ID()), "panic": fmt.Sprint(r), "stack": string(panicked.Stack),
+	})
+	reporter.Failed(panicked)
+	panic(r)
 }
 
 // pendingCreateRef is a pending create's wire identity.
