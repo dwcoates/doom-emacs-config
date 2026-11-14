@@ -227,6 +227,12 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 
 	reader := bufio.NewReader(events)
 	outcome, sendErr := runUnended, error(nil)
+	// THE RUN'S END IS HELD UNTIL ITS SCRIPT EXITS, so the end relayed agrees
+	// with the exit status: the script still runs steps after the runner has
+	// ended (the git-state net, the timing record), and a script that exits
+	// non-zero after an ended passed is relayed as ended failed, naming the
+	// exit (2026-11-14: gates exited 1 while the stream said passed).
+	var ended *testrunv1.TestRunEvent
 	for {
 		ev := &testrunv1.TestRunEvent{}
 		err := protodelim.UnmarshalFrom(reader, ev)
@@ -252,6 +258,10 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 			outcome = runAborted
 			log.Error(opRunTests, "a test run stopped before it planned", dlog.Context{"dir": dir, "run": run, "selection": ev.GetAborted().GetSelection(), "cause": ev.GetAborted().GetDetail()})
 		}
+		if ev.GetEnded() != nil {
+			ended = ev
+			continue
+		}
 		if sendErr == nil {
 			sendErr = stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Event{Event: ev}, Run: run})
 			if sendErr != nil {
@@ -264,6 +274,26 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	}
 	events.Close() //nolint:errcheck // read to its end
 	result := <-done
+	if ended != nil {
+		if passed := ended.GetEnded().GetPassed(); passed != nil && result.err == nil && result.run.ExitCode != 0 {
+			failure := fmt.Sprintf("the run's script exited %d after its runner said every unit passed; its last output:\n%s", result.run.ExitCode, tail.String())
+			log.Error(opRunTests, "a test run's script failed after its runner ended passed; the run is relayed as failed", dlog.Context{
+				"dir": dir, "run": run, "exit_code": result.run.ExitCode, "tail": tail.String(),
+			})
+			ended = &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+				Outcome: &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{
+					PassedUnits: passed.GetPassedUnits(), RunFailures: []string{failure},
+				}},
+			}}}
+			outcome = runFailed
+		}
+		if sendErr == nil {
+			sendErr = stream.Send(&agentreplv1.RunTestsResponse{Frame: &agentreplv1.RunTestsResponse_Event{Event: ended}, Run: run})
+			if sendErr != nil {
+				log.Info(opRunTests, "a test run's caller went away before its end was relayed", dlog.Context{"dir": dir, "run": run, "cause": sendErr.Error()})
+			}
+		}
+	}
 	if sendErr != nil {
 		return outcome, sendErr
 	}

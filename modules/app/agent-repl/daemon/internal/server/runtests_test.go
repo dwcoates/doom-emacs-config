@@ -279,6 +279,61 @@ func TestRunTestsRefuses(t *testing.T) {
 	}
 }
 
+// THE RELAYED END AGREES WITH THE SCRIPT'S EXIT: a script that exits non-zero
+// after its runner ended passed (its git-state net, its timing record) is
+// relayed as ended failed, naming the exit and the script's last output.
+func TestRunTestsRelaysAnEndThatAgreesWithTheScriptsExit(t *testing.T) {
+	endedFailed := &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+		Outcome: &testrunv1.TestRunEnded_Failed{Failed: &testrunv1.TestRunEndedFailed{FailedUnits: 1}}}}}
+	cases := []struct {
+		name        string
+		ended       *testrunv1.TestRunEvent
+		exit        int
+		want        *testrunv1.TestRunEnded
+		wantFailure string
+		wantError   bool
+	}{
+		{name: "a passed end with a clean exit is relayed passed", ended: endedPassed(), want: endedPassed().GetEnded()},
+		{
+			name: "a passed end the script then fails is relayed failed", ended: endedPassed(), exit: 1,
+			wantFailure: "the run's script exited 1 after its runner said every unit passed; its last output:\nDRIFT DETECTED", wantError: true,
+		},
+		{name: "a failed end is relayed as the runner said it", ended: endedFailed, exit: 1, want: endedFailed.GetEnded()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			log := dlog.NewTestLogger()
+			h.Surfaces.workspace, h.Surfaces.global = log, log
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.Tests.events = []*testrunv1.TestRunEvent{tc.ended}
+			h.Tests.exit, h.Tests.lines = tc.exit, []string{"DRIFT DETECTED"}
+
+			// Act
+			frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()})
+
+			// Assert
+			if len(frames) != 1 || frames[0].GetEvent().GetEnded() == nil {
+				t.Fatalf("frames = %v, want the run's one end", frames)
+			}
+			got := frames[0].GetEvent().GetEnded()
+			if tc.want != nil && !proto.Equal(got, tc.want) {
+				t.Fatalf("ended = %v, want %v", got, tc.want)
+			}
+			if tc.wantFailure != "" {
+				f := got.GetFailed()
+				if f.GetPassedUnits() != 1 || !slices.Equal(f.GetRunFailures(), []string{tc.wantFailure}) {
+					t.Fatalf("ended = %v, want failed with its passed unit and the run failure %q", got, tc.wantFailure)
+				}
+			}
+			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opRunTests}); found != tc.wantError {
+				t.Fatalf("error record found = %v, want %v: %+v", found, tc.wantError, log.Records())
+			}
+		})
+	}
+}
+
 func TestRunTestsAnswersARunThatNeverSaidHowItEnded(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -78,7 +78,8 @@ Example, run from `modules/app/agent-repl`:
 Output: one line of protojson per event as it arrives: `planned` (the units
 and the run's log path), `unit_ended` per unit (verdict, wall time, per-test
 results, and a failed unit's output tail), then `ended` (passed or failed
-counts) or `refused` (a selection naming something the roster does not hold,
+counts; a run that failed with every unit passing, such as a full run's
+placement check, names why in `runFailures`, also said on stderr) or `refused` (a selection naming something the roster does not hold,
 or a name the runner cannot find). Read the run's log path from `planned`
 for full output.
 
