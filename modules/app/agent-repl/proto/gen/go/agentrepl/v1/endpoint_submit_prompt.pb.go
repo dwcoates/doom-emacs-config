@@ -2287,7 +2287,12 @@ func (*SubmitPromptFeedUndecodable) Descriptor() ([]byte, []int) {
 }
 
 type SubmitPromptNoSession struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE DAEMON'S OWN ACCOUNT of why the workspace has no session it could
+	// submit to -- no revival is wired, the revival failed, or the session
+	// came up without its watcher -- verbatim, so the composer says why
+	// nothing was sent. Never switched on.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2320,6 +2325,13 @@ func (x *SubmitPromptNoSession) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SubmitPromptNoSession.ProtoReflect.Descriptor instead.
 func (*SubmitPromptNoSession) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *SubmitPromptNoSession) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
 }
 
 var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
@@ -2435,8 +2447,9 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
 	"\b_address\" \n" +
 	"\x1eSubmitPromptFeedNotInWorkspace\"\x1d\n" +
-	"\x1bSubmitPromptFeedUndecodable\"\x17\n" +
-	"\x15SubmitPromptNoSession*c\n" +
+	"\x1bSubmitPromptFeedUndecodable\"/\n" +
+	"\x15SubmitPromptNoSession\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail*c\n" +
 	"\x14SubmitPromptDelivery\x12&\n" +
 	"\"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSUBMIT_PROMPT_DELIVERY_DEFERRED\x10\x01B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"

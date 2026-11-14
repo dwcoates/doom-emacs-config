@@ -5379,6 +5379,13 @@ encoder reads: the common codec owns the real encoding.")
                      (agent-repl-test-wire-verbs--parse json))
                     :type 'agent-repl-wire-error))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-prompt-error-no-session-carries-its-detail ()
+  "SubmitPromptError's `no_session' arm decodes the daemon's account."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error-no-session
+                    (agent-repl-test-wire-verbs--parse "{\"detail\":\"no revival is wired for this workspace\"}"))
+                   '(:detail "no revival is wired for this workspace")))))
+
 (provide 'test-wire-verbs)
 
 ;;; test-wire-verbs.el ends here
@@ -6842,3 +6849,4 @@ and why."
                     (agent-repl-test-wire-verbs--parse "{\"lifecycleConfigInvalid\":{\"path\":\"/r/.agent-repl/lifecycle.yaml\",\"detail\":\"pre_deploy is required\"}}"))
                    '(:cause (:arm :lifecycle-config-invalid
                              :value (:path "/r/.agent-repl/lifecycle.yaml" :detail "pre_deploy is required")))))))
+

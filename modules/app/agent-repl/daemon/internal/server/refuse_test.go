@@ -1052,6 +1052,24 @@ func TestSetArmFillsTheInvalidNameArmAndItsRule(t *testing.T) {
 	}
 }
 
+// TestARenameRefusalCarriesTheCreatesNamingBreach pins one rule, one wire
+// type: SetWorkspaceName's invalid_name arm is CreateWorkspaceInvalidName
+// itself, filled from the same breach fields a create's refusal is.
+func TestARenameRefusalCarriesTheCreatesNamingBreach(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SetWorkspaceNameResponse{}
+	fields := map[string]any{"name": "Bad", "component": "Bad", "rule": workspace.NameRuleSlug}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmInvalidName, fields)
+
+	// Assert.
+	var arm *agentreplv1.CreateWorkspaceInvalidName = resp.GetError().GetInvalidName()
+	if !ok || arm.GetName() != "Bad" || arm.GetComponent() != "Bad" || arm.GetSlug() == nil {
+		t.Fatalf("setResponseError = %v, invalid_name = %+v; want the create's breach with its slug rule", ok, arm)
+	}
+}
+
 // TestSetResponseErrorCarriesTheNameHeldArmsWorkspaceAndStanding pins the
 // create's name_held arm on the wire: its branch, the holding workspace's ref
 // and whether it is open reach the client, which reads them as "the workspace
@@ -1232,4 +1250,42 @@ func TestHandoverArmScanFindsAnArmWithNoAddress(t *testing.T) {
 	if len(lacking) == 0 {
 		t.Fatalf("the scan found no unknown_workspace arm; it reads no error message")
 	}
+}
+
+// TestANoSessionRefusalCarriesTheDaemonsAccount pins that the queue's account
+// of why the workspace has no session reaches SubmitPromptError.no_session's
+// detail, so the composer says why nothing was sent.
+func TestANoSessionRefusalCarriesTheDaemonsAccount(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := fmt.Errorf("SubmitPrompt: %w", &promptqueue.NoSessionError{Cause: "no revival is wired for this workspace"})
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+	set := ok && setResponseError(resp, got.Arm, got.Fields)
+
+	// Assert.
+	if !set || resp.GetError().GetNoSession().GetDetail() != "no revival is wired for this workspace" {
+		t.Fatalf("response = %v, want no_session carrying the queue's account", resp)
+	}
+}
+
+// TestABareNoSessionRefusalIsAnInvariantBreak pins that a no_session refusal
+// with no account fails loudly rather than answering an empty detail: every
+// queue refusal is a *NoSessionError.
+func TestABareNoSessionRefusalIsAnInvariantBreak(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatalf("asRefusal answered a bare ErrNoSession, want a panic")
+		}
+	}()
+
+	// Act.
+	surface.asRefusal(promptqueue.ErrNoSession)
 }

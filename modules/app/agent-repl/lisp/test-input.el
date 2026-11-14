@@ -2686,6 +2686,20 @@ flash never claims a start is under way."
     (should (member "agent-repl: no session, and the daemon could not start one; nothing was sent"
                     agent-repl-test-input--messages))))
 
+(ert-deftest agent-repl-input-no-session-echoes-the-daemons-account ()
+  "The daemon's account of why it could not start a session follows the echo."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :no-session
+                                                   :value (:detail "no revival is wired for this workspace"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (member "agent-repl: no session, and the daemon could not start one; nothing was sent (no revival is wired for this workspace)"
+                    agent-repl-test-input--messages))))
+
 (ert-deftest agent-repl-input-no-session-records-at-warn ()
   "A session the daemon could not bring back is a WARN, under its own token."
   (agent-repl-test-input--with

@@ -124,8 +124,8 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 		// exactly as mounting the frontend is; only a workspace that will not
 		// come back refuses.
 		if q.deps.Revive == nil {
-			refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session to submit to", nil)
-			return Disposition{}, ErrNoSession
+			refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session to submit to", dlog.Context{"cause": causeNoRevival})
+			return Disposition{}, noSession(causeNoRevival)
 		}
 		return q.holdForRevival(ctx, sub, log)
 	}
@@ -172,8 +172,8 @@ func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error)
 
 	watcher, ok := q.deps.Watcher(sub.WS)
 	if !ok {
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session watcher", nil)
-		return Disposition{}, ErrNoSession
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no session watcher", dlog.Context{"cause": causeNoWatcher})
+		return Disposition{}, noSession(causeNoWatcher)
 	}
 	if running := watcher.TurnInFlight(); running != nil {
 		if *running == sub.Turn {
@@ -911,8 +911,8 @@ func (q *queue) ReviveForSettings(ctx context.Context, ws ids.WorkspaceID) error
 		return nil
 	}
 	if q.deps.Revive == nil {
-		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for a settings pick", nil)
-		return ErrNoSession
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for a settings pick", dlog.Context{"cause": causeNoRevival})
+		return noSession(causeNoRevival)
 	}
 	q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)
 	return nil

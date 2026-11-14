@@ -2393,9 +2393,12 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; refused).  Like the cold gate this is an answer rather than a
          ;; transport failure, but a genuine refusal, so it is recorded at
          ;; WARN and the prompt is not queued; the text stays so the user can
-         ;; resubmit once a session is up.
-         (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
-         (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash))
+         ;; resubmit once a session is up.  The daemon's `detail' says why
+         ;; it could not, echoed verbatim; it is never switched on.
+         (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+           (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S detail=%s"
+                             ws origin arm detail)
+           (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash detail)))
         (:bubble-refused
          ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
          ;; the refusal BY KIND.  Both kinds are the same answer to the user

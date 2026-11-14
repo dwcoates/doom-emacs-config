@@ -213,8 +213,8 @@ func (q *queue) decideRelease(ctx context.Context, d *delivery, held wsm.HeldPro
 		return waits(waitsForBounce)
 	}
 	if _, ok := q.deps.Watcher(ws); !ok {
-		log.Warn(opRelease, "the workspace has no session watcher", nil)
-		return failed(ErrNoSession)
+		log.Warn(opRelease, "the workspace has no session watcher", dlog.Context{"cause": causeNoWatcher})
+		return failed(noSession(causeNoWatcher))
 	}
 	// A RECORDED CONTEXT CUT IS RUNNING whether or not the watcher has learned
 	// of it yet, and a force-through would deliver into it or interject it.
@@ -448,22 +448,22 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 			return false, err
 		}
 		if !revived {
-			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
-			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
+			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", dlog.Context{"cause": causeNotRevived})
+			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, noSession(causeNotRevived), log)
 		}
 		// THE REVIVAL MAY HAVE PARKED AT THE GATE, which leaves no shim.
 		if parked, err := q.holdAtStandingGate(ctx, ws, held.Turn, log); parked || err != nil {
 			return false, err
 		}
 		if sender, ok = q.deps.Client(ws); !ok {
-			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", nil)
-			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
+			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", dlog.Context{"cause": causeNoShimAfterRevival})
+			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, noSession(causeNoShimAfterRevival), log)
 		}
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {
-		log.Warn(opDeliver, "the workspace has no session watcher", nil)
-		return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
+		log.Warn(opDeliver, "the workspace has no session watcher", dlog.Context{"cause": causeNoWatcher})
+		return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, noSession(causeNoWatcher), log)
 	}
 
 	sub := submissionOf(held)
