@@ -261,6 +261,7 @@ var migrations = []migration{
 	// IT IS BREAKING: see forkLineageByConversationDDL.
 	{To: 138, Name: "fork_lineage_by_conversation", Kind: MigrationBreaking, DDL: forkLineageByConversationDDL},
 	{To: 139, Name: "owed_nukes", Kind: MigrationAdditive, DDL: owedNukeDDL},
+	{To: 140, Name: "owed_placement_notes", Kind: MigrationAdditive, DDL: owedPlacementNotesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

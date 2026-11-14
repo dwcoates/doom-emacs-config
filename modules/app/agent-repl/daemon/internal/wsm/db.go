@@ -87,6 +87,12 @@ type DB interface {
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
 	// OweNuke records that a nuke of the workspace began (owednuke.go).
 	OweNuke(ctx context.Context, id WorkspaceID, at time.Time) error
+	// OwePlacementNote records that the workspace's next prompt owes the
+	// subsection placement note (owedplacement.go).
+	OwePlacementNote(ctx context.Context, id WorkspaceID, at time.Time) error
+	// TakeOwedPlacementNote takes the placement note the workspace's next
+	// prompt owes, answering whether one was owed.
+	TakeOwedPlacementNote(ctx context.Context, id WorkspaceID) (bool, error)
 	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
 	// closed or closing, nil when it is open (family.go).
 	RequireOpenParent(ctx context.Context, parent WorkspaceID) error

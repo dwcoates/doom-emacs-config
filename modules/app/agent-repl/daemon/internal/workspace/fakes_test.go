@@ -340,7 +340,12 @@ type fakeDB struct {
 	// owedNukes is every nuke OweNuke recorded, in order; oweNukeErr fails it.
 	owedNukes  []ids.WorkspaceID
 	oweNukeErr error
-	terminals  map[ids.WorkspaceID]wsm.SessionTerminal
+	// owedPlacements are the workspaces whose next prompt owes the placement
+	// note; owePlacementErr fails owing one and takePlacementErr taking one.
+	owedPlacements   map[ids.WorkspaceID]bool
+	owePlacementErr  error
+	takePlacementErr error
+	terminals        map[ids.WorkspaceID]wsm.SessionTerminal
 	// clearTerminalErr fails the terminal RETIREMENT, which the fake's own map
 	// cannot, so the live-shim invariant's failure arm is reachable.
 	clearTerminalErr error
@@ -1223,6 +1228,26 @@ func (d *fakeDB) OweNuke(_ context.Context, id ids.WorkspaceID, at time.Time) er
 		d.workspaces[id] = ws
 	}
 	return nil
+}
+
+func (d *fakeDB) OwePlacementNote(_ context.Context, id ids.WorkspaceID, _ time.Time) error {
+	if d.owePlacementErr != nil {
+		return d.owePlacementErr
+	}
+	if d.owedPlacements == nil {
+		d.owedPlacements = map[ids.WorkspaceID]bool{}
+	}
+	d.owedPlacements[id] = true
+	return nil
+}
+
+func (d *fakeDB) TakeOwedPlacementNote(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.takePlacementErr != nil {
+		return false, d.takePlacementErr
+	}
+	owed := d.owedPlacements[id]
+	delete(d.owedPlacements, id)
+	return owed, nil
 }
 
 func (d *fakeDB) Forget(_ context.Context, id ids.WorkspaceID) (wsm.ForgetReport, error) {
