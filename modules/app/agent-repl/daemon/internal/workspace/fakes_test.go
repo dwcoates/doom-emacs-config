@@ -4691,21 +4691,15 @@ func (d *fakeDB) WorkspacePullRequestSubscriptions(_ context.Context, id ids.Wor
 	return d.prSubs[id], nil
 }
 
-// fakeAnchors answers each Anchor with a subscription told "anchored", or
-// with err and an unanchored one, recording every pull request asked.
+// fakeAnchors answers each FollowFromFirstRead with a subscription told
+// "first read", recording every pull request asked.
 type fakeAnchors struct {
-	err   error
 	asked []wsm.PullRequestKey
 }
 
-func (a *fakeAnchors) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error) {
+func (a *fakeAnchors) FollowFromFirstRead(ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) wsm.PullRequestSubscription {
 	a.asked = append(a.asked, pr)
-	sub := wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr, Events: events, Origin: origin}
-	if a.err != nil {
-		return sub, nil, a.err
-	}
-	sub.Told = "anchored"
-	return sub, &agentreplv1.PullRequestStatus{}, nil
+	return wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr, Events: events, Origin: origin, Told: "first read"}
 }
 
 // WorkspaceSummaryOf answers the stored summary, or summaryErr.

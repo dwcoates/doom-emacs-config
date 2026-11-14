@@ -314,6 +314,12 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		return
 	}
 	next, activity := diff(snap, prev, anchored)
+	// A SUBSCRIPTION TAKEN WITHOUT A READ IS ANCHORED BY ITS FIRST ONE
+	// (FollowFromFirstRead): what is already on the pull request counts as
+	// told, exactly as Anchor's read counts it. Only its end is still said.
+	if prev.AnchorOnRead {
+		activity = nil
+	}
 	var told []*agentreplv1.PullRequestActivity
 	for _, a := range activity {
 		if sub.Events.Has(eventOf(a)) {
