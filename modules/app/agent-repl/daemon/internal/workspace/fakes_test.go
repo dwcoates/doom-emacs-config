@@ -2113,6 +2113,9 @@ type fakeMerge struct {
 	// ownResumes records every ResumeOwnPause, which answers ownResumeErr.
 	ownResumes   []ownResume
 	ownResumeErr error
+	// ownResumeNone makes ResumeOwnPause answer that no pause of the
+	// workspace's own stood.
+	ownResumeNone bool
 }
 
 // ownResume is one ResumeOwnPause the fake was asked for.
@@ -2136,7 +2139,7 @@ func (f *fakeMerge) Unpause(context.Context, *merge.RepositoryScope) error {
 // ResumeOwnPause records the resume and answers ownResumeErr.
 func (f *fakeMerge) ResumeOwnPause(_ context.Context, scope merge.RepositoryScope, ws ids.WorkspaceID) (bool, error) {
 	f.ownResumes = append(f.ownResumes, ownResume{scope: scope, ws: ws})
-	return f.ownResumeErr == nil, f.ownResumeErr
+	return f.ownResumeErr == nil && !f.ownResumeNone, f.ownResumeErr
 }
 
 // Relabel records the renamed workspace and answers relabelErr.

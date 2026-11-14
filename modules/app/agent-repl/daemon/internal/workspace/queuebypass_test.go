@@ -549,7 +549,7 @@ func TestBypassTurnEndsRecordsAResumeItCannotCarryOut(t *testing.T) {
 	}
 }
 
-func TestTakingTheModeStopsTheQueueInTheHoldersName(t *testing.T) {
+func TestTakingTheModeLeavesTheQueueRunning(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -559,27 +559,28 @@ func TestTakingTheModeStopsTheQueueInTheHoldersName(t *testing.T) {
 	// Act
 	on, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", QueueBypassOn, QueueBypassContextDefault)
 
-	// Assert
+	// Assert: taken, and the queue neither stopped nor paused.
 	if err != nil || !on {
 		t.Fatalf("UpdateQueueBypassMode = (%v, %v), want the mode taken", on, err)
 	}
-	if want := []merge.Pauser{{By: merge.RequestedByAgent, Asker: "w1"}}; !slices.Equal(f.merge.hardStops, want) {
-		t.Fatalf("hard stops = %+v, want %+v", f.merge.hardStops, want)
+	if len(f.merge.hardStops) != 0 {
+		t.Fatalf("hard stops = %+v, want none", f.merge.hardStops)
 	}
 }
 
 func TestReleasingTheMode(t *testing.T) {
 	cases := []struct {
 		name      string
-		unpause   error
+		none      bool
+		resumeErr error
 		wantErr   bool
 		wantLevel string
 		wantText  string
 	}{
-		{name: "a paused queue is resumed", wantLevel: "info", wantText: "the workspace switched its queue bypass mode"},
-		{name: "a running queue has nothing to resume", unpause: &merge.RefusalError{Arm: merge.ArmNotPaused, Reason: "the merge queue is not paused"},
-			wantLevel: "info", wantText: "the repository's merge queue was running when the mode was released, so there was nothing to resume"},
-		{name: "a resume that fails is refused as a failed switch", unpause: errors.New("queue gone"), wantErr: true,
+		{name: "the holder's own pause is resumed", wantLevel: "info", wantText: "the workspace switched its queue bypass mode"},
+		{name: "no pause of the holder's own has nothing to resume", none: true,
+			wantLevel: "info", wantText: "the mode was released with no pause of the holder's own standing, so there was nothing to resume"},
+		{name: "a resume that fails is refused as a failed switch", resumeErr: errors.New("queue gone"), wantErr: true,
 			wantLevel: "error", wantText: "the repository's merge queue could not be resumed after the mode was released"},
 	}
 	for _, tc := range cases {
@@ -589,20 +590,20 @@ func TestReleasingTheMode(t *testing.T) {
 			f.workspace("w1", t.TempDir())
 			bindTo(f, "w1", "vendor-bypass")
 			f.db.bypass = map[ids.WorkspaceID]wsm.QueueBypass{"w1": {Holds: true, RepoID: "r1", ParkedVendorSessionID: "vendor-queue"}}
-			f.merge.unpauseErr = tc.unpause
+			f.merge.ownResumeNone, f.merge.ownResumeErr = tc.none, tc.resumeErr
 
 			// Act
 			on, err := f.verbs.UpdateQueueBypassMode(context.Background(), "w1", QueueBypassOff, QueueBypassContextDefault)
 
-			// Assert
+			// Assert: only the holder's own pause, never any pause.
 			if on || (err != nil) != tc.wantErr {
 				t.Fatalf("UpdateQueueBypassMode = (%v, %v), want released with error %v", on, err, tc.wantErr)
 			}
 			if tc.wantErr && refusedArm(err) != ArmSwitchFailed {
 				t.Fatalf("arm = %q, want %q", refusedArm(err), ArmSwitchFailed)
 			}
-			if f.merge.unpaused != 1 {
-				t.Fatalf("unpaused %d times, want 1", f.merge.unpaused)
+			if f.merge.unpaused != 0 || len(f.merge.ownResumes) != 1 || f.merge.ownResumes[0].ws != "w1" {
+				t.Fatalf("unpaused %d, own resumes %+v; want only w1's own pause resumed", f.merge.unpaused, f.merge.ownResumes)
 			}
 			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: tc.wantLevel, Operation: opQueueBypass, Message: tc.wantText}); !ok {
 				t.Fatalf("want %q at %s: %+v", tc.wantText, tc.wantLevel, f.log.logger.Records())

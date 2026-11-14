@@ -145,16 +145,18 @@ func (c QueueBypassContext) resumesExisting() bool {
 // change names QueueBypassContextDefault.
 //
 // TAKING IT, IN ORDER: the hold is recorded (the store's key refuses a second
-// holder of the repository, whatever two callers race), the repository's
-// merge queue is HARD-STOPPED in the holder's name so whatever it was running
-// stops at once, and the workspace switches to its bypass conversation, whose
-// start reads the hold and so comes up with the bypass landing
-// (sessionProfile). The end of the holder's next turn lets the queue through
+// holder of the repository, whatever two callers race), and the workspace
+// switches to its bypass conversation, whose start reads the hold and so
+// comes up with the bypass landing (sessionProfile). THE QUEUE KEEPS RUNNING
+// (owner ruling, 2026-11-14): the holder pauses it only to land a change and
+// resumes it at once (metaprompt-queue-bypass.md), and the end of each of
+// its turns lets through a pause of its own left standing
 // (LetQueueThroughAfterBypassTurn).
 //
 // RELEASING IT is the reverse: the hold is cleared first, so the switch back
-// starts the ordinary conversation with the queue landing, and a paused queue
-// is resumed last.
+// starts the ordinary conversation with the queue landing, and a pause of the
+// holder's own still standing is resumed last; a pause by the user or another
+// workspace stands.
 //
 // THE SWITCH SWAPS TWO CONVERSATIONS. The one the workspace steps out of is
 // parked with its cache clock (wsm.SwapParkedConversation) and the parked one
@@ -216,10 +218,6 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 	// hangs up mid-way must not leave the hold and the conversation disagreeing.
 	swap := context.WithoutCancel(ctx)
 	scope := &merge.RepositoryScope{ID: standing.RepoID}
-	// THE STOP THE MODE TAKES IS THE HOLDER'S OWN, so the end of the
-	// holder's next turn lets the queue through
-	// (LetQueueThroughAfterBypassTurn).
-	pauser := merge.Pauser{By: merge.RequestedByAgent, Asker: ws}
 	if want {
 		if err := v.deps.DB.TakeQueueBypass(swap, ws, v.now()); err != nil {
 			if errors.Is(err, wsm.ErrQueueBypassHeld) {
@@ -230,11 +228,6 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 			}
 			log.Error(opQueueBypass, "could not record the workspace's hold on the queue bypass mode", dlog.Context{"cause": err.Error()})
 			return false, fmt.Errorf("queue bypass for %q: take the hold: %w", ws, err)
-		}
-		if err := v.deps.Merge.HardStop(swap, scope, pauser); err != nil {
-			log.Error(opQueueBypass, "the repository's merge queue could not be hard-stopped; the hold stands and the switch goes on", dlog.Context{"cause": err.Error()})
-			return true, refuseWith(log, rpc, ArmSwitchFailed, fmt.Sprintf("the merge queue could not be hard-stopped: %s", err.Error()), false,
-				map[string]any{"detail": "the merge queue could not be hard-stopped: " + err.Error()})
 		}
 	} else {
 		if err := v.deps.DB.ReleaseQueueBypass(swap, ws); err != nil {
@@ -247,11 +240,11 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 		return want, err
 	}
 	if !want {
-		// THE QUEUE RUNS BETWEEN THE HOLDER'S TURNS, so a release finding it
-		// running has nothing to resume.
-		var refusal *merge.RefusalError
-		if err := v.deps.Merge.Unpause(swap, scope); errors.As(err, &refusal) && refusal.Arm == merge.ArmNotPaused {
-			log.Info(opQueueBypass, "the repository's merge queue was running when the mode was released, so there was nothing to resume", nil)
+		// ONLY THE HOLDER'S OWN PAUSE IS RESUMED: one left standing by a
+		// landing is let through, and a pause by the user or another
+		// workspace stands.
+		if resumed, err := v.deps.Merge.ResumeOwnPause(swap, *scope, ws); err == nil && !resumed {
+			log.Info(opQueueBypass, "the mode was released with no pause of the holder's own standing, so there was nothing to resume", nil)
 		} else if err != nil {
 			log.Error(opQueueBypass, "the repository's merge queue could not be resumed after the mode was released", dlog.Context{"cause": err.Error()})
 			v.restateQueueBypass(swap, log, standing.RepoID)

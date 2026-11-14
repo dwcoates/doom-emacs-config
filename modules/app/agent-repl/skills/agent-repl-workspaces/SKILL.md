@@ -663,9 +663,10 @@ creating workspaces there with `-repository DIR`.
   - How the mode behaves is
     `modules/app/agent-repl/docs/developer/remote-control.md`.
 - **QUEUE BYPASS MODE.** `workspace set WS -queue-bypass on|off` takes or
-  releases WS's repository's queue bypass mode: the repository's merge queue
-  is hard-stopped while WS holds it, and WS switches to its bypass
-  conversation, which lands each change on the main branch itself.
+  releases WS's repository's queue bypass mode: WS switches to its bypass
+  conversation, which lands each change on the main branch itself, pausing
+  the repository's merge queue only while it lands one. The queue keeps
+  running otherwise.
   - `-context` names, with `on` only, how the bypass session gets its
     context:
     - `full`: a full fork of the queue conversation, replacing any parked
