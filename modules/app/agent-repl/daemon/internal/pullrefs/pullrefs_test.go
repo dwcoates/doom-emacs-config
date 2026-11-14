@@ -163,17 +163,24 @@ func TestTargetFor(t *testing.T) {
 	cases := []struct {
 		name      string
 		configDir string
+		repo      string
 		want      Target
 		wantOK    bool
 	}{
 		{name: "a configured root targets its owner and the repository's name", configDir: "/work/root/",
 			want: Target{Owner: "ChessCom", Repo: "explanation-engine"}, wantOK: true},
+		{name: "the name is the one given, never a directory's base", configDir: "/work/root",
+			repo: "doom-emacs-config", want: Target{Owner: "ChessCom", Repo: "doom-emacs-config"}, wantOK: true},
 		{name: "an unconfigured root has no target", configDir: "/work/other"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, ok := owners.TargetFor(tc.configDir, "/work/repos/explanation-engine/")
+			repo := tc.repo
+			if repo == "" {
+				repo = "explanation-engine"
+			}
+			got, ok := owners.TargetFor(tc.configDir, repo)
 
 			// Assert
 			if got != tc.want || ok != tc.wantOK {

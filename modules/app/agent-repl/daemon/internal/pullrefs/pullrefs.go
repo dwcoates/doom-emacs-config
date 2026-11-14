@@ -70,15 +70,24 @@ type Target struct {
 	Repo  string
 }
 
-// TargetFor answers the target of a repository whose main checkout is
-// REPO_DIR and whose work is routed to the account root CONFIG_DIR. An account
-// with no owner has no target.
-func (o Owners) TargetFor(configDir, repoDir string) (Target, bool) {
+// OwnerFor answers the GitHub owner of the account root CONFIG_DIR, and false
+// for an account with no owner, whose references link nowhere.
+func (o Owners) OwnerFor(configDir string) (string, bool) {
 	owner, ok := o[filepath.Clean(configDir)]
+	return owner, ok
+}
+
+// TargetFor answers the target of the GitHub repository named REPO whose work
+// is routed to the account root CONFIG_DIR. REPO is the name the repository's
+// `origin` remote gives it, never its checkout's directory name: the two
+// differ (the `doom` checkout's origin is `doom-emacs-config`). An account
+// with no owner has no target.
+func (o Owners) TargetFor(configDir, repo string) (Target, bool) {
+	owner, ok := o.OwnerFor(configDir)
 	if !ok {
 		return Target{}, false
 	}
-	return Target{Owner: owner, Repo: filepath.Base(filepath.Clean(repoDir))}, true
+	return Target{Owner: owner, Repo: repo}, true
 }
 
 // PullURL is the address of pull request NUMBER in T: THE ONE spelling of a
