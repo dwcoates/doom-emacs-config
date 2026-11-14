@@ -90,7 +90,12 @@ spelling, which belongs only to genuinely unlanded arms. `server.UnlandedArm` is
 used at NO Watch* refusal site, and the per-workspace standing refusals
 (`transferring_away`, `not_yet_adopted`) resolved for a stream are likewise not
 warned: `server.resolveStreamRef` suppresses that warning, so the INFO record is
-the only one a refused open makes.
+the only one a refused open makes. The address a unary rpc's handover arm
+carries (the successor of `transferring_away`, the daemon serving the
+workspace meanwhile of `not_yet_adopted`) rides a refused stream's error
+metadata under `Agent-Repl-Refusal-Address` (`server.RefusalAddressKey`),
+which connect-go writes into the end-stream frame's `metadata`, and the
+record's `address`.
 
 | rpc | refusal | condition | package |
 | --- | --- | --- | --- |

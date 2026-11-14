@@ -1194,18 +1194,39 @@ const opUnlandedArm = "daemon.refusal.unlanded_arm"
 // spelling, and records the refusal at INFO under
 // "daemon.refusal.transport_closed" with structured `rpc` and `cause`.
 func TransportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool) *connect.Error {
+	return transportClosed(log, rpc, cause, reason, notFound, "")
+}
+
+// transportClosed is TransportClosed for a refusal that names a daemon:
+// ADDRESS, when not empty, rides the Connect error's metadata under
+// RefusalAddressKey and the INFO record's `address`.
+func transportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool, address string) *connect.Error {
 	message := fmt.Sprintf("%s closed the stream: %s: %s", rpc, cause, reason)
 	code := connect.CodeFailedPrecondition
 	if notFound {
 		code = connect.CodeNotFound
 	}
-	if log != nil {
-		log.Info(opTransportClosed, message, dlog.Context{
-			"rpc": rpc, "cause": cause, "reason": reason, "not_found": notFound,
-		})
+	ctx := dlog.Context{"rpc": rpc, "cause": cause, "reason": reason, "not_found": notFound}
+	if address != "" {
+		ctx["address"] = address
 	}
-	return connect.NewError(code, fmt.Errorf("%s", message))
+	if log != nil {
+		log.Info(opTransportClosed, message, ctx)
+	}
+	err := connect.NewError(code, fmt.Errorf("%s", message))
+	if address != "" {
+		err.Meta().Set(RefusalAddressKey, address)
+	}
+	return err
 }
+
+// RefusalAddressKey is the Connect error metadata a refused STREAM names the
+// daemon its refusal points at under: the successor of a transferring_away,
+// the daemon serving the workspace meanwhile of a not_yet_adopted. A unary
+// rpc carries that address in its arm's `address` field; a stream has no
+// error message, so the address rides here, and connect-go writes it into
+// the end-stream frame's `metadata` object, where a client reads it.
+const RefusalAddressKey = "Agent-Repl-Refusal-Address"
 
 // opTransportClosed is the operation every refused stream open is recorded
 // under. ERROR-ARMS.md's transport-closed section reconciles against it.

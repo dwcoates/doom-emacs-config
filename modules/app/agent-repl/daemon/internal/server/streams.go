@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/workspace"
 )
 
 // THE SUBSCRIPTION INVARIANT, served once here for every standing stream:
@@ -212,8 +213,23 @@ func serveThenEnd[R any](s *server, rpc string, out streamSink[R], ending *R, bo
 // (landing 6) that is the SETTLED shape rather than an unlanded arm, so the
 // refusal is recorded at INFO under "daemon.refusal.transport_closed" and never
 // warned.
+//
+// A HANDOVER REFUSAL NAMES ITS DAEMON on the stream too: the address a
+// unary rpc's transferring_away or not_yet_adopted arm carries rides the
+// error's metadata (RefusalAddressKey), so a client follows a refused
+// stream exactly as it follows a refused call.
 func refuseStream(log dlog.Logger, rpc string, r refusal) *connect.Error {
-	return TransportClosed(log, rpc, r.Arm, r.Reason, r.NotFound)
+	return transportClosed(log, rpc, r.Arm, r.Reason, r.NotFound, refusalAddress(r))
+}
+
+// refusalAddress is the daemon address R's handover arm names, or "" for any
+// other arm and for a not_yet_adopted with no live incumbent (fill).
+func refusalAddress(r refusal) string {
+	if r.Arm != workspace.ArmTransferringAway && r.Arm != workspace.ArmNotYetAdopted {
+		return ""
+	}
+	address, _ := r.Fields["address"].(string)
+	return address
 }
 
 // WatchWorkspaceRoster serves the ONE editor-global stream: the roster, whole,
