@@ -4991,6 +4991,83 @@ made, and a fresh Emacs drew every workspace severed."
         (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
                        (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))))))
 
+;; A REFUSED STREAM THAT NAMES ITS DAEMON (`agent-repl-connect-refusal-address')
+;; is followed there, as a unary refusal's `address' is.
+
+(defun agent-repl-test-host--refuse-naming (ws arm address)
+  "Close WS's host stream refused ARM, its end frame naming ADDRESS."
+  (funcall (plist-get (agent-repl-host-stream ws) :on-close)
+           (list :error (list :kind :http :code "failed_precondition" :status nil
+                              :message (format "WatchHostWorkspace closed the stream: %s: elsewhere" arm)
+                              :address address))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-registers-there ()
+  "A stream refused not_yet_adopted naming the daemon that serves the workspace
+meanwhile views it there: the workspace registers on that daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (agent-repl-test-host--subscribe "ws-1")
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (equal (mapcar (lambda (call)
+                                 (list (car call) (agent-repl-connect-connection-address (nth 1 call))))
+                               (cl-remove-if-not (lambda (call) (equal (car call) "RegisterWorkspace"))
+                                                 agent-repl-test-host--calls))
+                       '(("RegisterWorkspace" "127.0.0.1:6666"))))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-adopts-nothing ()
+  "A workspace viewed where it is served is not adopted onto a standing successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-records-the-serving-daemon ()
+  "The refusal is recorded at INFO naming the daemon that serves the workspace."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.stream-refused-not-yet-adopted ws=ws-1 serving=\"127.0.0.1:6666\""))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-dials-it ()
+  "A stream refused transferring_away naming its successor dials that address,
+not the successor the link recorded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
+    ;; Assert
+    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9200")))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-records-it ()
+  "The refusal is recorded at INFO naming the successor."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.stream-refused-transferred ws=ws-1 address=\"127.0.0.1:9200\""))))
+
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."
   (agent-repl-test-host--with-harness

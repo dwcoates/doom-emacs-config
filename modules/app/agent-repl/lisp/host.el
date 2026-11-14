@@ -60,6 +60,7 @@
 
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-connect-refused-arm "connect" (detail))
+(declare-function agent-repl-connect-refusal-address "connect" (detail))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
@@ -1474,27 +1475,43 @@ it.  STREAM nil means the caller did not name the stream."
     ;; only once the incumbent exits -- and an incumbent still serving another
     ;; workspace never did (2026-10-26: a fresh Emacs, linked by daemon.addr
     ;; to the incumbent, drew all 45 of its workspaces severed).
-    (agent-repl-host--put ws :ending-stream nil)
-    (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s" ws)
-    (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
-    (agent-repl-host--put ws :stream nil)
-    (agent-repl-host--put ws :detached t)
-    (agent-repl-host--transferred ws))
+    ;;
+    ;; THE REFUSAL NAMES THE SUCCESSOR (`agent-repl-connect-refusal-address'),
+    ;; so WS walks there as a unary `transferring_away' walks it, rather than
+    ;; onto whichever successor the link recorded.
+    (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
+      (agent-repl-host--put ws :ending-stream nil)
+      (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s address=%S" ws address)
+      (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
+      (agent-repl-host--put ws :stream nil)
+      (agent-repl-host--put ws :detached t)
+      (if address
+          (agent-repl-host-handle-refusal
+           ws (list :arm :transferring-away :value (list :address address)))
+        (agent-repl-host--transferred ws))))
    ((equal (agent-repl-host--refused-arm outcome) "not_yet_adopted")
     ;; THE DAEMON HAS NOT TAKEN WS OVER YET, AND SAID SO.  Nothing is lost:
     ;; a standing successor is the one to adopt onto, and otherwise WS
     ;; follows the live daemon, which registers it once the link settles
     ;; (2026-10-26: the promoted successor refused a workspace its
     ;; predecessor still held at its exit, and that was drawn as a loss).
-    (agent-repl-host--put ws :ending-stream nil)
-    (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s" ws)
-    (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
-    (agent-repl-host--put ws :stream nil)
-    (agent-repl-host--put ws :detached t)
-    (let ((new (agent-repl-link-successor)))
-      (if new
-          (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
-        (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))
+    ;;
+    ;; A REFUSAL NAMING THE DAEMON THAT SERVES WS MEANWHILE is viewed there
+    ;; (`agent-repl-host-view-where-served'), as a unary `not_yet_adopted'
+    ;; is: nothing waits on the takeover.  One naming the very daemon that
+    ;; refused walks nothing there, and takes the walk below.
+    (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
+      (agent-repl-host--put ws :ending-stream nil)
+      (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s serving=%S" ws address)
+      (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
+      (agent-repl-host--put ws :stream nil)
+      (agent-repl-host--put ws :detached t)
+      (unless (and address
+                   (agent-repl-host-view-where-served ws address "stream-refused-not-yet-adopted"))
+        (let ((new (agent-repl-link-successor)))
+          (if new
+              (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
+            (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))))
    (t
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
