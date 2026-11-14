@@ -88,13 +88,19 @@ func (p procfs) Usage(pid int) (Usage, error) {
 		// descriptors or status lines left to read.
 		return Usage{}, ErrGone
 	}
-	ticks := uint64(0)
-	for _, n := range []int{procstat.FieldUtime, procstat.FieldStime} {
-		v, err := line.Uint(n)
+	ticks, childTicks := uint64(0), uint64(0)
+	for _, f := range []struct {
+		field int
+		sum   *uint64
+	}{
+		{procstat.FieldUtime, &ticks}, {procstat.FieldStime, &ticks},
+		{procstat.FieldCutime, &childTicks}, {procstat.FieldCstime, &childTicks},
+	} {
+		v, err := line.Uint(f.field)
 		if err != nil {
 			return Usage{}, goneAs(err)
 		}
-		ticks += v
+		*f.sum += v
 	}
 	status, err := p.tree.Status(pid)
 	if err != nil {
@@ -133,13 +139,14 @@ func (p procfs) Usage(pid int) (Usage, error) {
 		return Usage{}, fmt.Errorf("procmetrics: list the descriptors of pid %d: %w", pid, err)
 	}
 	return Usage{
-		CPUSeconds:     float64(ticks) / procstat.UserHZ,
-		ResidentBytes:  memory["VmRSS"],
-		FootprintBytes: memory["RssAnon"] + memory["VmSwap"],
-		DiskReadBytes:  disk["read_bytes"],
-		DiskWriteBytes: disk["write_bytes"],
-		Threads:        threads,
-		OpenFDs:        len(fds),
+		CPUSeconds:      float64(ticks) / procstat.UserHZ,
+		ChildCPUSeconds: float64(childTicks) / procstat.UserHZ,
+		ResidentBytes:   memory["VmRSS"],
+		FootprintBytes:  memory["RssAnon"] + memory["VmSwap"],
+		DiskReadBytes:   disk["read_bytes"],
+		DiskWriteBytes:  disk["write_bytes"],
+		Threads:         threads,
+		OpenFDs:         len(fds),
 	}, nil
 }
 

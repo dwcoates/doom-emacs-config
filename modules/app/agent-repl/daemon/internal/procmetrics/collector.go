@@ -43,7 +43,22 @@ type Deps struct {
 type pidState struct {
 	group Group
 	start int64
+	ppid  int
 	usage Usage
+}
+
+// lifetime is the CPU a process and every child it reaped had used when it
+// was read: what its parent's ChildCPUSeconds grows by once it is reaped.
+func (s pidState) lifetime() float64 {
+	return s.usage.CPUSeconds + s.usage.ChildCPUSeconds
+}
+
+// counted is CPU already counted for a parent's children that have exited
+// but whose reap the parent's ChildCPUSeconds has not yet shown: the next
+// child-time growth of that same process (its start) consumes it first.
+type counted struct {
+	start   int64
+	seconds float64
 }
 
 // totals are a group's monotonic counters.
@@ -62,6 +77,13 @@ type totals struct {
 // daemon restart starts every counter from zero rather than from the
 // lifetimes of processes that predate it. A reused pid is told from its
 // predecessor by its start time.
+//
+// A CHILD EXITING BETWEEN SAMPLES IS COUNTED THROUGH ITS PARENT. A process's
+// CPU here is its own and its reaped children's (Usage.ChildCPUSeconds), so a
+// tool that starts and exits between two samples still counts, in its
+// parent's group. A child that WAS sampled is already counted up to its last
+// read, so when it leaves, that last read's lifetime is owed against its
+// parent's next child-time growth (reaped) and only the remainder counts.
 type Collector struct {
 	deps   Deps
 	causes causelog.Tracker
@@ -75,6 +97,7 @@ type Collector struct {
 	mu     sync.Mutex
 	primed bool
 	seen   map[int]pidState
+	reaped map[int]counted
 	totals map[Group]*totals
 	// latest is the last sample's per-group footprints, for the rail's memory
 	// popups (memorypopup), which read it between samples.
@@ -107,7 +130,7 @@ func New(deps Deps) (*Collector, error) {
 		seen:            map[int]pidState{},
 		totals:          map[Group]*totals{},
 		hostBase:        map[string]float64{},
-		cpu:             desc("agentrepl_process_cpu_seconds_total", "CPU seconds (user and system) a group of agent-repl processes used since the daemon started.", labels),
+		cpu:             desc("agentrepl_process_cpu_seconds_total", "CPU seconds (user and system) a group of agent-repl processes, and every child they reaped, used since the daemon started.", labels),
 		read:            desc("agentrepl_process_disk_read_bytes_total", "Bytes a group read from disk since the daemon started.", labels),
 		write:           desc("agentrepl_process_disk_written_bytes_total", "Bytes a group wrote to disk since the daemon started.", labels),
 		energy:          desc("agentrepl_process_energy_joules_total", "Energy the kernel attributes to a group since the daemon started (macOS only: Linux attributes none).", labels),
@@ -261,7 +284,7 @@ func (c *Collector) sample() (map[Group]gauges, map[Group]totals, bool) {
 		u, err := c.deps.Reader.Usage(pid)
 		switch {
 		case err == nil:
-			live[pid] = pidState{group: group, start: ids[pid].StartUnixMicros, usage: u}
+			live[pid] = pidState{group: group, start: ids[pid].StartUnixMicros, ppid: ids[pid].PPID, usage: u}
 		case !errors.Is(err, ErrGone) && !c.goneSince(pid, ids[pid]):
 			usageErr = err
 		}
@@ -288,6 +311,7 @@ func (c *Collector) sample() (map[Group]gauges, map[Group]totals, bool) {
 // leaves (its gauges read zero), so a workspace's shim restarting continues
 // one series. Called with c.mu held.
 func (c *Collector) account(live map[int]pidState) map[Group]gauges {
+	c.oweLeavers(live)
 	sums := map[Group]gauges{}
 	for pid, now := range live {
 		t := c.totals[now.group]
@@ -301,11 +325,12 @@ func (c *Collector) account(live map[int]pidState) map[Group]gauges {
 			// The baseline: nothing counted.
 		case known && prev.start == now.start && prev.group == now.group:
 			t.cpu += nonNegative(now.usage.CPUSeconds - prev.usage.CPUSeconds)
+			t.cpu += c.unowed(pid, now.start, nonNegative(now.usage.ChildCPUSeconds-prev.usage.ChildCPUSeconds))
 			t.read += nonNegative(float64(now.usage.DiskReadBytes) - float64(prev.usage.DiskReadBytes))
 			t.write += nonNegative(float64(now.usage.DiskWriteBytes) - float64(prev.usage.DiskWriteBytes))
 			t.energy += nonNegative(now.usage.EnergyJoules - prev.usage.EnergyJoules)
 		default:
-			t.cpu += now.usage.CPUSeconds
+			t.cpu += now.lifetime()
 			t.read += float64(now.usage.DiskReadBytes)
 			t.write += float64(now.usage.DiskWriteBytes)
 			t.energy += now.usage.EnergyJoules
@@ -321,6 +346,50 @@ func (c *Collector) account(live map[int]pidState) map[Group]gauges {
 	c.seen = live
 	c.primed = true
 	return sums
+}
+
+// oweLeavers records, for every sampled process that has left since the last
+// sample, its last lifetime against the live parent that will reap it, and
+// drops what is owed by a process that has itself left. A child whose parent
+// is no process of agent-repl's (reparented to launchd) is reaped elsewhere,
+// so nothing is owed. Called with c.mu held.
+func (c *Collector) oweLeavers(live map[int]pidState) {
+	if c.reaped == nil {
+		c.reaped = map[int]counted{}
+	}
+	for pid, owed := range c.reaped {
+		if now, ok := live[pid]; !ok || now.start != owed.start {
+			delete(c.reaped, pid)
+		}
+	}
+	for pid, prev := range c.seen {
+		if now, ok := live[pid]; ok && now.start == prev.start {
+			continue
+		}
+		parent, ok := c.seen[prev.ppid]
+		if now, alive := live[prev.ppid]; !ok || !alive || now.start != parent.start {
+			continue
+		}
+		owed := c.reaped[prev.ppid]
+		c.reaped[prev.ppid] = counted{start: parent.start, seconds: owed.seconds + prev.lifetime()}
+	}
+}
+
+// unowed answers how much of a process's child-time growth is new CPU: the
+// growth less what its exited children were already counted for, which the
+// growth consumes. Called with c.mu held.
+func (c *Collector) unowed(pid int, start int64, growth float64) float64 {
+	owed, ok := c.reaped[pid]
+	if !ok || owed.start != start {
+		return growth
+	}
+	paid := min(owed.seconds, growth)
+	if owed.seconds -= paid; owed.seconds > 0 {
+		c.reaped[pid] = owed
+	} else {
+		delete(c.reaped, pid)
+	}
+	return growth - paid
 }
 
 func nonNegative(v float64) float64 {

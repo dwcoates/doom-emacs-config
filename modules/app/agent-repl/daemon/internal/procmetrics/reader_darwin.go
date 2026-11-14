@@ -146,14 +146,15 @@ func (Kernel) Usage(pid int) (Usage, error) {
 		fds = int(n) / int(C.sizeof_struct_proc_fdinfo)
 	}
 	return Usage{
-		CPUSeconds:     machToSeconds(ru.ri_user_time) + machToSeconds(ru.ri_system_time),
-		ResidentBytes:  uint64(ru.ri_resident_size),
-		FootprintBytes: uint64(ru.ri_phys_footprint),
-		DiskReadBytes:  uint64(ru.ri_diskio_bytesread),
-		DiskWriteBytes: uint64(ru.ri_diskio_byteswritten),
-		EnergyJoules:   float64(ru.ri_energy_nj) / 1e9,
-		Threads:        threads,
-		OpenFDs:        fds,
+		CPUSeconds:      machToSeconds(ru.ri_user_time) + machToSeconds(ru.ri_system_time),
+		ChildCPUSeconds: machToSeconds(ru.ri_child_user_time) + machToSeconds(ru.ri_child_system_time),
+		ResidentBytes:   uint64(ru.ri_resident_size),
+		FootprintBytes:  uint64(ru.ri_phys_footprint),
+		DiskReadBytes:   uint64(ru.ri_diskio_bytesread),
+		DiskWriteBytes:  uint64(ru.ri_diskio_byteswritten),
+		EnergyJoules:    float64(ru.ri_energy_nj) / 1e9,
+		Threads:         threads,
+		OpenFDs:         fds,
 	}, nil
 }
 

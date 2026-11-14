@@ -27,8 +27,9 @@ type fixtureProc struct {
 }
 
 // liveStat is a running process's stat: ppid 1, utime 150 and stime 50
-// ticks, started 300 ticks after boot.
-const liveStat = "42 (node) S 1 42 42 0 -1 4194304 0 0 0 0 150 50 0 0 20 0 7 0 300 0 0"
+// ticks, its reaped children's cutime 30 and cstime 20, started 300 ticks
+// after boot.
+const liveStat = "42 (node) S 1 42 42 0 -1 4194304 0 0 0 0 150 50 30 20 20 0 7 0 300 0 0"
 
 const liveStatus = "Name:\tnode\nThreads:\t7\nVmRSS:\t  2048 kB\nRssAnon:\t  1024 kB\nVmSwap:\t   512 kB\n"
 
@@ -151,7 +152,7 @@ func TestProcfsUsage(t *testing.T) {
 	u, err := p.Usage(42)
 
 	// Assert
-	want := Usage{CPUSeconds: 2, ResidentBytes: 2048 << 10, FootprintBytes: 1536 << 10, DiskReadBytes: 4096, DiskWriteBytes: 8192, Threads: 7, OpenFDs: 3}
+	want := Usage{CPUSeconds: 2, ChildCPUSeconds: 0.5, ResidentBytes: 2048 << 10, FootprintBytes: 1536 << 10, DiskReadBytes: 4096, DiskWriteBytes: 8192, Threads: 7, OpenFDs: 3}
 	if err != nil || u != want {
 		t.Fatalf("Usage = (%+v, %v), want %+v", u, err, want)
 	}

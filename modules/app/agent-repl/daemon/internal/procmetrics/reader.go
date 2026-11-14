@@ -49,11 +49,15 @@ type Identity struct {
 
 // Usage is what is measured, read only for agent-repl's processes.
 type Usage struct {
-	CPUSeconds     float64
-	ResidentBytes  uint64
-	FootprintBytes uint64
-	DiskReadBytes  uint64
-	DiskWriteBytes uint64
+	CPUSeconds float64
+	// ChildCPUSeconds is the CPU (user and system) of every child the
+	// process has reaped, each with its own reaped children: a tool that
+	// starts and exits between two samples is counted only through it.
+	ChildCPUSeconds float64
+	ResidentBytes   uint64
+	FootprintBytes  uint64
+	DiskReadBytes   uint64
+	DiskWriteBytes  uint64
 	// EnergyJoules is zero where the kernel attributes no energy
 	// (Platform.MeasuresEnergy).
 	EnergyJoules float64

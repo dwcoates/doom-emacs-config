@@ -5,6 +5,7 @@ package procmetrics
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"slices"
 	"testing"
 
@@ -57,6 +58,28 @@ func TestKernelReadsThisProcessArgv(t *testing.T) {
 	// Assert
 	if err != nil || !slices.Equal(args, os.Args) {
 		t.Fatalf("Args(self) = (%q, %v), want %q", args, err, os.Args)
+	}
+}
+
+func TestKernelReadsTheCPUOfTheChildrenThisProcessReaped(t *testing.T) {
+	// Arrange: a child this process runs to its end and reaps.
+	before, err := Kernel{}.Usage(os.Getpid())
+	if err != nil {
+		t.Fatalf("Usage(self) before: %v", err)
+	}
+	if err := exec.Command("/usr/bin/true").Run(); err != nil {
+		t.Fatalf("run /usr/bin/true: %v", err)
+	}
+
+	// Act
+	after, err := Kernel{}.Usage(os.Getpid())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Usage(self) after: %v", err)
+	}
+	if after.ChildCPUSeconds <= before.ChildCPUSeconds {
+		t.Fatalf("ChildCPUSeconds = %v after reaping a child, want more than %v", after.ChildCPUSeconds, before.ChildCPUSeconds)
 	}
 }
 
