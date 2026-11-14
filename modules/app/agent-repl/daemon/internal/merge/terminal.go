@@ -829,15 +829,10 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// this: it reads the state client, which closes once the drain returns
 	// (2026-11-13: a judgement kicked during an exit read a closed database).
 	if judged := o.stopOffQueueLanded(); judged != nil {
-		select {
-		case <-judged:
-		case <-expired.C:
-			log.Error(op, "the judgement of the merges off their queues outlived the drain's bound; the state client closes under it",
-				dlog.Context{"bound": bound.String()})
-			return
-		case <-ctx.Done():
-			log.Error(op, "the drain was cancelled while the merges off their queues were being judged; the state client closes under it",
-				dlog.Context{"bound": bound.String()})
+		if !drainStep(ctx, log, op, expired.C, judged,
+			"the judgement of the merges off their queues outlived the drain's bound; the state client closes under it",
+			"the drain was cancelled while the merges off their queues were being judged; the state client closes under it",
+			dlog.Context{"bound": bound.String()}) {
 			return
 		}
 	}
@@ -845,15 +840,10 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	// starts after this (mediationlife.go): its pass and rounds read the
 	// state client, which closes once the drain returns.
 	if mediated := o.stopMediation(); mediated != nil {
-		select {
-		case <-mediated:
-		case <-expired.C:
-			log.Error(op, "the deploy mediation outlived the drain's bound; the state client closes under it",
-				dlog.Context{"bound": bound.String()})
-			return
-		case <-ctx.Done():
-			log.Error(op, "the drain was cancelled while the deploy mediation was ending; the state client closes under it",
-				dlog.Context{"bound": bound.String()})
+		if !drainStep(ctx, log, op, expired.C, mediated,
+			"the deploy mediation outlived the drain's bound; the state client closes under it",
+			"the drain was cancelled while the deploy mediation was ending; the state client closes under it",
+			dlog.Context{"bound": bound.String()}) {
 			return
 		}
 	}
@@ -863,30 +853,20 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	if admitted != nil {
 		log.Debug(op, "the merge drain waits for the admission steps already in flight",
 			dlog.Context{"bound": bound.String(), "in_flight": inFlight})
-		select {
-		case <-admitted:
-		case <-expired.C:
-			log.Error(op, "an admission step outlived the drain's bound; the state client closes under it",
-				dlog.Context{"bound": bound.String(), "in_flight": inFlight})
-			return
-		case <-ctx.Done():
-			log.Error(op, "the drain was cancelled while an admission step was in flight; the state client closes under it",
-				dlog.Context{"bound": bound.String(), "in_flight": inFlight})
+		if !drainStep(ctx, log, op, expired.C, admitted,
+			"an admission step outlived the drain's bound; the state client closes under it",
+			"the drain was cancelled while an admission step was in flight; the state client closes under it",
+			dlog.Context{"bound": bound.String(), "in_flight": inFlight}) {
 			return
 		}
 	}
 	// THE SUSPENDED RUNS LET GO NEXT: a cut wait answers at once, and what a
 	// run does on its way out is in-process only.
 	for _, r := range suspended {
-		select {
-		case <-r.finished:
-		case <-expired.C:
-			log.Error(op, "a suspended merge did not let go before the drain's bound; the state client closes under it",
-				dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()})
-			return
-		case <-ctx.Done():
-			log.Error(op, "the drain was cancelled while a suspended merge was letting go; the state client closes under it",
-				dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()})
+		if !drainStep(ctx, log, op, expired.C, r.finished,
+			"a suspended merge did not let go before the drain's bound; the state client closes under it",
+			"the drain was cancelled while a suspended merge was letting go; the state client closes under it",
+			dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "bound": bound.String()}) {
 			return
 		}
 	}
@@ -914,6 +894,23 @@ func (o *orchestrator) Drain(ctx context.Context) {
 	}
 	log.Debug(op, "the merge drain finished every terminal it was holding",
 		dlog.Context{"terminals": len(waits), "suspended": len(suspended), "bound": bound.String()})
+}
+
+// drainStep waits for one step of the drain, DONE, within the drain's one
+// bound (EXPIRED fires once it is spent) and CTX, and answers whether the
+// drain goes on. A step that outlives the bound is recorded at ERROR as
+// OVERRAN, and one the drain's cancellation cut as CANCELLED: either way the
+// state client closes under it, so the drain returns.
+func drainStep(ctx context.Context, log dlog.Logger, op string, expired <-chan time.Time, done <-chan struct{}, overran, cancelled string, fields dlog.Context) bool {
+	select {
+	case <-done:
+		return true
+	case <-expired:
+		log.Error(op, overran, fields)
+	case <-ctx.Done():
+		log.Error(op, cancelled, fields)
+	}
+	return false
 }
 
 // errDaemonExiting is the cause the drain cuts a suspended run's waits with.

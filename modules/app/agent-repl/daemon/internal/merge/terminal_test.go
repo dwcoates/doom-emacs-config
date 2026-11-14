@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -2596,5 +2597,76 @@ func TestALandingWhoseOwnedPullRequestsCannotBeReadLeavesTheWorkspaceOpen(t *tes
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Message: "could not read whether the merged workspace's owned pull requests have merged; it is left open"}); !ok {
 		t.Fatal("the failed read was not recorded at error")
+	}
+}
+
+func TestDrainStep(t *testing.T) {
+	tests := []struct {
+		name      string
+		done      bool
+		expired   bool
+		cancelled bool
+		want      bool
+		wantError string
+	}{
+		{name: "a step that finished lets the drain go on", done: true, want: true},
+		{name: "a step that outlives the bound ends the drain", expired: true, wantError: "overran"},
+		{name: "a step the drain's cancellation cuts ends the drain", cancelled: true, wantError: "cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			done, expired := make(chan struct{}), make(chan time.Time, 1)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.done {
+				close(done)
+			}
+			if tt.expired {
+				expired <- time.Time{}
+			}
+			if tt.cancelled {
+				cancel()
+			}
+
+			// Act
+			got := drainStep(ctx, log, "daemon.merge.drain", expired, done, "overran", "cancelled", dlog.Context{"bound": "1s"})
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("drainStep = %v, want %v", got, tt.want)
+			}
+			errs := 0
+			for _, rec := range log.Records() {
+				if rec.Level == dlog.LevelError {
+					errs++
+					if rec.Message != tt.wantError || rec.Context["bound"] != "1s" {
+						t.Fatalf("recorded %+v, want %q with the step's fields", rec, tt.wantError)
+					}
+				}
+			}
+			if want := map[bool]int{true: 1, false: 0}[tt.wantError != ""]; errs != want {
+				t.Fatalf("recorded %d errors, want %d: %v", errs, want, log.Records())
+			}
+		})
+	}
+}
+
+// Every step the drain waits out under its one bound goes through drainStep,
+// so a step added by hand cannot drift from the others' recording.
+func TestEveryDrainStepGoesThroughDrainStep(t *testing.T) {
+	// Act
+	steps := sourcescan.Sites(t, "drainStep(ctx, log, op, expired.C,")
+	byHand := sourcescan.Sites(t, "case <-expired.C:")
+
+	// Assert
+	if len(steps) != 4 {
+		t.Fatalf("drainStep is called at %v, want the off-queue judgement, the mediation, the admissions and the suspended runs", steps)
+	}
+	// The two left are not steps of that shape: the terminal waits record
+	// every merge left undrained, and the git stop records what it waited.
+	if want := []string{"terminal.go", "terminal.go"}; !slices.Equal(byHand, want) {
+		t.Fatalf("the bound is waited by hand at %v, want only the terminal waits and the git stop", byHand)
 	}
 }
