@@ -144,7 +144,6 @@ var createRefusalArms = map[string]bool{
 	"version_increment_unexpected":          true,
 	"async_merge_requester_merging":         true,
 	"async_merge_requester_session_deleted": true,
-	"requester_bypassing_queue":             true,
 	ArmPlacementOnChild:                     true,
 	ArmPlacementOnMergeWorkspace:            true,
 	ArmPlacementRequiresWorkspace:           true,

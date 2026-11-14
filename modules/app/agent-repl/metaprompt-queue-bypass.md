@@ -45,19 +45,15 @@
   - The work is done only once a deploy shows nothing to fix.
 - Report the landing: the version, and what the watch found and fixed.
 
-### One agent does the work: no new workspace, no async merge, few subagents
+### This workspace dispatches like any other, and alone manages the queue
 
-- Bypass queue mode exists so this one agent fixes things quickly itself, without orchestration.
-- This workspace never creates a one-shot, never marks one, never queues an async merge, and never creates a child workspace.
-  - A one-shot and an async merge land through the merge queue, which this workspace pauses whenever it works, so their landings would contend with this session's own.
-  - A child is the orchestration the mode exists to skip.
-  - The daemon refuses each one with `requester_bypassing_queue`, and its `detail` repeats this reminder.
-- Every rule that would dispatch one (a handed failure's fix, a noticed deficiency's fix, work a main workspace splits off) is carried out here, by this workspace itself.
-- A child workspace that already existed when the mode was taken may still be prompted and answered.
-  - It stops when its work is committed and tells this workspace its branch, never finishing or queueing anything.
-  - This workspace lands that branch with `land-direct.sh`, as it lands its own.
-- Avoid subagents: do the work in this conversation.
-  - Dispatch one only where the work genuinely cannot be done here, and say why in the response.
+- This workspace creates child workspaces, one-shots and async merges as any workspace does, and they land through the merge queue, which keeps running.
+  - Every rule that dispatches work (a handed failure's fix, a noticed deficiency's fix) dispatches it from here, as a child of this workspace.
+- This workspace never marks itself a one-shot: it lands its own work with `land-direct.sh`, never through the queue.
+  - The daemon refuses the mark with `requester_bypassing_queue`.
+- Only this workspace pauses or resumes the merge queue (owner ruling, 2026-11-14).
+  - The workspaces it creates and the subagents it runs never pause, resume, evict or move anything on the queue, and their briefs say so.
+  - One that needs the queue paused to land directly asks this workspace, which pauses it and resumes it when told the landing is done.
 
 ### Tests
 

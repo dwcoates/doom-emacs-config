@@ -142,16 +142,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
   });
 
-  it("forbids a queue-bypass session one-shots, async merges and child workspaces, and says what replaces them", () => {
+  it("lets a queue-bypass session dispatch like any other, and keeps the queue its alone to manage", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("bypassing_queue", home);
-    // Assert — owner ruling 2026-11-12: the mode's one agent does the work
-    // itself, so it creates no child workspace either.
-    expect(text).toContain("This workspace never creates a one-shot, never marks one, never queues an async merge, and never creates a child workspace.");
-    expect(text).toContain("`requester_bypassing_queue`");
-    expect(text).toContain("This workspace lands that branch with `land-direct.sh`, as it lands its own.");
+    // Assert — owner ruling 2026-11-14: the queue keeps running, so the
+    // session's children land through it, and only the session manages it.
+    expect(text).toContain("This workspace creates child workspaces, one-shots and async merges as any workspace does");
+    expect(text).toContain("This workspace never marks itself a one-shot");
+    expect(text).toContain("Only this workspace pauses or resumes the merge queue");
+    expect(text).not.toContain("never creates a child workspace");
   });
 
   it("has a queue-bypass session pause the queue only to land, and resume it at once", () => {
@@ -209,7 +210,6 @@ describe("this repository's committed metaprompt", () => {
     // and the table is not a backlog.
     expect(text).toContain("I start its fix at once, without asking.");
     expect(text).toContain("dispatches each fix as its own async merge the moment it notices it");
-    expect(text).toContain("A workspace in queue bypass mode fixes it itself");
     expect(text).toContain("A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.");
     expect(text).not.toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");
   });

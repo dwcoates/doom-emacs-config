@@ -594,8 +594,11 @@ message CreateWorkspaceError {
   // Tag 36 (`async_merge_requester_queued`) is RETIRED (owner ruling,
   // 2026-11-12): each async request is recorded on its own, so a requester
   // asks for any number in one turn, beside a merge of its own branch.
-  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 27, 36;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned", "async_merge_requester_queued";
+  // Tag 54 (`requester_bypassing_queue`) is RETIRED (owner ruling,
+  // 2026-11-14): the merge queue keeps running while a workspace holds the
+  // queue bypass mode, so what it creates lands through the queue as usual.
+  reserved 3, 4, 5, 8, 9, 15, 22, 23, 24, 27, 36, 54;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands", "owner_notice_required", "owner_notice_unexpected", "async_merge_branch_owned", "async_merge_requester_queued", "requester_bypassing_queue";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -742,12 +745,6 @@ message CreateWorkspaceError {
     // worktree, branch and registration removed), as every failed create is,
     // and the repository's main workspace was asked to find out why.
     CreateWorkspaceCreationHookFailed creation_hook_failed = 53;
-    // The requester holds its repository's queue bypass mode, and the create
-    // asked for a one-shot workspace or an async merge: either one lands
-    // through the merge queue, which the mode hard-stops (owner ruling,
-    // 2026-11-10). Nothing was created. The requester does the work itself,
-    // or creates a child that is no one-shot and lands its branch directly.
-    CreateWorkspaceRequesterBypassingQueue requester_bypassing_queue = 54;
     // The placement names a workspace with a parent: a child sits wherever
     // its owner does. Nothing was created.
     CreateWorkspacePlacementOnChild placement_on_child = 55;
@@ -768,12 +765,6 @@ message CreateWorkspaceError {
     // subsection, of another repository, or named twice.
     CreateWorkspaceGatherNotGatherable gather_not_gatherable = 61;
   }
-}
-// The requester holds the queue bypass mode, so it dispatches no one-shot and
-// no async merge.
-message CreateWorkspaceRequesterBypassingQueue {
-  // What the requester is reminded to do instead, composed by the daemon.
-  string detail = 1;
 }
 // A placement on a child workspace.
 message CreateWorkspacePlacementOnChild {

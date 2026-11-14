@@ -32,27 +32,6 @@ func bypassOneShotCreate(h *harness) *agentreplv1.CreateWorkspaceRequest {
 	return req
 }
 
-func TestAOneShotAskedWhileHoldingTheBypassModeIsRefusedWithItsReminder(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	holdingBypass(h)
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassOneShotCreate(h)))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	refusal := resp.Msg.GetError().GetRequesterBypassingQueue()
-	if refusal == nil || !strings.Contains(refusal.GetDetail(), "land-direct.sh") {
-		t.Fatalf("answer = %v, want the bypass refusal with its reminder", resp.Msg)
-	}
-	if len(h.Verbs.createSpecs) != 0 {
-		t.Fatalf("creates = %+v, want none", h.Verbs.createSpecs)
-	}
-}
-
 // bypassStandardCreate is a standard create the test workspace asks for,
 // under RELATIONSHIP.
 func bypassStandardCreate(h *harness, relationship *agentreplv1.WorkspaceRelationship) *agentreplv1.CreateWorkspaceRequest {
@@ -65,62 +44,34 @@ func bypassStandardCreate(h *harness, relationship *agentreplv1.WorkspaceRelatio
 	return req
 }
 
-func TestAChildAskedWhileHoldingTheBypassModeIsRefusedWithItsReminder(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	holdingBypass(h)
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassStandardCreate(h, childRelationship(ref()))))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
-	refusal := resp.Msg.GetError().GetRequesterBypassingQueue()
-	if refusal == nil || !strings.Contains(refusal.GetDetail(), "a child workspace refused") || !strings.Contains(refusal.GetDetail(), "no child workspace") {
-		t.Fatalf("answer = %v, want the bypass refusal naming the child", resp.Msg)
-	}
-	if len(h.Verbs.createSpecs) != 0 {
-		t.Fatalf("creates = %+v, want none", h.Verbs.createSpecs)
-	}
-}
-
-func TestAPeerAskedWhileHoldingTheBypassModeIsCreated(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	holdingBypass(h)
-	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
-
-	// Act
-	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassStandardCreate(h, peerRelationship())))
-
-	// Assert
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("CreateWorkspace = %v, %v; want success", resp, err)
-	}
-}
-
-func TestBypassRefusedCreateNamesEveryCreateTheModeRefuses(t *testing.T) {
-	parent := ids.WorkspaceID("ws-parent")
+// TestEveryCreateAskedWhileHoldingTheBypassModeIsMade covers the owner's
+// ruling (2026-11-14): a workspace in queue bypass mode creates its peers,
+// children and one-shots as any workspace does, since the queue they land
+// through keeps running while the mode is held.
+func TestEveryCreateAskedWhileHoldingTheBypassModeIsMade(t *testing.T) {
 	tests := []struct {
 		name string
-		spec workspace.CreateSpec
-		want string
+		req  func(h *harness) *agentreplv1.CreateWorkspaceRequest
 	}{
-		{name: "a one-shot", spec: workspace.CreateSpec{OneShot: true}, want: "a one-shot workspace"},
-		{name: "a one-shot child", spec: workspace.CreateSpec{OneShot: true, Parent: &parent}, want: "a one-shot workspace"},
-		{name: "a child", spec: workspace.CreateSpec{Parent: &parent}, want: "a child workspace"},
-		{name: "a peer", spec: workspace.CreateSpec{}, want: ""},
+		{name: "a peer", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest { return bypassStandardCreate(h, peerRelationship()) }},
+		{name: "a child", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
+			return bypassStandardCreate(h, childRelationship(ref()))
+		}},
+		{name: "a one-shot", req: bypassOneShotCreate},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			holdingBypass(h)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
 			// Act
-			got := bypassRefusedCreate(tt.spec)
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(tt.req(h)))
 
 			// Assert
-			if got != tt.want {
-				t.Fatalf("bypassRefusedCreate = %q, want %q", got, tt.want)
+			if err != nil || resp.Msg.GetSuccess() == nil || len(h.Verbs.createSpecs) != 1 {
+				t.Fatalf("CreateWorkspace = %v, %v (creates %d); want it made", resp, err, len(h.Verbs.createSpecs))
 			}
 		})
 	}
@@ -140,20 +91,6 @@ func TestAOneShotAskedWithoutTheBypassModeIsCreated(t *testing.T) {
 	}
 }
 
-func TestAOneShotWhoseRequestersStandingCannotBeReadFails(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.DB.bypassErr = errors.New("store down")
-
-	// Act
-	_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(bypassOneShotCreate(h)))
-
-	// Assert
-	if err == nil || len(h.Verbs.createSpecs) != 0 {
-		t.Fatalf("err %v, creates %d; want the read's failure and nothing created", err, len(h.Verbs.createSpecs))
-	}
-}
-
 func TestMarkingAWorkspaceHoldingTheBypassModeAOneShotIsRefused(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -166,5 +103,38 @@ func TestMarkingAWorkspaceHoldingTheBypassModeAOneShotIsRefused(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "queue bypass mode") || len(h.Verbs.api.oneShots) != 0 {
 		t.Fatalf("err %v, marks %+v; want the bypass refusal and no mark", err, h.Verbs.api.oneShots)
+	}
+}
+
+func TestAOneShotMarkWhoseStandingCannotBeReadFails(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.DB.bypassErr = errors.New("store down")
+
+	// Act
+	_, err := h.Client.SetWorkspaceOneShot(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceOneShotRequest{
+		Workspace: ref(), Requester: workspaceRequester(ref()), OneShot: true}))
+
+	// Assert
+	if err == nil || len(h.Verbs.api.oneShots) != 0 {
+		t.Fatalf("err %v, marks %+v; want the read's failure and no mark", err, h.Verbs.api.oneShots)
+	}
+}
+
+func TestAnAsyncMergeAskedWhileHoldingTheBypassModeIsAccepted(t *testing.T) {
+	// Arrange
+	h, req := asyncHarness(t)
+	holdingBypass(h)
+	async := req.GetAsyncMerge()
+	async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Maker{Maker: &agentreplv1.CreateWorkspaceAsyncMergeTargetMaker{}}}
+	async.Placement = frontPlacement()
+	async.Source.Branch = "agent-1/fix"
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil || resp.Msg.GetAsyncMergeAccepted() == nil || len(h.Merge.requests) != 1 {
+		t.Fatalf("CreateWorkspace = %v, %v; want the async merge accepted", resp, err)
 	}
 }
