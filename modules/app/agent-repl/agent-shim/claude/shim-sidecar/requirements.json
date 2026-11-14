@@ -52,7 +52,7 @@
         "--store-socket",
         "~/.cache/agent-repl/sock/store.sock",
         "--config-roots",
-        "~/.claude,~/.claude-chesscom",
+        "{claude-config-roots}",
         "--spool-root",
         "/tmp",
         "--state-dir",
