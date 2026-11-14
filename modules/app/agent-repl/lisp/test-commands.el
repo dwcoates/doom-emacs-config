@@ -627,15 +627,17 @@ band's, in one group."
           :closed (agent-repl-test--closed-rows closed)
           :current nil)))
 
-(defun agent-repl-test-commands--closed-row (name by at-ms)
+(defun agent-repl-test-commands--closed-row (name by at-ms &optional selected-ms)
   "Return a decoded CLOSED roster row for NAME, closed BY (an arm) at AT-MS.
-BY nil is a close that predates the daemon's record: no `closure'."
+BY nil is a close that predates the daemon's record: no `closure'.
+SELECTED-MS is its last-selected instant, 100 when not given."
   (append (list :closure (and by (list :at-ms at-ms :by (list :arm by :value nil))))
-          (agent-repl-test-commands--row name (concat "id-" name) 100 t at-ms)))
+          (agent-repl-test-commands--row name (concat "id-" name) (or selected-ms 100) t at-ms)))
 
-(defun agent-repl-test-commands--merged-row (name at-ms)
-  "Return a decoded merged roster row for NAME, landed at AT-MS."
-  (let ((row (agent-repl-test-commands--row name (concat "id-" name) 100 t at-ms)))
+(defun agent-repl-test-commands--merged-row (name at-ms &optional selected-ms)
+  "Return a decoded merged roster row for NAME, landed at AT-MS.
+SELECTED-MS is its last-selected instant, 100 when not given."
+  (let ((row (agent-repl-test-commands--row name (concat "id-" name) (or selected-ms 100) t at-ms)))
     (plist-put row :status '(:arm :merged :value nil))
     (plist-put row :when (list :arm :merged :value (list :at-ms at-ms)))))
 
@@ -2281,37 +2283,48 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (equal (sort (copy-sequence offered) #'string<)
                      '("landed" "mine" "open" "tucked"))))))
 
-(ert-deftest agent-repl-test-commands-switcher-offers-the-most-recently-updated-first ()
-  "`SPC p p' offers every section's workspaces most recently updated first."
-  ;; Arrange
-  (let ((rows (list (agent-repl-test-commands--row "stale" "id-stale" 100 nil 100)
-                    (agent-repl-test-commands--row "fresh" "id-fresh" 100 nil 900)
-                    (agent-repl-test-commands--closed-row "mine" :user 500)))
-        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 100 nil 800)))
-        (merged (list (agent-repl-test-commands--merged-row "landed" 700))))
+(ert-deftest agent-repl-test-commands-switcher-offers-the-most-recently-selected-first ()
+  "`SPC p p' offers every section's workspaces most recently selected first."
+  ;; Arrange: update recency (last arg) deliberately disagrees with selection.
+  (let ((rows (list (agent-repl-test-commands--row "stale" "id-stale" 100 nil 900)
+                    (agent-repl-test-commands--row "fresh" "id-fresh" 900 nil 100)
+                    (agent-repl-test-commands--closed-row "mine" :user 500 400)))
+        (hidden (list (agent-repl-test-commands--row "tucked" "id-tucked" 800 nil 100)))
+        (merged (list (agent-repl-test-commands--merged-row "landed" 700 600))))
     ;; Act
     (let ((offered (agent-repl-test-commands--offered-by
                     #'agent-repl-switch-to-project rows hidden merged)))
       ;; Assert
       (should (equal offered '("fresh" "tucked" "landed" "mine" "stale"))))))
 
+(ert-deftest agent-repl-test-commands-switcher-ranks-a-never-selected-workspace-last ()
+  "A workspace with no last-selected instant sits below every selected one."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "never" "id-never" nil nil 900)
+                    (agent-repl-test-commands--row "once" "id-once" 5 nil 1))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-by
+                    #'agent-repl-switch-to-project rows)))
+      ;; Assert
+      (should (equal offered '("once" "never"))))))
+
 (ert-deftest agent-repl-test-commands-switcher-keeps-roster-order-between-ties ()
-  "Workspaces updated at the same instant keep the roster's own order."
+  "Workspaces selected at the same instant keep the roster's own order."
   ;; Arrange
   (let ((rows (list (agent-repl-test-commands--row "first" "id-first" 100 nil 300)
-                    (agent-repl-test-commands--row "second" "id-second" 100 nil 300))))
+                    (agent-repl-test-commands--row "second" "id-second" 100 nil 900))))
     ;; Act
     (let ((offered (agent-repl-test-commands--offered-by
                     #'agent-repl-switch-to-project rows)))
       ;; Assert
       (should (equal offered '("first" "second"))))))
 
-(ert-deftest agent-repl-test-commands-switch-to-any-offers-the-most-recently-updated-first ()
-  "`SPC p P' orders every known workspace most recently updated first too."
+(ert-deftest agent-repl-test-commands-switch-to-any-offers-the-most-recently-selected-first ()
+  "`SPC p P' orders every known workspace most recently selected first too."
   ;; Arrange
-  (let ((rows (list (agent-repl-test-commands--closed-row "by-daemon" :daemon 200)
-                    (agent-repl-test-commands--row "open" "id-open" 100 nil 900)))
-        (merged (list (agent-repl-test-commands--merged-row "landed" 500))))
+  (let ((rows (list (agent-repl-test-commands--closed-row "by-daemon" :daemon 200 300)
+                    (agent-repl-test-commands--row "open" "id-open" 900 nil 100)))
+        (merged (list (agent-repl-test-commands--merged-row "landed" 500 500))))
     ;; Act
     (let ((offered (agent-repl-test-commands--offered-by
                     #'agent-repl-switch-to-any-workspace rows nil merged)))
@@ -2321,27 +2334,13 @@ and `--switched' to the workspace whose switch was requested of the daemon."
 (ert-deftest agent-repl-test-commands-switch-by-recency-ranks-a-rowless-workspace-first ()
   "A live local workspace no roster push carries yet is the newest there is."
   ;; Arrange
-  (let ((entries (list (list :name "known" :row (agent-repl-test-commands--row "known" "id-k" 1 nil 900))
+  (let ((entries (list (list :name "known" :row (agent-repl-test-commands--row "known" "id-k" 900))
                        (list :name "registering" :row nil))))
     ;; Act
     (let ((ranked (agent-repl--switch-by-recency entries)))
       ;; Assert
       (should (equal (mapcar (lambda (e) (plist-get e :name)) ranked)
                      '("registering" "known"))))))
-
-(ert-deftest agent-repl-test-commands-switch-by-recency-without-an-update-recency-fails-hard ()
-  "A row that states no update recency is a violated invariant."
-  ;; Arrange
-  (let ((errors nil)
-        (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
-    (plist-put row :last-updated nil)
-    (cl-letf (((symbol-function 'agent-repl--error)
-               (agent-repl-test--record-into errors)))
-      ;; Act / Assert
-      (should-error (agent-repl--switch-by-recency
-                     (list (list :name "bare" :row row)
-                           (list :name "other" :row (agent-repl-test-commands--row "o" "id-o" 2)))))
-      (should (string-match-p "switch-update-ms: name=bare has no update recency" (car errors))))))
 
 (ert-deftest agent-repl-test-commands-switcher-leaves-out-what-the-user-did-not-close ()
   "A workspace the daemon, an agent or a merge closed is left to `SPC p P'."
@@ -2427,18 +2426,15 @@ and `--switched' to the workspace whose switch was requested of the daemon."
         (should (eq (car (car (car logged))) :agent-repl-central))))))
 
 (ert-deftest agent-repl-test-commands-switch-rankings-share-the-invariant-failure ()
-  "Both switcher rankings report a broken entry through the one shared failure."
+  "The switcher's most-recent ranking reports a broken entry through the shared failure."
   ;; Arrange
-  (let ((calls nil)
-        (row (agent-repl-test-commands--row "bare" "id-bare" 1)))
-    (plist-put row :last-updated nil)
+  (let ((calls nil))
     (cl-letf (((symbol-function 'agent-repl--switch-entry-invariant-failed)
                (lambda (op _entry _missing) (push op calls) (error "stop"))))
       ;; Act
       (ignore-errors (agent-repl--switch-most-recent '((:name "x")) #'ignore))
-      (ignore-errors (agent-repl--switch-update-ms (list :name "bare" :row row)))
       ;; Assert
-      (should (equal (reverse calls) '("switch-most-recent" "switch-update-ms"))))))
+      (should (equal (reverse calls) '("switch-most-recent"))))))
 
 (ert-deftest agent-repl-test-commands-switcher-ranking-without-an-instant-fails-hard ()
   "An entry handed to the ranking with no instant is a violated invariant."
