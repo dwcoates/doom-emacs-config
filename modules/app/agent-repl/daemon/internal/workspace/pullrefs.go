@@ -49,7 +49,7 @@ func (v *verbs) bindPullTarget(ctx context.Context, log dlog.Logger, record wsm.
 	// THE GITHUB NAME IS THE ORIGIN'S, never the checkout directory's: the
 	// two differ (the `doom` checkout's origin is `doom-emacs-config`), and a
 	// name read off the directory linked every `#n` to the wrong repository.
-	remote, err := v.deps.Git.RemoteURL(ctx, repo.Dir, "origin")
+	_, name, remote, onGithub, err := prwatch.OriginRepository(ctx, v.deps.Git, repo.Dir)
 	if err != nil {
 		// A repository with no readable origin (a local-only repository) has
 		// no GitHub repository to link into: an ordinary fact, never a
@@ -60,7 +60,6 @@ func (v *verbs) bindPullTarget(ctx context.Context, log dlog.Logger, record wsm.
 		v.deps.Feed.SetPullTarget(record.ID, nil)
 		return nil
 	}
-	_, name, onGithub := prwatch.RepositoryOfRemote(remote)
 	if !onGithub {
 		log.Debug(opPullTarget, "the repository's origin is not on github.com; its references link nowhere", dlog.Context{
 			"workspace": string(record.ID), "repository_dir": repo.Dir, "origin": remote,
