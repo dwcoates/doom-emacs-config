@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+
+	"agentrepl/logging/procstat"
 )
 
 // readProcessState reads pid's state from /proc (procgroup.ReadState).
@@ -35,7 +37,7 @@ func threadsHalted(pid int) (halted, awaitingCPU bool, name string, err error) {
 		if err != nil {
 			return false, false, "", err
 		}
-		line, err := procgroup.ParseStat(string(raw))
+		line, err := procstat.ParseStat(string(raw))
 		if err != nil {
 			return false, false, "", fmt.Errorf("unparseable /proc/%d/task/%s/stat: %w", pid, task.Name(), err)
 		}

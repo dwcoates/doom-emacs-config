@@ -80,9 +80,3 @@ func parseProcArgs2(buf []byte) (string, error) {
 	}
 	return strings.Join(args, " "), nil
 }
-
-// parseProcCmdline decodes a linux `/proc/<pid>/cmdline`: NUL-terminated
-// arguments, answered joined by single spaces.
-func parseProcCmdline(raw []byte) string {
-	return strings.Join(strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00"), " ")
-}

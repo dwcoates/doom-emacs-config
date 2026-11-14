@@ -60,28 +60,6 @@ func TestParseProcArgs2(t *testing.T) {
 	}
 }
 
-func TestParseProcCmdline(t *testing.T) {
-	cases := []struct {
-		name string
-		raw  string
-		want string
-	}{
-		{name: "arguments are joined by spaces", raw: "/bin/daemon\x00--state-dir\x00/tmp/s\x00", want: "/bin/daemon --state-dir /tmp/s"},
-		{name: "a single argument stands alone", raw: "/bin/x\x00", want: "/bin/x"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := parseProcCmdline([]byte(tc.raw))
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("parseProcCmdline = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // TestProcessTableListsALiveChildWithItsArgv asserts the table names a process
 // this test started, under its own pid, with the argv it was started with.
 func TestProcessTableListsALiveChildWithItsArgv(t *testing.T) {

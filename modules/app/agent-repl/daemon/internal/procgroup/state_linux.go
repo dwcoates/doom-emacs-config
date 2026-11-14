@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+
+	"agentrepl/logging/procstat"
 )
 
 // readStat reads pid's /proc/<pid>/stat line, answering gone for a pid with
@@ -30,7 +32,7 @@ func ReadState(pid int) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	line, err := ParseStat(raw)
+	line, err := procstat.ParseStat(raw)
 	if err != nil {
 		return State{}, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 	}
@@ -65,7 +67,7 @@ func LiveMembers(pgid int) ([]Member, error) {
 			return nil, err
 		}
 		// The state, ppid and pgrp follow the parenthesized command name.
-		line, err := ParseStat(string(raw))
+		line, err := procstat.ParseStat(string(raw))
 		if err != nil {
 			return nil, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 		}

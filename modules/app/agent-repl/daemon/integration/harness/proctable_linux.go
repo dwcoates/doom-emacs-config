@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+
+	"agentrepl/logging/procstat"
 )
 
 // processTable answers every live process visible under /proc, with its argv.
@@ -32,7 +35,7 @@ func processTable() ([]procEntry, error) {
 		if len(raw) == 0 {
 			continue
 		}
-		entries = append(entries, procEntry{pid: pid, args: parseProcCmdline(raw)})
+		entries = append(entries, procEntry{pid: pid, args: strings.Join(procstat.ParseCmdline(raw), " ")})
 	}
 	return entries, nil
 }
