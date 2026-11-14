@@ -2,9 +2,12 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
+	"agent-repld/internal/sessionwatcher"
 )
 
 // mediationLife is the lifetime of the deploy mediation's work in this
@@ -30,6 +33,10 @@ type mediationLife struct {
 	running int
 	// idle is closed when running falls to zero after a stop; nil otherwise.
 	idle chan struct{}
+	// handedOver is set when a handover cut a round (mediationFailed): the
+	// successor runs it, and should the handover end with this daemon
+	// serving again, this daemon runs it again (resumeHandedOver).
+	handedOver bool
 }
 
 // enterMediation enters a pass or a round, answering the context it runs
@@ -91,13 +98,60 @@ const mediationNotRun = "the mediations were not run: this daemon is stopping; t
 
 // mediationFailed records a pass's or a round's failure ERR and answers
 // whether it was a cut: at INFO when the daemon's exit (or the caller) cut
-// CTX under it, since the next boot's pass runs it again, and at ERROR as
-// MESSAGE otherwise.
+// CTX under it, since the next boot's pass runs it again, or when a handover
+// took the mediator's session away (cutByHandover), since the daemon that
+// serves the queues next runs it again; and at ERROR as MESSAGE otherwise.
 func (o *orchestrator) mediationFailed(ctx context.Context, fields dlog.Context, message string, err error) bool {
 	if cutUnder(ctx, err) {
 		o.deps.Log.Global().Info(opMediation, "the mediation was cut by the daemon's exit; the next boot's pass runs it again", withField(withField(fields, "cut", message), "cause", err.Error()))
 		return true
 	}
+	if o.cutByHandover(err) {
+		o.deps.Log.Global().Info(opMediation, mediationHandedOver, withField(withField(fields, "cut", message), "cause", err.Error()))
+		return true
+	}
 	o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
 	return false
+}
+
+// mediationHandedOver is the record of a round a handover cut.
+const mediationHandedOver = "the mediation was cut by a handover; the daemon that serves the queues next runs it again"
+
+// cutByHandover answers whether ERR is a handover's cut, marking the round
+// owed a rerun here should this daemon serve again: the mediator's session
+// watcher closed while this daemon does not serve the queues. A WORKSPACE
+// TRANSFERS ONLY INSIDE A HANDOVER, and a standing handover never serves the
+// queues (rollout's servesQueueLocked), so the session a transfer takes away
+// is always read as this cut (2026-11-14: the mediator's transfer under a
+// round awaiting its turn was recorded at ERROR). A watcher closed while this
+// daemon serves is no handover's, and stays an error.
+func (o *orchestrator) cutByHandover(err error) bool {
+	if !errors.Is(err, sessionwatcher.ErrWatcherClosed) || o.deps.Standing.ServesQueue() {
+		return false
+	}
+	l := &o.mediationLife
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.handedOver = true
+	return true
+}
+
+// resumeHandedOver runs the mediation pass again when a handover cut a round
+// and this daemon serves the queues again: the handover ended without a
+// successor taking them, so nobody else runs the round.
+func (o *orchestrator) resumeHandedOver(ctx context.Context) {
+	l := &o.mediationLife
+	l.mu.Lock()
+	owed := l.handedOver
+	l.handedOver = false
+	l.mu.Unlock()
+	if !owed {
+		return
+	}
+	o.deps.Log.Global().Info(opMediation, "this daemon serves the queues again after a handover cut a mediation round; the round runs again", nil)
+	if !o.async {
+		o.Mediate(ctx)
+		return
+	}
+	inflight.Go(func() { o.Mediate(ctx) })
 }

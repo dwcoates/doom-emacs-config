@@ -72,6 +72,11 @@ func (o *orchestrator) followStandingOnce(ctx context.Context, last bool) (bool,
 
 // standingMoved holds or takes on every queue as SERVES says.
 func (o *orchestrator) standingMoved(ctx context.Context, serves bool) {
+	if serves {
+		// A ROUND A HANDOVER CUT RUNS AGAIN, whatever the queues' read
+		// answers: the mediation is read by the pass itself.
+		defer o.resumeHandedOver(ctx)
+	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		o.deps.Log.Global().Error(opStanding, "could not read the queues whose standing moved", dlog.Context{"serves": serves, "error": err.Error()})
