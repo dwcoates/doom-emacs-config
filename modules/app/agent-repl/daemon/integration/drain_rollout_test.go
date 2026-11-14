@@ -641,8 +641,6 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	// (2026-10-31: two queue merges' gates failed here, the successor having
 	// adopted the running shim before the early prompt arrived).
 	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
-	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -787,7 +785,6 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 	// on (the reproductions above do not either).
 	const workspaces = 2
 	selfRepo, d := drainSelfRepoDaemon(t)
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	fixtures := make([]*fixture, workspaces)
 	webs := make([]*harness.Stream[*agentreplv1.WatchWebWorkspaceResponse], workspaces)
 	for i := range fixtures {
@@ -997,9 +994,6 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	// the seam the call raced that exit and read `unexpected EOF`
 	// (2026-11-03, a queue merge's gate).
 	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
-	// The standing refusal is recorded as the transport's unlanded arm, as
-	// every refusal of a workspace this daemon no longer serves is.
-	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()

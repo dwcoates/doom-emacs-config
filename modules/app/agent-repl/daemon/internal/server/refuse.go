@@ -461,25 +461,14 @@ type resolved struct {
 // does not serve. Every per-workspace rpc goes through here BEFORE it
 // delegates: the verbs repeat the check for their own callers, but the rpcs
 // that do not route through the verbs would otherwise have none.
+//
+// A STANDING REFUSAL IS RECORDED BY WHOEVER ANSWERS IT, NOT HERE. It is the
+// ordinary answer to a client that reached the wrong side of a handover, so
+// it is marked Info: a unary's refuse records it at INFO when the rpc's error
+// carries the arm and WARNs it as unlanded only when it does not, and a
+// stream's TransportClosed records it at INFO. Warning it here as well called
+// every typed transferring_away an unlanded arm (OpenFeed, 2026-11-14).
 func (s *server) resolveRef(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
-	return s.resolveRefLogging(ctx, rpc, ref, true)
-}
-
-// resolveStreamRef is resolveRef for a STANDING STREAM. A refused stream open
-// is transport-closed by ruling, not an unlanded arm, so the standing refusals
-// are NOT warned here: the caller records them at INFO through TransportClosed.
-func (s *server) resolveStreamRef(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
-	return s.resolveRefLogging(ctx, rpc, ref, false)
-}
-
-// resolveRefLogging is the shared body; warnStanding selects whether a standing
-// refusal is warned as an unlanded arm.
-func (s *server) resolveRefLogging(
-	ctx context.Context,
-	rpc string,
-	ref *workspacev1.WorkspaceRef,
-	warnStanding bool,
-) (resolved, *refusal, error) {
 	id := ids.WorkspaceID(ref.GetId())
 
 	// THE SERVING STANDING IS DECIDED FIRST, BEFORE ANY STATE IS TOUCHED. A
@@ -507,21 +496,15 @@ func (s *server) resolveRefLogging(
 		r := s.fill(refusal{
 			Arm:    workspace.ArmTransferringAway,
 			Reason: fmt.Sprintf("workspace %q has been handed to a successor daemon", id),
+			Info:   true,
 		})
-		if warnStanding {
-			s.log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon no longer serves",
-				dlog.Context{"rpc": rpc, "arm": r.Arm, "workspace": string(id)})
-		}
 		return resolved{}, &r, nil
 	case workspace.StandingNotYetAdopted:
 		r := s.fill(refusal{
 			Arm:    workspace.ArmNotYetAdopted,
 			Reason: fmt.Sprintf("workspace %q has not been adopted by this daemon yet", id),
+			Info:   true,
 		})
-		if warnStanding {
-			s.log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon has not adopted",
-				dlog.Context{"rpc": rpc, "arm": r.Arm, "workspace": string(id)})
-		}
 		return resolved{}, &r, nil
 	default:
 		return resolved{}, nil, fmt.Errorf("%s: workspace %q: unknown serving standing %d", rpc, id, standing)
@@ -530,7 +513,7 @@ func (s *server) resolveRefLogging(
 }
 
 // resolveRegistered resolves a workspace ref against the registry ALONE,
-// without the serving-standing gate resolveRefLogging puts in front of it.
+// without the serving-standing gate resolveRef puts in front of it.
 //
 // It exists for the refs whose answer must not depend on which daemon serves
 // the workspace: ClientLog's subject (see subjectForClientLog), and

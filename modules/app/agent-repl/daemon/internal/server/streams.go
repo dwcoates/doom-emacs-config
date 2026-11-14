@@ -270,7 +270,7 @@ func (s *server) watchFooter(
 	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
+	subject, r, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -302,7 +302,7 @@ func (s *server) watchTopbar(
 	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
+	subject, r, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -326,7 +326,7 @@ func (s *server) WatchHostWorkspace(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -458,7 +458,7 @@ func (s *server) watchWebWorkspace(
 	if err := validateWatchWebWorkspaceRequest(msg); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
+	subject, r, err := s.resolveRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
