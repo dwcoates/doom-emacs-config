@@ -153,21 +153,18 @@ func (r *resolver) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return 
 // workspace's OWN durable sink from the registry's directory; a fact for a
 // workspace the registry does not carry is an invariant violation, recorded as
 // one rather than written globally by default.
+//
+// A REGISTERED WORKSPACE WHOSE DIRECTORY CANNOT HOST A SINK IS ORDINARY: a
+// landed workspace keeps its registry row after its worktree is reaped, and
+// the roster renders it on. Its records go to the central sink naming it
+// (dlog.Surfaces.WorkspaceOrCentral, the surface for callers that render
+// every workspace the registry holds), and nothing about it is a violation.
 func (r *resolver) logFor(ws ids.WorkspaceID) dlog.Logger {
 	for _, rec := range r.state.reg.Workspaces {
 		if rec.ID != ws {
 			continue
 		}
-		log, err := r.log.Workspace(rec.Dir)
-		if err != nil {
-			return r.log.Global().With(dlog.Context{
-				"workspace_id":        string(ws),
-				"workspace_dir":       rec.Dir,
-				"invariant_violation": "the roster could not resolve a registered workspace's log sink",
-				"cause":               err.Error(),
-			})
-		}
-		return log.With(dlog.Context{"workspace_id": string(ws)})
+		return r.log.WorkspaceOrCentral(rec.Dir).With(dlog.Context{"workspace_id": string(ws)})
 	}
 	return r.log.Global().With(dlog.Context{
 		"workspace_id":        string(ws),

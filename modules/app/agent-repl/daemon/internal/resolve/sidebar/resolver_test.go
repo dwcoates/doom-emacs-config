@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -1024,4 +1025,33 @@ func countOperation(records []dlog.Record, op string) int {
 		}
 	}
 	return n
+}
+
+// TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary pins
+// logFor for a landed workspace whose worktree was reaped: its records go to
+// the central sink naming it, and nothing records an invariant violation
+// (TestALateFactsRefusalIsOfferedAgainMidWork, 2026-11-13).
+func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *testing.T) {
+	// Arrange: the workspace's directory can host no sink.
+	r := arrange(t)
+	r.surfaces.BindWorkspaceIDs(func(string) (string, error) {
+		return "", errors.New("the worktree was reaped")
+	})
+
+	// Act: a fact that moves the row's status arm.
+	r.OnLink(theWS, shimclient.LinkConnected)
+
+	// Assert.
+	var routed bool
+	for _, rec := range r.surfaces.Records() {
+		if _, ok := rec.Context["invariant_violation"]; ok {
+			t.Fatalf("record %s carries an invariant violation: %+v", rec.Operation, rec.Context)
+		}
+		if rec.Operation == "daemon.sidebar.status_arm_changed" && rec.Context["workspace_id"] == string(theWS) && rec.Context[dlog.KeyUnroutableWorkspace] != nil {
+			routed = true
+		}
+	}
+	if !routed {
+		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", r.surfaces.Records())
+	}
 }
