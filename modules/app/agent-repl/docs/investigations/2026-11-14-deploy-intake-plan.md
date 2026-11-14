@@ -214,3 +214,60 @@ would otherwise reason out, and hands it facts, not questions:
 5. Sidebar: the third label, clickable labels.
 6. Metrics and the catalog.
 7. Retire the standing mediator and its brief.
+
+## Implementation stages (contract landed 2026-11-14)
+
+The contract is in `docs/protobuf-design/2026-11-14-deploy-intake.md` and
+the `.proto` files. Every stage below lands with the rest, on one branch:
+the live daemon reads the doom repository's `deploy_mediator` config until
+the daemon that understands `deploy_checks` is deployed with it.
+
+1. (Done) Config: `lifecycleconfig` validates `deploy_checks`; the retired
+   key fails to parse.
+2. Store (wsm): the chain records its roles. `merge_queue_repos` gains the
+   chain's intake workspace and its last remediation workspace, and the
+   stage of the owed check (rolling out, assessing, dispatched/fixing). A
+   dispatch is one write: the problems, the remediation chosen, the stage.
+   The remediation workspace's direct landing records its steps (gated,
+   landed, deployed) durably, keyed by workspace.
+3. Hold split (`merge/standing.go` `queueHeld`): while the check is owed,
+   the head neither lands nor is admitted; chain extension, background
+   rebases and resumes are stopped only while the stage is dispatched.
+4. Intake lifecycle (`merge/mediation.go`, `workspace/mediator.go`): the
+   chain's intake is made hidden with a fresh context on sonnet at low
+   effort when the chain's first deploy has rolled out, told of every
+   deploy of its chain (no compaction), and closed when the chain ends.
+   It is identified by its recorded role, never a configured name.
+5. The intake's brief: the daemon sorts the window's WARN and ERROR records
+   by operation and message into NEW and SEEN BEFORE (the same span before
+   the deploy), adds `--doctor` faults and the latency comparison as facts,
+   the chain so far (earlier deploys, dispatches, the remediation's landed
+   commits and touched files) and the count against the bound. New brief
+   `prompts/deploy-intake.md`; `prompts/deploy-mediation.md` and
+   `metaprompt-deploy-mediator.md` are retired.
+6. Dispatch (`DecideMediation`): validates the problems, enforces the
+   bound and the restore refusal, then creates the remediation workspace
+   (opus, medium effort, visible, fresh context, the problems and evidence
+   as its prompt) or restores the chain's last one (reopen from its stored
+   conversation; recreate its worktree on its branch at the main branch's
+   tip; compact first when large; prompt it with only the new findings).
+7. The remediation's finish (`FinishWorkspace` for a workspace whose role is
+   remediation): answer `landing_directly`; run the full gate on its branch
+   rebased onto the main branch; on a failure resume it with the failures
+   (up to the queue's fixing bound, then the intake is told and escalates);
+   on a pass land directly (the merge, changelog line and version tag
+   `land-direct.sh` makes) and deploy; each step durable, resumed by the
+   next daemon. The remediation workspace closes at the deploy; the deploy
+   owes the chain's next check.
+8. CLI: `agent-repld merge-queue mediation dispatch` with problems and
+   restore or fresh; `merge-queue status` prints the stage.
+9. Sidebar: the resolver draws waiting, checking, fixing with targets; the
+   webapp draws `fixing reload` and makes the label a click target that
+   selects (and shows, for the hidden intake) the workspace; Emacs decodes
+   the arm and targets.
+10. Metrics: the intake's outcomes (`approved`, `escalated`, `dispatched`,
+    `undecided`, `superseded`, `unmediated`) and
+    `agentrepl_deploy_remediation_seconds{outcome}`; the catalog.
+11. The doom repository's `.agent-repl/lifecycle.yaml` moves to
+    `deploy_checks: {remediations_before_escalation: 4}`; the standing
+    `deploy-mediator` workspace is closed after the deploy.
