@@ -79,6 +79,9 @@ func machToSeconds(t C.uint64_t) float64 {
 	return float64(t) * timebaseNum / timebaseDen / 1e9
 }
 
+// Platform implements Reader.
+func (Kernel) Platform() Platform { return Darwin }
+
 // PIDs implements Reader.
 func (Kernel) PIDs() ([]int, error) {
 	n, err := C.proc_listallpids(nil, 0)

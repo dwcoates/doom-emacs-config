@@ -29,6 +29,15 @@ type fakeReader struct {
 	onUsage map[int]func(f *fakeReader)
 	host    Host
 	hostErr error
+	// platform is the kernel's rules, Darwin unless a test sets them.
+	platform *Platform
+}
+
+func (f *fakeReader) Platform() Platform {
+	if f.platform == nil {
+		return Darwin
+	}
+	return *f.platform
 }
 
 func (f *fakeReader) PIDs() ([]int, error) {
@@ -307,6 +316,27 @@ func TestTheHostAndItsPowerAreServed(t *testing.T) {
 	mustValue(t, get, 3, "agentrepl_host_disk_free_bytes")
 	mustValue(t, get, 10, "agentrepl_host_disk_total_bytes")
 	mustValue(t, get, 1, "agentrepl_host_on_battery")
+}
+
+func TestAPlatformThatMeasuresNoEnergyOrPressureServesNeitherSeries(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	linux := Linux
+	reader.platform = &linux
+	h := newHarness(t, reader)
+
+	// Act
+	get := h.scrape(t)
+
+	// Assert
+	if _, ok := get("agentrepl_process_energy_joules_total", shim()...); ok {
+		t.Fatal("the energy series is served on a platform that measures no energy")
+	}
+	if _, ok := get("agentrepl_host_memory_pressure"); ok {
+		t.Fatal("the pressure series is served on a platform with no pressure level")
+	}
+	mustValue(t, get, 0, "agentrepl_process_cpu_seconds_total", shim()...)
+	mustValue(t, get, 16, "agentrepl_host_memory_total_bytes")
 }
 
 func TestTheHostsCPUCountsFromTheDaemonsFirstRead(t *testing.T) {

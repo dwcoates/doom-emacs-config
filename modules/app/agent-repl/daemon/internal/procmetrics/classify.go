@@ -22,22 +22,14 @@ const (
 	ProcessWebKitGPU        = "webkit_gpu"
 )
 
-// webkitRoles maps a WebKit process's role, the first name segment after
-// "com.apple.WebKit.", to its group. It is the closed set of WebKit groups:
-// a development build's processes ("com.apple.WebKit.GPU.Development", which
-// the kernel truncates) are their role's ordinary group, and a role not named
-// here is no group at all (classification.unknownWebKit).
+// webkitRoles maps a WebKit process's role to its group. It is the closed
+// set of WebKit groups: a role not named here is no group at all
+// (classification.unknownWebKit). Each Platform names its own processes'
+// roles (Platform.WebKitRole).
 var webkitRoles = map[string]string{
 	"WebContent": ProcessWebKitWebContent,
 	"Networking": ProcessWebKitNetworking,
 	"GPU":        ProcessWebKitGPU,
-}
-
-// webkitGroup answers the group of the WebKit process named name.
-func webkitGroup(name string) (string, bool) {
-	role, _, _ := strings.Cut(strings.TrimPrefix(name, webkitName), ".")
-	group, ok := webkitRoles[role]
-	return group, ok
 }
 
 // The binaries' process names (buildreport.ServiceStore and ServiceSidecar
@@ -46,10 +38,6 @@ const (
 	storeName   = "shim-store"
 	sidecarName = "shim-claude-sidecar"
 	nodeName    = "node"
-	webkitName  = "com.apple.WebKit."
-	// launchdPID is the parent of every launchd-managed service: a store or
-	// sidecar a test started has its test as parent and is not ours.
-	launchdPID = 1
 )
 
 // Group is a set of processes measured together. Workspace is set for a
@@ -72,8 +60,8 @@ type classification struct {
 // classify sorts the host's processes into agent-repl's groups (see the
 // package comment for the rules). self is the daemon, emacs the pid of the
 // Emacs whose stream stands (0 for none), sockDir the directory its shims
-// listen in.
-func classify(ids map[int]Identity, self, emacs int, sockDir string, args func(int) ([]string, error)) classification {
+// listen in, and platform the rules of the kernel the identities came from.
+func classify(platform Platform, ids map[int]Identity, self, emacs int, sockDir string, args func(int) ([]string, error)) classification {
 	out := classification{groups: map[int]Group{}}
 	// AN EMACS THAT HAS EXITED IS NOBODY: its stream's end has not been
 	// observed yet, and a pid it no longer holds names no process of ours.
@@ -90,17 +78,18 @@ func classify(ids map[int]Identity, self, emacs int, sockDir string, args func(i
 	var shims []int
 	for _, pid := range pids {
 		id := ids[pid]
+		role, webkit := platform.WebKitRole(ids, id, emacs)
 		switch {
 		case pid == self:
 			out.groups[pid] = Group{Process: ProcessDaemon}
 		case pid == emacs:
 			out.groups[pid] = Group{Process: ProcessEmacs}
-		case id.PPID == launchdPID && id.Name == storeName:
+		case id.Name == storeName && platform.ServiceParent(ids, id.PPID):
 			out.groups[pid] = Group{Process: ProcessStore}
-		case id.PPID == launchdPID && id.Name == sidecarName:
+		case id.Name == sidecarName && platform.ServiceParent(ids, id.PPID):
 			out.groups[pid] = Group{Process: ProcessSidecar}
-		case emacs != 0 && id.Responsible == emacs && strings.HasPrefix(id.Name, webkitName):
-			group, ok := webkitGroup(id.Name)
+		case emacs != 0 && webkit:
+			group, ok := webkitRoles[role]
 			if !ok {
 				out.unknownWebKit = append(out.unknownWebKit, id.Name)
 				continue

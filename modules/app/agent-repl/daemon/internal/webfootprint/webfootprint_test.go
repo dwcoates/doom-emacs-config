@@ -21,6 +21,8 @@ type fakeReader struct {
 	pidsErr  error
 	idErr    map[int]error
 	usageErr map[int]error
+	// platform is the kernel's rules, Darwin unless a test sets them.
+	platform *procmetrics.Platform
 }
 
 func (f *fakeReader) PIDs() ([]int, error) {
@@ -48,11 +50,17 @@ func (f *fakeReader) Usage(pid int) (procmetrics.Usage, error) {
 	return f.usage[pid], nil
 }
 
+func (f *fakeReader) Platform() procmetrics.Platform {
+	if f.platform == nil {
+		return procmetrics.Darwin
+	}
+	return *f.platform
+}
 func (f *fakeReader) Args(int) ([]string, error)            { return nil, procmetrics.ErrGone }
 func (f *fakeReader) Host(string) (procmetrics.Host, error) { return procmetrics.Host{}, nil }
 
 func webContent(pid int, age time.Duration) procmetrics.Identity {
-	return procmetrics.Identity{PID: pid, Name: processName, StartUnixMicros: now.Add(-age).UnixMicro()}
+	return procmetrics.Identity{PID: pid, Name: procmetrics.Darwin.WebContentName, StartUnixMicros: now.Add(-age).UnixMicro()}
 }
 
 func newSampler(t *testing.T, r *fakeReader) (*Sampler, *dlog.TestLogger) {
@@ -93,6 +101,32 @@ func TestSampleRecordsEveryProcessLargestFirst(t *testing.T) {
 	}
 	if procs[0]["resident_mb"] != int64(2) || procs[0]["elapsed"] != "02:00" {
 		t.Fatalf("pid 2 = %+v, want 2 MB resident and 02:00 elapsed", procs[0])
+	}
+}
+
+func TestSampleOnLinuxReadsWebKitGTKsWebContentProcess(t *testing.T) {
+	// Arrange
+	linux := procmetrics.Linux
+	s, log := newSampler(t, &fakeReader{
+		platform: &linux,
+		ids: map[int]procmetrics.Identity{
+			1: {PID: 1, Name: "WebKitWebProcess", StartUnixMicros: now.Add(-time.Minute).UnixMicro()},
+			2: webContent(2, time.Minute),
+		},
+		usage: map[int]procmetrics.Usage{1: {FootprintBytes: 3 << 20}, 2: {FootprintBytes: 9 << 20}},
+	})
+
+	// Act
+	s.Sample(context.Background())
+
+	// Assert
+	r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: op})
+	if !ok {
+		t.Fatalf("records = %+v, want the sample at INFO", log.Records())
+	}
+	procs := r.Context["processes"].([]map[string]any)
+	if len(procs) != 1 || procs[0]["pid"] != 1 || r.Context["largest_footprint_mb"] != int64(3) {
+		t.Fatalf("context = %+v, want only pid 1 at 3 MB", r.Context)
 	}
 }
 

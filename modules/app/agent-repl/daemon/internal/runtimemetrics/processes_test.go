@@ -16,7 +16,8 @@ import (
 // selfOnly is a kernel holding only the test process, as the daemon.
 type selfOnly struct{}
 
-func (selfOnly) PIDs() ([]int, error) { return []int{os.Getpid()}, nil }
+func (selfOnly) Platform() procmetrics.Platform { return procmetrics.Darwin }
+func (selfOnly) PIDs() ([]int, error)           { return []int{os.Getpid()}, nil }
 func (selfOnly) Identity(pid int) (procmetrics.Identity, error) {
 	return procmetrics.Identity{PID: pid, PPID: 1, Name: "agent-repld", Responsible: pid, StartUnixMicros: 1}, nil
 }
