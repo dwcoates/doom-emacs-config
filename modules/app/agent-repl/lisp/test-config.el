@@ -21,6 +21,13 @@
 (let ((dir (file-name-directory (or load-file-name buffer-file-name))))
   (load (expand-file-name "test-helpers.el" dir) nil t))
 
+(defvar agent-repl-config-test--harness-load-errors nil
+  "`agent-repl--load-errors' as the harness\='s REAL load of config.el left it.
+test-helpers.el, loaded just above, loads config.el and with it every
+module config.el names, for real.  Captured here, before this file\='s own
+stubbed reload of config.el (below) resets the accumulator.")
+(setq agent-repl-config-test--harness-load-errors agent-repl--load-errors)
+
 ;; `config.el' calls `agent-repl--load-module' for every sub-file; stub it
 ;; to a no-op so we get the early defuns without re-loading the full module.
 ;;
@@ -393,6 +400,137 @@ reset must be a top-level `setq' that precedes the first module load."
                        forms)))
       ;; Assert
       (should (and reset first-load (< reset first-load))))))
+
+;;;; ---- Every module loads ----
+
+(ert-deftest agent-repl-config-test-every-module-loads-in-batch ()
+  "The harness\='s real load of every module config.el names failed none.
+A module whose load fails is reported only at boot, so without this a
+broken module surfaced only as whatever downstream symptom it caused
+\(2026-11-02: a bytecode `module-not-loaded' record)."
+  (should (null agent-repl-config-test--harness-load-errors)))
+
+;;;; ---- What runs once every module had its turn ----
+
+(defmacro agent-repl-config-test--with-lifecycle (&rest body)
+  "Run BODY with the lifecycle hooks empty and the boot reporters recorded.
+Binds `infos' and `warns', the formatted boot records, newest first."
+  (declare (indent 0))
+  `(let ((emacs-startup-hook nil)
+         (kill-emacs-hook nil)
+         (agent-repl-frontend-auto-start t)
+         (infos nil)
+         (warns nil))
+     (cl-letf (((symbol-function 'agent-repl--boot-info)
+                (lambda (fmt &rest args) (push (apply #'format fmt args) infos)))
+               ((symbol-function 'agent-repl--boot-warn)
+                (lambda (fmt &rest args) (push (apply #'format fmt args) warns))))
+       ,@body)))
+
+(ert-deftest agent-repl-config-test-lifecycle-registers-the-daemon-ensure ()
+  "An interactive load registers the daemon ensure on the startup hook."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hooks nil)
+    ;; Assert
+    (should (memq #'agent-repl-daemon-schedule-ensure emacs-startup-hook))))
+
+(ert-deftest agent-repl-config-test-lifecycle-registers-the-composer-save ()
+  "An interactive load registers the composer save on the shutdown hook."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hooks nil)
+    ;; Assert
+    (should (memq #'agent-repl-input-save-all-on-shutdown kill-emacs-hook))))
+
+(ert-deftest agent-repl-config-test-lifecycle-registers-the-log-retention-sweep ()
+  "An interactive load registers the log retention sweep on the startup hook."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hooks nil)
+    ;; Assert
+    (should (memq #'agent-repl-schedule-log-retention-sweep emacs-startup-hook))))
+
+(ert-deftest agent-repl-config-test-lifecycle-auto-start-off-registers-no-ensure ()
+  "With auto-start off the daemon ensure is not registered."
+  (agent-repl-config-test--with-lifecycle
+    ;; Arrange
+    (setq agent-repl-frontend-auto-start nil)
+    ;; Act
+    (agent-repl--register-lifecycle-hooks nil)
+    ;; Assert
+    (should-not (memq #'agent-repl-daemon-schedule-ensure emacs-startup-hook))))
+
+(ert-deftest agent-repl-config-test-lifecycle-batch-registers-nothing ()
+  "A batch load registers no lifecycle hook."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hooks t)
+    ;; Assert
+    (should (and (null emacs-startup-hook) (null kill-emacs-hook)))))
+
+(ert-deftest agent-repl-config-test-lifecycle-hook-of-a-failed-module-is-reported ()
+  "A hook whose module failed to load is reported loudly, never registered."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hook
+     'emacs-startup-hook 'agent-repl-config-test--never-defined nil "probe")
+    ;; Assert
+    (should (null emacs-startup-hook))
+    (should (equal warns
+                   '("lifecycle: probe NOT registered on emacs-startup-hook: `agent-repl-config-test--never-defined' is undefined, its module failed to load")))))
+
+(ert-deftest agent-repl-config-test-load-errors-report-each-module-loudly ()
+  "Each failed module is reported through the boot warn path, oldest first."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (ignore-error error
+      (agent-repl--report-load-errors '(("splash" error "b") ("core" error "a"))))
+    ;; Assert
+    (should (equal (reverse warns)
+                   '("Loaded with 2 ERROR(S):"
+                     "  core.el: (error \"a\")"
+                     "  splash.el: (error \"b\")")))))
+
+(ert-deftest agent-repl-config-test-load-errors-signal-after-the-report ()
+  "A failed load still ends in the FATAL error once it is reported."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (let ((err (should-error (agent-repl--report-load-errors '(("splash" error "b"))))))
+      ;; Assert
+      (should (string-search "FATAL: 1 module(s) failed to load" (cadr err))))))
+
+(defun agent-repl-config-test--top-level-forms ()
+  "Every top-level form of config.el, in order."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name "config.el" agent-repl-config-test--module-root))
+    (let (acc)
+      (condition-case nil
+          (while t (push (read (current-buffer)) acc))
+        (end-of-file nil))
+      (nreverse acc))))
+
+(ert-deftest agent-repl-config-test-lifecycle-is-registered-before-load-errors-signal ()
+  "config.el registers the lifecycle hooks BEFORE it reports the load errors.
+Regression, 2026-10-25: the report signalled first, and a cosmetic module
+failing its load left Emacs with no daemon at all.  Read from the source:
+a real load of config.el re-loads every module."
+  ;; Arrange
+  (let ((forms (agent-repl-config-test--top-level-forms)))
+    ;; Act
+    (let ((register (cl-position '(agent-repl--register-lifecycle-hooks noninteractive)
+                                 forms :test #'equal))
+          (report (cl-position-if
+                   (lambda (form)
+                     (and (eq (car-safe form) 'if)
+                          (equal (nth 1 form) 'agent-repl--load-errors)))
+                   forms))
+          (last-load (cl-position-if
+                      (lambda (form) (eq (car-safe form) 'agent-repl--load-module))
+                      forms :from-end t)))
+      ;; Assert
+      (should (and register report last-load (< last-load register report))))))
 
 ;;;; ---- config.el's load list ----
 
