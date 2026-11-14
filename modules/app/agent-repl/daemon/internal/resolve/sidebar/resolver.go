@@ -365,6 +365,16 @@ func (r *resolver) mutateWorkspace(ws ids.WorkspaceID, operation, message string
 // transition of its own: apply is handed the workspace's log sink, and runs
 // under the same lock as the render it precedes.
 func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger)) {
+	r.mutateWorkspaceIf(ws, operation, message, ctx, func(s *wsState, log dlog.Logger) bool {
+		apply(s, log)
+		return true
+	})
+}
+
+// mutateWorkspaceIf is mutateWorkspaceLogged for a change that may decline
+// under the lock: when APPLY answers false it changed nothing about the
+// workspace, and nothing is rendered, published or recorded for it.
+func (r *resolver) mutateWorkspaceIf(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger) bool) {
 	if ctx == nil {
 		ctx = dlog.Context{}
 	}
@@ -372,8 +382,7 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 	r.commit(&mutation{
 		operation: operation, message: message, ctx: ctx, ws: ws, scoped: true,
 		apply: func(log dlog.Logger) bool {
-			apply(r.state.workspace(ws), log)
-			return true
+			return apply(r.state.workspace(ws), log)
 		},
 	})
 }
@@ -1096,15 +1105,25 @@ func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
 }
 
 // OnActivity moves the row to thinking.
+//
+// AN ACTIVITY CHANGES THE ROW'S FACTS ONLY TWICE: the turn's first activity
+// (sawActivity) and the answer to a retried call (retrying). Every other
+// streamed frame declines, so it renders and publishes nothing: rendered, it
+// was a whole-roster render the topic dropped as a duplicate, on every frame
+// (2026-11-11, agent-repld's top cost in a `sample`). A footer status the
+// frame moved reaches the row through FooterStatusChanged, not here.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
-		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) {
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
+		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) bool {
+			changed := !s.sawActivity
 			s.sawActivity = true
 			if s.retrying != "" && ladder.RetryAnsweredBy(s.retrying, agent.GetValue(), act) {
 				log.Debug("daemon.sidebar.retry_cleared", "the retried call was answered; the row leaves api_retrying",
 					dlog.Context{"agent_id": agent.GetValue()})
 				s.retrying = ""
+				changed = true
 			}
+			return changed
 		})
 }
 
