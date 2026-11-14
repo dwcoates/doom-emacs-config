@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,5 +192,86 @@ func TestRemediationFinishesListsEveryFinishOldestFirstUntilItEnds(t *testing.T)
 	}
 	if again, err := s.EndRemediationFinish(ctx, "first"); err != nil || again {
 		t.Fatalf("EndRemediationFinish again = (%v, %v), want nothing ended", again, err)
+	}
+}
+
+func TestARemediationLandingRecordsItsHeadAndAddsItsPaths(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	beginFinish(t, s, RepoKey(t.TempDir()), instant, nil)
+	land := func(head string, paths ...string) {
+		t.Helper()
+		if ok, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationGating, RemediationLanding, instant); err != nil || !ok {
+			t.Fatalf("AdvanceRemediationFinish = (%v, %v)", ok, err)
+		}
+		if ok, err := s.RecordRemediationLanded(ctx, "remedy", head, paths, instant.Add(time.Minute)); err != nil || !ok {
+			t.Fatalf("RecordRemediationLanded = (%v, %v)", ok, err)
+		}
+	}
+	land("abc", "daemon/b.go", "daemon/a.go")
+	if ok, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationDeploying, RemediationDeployed, instant); err != nil || !ok {
+		t.Fatalf("AdvanceRemediationFinish = (%v, %v)", ok, err)
+	}
+	if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "remedy", Repo: RepoKey(t.TempDir()), StartedAt: instant.Add(time.Hour)}); err != nil {
+		t.Fatalf("a restored workspace's finish after its deploy: %v", err)
+	}
+
+	// Act
+	land("def", "daemon/a.go", "webapp/c.ts")
+	got, err := s.RemediationFinishOf(ctx, "remedy")
+
+	// Assert
+	want := []string{"daemon/a.go", "daemon/b.go", "webapp/c.ts"}
+	if err != nil || got.Step != RemediationDeploying || got.LandedHead != "def" || strings.Join(got.LandedPaths, ",") != strings.Join(want, ",") {
+		t.Fatalf("RemediationFinishOf = (%+v, %v), want deploying at def having changed %v", got, err, want)
+	}
+}
+
+func TestARemediationLandingIsRecordedOnlyWhileLanding(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	beginFinish(t, s, RepoKey(t.TempDir()), instant, nil)
+
+	// Act
+	ok, err := s.RecordRemediationLanded(context.Background(), "remedy", "abc", nil, instant)
+
+	// Assert
+	if err != nil || ok {
+		t.Fatalf("RecordRemediationLanded while gating = (%v, %v), want nothing recorded", ok, err)
+	}
+}
+
+func TestARemediationLandingRefusesOneNamingNoHead(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.RecordRemediationLanded(context.Background(), "remedy", "", nil, instant)
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.record_remediation_landed", "error") {
+		t.Fatalf("RecordRemediationLanded = %v, want a refusal recorded at ERROR: %v", err, log.Records())
+	}
+}
+
+func TestEndRemediationFinishesOfEndsOnlyThatQueuesFinishes(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	ended, kept := RepoKey(t.TempDir()), RepoKey(t.TempDir())
+	for ws, repo := range map[WorkspaceID]RepoKey{"a": ended, "b": ended, "c": kept} {
+		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act
+	n, err := s.EndRemediationFinishesOf(ctx, ended)
+	all, _ := s.RemediationFinishes(ctx)
+
+	// Assert
+	if err != nil || n != 2 || len(all) != 1 || all[0].Workspace != "c" {
+		t.Fatalf("EndRemediationFinishesOf = (%d, %v) leaving %+v, want 2 ended and c kept", n, err, all)
 	}
 }
