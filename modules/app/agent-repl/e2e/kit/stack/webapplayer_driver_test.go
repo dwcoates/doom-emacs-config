@@ -1,7 +1,9 @@
 package stack
 
 import (
+	"agent-repld/integration/grantedclock"
 	"agent-repld/integration/harness"
+	"context"
 	"fmt"
 	"os/exec"
 	"syscall"
@@ -106,7 +108,9 @@ func TestWlKillTreeReapsAGrandchild(t *testing.T) {
 	child.killTree()
 
 	// Assert: the grandchild is gone, not merely its parent.
-	if err := awaitPIDGone(grandchild, DefaultTimeout); err != nil {
+	gone, cancel := grantedclock.WithBound(context.Background(), DefaultTimeout)
+	defer cancel()
+	if err := AwaitPIDsGone(gone, []int{grandchild}); err != nil {
 		_ = syscall.Kill(grandchild, syscall.SIGKILL)
 		t.Fatalf("the grandchild survived killTree; the kill reached the parent only: %v", err)
 	}

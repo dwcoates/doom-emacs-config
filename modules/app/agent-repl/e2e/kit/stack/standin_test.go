@@ -2,8 +2,6 @@ package stack
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,21 +75,6 @@ func readReportedPID(t testing.TB, fifo string, exited <-chan struct{}) int {
 	return 0
 }
 
-// awaitPIDGone waits, on the kernel's exit event, for PID -- a process this
-// test does not reap -- to be gone, and answers why not when it is still
-// there at BOUND.
-func awaitPIDGone(pid int, bound time.Duration) error {
-	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
-	defer cancel()
-	if err := harness.WaitProcessExit(ctx, pid); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("pid %d is still running after %s granted", pid, bound)
-		}
-		return fmt.Errorf("await pid %d's exit: %w", pid, err)
-	}
-	return nil
-}
-
 func TestReadReportedPID(t *testing.T) {
 	cases := []struct {
 		name string
@@ -137,50 +120,6 @@ func TestReadReportedPID(t *testing.T) {
 			}
 			if tc.wantFailure != "" && !strings.Contains(rec.Failures(), tc.wantFailure) {
 				t.Fatalf("failures = %q, want one naming %q", rec.Failures(), tc.wantFailure)
-			}
-		})
-	}
-}
-
-func TestAwaitPIDGone(t *testing.T) {
-	cases := []struct {
-		name string
-		kill bool
-		// bound is the wait's bound: the fallback for an exit, and the
-		// subject itself for a process that never exits.
-		bound   time.Duration
-		wantErr string
-	}{
-		{name: "a process that exits is reported gone", kill: true, bound: DefaultTimeout},
-		{name: "a process still running at the bound is named", bound: 200 * time.Millisecond, wantErr: "still running after"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			cmd := exec.Command("/bin/sh", "-c", "read _")
-			stdin, err := cmd.StdinPipe()
-			if err != nil {
-				t.Fatalf("stdin: %v", err)
-			}
-			if err := cmd.Start(); err != nil {
-				t.Fatalf("start: %v", err)
-			}
-			reaped := make(chan struct{})
-			go func() { _ = cmd.Wait(); close(reaped) }()
-			t.Cleanup(func() { _ = stdin.Close(); <-reaped })
-			if tc.kill {
-				_ = stdin.Close()
-			}
-
-			// Act
-			err = awaitPIDGone(cmd.Process.Pid, tc.bound)
-
-			// Assert
-			switch {
-			case tc.wantErr == "" && err != nil:
-				t.Fatalf("awaitPIDGone = %v, want gone", err)
-			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
-				t.Fatalf("awaitPIDGone = %v, want an error naming %q", err, tc.wantErr)
 			}
 		})
 	}
