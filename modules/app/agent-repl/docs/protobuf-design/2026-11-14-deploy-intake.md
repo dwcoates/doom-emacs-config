@@ -105,3 +105,25 @@ embeds another's new messages.
   because it holds in every stage of a chain.
 - CONSEQUENCES: the CLI's status printer and its tests read the stage;
   `daemon/internal/merge` resolves the stage from the chain's store record.
+
+### 4. `frontend.v1.RosterMergeQueueMediation` gains `fixing` and click targets
+
+- WHAT: a third standing, `fixing` (tag 4). Every standing carries a
+  `RosterMergeQueueMediationTarget` (the workspace a click selects):
+  optional on `waiting` (no intake exists during a chain's first rollout),
+  required on `checking` (the intake) and `fixing` (the remediation).
+- WHY: the owner asked for the purple label to select the workspace at work,
+  and for a third label while a fix is in progress. The labels' words are
+  the owner's: `hot reloading`, `assessing reload`, `fixing reload`.
+- Layout (figma→idl): the label is one element of the repository group's
+  header, between the name and the count. Its arm is its state and its
+  target is its one prop, so one message per arm and one shared target
+  message for the one element; the target is not shared with any other
+  view.
+- Selecting the intake shows a hidden workspace: the selection reveals it
+  for that visit, as a click on any hidden workspace's link does.
+- CONSEQUENCES: `webapp/src/sidebar/merge-queue-view.ts`
+  (`drawQueueMediationLabel`) draws `fixing reload` and makes the label a
+  click target; `lisp/wire-roster.el` decodes the new arm and the targets;
+  `daemon/internal/resolve/sidebar/sections.go` resolves them from
+  `sidebar.QueueMediation`, which gains the stage and the workspaces.
