@@ -1948,6 +1948,25 @@ Every commit, whether made by an agent, a merge, or a hook, is authored and comm
   - The merge queue checks every commit from the target's tip to the merge commit just before the fast-forward (`daemon/internal/merge/identity.go`), and a mismatch fails the merge with the target unmoved.
   - An outside contributor's commit is refused by the local merge (`pre_deploy.local_merge` in `.agent-repl/lifecycle.yaml`), which lands only this machine's work. A repository whose deploy has no local merge lands its commits through its own upstream, which recorded their identities, so its deploys are not checked.
 
+## Linux runs on freedesktop standards, and some of it is untested on real hardware (owner ruling, 2026-11-14)
+
+agent-repl runs on a Linux desktop through freedesktop standards, never one distribution: `systemd --user`, logind, NetworkManager, power-profiles-daemon, X11, `xdg-open`, `notify-send`.
+
+- **What has run on Linux**, in a Lima VM (Ubuntu, aarch64, no GPU, no radio, no lid):
+  - the installer, building zettel-emacs (X11 GTK3, xwidgets) and every other requirement;
+  - the store, sidecar, zettel and metrics store under `systemd --user`, the process metrics reading `/proc`;
+  - every Go module's tests, natively;
+  - a webview drawing a page and running JavaScript under Xvfb.
+- **What is proven only against fakes**, because no Linux laptop was at hand:
+  - persistent wifi (`daemon/internal/persistentwifi/linuxhost.go`): the logind inhibitor that keeps a closed lid awake, nmcli's joins, leaves and scans, the power-saver profile, DPMS display sleep, and the lid heard from the kernel's lid switch;
+  - the application freezer's Linux naming (an application is its executable);
+  - links opening in `google-chrome`'s routed profile.
+- **The design is meant to be right, and the details may not be.** A Linux user whose machine answers differently (another tool's output, a polkit rule, a Wayland-only session) fixes the Linux implementation, and keeps the macOS one untouched.
+- **What Linux does without, by design**:
+  - the orange unfocused title bar (`lisp/titlebar.el`): the window manager draws Linux's title bar, and the module logs that it is unavailable;
+  - a clipboard image offered only as TIFF, which only macOS converts (`lisp/clipboard-image.el`); X11 offers PNG beside it;
+  - the test runner's RAM disk: a Linux run's root is on `/tmp`, which most distributions mount as `tmpfs`.
+
 ## Requirements: the manifests are the one record of what a machine needs
 
 Everything agent-repl needs on a machine is an entry in a requirement
