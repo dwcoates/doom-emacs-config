@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -360,5 +361,66 @@ func TestCloseWhenOwnedPullRequestsMergedSurfacesAnUnreadableLinkSet(t *testing.
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opClose, Message: "could not read the workspace's links; it is not closed for its merged pull requests"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", f.log.logger.Records())
+	}
+}
+
+func TestCloseRefusesAWorkspaceWhoseMergeStandsOnItsQueueWithNoFacts(t *testing.T) {
+	tests := []struct {
+		name  string
+		close func(f *fixture) error
+	}{
+		{name: "a close", close: func(f *fixture) error { return f.verbs.Close(context.Background(), "w1", wsm.CloseByUser) }},
+		{name: "a self-close", close: func(f *fixture) error {
+			_, err := f.verbs.CloseSelf(context.Background(), "w1")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a merge a pause suspended, which this daemon published
+			// no facts for, still holds its queue's line.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.mergeQueues = map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "w1", State: wsm.MergeAdmitted}}}
+
+			// Act.
+			err := tt.close(f)
+
+			// Assert.
+			refusal := asRefusal(t, err, "blocked")
+			if f.footer.closing["w1"].Reason != "merge_queued" || !strings.Contains(refusal.Reason, "on its queue") {
+				t.Fatalf("footer reason = %q, refusal %q; want merge_queued naming the queue", f.footer.closing["w1"].Reason, refusal.Reason)
+			}
+			if f.db.closedFlags["w1"] {
+				t.Fatal("the workspace closed with its merge standing on its queue")
+			}
+		})
+	}
+}
+
+func TestCloseWhoseMergeQueuesCannotBeReadClosesNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.mergeQueuesErr = errors.New("database locked")
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "database locked") {
+		t.Fatalf("Close = %v, want the read's failure", err)
+	}
+	if f.db.closedFlags["w1"] {
+		t.Fatal("the workspace closed though its merge queues could not be read")
+	}
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Operation == opClose && r.Message == "could not judge whether the workspace is quiet" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no ERROR record of the failed judgment: %+v", f.log.logger.Records())
 	}
 }
