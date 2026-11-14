@@ -135,35 +135,56 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		o.deps.Log.Global().Info(opMediation, "this daemon does not serve the queues; their mediations are run by the daemon that does", nil)
 		return
 	}
-	queues, err := o.mediatedQueues(ctx, opMediation)
-	if cutUnder(ctx, err) {
-		o.deps.Log.Global().Info(opMediation, "the mediations were not run: this daemon is stopping; the daemon that serves the queues next runs them", dlog.Context{"cause": err.Error()})
+	// THE PASS RUNS INSIDE THE MEDIATION'S LIFETIME (mediationlife.go), so
+	// the daemon's exit cuts it and waits for it before the state client
+	// closes; it also ends with the caller's context.
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, nil)
 		return
 	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
+	queues, err := o.mediatedQueues(ctx, opMediation)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not list the repositories whose mediations are owed", dlog.Context{"error": err.Error()})
+		o.mediationFailed(ctx, nil, "could not list the repositories whose mediations are owed", err)
 		return
 	}
 	o.releaseUnmediated(ctx, queues)
 	for _, q := range queues {
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
-		if cutUnder(ctx, err) {
-			o.deps.Log.Global().Info(opMediation, "the mediations were not run: this daemon is stopping; the daemon that serves the queues next runs them", dlog.Context{"repo": string(q.key), "cause": err.Error()})
-			return
-		}
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read a repository's owed mediation", dlog.Context{"repo": string(q.key), "error": err.Error()})
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read a repository's owed mediation", err) {
+				return
+			}
 			continue
 		}
-		if m == nil || !o.claimMediation(q.key) {
+		if m == nil {
+			continue
+		}
+		// A ROUND OUTLIVES THE PASS, NOT THE DAEMON: it runs under the
+		// mediation's lifetime, which only the daemon's exit cuts.
+		round, leaveRound, entered := o.enterMediation()
+		if !entered {
+			o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"repo": string(q.key)})
+			return
+		}
+		if !o.claimMediation(q.key) {
+			leaveRound()
 			continue
 		}
 		if !o.async {
-			o.mediationRound(context.WithoutCancel(ctx), q, *m)
+			o.mediationRound(round, q, *m)
+			leaveRound()
 			continue
 		}
 		owed := *m
-		inflight.Go(func() { o.mediationRound(context.WithoutCancel(ctx), q, owed) })
+		inflight.Go(func() {
+			defer leaveRound()
+			o.mediationRound(round, q, owed)
+		})
 	}
 }
 
@@ -174,11 +195,8 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 // left owed: its mediator may still be named.
 func (o *orchestrator) releaseUnmediated(ctx context.Context, mediated []mediatedQueue) {
 	all, err := o.registeredQueues(ctx, opMediation)
-	if cutUnder(ctx, err) {
-		return
-	}
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not list the repositories to release mediations no mediator decides", dlog.Context{"error": err.Error()})
+		o.mediationFailed(ctx, nil, "could not list the repositories to release mediations no mediator decides", err)
 		return
 	}
 	named := make(map[wsm.RepoKey]bool, len(mediated))
@@ -197,7 +215,9 @@ func (o *orchestrator) releaseUnmediated(ctx context.Context, mediated []mediate
 		}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read whether a repository with no mediator owes a mediation", dlog.Context{"repo": string(q.key), "error": err.Error()})
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not read whether a repository with no mediator owes a mediation", err) {
+				return
+			}
 			continue
 		}
 		if m == nil {
@@ -205,7 +225,9 @@ func (o *orchestrator) releaseUnmediated(ctx context.Context, mediated []mediate
 		}
 		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not release a mediation no mediator decides; the queue stays held", dlog.Context{"repo": string(q.key), "error": err.Error()})
+			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not release a mediation no mediator decides; the queue stays held", err) {
+				return
+			}
 			continue
 		}
 		if released {
@@ -241,7 +263,7 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 	fields := dlog.Context{"repo": string(q.key), "mediator": q.mediator, "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)}
 	ws, err := o.mediatorOf(ctx, q)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be found or made; the queue stays held for it", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the deploy mediator could not be found or made; the queue stays held for it", err)
 		return
 	}
 	fields["workspace"] = string(ws)
@@ -255,7 +277,11 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		return
 	}
 	if !m.Prompted() {
-		turn, err := o.tellMediator(ctx, q, ws, m, brief, fields)
+		// THE AWAIT'S ERROR IS THE ROUND'S err, never one scoped to this
+		// branch: a shadowed err dropped a failed await, and the round then
+		// settled the mediation as decided nothing, letting the queue through.
+		var turn ids.TurnID
+		turn, err = o.tellMediator(ctx, q, ws, m, brief, fields)
 		if err != nil || turn == "" {
 			return
 		}
@@ -269,7 +295,7 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
 	}
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the mediator's turn could not be awaited; the queue stays held until the next round", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the mediator's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
 	o.mediationTurnEnded(ctx, q, ws, m.OwedAt, fields)
@@ -285,20 +311,20 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 	// opens on the empty context it has.
 	conversed, err := o.deps.DB.HasTurns(ctx, ws)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read whether the mediator has a context to compact; the queue stays held", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "could not read whether the mediator has a context to compact; the queue stays held", err)
 		return "", err
 	}
 	if conversed {
 		compact := sessioncommand.Literal(conversationv1.SessionCommand_SESSION_COMMAND_COMPACT)
 		if _, err := o.submitMediatorPrompt(ctx, ws, wsm.NewTurnID(), compact, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the mediator's context could not be compacted; the queue stays held", withField(fields, "error", err.Error()))
+			o.mediationFailed(ctx, fields, "the mediator's context could not be compacted; the queue stays held", err)
 			return "", err
 		}
 	}
 	turn := wsm.NewTurnID()
 	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, o.deps.Now(), turn)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not record that the mediator is told of the deploy; the queue stays held", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "could not record that the mediator is told of the deploy; the queue stays held", err)
 		return "", err
 	}
 	if !marked {
@@ -306,7 +332,7 @@ func (o *orchestrator) tellMediator(ctx context.Context, q mediatedQueue, ws ids
 		return "", nil
 	}
 	if _, err := o.submitMediatorPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the mediation brief could not be submitted; the queue stays held", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the mediation brief could not be submitted; the queue stays held", err)
 		return "", err
 	}
 	o.deps.Log.Global().Info(opMediation, "the mediator was told of the deploy", withField(withField(fields, "turn", string(turn)), "compacted", conversed))
@@ -333,7 +359,7 @@ func (o *orchestrator) submitMediatorPrompt(ctx context.Context, ws ids.Workspac
 func (o *orchestrator) mediationTurnEnded(ctx context.Context, q mediatedQueue, ws ids.WorkspaceID, owed time.Time, fields dlog.Context) {
 	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, owed)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not settle a mediation its turn ended on; the queue stays held", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "could not settle a mediation its turn ended on; the queue stays held", err)
 		return
 	}
 	if !released {

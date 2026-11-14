@@ -1,13 +1,16 @@
 package rostermirror
 
 import (
-	"connectrpc.com/connect"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"maps"
 	"sync"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -350,29 +353,41 @@ func TestAFailedSubscriptionWithdrawsTheMirrorAtError(t *testing.T) {
 }
 
 func TestAnIncumbentThatIsGoneEndsTheMirrorAtInfo(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s := f.run(t, ctx)
-	s.Frames <- rosterFrame(row("ws-a", thinking))
-	f.awaitSunk(t)
-
-	// Act: the incumbent's connection is reset as it dies.
-	s.End(connect.NewError(connect.CodeUnavailable, errors.New("read: connection reset by peer")))
-
-	// Assert
-	if got := f.awaitSunk(t); got != nil {
-		t.Fatalf("after the incumbent went, mirrored = %v, want nothing", got)
+	tests := []struct {
+		name string
+		cut  error
+	}{
+		{name: "its connection reset", cut: connect.NewError(connect.CodeUnavailable, errors.New("read: connection reset by peer"))},
+		{name: "its stream cut partway through a frame",
+			cut: connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("protocol error: incomplete envelope: %w", io.ErrUnexpectedEOF))},
 	}
-	f.awaitEnded(t)
-	rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: Op,
-		Message: "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own"})
-	if !ok || rec.Context["incumbent"] != "127.0.0.1:7777" || rec.Context["cause"] == nil {
-		t.Fatalf("records = %v, want the incumbent's departure at INFO with the incumbent and the cause", f.log.Records())
-	}
-	if _, bad := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: Op}); bad {
-		t.Fatalf("records = %v, want no ERROR for an incumbent that is gone", f.log.Records())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := f.run(t, ctx)
+			s.Frames <- rosterFrame(row("ws-a", thinking))
+			f.awaitSunk(t)
+
+			// Act: the incumbent's link breaks as it dies.
+			s.End(tt.cut)
+
+			// Assert
+			if got := f.awaitSunk(t); got != nil {
+				t.Fatalf("after the incumbent went, mirrored = %v, want nothing", got)
+			}
+			f.awaitEnded(t)
+			rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: Op,
+				Message: "the incumbent's roster stream ended with the incumbent gone; every row is this daemon's own"})
+			if !ok || rec.Context["incumbent"] != "127.0.0.1:7777" || rec.Context["cause"] == nil {
+				t.Fatalf("records = %v, want the incumbent's departure at INFO with the incumbent and the cause", f.log.Records())
+			}
+			if _, bad := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: Op}); bad {
+				t.Fatalf("records = %v, want no ERROR for an incumbent that is gone", f.log.Records())
+			}
+		})
 	}
 }
 

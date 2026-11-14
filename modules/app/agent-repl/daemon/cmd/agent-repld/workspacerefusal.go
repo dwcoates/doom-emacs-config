@@ -55,6 +55,8 @@ func describeFinishRefusal(ws string, e *agentreplv1.FinishWorkspaceError) (stri
 		return fmt.Sprintf("%s's repository's %s cannot be read (%s)", ws, r.DeployConfigInvalid.GetPath(), r.DeployConfigInvalid.GetDetail()), nil
 	case *agentreplv1.FinishWorkspaceError_PlacementBehindNotInLine:
 		return fmt.Sprintf("the merge %s that %s was to go behind is not in its queue", r.PlacementBehindNotInLine.GetBehind(), ws), nil
+	case *agentreplv1.FinishWorkspaceError_MergeOffQueue:
+		return fmt.Sprintf("%s's merge left its queue without landing and its request stands; put it back with `agent-repld merge-queue requeue %s`, or end it with `agent-repld merge-queue discard %s` before finishing again", ws, ws, ws), nil
 	}
 	return "", fmt.Errorf("%w: finishing %s: %v", errUndescribedWorkspaceRefusal, ws, e)
 }

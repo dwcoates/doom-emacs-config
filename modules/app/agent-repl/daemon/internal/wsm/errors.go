@@ -457,6 +457,22 @@ func (e *MergeQueuedError) Error() string {
 	return fmt.Sprintf("wsm: workspace %s is already %s in repo %q merge queue at position %d", e.Workspace, e.State, e.Repo, e.Position)
 }
 
+// MergeOffQueueError refuses a merge request from a workspace whose merge
+// stands off its queue: a request ends only by landing or by an explicit
+// discard, so that request is requeued as itself (RequeueOffQueueMerge) or
+// discarded (DiscardOffQueueMerge) first, never asked for a second time.
+type MergeOffQueueError struct {
+	// Workspace is the workspace whose request stands off its queue.
+	Workspace WorkspaceID
+	// Cause is why it left its queue (OffQueueMerge.Cause).
+	Cause string
+}
+
+// Error implements error.
+func (e *MergeOffQueueError) Error() string {
+	return fmt.Sprintf("wsm: workspace %s's merge left its queue (%s) and its request stands; requeue or discard it rather than asking again", e.Workspace, e.Cause)
+}
+
 // ErrMainWorkspaceNotSortable refuses an agent's placement that would move a
 // repository's main workspace, or a family whose root it is (a placement
 // moves a family whole). A main workspace sits where the user put it: the

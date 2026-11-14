@@ -445,6 +445,15 @@ func (o *orchestrator) republishOffQueue(ctx context.Context, log dlog.Logger, w
 	}
 }
 
+// mergeOffQueueRefusal refuses a merge request from RECORD, whose own merge
+// stands off its queue for CAUSE: that request is requeued or discarded,
+// never asked for again.
+func mergeOffQueueRefusal(record wsm.Workspace, cause string) *RefusalError {
+	refusal := refuse(ArmMergeOffQueue, record.ID, "the merge left its queue without landing (%s) and its request stands; requeue it with `agent-repld merge-queue requeue %s`, or discard it with `agent-repld merge-queue discard %s` before asking again", cause, record.Name, record.Name)
+	refusal.Fields = map[string]any{"cause": OffQueueCause(cause)}
+	return refusal
+}
+
 // refuseNameOffQueue refuses an async request under NAME when a merge off its
 // queue in REQUESTER's repository holds it: that merge is requeued as
 // itself, never asked for again. Nil when no such merge holds the name.

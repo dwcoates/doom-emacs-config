@@ -51,6 +51,8 @@ var finishRefusalCases = []refusalCase{
 		want: "ws's repository's /r/.agent-repl/deploy.yaml cannot be read (bad yaml)"},
 	{name: "placement_behind_not_in_line", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_PlacementBehindNotInLine{PlacementBehindNotInLine: &agentreplv1.MergeQueuePlacementBehindNotInLine{Behind: "other"}}},
 		want: "the merge other that ws was to go behind is not in its queue"},
+	{name: "merge_off_queue", err: &agentreplv1.FinishWorkspaceError{Cause: &agentreplv1.FinishWorkspaceError_MergeOffQueue{MergeOffQueue: &agentreplv1.FinishWorkspaceMergeOffQueue{}}},
+		want: "ws's merge left its queue without landing and its request stands; put it back with `agent-repld merge-queue requeue ws`, or end it with `agent-repld merge-queue discard ws` before finishing again"},
 }
 
 // oneShotRefusalCases holds one case per SetWorkspaceOneShotError arm.

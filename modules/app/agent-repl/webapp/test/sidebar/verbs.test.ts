@@ -739,6 +739,11 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(refusal?.textContent).toContain("is unusable");
   });
 
+  it("says a deploy whose merge stands off the queue is requeued or discarded", async () => {
+    const refusal = await refuseWith(verbNamed("FinishWorkspace"), "mergeOffQueue");
+    expect(refusal?.textContent).toContain("requeue or discard it in the merge queue");
+  });
+
 });
 
 describe("a refusal", () => {
