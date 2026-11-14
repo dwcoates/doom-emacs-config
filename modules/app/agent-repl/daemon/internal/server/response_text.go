@@ -14,6 +14,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/publish"
 	"agent-repld/internal/revision"
 )
 
@@ -37,30 +38,87 @@ type responseHighlight struct {
 	words string
 }
 
-// responseHighlights is every workspace's held highlight.
+// responseHighlights is every workspace's held highlight and the root-feed
+// topic that states it (frontend.v1.FeedResponseHighlight). ONE MUTEX GUARDS
+// BOTH, so the published state is always the state held: a change and its
+// publication can never interleave with another workspace call's.
 type responseHighlights struct {
-	mu   sync.Mutex
-	held map[ids.WorkspaceID]responseHighlight
+	mu     sync.Mutex
+	held   map[ids.WorkspaceID]responseHighlight
+	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseHighlight]
 }
 
-// set holds HIGHLIGHT for WS, or clears it when HIGHLIGHT is nil.
+// newResponseHighlights answers an empty holder: no workspace holds a
+// highlight.
+func newResponseHighlights() responseHighlights {
+	return responseHighlights{
+		held:   map[ids.WorkspaceID]responseHighlight{},
+		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseHighlight]{},
+	}
+}
+
+// topicLocked answers WS's topic, creating it on first use SEEDED WITH NONE,
+// so a root watch accepted by a daemon that never held a highlight for WS
+// (one just restarted) is told it holds none. Called with mu held.
+func (h *responseHighlights) topicLocked(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FeedResponseHighlight] {
+	topic, ok := h.topics[ws]
+	if !ok {
+		topic = &publish.Topic[*frontendv1.FeedResponseHighlight]{}
+		topic.Publish(feedHighlightNone())
+		h.topics[ws] = topic
+	}
+	return topic
+}
+
+// topic answers WS's response-highlight topic. It replays its latest value,
+// so a root watch accepted at any moment is told the state that stands.
+func (h *responseHighlights) topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FeedResponseHighlight] {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.topicLocked(ws)
+}
+
+// set holds HIGHLIGHT for WS, or clears it when HIGHLIGHT is nil, and
+// publishes the state it leaves.
 func (h *responseHighlights) set(ws ids.WorkspaceID, highlight *responseHighlight) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if highlight == nil {
 		delete(h.held, ws)
+		h.topicLocked(ws).Publish(feedHighlightNone())
 		return
 	}
 	h.held[ws] = *highlight
+	h.topicLocked(ws).Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Held{
+		Held: feedHighlightWords(*highlight),
+	}})
 }
 
-// take answers WS's highlight and ends it, false when none is held.
+// take answers WS's highlight and ends it, false when none is held. A take
+// publishes `taken`, whatever the prompt that took it then does (a refused
+// revision included), so the page drops the paint of words no longer held.
 func (h *responseHighlights) take(ws ids.WorkspaceID) (responseHighlight, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	held, ok := h.held[ws]
+	if !ok {
+		return responseHighlight{}, false
+	}
 	delete(h.held, ws)
-	return held, ok
+	h.topicLocked(ws).Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Taken{
+		Taken: feedHighlightWords(held),
+	}})
+	return held, true
+}
+
+// feedHighlightNone is the root feed's FeedResponseHighlight for no highlight.
+func feedHighlightNone() *frontendv1.FeedResponseHighlight {
+	return &frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_None{None: &frontendv1.FeedResponseHighlightNone{}}}
+}
+
+// feedHighlightWords is HELD's words as the root feed states them.
+func feedHighlightWords(held responseHighlight) *frontendv1.FeedResponseHighlightWords {
+	return &frontendv1.FeedResponseHighlightWords{Row: held.row, Words: held.words}
 }
 
 // SelectResponseText holds the words highlighted in a final response, or

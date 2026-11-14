@@ -306,3 +306,118 @@ func TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight(t *tes
 		})
 	}
 }
+
+// receiveHighlight reads the watch stream until a response-highlight frame arrives.
+func receiveHighlight(t *testing.T, stream *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse]) *frontendv1.FeedResponseHighlight {
+	t.Helper()
+	return receivePush(t, stream, "a response highlight", (*agentreplv1.WatchFeedResponse).GetResponseHighlight)
+}
+
+// wordsOf answers WORDS' row and words, "" for none.
+func wordsOf(words *frontendv1.FeedResponseHighlightWords) (string, string) {
+	return words.GetRow().GetValue(), words.GetWords()
+}
+
+func TestARootWatchOfADaemonHoldingNoHighlightIsToldNone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	got := receiveHighlight(t, openRootWatch(t, h, ctx))
+
+	// Assert.
+	if got.GetNone() == nil {
+		t.Fatalf("frame = %v, want none: a page whose daemon restarted must learn it holds nothing", got)
+	}
+}
+
+func TestTheRootFeedWatchStatesEachHighlightChange(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	withRevisable(h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	receiveHighlight(t, stream)
+
+	// Act.
+	highlight(t, h, "row-1", "entropy")
+	held := receiveHighlight(t, stream)
+	clearHighlight(t, h)
+	cleared := receiveHighlight(t, stream)
+
+	// Assert.
+	if row, words := wordsOf(held.GetHeld()); row != "row-1" || words != "entropy" {
+		t.Fatalf("frame after the highlight = %v, want held row-1 entropy", held)
+	}
+	if cleared.GetNone() == nil {
+		t.Fatalf("frame after the clear = %v, want none", cleared)
+	}
+}
+
+func TestALateRootWatchIsToldTheHeldHighlight(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	withRevisable(h)
+	highlight(t, h, "row-1", "entropy")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	got := receiveHighlight(t, openRootWatch(t, h, ctx))
+
+	// Assert.
+	if row, words := wordsOf(got.GetHeld()); row != "row-1" || words != "entropy" {
+		t.Fatalf("frame = %v, want held row-1 entropy", got)
+	}
+}
+
+func TestThePromptThatTakesTheHighlightStatesItTaken(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{name: "a queued revision", err: nil},
+		{name: "a refused revision", err: revision.ErrNotRevisable},
+		{name: "a revision that could not be queued", err: errors.New("the lane is gone")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			withRevisable(h)
+			h.Revisions.err = tc.err
+			highlight(t, h, "row-1", "entropy")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := openRootWatch(t, h, ctx)
+			receiveHighlight(t, stream)
+
+			// Act.
+			_, _ = h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+			got := receiveHighlight(t, stream)
+
+			// Assert.
+			if row, words := wordsOf(got.GetTaken()); row != "row-1" || words != "entropy" {
+				t.Fatalf("frame = %v, want taken row-1 entropy", got)
+			}
+		})
+	}
+}
+
+func TestTakingWithNoHighlightHeldPublishesNothing(t *testing.T) {
+	// Arrange.
+	highlights := newResponseHighlights()
+	topic := highlights.topic("ws-1")
+
+	// Act.
+	_, ok := highlights.take("ws-1")
+
+	// Assert.
+	got, _ := topic.Latest()
+	if ok || got.GetNone() == nil {
+		t.Fatalf("take answered %v and left %v, want false and none", ok, got)
+	}
+}

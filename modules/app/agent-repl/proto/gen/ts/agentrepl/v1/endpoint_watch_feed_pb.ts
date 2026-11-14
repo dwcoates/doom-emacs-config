@@ -19,7 +19,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { FeedComposerEntry, FeedId, FeedResponseQuestion, FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
+import type { FeedComposerEntry, FeedId, FeedResponseHighlight, FeedResponseQuestion, FeedRow, FeedSelection, FeedTextScale } from "../../frontend/v1/feed_pb";
 import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { FeedHeld } from "../../frontend/v1/feed_held_pb";
 import { file_frontend_v1_feed_held } from "../../frontend/v1/feed_held_pb";
@@ -33,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4i+wMKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBARI5Cg1pbWFnZV9vdmVybGF5GAUgASgLMh0uZnJvbnRlbmQudjEuRmVlZEltYWdlT3ZlcmxheUgDiAEBEjsKDmNvbXBvc2VyX2VudHJ5GAYgASgLMh4uZnJvbnRlbmQudjEuRmVlZENvbXBvc2VyRW50cnlIBIgBARJBChFyZXNwb25zZV9xdWVzdGlvbhgHIAEoCzIhLmZyb250ZW5kLnYxLkZlZWRSZXNwb25zZVF1ZXN0aW9uSAWIAQFCDAoKX3NlbGVjdGlvbkISChBfZmVlZF90ZXh0X3NjYWxlQgcKBV9oZWxkQhAKDl9pbWFnZV9vdmVybGF5QhEKD19jb21wb3Nlcl9lbnRyeUIUChJfcmVzcG9uc2VfcXVlc3Rpb24ijgEKE1dhdGNoRmVlZEhlbGRDaGFuZ2USIwoEaGVsZBgBIAEoCzIVLmZyb250ZW5kLnYxLkZlZWRIZWxkEiIKBHJvd3MYAiADKAsyFC5mcm9udGVuZC52MS5GZWVkUm93Ei4KBWZvbGRzGAMgAygLMh8uYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRGb2xkIlsKEVdhdGNoRmVlZEhlbGRGb2xkEiMKBmZvbGRlZBgBIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBIhCgRpbnRvGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_frontend_v1_feed_image_overlay, file_agentrepl_v1_feed_token]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfZmVlZC5wcm90bxIMYWdlbnRyZXBsLnYxIj8KEFdhdGNoRmVlZFJlcXVlc3QSKwoFd2F0Y2gYASABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4i1wQKEVdhdGNoRmVlZFJlc3BvbnNlEiEKA3JvdxgBIAEoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSMgoJc2VsZWN0aW9uGAIgASgLMhouZnJvbnRlbmQudjEuRmVlZFNlbGVjdGlvbkgAiAEBEjgKD2ZlZWRfdGV4dF9zY2FsZRgDIAEoCzIaLmZyb250ZW5kLnYxLkZlZWRUZXh0U2NhbGVIAYgBARI0CgRoZWxkGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRmVlZEhlbGRDaGFuZ2VIAogBARI5Cg1pbWFnZV9vdmVybGF5GAUgASgLMh0uZnJvbnRlbmQudjEuRmVlZEltYWdlT3ZlcmxheUgDiAEBEjsKDmNvbXBvc2VyX2VudHJ5GAYgASgLMh4uZnJvbnRlbmQudjEuRmVlZENvbXBvc2VyRW50cnlIBIgBARJBChFyZXNwb25zZV9xdWVzdGlvbhgHIAEoCzIhLmZyb250ZW5kLnYxLkZlZWRSZXNwb25zZVF1ZXN0aW9uSAWIAQESQwoScmVzcG9uc2VfaGlnaGxpZ2h0GAggASgLMiIuZnJvbnRlbmQudjEuRmVlZFJlc3BvbnNlSGlnaGxpZ2h0SAaIAQFCDAoKX3NlbGVjdGlvbkISChBfZmVlZF90ZXh0X3NjYWxlQgcKBV9oZWxkQhAKDl9pbWFnZV9vdmVybGF5QhEKD19jb21wb3Nlcl9lbnRyeUIUChJfcmVzcG9uc2VfcXVlc3Rpb25CFQoTX3Jlc3BvbnNlX2hpZ2hsaWdodCKOAQoTV2F0Y2hGZWVkSGVsZENoYW5nZRIjCgRoZWxkGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZEhlbGQSIgoEcm93cxgCIAMoCzIULmZyb250ZW5kLnYxLkZlZWRSb3cSLgoFZm9sZHMYAyADKAsyHy5hZ2VudHJlcGwudjEuV2F0Y2hGZWVkSGVsZEZvbGQiWwoRV2F0Y2hGZWVkSGVsZEZvbGQSIwoGZm9sZGVkGAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEiEKBGludG8YAiABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_frontend_v1_feed_held, file_frontend_v1_feed_image_overlay, file_agentrepl_v1_feed_token]);
 
 /**
  * Opens the tail of the ONE feed the token names.
@@ -65,8 +65,9 @@ export const WatchFeedRequestSchema: GenMessage<WatchFeedRequest> = /*@__PURE__*
  * A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
  * push (`selection`), a feed-text-scale push (`feed_text_scale`), a
  * held-section change (`held`), an image-overlay push (`image_overlay`), a
- * composer-entry push (`composer_entry`), or a response-question push
- * (`response_question`), never more than one. The selection push is the daemon's per-workspace
+ * composer-entry push (`composer_entry`), a response-question push
+ * (`response_question`), or a response-highlight push (`response_highlight`),
+ * never more than one. The selection push is the daemon's per-workspace
  * reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
  * the ROOT feed's watch so the webapp recolors the selected final-response
  * bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -142,6 +143,16 @@ export type WatchFeedResponse = Message<"agentrepl.v1.WatchFeedResponse"> & {
    * @generated from field: optional frontend.v1.FeedResponseQuestion response_question = 7;
    */
   responseQuestion?: FeedResponseQuestion | undefined;
+
+  /**
+   * The workspace's response highlight as the daemon holds it, whole. Set on
+   * a response-highlight frame; unset otherwise. Carried on the ROOT feed's
+   * watch only, and the current state is sent the moment a root watch is
+   * accepted, so a page whose daemon restarted learns it holds nothing.
+   *
+   * @generated from field: optional frontend.v1.FeedResponseHighlight response_highlight = 8;
+   */
+  responseHighlight?: FeedResponseHighlight | undefined;
 };
 
 /**

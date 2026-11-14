@@ -4508,6 +4508,43 @@ message FeedResponseQuestionAsking {
   FeedId row = 1;
 }
 
+// ---- The response highlight -----------------------------------------------
+
+// The workspace's highlight of words in a final response (agentrepl.v1
+// .SelectResponseText), as the daemon holds it. STATE, not an event: the root
+// feed's watch carries it whenever it changes and the moment a root watch is
+// accepted. The PAGE makes the highlight and paints it; this is how the page
+// learns what became of it on the daemon's side:
+//
+//   - `taken`: a prompt took the highlight (whether or not its revision was
+//     then refused), so the page drops its paint over those words;
+//   - `none`: the daemon holds no highlight, so a page still holding one
+//     (its daemon restarted, which forgets every highlight) restates it;
+//   - `held`: the daemon holds these words, as the page reported them.
+message FeedResponseHighlight {
+  // THE ARM IS THE STATE.
+  oneof state {
+    // The daemon holds no highlight, and the last one ended without a prompt
+    // taking it (the page cleared it, or this daemon never held one).
+    FeedResponseHighlightNone none = 1;
+    // The daemon holds these words of a final response.
+    FeedResponseHighlightWords held = 2;
+    // The prompt the user sent took these words; the daemon holds none.
+    FeedResponseHighlightWords taken = 3;
+  }
+}
+
+// The daemon holds no highlight.
+message FeedResponseHighlightNone {}
+
+// Words highlighted in one final response.
+message FeedResponseHighlightWords {
+  // The final response's row on the root feed.
+  FeedId row = 1;
+  // The highlighted words, verbatim as the page reported them.
+  string words = 2;
+}
+
 // ---- The composer's entry ---------------------------------------------------
 
 // The node of a response's tree the entry point is on in the composer answers,

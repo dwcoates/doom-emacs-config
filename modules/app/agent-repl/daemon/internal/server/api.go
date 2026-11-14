@@ -667,7 +667,7 @@ func New(deps Deps) (Server, error) {
 		selectionTopics:        make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
 		imageOverlayTopics:     make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
 		composerReports:        make(map[ids.WorkspaceID]composerReport),
-		highlights:             responseHighlights{held: map[ids.WorkspaceID]responseHighlight{}},
+		highlights:             newResponseHighlights(),
 		questions:              responseQuestions{held: map[ids.WorkspaceID]*frontendv1.FeedId{}},
 		responseQuestionTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseQuestion]),
 		fanOut:                 newFanOut(),

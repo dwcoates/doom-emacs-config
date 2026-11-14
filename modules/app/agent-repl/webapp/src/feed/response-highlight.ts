@@ -26,10 +26,18 @@
  *   - the reader presses the webhost around the page (its sidebar;
  *     webhost-pressed.ts);
  *   - a selection holding other words settles with no press (a select-all);
- *   - the prompt the reader sent takes it, which the response's revision
- *     going pending says (`responseHighlightTaken`).
+ *   - the prompt the reader sent takes it, which the daemon says on the root
+ *     feed's watch (frontend.v1.FeedResponseHighlight `taken`), whether or not
+ *     the revision it asked for was then refused.
+ *
+ * THE DAEMON STATES WHAT IT HOLDS on the root feed's watch
+ * (`applyResponseHighlight`), and the page follows it: `taken` of the words
+ * the page holds drops their paint, and `none` while the page holds words is
+ * a daemon that never heard of them (one just restarted, which forgets every
+ * highlight), so the page restates them.
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import type { FeedResponseHighlight } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   SelectResponseTextRequestSchema,
   SelectResponseTextResponseSchema,
@@ -139,21 +147,20 @@ export const cssHighlightPaint: HighlightPaint = {
   },
 };
 
-/** The rows whose highlight a sent prompt took, told per page. */
-const takenOf = perDocument((): Listeners<[string]> => createListeners<[string]>());
+/** The daemon's response-highlight states, told per page. */
+const statesOf = perDocument((): Listeners<[FeedResponseHighlight]> => createListeners<[FeedResponseHighlight]>());
 
 /**
- * The prompt the reader sent took the highlight of ROW in DOC's page: the
- * daemon ended it and the response's revision is on its way, so the paint
- * goes and nothing is reported back.
+ * The daemon states the highlight it holds for DOC's page (the root feed's
+ * watch): told to the page's installed highlight, which follows it.
  */
-export function responseHighlightTaken(doc: Document, row: string): void {
-  takenOf(doc).notify(row);
+export function applyResponseHighlight(doc: Document, state: FeedResponseHighlight): void {
+  statesOf(doc).notify(state);
 }
 
-/** Tell LISTENER each row whose highlight a sent prompt took in DOC's page; answers the unsubscribe. */
-export function onResponseHighlightTaken(doc: Document, listener: (row: string) => void): () => void {
-  return takenOf(doc).add(listener);
+/** Tell LISTENER each response-highlight state the daemon states for DOC's page; answers the unsubscribe. */
+export function onResponseHighlightStates(doc: Document, listener: (state: FeedResponseHighlight) => void): () => void {
+  return statesOf(doc).add(listener);
 }
 
 /** The words each page holds highlighted, told to whoever relays them (the host link). */
@@ -208,6 +215,14 @@ export function installResponseHighlight(
     responseHighlightWords(doc, null);
     return row;
   };
+  /** Tell the daemon the page holds HIGHLIGHT. */
+  const sendHeld = (highlight: ResponseHighlight): void => {
+    void selectResponseText(
+      ctx,
+      { case: "highlighted", value: { row: { value: highlight.row }, words: highlight.words } },
+      "hold the response highlight",
+    );
+  };
   const end = (why: string): void => {
     const row = release();
     if (row === null) return;
@@ -227,11 +242,7 @@ export function installResponseHighlight(
       operation: "feed.response-highlight.held",
       context: { row: now.row, characters: now.words.length },
     });
-    void selectResponseText(
-      ctx,
-      { case: "highlighted", value: { row: { value: now.row }, words: now.words } },
-      "hold the response highlight",
-    );
+    sendHeld(now);
   };
   const settle = (how: Settled): void => {
     const now = responseHighlightIn(host, doc);
@@ -268,13 +279,38 @@ export function installResponseHighlight(
     clearSelectionIn(host, doc);
     end("the reader pressed the webhost");
   });
-  const stopTaken = onResponseHighlightTaken(doc, (row) => {
-    if (held === null || held.row !== row) return;
-    release();
-    log.debug("the sent prompt took the response highlight; its paint goes", {
-      operation: "feed.response-highlight.taken",
-      context: { row },
-    });
+  const stopStates = onResponseHighlightStates(doc, (state) => {
+    if (held === null) return;
+    switch (state.state.case) {
+      case "taken": {
+        const taken = state.state.value;
+        if (taken.row?.value !== held.row || taken.words !== held.words) return;
+        release();
+        log.debug("the sent prompt took the response highlight; its paint goes", {
+          operation: "feed.response-highlight.taken",
+          context: { row: taken.row.value },
+        });
+        return;
+      }
+      case "none":
+        // A DAEMON HOLDING NONE while the page holds words never heard of
+        // them (it restarted) or has not yet: either way the page restates
+        // them, and a restatement it already holds changes nothing.
+        log.debug("the daemon holds no response highlight; the page restates its own", {
+          operation: "feed.response-highlight.restated",
+          context: { row: held.row },
+        });
+        sendHeld(held);
+        return;
+      case "held":
+        return;
+      case undefined:
+        log.error("the daemon stated a response highlight with no state arm set", {
+          operation: "feed.response-highlight.stateless",
+          context: { row: held.row },
+        });
+        throw new Error("agent-repl: a FeedResponseHighlight arrived with no state arm set");
+    }
   });
   doc.addEventListener("pointerdown", onPointerDown, { capture: true });
   doc.addEventListener("pointerup", onPointerUp, { capture: true });
@@ -284,7 +320,7 @@ export function installResponseHighlight(
     doc.removeEventListener("pointerup", onPointerUp, { capture: true });
     doc.removeEventListener("selectionchange", onSelectionChange);
     stopPresses();
-    stopTaken();
+    stopStates();
     release();
   };
 }
