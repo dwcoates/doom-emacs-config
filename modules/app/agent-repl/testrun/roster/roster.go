@@ -25,7 +25,7 @@ const (
 	ERT
 	// GoModule is a Go module's tests, split by top-level test.
 	GoModule
-	// Vitest is a TypeScript package: a typecheck and split test files.
+	// Vitest is a TypeScript package: a typecheck, knip and split test files.
 	Vitest
 	// E2E is the cross-system Go suite: one build, its top-level tests split
 	// into chunks.
@@ -138,7 +138,7 @@ type Suite struct {
 // integration, named by its path relative to Suite.Path, "." the root, and
 // "[tags]" after a tagged pass's: "integration[integration]"), a vitest test
 // file or an ERT test file (named by its path relative to Suite.Path), a
-// suite-wide check ("vet", "vet[perf]", "typecheck"), or, for a script or e2e
+// suite-wide check ("vet", "vet[perf]", "typecheck", "knip"), or, for a script or e2e
 // suite, the whole suite (named "").
 //
 // Paths are spelled as Suite.Path is: relative to the module root, or to the

@@ -266,7 +266,7 @@ func webUnits() suites.Units {
 		return suites.Split{Group: g, Items: []string{file}, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
 	}
 	return suites.Units{
-		Atomic: []run.Spec{spec("web:typecheck"), spec("web:integration-build")},
+		Atomic: []run.Spec{spec("web:typecheck"), spec("web:knip"), spec("web:integration-build")},
 		Splits: []suites.Split{split("web/test/a.test.ts", "test/a.test.ts"), split("web/test/b.test.ts", "test/b.test.ts"),
 			split("web[integration]/test/integration/i.test.ts", "test/integration/i.test.ts")},
 	}
@@ -348,9 +348,11 @@ func TestDeriveVitestKeysEachFileOnItsOwnImportGraph(t *testing.T) {
 	if i.Contains(fixtureModule + "/web/test/integration/unimported.json") {
 		t.Error("the integration file's set places what nothing names")
 	}
-	tc := byName["typecheck"].Set
-	if !tc.Contains(fixtureModule+"/web/src/b.ts") || !tc.Contains(fixtureModule+"/web/test/integration/unimported.json") {
-		t.Error("the typecheck does not read the package's whole tree")
+	for _, check := range []string{"typecheck", "knip"} {
+		set := byName[check].Set
+		if set == nil || !set.Contains(fixtureModule+"/web/src/b.ts") || !set.Contains(fixtureModule+"/web/test/integration/unimported.json") {
+			t.Errorf("the %s does not read the package's whole tree", check)
+		}
 	}
 	if !slices.Equal(su.Infra, []string{"web:integration-build"}) {
 		t.Errorf("infra = %v", su.Infra)
@@ -366,7 +368,7 @@ func TestDeriveVitestFailures(t *testing.T) {
 		arrange func(f fixture, u *suites.Units)
 		want    string
 	}{
-		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("web:mystery")) }, "is no file's, typecheck's or build's"},
+		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("web:mystery")) }, "is no file's, typecheck's, knip's or build's"},
 		{"a group of no batch", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "web" }, "is no batch group of web"},
 		{"one file in two batches", func(_ fixture, u *suites.Units) {
 			u.Splits = append(u.Splits, suites.Split{Group: "web[integration]/again", Items: []string{"test/a.test.ts"}})

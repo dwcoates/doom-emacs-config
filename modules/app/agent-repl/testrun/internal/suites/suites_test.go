@@ -714,27 +714,40 @@ func TestVitestCoverageModes(t *testing.T) {
 	}
 }
 
-func TestVitestTypecheckHoldsTheTwoCoresItUses(t *testing.T) {
-	// Arrange
-	dir := t.TempDir()
-	l := Layout{Module: dir, Work: t.TempDir()}
-
-	// Act
-	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
+func TestVitestChecksRunInThePackageOnTheCoresTheyUse(t *testing.T) {
+	tests := []struct {
+		id    string
+		argv  string
+		width int
+	}{
+		{id: "webapp:typecheck", argv: "npm run typecheck", width: TypecheckSlots},
+		{id: "webapp:knip", argv: "npm run knip", width: KnipSlots},
 	}
-	for _, unit := range u.Atomic {
-		if unit.ID == "webapp:typecheck" {
-			if unit.Width() != 2 {
-				t.Fatalf("typecheck width = %d, want 2", unit.Width())
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			l := Layout{Module: dir, Work: t.TempDir()}
+
+			// Act
+			u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
 			}
-			return
-		}
+			for _, unit := range u.Atomic {
+				if unit.ID != tt.id {
+					continue
+				}
+				if unit.Width() != tt.width || strings.Join(unit.Argv, " ") != tt.argv || unit.Dir != dir {
+					t.Fatalf("%s = width %d argv %q dir %s, want width %d argv %q dir %s", tt.id, unit.Width(), unit.Argv, unit.Dir, tt.width, tt.argv, dir)
+				}
+				return
+			}
+			t.Fatalf("no %s unit in %v", tt.id, u.Atomic)
+		})
 	}
-	t.Fatalf("no typecheck unit in %v", u.Atomic)
 }
 
 func TestQuietGoTestOutput(t *testing.T) {
