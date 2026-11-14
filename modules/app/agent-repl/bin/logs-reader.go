@@ -751,15 +751,42 @@ func leadingTimestamp(raw []byte) (time.Time, bool) {
 	return instant, true
 }
 
+// eachLine calls visit with every line of reader, its newline and any
+// carriage return before it removed, the last line included though no newline
+// ends it. A LINE OF ANY LENGTH IS READ: the bufio.Scanner this replaced
+// capped a line at 16MB, and a longer record made the scanner fail, which
+// dropped its WHOLE generation as an unreadable sink. Every record of the
+// current generation vanished from stdout with only a stderr finding to say
+// so, so a read looked as if its runtime had gone silent at the generation's
+// rotation (todo 2026-11-10, the central Emacs log). A read failure is still
+// returned as an unreadableLogError; visit's own error is returned as is.
+func eachLine(reader io.Reader, path string, visit func(line []byte) error) error {
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	for {
+		line, err := buffered.ReadBytes('\n')
+		if len(line) != 0 {
+			line = bytes.TrimSuffix(line, []byte("\n"))
+			line = bytes.TrimSuffix(line, []byte("\r"))
+			if visitErr := visit(line); visitErr != nil {
+				return visitErr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
+		}
+	}
+}
+
 func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	var records []record
 	line := firstLine
-	for scanner.Scan() {
-		raw := bytes.TrimSpace(scanner.Bytes())
+	err := eachLine(reader, path, func(text []byte) error {
+		raw := bytes.TrimSpace(text)
 		if len(raw) == 0 {
-			return nil, sequence, line, fmt.Errorf("%s:%d: malformed JSONL: empty line", path, line)
+			return fmt.Errorf("%s:%d: malformed JSONL: empty line", path, line)
 		}
 		// A RECORD STAMPED BEFORE THE WINDOW IS PASSED OVER UNDECODED: its
 		// stamp leads the line, and decoding every earlier record of a
@@ -769,20 +796,21 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 		if instant, ok := leadingTimestamp(raw); ok && filter.since != nil && instant.Before(*filter.since) {
 			sequence++
 			line++
-			continue
+			return nil
 		}
 		record, err := parseRecord(raw, sequence)
 		if err != nil {
-			return nil, sequence, line, fmt.Errorf("%s:%d: malformed JSONL: %w", path, line, err)
+			return fmt.Errorf("%s:%d: malformed JSONL: %w", path, line, err)
 		}
 		sequence++
 		if filter.accepts(record) {
 			records = append(records, record)
 		}
 		line++
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, sequence, line, &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
+		return nil
+	})
+	if err != nil {
+		return nil, sequence, line, err
 	}
 	return records, sequence, line, nil
 }
@@ -793,12 +821,10 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 // through the exact same tally/sample/timeline/fields/human/json renderers.
 // See AGENTS.md "Logs" for the synthetic fields this manufactures.
 func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime time.Time, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	var records []record
 	line := firstLine
-	for scanner.Scan() {
-		text := scanner.Text()
+	err := eachLine(reader, path, func(raw []byte) error {
+		text := string(raw)
 		var rec record
 		var ok bool
 		switch selectedSink.format {
@@ -807,16 +833,17 @@ func scanTextRecords(reader io.Reader, path string, selectedSink sink, mtime tim
 		case "messages":
 			rec, ok = synthesizeMessagesRecord(selectedSink, text, mtime, sequence)
 		default:
-			return nil, sequence, line, fmt.Errorf("%s:%d: unknown text sink format %q", path, line, selectedSink.format)
+			return fmt.Errorf("%s:%d: unknown text sink format %q", path, line, selectedSink.format)
 		}
 		sequence++
 		line++
 		if ok && filter.accepts(rec) {
 			records = append(records, rec)
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, sequence, line, &unreadableLogError{fmt.Errorf("read log %q: %w", path, err)}
+		return nil
+	})
+	if err != nil {
+		return nil, sequence, line, err
 	}
 	return records, sequence, line, nil
 }

@@ -219,6 +219,54 @@ test_central_default_emacs_sink() {
     fi
 }
 
+# A RECORD OF ANY LENGTH IS READ (todo 2026-11-10): the reader's line cap was
+# 16MB, and a longer record failed its whole generation as an unreadable
+# sink, so every record of the current generation, before and after it,
+# vanished from stdout and the runtime looked silent from the rotation on.
+over_long_payload() {
+    head -c 17000000 /dev/zero | tr '\0' x
+}
+
+test_central_reads_a_record_longer_than_16mb() {
+    local out err
+    mkdir -p "$state/logs"
+    {
+        printf '%s\n' '{"timestamp":"2026-09-10T10:00:17.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.before_long","message":"before","context":{}}'
+        printf '{"timestamp":"2026-09-10T10:00:18.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.long","message":"%s","context":{}}\n' "$(over_long_payload)"
+        printf '%s\n' '{"timestamp":"2026-09-10T10:00:19.000000Z","runtime":"emacs","pid":51,"level":"info","verbosity":"normal","operation":"emacs.after_long","message":"after","context":{}}'
+    } >"$state/logs/emacs.central.log"
+    out="$(AGENT_REPL_EMACS_GLOBAL_LOG_OVERRIDE='' run_logs --central --runtime emacs --fields operation 2>"$TMP/long-record.err")"
+    err="$(cat "$TMP/long-record.err")"
+    rm -f "$state/logs/emacs.central.log"
+    if [ "$out" = $'operation=emacs.before_long\noperation=emacs.long\noperation=emacs.after_long' ] &&
+        ! grep_in "$err" -q 'sink unreadable'; then
+        pass "a JSONL record longer than 16MB is read with every record around it"
+    else
+        fail "a JSONL record longer than 16MB is read with every record around it"
+        printf 'stdout: %s\nstderr: %s\n' "$out" "$err" >&2
+    fi
+}
+
+test_stderr_sink_reads_a_line_longer_than_16mb() {
+    local out err saved="$TMP/store-err.saved"
+    cp "$cache/agent-repl/log/shim-store.err.log" "$saved"
+    {
+        printf 'error: %s\n' "$(over_long_payload)"
+        printf '%s\n' 'error: after the long line'
+    } >"$cache/agent-repl/log/shim-store.err.log"
+    out="$(run_logs --central --runtime store --level error --timeline --width 30 2>"$TMP/long-stderr.err")"
+    err="$(cat "$TMP/long-stderr.err")"
+    mv "$saved" "$cache/agent-repl/log/shim-store.err.log"
+    if grep_in "$out" -q 'error: xxxx' &&
+        grep_in "$out" -q 'error: after the long line' &&
+        ! grep_in "$err" -q 'sink unreadable'; then
+        pass "a stderr sink line longer than 16MB is read with every line after it"
+    else
+        fail "a stderr sink line longer than 16MB is read with every line after it"
+        printf 'stdout: %s\nstderr: %s\n' "$out" "$err" >&2
+    fi
+}
+
 test_all() {
     local out
     out="$(run_logs --all --level warn --json)"
@@ -1150,6 +1198,8 @@ test_workspace_name
 test_ambiguous_workspace_name
 test_central
 test_central_default_emacs_sink
+test_central_reads_a_record_longer_than_16mb
+test_stderr_sink_reads_a_line_longer_than_16mb
 test_all
 test_all_beyond_the_argument_limit
 test_since_rfc3339
