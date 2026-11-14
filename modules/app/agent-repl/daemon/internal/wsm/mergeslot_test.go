@@ -515,9 +515,25 @@ func TestTheOneHolderIndexCoversExactlyTheExclusiveSlots(t *testing.T) {
 	}
 }
 
-// queueShapeWrite matches a statement that changes the shape of a merge
-// queue: a row added or deleted, or a row's state, place or repair moved.
-var queueShapeWrite = regexp.MustCompile(`(?is)^\s*(INSERT(\s+OR\s+\w+)?\s+INTO\s+merge_queue\b|DELETE\s+FROM\s+merge_queue\b|UPDATE\s+merge_queue\s+SET\b.*\b(state|seq|aside)\s*=)`)
+// queueRowWrite matches a statement that adds or deletes a merge queue row,
+// and queueUpdate one that updates rows, its SET clause captured.
+var (
+	queueRowWrite    = regexp.MustCompile(`(?is)^\s*(INSERT(\s+OR\s+\w+)?\s+INTO\s+merge_queue\b|DELETE\s+FROM\s+merge_queue\b)`)
+	queueUpdate      = regexp.MustCompile(`(?is)^\s*UPDATE\s+merge_queue\s+SET\b(.*?)(\bWHERE\b|$)`)
+	queueShapeColumn = regexp.MustCompile(`(?i)\b(state|seq|aside)\s*=`)
+)
+
+// queueShapeWrite reports whether TEXT changes the shape of a merge queue: a
+// row added or deleted, or a row's state, place or repair moved. Only an
+// update's SET clause is read: a WHERE clause that names `state` (a write
+// guarded on it) moves nothing.
+func queueShapeWrite(text string) bool {
+	if queueRowWrite.MatchString(text) {
+		return true
+	}
+	m := queueUpdate.FindStringSubmatch(text)
+	return m != nil && queueShapeColumn.MatchString(m[1])
+}
 
 // unstampedQueueWrites answers each function of FILES that writes a merge
 // queue's shape (queueShapeWrite) and reaches no slot stamping: it neither
@@ -554,7 +570,7 @@ func unstampedQueueWrites(t *testing.T, files []sourcescan.File) []string {
 				switch n := n.(type) {
 				case *ast.BasicLit:
 					if n.Kind == token.STRING {
-						if text, err := strconv.Unquote(n.Value); err == nil && queueShapeWrite.MatchString(text) {
+						if text, err := strconv.Unquote(n.Value); err == nil && queueShapeWrite(text) {
 							f.writes = true
 						}
 					}
@@ -651,6 +667,13 @@ func (s *store) move(ctx context.Context) error {
 func (s *store) admit(ctx context.Context) error {
 	return s.writeQueue(ctx, "op", nil, "k", func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "UPDATE merge_queue SET state = 1")
+		return err
+	})
+}`},
+		{name: "a write guarded on its state that moves no shape column", source: `package wsm
+func (s *store) clear(ctx context.Context) error {
+	return s.write(ctx, "op", nil, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "UPDATE merge_queue SET source_pick = NULL WHERE workspace_id = ? AND state = ?", 1, 2)
 		return err
 	})
 }`},
