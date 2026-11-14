@@ -4,39 +4,51 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"agent-repld/internal/wsm"
 )
 
-func TestQueueHeld(t *testing.T) {
+func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
 	tests := []struct {
-		name      string
-		paused    bool
-		serves    bool
-		mediation bool
-		want      bool
+		name            string
+		paused          bool
+		serves          bool
+		check           string
+		wantHead        bool
+		wantSpeculation bool
 	}{
 		{name: "a running queue this daemon serves", serves: true},
-		{name: "a paused queue", paused: true, serves: true, want: true},
-		{name: "a queue a handover holds", want: true},
-		{name: "a queue whose deploy owes a mediation", serves: true, mediation: true, want: true},
+		{name: "a paused queue", paused: true, serves: true, wantHead: true, wantSpeculation: true},
+		{name: "a queue a handover holds", wantHead: true, wantSpeculation: true},
+		{name: "a queue whose deploy's check is assessed holds only its head", serves: true, check: "owed", wantHead: true},
+		{name: "a queue whose deploy has a fix dispatched holds everything new", serves: true, check: "dispatched", wantHead: true, wantSpeculation: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			ctx := context.Background()
 			seedQueue(h, h.repoKey(), tt.paused)
 			h.standing.serves = tt.serves
-			if tt.mediation {
-				h.db.mediations[h.repoKey()] = &wsm.Mediation{OwedAt: epochPause}
+			if tt.check != "" {
+				if _, err := h.db.OweMediation(ctx, h.repoKey(), epochPause, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.check == "dispatched" {
+				if _, err := h.db.DispatchMediation(ctx, h.repoKey(), epochPause, epochPause, "ws-remedy"); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			// Act
-			got, err := h.o.queueHeld(context.Background(), h.repoKey())
+			head, headErr := h.o.queueHeld(ctx, h.repoKey())
+			speculation, specErr := h.o.speculationHeld(ctx, h.repoKey())
 
 			// Assert
-			if err != nil || got != tt.want {
-				t.Fatalf("queueHeld = (%v, %v), want %v", got, err, tt.want)
+			if headErr != nil || head != tt.wantHead {
+				t.Fatalf("queueHeld = (%v, %v), want %v", head, headErr, tt.wantHead)
+			}
+			if specErr != nil || speculation != tt.wantSpeculation {
+				t.Fatalf("speculationHeld = (%v, %v), want %v", speculation, specErr, tt.wantSpeculation)
 			}
 		})
 	}
@@ -51,10 +63,11 @@ func TestQueueHeldAnswersAnUnreadableMediation(t *testing.T) {
 
 	// Act
 	_, err := h.o.queueHeld(context.Background(), h.repoKey())
+	_, specErr := h.o.speculationHeld(context.Background(), h.repoKey())
 
 	// Assert
-	if err == nil {
-		t.Fatal("queueHeld = nil error, want the mediation read's failure")
+	if err == nil || specErr == nil {
+		t.Fatalf("queueHeld = %v, speculationHeld = %v; want the check read's failure from both", err, specErr)
 	}
 }
 

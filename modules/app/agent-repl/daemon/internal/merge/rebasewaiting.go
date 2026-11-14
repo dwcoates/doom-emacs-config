@@ -90,7 +90,7 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		o.deps.Log.Global().Error(op, "could not read the queue to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
 	}
-	paused, err := o.queueHeld(ctx, repo)
+	paused, err := o.speculationHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
