@@ -393,6 +393,18 @@ func (s *Service) TurnEnded(ws ids.WorkspaceID, turn ids.TurnID) {
 func (s *Service) record(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, markdown string) {
 	log := s.deps.Log(ws)
 	row, err := s.deps.Turns.Turn(ctx, ws, turn)
+	// A TURN WITH NO RECORD ASKED NO QUESTION. A thread question's row is
+	// written before its prompt is delivered, so a turn the records never
+	// held (one whose adoption no daemon saw, which the session watcher
+	// recorded at ERROR when its terminal arrived) cannot be one. Every
+	// replay of its history tells its answer again, so it is not a fault here.
+	if errors.Is(err, wsm.ErrNotFound) {
+		log.Info("daemon.chat.turn_unrecorded", "an answered turn has no record, so it asked no thread question; nothing is recorded", dlog.Context{
+			"workspace": string(ws), "turn": string(turn),
+		})
+		s.forgetAnswer(ws, turn)
+		return
+	}
 	if err != nil {
 		log.Error("daemon.chat.record_failed", "an answered turn's record could not be read", dlog.Context{
 			"thread": string(ws), "turn": string(turn), "cause": err.Error(),
