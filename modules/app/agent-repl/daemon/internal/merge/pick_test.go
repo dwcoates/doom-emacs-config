@@ -393,7 +393,7 @@ func TestAPickIsTimedByHowItEnded(t *testing.T) {
 			runThePick(t, h, context.Background(), false)
 
 			// Assert
-			got := h.meter.all()
+			got := h.meter.timed()
 			if len(got) == 0 || got[0] != tt.want {
 				t.Fatalf("timings = %v, want %s first", got, tt.want)
 			}
