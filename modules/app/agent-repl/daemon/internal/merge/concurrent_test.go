@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
@@ -9,6 +10,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // The scripts the concurrent configs name: the deploy stage's pull request,
@@ -210,5 +212,28 @@ func TestADeployBehindTheHeadInNoChainCannotTakeItsTurn(t *testing.T) {
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.concurrent", text: "stands in no chain"}) {
 		t.Fatal("no ERROR record names the deploy that stands in no chain")
+	}
+}
+
+func TestADeployWaitingForItsTurnFailsWhenTheNameAheadCannotBeRead(t *testing.T) {
+	// Arrange: the deploy ahead in the chain names a workspace the registry
+	// does not hold.
+	h := newHarness(t)
+	ahead := &run{o: h.o, ws: "ws-gone", repo: h.repoKey()}
+	r := &run{o: h.o, ws: behind, repo: h.repoKey(), speculative: true, target: deployTarget{cfg: concurrentThrough("deploy")}}
+	h.o.mu.Lock()
+	h.o.chains[h.repoKey()] = []*run{ahead, r}
+	h.o.runsByWorkspace[ahead.ws] = ahead
+	h.o.mu.Unlock()
+
+	// Act
+	err := r.awaitTurnFor(context.Background(), lifecycleconfig.StagePostDeploy)
+
+	// Assert
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("awaitTurnFor = %v, want the name's read failure", err)
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.concurrent", text: "could not read a workspace's name", context: map[string]string{"workspace": "ws-gone"}}) {
+		t.Fatalf("no ERROR record names the unreadable workspace: %+v", h.logs.Records())
 	}
 }

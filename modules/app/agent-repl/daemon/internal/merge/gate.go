@@ -94,7 +94,11 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 		"since_gate_start_seconds": g.since()})
 	r.publishRun(round, round.live(), nil, nil)
 
-	argv := r.o.deps.TestCommand(dir, r.target.testScript(), r.o.workspaceName(ctx, r.ws))
+	name, err := r.o.workspaceName(ctx, op, r.ws)
+	if err != nil {
+		return gateVerdict{}, err
+	}
+	argv := r.o.deps.TestCommand(dir, r.target.testScript(), name)
 	if len(argv) == 0 {
 		return g.brokenGate(ctx, GateResult{}, "no test command is configured for it"), nil
 	}

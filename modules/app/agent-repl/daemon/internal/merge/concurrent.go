@@ -85,10 +85,18 @@ func (r *run) awaitTurn(ctx context.Context) error {
 			return err
 		}
 		ahead, found := r.o.runFor(place.ahead)
+		var aheadName string
+		if found {
+			name, err := r.o.workspaceName(ctx, op, ahead.ws)
+			if err != nil {
+				return err
+			}
+			aheadName = name
+		}
 		r.setStep(ctx, footer.StepAwaitingTurn, func(f *footer.MergeFacts) {
 			f.Ahead = place.rank
 			if found {
-				f.Line, f.LineAt = ahead.enqueuedLine(r.o.workspaceName(ctx, ahead.ws))
+				f.Line, f.LineAt = ahead.enqueuedLine(aheadName)
 			}
 		})
 		if !logged {
