@@ -54,11 +54,23 @@ written for review: nothing below is built yet.
    turn, so every attempt is in its context; retired when the chain ends. Its
    brief carries the history the store keeps: the chain so far and how
    recent chains ended. It never edits code.
-3. THE REMEDIATION, at most one per chain. Created visible by the intake's
-   dispatch, a child of nothing, with a fresh context and the intake's
-   account of the defect as its prompt. Every later deploy of the chain that
-   the intake finds broken is handed to the same remediation workspace while
-   it is open, never to a second.
+3. THE REMEDIATION, at most one live per chain. Created visible by the
+   intake's first dispatch, a child of nothing, with a fresh context and the
+   intake's account of the defect as its prompt. It CLOSES at its finish's
+   deploy like any finished workspace, so no live session spans the daemon
+   restart. A later dispatch in the same chain (owner ruling, 2026-11-14):
+   - RESTORES the chain's last remediation workspace when the defect is in,
+     or caused by, its own fix: it knows what it changed, why, and what it
+     ruled out. It reopens on the serving daemon from its stored
+     conversation; its worktree, removed by its landing, is recreated on its
+     branch at the main branch's tip, which holds its landed fix. The
+     intake's brief to it states only the new findings, and it compacts
+     first when its context is large.
+   - CREATES a fresh remediation workspace when the defect is unrelated to
+     the earlier fix, so it inherits no irrelevant context or approach.
+   - The intake states which, and why, in its dispatch. The bound on
+     remediations in a row (owner question 2) is what stops a restored
+     workspace whose approach is the problem from trying again.
 
 ### The intake's decision
 
@@ -97,8 +109,8 @@ after the deploy picks it up where it stood:
    NEVER releases the hold and NEVER resumes the queue: only the intake's
    approval of the fix's deploy does.
 
-The remediation workspace closes when its fix's deploy is approved, or when
-the chain is escalated.
+The remediation workspace closes at its finish's deploy (step 3), and is
+restored by a later dispatch of its chain as above.
 
 ### The hold, the pause, and the queue's work
 
