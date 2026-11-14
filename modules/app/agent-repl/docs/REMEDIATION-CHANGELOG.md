@@ -1462,3 +1462,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): The pick timing test reads only durations, beside the new queue change counts
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Todo: a deploy that installs nothing still owes a deploy mediation
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Queue bypass mode gates every landing on the full suite, run on the branch rebased onto the main branch
+- 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): The persistent-wifi helper's sources are placed in the test roster, so every merge queue gate's placement check passes again
