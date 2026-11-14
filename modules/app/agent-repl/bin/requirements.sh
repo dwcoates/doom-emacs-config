@@ -26,6 +26,8 @@
 #                            per platform) with its configuration features
 #                            (`configuration_features`, and the platform block's)
 #   env                      an environment variable the user sets
+#   group                    the user belongs to a group (`name`), which only an
+#                            administrator grants
 #   notification_permission  macOS lets a banner program notify
 #   app_build                a macOS app built from the module (`build.module`, a
 #                            script taking the app's path, which answers its
@@ -326,6 +328,7 @@ validate_entries() {
                (select($p == "darwin" and $e.install.source[$p] != null and $e.install.source[$p].app == null)
                  | "\($e._file): \($e.id): an emacs install.source.darwin needs \"app\"")))
        elif $e.kind == "env" then need($e; ["name", "doc"])
+       elif $e.kind == "group" then need($e; ["name", "platforms"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
          (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
@@ -499,6 +502,19 @@ check_env() {
     STATUS=ok; DETAIL="$name is set"
   else
     STATUS=needs-user; DETAIL="$name is not set"
+  fi
+}
+
+# check_group: the user's groups, as the kernel holds them for this login
+# (`id -nG`). A group granted since takes a new login, which the fix says.
+check_group() {
+  local e="$1" name
+  name="$(field "$e" .name)"
+  FIX="sudo usermod -aG $name \"\$USER\", then log out and back in"
+  if id -nG | tr ' ' '\n' | grep -qx "$name"; then
+    STATUS=ok; DETAIL="this user is in the $name group"
+  else
+    STATUS=needs-user; DETAIL="this user is not in the $name group"
   fi
 }
 
@@ -1183,6 +1199,8 @@ install_emacs_source() {
 }
 
 install_env() { return 1; }
+
+install_group() { return 1; }
 
 install_notification_permission() {
   local cmd

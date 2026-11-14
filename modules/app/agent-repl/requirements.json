@@ -388,6 +388,80 @@
       "app": "AgentReplWifi.app"
     },
     {
+      "id": "nmcli",
+      "kind": "program",
+      "why": "persistent wifi on Linux reads, joins, leaves and scans Wi-Fi through NetworkManager (daemon/internal/persistentwifi/linuxhost.go)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "command": "nmcli",
+      "install": {
+        "manual": "Install NetworkManager's nmcli with your distribution's package manager.",
+        "apt": "network-manager",
+        "dnf": "NetworkManager",
+        "pacman": "networkmanager",
+        "zypper": "NetworkManager"
+      }
+    },
+    {
+      "id": "powerprofilesctl",
+      "kind": "program",
+      "why": "persistent wifi's lid-closed quiet state on Linux sets the power-saver profile and restores the one in use (daemon/internal/persistentwifi/linuxhost.go)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "command": "powerprofilesctl",
+      "install": {
+        "manual": "Install power-profiles-daemon's powerprofilesctl with your distribution's package manager.",
+        "apt": "power-profiles-daemon",
+        "dnf": "power-profiles-daemon",
+        "pacman": "power-profiles-daemon",
+        "zypper": "power-profiles-daemon"
+      }
+    },
+    {
+      "id": "xset",
+      "kind": "program",
+      "why": "persistent wifi's lid-closed quiet state on Linux sleeps and wakes the display through X11's DPMS (daemon/internal/persistentwifi/linuxhost.go)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "command": "xset",
+      "install": {
+        "manual": "Install X11's xset with your distribution's package manager.",
+        "apt": "x11-xserver-utils",
+        "dnf": "xset",
+        "pacman": "xorg-xset",
+        "zypper": "xset"
+      }
+    },
+    {
+      "id": "systemd-inhibit",
+      "kind": "program",
+      "why": "persistent wifi on Linux keeps the machine awake with its lid closed through a logind inhibitor (daemon/internal/persistentwifi/linuxhost.go)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "command": "systemd-inhibit",
+      "install": {
+        "manual": "systemd-inhibit ships with systemd; agent-repl runs only on a systemd host."
+      }
+    },
+    {
+      "id": "input-group",
+      "kind": "group",
+      "why": "persistent wifi on Linux hears the lid from the kernel's lid switch device, which only the input group may read (daemon/internal/persistentwifi/lid_linux.go)",
+      "profile": "run",
+      "platforms": [
+        "linux"
+      ],
+      "name": "input"
+    },
+    {
       "id": "notify-send",
       "kind": "program",
       "why": "the daemon's desktop banners on Linux (daemon/internal/desktopnotify)",
