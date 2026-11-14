@@ -62,3 +62,29 @@ embeds another's new messages.
   `daemon/internal/workspace/mediator.go:76` identify the mediator by the
   configured name and are rewritten to identify the chain's intake by its
   recorded role.
+
+### 2. `agentrepl.v1.UpdateMergeQueueMediation` gains `dispatch`
+
+- WHAT: a third decision arm, `dispatch` (tag 4): `repeated DeployProblem
+  problems` and a `remediation` oneof of `restore` or `fresh`.
+  `DeployProblem` holds a `statement` and verbatim `evidence` records. Two
+  refusals: `no_remediation_to_restore` (17) and `remediation_bound_reached`
+  (18, carrying the bound). `not_mediator` and `no_mediation_owed` keep
+  their tags and now mean "not the chain's intake" and "no check owed".
+- WHY: the owner ruled the intake is a weaker model that only states
+  problems and never prescribes fixes, so the dispatch carries statements
+  and evidence, no cause and no plan. Restore versus fresh is the intake's
+  call by the owner's ruling (restore when the problem is in or caused by
+  the last fix). The evidence is verbatim so the remediation workspace
+  starts from the records, not a paraphrase.
+- The message names keep "Mediation": the intake mediates between a deploy
+  and the queue, and renaming the verb across the daemon and the CLI buys
+  nothing a reader needs.
+- `DeployProblem.evidence` is a list of strings on purpose: each is a log
+  line, a doctor line or a metrics row quoted for an agent to read, and its
+  sources have no common typed shape. It is text for a model, never parsed.
+- The bound is enforced by the refusal, not only by the brief, so a
+  sonnet-level intake that miscounts cannot exceed it.
+- CONSEQUENCES: the CLI verb `agentrepl merge-queue mediation` gains a
+  `dispatch` form; `daemon/internal/merge/mediation.go` (`DecideMediation`)
+  gains the dispatch path and both refusals.
