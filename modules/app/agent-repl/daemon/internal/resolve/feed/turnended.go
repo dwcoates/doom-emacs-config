@@ -17,6 +17,21 @@ import (
 // liveness is STRUCTURAL: no terminal row for the current turn means the turn
 // is live. A connection dying without one stays a transport failure.
 
+// terminalEndedAtMs is when TURN's terminal happened: the place its record
+// states, which for a failure is when it failed, so a terminal that reaches
+// the feed late still says when it ended. The daemon's receipt stands in only
+// when the serving side states no place, as the contract orders
+// (conversation.v1.HistoryEntryAt.place), and that is recorded.
+func (r *resolver) terminalEndedAtMs(s *wsState, turn ids.TurnID) int64 {
+	if at := s.entryPlace.GetAtMs(); at > 0 {
+		return at
+	}
+	r.logger(s.id).Debug("daemon.feed.terminal_unplaced",
+		"a turn's terminal states no place; it is stamped with the daemon's receipt",
+		dlog.Context{"turn": string(turn)})
+	return r.deps.Now().UnixMilli()
+}
+
 // drawTerminal draws how one agent's stream ended.
 func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	log := r.logger(s.id)
@@ -37,7 +52,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	at, placed := r.placeTurn(s, agent, turn)
 
 	turnID := &conversationv1.TurnId{Value: string(*turn)}
-	ended := &frontendv1.FeedTurnEnded{EndedAtMs: r.deps.Now().UnixMilli()}
+	ended := &frontendv1.FeedTurnEnded{EndedAtMs: r.terminalEndedAtMs(s, *turn)}
 
 	// THE TERMINAL ANSWERS EVERY STALL THIS TURN HAD OPEN. No fold of a turn
 	// that ended is still expecting a frame, so the windows are dropped and a
@@ -99,6 +114,9 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		Turn: turnID,
 		Row:  &frontendv1.FeedRow_TurnEnded{TurnEnded: ended},
 	}
+	// A CONNECTION FAILURE THE NETWORK'S RETURN ALREADY ANSWERED is refused
+	// at the upsert door like one drawn before the return (reconnect.go).
+	r.answerLateUnreachable(s, row)
 	switch {
 	case suppress:
 		log.Debug("daemon.feed.turn_ended",

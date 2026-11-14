@@ -169,3 +169,63 @@ func TestTheConnectionComingBackWithNoCardRecordsNothing(t *testing.T) {
 		t.Fatalf("recorded %v, want nothing", store.turns)
 	}
 }
+
+func TestALateConnectionFailedCardThatFailedBeforeTheReturnIsNotDrawn(t *testing.T) {
+	// Arrange: the turn failed, the network came back, and only then did
+	// the failure's terminal reach the feed.
+	store := &fakeTurnSet{}
+	h := newDurableHarness(t, durableStores{reconnected: store})
+	h.resolver.NetworkFaultOpened(testWorkspace, "f-1")
+	h.deliverPrompt("t1", "question t1")
+	failedAt := h.nowMs - 5_000
+	h.resolver.NetworkFaultClosed(testWorkspace, "f-1")
+
+	// Act
+	h.terminalAt("t1", nil, unreachableFailure(), failedAt)
+
+	// Assert
+	if h.endingDrawn("t1") {
+		t.Fatal("a connection failure the network's return answered was drawn")
+	}
+	if !slices.Equal(store.turns, []ids.TurnID{"t1"}) {
+		t.Fatalf("recorded %v, want t1", store.turns)
+	}
+	if !h.hasRecordWith("info", opReconnected, "failed_at_ms", failedAt) {
+		t.Fatalf("records = %+v, want the late answer recorded at INFO", h.records())
+	}
+}
+
+func TestAConnectionFailedCardThatFailedAfterTheReturnStands(t *testing.T) {
+	// Arrange: a new outage's first card arrives before its fault opens.
+	h := newHarness(t)
+	h.resolver.NetworkFaultOpened(testWorkspace, "f-1")
+	h.resolver.NetworkFaultClosed(testWorkspace, "f-1")
+	h.deliverPrompt("t2", "question t2")
+
+	// Act
+	h.terminalAt("t2", nil, unreachableFailure(), h.nowMs+5_000)
+
+	// Assert
+	if !h.endingDrawn("t2") {
+		t.Fatal("a new outage's connection-failed card was retired by the earlier return")
+	}
+}
+
+func TestAFailedLateReconnectionRecordStillRefusesTheCardAndIsRaised(t *testing.T) {
+	// Arrange
+	store := &fakeTurnSet{putErr: errors.New("disk full")}
+	h := newDurableHarness(t, durableStores{reconnected: store})
+	h.resolver.NetworkFaultOpened(testWorkspace, "f-1")
+	h.deliverPrompt("t1", "question t1")
+	failedAt := h.nowMs - 5_000
+	h.resolver.NetworkFaultClosed(testWorkspace, "f-1")
+
+	// Act
+	h.terminalAt("t1", nil, unreachableFailure(), failedAt)
+
+	// Assert
+	if h.endingDrawn("t1") {
+		t.Fatal("the card stood because recording it failed")
+	}
+	assertRecordedFault(t, h, opReconnected, "disk full")
+}
