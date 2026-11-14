@@ -1461,3 +1461,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Merge queue and deploy mediation metrics: each round and its outcome, rounds per merge, queue changes, how each deploy check ended, and remediations deployed in a row; the mediation labels read "hot reloading" and "assessing reload"; the metrics skill documents every metric
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): The pick timing test reads only durations, beside the new queue change counts
 - 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Todo: a deploy that installs nothing still owes a deploy mediation
+- 2026-11-14 merge-queue-stall-triage (landed in queue bypass mode): Queue bypass mode gates every landing on the full suite, run on the branch rebased onto the main branch
