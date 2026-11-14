@@ -135,8 +135,8 @@ func TestMediationFailed(t *testing.T) {
 }
 
 func TestTheDrainCutsAMediationRoundAndWaitsForIt(t *testing.T) {
-	// Arrange: a round told of the deploy and awaiting its mediator's turn.
-	h := mediated(t)
+	// Arrange: a round told of the deploy and awaiting its intake's turn.
+	h := checked(t)
 	owe(t, h)
 	h.awaitGate, h.awaitStarted = make(chan struct{}), make(chan ids.TurnID, 1)
 	mediated := make(chan struct{})
@@ -173,7 +173,7 @@ func TestTheDrainCutsAMediationRoundAndWaitsForIt(t *testing.T) {
 	submitted := len(h.queue.submissions)
 	h.o.Mediate(context.Background())
 	if len(h.queue.submissions) != submitted {
-		t.Fatal("a pass after the drain told the mediator again")
+		t.Fatal("a pass after the drain told the intake again")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: mediationNotRun}); !ok {
 		t.Fatalf("records = %v, want the refused pass at INFO", h.logs.Records())
@@ -209,9 +209,9 @@ func TestARoundAHandoverCutRunsAgainOnlyWhenThisDaemonServesAgain(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: the handover begins as the mediator is told, and its
+			// Arrange: the handover begins as the intake is told, and its
 			// session's watcher closes under the round's await.
-			h := mediated(t)
+			h := checked(t)
 			owe(t, h)
 			if tt.handover {
 				h.queue.onSubmit = func(sub promptqueue.Submission) {

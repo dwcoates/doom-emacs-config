@@ -708,6 +708,8 @@ func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID
 	// (wsm.markClosedInTx), so the roster stops drawing it.
 	o.publishOffQueue(ctx)
 	o.dropAsyncRequestsOf(ctx, ws)
+	// A REMEDIATION CLOSED BEFORE ITS FIX DEPLOYS HANDS ITS HOLD BACK.
+	o.remediationClosed(ctx, ws)
 	if _, running := o.runFor(ws); running {
 		// A RUNNING MERGE ENDS WITH ITS WORKSPACE TOO. Left alone, a merge
 		// running on a workspace that is gone would hold its lease for ever.

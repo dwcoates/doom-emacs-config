@@ -879,7 +879,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
-		Mediates: workspace.MediatesFrom(lifecycleconfig.OnDisk{}, p.DB),
 		// THE STORE'S READ-ONLY FACE, dialled beside the store socket every
 		// shim is handed: the daemon reads every workspace's history there,
 		// and never writes the store.
@@ -1396,7 +1395,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TurnInFlight:      turnInFlight(fleet),
 		Rollout:           deployer,
 		Standing:          rolloutController,
-		CreateMediator:    verbsRef.createMediator,
+		DeployChecks:      deployChecks{f: verbsRef},
+		ReadLogs:          logsReader(scripts, filepath.Dir(paths.PromptsDir)),
 		Log:               p.Surfaces,
 	})
 	if err != nil {

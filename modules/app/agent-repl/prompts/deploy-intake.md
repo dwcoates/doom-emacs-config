@@ -1,0 +1,12 @@
+<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{repo_dir}}, {{version}}, {{chain}}, {{bound}}, {{facts}} -->
+A deploy of {{repo_dir}} began at {{deploy_started}} ({{version}}), and its merge queue lands nothing past it until you decide it.
+
+The chain so far: {{chain}} The chain may deploy {{bound}} remediations in a row; at the bound, escalate.
+
+What the daemon found in every system's logs since the deploy began, grouped by operation and message, and sorted against the same span before it:
+
+{{facts}}
+
+Also read `~/.claude/skills/agent-repl-runtime/run.sh --doctor`: a fault it reports is a problem of this deploy only when its records are NEW above.
+
+Decide this deploy in this turn, as your session's rules say: approve, escalate, or dispatch the problems this deploy caused. File each SEEN BEFORE group first, unless an open workspace already works on it.

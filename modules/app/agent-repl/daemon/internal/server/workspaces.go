@@ -969,15 +969,27 @@ func (s *server) FinishWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
+	// A DEPLOY REMEDIATION LANDS DIRECTLY, by its recorded role: its finish
+	// runs the full gate, lands on the main branch and deploys, never through
+	// the queue its check holds (merge.FinishRemediation).
+	remediation, err := s.deps.Merge.IsDeployRemediation(ctx, subject.Record.ID)
+	if err != nil {
+		subject.Log.Error("daemon.server.finish_workspace", "could not read whether the finishing workspace is a deploy remediation; nothing was finished", dlog.Context{"rpc": rpc, "error": err.Error()})
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	success := &agentreplv1.FinishWorkspaceSuccess{Landing: &agentreplv1.FinishWorkspaceSuccess_Queued{Queued: &agentreplv1.FinishWorkspaceSuccessQueued{}}}
+	if remediation {
+		if err := s.deps.Merge.FinishRemediation(ctx, subject.Record.ID, versionIncrement(req.Msg.GetVersionIncrement())); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
+		}
+		success.Landing = &agentreplv1.FinishWorkspaceSuccess_LandingDirectly{LandingDirectly: &agentreplv1.FinishWorkspaceSuccessLandingDirectly{}}
+	} else if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.
 	s.PublishHostWorkspace(ctx, subject.Record.ID)
-	resp.Result = &agentreplv1.FinishWorkspaceResponse_Success{
-		Success: &agentreplv1.FinishWorkspaceSuccess{},
-	}
+	resp.Result = &agentreplv1.FinishWorkspaceResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -98,6 +99,9 @@ type cliDeps struct {
 	mintKey func(prefix string) (string, error)
 	// now is the current instant, which a relative time flag counts back from.
 	now func() time.Time
+	// stdin is what a verb reading its input from standard input reads (a
+	// deploy intake's dispatched problems).
+	stdin io.Reader
 }
 
 // productionCLIDeps reaches the real serving daemon.
@@ -115,6 +119,7 @@ func productionCLIDeps() cliDeps {
 		getwd:   os.Getwd,
 		mintKey: prompthandler.MintKey,
 		now:     time.Now,
+		stdin:   os.Stdin,
 	}
 }
 
@@ -190,7 +195,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
 		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
-		"mediation":   {usage: "mediation approve|escalate -summary TEXT", run: queueMediation},
+		"mediation":   {usage: "mediation approve|escalate|dispatch [-fresh|-restore] -summary TEXT (dispatch reads its problems from stdin as JSON)", run: queueMediation},
 		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
@@ -2259,34 +2264,78 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 	}
 }
 
-// queueMediation is the deploy mediator's decision on the deploy its
-// repository owes a mediation of: approve or escalate, with what it found.
+// queueMediation is the deploy intake's decision on the deploy its chain
+// owes a check of: approve, escalate, or dispatch the problems the deploy
+// caused, read from standard input as JSON, to a fresh or the restored
+// remediation workspace.
 func queueMediation(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
+	fresh := fs.Bool("fresh", false, "dispatch to a fresh remediation workspace")
+	restore := fs.Bool("restore", false, "dispatch to the chain's last remediation workspace, reopened")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
 	}
 	if len(positionals) != 1 {
-		return c.usageFailed("name the decision: approve or escalate")
+		return c.usageFailed("name the decision: approve, escalate or dispatch")
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
+	if positionals[0] != "dispatch" && (*fresh || *restore) {
+		return c.usageFailed("-fresh and -restore choose a dispatch's remediation workspace")
+	}
 	switch positionals[0] {
 	case "approve":
 		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}
 	case "escalate":
 		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}
+	case "dispatch":
+		dispatch, err := readDispatch(c.deps.stdin, *fresh, *restore)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: dispatch}
 	default:
-		return c.usageFailed("the decision is approve or escalate, not %q", positionals[0])
+		return c.usageFailed("the decision is approve, escalate or dispatch, not %q", positionals[0])
 	}
 	if strings.TrimSpace(*summary) == "" {
-		return c.usageFailed("-summary is required: what the mediation found")
+		return c.usageFailed("-summary is required: what the check found")
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
 	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
+}
+
+// readDispatch reads a dispatch's problems from IN, a JSON list of
+// {"statement", "evidence"} objects, to the remediation workspace FRESH or
+// RESTORE chooses (exactly one).
+func readDispatch(in io.Reader, fresh, restore bool) (*agentreplv1.UpdateMergeQueueMediationDispatch, error) {
+	if fresh == restore {
+		return nil, errors.New("a dispatch names exactly one of -fresh or -restore")
+	}
+	var problems []struct {
+		Statement string   `json:"statement"`
+		Evidence  []string `json:"evidence"`
+	}
+	decoder := json.NewDecoder(in)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&problems); err != nil {
+		return nil, fmt.Errorf("read the dispatch's problems from standard input as a JSON list of {\"statement\", \"evidence\"}: %w", err)
+	}
+	if len(problems) == 0 {
+		return nil, errors.New("a dispatch states at least one problem")
+	}
+	out := &agentreplv1.UpdateMergeQueueMediationDispatch{}
+	for _, p := range problems {
+		out.Problems = append(out.Problems, &agentreplv1.DeployProblem{Statement: p.Statement, Evidence: p.Evidence})
+	}
+	if fresh {
+		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}
+	} else {
+		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Restore{Restore: &agentreplv1.UpdateMergeQueueMediationDispatchRestore{}}
+	}
+	return out, nil
 }
 
 // queueSubscribe has the caller told of a merge put in line, a merge leaving

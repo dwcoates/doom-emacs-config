@@ -1210,6 +1210,13 @@ type fakeMerge struct {
 	// decisions records every DecideMediation, which decideErr answers.
 	decisions  []fakeDecision
 	decideErr  error
+	// remediations answers IsDeployRemediation, which remediationErr fails;
+	// remediationFinishes records every FinishRemediation, which
+	// remediationFinishErr answers.
+	remediations         map[ids.WorkspaceID]bool
+	remediationErr       error
+	remediationFinishes  []ids.WorkspaceID
+	remediationFinishErr error
 	enqueueErr error
 	pauseErr   error
 	pauseScope *merge.RepositoryScope
@@ -1439,13 +1446,21 @@ func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by
 // fakeDecision is one DecideMediation the fake was asked for.
 type fakeDecision struct {
 	ws       ids.WorkspaceID
-	decision merge.MediationDecision
-	summary  string
+	decision merge.Decision
 }
 
-func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, decision merge.MediationDecision, summary string) error {
-	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: decision, summary: summary})
+func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {
+	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: d})
 	return f.decideErr
+}
+
+func (f *fakeMerge) IsDeployRemediation(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	return f.remediations[ws], f.remediationErr
+}
+
+func (f *fakeMerge) FinishRemediation(_ context.Context, ws ids.WorkspaceID, _ *wsm.VersionIncrement) error {
+	f.remediationFinishes = append(f.remediationFinishes, ws)
+	return f.remediationFinishErr
 }
 
 // fakeDrain answers the schedule verbs and records what it was handed.

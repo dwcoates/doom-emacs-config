@@ -1346,7 +1346,37 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 			return invalid("mediation.summary", "a mediation says what it found")
 		}
 		if req.GetRequester().GetWorkspace() == nil {
-			return invalid("requester", "only a deploy mediator's agent decides a mediation")
+			return invalid("requester", "only a deploy intake's agent decides a deploy")
+		}
+		if d := m.GetDispatch(); d != nil {
+			if err := validateDispatch(d); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateDispatch refuses a dispatch naming no problem, a problem with no
+// statement or no evidence, or no choice of remediation workspace.
+func validateDispatch(d *agentreplv1.UpdateMergeQueueMediationDispatch) *connect.Error {
+	if d.GetRemediation() == nil {
+		return invalid("mediation.dispatch.remediation", "a dispatch says whether it restores the chain's last remediation or makes a fresh one")
+	}
+	if len(d.GetProblems()) == 0 {
+		return invalid("mediation.dispatch.problems", "a dispatch states at least one problem")
+	}
+	for _, p := range d.GetProblems() {
+		if strings.TrimSpace(p.GetStatement()) == "" {
+			return invalid("mediation.dispatch.problems.statement", "each problem says what is wrong")
+		}
+		if len(p.GetEvidence()) == 0 {
+			return invalid("mediation.dispatch.problems.evidence", "each problem quotes the records that show it")
+		}
+		for _, e := range p.GetEvidence() {
+			if strings.TrimSpace(e) == "" {
+				return invalid("mediation.dispatch.problems.evidence", "an evidence record is never blank")
+			}
 		}
 	}
 	return nil

@@ -13,11 +13,18 @@ const (
 	// MergeSpanName is each merge's pick, queued, running and total spans,
 	// by how it ended.
 	MergeSpanName = "agentrepl_merge_seconds"
-	// MediationSpanName is each deploy mediation's rollout, assessment and
-	// total spans, by how it ended (merge's mediation outcomes). Its total
-	// span's count per outcome is how many mediations ended so: how often
-	// the mediator found nothing, fixed and redeployed, or escalated.
+	// MediationSpanName is each deploy check's rollout, assessment and total
+	// spans, by how it ended (merge's check outcomes). Its total span's
+	// count per outcome is how many checks ended so: how often the intake
+	// found nothing, dispatched a fix, or escalated.
 	MediationSpanName = "agentrepl_deploy_mediation_seconds"
+	// RemediationSpanName is each remediation, from its dispatch to the
+	// check that ended it, by how it ended: its fix approved (landed), the
+	// chain escalated, or dispatched again.
+	RemediationSpanName = "agentrepl_deploy_remediation_seconds"
+	// RemediationGateRoundsName is how many of a remediation finish's gates
+	// failed before it landed or was given up, by which.
+	RemediationGateRoundsName = "agentrepl_deploy_remediation_gate_rounds"
 	// MediationChainRedeploysName is how many remediations were deployed in
 	// a row before the queue advanced, per chain, by how its last mediation
 	// ended. Its count per outcome is how many chains ended so.
@@ -51,6 +58,7 @@ var mergeBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1
 // client_golang's own atomic add.
 type merges struct {
 	steps, spans, mediations, chainRedeploys, chainSpans, rounds, roundCounts *prometheus.HistogramVec
+	remediations, remediationGates                                            *prometheus.HistogramVec
 	inARow                                                                    prometheus.Gauge
 	changes                                                                   *prometheus.CounterVec
 }
@@ -64,8 +72,14 @@ func newMerges() merges {
 			Name: MergeSpanName, Help: "A merge's pick, queued, running and total spans, by span and outcome.", Buckets: mergeBuckets,
 		}, []string{"span", "outcome"}),
 		mediations: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: MediationSpanName, Help: "A deploy mediation's rollout, assessment and total spans, by span and how it ended.", Buckets: mergeBuckets,
+			Name: MediationSpanName, Help: "A deploy check's rollout, assessment and total spans, by span and how it ended.", Buckets: mergeBuckets,
 		}, []string{"span", "outcome"}),
+		remediations: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: RemediationSpanName, Help: "A deploy remediation, from its dispatch to the check that ended it, by how it ended.", Buckets: mergeBuckets,
+		}, []string{"outcome"}),
+		remediationGates: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: RemediationGateRoundsName, Help: "Failed gates of a deploy remediation's finish before it landed or was given up, by which.", Buckets: roundCountBuckets,
+		}, []string{"outcome"}),
 		chainRedeploys: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: MediationChainRedeploysName, Help: "Remediations deployed in a row before the queue advanced, per chain, by how its last mediation ended.", Buckets: roundCountBuckets,
 		}, []string{"outcome"}),
@@ -120,6 +134,24 @@ func (s *Surface) ObserveMediationChain(outcome string, redeploys int, took time
 	}
 	s.merges.chainRedeploys.WithLabelValues(outcome).Observe(float64(redeploys))
 	s.merges.chainSpans.WithLabelValues(outcome).Observe(took.Seconds())
+}
+
+// ObserveRemediation implements merge.Meter. The off surface records
+// nothing.
+func (s *Surface) ObserveRemediation(outcome string, took time.Duration) {
+	if s == nil {
+		return
+	}
+	s.merges.remediations.WithLabelValues(outcome).Observe(took.Seconds())
+}
+
+// ObserveRemediationGateRounds implements merge.Meter. The off surface
+// records nothing.
+func (s *Surface) ObserveRemediationGateRounds(outcome string, n int) {
+	if s == nil {
+		return
+	}
+	s.merges.remediationGates.WithLabelValues(outcome).Observe(float64(n))
 }
 
 // SetRemediationsInARow implements merge.Meter. The off surface records

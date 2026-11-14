@@ -140,11 +140,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		return queueSubject(credited, entry), true
 	}
 	if m := q.mediation; m != nil {
-		out.Mediation = &frontendv1.RosterMergeQueueMediation{
-			Standing: &frontendv1.RosterMergeQueueMediation_Waiting{Waiting: &frontendv1.RosterMergeQueueMediationWaiting{}}}
-		if m.Told {
-			out.Mediation.Standing = &frontendv1.RosterMergeQueueMediation_Checking{Checking: &frontendv1.RosterMergeQueueMediationChecking{}}
-		}
+		out.Mediation = drawMediation(*m, byID, log)
 	}
 	for _, entry := range q.remediating {
 		sub, ok := subject(entry)
@@ -280,6 +276,48 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 // async merge by its own name (QueueEntry.AsyncName), so several async merges
 // one workspace asked for are drawn apart; a click on either selects the
 // credited workspace and reveals the merge's own bubble on its root feed.
+// drawMediation is the label of deploy check M beside the repository's name,
+// with the workspace a click selects: the chain's intake while the deploy
+// rolls out (none for a chain's first deploy) or is assessed, and the
+// remediation workspace while it is fixed. A workspace at work that the
+// registry does not carry is a broken roster: it is recorded, and the label
+// is drawn unclickable while rolling out, and not at all otherwise, since
+// those standings require their target.
+func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log dlog.Logger) *frontendv1.RosterMergeQueueMediation {
+	const op = "daemon.sidebar.merge_queue"
+	target := func(ws ids.WorkspaceID) *frontendv1.RosterMergeQueueMediationTarget {
+		if ws == "" {
+			return nil
+		}
+		record, ok := byID[ws]
+		if !ok {
+			log.Error(op, "the workspace at work on a deploy check is one the registry does not carry, so the label selects nothing", dlog.Context{
+				"workspace_id": string(ws), "repository_id": string(m.Repo), "stage": int(m.Stage),
+				"invariant_violation": "a deploy check's workspace at work is registered"})
+			return nil
+		}
+		return &frontendv1.RosterMergeQueueMediationTarget{Workspace: record.Ref()}
+	}
+	switch m.Stage {
+	case MediationWaiting:
+		return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Waiting{
+			Waiting: &frontendv1.RosterMergeQueueMediationWaiting{Target: target(m.Intake)}}}
+	case MediationChecking:
+		if t := target(m.Intake); t != nil {
+			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Checking{
+				Checking: &frontendv1.RosterMergeQueueMediationChecking{Target: t}}}
+		}
+	case MediationFixing:
+		if t := target(m.Remediation); t != nil {
+			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Fixing{
+				Fixing: &frontendv1.RosterMergeQueueMediationFixing{Target: t}}}
+		}
+	default:
+		panic(fmt.Sprintf("sidebar: a deploy check stands at no stage (%+v)", m))
+	}
+	return nil
+}
+
 func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
 	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
 	name := credited.Name
