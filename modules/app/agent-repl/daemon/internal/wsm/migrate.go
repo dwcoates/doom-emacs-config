@@ -258,6 +258,8 @@ var migrations = []migration{
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
 	// IT IS BREAKING: see retiredColumnsDDL.
 	{To: 137, Name: "retired_columns_dropped", Kind: MigrationBreaking, DDL: retiredColumnsDDL},
+	// IT IS BREAKING: see forkLineageByConversationDDL.
+	{To: 138, Name: "fork_lineage_by_conversation", Kind: MigrationBreaking, DDL: forkLineageByConversationDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

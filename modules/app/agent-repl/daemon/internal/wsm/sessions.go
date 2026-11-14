@@ -72,10 +72,10 @@ func (s *store) PutSession(ctx context.Context, sess Session) error {
 
 // BindSession records a workspace's session bound to a DIFFERENT conversation
 // (agentrepl.v1 BindWorkspaceSession) and, in the same transaction, forgets
-// the fork it was: its lineage and any fork it still owed. A lineage describes
-// the conversation a fork continues, and a workspace bound elsewhere no longer
-// continues it, so a lineage kept past the bind would draw another
-// conversation's past under the chosen one.
+// any fork it still owed. A made fork's lineage is the conversation's, keyed
+// by it (fork_lineage.vendor_session_id), so it stays with that conversation:
+// the conversation bound draws its own lineage, and a bind back onto a forked
+// one draws its inherited past again.
 //
 // OWED, when set, is the work the next start of the bound conversation owes
 // (OwedStartWork), recorded in the same transaction.
@@ -127,8 +127,8 @@ func OwedField(owed *OwedStartWork) string {
 
 // BindSessionToOwnFork binds workspace SESS.Workspace to a fork of its own
 // conversation PARENTVENDORSESSIONID, made at the next bring-up: in ONE
-// transaction the session is bound with no vendor id, the fork the workspace
-// was is forgotten as BindSession forgets it, and the own fork is recorded as
+// transaction the session is bound with no vendor id, any fork it still owed
+// is forgotten as BindSession forgets it, and the own fork is recorded as
 // owed. There is no moment at which the record names no conversation and owes
 // no fork, so no bring-up can come up fresh in between.
 //
@@ -166,14 +166,15 @@ func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVe
 }
 
 // bindSessionTx is the one bind, inside the caller's transaction: the session
-// upsert, then the forgetting of the fork the workspace was, and of the start
-// work and the context summary the previous binding owed, which were about
-// the conversation it bound.
+// upsert, then the forgetting of the fork the workspace still owed, and of the
+// start work and the context summary the previous binding owed, which were
+// about the conversation it bound. A made fork's lineage is its
+// conversation's, and stays.
 func bindSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	if err := putSessionTx(ctx, tx, sess); err != nil {
 		return err
 	}
-	for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns", "owed_start_work", "owed_context_summaries"} {
+	for _, table := range []string{"pending_forks", "owed_start_work", "owed_context_summaries"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
 			return err
 		}
@@ -386,12 +387,32 @@ func (s *store) SetVendorSessionID(ctx context.Context, id WorkspaceID, vendorSe
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id)); err != nil {
+			return err
+		}
+		return carryLineageTx(ctx, tx, id, previous, vendorSessionID)
 	})
 	if err != nil {
 		return "", err
 	}
 	return previous, nil
+}
+
+// carryLineageTx moves workspace ID's fork lineage from conversation FROM to
+// conversation TO, inside the caller's transaction: a rotation (a /clear, or
+// a re-announced start naming the id in force) continues the conversation the
+// lineage describes under its new id, so the inherited past stays drawn. A
+// blank FROM, or FROM equal to TO, carries nothing.
+func carryLineageTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, from, to string) error {
+	if from == "" || from == to {
+		return nil
+	}
+	for _, table := range []string{"fork_lineage", "fork_uninherited_turns"} {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+table+` SET vendor_session_id = ? WHERE workspace_id = ? AND vendor_session_id = ?`, to, id, from); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetSessionModel records the model the user chose for a workspace's session.

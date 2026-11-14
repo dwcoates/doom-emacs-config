@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -237,8 +238,14 @@ func TestLineageRefusesACycle(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	a, b := testWorkspace(t, s), testWorkspace(t, s)
-	corrupt(t, s, `INSERT INTO fork_lineage (workspace_id, parent_workspace_id, parent_book, through_ms) VALUES (?, ?, 'x', 1)`, a.ID, b.ID)
-	corrupt(t, s, `INSERT INTO fork_lineage (workspace_id, parent_workspace_id, parent_book, through_ms) VALUES (?, ?, 'y', 1)`, b.ID, a.ID)
+	instant := time.Unix(1_700_000_000, 0)
+	for ws, conv := range map[WorkspaceID]string{a.ID: "va", b.ID: "vb"} {
+		if err := s.PutSession(context.Background(), Session{Workspace: ws, HostSessionID: "h", VendorSessionID: conv, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+			t.Fatalf("PutSession: %v", err)
+		}
+	}
+	corrupt(t, s, `INSERT INTO fork_lineage (workspace_id, vendor_session_id, parent_workspace_id, parent_book, through_ms) VALUES (?, 'va', ?, 'x', 1)`, a.ID, b.ID)
+	corrupt(t, s, `INSERT INTO fork_lineage (workspace_id, vendor_session_id, parent_workspace_id, parent_book, through_ms) VALUES (?, 'vb', ?, 'y', 1)`, b.ID, a.ID)
 
 	// Act
 	_, err := s.Lineage(context.Background(), a.ID)
@@ -259,17 +266,22 @@ func loggedError(records []dlog.Record, operation string) bool {
 	return false
 }
 
-func TestBindSessionForgetsTheForkTheWorkspaceWas(t *testing.T) {
+// TestBindSessionForgetsAnOwedForkAndKeepsAMadeForksLineage pins what a bind
+// forgets: the fork the workspace still owed, never the lineage of a fork that
+// was made, which stays with its conversation and is not drawn under the
+// conversation bound.
+func TestBindSessionForgetsAnOwedForkAndKeepsAMadeForksLineage(t *testing.T) {
 	cases := []struct {
-		name  string
-		owned func(t *testing.T, s *store, parent, child Workspace)
+		name        string
+		owned       func(t *testing.T, s *store, parent, child Workspace)
+		wantLineage int
 	}{
-		{name: "a fork still owed", owned: func(*testing.T, *store, Workspace, Workspace) {}},
+		{name: "a fork still owed", owned: func(*testing.T, *store, Workspace, Workspace) {}, wantLineage: 0},
 		{name: "a made fork", owned: func(t *testing.T, s *store, parent, child Workspace) {
 			if err := s.ResolveFork(context.Background(), "v", ForkLineage{Workspace: child.ID, Parent: parent.ID, ParentBook: "b", ThroughMs: 1, Uninherited: []TurnID{"t"}}); err != nil {
 				t.Fatalf("ResolveFork: %v", err)
 			}
-		}},
+		}, wantLineage: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,15 +298,84 @@ func TestBindSessionForgetsTheForkTheWorkspaceWas(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BindSession: %v", err)
 			}
-			for _, table := range []string{"pending_forks", "fork_lineage", "fork_uninherited_turns"} {
-				if n := scalar[int](t, s, `SELECT count(*) FROM `+table+` WHERE workspace_id = ?`, child.ID); n != 0 {
-					t.Fatalf("%s holds %d rows after the bind", table, n)
+			if n := scalar[int](t, s, `SELECT count(*) FROM pending_forks WHERE workspace_id = ?`, child.ID); n != 0 {
+				t.Fatalf("pending_forks holds %d rows after the bind", n)
+			}
+			for _, table := range []string{"fork_lineage", "fork_uninherited_turns"} {
+				if n := scalar[int](t, s, `SELECT count(*) FROM `+table+` WHERE workspace_id = ? AND vendor_session_id = 'v'`, child.ID); n != tc.wantLineage {
+					t.Fatalf("%s holds %d rows for the made fork's conversation after the bind, want %d", table, n, tc.wantLineage)
 				}
+			}
+			if got, err := s.Lineage(context.Background(), child.ID); err != nil || len(got) != 0 {
+				t.Fatalf("Lineage = (%+v, %v), want none drawn under the chosen conversation", got, err)
 			}
 			if got := scalar[string](t, s, `SELECT vendor_session_id FROM sessions WHERE workspace_id = ?`, child.ID); got != "chosen" {
 				t.Fatalf("vendor id = %q, want chosen", got)
 			}
 		})
+	}
+}
+
+// TestABindBackOntoAForkedConversationDrawsItsLineageAgain pins the fix for
+// the queue-bypass switch back (2026-11-10): a conversation that was a fork
+// draws its inherited past again once it is bound again.
+func TestABindBackOntoAForkedConversationDrawsItsLineageAgain(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	parent, child := forkedPair(t, s)
+	if err := s.ResolveFork(ctx, "v-queue", ForkLineage{Workspace: child.ID, Parent: parent.ID, ParentBook: "book-p", ThroughMs: 7, Uninherited: []TurnID{"t-open"}}); err != nil {
+		t.Fatalf("ResolveFork: %v", err)
+	}
+	instant := time.Unix(1_700_000_000, 0)
+	away := Session{Workspace: child.ID, HostSessionID: "h", VendorSessionID: "v-other", StartedAt: instant, LastEngagementAt: instant}
+	if err := s.BindSession(ctx, away, nil); err != nil {
+		t.Fatalf("BindSession away: %v", err)
+	}
+
+	// Act
+	back := away
+	back.VendorSessionID = "v-queue"
+	if err := s.BindSession(ctx, back, nil); err != nil {
+		t.Fatalf("BindSession back: %v", err)
+	}
+	got, err := s.Lineage(ctx, child.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Lineage: %v", err)
+	}
+	if len(got) != 1 || got[0].Parent != parent.ID || got[0].ParentBook != "book-p" || got[0].ThroughMs != 7 || !slices.Equal(got[0].Uninherited, []TurnID{"t-open"}) {
+		t.Fatalf("Lineage = %+v, want the queue conversation's fork of the parent", got)
+	}
+}
+
+// TestSetVendorSessionIDCarriesTheLineageToTheRotatedConversation pins the
+// rotation: a /clear continues the conversation under a new id, and its
+// lineage moves with it.
+func TestSetVendorSessionIDCarriesTheLineageToTheRotatedConversation(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	parent, child := forkedPair(t, s)
+	if err := s.ResolveFork(ctx, "v-before", ForkLineage{Workspace: child.ID, Parent: parent.ID, ParentBook: "book-p", ThroughMs: 3, Uninherited: []TurnID{"t"}}); err != nil {
+		t.Fatalf("ResolveFork: %v", err)
+	}
+
+	// Act
+	if _, err := s.SetVendorSessionID(ctx, child.ID, "v-after"); err != nil {
+		t.Fatalf("SetVendorSessionID: %v", err)
+	}
+	got, err := s.Lineage(ctx, child.ID)
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].ParentBook != "book-p" || !slices.Equal(got[0].Uninherited, []TurnID{"t"}) {
+		t.Fatalf("Lineage = (%+v, %v), want the fork carried to the rotated conversation", got, err)
+	}
+	for _, table := range []string{"fork_lineage", "fork_uninherited_turns"} {
+		if n := scalar[int](t, s, `SELECT count(*) FROM `+table+` WHERE workspace_id = ? AND vendor_session_id = 'v-before'`, child.ID); n != 0 {
+			t.Fatalf("%s still holds %d rows under the id the rotation replaced", table, n)
+		}
 	}
 }
 
@@ -354,7 +435,11 @@ func TestBindSessionToOwnForkBindsNoConversationAndOwesTheFork(t *testing.T) {
 	}
 }
 
-func TestBindSessionToOwnForkForgetsTheForkTheWorkspaceWas(t *testing.T) {
+// TestAnOwnForkOfAForkedConversationWalksThroughTheConversationItCopied pins
+// the queue-bypass fork of a conversation that was itself a fork: the bypass
+// conversation's lineage is its own fork, then the queue conversation's fork
+// of the parent.
+func TestAnOwnForkOfAForkedConversationWalksThroughTheConversationItCopied(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	parent, child := forkedPair(t, s)
@@ -364,16 +449,24 @@ func TestBindSessionToOwnForkForgetsTheForkTheWorkspaceWas(t *testing.T) {
 	}
 	sess, _, _ := s.Session(ctx, child.ID)
 	sess.VendorSessionID = ""
+	if err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue", nil); err != nil {
+		t.Fatalf("BindSessionToOwnFork: %v", err)
+	}
 
 	// Act
-	err := s.BindSessionToOwnFork(ctx, sess, "vendor-queue", nil)
+	if err := s.ResolveFork(ctx, "vendor-bypass", ForkLineage{Workspace: child.ID, Parent: child.ID, ParentBook: "book-queue", ThroughMs: 5}); err != nil {
+		t.Fatalf("ResolveFork own: %v", err)
+	}
+	got, err := s.Lineage(ctx, child.ID)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("BindSessionToOwnFork: %v", err)
+		t.Fatalf("Lineage: %v", err)
 	}
-	if n := scalar[int](t, s, `SELECT count(*) FROM fork_lineage WHERE workspace_id = ?`, child.ID); n != 0 {
-		t.Fatalf("fork_lineage holds %d rows for the workspace after the bind", n)
+	if len(got) != 2 ||
+		got[0].Parent != child.ID || got[0].ParentVendorSessionID != "vendor-queue" || got[0].ParentBook != "book-queue" ||
+		got[1].Parent != parent.ID || got[1].ParentVendorSessionID != "" || got[1].ParentBook != "book-p" {
+		t.Fatalf("Lineage = %+v, want the own fork then the queue conversation's fork of the parent", got)
 	}
 }
 
@@ -414,7 +507,9 @@ func TestBindSessionToOwnForkRefusesAndWritesNothing(t *testing.T) {
 	}
 }
 
-func TestLineageEndsAtAnOwnFork(t *testing.T) {
+// TestLineageOfAnOwnForkOfAnUnforkedConversationIsTheOwnForkAlone pins the
+// walk's end at a copied conversation that was no fork.
+func TestLineageOfAnOwnForkOfAnUnforkedConversationIsTheOwnForkAlone(t *testing.T) {
 	// Arrange
 	s, _, ws := ownForkStore(t)
 	ctx := context.Background()
@@ -435,7 +530,89 @@ func TestLineageEndsAtAnOwnFork(t *testing.T) {
 		t.Fatalf("Lineage: %v", err)
 	}
 	want := []ForkLineage{{Workspace: ws.ID, Parent: ws.ID, ParentBook: "book-queue", ThroughMs: 5}}
-	if len(got) != 1 || got[0].Workspace != want[0].Workspace || got[0].Parent != want[0].Parent || got[0].ParentBook != want[0].ParentBook || got[0].ThroughMs != want[0].ThroughMs {
+	if len(got) != 1 || got[0].Workspace != want[0].Workspace || got[0].Parent != want[0].Parent || got[0].ParentBook != want[0].ParentBook || got[0].ThroughMs != want[0].ThroughMs || got[0].ParentVendorSessionID != "vendor-queue" {
 		t.Fatalf("Lineage = %+v, want %+v", got, want)
+	}
+}
+
+// byConversationFixture answers a file at the layout before the
+// by-conversation step, holding the fixture workspace and two more, ws-child
+// and ws-own, with no lineage yet.
+func byConversationFixture(t *testing.T) string {
+	t.Helper()
+	path := fixtureAt(t, stepNamed(t, "fork_lineage_by_conversation")-1)
+	for _, ws := range []string{"ws-child", "ws-own"} {
+		execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at, place)
+		VALUES (?, 'repo-1', ?, ?, ?, 'master', 0, 0, 0, 1, 60)`, ws, "/tmp/"+ws, ws, ws)
+	}
+	return path
+}
+
+// TestTheByConversationStepKeysEachLineageByItsBoundConversation pins the
+// layout-137 step: a standing lineage is carried to the conversation its
+// workspace is bound to, and an own fork records the parked conversation it
+// copied.
+func TestTheByConversationStepKeysEachLineageByItsBoundConversation(t *testing.T) {
+	// Arrange
+	path := byConversationFixture(t)
+	execRaw(t, path, `INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at)
+		VALUES ('ws-child', 'h', 'v-child', '/c', 'opus', 'auto', 1, 1), ('ws-own', 'h', 'v-bypass', '/c', 'opus', 'auto', 1, 1)`)
+	execRaw(t, path, `INSERT INTO workspace_parked_conversations (workspace_id, vendor_session_id) VALUES ('ws-own', 'v-queue')`)
+	execRaw(t, path, `INSERT INTO fork_lineage (workspace_id, parent_workspace_id, parent_book, through_ms) VALUES ('ws-child', ?, 'b1', 1), ('ws-own', 'ws-own', 'b2', 2)`, string(fixtureWorkspaceID))
+	execRaw(t, path, `INSERT INTO fork_uninherited_turns (workspace_id, turn_id) VALUES ('ws-child', 't1')`)
+
+	// Act
+	openMigrated(t, path)
+
+	// Assert
+	lineage := rawScalar[string](t, path, `SELECT group_concat(workspace_id || ':' || vendor_session_id || ':' || coalesce(parent_vendor_session_id, '-'), ',') FROM (SELECT * FROM fork_lineage ORDER BY workspace_id)`)
+	if want := "ws-child:v-child:-,ws-own:v-bypass:v-queue"; lineage != want {
+		t.Fatalf("fork_lineage = %q, want %q", lineage, want)
+	}
+	turns := rawScalar[string](t, path, `SELECT group_concat(workspace_id || ':' || vendor_session_id || ':' || turn_id, ',') FROM fork_uninherited_turns`)
+	if want := "ws-child:v-child:t1"; turns != want {
+		t.Fatalf("fork_uninherited_turns = %q, want %q", turns, want)
+	}
+}
+
+// TestTheByConversationStepFailsALineageWhoseWorkspaceNamesNoConversation pins
+// the step's invariant: a lineage row whose workspace is bound to no
+// conversation fails the migration, never dropped.
+func TestTheByConversationStepFailsALineageWhoseWorkspaceNamesNoConversation(t *testing.T) {
+	// Arrange
+	path := byConversationFixture(t)
+	execRaw(t, path, `INSERT INTO fork_lineage (workspace_id, parent_workspace_id, parent_book, through_ms) VALUES ('ws-child', 'ws-own', 'b1', 1)`)
+
+	// Act
+	_, err := Open(context.Background(), path, WithUnsyncedWrites())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "NOT NULL") {
+		t.Fatalf("Open = %v, want the step failed on the lineage naming no conversation", err)
+	}
+	if got := rawScalar[int](t, path, `SELECT count(*) FROM fork_lineage WHERE workspace_id = 'ws-child'`); got != 1 {
+		t.Fatalf("lineage rows after the refused step = %d, want the row left in place", got)
+	}
+}
+
+// TestAMigratedForkLineageMatchesAFreshOne pins that both routes to the
+// by-conversation layout leave the lineage tables in one shape.
+func TestAMigratedForkLineageMatchesAFreshOne(t *testing.T) {
+	for _, table := range []string{"fork_lineage", "fork_uninherited_turns"} {
+		t.Run(table, func(t *testing.T) {
+			// Arrange
+			migrated := byConversationFixture(t)
+			openMigrated(t, migrated)
+			fresh := filepath.Join(t.TempDir(), "fresh.db")
+			openMigrated(t, fresh)
+
+			// Act
+			got, want := tableColumns(t, migrated, table), tableColumns(t, fresh, table)
+
+			// Assert
+			if got != want {
+				t.Fatalf("migrated %s columns = %q, a fresh file's = %q", table, got, want)
+			}
+		})
 	}
 }
