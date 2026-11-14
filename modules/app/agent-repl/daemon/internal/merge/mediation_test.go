@@ -666,3 +666,58 @@ func TestEveryMediationEndIsTimedOnceByHowItEnded(t *testing.T) {
 		})
 	}
 }
+
+// TestAChainOfRemediationsIsRecordedWhenTheQueueAdvances covers the chain:
+// each remediation deployed in a row is counted, the count stated while the
+// chain is owed, and the chain recorded, by how it ended, once the queue
+// advances past it.
+func TestAChainOfRemediationsIsRecordedWhenTheQueueAdvances(t *testing.T) {
+	// Arrange: the mediator remediates the first deploy, then approves its
+	// remediation.
+	h := mediated(t)
+	owe(t, h)
+	brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
+	rounds := 0
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != brief {
+			return
+		}
+		rounds++
+		if rounds == 1 {
+			if err := h.o.OweMediations(context.Background(), deployStarted.Add(time.Minute)); err != nil {
+				t.Errorf("OweMediations: %v", err)
+			}
+			return
+		}
+		if err := h.o.DecideMediation(context.Background(), sub.WS, MediationApprove, "clean"); err != nil {
+			t.Errorf("DecideMediation: %v", err)
+		}
+	}
+
+	// Act: the first deploy's round, then its remediation's.
+	h.o.Mediate(context.Background())
+	h.o.Mediate(context.Background())
+
+	// Assert
+	var got []string
+	for _, m := range h.meter.all() {
+		if strings.HasPrefix(m, "chain:") || strings.HasPrefix(m, "in_a_row:") {
+			got = append(got, m)
+		}
+	}
+	want := []string{"in_a_row:0", "in_a_row:1", "chain:" + MediationApproved + ":1", "in_a_row:0"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("recorded %v, want %v", got, want)
+	}
+	// The chain is held from the FIRST deploy: its duration reaches back to
+	// deployStarted, not to its remediation's deploy a minute later. The
+	// harness clock ticks a millisecond a read, so the decision fell within
+	// the reads since.
+	h.mu.Lock()
+	now := h.now
+	h.mu.Unlock()
+	took := h.meter.chainTook
+	if len(took) != 1 || deployStarted.Add(took[0]).After(now) || now.Sub(deployStarted.Add(took[0])) > time.Second {
+		t.Fatalf("chain took %v, want it measured from the first deploy at %v (now %v)", took, deployStarted, now)
+	}
+}

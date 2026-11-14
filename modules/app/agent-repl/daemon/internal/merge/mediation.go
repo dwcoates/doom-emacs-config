@@ -102,12 +102,18 @@ const (
 )
 
 // observeMediationEnd records how mediation M ended, as OUTCOME, at AT: its
-// assessment span when its mediator was told, and its total.
+// assessment span when its mediator was told, and its total. An end that lets
+// the queue advance (all but a replacement) ends M's chain too.
 func (o *orchestrator) observeMediationEnd(m wsm.Mediation, outcome string, at time.Time) {
 	if m.PromptedAt != nil {
 		o.deps.Meter.ObserveMediationSpan(MediationSpanAssessment, outcome, at.Sub(*m.PromptedAt))
 	}
 	o.deps.Meter.ObserveMediationSpan(MediationSpanTotal, outcome, at.Sub(m.OwedAt))
+	if outcome == MediationRedeployed || outcome == MediationSuperseded {
+		return
+	}
+	o.deps.Meter.ObserveMediationChain(outcome, m.ChainRedeploys, at.Sub(m.ChainStartedAt))
+	o.deps.Meter.SetRemediationsInARow(0)
 }
 
 // replacedOutcome is how a mediation a newer deploy replaced ended: redeployed
@@ -319,7 +325,11 @@ func (o *orchestrator) mediationRound(ctx context.Context, q mediatedQueue, m ws
 		delete(o.mediating, q.key)
 		o.mu.Unlock()
 	}()
-	fields := dlog.Context{"repo": string(q.key), "mediator": q.mediator, "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)}
+	fields := dlog.Context{"repo": string(q.key), "mediator": q.mediator, "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano),
+		"chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano), "chain_redeploys": m.ChainRedeploys}
+	// EVERY ROUND STATES THE CHAIN IT CHECKS, so a daemon that booted on a
+	// remediation's deploy serves the count the chain carries.
+	o.deps.Meter.SetRemediationsInARow(m.ChainRedeploys)
 	ws, err := o.mediatorOf(ctx, q)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the deploy mediator could not be found or made; the queue stays held for it", err)

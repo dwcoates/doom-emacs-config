@@ -404,6 +404,7 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 		r.tabRecordFailed(ctx, "daemon.merge.tab_close", "could not record a tab interval's end; the round stays open", round, err)
 		return
 	}
+	r.o.deps.Meter.ObserveMergeRound(round.kind, outcome, ended.Sub(round.started))
 	// A ROUND LEAVES openRounds ONLY ONCE ITS END IS RECORDED. It used to
 	// leave before the write, so an abandon that cancelled the write left its
 	// interval open in the ledger for good, since the abandon's own close

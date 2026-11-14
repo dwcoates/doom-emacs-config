@@ -753,7 +753,31 @@ type Meter interface {
 	// (MediationSpanRollout, MediationSpanAssessment, MediationSpanTotal) by
 	// how it ended (mediation.go's outcomes).
 	ObserveMediationSpan(span, outcome string, took time.Duration)
+	// ObserveMediationChain records a chain of mediations the queue advanced
+	// past, by how its last ended: how many remediations were deployed in a
+	// row, and how long the queue was held from the chain's first deploy.
+	ObserveMediationChain(outcome string, redeploys int, took time.Duration)
+	// SetRemediationsInARow is the chain owed now: how many remediations
+	// were deployed in a row since the queue last advanced, 0 when none is
+	// owed.
+	SetRemediationsInARow(n int)
+	// ObserveMergeRound records one round of a merge's tab (a rebase, a
+	// conflict resolution, a test gate, a fixing attempt) by its ledger
+	// outcome.
+	ObserveMergeRound(kind, outcome string, took time.Duration)
+	// ObserveMergeRounds records how many rounds of one repair tab kind
+	// (RoundCountKinds) a concluded merge took, by how the merge ended.
+	ObserveMergeRounds(kind, outcome string, n int)
+	// CountQueueChange records one change to a queue's line, by its
+	// QueueChangeKind spelling and, for a merge leaving, its cause.
+	CountQueueChange(change, cause string)
 }
+
+// RoundCountKinds are the tab kinds a concluded merge's round counts are
+// recorded for, every one of them, 0 for a kind the merge never opened: how
+// many rebases, conflict resolutions, test gates and fixing attempts it
+// took.
+var RoundCountKinds = []string{TabRebasing, TabConflicts, TabTests, TabFixes}
 
 // The merge spans a Meter records.
 const (

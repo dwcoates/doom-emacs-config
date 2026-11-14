@@ -78,6 +78,15 @@ func (r *run) timeEnd(out outcome, endedMS int64) {
 		result = OutcomeAlreadyOn
 	}
 	t := r.o.deps.Meter
+	r.mu.Lock()
+	rounds := make(map[string]int, len(RoundCountKinds))
+	for _, kind := range RoundCountKinds {
+		rounds[kind] = r.rounds[kind]
+	}
+	r.mu.Unlock()
+	for _, kind := range RoundCountKinds {
+		t.ObserveMergeRounds(kind, result, rounds[kind])
+	}
 	if r.startedMS > 0 {
 		t.ObserveMergeSpan(SpanQueued, result, time.Duration(r.startedMS-r.queuedMS)*time.Millisecond)
 		t.ObserveMergeSpan(SpanRunning, result, time.Duration(endedMS-r.startedMS)*time.Millisecond)

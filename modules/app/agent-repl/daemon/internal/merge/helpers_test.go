@@ -324,8 +324,17 @@ func newFakeDB() *fakeDB {
 func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// The store's chain rule (wsm.OweMediation): begun where nothing was
+	// owed, passed on, and counting a replaced mediation that was told.
 	replaced := f.mediations[repo]
-	f.mediations[repo] = &wsm.Mediation{OwedAt: at, Version: version}
+	owed := &wsm.Mediation{OwedAt: at, Version: version, ChainStartedAt: at}
+	if replaced != nil {
+		owed.ChainStartedAt, owed.ChainRedeploys = replaced.ChainStartedAt, replaced.ChainRedeploys
+		if replaced.Prompted() {
+			owed.ChainRedeploys++
+		}
+	}
+	f.mediations[repo] = owed
 	return replaced, nil
 }
 
@@ -3959,6 +3968,8 @@ func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID)
 type fakeMeter struct {
 	mu  sync.Mutex
 	got []string
+	// chainTook is each recorded mediation chain's duration, in order.
+	chainTook []time.Duration
 }
 
 func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
@@ -3977,6 +3988,37 @@ func (f *fakeMeter) ObserveMediationSpan(span, outcome string, took time.Duratio
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "mediation:"+span+":"+outcome)
+}
+
+func (f *fakeMeter) ObserveMediationChain(outcome string, redeploys int, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("chain:%s:%d", outcome, redeploys))
+	f.chainTook = append(f.chainTook, took)
+}
+
+func (f *fakeMeter) SetRemediationsInARow(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("in_a_row:%d", n))
+}
+
+func (f *fakeMeter) ObserveMergeRound(kind, outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "round:"+kind+":"+outcome)
+}
+
+func (f *fakeMeter) ObserveMergeRounds(kind, outcome string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("rounds:%s:%s:%d", kind, outcome, n))
+}
+
+func (f *fakeMeter) CountQueueChange(change, cause string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "change:"+change+":"+cause)
 }
 
 func (f *fakeMeter) all() []string {
