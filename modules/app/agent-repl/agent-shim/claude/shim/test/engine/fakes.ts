@@ -255,8 +255,23 @@ export class ScriptedQuery implements QueryLike {
    * from `calls`, so the suites that pin `calls` exactly are not about it.
    */
   planUsageOptions: Array<{ skipBehaviors: true }> = [];
+  private readonly planUsageReadWaiters = new Set<{ reads: number; resolve: () => void }>();
+  /**
+   * Resolves once READS plan-usage reads have been made: at once if they
+   * have, else at the read that makes them. The read is the event; nothing
+   * polls for it.
+   */
+  untilPlanUsageReads(reads: number): Promise<void> {
+    if (this.planUsageOptions.length >= reads) return Promise.resolve();
+    return new Promise((resolve) => this.planUsageReadWaiters.add({ reads, resolve }));
+  }
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(opts: { skipBehaviors: true }): Promise<PlanUsageLike> {
     this.planUsageOptions.push(opts);
+    for (const waiter of [...this.planUsageReadWaiters]) {
+      if (this.planUsageOptions.length < waiter.reads) continue;
+      this.planUsageReadWaiters.delete(waiter);
+      waiter.resolve();
+    }
     return this.planUsage instanceof Error ? Promise.reject(this.planUsage) : Promise.resolve(this.planUsage);
   }
   accountInfo(): Promise<AccountInfoLike> {

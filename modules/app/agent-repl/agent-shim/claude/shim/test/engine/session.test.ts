@@ -8460,6 +8460,13 @@ describe("the account's plan usage, read from the vendor", () => {
     rate_limits: { seven_day: { utilization: 8, resets_at: "2026-11-13T08:00:00Z" } },
   };
 
+  /** Resolves once the session's query has made READS plan-usage reads. */
+  function planUsageReads(h: Harness, reads: number): Promise<void> {
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("the session made no query to read the plan usage on");
+    return query.untilPlanUsageReads(reads);
+  }
+
   /** Drive one prompt to its `result`, which is what re-reads the plan usage. */
   async function closeTurn(h: Harness): Promise<void> {
     await h.engine.startTurn(
@@ -8481,9 +8488,8 @@ describe("the account's plan usage, read from the vendor", () => {
     await started(h);
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }]);
-    });
+    await planUsageReads(h, 1);
+    expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }]);
   });
 
   it("pushes the figures the start's read answered", async () => {
@@ -8496,7 +8502,7 @@ describe("the account's plan usage, read from the vendor", () => {
       (update) => (update.case === "planUsage" ? update.value.sevenDay?.utilizationPercent : undefined),
       async () => {
         await started(h);
-        await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+        await planUsageReads(h, 1);
       },
     );
 
@@ -8508,15 +8514,14 @@ describe("the account's plan usage, read from the vendor", () => {
     // Arrange.
     const h = harness({ onQueryCreated: (query) => (query.planUsage = FIGURED) });
     await started(h);
-    await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+    await planUsageReads(h, 1);
 
     // Act.
     await closeTurn(h);
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }, { skipBehaviors: true }]);
-    });
+    await planUsageReads(h, 2);
+    expect(h.queries[0]?.query.planUsageOptions).toEqual([{ skipBehaviors: true }, { skipBehaviors: true }]);
   });
 
   it("pushes nothing for an account the plan limits do not apply to", async () => {
@@ -8529,7 +8534,7 @@ describe("the account's plan usage, read from the vendor", () => {
       (update) => (update.case === "planUsage" ? update.value : undefined),
       async () => {
         await started(h);
-        await vi.waitFor(() => expect(h.queries[0]?.query.planUsageOptions.length).toBe(1));
+        await planUsageReads(h, 1);
       },
     );
 
@@ -13569,20 +13574,22 @@ describe("a component that recovers", () => {
       },
     });
     await started(h);
-    await vi.waitFor(() => {
-      expect(standingFaults(h)).toContainEqual({
-        component: "vendor-plan-usage",
-        detail: "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET failed: the usage endpoint is busy",
-      });
-    });
+    await untilPushed(h.engine.pushes, "the plan usage's fault to stand", () =>
+      holds(() =>
+        expect(standingFaults(h)).toContainEqual({
+          component: "vendor-plan-usage",
+          detail: "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET failed: the usage endpoint is busy",
+        }),
+      ),
+    );
 
     // Act.
     await closeATurn(h, "turn-1");
 
     // Assert.
-    await vi.waitFor(() => {
-      expect(faultyComponents(h)).not.toContain("vendor-plan-usage");
-    });
+    await untilPushed(h.engine.pushes, "the plan usage's fault to clear", () =>
+      holds(() => expect(faultyComponents(h)).not.toContain("vendor-plan-usage")),
+    );
   });
 
   it("clears the mcp probe's fault when the next probe answers", async () => {

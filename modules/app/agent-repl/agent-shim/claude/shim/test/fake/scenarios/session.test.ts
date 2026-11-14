@@ -2,7 +2,7 @@
  * The session-fact family: rotation, slash commands the vendor answers itself,
  * fast mode, compaction, and the two attachment kinds both planes drop.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { COLD_GATE_FLOOR_TOKENS, readTranscriptFacts } from "../../../src/engine/cold.js";
 import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
@@ -829,8 +829,8 @@ describe("the plan-usage verb", () => {
   async function sevenDayAfter(prompt: string): Promise<unknown> {
     let answered: unknown;
     await driveScenario([prompt], {
-      during: async (query, _feeder, messages) => {
-        await vi.waitFor(() => expect(messages.some((m) => m.type === "result")).toBe(true));
+      during: async (query, _feeder, _messages, _roots, untilMessage) => {
+        await untilMessage("the first turn's result", (m) => m.type === "result");
         const usage = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
         answered = usage.rate_limits?.seven_day;
       },
