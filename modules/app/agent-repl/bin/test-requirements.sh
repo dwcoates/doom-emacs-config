@@ -1111,6 +1111,32 @@ test_install_reloads_a_stale_service_definition() {
   else fail "systemd service refresh" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
+test_a_stale_service_definition_names_what_differs() {
+  service_case
+  run install
+  printf 'stale\n' >"$CASE/home/Library/LaunchAgents/com.example.svc.plist"
+  run check
+  if has "differs from the svc entry's rendering: < stale >"; then
+    pass "an outdated service definition names the line that differs"
+  else fail "service difference named" "rc=$RC" "$OUT"; fi
+}
+
+test_install_from_a_linked_worktree_never_touches_a_service() {
+  service_case
+  # git answers the case's module as a linked worktree of another checkout.
+  write_stub git '
+if [ "$3" = worktree ] && [ "$4" = list ]; then
+  printf "worktree /main/checkout\nHEAD 0\nbranch refs/heads/master\n\nworktree %s\nHEAD 0\nbranch refs/heads/feature\n" "${STUB_DIR%/stubs}/module"
+  exit 0
+fi
+exec /usr/bin/git "$@"'
+  run install
+  if [ "$RC" -eq 1 ] && has "not installed from the linked worktree" && has "main checkout (/main/checkout) only" \
+     && ! ran "build svc" && ! ran "launchctl"; then
+    pass "an install from a linked worktree builds, renders and restarts no service"
+  else fail "service from a linked worktree" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
 test_uninstall_removes_the_service() {
   service_case
   run install

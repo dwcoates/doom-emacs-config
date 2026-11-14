@@ -857,7 +857,11 @@ check_service() {
   elif [ ! -f "$dest" ]; then
     STATUS=missing; DETAIL="$dest is not installed"
   elif ! rendered_service "$e" | cmp -s - "$dest"; then
-    STATUS=outdated; DETAIL="$dest differs from the $(field "$e" .id) entry's rendering"
+    # THE DIFFERENCE IS NAMED, so an install it causes says why.
+    local differs
+    # diff answers 1 for files that differ, which is this branch's case.
+    differs="$(rendered_service "$e" | diff "$dest" - | grep -E '^[<>]' | head -2 | tr '\n' ' ' || true)"
+    STATUS=outdated; DETAIL="$dest differs from the $(field "$e" .id) entry's rendering: ${differs% }"
   elif [ -n "$stale" ]; then
     STATUS=outdated; DETAIL="$CACHE_ROOT lacks the module's copy of$stale"
   elif ! service_held "$e"; then
@@ -1185,6 +1189,14 @@ install_service() {
   local e="$1" label dest uid
   label="$(field "$e" .label)"
   dest="$(service_definition "$e")"
+  # THE SERVICES ARE EVERY WORKSPACE'S (owner report, 2026-11-14): an install
+  # run from a linked worktree rebuilt and restarted the store from that
+  # worktree's source, which severed every session at once. They are installed
+  # from the main checkout only.
+  if in_linked_worktree "$MODULE_DIR"; then
+    err "install: $(field "$e" .id): not installed from the linked worktree $MODULE_DIR; the services every workspace shares are installed from the main checkout ($(module_main_worktree)) only"
+    return 1
+  fi
   # No service manager creates these, and the services bind sockets and open
   # their logs and databases in them.
   mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$(dirname "$dest")"
