@@ -3,11 +3,16 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/sessionwatcher"
 )
 
 func TestTheMediationLifetime(t *testing.T) {
@@ -81,9 +86,11 @@ func TestTheMediationLifetime(t *testing.T) {
 }
 
 func TestMediationFailed(t *testing.T) {
+	watcherClosed := fmt.Errorf("await turn: %w", sessionwatcher.ErrWatcherClosed)
 	tests := []struct {
 		name      string
 		cut       bool
+		handover  bool
 		err       error
 		wantLevel string
 		wantCut   bool
@@ -91,6 +98,9 @@ func TestMediationFailed(t *testing.T) {
 		{name: "a failure the daemon's exit cut is recorded at info", cut: true, err: context.Canceled, wantLevel: "info", wantCut: true},
 		{name: "a failure while the daemon runs is an error", err: errors.New("disk gone"), wantLevel: "error"},
 		{name: "a failure that is no cut is an error even once the context ended", cut: true, err: errors.New("disk gone"), wantLevel: "error"},
+		{name: "a watcher a handover closed is recorded at info", handover: true, err: watcherClosed, wantLevel: "info", wantCut: true},
+		{name: "a watcher closed while this daemon serves is an error", err: watcherClosed, wantLevel: "error"},
+		{name: "another failure during a handover is an error", handover: true, err: errors.New("disk gone"), wantLevel: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,6 +110,9 @@ func TestMediationFailed(t *testing.T) {
 			defer cancel()
 			if tt.cut {
 				cancel()
+			}
+			if tt.handover {
+				h.standing.set(false)
 			}
 
 			// Act
@@ -182,5 +195,57 @@ func TestADrainWhoseMediationOutlivesItsBoundIsAnError(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.drain",
 		Message: "the deploy mediation outlived the drain's bound; the state client closes under it"}); !ok {
 		t.Fatalf("records = %+v, want the overrun recorded at error", h.logs.Records())
+	}
+}
+
+func TestARoundAHandoverCutRunsAgainOnlyWhenThisDaemonServesAgain(t *testing.T) {
+	tests := []struct {
+		name      string
+		handover  bool
+		wantRerun bool
+	}{
+		{name: "a round the handover cut is reattached once the queues are served here again", handover: true, wantRerun: true},
+		{name: "serving again with no round cut runs no pass"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the handover begins as the mediator is told, and its
+			// session's watcher closes under the round's await.
+			h := mediated(t)
+			owe(t, h)
+			if tt.handover {
+				h.queue.onSubmit = func(sub promptqueue.Submission) {
+					if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+						h.standing.set(false)
+					}
+				}
+				h.awaitErr = fmt.Errorf("await turn: %w", sessionwatcher.ErrWatcherClosed)
+				h.o.Mediate(context.Background())
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: mediationHandedOver}); !ok {
+					t.Fatalf("records = %v, want the handover's cut at INFO", h.logs.Records())
+				}
+				h.mu.Lock()
+				h.awaitErr = nil
+				h.mu.Unlock()
+				h.queue.onSubmit = nil
+			} else {
+				h.standing.set(false)
+			}
+			awaited := len(h.awaitedTurns)
+
+			// Act: the handover ends with this daemon serving again.
+			h.standing.set(true)
+			h.o.followStandingOnce(context.Background(), false)
+
+			// Assert
+			if _, errored := h.recordFor("error", opMediation); errored && !tt.wantRerun {
+				t.Fatalf("records = %v, want no ERROR", h.logs.Records())
+			}
+			_, reran := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "this daemon serves the queues again after a handover cut a mediation round; the round runs again"})
+			if reran != tt.wantRerun || (len(h.awaitedTurns) > awaited) != tt.wantRerun {
+				t.Fatalf("reran %v, awaited %v after %d; want a rerun %v", reran, h.awaitedTurns, awaited, tt.wantRerun)
+			}
+		})
 	}
 }
