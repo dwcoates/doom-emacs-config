@@ -321,11 +321,12 @@ func newFakeDB() *fakeDB {
 	}
 }
 
-func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) error {
+func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	replaced := f.mediations[repo]
 	f.mediations[repo] = &wsm.Mediation{OwedAt: at, Version: version}
-	return nil
+	return replaced, nil
 }
 
 func (f *fakeDB) MarkMediationPrompted(_ context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
@@ -3970,6 +3971,12 @@ func (f *fakeTimings) ObserveMergeSpan(span, outcome string, took time.Duration)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, span+":"+outcome)
+}
+
+func (f *fakeTimings) ObserveMediationSpan(span, outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediation:"+span+":"+outcome)
 }
 
 func (f *fakeTimings) all() []string {

@@ -26,7 +26,7 @@ func TestADeployOwesAMediationUnprompted(t *testing.T) {
 	repo := RepoKey(t.TempDir())
 
 	// Act
-	if err := s.OweMediation(ctx, repo, instant, "0.431.0"); err != nil {
+	if _, err := s.OweMediation(ctx, repo, instant, "0.431.0"); err != nil {
 		t.Fatalf("OweMediation: %v", err)
 	}
 	m, err := s.MediationOf(ctx, repo)
@@ -52,7 +52,7 @@ func TestAMediationIsPromptedOnlyWhileItIsTheOneOwed(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()
 			repo := RepoKey(t.TempDir())
-			if err := s.OweMediation(ctx, repo, instant, ""); err != nil {
+			if _, err := s.OweMediation(ctx, repo, instant, ""); err != nil {
 				t.Fatal(err)
 			}
 
@@ -83,7 +83,7 @@ func TestReleaseMediationClearsOnlyTheMediationItNames(t *testing.T) {
 			s, _ := testStore(t)
 			ctx := context.Background()
 			repo := RepoKey(t.TempDir())
-			if err := s.OweMediation(ctx, repo, instant, ""); err != nil {
+			if _, err := s.OweMediation(ctx, repo, instant, ""); err != nil {
 				t.Fatal(err)
 			}
 
@@ -104,7 +104,7 @@ func TestANewerDeployReplacesTheMediationOwedAndOwesItsPrompt(t *testing.T) {
 	s, _ := testStore(t)
 	ctx := context.Background()
 	repo := RepoKey(t.TempDir())
-	if err := s.OweMediation(ctx, repo, instant, "0.1.0"); err != nil {
+	if _, err := s.OweMediation(ctx, repo, instant, "0.1.0"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.MarkMediationPrompted(ctx, repo, instant, instant.Add(time.Second), "turn-1"); err != nil {
@@ -112,14 +112,30 @@ func TestANewerDeployReplacesTheMediationOwedAndOwesItsPrompt(t *testing.T) {
 	}
 
 	// Act
-	if err := s.OweMediation(ctx, repo, instant.Add(time.Minute), "0.2.0"); err != nil {
-		t.Fatal(err)
-	}
+	replaced, err := s.OweMediation(ctx, repo, instant.Add(time.Minute), "0.2.0")
 
-	// Assert
+	// Assert: the newer deploy's owed, and the prompted one it replaced
+	// answered.
+	if err != nil || replaced == nil || !replaced.OwedAt.Equal(instant) || replaced.PromptedAt == nil || !replaced.PromptedAt.Equal(instant.Add(time.Second)) {
+		t.Fatalf("OweMediation = (%+v, %v), want the first deploy's prompted mediation replaced", replaced, err)
+	}
 	m, err := s.MediationOf(ctx, repo)
 	if err != nil || !m.OwedAt.Equal(instant.Add(time.Minute)) || m.Version != "0.2.0" || m.Prompted() || m.Turn != "" {
 		t.Fatalf("MediationOf = (%+v, %v), want the newer deploy's, unprompted", m, err)
+	}
+}
+
+func TestOweMediationWithNothingOwedReplacesNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+
+	// Act
+	replaced, err := s.OweMediation(context.Background(), repo, instant, "0.1.0")
+
+	// Assert
+	if err != nil || replaced != nil {
+		t.Fatalf("OweMediation = (%+v, %v), want nothing replaced", replaced, err)
 	}
 }
 
@@ -130,7 +146,7 @@ func TestOweMediationRefusesADeployWithNoInstantAndWritesNothing(t *testing.T) {
 	repo := RepoKey(t.TempDir())
 
 	// Act
-	err := s.OweMediation(ctx, repo, time.Time{}, "")
+	_, err := s.OweMediation(ctx, repo, time.Time{}, "")
 
 	// Assert
 	m, rerr := s.MediationOf(ctx, repo)

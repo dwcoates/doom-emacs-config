@@ -13,6 +13,11 @@ const (
 	// MergeSpanName is each merge's pick, queued, running and total spans,
 	// by how it ended.
 	MergeSpanName = "agentrepl_merge_seconds"
+	// MediationSpanName is each deploy mediation's rollout, assessment and
+	// total spans, by how it ended (merge's mediation outcomes). Its total
+	// span's count per outcome is how many mediations ended so: how often
+	// the mediator found nothing, fixed and redeployed, or escalated.
+	MediationSpanName = "agentrepl_deploy_mediation_seconds"
 )
 
 // mergeBuckets span a merge stage from an instant step to a long test gate.
@@ -21,7 +26,7 @@ var mergeBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1
 // merges holds the merge queue's histograms; each observation is
 // client_golang's own atomic add.
 type merges struct {
-	steps, spans *prometheus.HistogramVec
+	steps, spans, mediations *prometheus.HistogramVec
 }
 
 func newMerges() merges {
@@ -31,6 +36,9 @@ func newMerges() merges {
 		}, []string{"step"}),
 		spans: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: MergeSpanName, Help: "A merge's pick, queued, running and total spans, by span and outcome.", Buckets: mergeBuckets,
+		}, []string{"span", "outcome"}),
+		mediations: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: MediationSpanName, Help: "A deploy mediation's rollout, assessment and total spans, by span and how it ended.", Buckets: mergeBuckets,
 		}, []string{"span", "outcome"}),
 	}
 }
@@ -49,4 +57,13 @@ func (s *Surface) ObserveMergeSpan(span, outcome string, took time.Duration) {
 		return
 	}
 	s.merges.spans.WithLabelValues(span, outcome).Observe(took.Seconds())
+}
+
+// ObserveMediationSpan implements merge.Timer. The off surface records
+// nothing.
+func (s *Surface) ObserveMediationSpan(span, outcome string, took time.Duration) {
+	if s == nil {
+		return
+	}
+	s.merges.mediations.WithLabelValues(span, outcome).Observe(took.Seconds())
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -577,6 +578,90 @@ func TestAMediationNoMediatorDecidesIsReleased(t *testing.T) {
 				Message: "released a mediation owed by a repository whose lifecycle config names no mediator now; its queue advances"})
 			if recorded != tt.wantReleased {
 				t.Fatalf("release recorded %v, want %v", recorded, tt.wantReleased)
+			}
+		})
+	}
+}
+
+// TestEveryMediationEndIsTimedOnceByHowItEnded covers the mediation spans:
+// the rollout span when the mediator is told, then one assessment span (when
+// it was told) and one total, by how the mediation ended.
+func TestEveryMediationEndIsTimedOnceByHowItEnded(t *testing.T) {
+	brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
+	told := "mediation:" + MediationSpanRollout + ":" + MediationTold
+	ended := func(outcome string, assessed bool) []string {
+		out := []string{"mediation:" + MediationSpanTotal + ":" + outcome}
+		if assessed {
+			out = append([]string{"mediation:" + MediationSpanAssessment + ":" + outcome}, out...)
+		}
+		return out
+	}
+	tests := []struct {
+		name string
+		// inTurn runs as the mediator is given its brief.
+		inTurn func(t *testing.T, h *harness, ws ids.WorkspaceID)
+		// act ends the mediation another way than a round, when set.
+		act  func(t *testing.T, h *harness)
+		want []string
+	}{
+		{name: "an approval", want: append([]string{told}, ended(MediationApproved, true)...),
+			inTurn: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.o.DecideMediation(context.Background(), ws, MediationApprove, "clean"); err != nil {
+					t.Errorf("DecideMediation: %v", err)
+				}
+			}},
+		{name: "an escalation", want: append([]string{told}, ended(MediationEscalated, true)...),
+			inTurn: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.o.DecideMediation(context.Background(), ws, MediationEscalate, "over to you"); err != nil {
+					t.Errorf("DecideMediation: %v", err)
+				}
+			}},
+		{name: "a remediation the mediator deploys", want: append([]string{told}, ended(MediationRedeployed, true)...),
+			inTurn: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.o.OweMediations(context.Background(), deployStarted.Add(time.Minute)); err != nil {
+					t.Errorf("OweMediations: %v", err)
+				}
+			}},
+		{name: "a turn that decides nothing", want: append([]string{told}, ended(MediationUndecided, true)...)},
+		{name: "a newer deploy before the mediator is told", want: ended(MediationSuperseded, false),
+			act: func(t *testing.T, h *harness) {
+				if err := h.o.OweMediations(context.Background(), deployStarted.Add(time.Minute)); err != nil {
+					t.Fatalf("OweMediations: %v", err)
+				}
+			}},
+		{name: "a repository that names no mediator any more", want: ended(MediationUnmediated, false),
+			act: func(t *testing.T, h *harness) {
+				h.config.DeployMediator = nil
+				h.o.releaseUnmediated(context.Background(), nil)
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediated(t)
+			owe(t, h)
+			h.queue.onSubmit = func(sub promptqueue.Submission) {
+				if sub.Origin == brief && tt.inTurn != nil {
+					tt.inTurn(t, h, sub.WS)
+				}
+			}
+
+			// Act
+			if tt.act != nil {
+				tt.act(t, h)
+			} else {
+				h.o.Mediate(context.Background())
+			}
+
+			// Assert
+			var got []string
+			for _, timed := range h.timings.all() {
+				if strings.HasPrefix(timed, "mediation:") {
+					got = append(got, timed)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("timed %v, want %v", got, tt.want)
 			}
 		})
 	}

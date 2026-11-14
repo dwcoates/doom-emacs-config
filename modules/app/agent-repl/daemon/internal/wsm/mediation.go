@@ -48,28 +48,63 @@ func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
 // AT, installing VERSION. A mediation still owed is replaced by the newer
 // deploy's, never stacked: the mediator checks the window from the newest
 // deploy's start, and the older deploy's decision would release nothing
-// (ReleaseMediation). Its prompt is owed afresh.
-func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) error {
+// (ReleaseMediation). Its prompt is owed afresh. It answers the mediation it
+// replaced, read in the same write, nil when none was owed: the replacement
+// is how that mediation ended, so it is counted exactly once.
+func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*Mediation, error) {
 	const op = "daemon.wsm.owe_mediation"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return err
+		return nil, err
 	}
 	if at.IsZero() {
 		err := fmt.Errorf("wsm: a mediation of %s names no deploy instant", key)
 		s.log.Error(op, "refused a mediation that names no deploy instant", withError(dlog.Context{"repo": string(key)}, err))
-		return err
+		return nil, err
 	}
 	fields := dlog.Context{"repo": string(key), "owed_at": nanos(at), "version": version}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
+	var replaced *Mediation
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		prior, err := scanMediation(tx.QueryRowContext(ctx, mediationQuery, key))
+		if err != nil {
+			return err
+		}
+		replaced = prior
+		_, err = tx.ExecContext(ctx,
 			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn) VALUES (?, 0, ?, NULL, ?, '')
 			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at,
 			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = ''`,
 			key, nanos(at), version)
 		return err
 	})
+	if err != nil {
+		return nil, err
+	}
+	return replaced, nil
+}
+
+// mediationQuery reads one repository's mediation columns, keyed by repo.
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn FROM merge_queue_repos WHERE repo_key = ?`
+
+// scanMediation decodes ROW of mediationQuery: nil when the repository has
+// no row or owes no mediation. It is the one mediation decoding path.
+func scanMediation(row *sql.Row) (*Mediation, error) {
+	var owed, prompted sql.NullInt64
+	var version, turn string
+	err := row.Scan(&owed, &prompted, &version, &turn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil || !owed.Valid {
+		return nil, err
+	}
+	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn)}
+	if prompted.Valid {
+		at := fromNanos(prompted.Int64)
+		m.PromptedAt = &at
+	}
+	return m, nil
 }
 
 // MediationOf answers the mediation REPO owes, nil when it owes none.
@@ -82,24 +117,9 @@ func (s *store) MediationOf(ctx context.Context, repo RepoKey) (*Mediation, erro
 	}
 	var out *Mediation
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		var owed, prompted sql.NullInt64
-		var version, turn string
-		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn FROM merge_queue_repos WHERE repo_key = ?`, key).
-			Scan(&owed, &prompted, &version, &turn)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil || !owed.Valid {
-			return err
-		}
-		m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn)}
-		if prompted.Valid {
-			at := fromNanos(prompted.Int64)
-			m.PromptedAt = &at
-		}
+		m, err := scanMediation(s.q(ctx).QueryRowContext(ctx, mediationQuery, key))
 		out = m
-		return nil
+		return err
 	})
 	return out, err
 }

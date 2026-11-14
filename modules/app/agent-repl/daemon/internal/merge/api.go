@@ -750,6 +750,10 @@ type Timer interface {
 	// ObserveMergeSpan records one span of a merge (SpanPick, SpanQueued,
 	// SpanRunning, SpanTotal) by how it ended.
 	ObserveMergeSpan(span, outcome string, took time.Duration)
+	// ObserveMediationSpan records one span of a deploy mediation
+	// (MediationSpanRollout, MediationSpanAssessment, MediationSpanTotal) by
+	// how it ended (mediation.go's outcomes).
+	ObserveMediationSpan(span, outcome string, took time.Duration)
 }
 
 // The merge spans a Timer records.
