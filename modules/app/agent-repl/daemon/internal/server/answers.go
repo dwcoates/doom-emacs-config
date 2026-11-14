@@ -101,7 +101,7 @@ func (s *server) askRow(
 ) (subject resolved, ref feedid.Ref, done *connect.Error, answered bool, err error) {
 	subject, r, err := s.resolveRef(ctx, rpc, ws)
 	if err != nil {
-		return resolved{}, feedid.Ref{}, nil, false, fail(s.log, rpc, err)
+		return resolved{}, feedid.Ref{}, nil, false, failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return resolved{}, feedid.Ref{}, s.refuse(s.log, rpc, resp, *r), true, nil
@@ -129,7 +129,7 @@ func (s *server) Interrupt(
 	resp := &agentreplv1.InterruptResponse{}
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
@@ -429,7 +429,7 @@ func (s *server) AnswerColdGate(
 	resp := &agentreplv1.AnswerColdGateResponse{}
 	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return nil, fail(s.log, rpc, err)
+		return nil, failResolution(s.log, rpc, err)
 	}
 	if r != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, *r))
