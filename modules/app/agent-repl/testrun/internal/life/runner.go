@@ -25,7 +25,12 @@ type Runner struct {
 	log    Logger
 	reap   func(reap.Members) (reap.Result, error)
 	warden *os.File
-	mu     sync.Mutex
+	// now is the clock the cut's span is read from.
+	now func() time.Time
+	mu  sync.Mutex
+	// cutAt is when the run first saw its sentinel gone; zero while it has
+	// not been cut (guarded by mu).
+	cutAt time.Time
 	// commands is held shared by every command in flight through Unreaped,
 	// and exclusively by every reap of the session (ReapSession).
 	commands sync.RWMutex
@@ -66,6 +71,7 @@ func StartRunner(table reap.Table, reapFn func(reap.Members) (reap.Result, error
 		Own:  reap.Members{What: fmt.Sprintf("run %d", pid), Session: pid, Since: since, Except: []int{pid, sentinel}},
 		log:  log,
 		reap: reapFn,
+		now:  time.Now,
 	}
 	// The warden's lifeline is CLOEXEC on this side, so no unit inherits its
 	// write end and keeps it open past the runner's death.
@@ -171,12 +177,25 @@ func (r *Runner) Unreaped(fn func()) {
 func (r *Runner) CancelOnLifeline(gone <-chan struct{}, cancel func()) {
 	go func() {
 		<-gone
+		r.markCut()
 		r.log.Infof("the sentinel is gone (the run was cut): the run is cancelled and its session %d reaped", r.Own.Session)
 		cancel()
 		// The error is logged by the reap; the release reaps again and keeps
 		// the disk if anything still remains.
 		_ = r.ReapSession()
 	}()
+}
+
+// markCut records the instant the run first saw its sentinel gone, and
+// answers it: the lifeline's watcher and Finish both see the cut, whichever
+// sees it first sets it.
+func (r *Runner) markCut() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cutAt.IsZero() {
+		r.cutAt = r.now()
+	}
+	return r.cutAt
 }
 
 // Finish ends the run whose suites answered code: it reaps the session,
@@ -193,7 +212,11 @@ func (r *Runner) Finish(code int, gone <-chan struct{}, release func() error) in
 	}
 	select {
 	case <-gone:
-		r.log.Errorf("the run was cut (its sentinel is gone); it reaped its session %d and released its disk", r.Own.Session)
+		// THE CUT'S SPAN IS MEASURED: a gate cut that waits for the run's
+		// reap before its successor starts is bounded by it (org/todo.md,
+		// the cancelled gate run's reap).
+		span := r.now().Sub(r.markCut())
+		r.log.Errorf("the run was cut (its sentinel is gone); it reaped its session %d and released its disk %.3fs after the cut", r.Own.Session, span.Seconds())
 		code = 1
 	default:
 	}
