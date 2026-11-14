@@ -31,6 +31,12 @@ What the phone sends goes straight into the CLI, past agent-repl's prompt queue
   `AgentPermissionSuccess.answered_remotely`. The decision is not relayed, so
   the gated call's own outcome says which way it went. When the shim answers
   first, the CLI withdraws claude.ai's prompt itself.
+- **A question answer** arrives the same way, and the shim settles the
+  question as `AgentQuestionSuccess.answered_remotely`. The answers are not
+  relayed, so the card shows only that claude.ai answered it, and the
+  question's tool result carries what was chosen.
+- **A prompt's turn** runs under the prompt's own record uuid, so
+  `RollBackSession` finds a remote prompt by its turn as it finds a sent one.
 - **An interrupt or a stop** ends the turn inside the CLI. The shim sees the
   turn's interrupted result as it sees one it asked for.
 
@@ -65,10 +71,10 @@ app):
   `failure_kind`) and `policy_disabled`. No shim converter owns them, so they
   land as residue, and a bridge that fails after it was turned on leaves the
   chip saying on. The contract has no field for the bridge's health.
-- **A question answered on claude.ai** has no "answered remotely" arm, so it
-  is recorded `unanswered`.
-- **A rollback past a remote prompt** is untested and probably refuses
-  `unseen_prompt`.
+- **A rollback past a remote prompt folded into a running turn** is refused
+  `unseen_prompt`: the folded prompt's record names no turn the rollback
+  drops. A remote prompt that opened its own turn is rolled back past like a
+  sent one, since its turn runs under its record's uuid.
 
 ## The mode
 
