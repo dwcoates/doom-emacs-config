@@ -1041,6 +1041,43 @@ describe("GetLiveWork", () => {
     ).toEqual(["task-1"]);
   });
 
+  it("answers detached work announced in the main book as owned by the book holding its call's unit", async () => {
+    // Arrange: sub-1's call is in sub-1's book; the session-wide task stream
+    // announced its run in the main agent's book.
+    const { client } = await store();
+    await write(client, spawnEntry("main", "activity:spawn-1", "sub-1"));
+    await write(client, monitorUnitEntry("sub-1", "mon1", "start"));
+    await write(client, detachedEntry("main", "detached:task-1", "task-1", "mon1"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveDetachedRuns.map((run) => [run.work?.value, run.owner?.value])
+        : [],
+    ).toEqual([["task-1", "sub-1"]]);
+  });
+
+  it("files detached work under its call's book when the unit lands after the announcement", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, spawnEntry("main", "activity:spawn-1", "sub-1"));
+    await write(client, detachedEntry("main", "detached:task-1", "task-1", "mon1"));
+    await write(client, monitorUnitEntry("sub-1", "mon1", "start"));
+
+    // Act.
+    const response = await client.getLiveWork(liveWorkFor("main"));
+
+    // Assert.
+    expect(
+      response.result.case === "success"
+        ? response.result.value.liveDetachedRuns.map((run) => [run.work?.value, run.owner?.value])
+        : [],
+    ).toEqual([["task-1", "sub-1"]]);
+  });
+
   it("never reports detached work another session announced", async () => {
     // Arrange.
     const { client } = await store();
