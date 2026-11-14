@@ -127,3 +127,44 @@ embeds another's new messages.
   click target; `lisp/wire-roster.el` decodes the new arm and the targets;
   `daemon/internal/resolve/sidebar/sections.go` resolves them from
   `sidebar.QueueMediation`, which gains the stage and the workspaces.
+
+### 5. `agentrepl.v1.FinishWorkspaceSuccess` says how the work lands
+
+- WHAT: `FinishWorkspaceSuccess` gains a required `landing` oneof:
+  `queued` (every finish today) and `landing_directly` (a deploy
+  remediation workspace). The request's `placement` is documented as not
+  read for a remediation workspace.
+- WHY: the owner ruled a remediation workspace finishes like a one-shot, but
+  its finish runs the full gate (resuming it on a failure to fix and finish
+  again), lands directly on the main branch and deploys, never through the
+  queue. The agent finishing needs to know which path its finish took,
+  because a gate failure comes back to it as a resumed turn rather than as a
+  queue notice.
+- The request keeps one shape for both paths: the finishing agent does not
+  choose its path, its recorded role does, so a second request shape would
+  let an agent ask for a path it does not have. The cost accepted is a
+  `placement` that is read on one path only, stated at the field.
+- CONSEQUENCES: every producer of `FinishWorkspaceSuccess` sets `queued`
+  (`daemon/internal/server` finish handler and its tests); the CLI prints
+  which path; the remediation finish path in `daemon/internal/merge` records
+  each step durably (gate, land, deploy, owed check) so a handover resumes
+  it.
+
+## Sweep
+
+- `repoconfig.v1.DeployMediator` was removed with its field. No other
+  declaration lost its last reference: `UpdateMergeQueueNotMediator` and
+  `UpdateMergeQueueNoMediationOwed` keep their arms with the intake's
+  meaning.
+
+## Consequences recap
+
+- The doom lifecycle config moves to `deploy_checks`, and a config naming
+  `deploy_mediator` fails to parse.
+- The intake decides with approve, escalate or dispatch; the bound is
+  enforced by a refusal.
+- `merge-queue status` reports rolling out, assessing or fixing, with the
+  workspaces and the count in a row.
+- The sidebar label gains `fixing reload` and selects the workspace at work.
+- Every finish answers `queued` or `landing_directly`; a remediation's
+  `placement` is not read.
