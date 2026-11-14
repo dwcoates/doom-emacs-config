@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -1021,6 +1023,55 @@ func TestAForcedBounceStandsTheShimDownForced(t *testing.T) {
 	}
 	if got := old.KillRequests(); len(got) != 1 || !got[0].GetForce() {
 		t.Fatalf("stand-down requests = %+v, want one KillSession{force:true}", got)
+	}
+}
+
+func TestAFailedForcedStandDownTheShimLeftIsRecordedByItsCause(t *testing.T) {
+	cases := []struct {
+		name    string
+		cause   error
+		level   string
+		message string
+	}{
+		{
+			name:    "a stand-down this daemon had already ordered is INFO",
+			cause:   fmt.Errorf("kill session: %w", shimclient.ErrStandDownOrdered),
+			level:   "info",
+			message: "the forced stand-down lost a race with a stand-down this daemon had already ordered, and the shim left; the gate is passed",
+		},
+		{
+			name:    "any other failure is WARN",
+			cause:   errors.New("kill session: connection reset"),
+			level:   "warn",
+			message: "the forced stand-down call failed, but the shim left; the gate is passed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a busy workspace whose forced stand-down call fails
+			// with tc.cause after the shim has left.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.freeness.SetFree(ws, false)
+			old := h.fleet.live[ws]
+			old.killErr = tc.cause
+			old.onKillSession = func() { old.Reap() }
+			done := make(chan error, 1)
+
+			// Act
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, true, nil, func(err error) { done <- err }); err != nil {
+				t.Fatalf("BounceShim: %v", err)
+			}
+			if err := awaitBounce(t, h, done); err != nil {
+				t.Fatalf("bounce: %v", err)
+			}
+
+			// Assert
+			got := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Operation: opRelaunch, Message: tc.message})
+			if len(got) != 1 || got[0].Level != tc.level {
+				t.Fatalf("records = %+v, want one %s record %q", records(h.log, opRelaunch), tc.level, tc.message)
+			}
+		})
 	}
 }
 
