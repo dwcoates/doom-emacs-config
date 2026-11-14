@@ -23,6 +23,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/endpoint_create_workspace.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -76,8 +77,10 @@ message SetWorkspaceNameError {
     SetWorkspaceNameTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SetWorkspaceNameNotYetAdopted not_yet_adopted = 4;
-    // The name breaks the naming rule.
-    SetWorkspaceNameInvalidName invalid_name = 5;
+    // The name breaks the naming rule. ONE RULE, ONE BREACH: the arm carries
+    // the create's own message, as ValidateWorkspaceName's verdict does, so a
+    // client words a rename's refusal and a create's alike.
+    CreateWorkspaceInvalidName invalid_name = 5;
     // Another workspace, or a merge or create in flight, already holds the
     // name.
     SetWorkspaceNameTaken name_taken = 6;
@@ -100,7 +103,6 @@ message SetWorkspaceNameTransferringAway {
 }
 
 // A joining daemon has not finished adopting this workspace yet.
-// DELIBERATELY EMPTY.
 message SetWorkspaceNameNotYetAdopted {
   // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
   // joining daemon adopts it: the handover's incumbent. A client views and
@@ -110,34 +112,6 @@ message SetWorkspaceNameNotYetAdopted {
   // waits for the adoption.
   optional string address = 1;
 }
-
-// A name that breaks the naming rule, refused before anything is recorded.
-// The rule and its two component kinds are the ones a supplied create name
-// is held to (CreateWorkspaceInvalidName), so one name is legal for both.
-message SetWorkspaceNameInvalidName {
-  // The name as requested, with surrounding whitespace trimmed.
-  string name = 1;
-  // The `/`-separated component of `name` that broke its rule, exactly as it
-  // appears in `name`. Empty when that component is empty (a leading,
-  // trailing or doubled `/`), which is itself the breach.
-  string component = 2;
-  // Which rule `component` broke, set from where the component sits in the
-  // name, so a client words the refusal from the arm alone.
-  oneof rule {
-    // The last component is not a slug.
-    SetWorkspaceNameInvalidNameSlug slug = 3;
-    // A component before the last is not a prefix.
-    SetWorkspaceNameInvalidNamePrefix prefix = 4;
-  }
-}
-
-// The name's last component, its slug, is not lowercase hyphen-separated
-// ASCII alphanumeric words. DELIBERATELY EMPTY.
-message SetWorkspaceNameInvalidNameSlug {}
-
-// A prefix component of the name is empty, or is not ASCII letters and digits
-// joined by single `.`, `_` or `-`. DELIBERATELY EMPTY.
-message SetWorkspaceNameInvalidNamePrefix {}
 
 // The name is already held. Names and branches are one namespace: a
 // workspace's name is refused when any OTHER registered workspace, open or
