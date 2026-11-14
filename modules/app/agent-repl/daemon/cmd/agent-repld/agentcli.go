@@ -187,8 +187,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"move-down":   {usage: "move-down MERGE|here", run: queueMove(false)},
 		"requeue":     {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
 		"discard":     {usage: "discard MERGE|here", run: queueDiscard},
-		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
-		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
+		"pause":       {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
+		"resume":      {usage: "resume -repository here|DIR|all", run: queuePause(false)},
 		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
 		"mediation":   {usage: "mediation approve|escalate -summary TEXT", run: queueMediation},
 		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
@@ -2055,6 +2055,27 @@ func (c *cliCall) scopeFlag(repository string) (*workspacev1.RepositoryRef, bool
 	return c.repository(repository)
 }
 
+// allRepositories is the -repository value a verb that changes queues takes
+// to act on every registered repository's queue.
+const allRepositories = "all"
+
+// requiredScopeFlag reads the -repository flag of a verb that changes queues,
+// which must name its scope: `all` is every repository (nil), anything else
+// one repository. An unset flag is refused, because a pause that silently
+// reached every repository stopped another repository's queue for 9 hours
+// (2026-10-26: the `doom` workspace's hard stop paused `explanation-engine`,
+// and every resume after it was scoped to `~/.config/doom`).
+func (c *cliCall) requiredScopeFlag(repository string) (*workspacev1.RepositoryRef, bool) {
+	switch repository {
+	case "":
+		c.usageFailed("-repository is required: here, a main checkout, or all for every repository")
+		return nil, false
+	case allRepositories:
+		return nil, true
+	}
+	return c.repository(repository)
+}
+
 func queueStatus(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
@@ -2239,7 +2260,7 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 func queuePause(pause bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
-		repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
+		repository := fs.String("repository", "", "here, a main checkout, or all (every repository); required")
 		hard, toLand := false, false
 		if pause {
 			fs.BoolVar(&hard, "hard", false, "a hard stop: also interrupt the turns the queue's merges drive")
@@ -2248,7 +2269,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
 			return exitFailure
 		}
-		scope, ok := c.scopeFlag(*repository)
+		scope, ok := c.requiredScopeFlag(*repository)
 		if !ok {
 			return exitFailure
 		}

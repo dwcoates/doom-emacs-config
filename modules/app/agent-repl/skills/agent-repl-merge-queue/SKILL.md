@@ -177,16 +177,17 @@ Either kind:
   `still_queued` (dequeue first).
 - `workspace async-merge` under a name an off-queue merge holds is refused
   `async_merge_name_off_queue`, naming that merge: requeue it instead.
-- `merge-queue pause` and `merge-queue resume [-repository here|DIR]` suspend
-  or resume a queue.
-- `merge-queue pause -hard [-repository here|DIR]` is a HARD STOP: it pauses
+- `merge-queue pause -repository here|DIR|all` and `merge-queue resume
+  -repository here|DIR|all` suspend or resume a queue. `-repository` is
+  required; `all` names every repository's queue.
+- `merge-queue pause -hard -repository here|DIR|all` is a HARD STOP: it pauses
   the queue and also interrupts the agent turn of every merge stopped at a
   fixing attempt or a conflict resolution, and of every waiting merge's
   background rebase. A turn at any other step (a pick, a deploy-stage prompt)
   is left to finish. A queue already paused is not refused. On resume, each
   interrupted step is prompted again without spending an attempt.
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
-- `merge-queue pause -to-land` marks a pause made to land a change: the only
+- `merge-queue pause -to-land -repository here|DIR|all` marks a pause made to land a change: the only
   pause the queue bypass holder's turn end lets through. A pause without it,
   such as one the user asked for, stands until it is resumed explicitly.
 - A queue the HOST paused (`by the host` in its hover) stands for a merge
