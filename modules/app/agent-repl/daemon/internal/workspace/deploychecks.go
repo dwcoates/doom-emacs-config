@@ -83,6 +83,16 @@ func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, in
 		role, effort = "intake", intakeEffort
 	}
 	fields := dlog.Context{"workspace": string(ws), "role": role, "effort": effort.String()}
+	// A WORKSPACE WITH NO SESSION YET SERVES NO EFFORT SELECTOR, so its level
+	// is picked rather than set: the session the role's brief starts comes up
+	// at the pick (Fleet.reapplyEffort). Setting it through the selector
+	// refused every fresh intake (2026-11-15 16:17, 0.444.0: "serves no
+	// effort level for its model") and left the queue held for it.
+	if _, served := v.deps.Cards.EffortLevels(ws); !served {
+		v.deps.Topbar.SetPickedEffort(ws, effort)
+		v.deps.Log.Global().Info(opDeployChecks, "picked the deploy check workspace's effort; its session starts at it", fields)
+		return nil
+	}
 	if err := v.SetEffort(ctx, ws, effort); err != nil {
 		v.deps.Log.Global().Error(opDeployChecks, "the deploy check workspace's effort could not be set", dlog.WithCause(fields, err))
 		return fmt.Errorf("set the deploy %s %s's effort: %w", role, ws, err)
