@@ -40,7 +40,7 @@ type forest struct {
 func nest(in []wsm.Workspace, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
 
-	parent := parentsIn(ordered)
+	parent := wsm.ParentsIn(ordered)
 
 	out := forest{children: map[ids.WorkspaceID][]wsm.Workspace{}}
 	for _, ws := range ordered {
@@ -50,7 +50,7 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 			log.Debug("daemon.sidebar.nest", "a workspace renders at the section's top level",
 				dlog.Context{"row_workspace": string(ws.ID), "recorded_parent": recordedParent(ws)})
 			out.roots = append(out.roots, ws)
-		case cycles(ws.ID, parent):
+		case wsm.ParentChainCycles(ws.ID, parent):
 			log.Warn("daemon.sidebar.nest",
 				"a recorded parent chain cycles; the workspace renders at the top level rather than vanishing",
 				dlog.Context{"row_workspace": string(ws.ID), "recorded_parent": recordedParent(ws)})
@@ -60,46 +60,6 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 				dlog.Context{"row_workspace": string(ws.ID), "parent_id": string(p)})
 			out.children[p] = append(out.children[p], ws)
 		}
-	}
-	return out
-}
-
-// parentsIn answers each workspace of IN's recorded parent, for those whose
-// parent is among IN too (and is not itself): the only parents a row can
-// nest under.
-func parentsIn(in []wsm.Workspace) map[ids.WorkspaceID]ids.WorkspaceID {
-	present := map[ids.WorkspaceID]struct{}{}
-	for _, ws := range in {
-		present[ws.ID] = struct{}{}
-	}
-	parent := map[ids.WorkspaceID]ids.WorkspaceID{}
-	for _, ws := range in {
-		if ws.Parent == nil {
-			continue
-		}
-		if _, drawn := present[*ws.Parent]; drawn && *ws.Parent != ws.ID {
-			parent[ws.ID] = *ws.Parent
-		}
-	}
-	return parent
-}
-
-// familyRoots answers, for every workspace of IN, the top-level row nest
-// draws its row under: itself when it renders at the top level (no parent
-// among IN, or a parent chain that cycles), else its parent's family root.
-func familyRoots(in []wsm.Workspace) map[ids.WorkspaceID]ids.WorkspaceID {
-	parent := parentsIn(in)
-	out := map[ids.WorkspaceID]ids.WorkspaceID{}
-	for _, ws := range in {
-		at := ws.ID
-		for {
-			p, nested := parent[at]
-			if !nested || cycles(at, parent) {
-				break
-			}
-			at = p
-		}
-		out[ws.ID] = at
 	}
 	return out
 }
@@ -124,21 +84,4 @@ func (f forest) walk(visit func(wsm.Workspace)) {
 // when it has none.
 func recordedParent(ws wsm.Workspace) string {
 	return ids.Optional(ws.Parent)
-}
-
-// cycles reports whether following the parent chain from ws returns to ws. A
-// cycle is unreachable through ordinary creation, which is exactly why it is
-// checked: an ill-formed lineage must recede a row to the top level rather
-// than build a tree that never terminates.
-func cycles(ws ids.WorkspaceID, parent map[ids.WorkspaceID]ids.WorkspaceID) bool {
-	seen := map[ids.WorkspaceID]struct{}{ws: {}}
-	for at := parent[ws]; ; at = parent[at] {
-		if at == "" {
-			return false
-		}
-		if _, repeat := seen[at]; repeat {
-			return true
-		}
-		seen[at] = struct{}{}
-	}
 }

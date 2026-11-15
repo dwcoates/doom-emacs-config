@@ -49,7 +49,7 @@ type bucket struct {
 func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[ids.RepoID][]wsm.Workspace) {
 	bySubsection := map[ids.SubsectionID][]wsm.Workspace{}
 	unsectioned := map[ids.RepoID][]wsm.Workspace{}
-	section := sectionRepos(workspaces)
+	section := wsm.SectionRepos(workspaces)
 	for _, ws := range workspaces {
 		repo := section[ws.ID]
 		if ws.Subsection != nil {
@@ -71,31 +71,12 @@ func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[i
 	return out, unsectioned
 }
 
-// sectionRepos answers, for every workspace of WORKSPACES, the repository
-// whose section draws it: its FAMILY ROOT's (familyRoots). A FAMILY NEVER
-// SPLITS ACROSS SECTIONS, as it never splits across subsections: a child of
-// another repository than its parent's nests under that parent, in the
-// parent's section, where its row begins a repository divider
-// (frontend.v1.RosterOpenRow.repository_divider).
-func sectionRepos(workspaces []wsm.Workspace) map[ids.WorkspaceID]ids.RepoID {
-	root := familyRoots(workspaces)
-	repoOf := make(map[ids.WorkspaceID]ids.RepoID, len(workspaces))
-	for _, ws := range workspaces {
-		repoOf[ws.ID] = ws.Repo
-	}
-	out := make(map[ids.WorkspaceID]ids.RepoID, len(workspaces))
-	for _, ws := range workspaces {
-		out[ws.ID] = repoOf[root[ws.ID]]
-	}
-	return out
-}
-
 // walkBuckets files one repository's UNSECTIONED workspaces and its SUBS'
 // workspaces (BY_SUBSECTION) into its walk: each family of the unsectioned
 // ones stands where its top-level row's place puts it among the subsections
 // (wsm.Walk), consecutive families sharing one run.
 func walkBuckets(unsectioned []wsm.Workspace, subs []wsm.Subsection, bySubsection map[ids.SubsectionID][]wsm.Workspace) []bucket {
-	root := familyRoots(unsectioned)
+	root := wsm.FamilyRoots(unsectioned)
 	family := map[ids.WorkspaceID][]wsm.Workspace{}
 	var tops []wsm.Workspace
 	for _, ws := range unsectioned {
@@ -143,7 +124,7 @@ func sortSubsections(in []wsm.Subsection) []wsm.Subsection {
 // another repository than its FAMILY's, or a subsection of an unregistered
 // repository.
 //
-// A FAMILY'S REPOSITORY IS ITS ROOT'S (sectionRepos). A child reads its
+// A FAMILY'S REPOSITORY IS ITS ROOT'S (wsm.SectionRepos). A child reads its
 // subsection from its root (wsm's rootSubsectionColumn), and a child of
 // another repository than its parent's nests in that family, so the
 // subsection it names is its root's repository's, never necessarily its own.
@@ -168,7 +149,7 @@ func (r *resolver) assertArrangement(reg Registry) {
 		}
 		subsections[sub.ID] = sub
 	}
-	family := sectionRepos(reg.Workspaces)
+	family := wsm.SectionRepos(reg.Workspaces)
 	for _, ws := range reg.Workspaces {
 		if ws.Subsection == nil {
 			continue
