@@ -7,7 +7,7 @@ What the daemon found in every system's logs since the deploy began, grouped by 
 
 {{facts}}
 
-The test gates' reuse, which the daemon judged against the gates before:
+The last test gate's reuse, which the daemon judged by why its units ran:
 
 {{reuse}}
 
