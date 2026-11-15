@@ -523,6 +523,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// feed resolver's next workspace lookup read a closed database. Arming
 	// them here makes the failed boot tear down in exactly the order the
 	// orderly exit does.
+	// THE ROSTER'S HELD WRITES ARE WRITTEN AFTER EVERYTHING THAT CHANGES THE
+	// ROSTER has closed, and before the state client: deferred here, before
+	// the banners and the watchers are, so it runs after both.
+	if built.CloseRosterWrites != nil {
+		defer teardown.step("close_roster_writes", built.CloseRosterWrites)
+	}
 	// THE BANNERS CLOSE AFTER THE WATCHERS and before the state client:
 	// deferred here, BEFORE CloseWatchers is, so it runs after it.
 	if built.CloseBanners != nil {

@@ -552,6 +552,17 @@ func TestStampSpan(t *testing.T) {
 			want: []span{{0, 20_000}},
 		},
 		{
+			name: "a settled bubble drawn again after a later instant keeps a start before its settle",
+			act: func(h *harness) {
+				h.deliverPrompt("turn-1", "do the thing")
+				h.deliverFoldedPromptAt("turn-2", "turn-1", "also this", placeAt(30_000))
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 20_000))
+				h.main(settledProseAt("unit-prose-1", "looking", 20_000))
+			},
+			want: []span{{0, 20_000}},
+		},
+		{
 			name: "a settle restated by the other plane keeps the first span",
 			act: func(h *harness) {
 				h.deliverPromptAt("turn-1", "do the thing", 10_000)
@@ -594,6 +605,58 @@ func TestTheFinalAnswerSpansTheWholeTurn(t *testing.T) {
 	// Assert: the green bubble spans from the turn's prompt; the earlier one
 	// keeps its own span.
 	h.wantSpans(span{10_000, 25_000}, span{10_000, 40_000})
+}
+
+func TestTheFinalAnswerOfATurnOpenedAfterItSettledStartsBeforeItsSettle(t *testing.T) {
+	// Arrange: the turn's own prompt is unplaced, so the account opens at a
+	// prompt folded into it after its one bubble settled.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProseAt("unit-prose-1", "done", 20_000))
+	h.deliverFoldedPromptAt("turn-2", "turn-1", "also this", placeAt(30_000))
+
+	// Act: the turn concludes on that bubble.
+	turn := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-prose-1"), nil, nil)
+
+	// Assert: the green bubble's span states no start after its settle.
+	h.wantSpans(span{0, 20_000})
+}
+
+func TestBoundedSince(t *testing.T) {
+	tests := []struct {
+		name     string
+		settled  int64
+		instants []int64
+		at       int64
+		want     int64
+	}{
+		{name: "an arriving fold takes the instant as it is", settled: 0, instants: []int64{10_000}, at: 30_000, want: 30_000},
+		{name: "a start before the settle stands", settled: 20_000, instants: []int64{10_000}, at: 10_000, want: 10_000},
+		{name: "a start at the settle stands", settled: 20_000, instants: []int64{20_000}, at: 20_000, want: 20_000},
+		{name: "a start after the settle takes the latest instant before it", settled: 20_000, instants: []int64{5_000, 15_000, 30_000}, at: 30_000, want: 15_000},
+		{name: "a start after the settle with no instant before it is unknown", settled: 20_000, instants: []int64{30_000}, at: 30_000, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			s := h.resolver.state(testWorkspace)
+			for _, at := range tt.instants {
+				s.advanceSince("turn\x00turn-1", at)
+			}
+			fold := &proseState{account: "turn\x00turn-1", settledAtMs: tt.settled}
+
+			// Act
+			got := s.boundedSince(fold, tt.at)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("boundedSince = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestASubFeedsFirstBubbleSpansFromItsSpawn(t *testing.T) {

@@ -129,6 +129,35 @@ func TestRunWithLoggerRefusesAnUnsafePprofAddressBeforeTouchingTheDatabase(t *te
 	}
 }
 
+func TestRunWithLoggerClosesTheMetricsSurfaceBeforeTheDatabase(t *testing.T) {
+	// Arrange. The database and the metrics surface open, and the producers'
+	// socket cannot bind (its directory is a file), so the store's teardown
+	// runs with both open: the surface's last push counts the cross-session
+	// messages from the database.
+	root := t.TempDir()
+	blocked := filepath.Join(root, "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("stage a non-directory: %v", err)
+	}
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+
+	// Act.
+	err := runWithLogger(filepath.Join(blocked, "store.sock"), shortSocketPath(t), filepath.Join(root, "events.db"), "", t.TempDir(), 0, log)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("runWithLogger = nil, want the producers' socket refused")
+	}
+	records := storeRecords(t, sink)
+	if !hasOperation(records, "store.listen") {
+		t.Fatalf("records = %+v, want the socket's refusal recorded", records)
+	}
+	if hasOperation(records, "store.metrics.peer-messages") {
+		t.Fatalf("records = %+v, want the surface's last push to count the messages before the database closed", records)
+	}
+}
+
 func TestOpenLoggerReturnsABootstrapErrorBeforeThePersistentSinkExists(t *testing.T) {
 	// Arrange.
 	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")

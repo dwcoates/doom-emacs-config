@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"agentrepl/testrun/internal/gobuild"
@@ -166,5 +167,42 @@ func TestCheckTestCmdPassesABuiltBinary(t *testing.T) {
 	// Assert
 	if code != 0 || errs.Len() != 0 {
 		t.Fatalf("exit %d logging %q, want a quiet pass", code, errs.String())
+	}
+}
+
+func TestEventsStreamIsCloseOnExec(t *testing.T) {
+	// Arrange: a write end standing in for the invoker's events stream,
+	// inherited without close-on-exec as a started runner holds it.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	fd := int(w.Fd())
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0); errno != 0 {
+		t.Fatalf("clear close-on-exec: %v", errno)
+	}
+
+	// Act
+	stream, err := eventsStream(fd)
+
+	// Assert
+	if err != nil || stream.Fd() != w.Fd() {
+		t.Fatalf("eventsStream = %v, %v; want the stream at fd %d", stream, err, fd)
+	}
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
+	if errno != 0 || flags&syscall.FD_CLOEXEC == 0 {
+		t.Fatalf("fd flags = %#x (%v), want FD_CLOEXEC so no unit inherits the stream", flags, errno)
+	}
+}
+
+func TestEventsStreamRefusesAClosedDescriptor(t *testing.T) {
+	// Act
+	_, err := eventsStream(-1)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "is not an open file") {
+		t.Fatalf("eventsStream = %v, want a descriptor that is no file refused", err)
 	}
 }

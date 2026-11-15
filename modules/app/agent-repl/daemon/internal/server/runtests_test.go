@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -49,6 +50,10 @@ type fakeTests struct {
 	// running, when set, is closed once the run wrote its events; the run
 	// then lasts until its context ends, as a script the daemon stops does.
 	running chan struct{}
+	// escaped, when set, receives a duplicate of the events pipe's write end
+	// before the run writes, held as a process outside the script's group
+	// holds it: open past the script's end until the test closes it.
+	escaped chan *os.File
 }
 
 func (f *fakeTests) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
@@ -92,6 +97,13 @@ func (f *fakeTests) RunLinesWith(ctx context.Context, dir string, argv []string,
 		return scriptrunner.Run{ExitCode: f.exit}, nil
 	}
 	pipe := opts.ExtraFiles[0]
+	if f.escaped != nil {
+		fd, err := syscall.Dup(int(pipe.Fd()))
+		if err != nil {
+			return scriptrunner.Run{}, err
+		}
+		f.escaped <- os.NewFile(uintptr(fd), "escaped-events")
+	}
 	for _, ev := range events {
 		if _, err := protodelim.MarshalTo(pipe, ev); err != nil {
 			return scriptrunner.Run{}, err
@@ -403,6 +415,49 @@ func TestRunTestsStoppedByTheDaemonsExitHandsTheRunOn(t *testing.T) {
 				t.Fatalf("records = %+v, want no error: the exit stopped the run on purpose", log.Records())
 			}
 		})
+	}
+}
+
+func TestRunTestsStoppedByTheDaemonsExitEndsWhileAnotherProcessHoldsItsEvents(t *testing.T) {
+	// Arrange: the run's events pipe is also held by a process outside the
+	// script's group (testrun's runner, its own session), which outlives the
+	// script the exit stops.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) {
+		deps.Log = &fakeSurfaces{global: log, workspace: log}
+		deps.SuccessorAddress = func() string { return "127.0.0.1:9999" }
+	})
+	ref := testsWorkspace(t, h, testsDeploy)
+	planned := &testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Planned{Planned: &testrunv1.TestRunPlanned{}}}
+	h.Tests.events = []*testrunv1.TestRunEvent{planned}
+	h.Tests.running = make(chan struct{})
+	h.Tests.escaped = make(chan *os.File, 1)
+	stream, err := h.Client.RunTests(context.Background(), connect.NewRequest(&agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	held := <-h.Tests.escaped
+	defer held.Close()
+	if !stream.Receive() || stream.Msg().GetEvent().GetPlanned() == nil {
+		t.Fatalf("first frame = %v (%v), want the run's plan", stream.Msg(), stream.Err())
+	}
+
+	// Act: the exit stops the run while the other holder keeps the pipe open.
+	if err := h.Server.(*server).Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the stream ends with the run handed on, the pipe still held.
+	var frames []*agentreplv1.RunTestsResponse
+	for stream.Receive() {
+		frames = append(frames, stream.Msg())
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream: %v, want an ended stream", err)
+	}
+	if len(frames) != 1 || frames[0].GetError().GetTransferringAway().GetAddress() != "127.0.0.1:9999" {
+		t.Fatalf("frames after the exit = %v, want the one answer handing the run on", frames)
 	}
 }
 

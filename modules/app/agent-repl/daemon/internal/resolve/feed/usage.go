@@ -173,7 +173,7 @@ func (s *wsState) openStamp(fold *proseState, agent *conversationv1.AgentId) (st
 		fold.base = s.accountLanded[fold.account]
 	}
 	if fold.sinceMs == 0 {
-		fold.sinceMs = s.accountSinceMs[fold.account]
+		fold.sinceMs = s.boundedSince(fold, s.accountSinceMs[fold.account])
 	}
 	if fold.frozen {
 		return fold.usage, fold.fresh
@@ -191,14 +191,7 @@ func (s *wsState) landStamp(fold *proseState) {
 		return
 	}
 	fold.frozen = true
-	// A SPAN NEVER BEGINS AFTER IT SETTLED. A bubble first drawn after a later
-	// instant reached its account (a handover's replay drawing an older
-	// bubble after the live plane delivered a prompt folded into its turn,
-	// 2026-11-13) took that instant; it takes the latest one before its
-	// settle instead.
-	if fold.settledAtMs > 0 && fold.sinceMs > fold.settledAtMs {
-		fold.sinceMs = s.sinceBefore(fold.account, fold.settledAtMs)
-	}
+	fold.sinceMs = s.boundedSince(fold, fold.sinceMs)
 	if tally := s.accountTally[fold.account]; tally > s.accountLanded[fold.account] {
 		s.accountLanded[fold.account] = tally
 	}
@@ -234,8 +227,26 @@ func (s *wsState) stampFinalAnswerTotal(fold *proseState) bool {
 	}
 	fold.frozen = true
 	fold.usage, fold.fresh = total, fresh
-	fold.sinceMs = s.accountOpenedMs[fold.account]
+	fold.sinceMs = s.boundedSince(fold, s.accountOpenedMs[fold.account])
 	return true
+}
+
+// boundedSince answers AT as FOLD's span start, bounded by its settle: every
+// span start a fold takes goes through here.
+//
+// A SPAN NEVER BEGINS AFTER IT SETTLED. A bubble drawn after a later instant
+// reached its account took that instant: a handover's replay drawing an older
+// bubble after the live plane delivered a prompt folded into its turn
+// (2026-11-13), or a page drawn newest first, whose final answer landed before
+// the older bubble of its turn was drawn again (2026-11-15, the webapp's
+// `feed.row-malformed` "the span began at ..., after the response settled
+// at ..."). A settled fold takes the latest instant before its settle instead,
+// zero when none is.
+func (s *wsState) boundedSince(fold *proseState, at int64) int64 {
+	if fold.settledAtMs > 0 && at > fold.settledAtMs {
+		return s.sinceBefore(fold.account, fold.settledAtMs)
+	}
+	return at
 }
 
 // restampResponseRow re-publishes a fold's drawn row with its current figure,

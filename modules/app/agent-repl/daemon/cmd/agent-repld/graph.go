@@ -182,6 +182,11 @@ type graph struct {
 	// raise another banner then) and BEFORE the state client closes: a banner
 	// reads that client for the workspace's name.
 	CloseBanners func()
+	// CloseRosterWrites writes every roster change still held (rosterWrites)
+	// and stops its writers. `run` calls it AFTER the watchers and the
+	// banners close, the last of what changes the roster, and BEFORE the
+	// state client closes, which the writes are made to.
+	CloseRosterWrites func()
 	// DrainQueue is the BOUNDED wait for the prompt queue's own background
 	// goroutines — the asynchronous classification verdicts and the background
 	// revivals. `run` calls it BEFORE the state client closes, for the reason
@@ -544,9 +549,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE ROSTER'S LAST TURN RESULT IS DURABLE: a daemon that did not see a
 	// workspace's turn end draws its row as it stood, not `ready`. SO IS THE
 	// INSTANT ITS STATUS LAST CHANGED: a restart still ranks the row by it.
+	// ITS WRITES ARE MADE OFF ITS CALLERS (rosterWrites): no roster caller
+	// waits on the state database's one connection.
+	rosterDurable := newRosterWrites(rosterResults(p.DB, p.Surfaces.Global()), rosterStatusChanges(p.DB, p.Surfaces.Global()))
 	sidebarResolver, err := sidebar.New(colors, p.Surfaces, footerResolver,
-		sidebar.WithResultSink(rosterResults(p.DB, p.Surfaces.Global())),
-		sidebar.WithStatusChangeSink(rosterStatusChanges(p.DB, p.Surfaces.Global())),
+		sidebar.WithResultSink(rosterDurable.ResultSink()),
+		sidebar.WithStatusChangeSink(rosterDurable.StatusChangeSink()),
 		sidebar.WithQuiet(viewGate))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
@@ -1981,13 +1989,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			clicks.bind(srv)
 			clients.bind(srv)
 		},
-		Background:    background,
-		CloseWatchers: fleet.CloseWatchers,
-		CloseBanners:  notifier.Close,
-		DrainQueue:    queue.Drain,
-		DrainStarts:   fleet.DrainStarts,
-		DrainLandings: deployer.DrainLandings,
-		DrainMerges:   mergeOrchestrator.Drain,
+		Background:        background,
+		CloseWatchers:     fleet.CloseWatchers,
+		CloseBanners:      notifier.Close,
+		CloseRosterWrites: rosterDurable.Close,
+		DrainQueue:        queue.Drain,
+		DrainStarts:       fleet.DrainStarts,
+		DrainLandings:     deployer.DrainLandings,
+		DrainMerges:       mergeOrchestrator.Drain,
 		Notices: newNoticeLifetime(func(ctx context.Context) {
 			runNotifiers(ctx,
 				func(ctx context.Context) { queueNotices.Run(ctx, handler) },
