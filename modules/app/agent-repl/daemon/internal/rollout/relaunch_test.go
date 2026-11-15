@@ -1726,3 +1726,46 @@ func TestABounceDeferredBehindAMergeEndsNoWork(t *testing.T) {
 		t.Fatal("endWork ran for a bounce that was given back unperformed")
 	}
 }
+
+// TestBounceShimAsksTheRegistryToHoldItBehindAMergeByReason pins what the
+// registry is told: an unforced replacement nothing waits on (a stale build,
+// a stale skill set) waits behind a merge's lease in the registry itself, so
+// it never drains the workspace the merge drives (2026-11-14, doom).
+func TestBounceShimAsksTheRegistryToHoldItBehindAMergeByReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason RelaunchReason
+		force  bool
+		want   bool
+	}{
+		{name: "an unforced stale build waits", reason: ReasonBuildStale, want: true},
+		{name: "an unforced stale skill set waits", reason: ReasonSkillsChanged, want: true},
+		{name: "a forced stale build does not", reason: ReasonBuildStale, force: true, want: false},
+		{name: "the restart verb does not", reason: ReasonRestartVerb, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.registry.mu.Lock()
+			h.registry.park = true
+			h.registry.mu.Unlock()
+
+			// Act
+			if _, err := h.c.BounceShim(context.Background(), ws, tc.reason, tc.force, nil, nil); err != nil {
+				t.Fatalf("BounceShim: %v", err)
+			}
+
+			// Assert
+			h.registry.mu.Lock()
+			defer h.registry.mu.Unlock()
+			if len(h.registry.requests) != 1 {
+				t.Fatalf("requests = %d, want one", len(h.registry.requests))
+			}
+			if got := h.registry.requests[0].Req.WaitsBehindMerge; got != tc.want {
+				t.Fatalf("WaitsBehindMerge = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -40,6 +40,9 @@ func (c *controller) BounceShim(ctx context.Context, ws ids.WorkspaceID, reason 
 		Force:        force,
 		Run:          c.shimBounce(reason, force, endWork),
 		ReplacesShim: true,
+		// The registry holds it behind a merge's lease (bounce.Request); the
+		// run's own lease check below stays for a lease taken while it ran.
+		WaitsBehindMerge: reason.waitsBehindAMerge() && !force,
 		Done: func(err error) {
 			switch bounce.OutcomeOf(err) {
 			case bounce.OutcomeUnregistered:

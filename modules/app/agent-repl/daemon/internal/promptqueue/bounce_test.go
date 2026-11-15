@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2072,4 +2073,193 @@ func TestAShimReplacementWhoseShimDiedIsTakenWithoutWaitingInLine(t *testing.T) 
 	// Assert.
 	g.awaitStart(t)
 	g.finish(h, nil)
+}
+
+// mergeWaitingReplacement is a stale-build replacement that waits behind a
+// merge's lease (bounce.Request.WaitsBehindMerge), as rollout asks for one.
+func (g *gate) mergeWaitingReplacement() bounce.Request {
+	req := g.relaunching("build_stale")
+	req.WaitsBehindMerge = true
+	return req
+}
+
+// heldMergeBrief holds the merge's own repair brief behind the running turn.
+func heldMergeBrief(t *testing.T, h *harness, turn string) {
+	t.Helper()
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	brief := submission(idsTurn(turn), "repair the conflicts")
+	brief.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR
+	if _, err := h.q.Submit(context.Background(), brief); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+}
+
+// A BOUNCE AND A MERGE NEVER WAIT ON EACH OTHER (2026-11-14, doom queue
+// stalled 8.5 hours): a stale-build bounce was taken at the end of the turn
+// the merge's own brief was held behind, its run deferred behind the merge's
+// lease, and the drain's end delivered nothing under that lease -- the merge
+// waited on its brief and the bounce on the merge. Before the fix this test's
+// brief was never started.
+func TestATurnEndUnderAMergesLeaseDeliversTheMergesBriefAndLeavesTheBounceRegistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	running(t, h, "running-turn", "the running work")
+	heldMergeBrief(t, h, "t-brief")
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.mergeWaitingReplacement()); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if started := h.sender.started(); !slices.Contains(started, ids.TurnID("t-brief")) {
+		t.Fatalf("started = %v, want the merge's brief delivered at the turn's end", started)
+	}
+	if g.runs.Load() != 0 || h.q.isDraining(theWorkspace) {
+		t.Fatalf("runs = %d, draining = %v, want the bounce never taken under the merge's lease", g.runs.Load(), h.q.isDraining(theWorkspace))
+	}
+	if stage := registeredReplacement(h); stage == nil || stage.started {
+		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+	if !logged(h.log.Records(), "info", opBounce, "a merge's lease holds the workspace; the bounce stays registered, the workspace is not drained, and the lease's release takes it") {
+		t.Fatalf("records = %+v, want the held bounce recorded at INFO", h.log.Records())
+	}
+}
+
+func TestABounceHeldBehindAMergesLeaseIsTakenWhenTheLeaseIsReleased(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.mergeWaitingReplacement()); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act
+	h.clearLease()
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v, want the bounce's clean finish", err)
+	}
+}
+
+func TestRequestBounceOnAFreeWorkspaceDecidesByTheMergesLease(t *testing.T) {
+	tests := []struct {
+		name string
+		// leased stands a lease held by holder.
+		leased  bool
+		holder  wsm.LeaseHolder
+		waits   bool
+		force   bool
+		wantNow bool
+	}{
+		{name: "a merge-waiting replacement under a merge's lease is registered", leased: true, holder: wsm.HolderMerge, waits: true, wantNow: false},
+		{name: "a merge-waiting replacement with no lease runs now", waits: true, wantNow: true},
+		{name: "a merge-waiting replacement under another holder's lease runs now", leased: true, holder: wsm.HolderDrain, waits: true, wantNow: true},
+		{name: "a replacement that does not wait behind a merge runs now", leased: true, holder: wsm.HolderMerge, wantNow: true},
+		{name: "a forced replacement runs now", leased: true, holder: wsm.HolderMerge, waits: true, force: true, wantNow: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			g := newGate()
+			if tc.leased {
+				h.lease(tc.holder, wsm.PolicyHold)
+			}
+			req := g.relaunching("build_stale")
+			req.WaitsBehindMerge, req.Force = tc.waits, tc.force
+
+			// Act
+			decision, err := h.q.RequestBounce(context.Background(), theWorkspace, req)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RequestBounce: %v", err)
+			}
+			if decision.Now != tc.wantNow {
+				t.Fatalf("decision = %+v, want now = %v", decision, tc.wantNow)
+			}
+			if tc.wantNow {
+				g.awaitStart(t)
+				g.finish(h, nil)
+			} else if g.runs.Load() != 0 || h.q.isDraining(theWorkspace) {
+				t.Fatalf("runs = %d, draining = %v, want nothing taken", g.runs.Load(), h.q.isDraining(theWorkspace))
+			}
+		})
+	}
+}
+
+func TestABounceWhoseLeaseCannotBeReadStaysRegisteredAndIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.mergeWaitingReplacement()); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	h.db.mu.Lock()
+	h.db.leaseErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnFree(theWorkspace)
+
+	// Assert
+	if g.runs.Load() != 0 || h.q.isDraining(theWorkspace) {
+		t.Fatalf("runs = %d, draining = %v, want nothing taken on an unread lease", g.runs.Load(), h.q.isDraining(theWorkspace))
+	}
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+		Level: "error", Operation: opBounce,
+		Message: "could not read the occupancy lease before taking a bounce that waits behind a merge; it stays registered for the next edge",
+	})
+	if !ok || r.Context["cause"] != "the store is gone" || r.Context["reason"] != "build_stale" {
+		t.Fatalf("records = %+v, want the unread lease at ERROR with its cause and reason", h.log.Records())
+	}
+	if stage := registeredReplacement(h); stage == nil || stage.started {
+		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+}
+
+// A drain that ends under a merge's holding lease still runs the pop, which
+// delivers only what the lease exempts: the merge's own brief goes, and the
+// user's prompt waits for the lease's release.
+func TestADrainEndingUnderAMergesLeaseDeliversOnlyTheMergesOwnBrief(t *testing.T) {
+	// Arrange: the bounce started before the merge's lease was taken, and
+	// gives itself back behind it.
+	h := newHarness(t)
+	g := newGate()
+	running(t, h, "running-turn", "the running work")
+	heldMergeBrief(t, h, "t-brief")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("t-user", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+	g.awaitStart(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+
+	// Act
+	g.finish(h, bounce.ErrDeferredBehindLease)
+
+	// Assert
+	started := h.sender.started()
+	if !slices.Contains(started, ids.TurnID("t-brief")) || slices.Contains(started, ids.TurnID("t-user")) {
+		t.Fatalf("started = %v, want the merge's brief and not the user's prompt", started)
+	}
 }
