@@ -1721,14 +1721,13 @@ state keyed by WS-NAME + §9 REF via `agent-repl-host-ref' (nil ->
            nil "the renamed tab's composer gate to update")
           (should (eq (agent-repl-host-composer-gate "new") :open)))))))
 
-;; audit-3 #33
-(ert-deftest agent-repl-itest-roster-rename-colliding-with-a-tombstoned-name-is-refused-loudly-not-half-applied ()
-  "RULING: a rename target colliding with a TOMBSTONED name is refused loudly.
-`--ws-rename-state' signals `user-error' out of the push handler
-(workspace.el:225) when the target name is already registered, live or
-tombstoned — the push must be refused whole, never leave the old tab
-renamed halfway into some third state.  (This precondition sits ahead of
-the host re-key bug above and already holds independently of it.)"
+(ert-deftest agent-repl-itest-roster-rename-onto-a-tombstoned-name-purges-it-and-renames-whole ()
+  "A rename onto a name a closed workspace's tombstone holds purges the tombstone.
+Superseded ruling (owner, 2026-11-15): audit-3 #33 refused such a rename,
+which left the tab on its old name while the sidebar and the CLI used the
+new one.  The daemon frees a name once its workspace is closed for good, so
+the tombstone is stale: the roster purges it at INFO and the rename lands
+whole, never half-applied, and never as an invalid push."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       ;; Arrange: two open rows, then tombstone one by closing it.
@@ -1752,17 +1751,13 @@ the host re-key bug above and already holds independently of it.)"
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-collide-live" "dead" 'ready))))
-      ;; Assert: refused loudly, and the old tab untouched — never half-renamed.
-      ;; The refusal is recorded by `agent-repl-roster--rename-state', which
-      ;; catches `--ws-rename-state''s `user-error' so it cannot escape the
-      ;; push handler and abort the reconcile walk mid-list: the ruled shape
-      ;; (fanout §0c, R-AUDIT3-PROD) is a WHOLE refusal logged at ERROR, not
-      ;; an invalid push.  A `push-invalid' here would mean the signal
-      ;; escaped and the tab bar describes a roster nobody finished reading.
-      (agent-repl-itest--await-log daemon "elisp.roster.tab-rename-refused" "error")
-      (should (agent-repl-itest--logged-p daemon "elisp.roster.tab-rename-refused" "error"))
-      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
+      ;; Assert: purged at INFO, renamed whole, nothing refused or invalid.
+      (agent-repl-itest--await-log daemon "elisp.roster.tombstone-purged" "info")
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl--ws-by-ref-id "itest-collide-live") "dead"))
+       nil "the live row's tab under its new name")
+      (should-not (agent-repl-itest--logged-p daemon "elisp.roster.tab-rename-refused" "error"))
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error")))))
 
 ;; audit-3 #34
 (ert-deftest agent-repl-itest-roster-when-turn-running-started-at-ms-decodes-from-a-decimal-string ()
