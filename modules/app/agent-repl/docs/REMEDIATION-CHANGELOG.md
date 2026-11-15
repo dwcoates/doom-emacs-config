@@ -1485,3 +1485,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-15 merge-queue-stall-triage (landed in queue bypass mode): a handover's transfer overtakes a shim replacement held behind a merge's lease, so a merge the handover suspended can no longer keep the deploy from settling
 - 2026-11-15 merge-queue-stall-triage (landed in queue bypass mode): the merge queue's waiting head no longer draws an earlier attempt's steps (a stale 'rebasing') as if it were running
 - 2026-11-15 merge-queue-stall-triage (landed in queue bypass mode): a refused deploy names only the transfers its handover still waits on, and a free workspace whose transfer stays held is recorded at ERROR
+- 2026-11-15 merge-queue-stall-triage (landed in queue bypass mode): the merge queue admits the first merge whose workspace this daemon serves; a merge whose workspace an older daemon keeps until its work ends goes back to its place in line and holds nobody
