@@ -492,6 +492,10 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 		// HOW A ROLLBACK'S RESTART SETTLED: the rows withheld for it leave or
 		// come back (rollback.go).
 		r.settleRollbackLocked(s, ws, update.GetRollbackSettled())
+	case *conversationv1.SessionUpdate_VendorErrorRetry:
+		// A PROMISED RETRY ABANDONED draws the failure it withheld
+		// (retriedfailure.go).
+		r.observeVendorErrorRetry(s, update.GetVendorErrorRetry())
 	case *conversationv1.SessionUpdate_CommandCatalog:
 		// THE CATALOG CHANGES WHICH COMMANDS A PROMPT NAMES (commands.go). The
 		// watcher installs it in the one table (Deps.Commands) before routing

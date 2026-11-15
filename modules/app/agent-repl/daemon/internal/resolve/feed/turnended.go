@@ -117,6 +117,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	// A CONNECTION FAILURE THE NETWORK'S RETURN ALREADY ANSWERED is refused
 	// at the upsert door like one drawn before the return (reconnect.go).
 	r.answerLateUnreachable(s, row)
+	retried := failure != nil && s.retriedFailure(*turn, failure)
 	switch {
 	case suppress:
 		log.Debug("daemon.feed.turn_ended",
@@ -126,6 +127,9 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		log.Debug("daemon.feed.turn_ended",
 			"a turn's terminal row has no feed to land on and was not drawn",
 			dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended), "agent": agent.GetValue()})
+	case retried:
+		// A FAILURE AGENT-REPL RETRIES DRAWS NO ROW (retriedfailure.go).
+		r.withholdRetriedFailure(s, *turn, at, row, failure)
 	default:
 		log.Debug("daemon.feed.turn_ended",
 			"a turn's terminal row was upserted",
@@ -140,8 +144,9 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	}
 
 	// A LIVE ENDING IS FILED FOR THE DESKTOP BANNER — unless a confirmed /clear
-	// suppressed it, whose divider is the whole of its outcome.
-	if !suppress {
+	// suppressed it, whose divider is the whole of its outcome, or its failure
+	// is retried, which ends nothing the reader is told of.
+	if !suppress && !retried {
 		r.fileLiveEnding(s, *turn, ended, failure)
 	}
 	// A CHAT THREAD LEARNS ITS ANSWER HERE (chatsink.go), replayed or live.

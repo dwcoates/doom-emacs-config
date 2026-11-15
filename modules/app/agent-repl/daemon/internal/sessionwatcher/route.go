@@ -219,19 +219,23 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 	case *conversationv1.SessionUpdate_VendorErrorRetry:
 		// THE SCHEDULE OF AGENT-REPL'S RETRY OF A FAILED TURN is the footer's
 		// to draw (its countdown) and to read (a scheduled retry holds no
-		// prompt, footer.Resolver.VendorBlock); no other rule reads it.
+		// prompt, footer.Resolver.VendorBlock), and the feed's for one fact: a
+		// promised retry abandoned draws the failure the feed withheld for it
+		// (resolve/feed/retriedfailure.go).
 		// The watcher keeps one fact of it: whether a retry is still to be
 		// made, which a departure that cuts the shim owes the workspace
 		// (promptqueue's owed retry).
 		w.retryOwed = u.VendorErrorRetry.GetScheduled() != nil || u.VendorErrorRetry.GetAwaitingNetwork() != nil
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer and the feed", dlog.Context{
 			"arm":              sessionArm(update),
 			"scheduled":        u.VendorErrorRetry.GetScheduled() != nil,
 			"attempting":       u.VendorErrorRetry.GetAttempting() != nil,
 			"awaiting_network": u.VendorErrorRetry.GetAwaitingNetwork() != nil,
+			"abandoned":        u.VendorErrorRetry.GetAbandoned() != nil,
 			"retry_owed":       w.retryOwed,
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
+		w.sinks.Feed.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_SkillsChanged:
 		// THE VENDOR'S SKILL SET WENT STALE ON DISK: no view draws it, and the
