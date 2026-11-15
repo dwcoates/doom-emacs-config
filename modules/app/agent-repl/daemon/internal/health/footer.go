@@ -165,6 +165,11 @@ var daemonFaultCells = map[string]FaultCell{
 	// NON-ESCALATING for the same reason: every session serves, and only its
 	// cache is left to lapse between turns.
 	KindKeepaliveDriveStopped: {FaultStatusNone, ""},
+	// NON-ESCALATING: one brief disagrees with the values handed it, and
+	// every other brief still composes. The caller that asked for it was
+	// answered the failure; `daemon_impaired` would paint every workspace's
+	// row blue over one brief.
+	KindBriefUnsplicable: {FaultStatusNone, ""},
 }
 
 // FaultFooterCell answers where one recorded fault lands on the strip, and

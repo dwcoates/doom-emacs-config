@@ -105,7 +105,7 @@ func TestEveryDaemonFaultRaiserSharesRaiseDaemonFault(t *testing.T) {
 	}
 
 	// Assert
-	if shared != 1 || len(byHand) != 0 {
-		t.Fatalf("shared raisers = %d, hand-rolled in %v; want 1 and none", shared, byHand)
+	if shared != 2 || len(byHand) != 0 {
+		t.Fatalf("shared raisers = %d, hand-rolled in %v; want 2 and none", shared, byHand)
 	}
 }

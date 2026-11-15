@@ -4301,6 +4301,15 @@ The path that is not there."
     (agent-repl-wire-verbs--check-keys message json '(path))
     (list :path (agent-repl-wire-verbs--decode-string message 'path json))))
 
+(defun agent-repl-wire-decode-daemon-fault-brief-unsplicable (json)
+  "Decode DaemonFaultBriefUnsplicable from JSON into (:brief :cause).
+A brief that read but would not splice: its placeholders and the values the
+daemon handed it disagree.  The brief's name, and the splice's own account."
+  (let ((message "DaemonFaultBriefUnsplicable"))
+    (agent-repl-wire-verbs--check-keys message json '(brief cause))
+    (list :brief (agent-repl-wire-verbs--decode-string message 'brief json)
+          :cause (agent-repl-wire-verbs--decode-string message 'cause json))))
+
 (defun agent-repl-wire-decode-daemon-fault-wsm-read-only (json)
   "Decode DaemonFaultWsmReadOnly from JSON.  Empty: the arm is the whole fact."
   (agent-repl-wire-verbs--decode-empty "DaemonFaultWsmReadOnly" json))
@@ -4413,6 +4422,11 @@ contract breach."
 `DaemonFaultKeepaliveDriveStopped'."
   (agent-repl-wire-decode-daemon-fault-keepalive-drive-stopped json))
 
+(defun agent-repl-wire-decode-daemon-fault-kind-brief-unsplicable (json)
+  "Decode DaemonFault's `brief_unsplicable' kind arm from JSON as a
+`DaemonFaultBriefUnsplicable'."
+  (agent-repl-wire-decode-daemon-fault-brief-unsplicable json))
+
 (defun agent-repl-wire-decode-daemon-fault-kind (json)
   "Decode DaemonFault's `kind' oneof from JSON into (:arm ARM :value V).
 THE KIND IS A TYPED ARM: `detail' carries only what prose must, so a
@@ -4426,12 +4440,13 @@ fault with no kind is a contract breach."
                  (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only)
                  (list 'daemonStateUnreadable :daemon-state-unreadable #'agent-repl-wire-decode-daemon-fault-kind-daemon-state-unreadable)
                  (list 'deployFailed :deploy-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-failed)
-                 (list 'keepaliveDriveStopped :keepalive-drive-stopped #'agent-repl-wire-decode-daemon-fault-kind-keepalive-drive-stopped))))
+                 (list 'keepaliveDriveStopped :keepalive-drive-stopped #'agent-repl-wire-decode-daemon-fault-kind-keepalive-drive-stopped)
+                 (list 'briefUnsplicable :brief-unsplicable #'agent-repl-wire-decode-daemon-fault-kind-brief-unsplicable))))
 
 (defun agent-repl-wire-decode-daemon-fault (json)
   "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
   (let ((message "DaemonFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable deployFailed keepaliveDriveStopped))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned successorSpawnFailed promptsDirMissing wsmReadOnly daemonStateUnreadable deployFailed keepaliveDriveStopped briefUnsplicable))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
           :kind (agent-repl-wire-decode-daemon-fault-kind json))))
 

@@ -71,6 +71,9 @@ const (
 	// EdgePromptsDirServed is a composed brief read and spliced from the
 	// prompts directory: that read is the health probe.
 	EdgePromptsDirServed Edge = "prompts_dir_served"
+	// EdgeBriefComposed is one brief read and spliced: the disagreement a
+	// splice failure recorded about that brief is over.
+	EdgeBriefComposed Edge = "brief_composed"
 	// EdgeSuccessorServing is a handover's successor proving it serves.
 	EdgeSuccessorServing Edge = "successor_serving"
 	// EdgeDeployStepSucceeded is a deploy getting through the step a
@@ -121,6 +124,9 @@ var faultLifetimes = map[string]Lifetime{
 	KindSuccessorSpawnFailed: standing(EdgeSuccessorServing, EdgeSuperseded, EdgeDaemonBoot),
 	// A missing prompts directory ends at the next brief it furnishes.
 	KindPromptsDirMissing: standing(EdgePromptsDirServed),
+	// A brief that would not splice ends when that brief next composes, or
+	// at the next boot, whose build may hand it other values.
+	KindBriefUnsplicable: standing(EdgeBriefComposed, EdgeDaemonBoot),
 	// A failed deploy step ends when a later deploy gets through that step,
 	// or fails it again (the new fault supersedes it), or at the next boot,
 	// whose process draws no fault an earlier one opened.

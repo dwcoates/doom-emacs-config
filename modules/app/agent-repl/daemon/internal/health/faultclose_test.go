@@ -24,6 +24,7 @@ var wantStandingEdges = map[string][]Edge{
 	KindWsmReadOnly:           {EdgeDaemonBoot},
 	KindSuccessorSpawnFailed:  {EdgeSuccessorServing, EdgeSuperseded, EdgeDaemonBoot},
 	KindPromptsDirMissing:     {EdgePromptsDirServed},
+	KindBriefUnsplicable:      {EdgeBriefComposed, EdgeDaemonBoot},
 	KindDeployFailed:          {EdgeDeployStepSucceeded, EdgeSuperseded, EdgeDaemonBoot},
 	KindShimStartFailed:       {EdgeHealthyAttach},
 	KindShimDied:              {EdgeHealthyAttach},
