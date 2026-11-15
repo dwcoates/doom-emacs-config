@@ -3,7 +3,9 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -2726,5 +2728,77 @@ func TestEveryDrainStepGoesThroughDrainStep(t *testing.T) {
 	// every merge left undrained, and the git stop records what it waited.
 	if want := []string{"terminal.go", "terminal.go"}; !slices.Equal(byHand, want) {
 		t.Fatalf("the bound is waited by hand at %v, want only the terminal waits and the git stop", byHand)
+	}
+}
+
+func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
+	tests := []struct {
+		name        string
+		stopErr     error
+		wantRemoved bool
+		wantErr     bool
+		wantMessage string
+	}{
+		{name: "the session stopped, then the worktree removed", wantRemoved: true,
+			wantMessage: "stopped the merged workspace's session and removed its worktree"},
+		{name: "a session that will not stop keeps its worktree", stopErr: errors.New("shim hung"), wantErr: true,
+			wantMessage: "could not stop the merged workspace's session before removing its worktree"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.stopErr = tt.stopErr
+
+			// Act
+			err := h.o.retireLandedWorktree(context.Background(), h.logs.Global(), "daemon.merge.teardown", h.git, "ws-landed", h.targetD, h.sourceD, h.targetD, "feature")
+
+			// Assert
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("retireLandedWorktree = %v, want an error %v", err, tt.wantErr)
+			}
+			h.git.mu.Lock()
+			removed := slices.Contains(h.git.removedWorktrees, h.sourceD)
+			h.git.mu.Unlock()
+			if removed != tt.wantRemoved || !slices.Equal(h.stoppedSessions, []ids.WorkspaceID{"ws-landed"}) || !h.stopForces[0] {
+				t.Fatalf("removed %v, stopped %v forced %v; want removed %v after one forced stop", removed, h.stoppedSessions, h.stopForces, tt.wantRemoved)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.teardown", Message: tt.wantMessage}); !ok {
+				t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+			}
+		})
+	}
+}
+
+// TestEveryLandedTeardownGoesThroughRetireLandedWorktree pins that the
+// queue's merges and a remediation's direct landing share the one teardown:
+// a forced session stop appears nowhere in the package's sources but there.
+func TestEveryLandedTeardownGoesThroughRetireLandedWorktree(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var sites []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.Contains(line, ".StopSession(") && strings.Contains(line, ", true)") {
+				sites = append(sites, fmt.Sprintf("%s:%d", file, i+1))
+			}
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || !strings.HasPrefix(sites[0], "terminal.go:") {
+		t.Fatalf("forced session stops at %v, want only retireLandedWorktree's", sites)
 	}
 }

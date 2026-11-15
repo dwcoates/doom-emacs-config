@@ -15,7 +15,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/wsm"
 )
@@ -487,17 +486,12 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 	if err != nil {
 		return err
 	}
-	release := o.deps.HoldStarts(f.Workspace)
-	defer release()
-	if err := o.deps.StopSession(ctx, f.Workspace, true); err != nil {
-		return fmt.Errorf("merge: stop the remediation's session before removing its worktree: %w", err)
-	}
+	// A RETRY AFTER THE WORKTREE WENT finds nothing left to tear down.
 	if _, err := os.Stat(record.Dir); err == nil {
-		if err := o.deps.Git.RemoveWorktree(ctx, main, record.Dir); err != nil {
-			return fmt.Errorf("merge: remove the remediation's worktree: %w", err)
+		if err := o.retireLandedWorktree(ctx, o.deps.Log.Global(), opRemediationFinish, o.deps.Git, f.Workspace, main, record.Dir, main, record.Branch); err != nil {
+			return fmt.Errorf("merge: tear down the landed remediation: %w", err)
 		}
 	}
-	_, _ = landedbranch.Retire(ctx, o.deps.Git, o.deps.Log.Global(), opRemediationFinish, main, record.Branch, landedbranch.Landing{Into: "HEAD"}, fields)
 	if err := o.deps.PublishRegistry(ctx); err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not republish the roster after the remediation closed", withField(fields, "error", err.Error()))
 	}

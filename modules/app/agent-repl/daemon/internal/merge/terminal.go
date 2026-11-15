@@ -568,28 +568,37 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 			"workspace": string(closes), "error": err.Error()})
 		return
 	}
-	dir := job.Layout.SourceDir
+	// A failure is recorded by the teardown itself; the landing stands.
+	_ = r.o.retireLandedWorktree(ctx, log, op, r.git, closes, string(r.repo), job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.SourceBranch)
+}
+
+// retireLandedWorktree tears down landed workspace WS: its session stopped,
+// its worktree DIR removed from the repository REPO through GIT, and its
+// landed BRANCH retired against TARGETDIR's checkout. It is the ONE teardown
+// of a landed workspace, the queue's merges' and a deploy remediation's
+// direct landing's alike. Each failure is recorded under OP and answered.
+func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger, op string, git gitclient.Git, ws ids.WorkspaceID, repo, dir, targetDir, branch string) error {
 	// NO RELAUNCH REACHES THE WORKSPACE BETWEEN THE STOP AND THE REMOVAL. A
 	// stale-build bounce fired as the merge's work ended once installed its
 	// replacement after this stop, and the shim then ran in a worktree that
 	// was gone (2026-10-25, settings-page-land).
-	release := r.o.deps.HoldStarts(closes)
+	release := o.deps.HoldStarts(ws)
 	defer release()
-	if err := r.o.deps.StopSession(ctx, closes, true); err != nil {
+	if err := o.deps.StopSession(ctx, ws, true); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
-			"workspace": string(closes), "worktree": dir, "force": true, "error": err.Error()})
-		return
+			"workspace": string(ws), "worktree": dir, "force": true, "error": err.Error()})
+		return err
 	}
-	if err := r.git.RemoveWorktree(ctx, string(r.repo), dir); err != nil {
+	if err := git.RemoveWorktree(ctx, repo, dir); err != nil {
 		log.Error(op, "could not remove the merged worktree", dlog.Context{
-			"workspace": string(closes), "worktree": dir, "error": err.Error()})
-		return
+			"workspace": string(ws), "worktree": dir, "error": err.Error()})
+		return err
 	}
 	// INFO, not DEBUG: the worktree going is the edge every client sees its
 	// workspace's directory vanish at, and a diagnosis of what a client did
 	// next reads the removal off this record (owner SOP, 2026-10-06).
 	log.Info(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
-		"workspace": string(closes), "worktree": dir, "force": true})
+		"workspace": string(ws), "worktree": dir, "force": true})
 	// THE LANDED BRANCH GOES WITH ITS WORKTREE, verified against what the
 	// target checkout now holds (landedbranch.Retire): a branch left behind
 	// refuses every later create of the same name. Retire records its own
@@ -600,8 +609,9 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 	// merge commit's second parent is the branch's tip. Only a detached
 	// merge lands rebased copies the branch never points at, and its
 	// requester's retirement passes the head it recorded (RetireLanded).
-	_, _ = landedbranch.Retire(ctx, r.git, log, op, job.Layout.TargetDir, job.Layout.SourceBranch, landedbranch.Landing{Into: "HEAD"},
-		dlog.Context{"workspace": string(closes)})
+	_, _ = landedbranch.Retire(ctx, git, log, op, targetDir, branch, landedbranch.Landing{Into: "HEAD"},
+		dlog.Context{"workspace": string(ws)})
+	return nil
 }
 
 // cleanupLanded removes the worktree a landed async merge asked to clean up
