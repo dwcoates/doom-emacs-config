@@ -272,7 +272,7 @@ func main() {
 		// serving daemon's claim and took it the moment a deploy's handover
 		// freed it, then exited (2026-11-15 20:07, a stray `agent-repld queue
 		// -h` booted as a daemon at 19:57).
-		fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[0], err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(exitFailure)
 	}
 	startedIn, err := enterStableDir(opts, os.Getwd, os.Chdir)
