@@ -55,12 +55,12 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		[]string{"go", "build", "-buildvcs=false", "-o", fake, "."}, "GOPROXY=off", GoFlagsEnv("-mod=mod"))
 	driver := filepath.Join(l.Module, "testrun", "ert", "driver.el")
 	rosterForm := lispList(files)
-	named := func(id string, items []string, names []string) run.Spec {
+	named := func(id string, items []string, byItem map[string][]string) run.Spec {
 		form := fmt.Sprintf("(agent-repl-testrun-ert %s %s %s)",
 			strconv.Quote(lispDir+"/"), lispList(items), rosterForm)
-		if len(names) > 0 {
+		if names := lispNamesByFile(items, byItem); names != "" {
 			form = fmt.Sprintf("(agent-repl-testrun-ert %s %s %s %s)",
-				strconv.Quote(lispDir+"/"), lispList(items), rosterForm, lispSymbols(names))
+				strconv.Quote(lispDir+"/"), lispList(items), rosterForm, names)
 		}
 		sp := spec(id, s.Name, lispDir,
 			[]string{"emacs", "-batch", "-Q", "-l", "ert", "-l", driver, "--eval", form},
@@ -73,8 +73,28 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 	splits := batchSplits(s.Name, s.Name, BatchFiles(files, ERTArea, neverReused(s), PooledArea), chunk, named)
 	for i := range splits {
 		splits[i].Deps = []string{build.ID}
+		// THE DRIVER SCOPES EACH FILE'S NAMES TO THAT FILE, so two named
+		// files of one batch share a chunk (2026-11-13: two -ert FILE=NAMES
+		// flags checked every name against each file).
+		splits[i].ScopesNamesPerItem = true
 	}
 	return Units{Atomic: []run.Spec{build}, Splits: splits}, nil
+}
+
+// lispNamesByFile is the driver's NAMES argument: an alist of each named
+// item of ITEMS to its test symbols, in ITEMS' order, or "" when no item is
+// named. An item with no entry runs whole.
+func lispNamesByFile(items []string, byItem map[string][]string) string {
+	var entries []string
+	for _, item := range items {
+		if names := byItem[item]; len(names) > 0 {
+			entries = append(entries, "(cons "+strconv.Quote(item)+" "+lispSymbols(names)+")")
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	return "(list " + strings.Join(entries, " ") + ")"
 }
 
 // lispSymbols is a quoted list of symbols, each name interned exactly.

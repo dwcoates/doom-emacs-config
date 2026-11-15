@@ -29,13 +29,21 @@ func runDriver(t *testing.T, dir string, chunk, roster []string) (string, int) {
 	return runDriverNamed(t, dir, chunk, roster, nil)
 }
 
-// runDriverNamed runs one chunk narrowed to names (all of it when none).
-func runDriverNamed(t *testing.T, dir string, chunk, roster, names []string) (string, int) {
+// runDriverNamed runs one chunk narrowed to each file's names in NAMES (a
+// file with none runs whole), as the suite's chunk builder passes them.
+func runDriverNamed(t *testing.T, dir string, chunk, roster []string, names map[string][]string) (string, int) {
 	t.Helper()
 	form := "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + ")"
-	if len(names) > 0 {
-		form = "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + " " + lispSymbols(names) + ")"
+	if byFile := lispNamesByFile(chunk, names); byFile != "" {
+		form = "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(chunk) + " " + lispList(roster) + " " + byFile + ")"
 	}
+	return runDriverForm(t, dir, form)
+}
+
+// runDriverForm evaluates FORM in a batch Emacs with the driver loaded, from
+// DIR, and answers its output and exit status.
+func runDriverForm(t *testing.T, dir, form string) (string, int) {
+	t.Helper()
 	cmd := exec.Command("emacs", "-batch", "-Q", "-l", "ert", "-l", ertDriver(t), "--eval", form)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -162,7 +170,7 @@ func TestERTDriverRunsOnlyTheNamedTests(t *testing.T) {
 	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n(ert-deftest fixture-a-fails () (should nil))\n"})
 
 	// Act
-	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, []string{"fixture-a-passes"})
+	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, map[string][]string{"test-a.el": {"fixture-a-passes"}})
 
 	// Assert
 	if exit != 0 || !strings.Contains(out, "fixture-a-passes") || strings.Contains(out, "fixture-a-fails") {
@@ -175,10 +183,91 @@ func TestERTDriverRefusesANameNoChunkFileDefines(t *testing.T) {
 	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n"})
 
 	// Act
-	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, []string{"fixture-nope"})
+	out, exit := runDriverNamed(t, dir, []string{"test-a.el"}, []string{"test-helpers.el", "test-a.el"}, map[string][]string{"test-a.el": {"fixture-nope"}})
 
 	// Assert
-	if exit != 2 || !strings.Contains(out, "defines the test") || !strings.Contains(out, "fixture-nope") {
+	if exit != 2 || !strings.Contains(out, "test-a.el defines no test") || !strings.Contains(out, "fixture-nope") {
 		t.Fatalf("exit = %d, want 2 naming the missing test:\n%s", exit, out)
+	}
+}
+
+// twoFileFixture is a fixture of two files, each with a passing and a failing
+// test.
+func twoFileFixture(t *testing.T) string {
+	t.Helper()
+	return ertFixture(t, map[string]string{
+		"test-a.el": "(ert-deftest fixture-a-passes () (should t))\n(ert-deftest fixture-a-fails () (should nil))\n",
+		"test-b.el": "(ert-deftest fixture-b-passes () (should t))\n(ert-deftest fixture-b-fails () (should nil))\n",
+	})
+}
+
+func TestERTDriverScopesEachFilesNamesToThatFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		names   map[string][]string
+		exit    int
+		ran     []string
+		skipped []string
+	}{
+		{name: "two named files each run their own names",
+			names: map[string][]string{"test-a.el": {"fixture-a-passes"}, "test-b.el": {"fixture-b-passes"}},
+			exit:  0, ran: []string{"fixture-a-passes", "fixture-b-passes"}, skipped: []string{"fixture-a-fails", "fixture-b-fails"}},
+		{name: "a whole file beside a named one runs whole",
+			names: map[string][]string{"test-a.el": {"fixture-a-passes"}},
+			exit:  1, ran: []string{"fixture-a-passes", "fixture-b-passes", "fixture-b-fails"}, skipped: []string{"fixture-a-fails"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := twoFileFixture(t)
+
+			// Act
+			out, exit := runDriverNamed(t, dir, []string{"test-a.el", "test-b.el"}, []string{"test-helpers.el", "test-a.el", "test-b.el"}, tt.names)
+
+			// Assert
+			if exit != tt.exit {
+				t.Fatalf("exit = %d, want %d:\n%s", exit, tt.exit, out)
+			}
+			for _, name := range tt.ran {
+				if !strings.Contains(out, name) {
+					t.Errorf("%s did not run:\n%s", name, out)
+				}
+			}
+			for _, name := range tt.skipped {
+				if strings.Contains(out, name) {
+					t.Errorf("%s ran, want it left out:\n%s", name, out)
+				}
+			}
+		})
+	}
+}
+
+func TestERTDriverRefusesNamesOutsideTheirFile(t *testing.T) {
+	tests := []struct {
+		name  string
+		chunk []string
+		names map[string][]string
+		want  string
+	}{
+		{name: "a name the other chunk file defines", chunk: []string{"test-a.el", "test-b.el"},
+			names: map[string][]string{"test-a.el": {"fixture-b-passes"}}, want: "test-a.el defines no test `fixture-b-passes'"},
+		{name: "names for a file outside the chunk", chunk: []string{"test-a.el"},
+			names: map[string][]string{"test-a.el": {"fixture-a-passes"}, "test-b.el": {"fixture-b-passes"}}, want: "test-b.el, which is not in the chunk"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := twoFileFixture(t)
+			form := "(agent-repl-testrun-ert " + strconv.Quote(dir+"/") + " " + lispList(tt.chunk) + " " + lispList([]string{"test-helpers.el", "test-a.el", "test-b.el"}) +
+				" " + lispNamesByFile([]string{"test-a.el", "test-b.el"}, tt.names) + ")"
+
+			// Act
+			out, exit := runDriverForm(t, dir, form)
+
+			// Assert
+			if exit != 2 || !strings.Contains(out, tt.want) {
+				t.Fatalf("exit = %d, want 2 saying %q:\n%s", exit, tt.want, out)
+			}
+		})
 	}
 }
