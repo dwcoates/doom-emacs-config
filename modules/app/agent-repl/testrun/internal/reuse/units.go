@@ -13,6 +13,7 @@ import (
 
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/suites"
+	"agentrepl/testrun/reusewhy"
 	"agentrepl/testrun/roster"
 )
 
@@ -116,7 +117,7 @@ type Why struct {
 func (w Why) String() string {
 	switch w.Kind {
 	case WhyNeverRecorded:
-		return "never recorded"
+		return reusewhy.NeverRecorded
 	case WhyFailedBefore:
 		if len(w.Changed) == 0 {
 			return "failed before, inputs unchanged"
@@ -362,15 +363,16 @@ func whyTallyOf(verdicts []SuiteVerdict) string {
 	return strings.Join(why, ", ")
 }
 
-// whyTally names each reason in a suite's tally.
+// whyTally names each reason in a suite's tally, in the vocabulary the
+// daemon reads back (reusewhy).
 var whyTally = map[WhyKind]string{
-	WhyFailedBefore:  "failed before",
-	WhyInputsChanged: "inputs changed",
-	WhyNeverRecorded: "never recorded",
-	WhyNoReuse:       "not reusing",
-	WhyTargeted:      "targeted",
-	WhyNever:         "never reused",
-	WhyNoSandbox:     "no sandbox",
+	WhyFailedBefore:  reusewhy.FailedBefore,
+	WhyInputsChanged: reusewhy.InputsChanged,
+	WhyNeverRecorded: reusewhy.NeverRecorded,
+	WhyNoReuse:       reusewhy.NoReuse,
+	WhyTargeted:      reusewhy.Targeted,
+	WhyNever:         reusewhy.Never,
+	WhyNoSandbox:     reusewhy.NoSandbox,
 }
 
 // unitOfSpec is the unit index owning each of su's specs, and whether each

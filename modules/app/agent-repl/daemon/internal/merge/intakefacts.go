@@ -164,7 +164,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if err != nil {
 		return "", err
 	}
-	gates, err := gateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
+	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +175,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"chain":          chain,
 		"bound":          fmt.Sprint(q.bound),
 		"facts":          RenderFindings(SortFindings(window, before)),
-		"reuse":          RenderReuse(gates),
+		"reuse":          RenderReuse(gate, gated),
 	})
 }
 

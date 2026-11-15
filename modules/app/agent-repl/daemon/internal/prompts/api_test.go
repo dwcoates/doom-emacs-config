@@ -742,9 +742,10 @@ func TestTheRoutingBriefPassesAMessageThroughOnAnyDoubt(t *testing.T) {
 func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 	// Arrange
 	want := []string{
-		"wait for the user's ruling before changing anything",
-		"`agent-repld workspace finished here -version-part patch",
-		"your finish does not join the merge queue",
+		"settle the requirements with the user",
+		"wait for their ruling before changing anything",
+		"finish at once, without being asked: `agent-repld workspace finished here -version-part patch",
+		"Your finish does not join the merge queue",
 		"lands the branch directly on the main branch and deploys it",
 	}
 
