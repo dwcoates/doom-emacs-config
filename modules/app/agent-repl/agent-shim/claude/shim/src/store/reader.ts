@@ -515,6 +515,34 @@ function firstRowGate(): FirstRowGate {
   };
 }
 
+/**
+ * Count a book's NEWEST LINE, as an open named it, among the pointers a reading
+ * session has handed its consumer, unless it is already there.
+ *
+ * THE CONSUMER HOLDS IT ONCE THE OPEN HAS RETURNED, WHATEVER THE OPENING. The
+ * store names `newest` BY PLACE, and a teardown concludes through exactly that
+ * pointer (the book's head). A repaint's page starts on it. A catch-up page
+ * holds every line first written after the caller's `known_through` mark, so
+ * the newest line is either on that page or was written at or before the
+ * mark, which the caller already holds. A tail-only open is empty by request
+ * and anchors on it. Catch-up runs BY WRITE while the head runs BY PLACE, so a
+ * mark can name a line written after the head yet placed before it, and a
+ * session that counted only what it carried then stood for a head it never
+ * would: `KillSession` spent its whole conclusion budget on it at every
+ * rollout (2026-11-14, `concluded_through` sip1-3ygtn under a mark of
+ * sip1-3ygtq).
+ *
+ * It is recorded as CONTENT_UNKNOWN, so a later write at the same pointer is
+ * never withheld as already served.
+ */
+function holdsNewest(
+  served: Map<string, string>,
+  newest: conversationv1.HistoryPointer | undefined,
+): void {
+  if (newest !== undefined && !served.has(newest.value))
+    served.set(newest.value, CONTENT_UNKNOWN);
+}
+
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
 
@@ -668,12 +696,12 @@ export function createReader(options: ReaderOptions): Reader {
      * THE BOOK'S NEWEST LINE AS OF THE OPEN, as the store names it on every
      * open (unset: the book holds none).
      *
-     * A tail-only page is empty by request, so this is the only thing such a
-     * session stands on: the pointer a teardown concluding through the book's
-     * head names (already "served", so the tail ends at once instead of
-     * spending its conclusion budget on a line it will never carry), the mark
-     * a lossless re-open passes as `known_through` (never a repaint, which
-     * would replay history nobody asked for), and whether the book was empty.
+     * It is the pointer a teardown concluding through the book's head names
+     * when nothing was written since, so it counts as served for EVERY opening
+     * ({@link holdsNewest}). A tail-only page is empty by request, so for such
+     * a session it is also the mark a lossless re-open passes as
+     * `known_through` (never a repaint, which would replay history nobody
+     * asked for), and the only word on whether the book was empty.
      */
     const newest =
       opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
@@ -723,8 +751,9 @@ export function createReader(options: ReaderOptions): Reader {
     const served = new Map<string, string>();
     if (knownThrough !== undefined)
       served.set(knownThrough.value, CONTENT_UNKNOWN);
-    if (opening.case === "tailOnly" && newest !== undefined)
-      served.set(newest.value, CONTENT_UNKNOWN);
+    // THE BOOK'S NEWEST LINE AS OF THE OPEN IS THE CONSUMER'S, whatever the
+    // opening asked for (see {@link holdsNewest}).
+    holdsNewest(served, newest);
     for (const line of opened.page.lines) {
       if (line.at !== undefined)
         served.set(line.at.value, lineFingerprint(line));
@@ -962,6 +991,21 @@ export function createReader(options: ReaderOptions): Reader {
               abort.abort();
               return;
             }
+          }
+          // THE RE-OPEN'S NEWEST LINE IS THE CONSUMER'S NOW, as the open's
+          // was -- counted only AFTER the fresh lines went out, because a
+          // newest line BY PLACE can be written before other fresh lines, and
+          // a conclusion through it must not end the tail with those owed.
+          holdsNewest(
+            served,
+            reopened.newest === undefined
+              ? undefined
+              : toHistoryPointer(reopened.newest),
+          );
+          if (settled()) {
+            stopped = true;
+            abort.abort();
+            return;
           }
           token = reopened.watch;
           // A fresh controller per attempt: the aborted one stays aborted.

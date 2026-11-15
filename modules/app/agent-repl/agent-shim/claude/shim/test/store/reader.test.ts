@@ -4116,3 +4116,146 @@ describe("what a session states it opened on", () => {
     });
   });
 });
+
+describe("a conclusion through a head the opening mark already covers", () => {
+  /** A pointer by its opaque value. */
+  function pointer(value: string): conversationv1.HistoryPointer {
+    return create(conversationv1.HistoryPointerSchema, { value });
+  }
+
+  it("ends a catch-up tail concluded through a newest line written before its mark", async () => {
+    // THE HEAD IS THE NEWEST LINE BY PLACE; THE MARK IS BY WRITE. A line
+    // written after the head but placed before it ("q" here) is a mark the
+    // daemon can hold, and a catch-up open from it serves an empty page on a
+    // book whose newest line ("n") the consumer already holds. The teardown
+    // concluded through "n", which the tail had never served, and KillSession
+    // spent its whole conclusion budget on it at every rollout (2026-11-14).
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH, "n"),
+      watchAgentSession: () => standingWatch([]),
+    });
+    const session = await reader.openAgentPage(
+      BOOK,
+      knownThrough(pointer("q")),
+      () => true,
+    );
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act.
+    session.concludeThrough(pointer("n"));
+
+    // Assert.
+    await expect(
+      Promise.race([
+        iterator.next().then(() => "settled"),
+        // A HANG guard in macrotask ticks, not the mechanism of success.
+        hangGuard(),
+      ]),
+    ).resolves.toBe("settled");
+  });
+
+  it("still stands a catch-up tail concluded through a line written after its open", async () => {
+    // Arrange. "r" is not the book's newest as of the open, so it is owed.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH, "n"),
+      watchAgentSession: () => standingWatch([]),
+    });
+    const session = await reader.openAgentPage(
+      BOOK,
+      knownThrough(pointer("q")),
+      () => true,
+    );
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act.
+    session.concludeThrough(pointer("r"));
+    const outcome = await Promise.race([
+      iterator.next().then(() => "settled"),
+      hangGuard(),
+    ]);
+    session.close();
+
+    // Assert.
+    expect(outcome).toBe("hung");
+  });
+
+  it("ends a re-opened tail concluded through the re-open's newest line, written before its mark", async () => {
+    // Arrange. The store ends the first watch unasked; the re-open from the
+    // served mark "q" carries nothing new, on a book whose newest is "n".
+    let opens = 0;
+    let watches = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("q", "unit-q")]), WATCH, "q")
+          : opened(floorPage([]), WATCH_2, "n");
+      },
+      watchAgentSession: () => {
+        watches += 1;
+        return watches === 1
+          ? {
+              async *[Symbol.asyncIterator]() {
+                // Ended by the store, unasked, with nothing delivered.
+              },
+            }
+          : standingWatch([]);
+      },
+    });
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    // The teardown concludes through the book's head as the re-open will name
+    // it, before the tail has served anything.
+    session.concludeThrough(pointer("n"));
+
+    // Act.
+    const outcome = await Promise.race([
+      iterator.next().then(() => "settled"),
+      // A HANG guard in macrotask ticks, not the mechanism of success.
+      hangGuard(),
+    ]);
+
+    // Assert. The tail ended on the re-open itself, never watching again.
+    expect([outcome, opens, watches]).toEqual(["settled", 2, 1]);
+  });
+
+  it("serves every fresh line of a re-open before a conclusion through its newest ends it", async () => {
+    // Arrange. The conclusion names the re-open's newest line BY PLACE ("b"),
+    // which was written before the other fresh line ("c"); the tail must not
+    // end on "b" with "c" still owed.
+    let opens = 0;
+    let watches = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? opened(floorPage([storedLine("a", "unit-a")]), WATCH, "a")
+          : opened(
+              floorPage([storedLine("b", "unit-b"), storedLine("c", "unit-c")]),
+              WATCH_2,
+              "b",
+            );
+      },
+      watchAgentSession: () => {
+        watches += 1;
+        return watches === 1
+          ? {
+              async *[Symbol.asyncIterator]() {
+                // Ended by the store, unasked, with nothing delivered.
+              },
+            }
+          : standingWatch([]);
+      },
+    });
+    const session = await reader.openAgentPage(BOOK, REPAINT, () => true);
+    session.concludeThrough(pointer("b"));
+
+    // Act.
+    const served: (string | undefined)[] = [];
+    for await (const frame of session.tail) served.push(unitOf(entryOf(frame)));
+
+    // Assert. Both fresh lines, oldest written first, and then the end.
+    expect(served).toEqual(["unit-c", "unit-b"]);
+  });
+});

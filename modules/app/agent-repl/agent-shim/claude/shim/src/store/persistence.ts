@@ -221,7 +221,8 @@ export interface AgentPageSession {
    * the teardown just wrote. Concluding it through the book's head at that
    * moment delivers the terminal and then ends the stream honestly.
    *
-   * `through` unset — or a pointer already served — ends the tail at once.
+   * `through` unset — or a pointer already served, which includes the book's
+   * newest line as of the open whatever the opening — ends the tail at once.
    * Idempotent.
    */
   concludeThrough(through?: conversationv1.HistoryPointer): void;
