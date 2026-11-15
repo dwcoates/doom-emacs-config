@@ -1,4 +1,4 @@
-package mdfence
+package daemon_test
 
 import (
 	"go/ast"
@@ -11,9 +11,10 @@ import (
 )
 
 // TestNoDaemonSourceReadsAFenceByHand holds every fence delimiter the daemon
-// reads to the length rule Parse, Opens and Closes keep: a strings call handed
-// a literal opening on ``` or ~~~ (strings.HasPrefix(line, "```"), say) reads
-// a fence by hand, and toggles where the rule would read content.
+// reads to the length rule mdfence.Parse, Opens and Closes keep: a strings
+// call handed a literal opening on ``` or ~~~ (strings.HasPrefix(line,
+// "```"), say) reads a fence by hand, and toggles where the rule would read
+// content.
 func TestNoDaemonSourceReadsAFenceByHand(t *testing.T) {
 	// Arrange.
 	var sites []string
