@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"agent-repld/internal/recordlock"
 )
 
 // THE FETCH LOCK IS WAITED FOR IN A PROCESS THAT HOLDS NO OTHER LOCK.
@@ -52,7 +54,7 @@ func runFetchLockHelper(path, git string, args []string) int {
 	// linking this package that it starts, must never become a helper too.
 	os.Unsetenv(fetchLockEnv)
 	os.Unsetenv(fetchGitEnv)
-	if err := holdFetchLockAcrossExec(path); err != nil {
+	if err := recordlock.HoldAcrossExec(path); err != nil {
 		return helperFailed("taking %s: %v", path, err)
 	}
 	resolved, err := exec.LookPath(git)
@@ -70,20 +72,4 @@ func runFetchLockHelper(path, git string, args []string) int {
 func helperFailed(format string, args ...any) int {
 	fmt.Fprintf(os.Stderr, "agent-repl fetch lock: "+format+"\n", args...)
 	return fetchLockHelperFailed
-}
-
-// holdFetchLockAcrossExec opens PATH without close-on-exec and waits for its
-// exclusive record lock. The descriptor is never closed: it is the lock, and
-// the exec keeps both.
-func holdFetchLockAcrossExec(path string) error {
-	fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_CREAT, 0o644)
-	if err != nil {
-		return err
-	}
-	lock := &syscall.Flock_t{Type: syscall.F_WRLCK, Whence: 0, Start: 0, Len: 0}
-	if err := syscall.FcntlFlock(uintptr(fd), syscall.F_SETLKW, lock); err != nil {
-		syscall.Close(fd)
-		return err
-	}
-	return nil
 }
