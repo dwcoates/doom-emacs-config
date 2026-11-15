@@ -29,6 +29,9 @@ type DB interface {
 	// incumbent is still the sole writer and becomes a writer at its first
 	// adoption. Promoting a handle that already writes is success.
 	Promote(ctx context.Context) error
+	// ApplyContracts applies the contract steps a joining open left, once the
+	// daemon serves alone (MigrationContract).
+	ApplyContracts(ctx context.Context) error
 	// Changes reports every commit to the database, by this process or any
 	// other daemon on the same file, until ctx ends or the stop it answers is
 	// called: nil once per commit (commits that land before the reader takes

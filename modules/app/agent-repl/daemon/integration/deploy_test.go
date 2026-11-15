@@ -100,8 +100,13 @@ func TestADeployPushesTheWebappReloadToAStaleWebview(t *testing.T) {
 
 func TestADeployPushesTheElispReloadToAStaleEmacsAlone(t *testing.T) {
 	t.Parallel()
-	// Arrange: an Emacs on older elisp holds the daemon stream.
+	// Arrange: an Emacs on older elisp holds the daemon stream, attached
+	// after the boot's own elisp reload ran (deploy.ReloadStaleElisp, once the
+	// daemon serves), so the reload this test sees is the deploy's.
 	d := harness.StartDaemon(t, harness.Opts{})
+	d.AwaitLogRecord(d.RunLogPath(), "the boot's elisp reload ran", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.decide" && r.Message == "every connected Emacs runs the checkout's elisp"
+	})
 	ctx, cancel := context.WithCancel(d.Ctx())
 	defer cancel()
 	stream, err := d.Client().WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{

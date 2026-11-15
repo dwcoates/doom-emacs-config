@@ -258,6 +258,7 @@ describe("createDaemonContext", () => {
 
     // Act
     const daemon = createDaemonContext({
+      webappBuild: "test-webapp-build",
       client: c,
       ticker: createTicker(1000),
       failures: SINK,
@@ -273,6 +274,7 @@ describe("createDaemonContext", () => {
     // Arrange
     const c = client();
     const daemon = createDaemonContext({
+      webappBuild: "test-webapp-build",
       client: c,
       ticker: createTicker(1000),
       failures: SINK,
@@ -294,6 +296,7 @@ describe("createDaemonContext", () => {
 
     // Act
     const app = createAppContext({
+      webappBuild: "test-webapp-build",
       client: c,
       ticker: createTicker(1000),
       failures: SINK,
@@ -317,6 +320,7 @@ describe("onDaemonMoved", () => {
     return {
       daemon,
       context: createDaemonContext({
+        webappBuild: "test-webapp-build",
         client: c,
         ticker: createTicker(1000),
         failures: SINK,

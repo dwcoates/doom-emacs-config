@@ -59,6 +59,7 @@ function context(): AppContext {
     },
   } as unknown as PageStreams;
   return createAppContext({
+    webappBuild: "test-webapp-build",
     client,
     workspace: workspaceRef("ws-1", "/w"),
     ticker: createTicker(1000),

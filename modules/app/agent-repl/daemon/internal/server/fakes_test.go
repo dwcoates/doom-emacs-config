@@ -37,6 +37,7 @@ import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/netstate"
@@ -1532,6 +1533,26 @@ type fakeDeployer struct {
 	err    error
 	// edges are the web view host reconciles asked for, in order.
 	edges []string
+	// webapp is the installed webapp build a page attach states, and
+	// webappErr the failure of reading it.
+	webapp    string
+	webappErr error
+}
+
+// fakeInstalledWebapp is the installed webapp build a fake deployer states
+// unless a test sets another.
+const fakeInstalledWebapp = "webapp-installed"
+
+func (f *fakeDeployer) InstalledWebapp() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.webappErr != nil {
+		return "", f.webappErr
+	}
+	if f.webapp == "" {
+		return fakeInstalledWebapp, nil
+	}
+	return f.webapp, nil
 }
 
 func (f *fakeDeployer) ReconcileWebhost(edge string) int {
@@ -2358,6 +2379,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	}
 	deps := Deps{
 		Notices:           h.Notices,
+		DeployConfig:      lifecycleconfig.OnDisk{},
 		Tests:             h.Tests,
 		SubagentMakers:    h.Makers,
 		DB:                h.DB,

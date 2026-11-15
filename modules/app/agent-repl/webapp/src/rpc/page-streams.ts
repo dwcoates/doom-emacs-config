@@ -72,6 +72,8 @@ import { callUnary } from "./unary.js";
 export interface PageStreamContext extends StreamContext {
   /** Whether the page has gone quiet (the workspace moved to a successor). */
   isQuiesced(): boolean;
+  /** The webapp build this page runs, compared with the one its attach states. */
+  readonly webappBuild: string;
 }
 
 /** The `SubscribePageRequest.request` arms, which are also the `PageFrame` arms. */
@@ -298,6 +300,17 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
     const frame = response.frame;
     switch (frame.case) {
       case "attached":
+        // A DAEMON OF ANOTHER WEBAPP BUILD is one this page subscribes
+        // nothing from: its frames carry fields this build has no descriptor
+        // for. The page waits, attached but unsubscribed, for the reload the
+        // deploy pushes it onto the daemon's build.
+        if (frame.value.webappBuild !== ctx.webappBuild) {
+          log.info("the daemon serves another webapp build; this page subscribes nothing until it is reloaded onto it", {
+            operation: "rpc.page-stale-build",
+            context: { page, running: ctx.webappBuild, served: frame.value.webappBuild },
+          });
+          return;
+        }
         log.info("the page's one standing stream is attached", {
           operation: "rpc.page-attached",
           context: { page },

@@ -31,6 +31,7 @@
  * time: the warning chip if step 5 got that far, and the emergency console path if
  * it did not, which is the documented exception to "no direct console".
  */
+import { readWebappBuild } from "./webapp-build.js";
 import { pageRestyleTurns } from "./host/restyle-turn.js";
 import { installPageGate } from "./feed/gate-dock.js";
 import { installAskTray } from "./feed/ask-tray.js";
@@ -218,6 +219,7 @@ export async function boot(): Promise<void> {
     const ticker = createTicker(DEFAULT_TICK_MS, pageQuiet(document));
     const ctx = createAppContext({
       client,
+      webappBuild: readWebappBuild(),
       workspace,
       ticker,
       failures: localFailures,

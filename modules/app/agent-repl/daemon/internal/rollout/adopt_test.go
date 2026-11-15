@@ -1628,14 +1628,19 @@ func TestAFailedAdoptionMayBeRunAgainByALaterCaller(t *testing.T) {
 		t.Fatal("precondition: the first adoption succeeded")
 	}
 
+	// THE LATCH IS PROVED BY A LATER CALLER RUNNING IT, not read at one
+	// instant: the daemon's own retry may hold it again in between (the
+	// read raced that retry in a loaded full run, 2026-11-15).
+	h.fleet.mu.Lock()
+	delete(h.fleet.adoptErr, ws)
+	h.fleet.mu.Unlock()
+
 	// Act.
-	h.c.mu.Lock()
-	adopting := h.c.rendezvous[ws].adopting
-	h.c.mu.Unlock()
+	err := h.c.AdoptHost(context.Background(), ws)
 
 	// Assert.
-	if adopting {
-		t.Fatal("a failed adoption left the latch closed; no later caller could run it again")
+	if err != nil {
+		t.Fatalf("a later caller could not run the adoption again after a failure: %v", err)
 	}
 }
 
@@ -2650,5 +2655,59 @@ func TestASettledTakeoverTellsServingSettledAfterItsLatch(t *testing.T) {
 	awaitServingSettled(t, h)
 	if err := h.c.awaitTakeoverSettled(context.Background(), nil); err != nil {
 		t.Fatalf("awaitTakeoverSettled: %v", err)
+	}
+}
+
+// contractsDB records each ApplyContracts the takeover asks, failing it with
+// err when set.
+type contractsDB struct {
+	wsm.DB
+	mu      sync.Mutex
+	applied int
+	err     error
+}
+
+func (d *contractsDB) ApplyContracts(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.applied++
+	return d.err
+}
+
+func TestTheTakeoverAppliesTheContractStepsTheJoinLeft(t *testing.T) {
+	// Arrange
+	var db *contractsDB
+	h := newHarness(t, func(d *Deps) {
+		db = &contractsDB{DB: d.DB}
+		d.DB = db
+	})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.applied != 1 {
+		t.Fatalf("ApplyContracts was asked %d times, want once at the takeover", db.applied)
+	}
+}
+
+func TestATakeoverWhoseContractStepsFailSaysSoAndGoesOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.DB = &contractsDB{DB: d.DB, err: errors.New("a contract step was rolled back")}
+	})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAdopt,
+		Message: "the contract steps the join left could not be applied; they are applied at the next boot"}); !found {
+		t.Fatalf("the failed contract steps were not recorded at ERROR: %+v", h.log.Records())
+	}
+	if calls := h.merges.called(); !slices.Contains(calls, "review") {
+		t.Fatalf("merge calls = %v, want the takeover to go on past the failed contracts", calls)
 	}
 }

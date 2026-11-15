@@ -640,3 +640,117 @@ func TestNoProductionCodeRunsAScriptHookByItsOwnPath(t *testing.T) {
 		t.Fatalf("a script hook's command built by hand in %v, want ScriptArgv", byHand)
 	}
 }
+
+// pinnedWorld lays out the daemon's own repository (main worktree and one
+// linked worktree, as git writes them), whose live config is unparseable, a
+// snapshot of a usable config, and another repository with its own config.
+type pinnedWorld struct {
+	pinned          Pinned
+	own, linked     string
+	other, snapshot string
+}
+
+func newPinnedWorld(t *testing.T) pinnedWorld {
+	t.Helper()
+	root := t.TempDir()
+	w := pinnedWorld{
+		own:      filepath.Join(root, "own"),
+		linked:   filepath.Join(root, "own-worktree"),
+		other:    filepath.Join(root, "other"),
+		snapshot: filepath.Join(root, "bin", "lifecycle.yaml"),
+	}
+	admin := filepath.Join(w.own, ".git", "worktrees", "own-worktree")
+	for _, dir := range []string{admin, w.linked, filepath.Dir(w.snapshot), filepath.Join(w.own, ".agent-repl"), filepath.Join(w.other, ".agent-repl")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(w.linked, ".git"): "gitdir: " + admin + "\n",
+		Path(w.own):                     "a_field_this_build_cannot_read: true\n",
+		w.snapshot:                      agentRepl,
+		Path(w.other):                   agentRepl,
+	}
+	for path, text := range files {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.pinned = Pinned{Repository: w.own, Snapshot: w.snapshot, Disk: OnDisk{}}
+	return w
+}
+
+func TestPinnedReadsTheOwnRepositorysConfigFromTheBuildsSnapshot(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  func(w pinnedWorld) string
+	}{
+		{name: "the main worktree", dir: func(w pinnedWorld) string { return w.own }},
+		{name: "a linked worktree", dir: func(w pinnedWorld) string { return w.linked }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the live file is one this build cannot parse.
+			w := newPinnedWorld(t)
+
+			// Act
+			cfg, err := w.pinned.Load(tt.dir(w))
+
+			// Assert
+			if err != nil || cfg.GetPreDeploy().GetLocalMerge() == nil {
+				t.Fatalf("Load = %v, %v; want the snapshot's config", cfg, err)
+			}
+		})
+	}
+}
+
+func TestPinnedReadsAnotherRepositorysOwnFile(t *testing.T) {
+	// Arrange
+	w := newPinnedWorld(t)
+	if err := os.WriteFile(Path(w.other), []byte("a_field_this_build_cannot_read: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := w.pinned.Load(w.other)
+
+	// Assert
+	var invalid *InvalidError
+	if !errors.As(err, &invalid) || invalid.Path != Path(w.other) {
+		t.Fatalf("Load = %v, want the other repository's own file refused", err)
+	}
+}
+
+func TestPinnedReportsAMissingSnapshotAsAMissingConfig(t *testing.T) {
+	// Arrange
+	w := newPinnedWorld(t)
+	if err := os.Remove(w.snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := w.pinned.Load(w.own)
+
+	// Assert
+	var missing *MissingError
+	if !errors.As(err, &missing) || missing.Path != w.snapshot {
+		t.Fatalf("Load = %v, want the snapshot reported missing", err)
+	}
+}
+
+func TestPinnedRefusesAnUnparseableSnapshot(t *testing.T) {
+	// Arrange
+	w := newPinnedWorld(t)
+	if err := os.WriteFile(w.snapshot, []byte("a_field_this_build_cannot_read: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := w.pinned.Load(w.own)
+
+	// Assert
+	var invalid *InvalidError
+	if !errors.As(err, &invalid) || invalid.Path != w.snapshot {
+		t.Fatalf("Load = %v, want the snapshot refused by its own path", err)
+	}
+}

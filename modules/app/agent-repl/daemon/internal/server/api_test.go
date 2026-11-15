@@ -47,6 +47,22 @@ func TestNewRefusesAMissingRetarget(t *testing.T) {
 	}
 }
 
+// TestNewRefusesAMissingDeployConfigReader pins that a test run always reads
+// its worktree's config the way every deploy config is read.
+func TestNewRefusesAMissingDeployConfigReader(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	deps := h.withoutDep(func(d *Deps) { d.DeployConfig = nil })
+
+	// Act.
+	_, err := New(deps)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "a deploy config reader") {
+		t.Fatalf("New = %v, want the refusal naming the deploy config reader", err)
+	}
+}
+
 // TestNewRefusesMissingLoudFaults pins that the standing loud faults are
 // required: an Emacs stream with nothing to subscribe to would never be told
 // a failed deploy.

@@ -1100,6 +1100,53 @@ t_change_outside_the_pathspec_leaves_the_system_fresh() {
     rm -rf "$root"
 }
 
+# A daemon acts on the deploy config its own build carries (snapshot beside
+# the binary), so a config change stales the daemon and the build copies it.
+t_committed_lifecycle_config_change_stales_the_daemon() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    mkdir -p "$root/.agent-repl"
+    commit_change "$root" .agent-repl/lifecycle.yaml "deploy_checks: {}" "lifecycle: deploy checks"
+    run_script "$root" daemon >/dev/null
+    if grep -q "go build" "$root/stub.log"; then
+        pass "staleness: a committed deploy config change stales the daemon"
+    else
+        fail "staleness: a committed deploy config change stales the daemon" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_daemon_build_snapshots_the_lifecycle_config() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    mkdir -p "$root/.agent-repl"
+    printf 'deploy_checks: {}\n' > "$root/.agent-repl/lifecycle.yaml"
+    run_script "$root" daemon >/dev/null
+    if cmp -s "$root/.agent-repl/lifecycle.yaml" "$root/daemon/bin/lifecycle.yaml"; then
+        pass "snapshot: the daemon build copies the deploy config beside the binary"
+    else
+        fail "snapshot: the daemon build copies the deploy config beside the binary" \
+             "snapshot: $(cat "$root/daemon/bin/lifecycle.yaml" 2>&1)"
+    fi
+    rm -rf "$root"
+}
+
+t_daemon_build_removes_a_stale_snapshot_when_there_is_no_config() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    printf 'stale\n' > "$root/daemon/bin/lifecycle.yaml"
+    run_script "$root" daemon >/dev/null
+    if [ ! -e "$root/daemon/bin/lifecycle.yaml" ]; then
+        pass "snapshot: a build with no deploy config leaves no stale snapshot"
+    else
+        fail "snapshot: a build with no deploy config leaves no stale snapshot" \
+             "snapshot: $(cat "$root/daemon/bin/lifecycle.yaml")"
+    fi
+    rm -rf "$root"
+}
+
 # The stamp is what makes the skip possible, so a build must leave one behind.
 t_build_records_the_source_tree_stamp() {
     local root recorded expected paths; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
@@ -1983,6 +2030,9 @@ build_group_revision_staleness() {
     t_dirty_tree_always_rebuilds
     t_change_outside_the_pathspec_leaves_the_system_fresh
     t_build_records_the_source_tree_stamp
+    t_committed_lifecycle_config_change_stales_the_daemon
+    t_daemon_build_snapshots_the_lifecycle_config
+    t_daemon_build_removes_a_stale_snapshot_when_there_is_no_config
     t_in_place_go_builds_pass_buildvcs_false
     t_in_place_go_builds_pass_trimpath
     t_daemon_build_stamps_its_checkout

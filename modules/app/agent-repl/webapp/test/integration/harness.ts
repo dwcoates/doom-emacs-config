@@ -78,7 +78,7 @@ import { mountNewsDigest } from "../../src/news-digest/news-digest";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 import { resetPageState } from "../page-state";
-import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
+import { createFakeDaemon, FAKE_DAEMON_WEBAPP_BUILD, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 import { quietMarkupOf } from "./quiet-markup";
 
@@ -275,7 +275,7 @@ export interface Harness extends MountedApp {
  * without one. The fake daemon judges no build, so any well-formed entry
  * serves; a real daemon's caller names the entry its daemon serves.
  */
-export const HARNESS_WEBAPP_BUILD = "integration";
+export const HARNESS_WEBAPP_BUILD = FAKE_DAEMON_WEBAPP_BUILD;
 
 /**
  * The body of the real index.html, so the shell under test is the shipped one,
@@ -584,6 +584,7 @@ async function mountApp(
   // harnesses in one file cannot collide on the daemon's page registry.
   const workspace = workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR);
   const ctx = createAppContext({
+    webappBuild: options.webappBuild ?? HARNESS_WEBAPP_BUILD,
     client,
     workspace,
     ticker,

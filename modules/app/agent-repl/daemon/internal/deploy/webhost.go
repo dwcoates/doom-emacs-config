@@ -38,6 +38,12 @@ type webhostReload struct {
 	pushedFor *uint32
 }
 
+// InstalledWebapp answers the installed webapp's build, the one a page's
+// attach states (agentrepl.v1.PageAttached.webapp_build).
+func (d *Deployer) InstalledWebapp() (string, error) {
+	return buildid.Webapp(d.deps.Live.WebappDist())
+}
+
 // ReconcileWebhost pushes the web view host's reload when a standing host
 // runs a webapp other than the installed one, answering how many Emacs
 // streams took it. A reload is pushed ONCE per installed build.
@@ -52,7 +58,7 @@ type webhostReload struct {
 // again without end. A host that states no generation cannot be judged and
 // is taken as not reloaded yet.
 func (d *Deployer) ReconcileWebhost(edge string) int {
-	installed, err := buildid.Webapp(d.deps.Live.WebappDist())
+	installed, err := d.InstalledWebapp()
 	if err != nil {
 		d.log.Error(opWebhost, "could not read the installed webapp's build; the web view host is not reconciled",
 			dlog.WithCause(dlog.Context{"edge": edge}, err))

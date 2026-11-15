@@ -1309,3 +1309,121 @@ func TestTheMigrationAddsTheMergeQueueWaitColumns(t *testing.T) {
 		t.Fatalf("merge_queue has %d of the three wait columns after the migration, want 3", got)
 	}
 }
+
+func TestNoStepPastTheLastBreakingOneBreaks(t *testing.T) {
+	// Assert
+	for _, m := range migrations {
+		if m.To > lastBreakingLayout && m.Kind == MigrationBreaking {
+			t.Errorf("step %d (%s) is breaking; a change that would break is an additive step and a contract step", m.To, m.Name)
+		}
+	}
+}
+
+func TestSplitJoinable(t *testing.T) {
+	add := func(to int) migration { return migration{To: to, Name: "a", Kind: MigrationAdditive} }
+	con := func(to int) migration { return migration{To: to, Name: "c", Kind: MigrationContract} }
+	brk := func(to int) migration { return migration{To: to, Name: "b", Kind: MigrationBreaking} }
+	tests := []struct {
+		name          string
+		plan          []migration
+		wantAdditive  int
+		wantContracts int
+		wantRefusal   string
+	}{
+		{name: "additive steps alone", plan: []migration{add(1), add(2)}, wantAdditive: 2},
+		{name: "additive steps then contracts", plan: []migration{add(1), con(2), con(3)}, wantAdditive: 1, wantContracts: 2},
+		{name: "contracts alone", plan: []migration{con(1)}, wantContracts: 1},
+		{name: "an additive step after a contract", plan: []migration{con(1), add(2)}, wantRefusal: "follows a contract step"},
+		{name: "a breaking step", plan: []migration{add(1), brk(2)}, wantRefusal: "is a breaking migration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			additive, contracts, refusal := splitJoinable(tt.plan)
+
+			// Assert
+			if tt.wantRefusal != "" {
+				if !strings.Contains(refusal, tt.wantRefusal) {
+					t.Fatalf("refusal = %q, want one saying %q", refusal, tt.wantRefusal)
+				}
+				return
+			}
+			if refusal != "" || len(additive) != tt.wantAdditive || len(contracts) != tt.wantContracts {
+				t.Fatalf("splitJoinable = (%d, %d, %q), want (%d, %d, none)", len(additive), len(contracts), refusal, tt.wantAdditive, tt.wantContracts)
+			}
+		})
+	}
+}
+
+// markStepsContract has the last N steps of this build be contract steps.
+func markStepsContract(t *testing.T, n int) {
+	t.Helper()
+	real := migrations
+	swapped := slices.Clone(real)
+	for i := len(swapped) - n; i < len(swapped); i++ {
+		swapped[i].Kind = MigrationContract
+	}
+	migrations = swapped
+	t.Cleanup(func() { migrations = real })
+}
+
+func TestAJoinLeavesTheContractStepsAndTheTakeoverAppliesThem(t *testing.T) {
+	// Arrange: the build's last step is a contract, and the file stands one
+	// step behind.
+	markStepsContract(t, 1)
+	path := fixtureAt(t, LayoutVersion-1)
+
+	// Act: join, then serve alone.
+	joined, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	t.Cleanup(func() { joined.Close() })
+	before := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`)
+	if err := joined.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	applyErr := joined.ApplyContracts(context.Background())
+
+	// Assert
+	if before != LayoutVersion-1 {
+		t.Fatalf("the join left layout %d, want the contract step left at %d", before, LayoutVersion-1)
+	}
+	if applyErr != nil || rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`) != LayoutVersion {
+		t.Fatalf("ApplyContracts = %v, layout %d; want the contract applied to %d", applyErr, rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`), LayoutVersion)
+	}
+}
+
+func TestAJoinRefusesAnAdditiveStepAfterAContract(t *testing.T) {
+	// Arrange: the second-to-last step is a contract, the last additive.
+	markStepsContract(t, 2)
+	migrations[len(migrations)-1].Kind = MigrationAdditive
+	path := fixtureAt(t, LayoutVersion-2)
+
+	// Act
+	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+
+	// Assert
+	var refusal *LayoutError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, "follows a contract step") {
+		t.Fatalf("OpenJoining = %v, want the additive step after a contract refused", err)
+	}
+}
+
+func TestApplyContractsOnAReadOnlyHandleIsRefused(t *testing.T) {
+	// Arrange
+	path := writableStore(t)
+	ro, err := OpenReadOnly(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { ro.Close() })
+
+	// Act
+	err = ro.ApplyContracts(context.Background())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("ApplyContracts = %v, want the read-only handle refused", err)
+	}
+}

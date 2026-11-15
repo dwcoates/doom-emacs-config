@@ -80,7 +80,7 @@ function pageEnding(): WatchPageResponse {
 /** A frame carrying the attachment latch. */
 function attached(): WatchPageResponse {
   return create(WatchPageResponseSchema, {
-    frame: { case: "attached", value: create(PageAttachedSchema, {}) },
+    frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "test-webapp-build" }) },
   });
 }
 
@@ -265,6 +265,7 @@ function contextFor(
   failures: FailureSink,
 ): AppContext {
   return createAppContext({
+    webappBuild: "test-webapp-build",
     client,
     workspace: WORKSPACE,
     ticker: createTicker(1000),
@@ -292,6 +293,29 @@ describe("the page's attach listeners", () => {
 
     // Assert.
     expect(told).toBe(1);
+    ctx.quiesce();
+  });
+
+  it("tells no listener when the daemon serves another webapp build", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    let told = 0;
+    ctx.streams.onAttached(() => {
+      told += 1;
+    });
+    await settle();
+
+    // Act: the daemon states a build this page does not run.
+    daemon.send(
+      create(WatchPageResponseSchema, {
+        frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "another-build" }) },
+      }),
+    );
+    await settle();
+
+    // Assert: the page waits, unsubscribed, for its reload.
+    expect(told).toBe(0);
     ctx.quiesce();
   });
 
@@ -1110,6 +1134,7 @@ function movableContextFor(
   daemon: DaemonOrigin,
 ): AppContext {
   return createAppContext({
+    webappBuild: "test-webapp-build",
     client,
     workspace: WORKSPACE,
     ticker: createTicker(1000),

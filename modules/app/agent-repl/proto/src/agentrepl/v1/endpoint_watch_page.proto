@@ -122,7 +122,19 @@ message WatchPageResponse {
 }
 
 // The latch: the daemon has registered this page.
-message PageAttached {}
+message PageAttached {
+  // The webapp build this daemon serves (the installed dist's entry bundle
+  // hash, as webapp/src/webapp-build.ts reads a page's own). REQUIRED and not
+  // empty.
+  //
+  // A PAGE ON ANOTHER BUILD SUBSCRIBES NOTHING until it is reloaded onto this
+  // one: the frames a daemon of another build pushes carry fields the page has
+  // no descriptor for, and on 2026-11-15 the pages still on 0.442's webapp
+  // failed to decode 24 frames of the 0.443 daemon in the minute before their
+  // reload was pushed. The reload itself is the deploy's
+  // (WatchWebWorkspaceResponse.reload_webapp, WatchDaemonResponse.reload_webhost).
+  string webapp_build = 1;
+}
 
 // One push, addressed to the subscription that asked for it.
 message PageFrame {

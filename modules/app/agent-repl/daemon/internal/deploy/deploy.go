@@ -490,13 +490,18 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	}
 	d.stepSucceeded(ctx, health.DeployStepRestartServices)
 	deciding := d.deps.Clock.Now()
-	result.Outcomes = append(result.Outcomes, d.elisp(fresh))
 	rest, err := d.daemonShimWebapp(ctx, Staged{Dir: staging}, fresh, rollout.Ask{Force: force, DeployStartedAt: began})
 	d.timePhase(restarttiming.DeployDecide, deciding, err)
-	result.Outcomes = append(result.Outcomes, rest...)
 	if err != nil {
+		// THE ELISP IS NOT PUSHED onto a daemon that is not the fresh build:
+		// the reloaded editor would speak a contract the serving daemon does
+		// not.
+		d.log.Info(opDecide, "the daemon was not moved onto the fresh build, so no Emacs is pushed the fresh elisp", dlog.WithCause(fields, err))
+		result.Outcomes = append(result.Outcomes, rest...)
 		return result, err
 	}
+	result.Outcomes = append(result.Outcomes, d.elispAfter(rest, fresh))
+	result.Outcomes = append(result.Outcomes, rest...)
 	// A DEPLOY THAT GOT ALL THE WAY THROUGH installed and decided every
 	// component, so no earlier rollback's partial state stands.
 	d.stepSucceeded(ctx, health.DeployStepRollback)
@@ -957,6 +962,36 @@ func (s serviceStaleness) stale(component Component, service, fresh string) bool
 		s.log.Debug(s.op, "the service runs the fresh build", fields)
 		return false
 	}
+}
+
+// elispAfter decides the elisp once the daemon's own move is decided (REST).
+//
+// THE EDITOR RELOADS ONLY AGAINST A DAEMON OF ITS OWN BUILD. The reload was
+// pushed before the daemon's move, so a restart that waited on busy turns left
+// the fresh elisp speaking to the old daemon: on 2026-11-15 the 0.443 roster
+// decoder refused every push of the 0.442 daemon for 8 minutes. A daemon that
+// moves leaves the reload to its successor (ReloadStaleElisp, run once it
+// serves); one that stays pushes it now.
+func (d *Deployer) elispAfter(rest []Outcome, fresh builds) Outcome {
+	if movesDaemon(Result{Outcomes: rest}) {
+		d.log.Info(opDecide, "the daemon moves to the fresh build; its successor pushes the elisp reload once it serves", dlog.Context{"fresh": fresh.elisp})
+		return Outcome{Component: ComponentElisp, Build: fresh.elisp, Kind: DeferredToSuccessor}
+	}
+	return d.elisp(fresh)
+}
+
+// ReloadStaleElisp pushes reload_elisp to every connected Emacs whose loaded
+// elisp is not this daemon's checkout's: the step a deploy that moved the
+// daemon left to it (elispAfter), run once this daemon serves every workspace
+// it took (rollout.Deps.ServingSettled). An elisp build that cannot be read is
+// recorded at ERROR and pushes nothing.
+func (d *Deployer) ReloadStaleElisp() {
+	build, err := buildid.Elisp(d.deps.Live.ModuleRoot)
+	if err != nil {
+		d.log.Error(opDecide, "the checkout's elisp build could not be read; no Emacs is pushed a reload", dlog.WithCause(dlog.Context{"module_root": d.deps.Live.ModuleRoot}, err))
+		return
+	}
+	d.elisp(builds{elisp: build})
 }
 
 // elisp pushes reload_elisp to every Emacs whose loaded elisp is not the

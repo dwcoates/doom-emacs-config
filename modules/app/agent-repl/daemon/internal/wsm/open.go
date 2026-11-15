@@ -318,10 +318,19 @@ func migrateAdditiveWhileJoining(ctx context.Context, path string, opts []Option
 	if !ok {
 		return s.refuseLayout(version, "no migration in this build leads from it to this build's layout")
 	}
-	if planKind(plan) != MigrationAdditive {
-		return s.refuseLayout(version, "a breaking migration cannot run while the incumbent still writes it; the deploy restarts across it")
+	additive, contracts, refusal := splitJoinable(plan)
+	if refusal != "" {
+		return s.refuseLayout(version, refusal+"; the deploy restarts across it")
 	}
-	return s.migrateForward(ctx, version)
+	if len(contracts) > 0 {
+		s.log.Info("daemon.wsm.open", "joining on the additive steps; the contract steps wait until this daemon serves alone", dlog.Context{
+			"path": s.path, "file_layout": version, "additive": len(additive), "contracts": len(contracts),
+		})
+	}
+	if len(additive) == 0 {
+		return nil
+	}
+	return s.migrateSteps(ctx, version, additive, true)
 }
 
 // usablePath refuses the paths this store cannot be: it must be reopen-durable,
@@ -410,6 +419,11 @@ func (s *store) checkLayout(ctx context.Context) error {
 	}
 	if version > LayoutVersion {
 		return s.refuseLayout(version, "a downgrade is not a migration")
+	}
+	// A JOINED FILE WHOSE CONTRACT STEPS WAIT for this daemon to serve alone
+	// is this build's layout in every shape the build reads.
+	if pendingContracts(version) {
+		return nil
 	}
 	return s.refuseLayout(version, "a read-only handle cannot migrate it forward")
 }
@@ -503,6 +517,31 @@ func (s *store) db() *sql.DB {
 // ReadOnly reports whether this handle is read-only right now.
 func (s *store) ReadOnly() bool {
 	return s.current.Load().readOnly
+}
+
+// ApplyContracts applies the contract steps a joining open left (splitJoinable),
+// once this daemon serves alone: its incumbent has exited, so no running
+// build reads what they remove. A file with none pending is left as it is.
+// It writes, so the handle must already be a writing one.
+func (s *store) ApplyContracts(ctx context.Context) error {
+	const op = "daemon.wsm.contracts"
+	if s.ReadOnly() {
+		s.log.Error(op, "contract steps were asked of a read-only handle; nothing is applied", dlog.Context{"path": s.path})
+		return fmt.Errorf("wsm: apply contracts to %q: the handle is read-only", s.path)
+	}
+	version, err := s.layoutVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version == LayoutVersion {
+		s.log.Debug(op, "no contract step is pending", dlog.Context{"path": s.path, "layout": version})
+		return nil
+	}
+	if !pendingContracts(version) {
+		return s.refuseLayout(version, "the steps left to apply are not contract steps alone")
+	}
+	plan, ok := planMigrations(version)
+	return s.migrateSteps(ctx, version, plan, ok)
 }
 
 // Promote turns a READ-ONLY handle into a writing one, IN PLACE.

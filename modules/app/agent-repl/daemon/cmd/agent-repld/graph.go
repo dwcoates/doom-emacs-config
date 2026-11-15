@@ -801,6 +801,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// controller it drives, so it reaches both late-bound: every edge it takes
 	// is applied by its Run loop, which starts once the graph is built.
 	var drainController drain.Controller
+	// elispReloader is the deployer's ReloadStaleElisp, bound once the
+	// deployer is built (it is built after the rollout controller that calls
+	// it once this daemon serves).
+	var elispReloader func()
 	// THE SAME CUTOFF THE IDLE SWEEP RESOLVES (drain.New): the keeper sends
 	// no beat a session will not live to need.
 	idleCutoff, err := drain.ResolveIdleCutoff(p.Opts.idleCutoff)
@@ -1236,8 +1240,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// it serves: their waits lived in the previous daemon's memory alone.
 		// The drain controller is built after this one, so it is read at the
 		// call, never captured nil.
-		ServingSettled: func(ctx context.Context) { drainController.ResumeFolded(ctx) },
-		PublishViews:   views.PublishViews,
+		// THE ELISP RELOAD a deploy that moved the daemon left to this one is
+		// pushed here too, once this daemon serves (deploy.ReloadStaleElisp):
+		// the editor reloads only against a daemon of its own build. The
+		// deployer is built after this controller, so it is read at the call.
+		ServingSettled: func(ctx context.Context) {
+			drainController.ResumeFolded(ctx)
+			elispReloader()
+		},
+		PublishViews: views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
@@ -1296,6 +1307,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	elispReloader = deployer.ReloadStaleElisp
 	// THIS DAEMON PROVES IT CAN SPAWN ITS OWN SUCCESSOR before anything is
 	// served (rollout.Controller.PreflightSpawn): a joining successor that
 	// cannot ends its boot here, so its incumbent's handover is refused and
@@ -1366,7 +1378,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MintKey:       prompthandler.MintKey,
 		Log:           p.Surfaces,
 	})
+	deployConfig := deployConfigFiles(paths, log)
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		DeployConfig:  deployConfig,
 		Meter:         p.Metrics,
 		QueueEvents:   merge.QueueObservers{queueNotices, edges},
 		Detached:      detachedRef,
@@ -1488,7 +1502,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	verbs, err := workspace.New(workspace.Deps{
-		Instance: p.Instance,
+		Lifecycle: deployConfig,
+		Instance:  p.Instance,
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
 		Threads: chatService,
@@ -1821,7 +1836,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			Notices: p.Metrics,
+			DeployConfig: deployConfig,
+			Notices:      p.Metrics,
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
 			TestBarrier: os.Getenv(testBarrierEnv) == "1",
@@ -2015,6 +2031,9 @@ type paths struct {
 	// writes beside the daemon binary: the version the health and status
 	// surfaces show.
 	BuiltSHA string
+	// LifecycleSnapshot is the copy of the daemon's own repository's deploy
+	// config its build took (deployConfigFiles).
+	LifecycleSnapshot string
 	// Home is the user's home directory, which a producer's leading `~`
 	// expands to (dirpath.Absolute). A daemon that cannot name it does not
 	// boot.
@@ -2043,6 +2062,23 @@ func homeRepositoryCheckout(checkout string, getenv func(string) string) string 
 // it, and it beats the checkout's own prompts/.
 const envPromptsDir = "AGENT_REPL_PROMPTS_DIR"
 
+// deployConfigFiles is how the daemon reads deploy configs. A build that
+// snapshotted its own repository's config reads that repository's from the
+// snapshot (lifecycleconfig.Pinned); a binary nobody built through
+// bin/build-frontend.sh (a test harness's go build) has none, and reads every
+// repository's own file. Which one is recorded at INFO.
+func deployConfigFiles(p paths, log dlog.Logger) lifecycleconfig.Files {
+	if _, err := os.Stat(p.LifecycleSnapshot); err != nil {
+		log.Info(graphOperation, "this build carries no snapshot of its repository's deploy config; every repository's config is read from its own checkout",
+			dlog.Context{"snapshot": p.LifecycleSnapshot, "cause": err.Error()})
+		return lifecycleconfig.OnDisk{}
+	}
+	repository := checkout.Repository(p.Checkout)
+	log.Info(graphOperation, "this daemon reads its own repository's deploy config from its build's snapshot",
+		dlog.Context{"snapshot": p.LifecycleSnapshot, "repository": repository})
+	return lifecycleconfig.Pinned{Repository: repository, Snapshot: p.LifecycleSnapshot, Disk: lifecycleconfig.OnDisk{}}
+}
+
 // resolvePaths resolves the checkout and applies the flag and environment
 // overrides over it. The checkout is resolved even when every path is
 // overridden, because the render vocabulary has no flag: it is shared with
@@ -2068,6 +2104,7 @@ func resolvePaths(opts options) (paths, error) {
 		VocabDir:             checkout.VocabDir(root),
 		RequirementsManifest: checkout.RequirementsManifest(root),
 		BuiltSHA:             filepath.Join(root, "daemon", "bin", ".built-sha"),
+		LifecycleSnapshot:    checkout.LifecycleSnapshot(root),
 		Home:                 home,
 		RunDir:               runDir,
 	}

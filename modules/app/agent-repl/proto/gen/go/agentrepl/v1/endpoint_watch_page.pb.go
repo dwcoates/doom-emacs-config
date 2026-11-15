@@ -328,7 +328,18 @@ func (*WatchPageResponse_Ending) isWatchPageResponse_Frame() {}
 
 // The latch: the daemon has registered this page.
 type PageAttached struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The webapp build this daemon serves (the installed dist's entry bundle
+	// hash, as webapp/src/webapp-build.ts reads a page's own). REQUIRED and not
+	// empty.
+	//
+	// A PAGE ON ANOTHER BUILD SUBSCRIBES NOTHING until it is reloaded onto this
+	// one: the frames a daemon of another build pushes carry fields the page has
+	// no descriptor for, and on 2026-11-15 the pages still on 0.442's webapp
+	// failed to decode 24 frames of the 0.443 daemon in the minute before their
+	// reload was pushed. The reload itself is the deploy's
+	// (WatchWebWorkspaceResponse.reload_webapp, WatchDaemonResponse.reload_webhost).
+	WebappBuild   string `protobuf:"bytes,1,opt,name=webapp_build,json=webappBuild,proto3" json:"webapp_build,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -361,6 +372,13 @@ func (x *PageAttached) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PageAttached.ProtoReflect.Descriptor instead.
 func (*PageAttached) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PageAttached) GetWebappBuild() string {
+	if x != nil {
+		return x.WebappBuild
+	}
+	return ""
 }
 
 // One push, addressed to the subscription that asked for it.
@@ -1207,8 +1225,9 @@ const file_agentrepl_v1_endpoint_watch_page_proto_rawDesc = "" +
 	"\x04push\x18\x02 \x01(\v2\x17.agentrepl.v1.PageFrameH\x00R\x04push\x12;\n" +
 	"\x05ended\x18\x03 \x01(\v2#.agentrepl.v1.PageSubscriptionEndedH\x00R\x05ended\x12:\n" +
 	"\x06ending\x18\x04 \x01(\v2 .agentrepl.v1.DaemonStreamEndingH\x00R\x06endingB\a\n" +
-	"\x05frame\"\x0e\n" +
-	"\fPageAttached\"\xad\x05\n" +
+	"\x05frame\"1\n" +
+	"\fPageAttached\x12!\n" +
+	"\fwebapp_build\x18\x01 \x01(\tR\vwebappBuild\"\xad\x05\n" +
 	"\tPageFrame\x12\"\n" +
 	"\fsubscription\x18\x01 \x01(\tR\fsubscription\x12D\n" +
 	"\x06roster\x18\x02 \x01(\v2*.agentrepl.v1.WatchWorkspaceRosterResponseH\x00R\x06roster\x12N\n" +

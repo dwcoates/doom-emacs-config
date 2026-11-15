@@ -70,6 +70,46 @@ func TestPageStreamAttachesBeforeAnySubscription(t *testing.T) {
 	}
 }
 
+func TestPageAttachStatesTheInstalledWebapp(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Deployer.webapp = "webapp-0443"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream := attachPageStream(t, h, ctx, "page-1")
+
+	// Assert.
+	if got := stream.Msg().GetAttached().GetWebappBuild(); got != "webapp-0443" {
+		t.Fatalf("attached webapp_build = %q, want the installed build", got)
+	}
+}
+
+func TestAPageIsNotAttachedWhenTheInstalledWebappCannotBeRead(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Deployer.webappErr = errors.New("dist/index.html: no such file")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	stream, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{Page: "page-1"}))
+	if err != nil {
+		t.Fatalf("open the page's stream: %v", err)
+	}
+	received := stream.Receive()
+
+	// Assert.
+	if received || connect.CodeOf(stream.Err()) != connect.CodeInternal {
+		t.Fatalf("Receive = %v, err %v; want the stream refused Internal", received, stream.Err())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "WatchPage", Message: "could not read the installed webapp's build; the page is not attached"}); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", log.Records())
+	}
+}
+
 // TestPageCarriesASubscriptionsPushes pins the whole point: a view published
 // after a subscription is accepted arrives on the PAGE's stream, in the arm its
 // rpc owns, addressed to the subscription that asked for it.

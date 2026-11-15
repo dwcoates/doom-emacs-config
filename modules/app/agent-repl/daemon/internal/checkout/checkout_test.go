@@ -287,3 +287,35 @@ func TestRepoRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestRepositoryIsTheModuleRootWithTheMarkerTakenOff(t *testing.T) {
+	// Act
+	got := Repository("/home/u/.config/doom/modules/app/agent-repl")
+
+	// Assert
+	if got != "/home/u/.config/doom" {
+		t.Fatalf("Repository = %q, want the repository root", got)
+	}
+}
+
+func TestRepositoryOfARootWithoutTheMarkerPanics(t *testing.T) {
+	// Assert
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Repository of a non-module root did not panic")
+		}
+	}()
+
+	// Act
+	Repository("/tmp/elsewhere")
+}
+
+func TestLifecycleSnapshotSitsBesideTheDaemonBinary(t *testing.T) {
+	// Act
+	got := LifecycleSnapshot("/r/modules/app/agent-repl")
+
+	// Assert
+	if got != "/r/modules/app/agent-repl/daemon/bin/lifecycle.yaml" {
+		t.Fatalf("LifecycleSnapshot = %q", got)
+	}
+}
