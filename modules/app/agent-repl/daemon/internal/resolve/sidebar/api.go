@@ -426,13 +426,16 @@ func New(colors vocab.RenderColors, log dlog.Surfaces, footer FooterStatus, opts
 // ResultSink is told every change of a workspace's last turn result: how its
 // last turn ended and whether the user has seen it, nil when none stands. The
 // daemon keeps it durable (wsm.SetResult), so a daemon that did not see the
-// turn end draws the row as it stood. It is called off the resolver's lock.
+// turn end draws the row as it stood. It is called off the resolver's lock,
+// in the report every caller of a combined commit waits for, so it returns at
+// once: the daemon's only submits the change (rosterWrites).
 type ResultSink func(ws ids.WorkspaceID, result *wsm.TurnResult)
 
 // StatusChangeSink is told every instant a workspace's published status arm
 // moves. The daemon keeps it durable (wsm.SetStatusChangedAt), so a daemon
 // that did not see the change still ranks the row by it
-// (frontend.v1.RosterRowLastUpdated). It is called off the resolver's lock.
+// (frontend.v1.RosterRowLastUpdated). It is called off the resolver's lock,
+// in the same report, and returns at once just as the ResultSink does.
 type StatusChangeSink func(ws ids.WorkspaceID, at time.Time)
 
 // Option adjusts the resolver.
