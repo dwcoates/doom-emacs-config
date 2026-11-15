@@ -703,11 +703,9 @@ check_notification_permission() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     STATUS=missing; DETAIL="$cmd is not installed"; return
   fi
-  if out="$("$cmd" --check-notifications 2>&1)"; then
-    STATUS=ok; DETAIL="$(printf '%s\n' "$out" | head -n 1)"
-  else
-    STATUS=missing; DETAIL="$(printf '%s\n' "$out" | head -n 1)"
-  fi
+  if out="$("$cmd" --check-notifications 2>&1)"; then STATUS=ok; else STATUS=missing; fi
+  # The answer's first line is the detail.
+  DETAIL="${out%%$'\n'*}"
 }
 
 # app_path ENTRY: where an app_build or location_permission entry's app is
