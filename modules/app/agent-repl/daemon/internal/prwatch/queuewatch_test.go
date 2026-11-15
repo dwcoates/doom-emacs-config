@@ -302,6 +302,7 @@ func TestEveryNoticeKindSharesTheDeliveredShape(t *testing.T) {
 	notices := []owedNotice{
 		pullRequestNotice(r.db, wsm.PullRequestOwed{Subscriber: r.ws, PullRequest: prK}),
 		githubMergeQueueNotice(r.db, wsm.GithubMergeQueueOwed{Subscriber: r.ws, Queue: mainQueue}),
+		githubWorkflowRunNotice(r.db, wsm.GithubWorkflowRunOwed{Subscriber: r.ws, Run: runK}),
 	}
 
 	// Assert

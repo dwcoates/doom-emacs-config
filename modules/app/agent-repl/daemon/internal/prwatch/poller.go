@@ -581,42 +581,33 @@ func failureOf(err error, now time.Time) wsm.PullRequestFailure {
 // deliverOwed submits every owed notice, each saying first what the
 // subscriber's superseded notice said.
 func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitter) {
-	owed, err := w.deps.Store.OwedPullRequestNotices(ctx)
-	if err != nil && ctx.Err() != nil {
-		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+	if !deliverKind(ctx, w, prompts, "pull-request", w.deps.Store.OwedPullRequestNotices, pullRequestNotice) {
 		return
 	}
-	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed pull-request notices; none is told this tick", dlog.WithCause(nil, err))
+	if !deliverKind(ctx, w, prompts, "merge-queue", w.deps.Store.OwedGithubMergeQueueNotices, githubMergeQueueNotice) {
 		return
+	}
+	deliverKind(ctx, w, prompts, "workflow-run", w.deps.Store.OwedGithubWorkflowRunNotices, githubWorkflowRunNotice)
+}
+
+// deliverKind submits every notice of one GitHub subscription kind LOAD
+// answers, each as NOTICE spells it, answering false when they could not be
+// read: the delivery then stops for the tick, and a later one tells them.
+func deliverKind[T any](ctx context.Context, w *Watcher, prompts prompthandler.Submitter, noun string,
+	load func(context.Context) ([]T, error), notice func(Store, T) owedNotice) bool {
+	owed, err := load(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+		return false
+	}
+	if err != nil {
+		w.deps.Log.Error(opNotice, "could not read the owed "+noun+" notices; none is told this tick", dlog.WithCause(nil, err))
+		return false
 	}
 	for _, o := range owed {
-		w.deliver(ctx, prompts, pullRequestNotice(w.deps.Store, o))
+		w.deliver(ctx, prompts, notice(w.deps.Store, o))
 	}
-	queued, err := w.deps.Store.OwedGithubMergeQueueNotices(ctx)
-	if err != nil && ctx.Err() != nil {
-		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
-		return
-	}
-	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed merge-queue notices; none is told this tick", dlog.WithCause(nil, err))
-		return
-	}
-	for _, o := range queued {
-		w.deliver(ctx, prompts, githubMergeQueueNotice(w.deps.Store, o))
-	}
-	runs, err := w.deps.Store.OwedGithubWorkflowRunNotices(ctx)
-	if err != nil && ctx.Err() != nil {
-		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
-		return
-	}
-	if err != nil {
-		w.deps.Log.Error(opNotice, "could not read the owed workflow-run notices; none is told this tick", dlog.WithCause(nil, err))
-		return
-	}
-	for _, o := range runs {
-		w.deliver(ctx, prompts, githubWorkflowRunNotice(w.deps.Store, o))
-	}
+	return true
 }
 
 // owedNotice is one notice owed to one subscriber, whatever GitHub subject
