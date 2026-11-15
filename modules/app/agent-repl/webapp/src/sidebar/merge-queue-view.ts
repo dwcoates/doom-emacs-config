@@ -555,20 +555,9 @@ function mediationLabel(sc: SidebarContext, words: string, title: string, target
   label.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    log.info("selecting the workspace at work on a deploy check from the sidebar", {
-      operation: "sidebar.merge-queue.mediation-select",
-      context: { workspace: workspace.id, label: words },
-    });
-    void guardMalformed(
-      sc.ctx,
-      "sidebar.merge-queue.mediation-select",
-      runSelectVerb(label, {
-        sc,
-        rpc: "SelectWorkspace",
-        call: (client) => client.selectWorkspace(create(SelectWorkspaceRequestSchema, { workspace })),
-        schema: SelectWorkspaceResponseSchema,
-      }),
-    );
+    // THE SAME SELECT AS A ROW'S CLICK (`selectWorkspace`), as every queue
+    // line's: the editor makes the switch.
+    void guardMalformed(sc.ctx, "sidebar.merge-queue.mediation-select", selectWorkspace(label, sc, workspace));
   });
   return label;
 }

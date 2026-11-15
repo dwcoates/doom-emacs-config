@@ -677,13 +677,18 @@ function mediation(checking: boolean) {
 
 describe("drawQueueMediationLabel", () => {
   /** A context recording every SelectWorkspace ask. */
+  /** A context recording every select a click asks of the editor or the daemon. */
   function selecting() {
-    const asked: SelectWorkspaceRequest[] = [];
+    const asked: Array<SelectWorkspaceRequest | SelectInEditorRequest> = [];
     const sc = sidebarContext(
       appContext({
         selectWorkspace: (request) => {
           asked.push(request);
           return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+        },
+        selectInEditor: (request) => {
+          asked.push(request);
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
         },
       }),
     );
@@ -707,7 +712,7 @@ describe("drawQueueMediationLabel", () => {
     const { asked, sc } = selecting();
     drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
     await settled();
-    expect(asked.map((r) => r.workspace?.id)).toEqual([want]);
+    expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", want]]);
   });
 
   it("selects nothing on a click while a chain's first deploy rolls out", async () => {
