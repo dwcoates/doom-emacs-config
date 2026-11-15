@@ -1966,7 +1966,7 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - A program some Linux distribution does not package names a pinned `release` instead (VictoriaMetrics, which Fedora lacks, and whose Debian package starts a system-wide copy on the same port): the publisher's archive for each machine (`linux-arm64`, `linux-amd64`), its sha256, and the `file` inside it. Install checks the archive against the pin and puts the program into the user's bin dir; an archive that differs is refused, and the fix is a new pin.
   - A program is looked for on PATH and then in the user's bin dir (`~/.local/bin`), where a release and the Linux Emacs build are installed. Whether that dir is on the user's PATH is the `command_link` entry's to report, once.
   - A Linux machine whose package manager an entry has no package for reports the entry `missing` with "add install.<manager>": the manifest is inadequate, and the fix is the missing package name.
-- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `app_build`, `location_permission`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
+- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `app_build`, `location_permission`, `sudo_grant`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
 - **A `service` is one entry the runner renders for the platform's service manager**: a launchd plist on macOS, a systemd user unit on Linux (`services/AGENTS.md`). No plist or unit is checked in.
@@ -1975,6 +1975,10 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - `args`, `env` and `log`: its arguments, environment and log files, each `~/` made absolute.
   - `files`: config copied from the module into the cache (`from` module-relative, `to` cache-relative). A copy that differs reads as `outdated`, and install copies it again and restarts the service.
   - A service lists both platforms; `bin/test-requirements.sh` refuses one left to a single platform.
+- **A `sudo_grant` is a passwordless sudo grant only the user can install**, since it needs their password.
+  - `command` is an absolute path, `invocations` the argument strings it is run with, and `file` the name of the file under `/etc/sudoers.d/` that grants them.
+  - Check parses `sudo -n -l` and never runs the command: an invocation counts only when a `NOPASSWD` grant as root lists it exactly, the bare command, or `ALL`. A listing sudo refuses grants none.
+  - It reports `needs-user` naming exactly the missing invocations, and its fix is one command that writes every invocation to the file, checks it with `sudo visudo -c -f`, and installs it with `sudo install -m 0440 -o root -g wheel`. No existing sudoers file is edited, and a line another file already grants is a harmless duplicate.
 - **The `emacs` entry pins zettel-emacs, a fork of Emacs carrying the patches agent-repl needs.**
   - `revision` is the fork's commit, and check compares it to the installed Emacs's `emacs-repository-version`; `configuration_features` must all appear in its `system-configuration-features`.
   - `install.source` builds that commit with one build block per platform (`darwin`, `linux`): the block's `deps` for this machine's package manager first, then `autogen.sh`, `configure` with the block's arguments, `make` and `make install`, in a checkout under the cache (`src/<repo>`).

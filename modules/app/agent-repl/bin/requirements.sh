@@ -33,6 +33,10 @@
 #                            (`app`), rebuilt only when that hash changed
 #   location_permission      macOS lets a helper app (`app`, in the cache) name
 #                            Wi-Fi networks: Location Services allowed
+#   sudo_grant               sudo runs each of a command's `invocations` without a
+#                            password; the user installs the missing grant
+#                            (`file`, under /etc/sudoers.d) with the printed
+#                            command, since only they can give sudo a password
 #   skill_link               a Claude Code skill linked into the skills directory of
 #                            every Claude config root agent-repl runs sessions under
 #                            (`"retired": true`: our link is removed instead)
@@ -328,6 +332,13 @@ validate_entries() {
        elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
          (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
        elif $e.kind == "location_permission" then need($e; ["app", "platforms"])
+       elif $e.kind == "sudo_grant" then need($e; ["command", "invocations", "file", "platforms"]),
+         (select($e.command != null and ($e.command | test("^/[A-Za-z0-9_./-]+$") | not))
+           | "\($e._file): \($e.id): a sudo_grant command is an absolute path of plain characters, not \($e.command)"),
+         ($e.invocations // [] | .[] | select(test("^[A-Za-z0-9_./ -]+$") | not)
+           | "\($e._file): \($e.id): a sudo_grant invocation is plain words, not \(.)"),
+         (select($e.file != null and ($e.file | test("^[A-Za-z0-9_-]+$") | not))
+           | "\($e._file): \($e.id): a sudo_grant file is a plain name sudo reads from /etc/sudoers.d, not \($e.file)")
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
        elif $e.kind == "command_link" then need($e; ["name", "source"]),
          (select($e.source != null and $e.source.repo == null) | "\($e._file): \($e.id): a command_link source is a path in the repository (\"repo\")")
@@ -555,6 +566,81 @@ check_location_permission() {
     "") STATUS=failed; DETAIL="$app answered no standing" ;;
     *) STATUS=missing; DETAIL="$app may not name Wi-Fi networks: $standing" ;;
   esac
+}
+
+# SUDOERS_DIR is where a sudo_grant's file is installed; sudo reads every file
+# in it without a dot or a trailing ~ in its name.
+SUDOERS_DIR=/etc/sudoers.d
+
+# sudo_nopasswd_commands: every command `sudo -n -l` lists the user may run as
+# root without a password, one per line ("ALL" for any command). A listing line
+# is `(RUNAS) [TAG: ...]CMD, [TAG: ...]CMD, ...`; a tag holds for the commands
+# after it on the line until another tag resets it, and a command runs as root
+# only when RUNAS names root or ALL. Answers non-zero when sudo cannot list
+# without a password, printing its answer.
+sudo_nopasswd_commands() {
+  local out
+  out="$(sudo -n -l 2>&1)" || { printf '%s\n' "$out"; return 1; }
+  printf '%s\n' "$out" | awk '
+    /^[ \t]+\(/ {
+      line = $0
+      sub(/^[ \t]+\(/, "", line)
+      runas = substr(line, 1, index(line, ")") - 1)
+      rest = substr(line, index(line, ")") + 1)
+      sub(/^[ \t]+/, "", rest)
+      split(runas, users, ":")
+      gsub(/[ \t]/, "", users[1])
+      asroot = 0
+      n = split(users[1], who, ",")
+      for (i = 1; i <= n; i++) if (who[i] == "root" || who[i] == "ALL") asroot = 1
+      nopasswd = 0
+      n = split(rest, cmds, /, /)
+      for (i = 1; i <= n; i++) {
+        cmd = cmds[i]
+        while (match(cmd, /^[A-Z_]+:[ \t]*/)) {
+          tag = substr(cmd, 1, index(cmd, ":") - 1)
+          if (tag == "NOPASSWD") nopasswd = 1
+          if (tag == "PASSWD") nopasswd = 0
+          cmd = substr(cmd, RLENGTH + 1)
+        }
+        if (asroot && nopasswd) print cmd
+      }
+    }'
+}
+
+# sudo_grant_lines ENTRY: each invocation of the entry, as `COMMAND ARGS`.
+sudo_grant_lines() {
+  printf '%s\n' "$1" | jq -r '.command as $c | .invocations[] | "\($c) \(.)"'
+}
+
+# sudo_grant_fix ENTRY: the one command that installs the entry's file. It
+# writes every invocation, so it can be run again over the file it made; a line
+# another file already grants is a harmless duplicate. visudo checks the file
+# before it goes in, and no existing sudoers file is ever edited.
+sudo_grant_fix() {
+  local e="$1" line quoted=""
+  while IFS= read -r line; do quoted="$quoted \"$line\""; done < <(sudo_grant_lines "$e")
+  printf '%s' "(f=\"\$(mktemp)\" && trap 'rm -f \"\$f\"' EXIT && u=\"\$(id -un)\" && for c in$quoted; do printf '%s ALL=(root) NOPASSWD: %s\\n' \"\$u\" \"\$c\"; done >\"\$f\" && sudo visudo -c -f \"\$f\" && sudo install -m 0440 -o root -g wheel \"\$f\" $SUDOERS_DIR/$(field "$e" .file))"
+}
+
+check_sudo_grant() {
+  local e="$1" granted line missing=""
+  FIX="run this in a terminal; it asks for your password: $(sudo_grant_fix "$e")"
+  if ! granted="$(sudo_nopasswd_commands)"; then
+    STATUS=needs-user
+    DETAIL="sudo -n -l could not list your grants ($(printf '%s\n' "$granted" | head -n 1)), so none of $(sudo_grant_lines "$e" | paste -sd ',' - | sed 's/,/, /g') is granted"
+    return
+  fi
+  while IFS= read -r line; do
+    if ! printf '%s\n' "$granted" | grep -qxF -e "$line" -e "$(field "$e" .command)" -e ALL; then
+      missing="${missing:+$missing, }$line"
+    fi
+  done < <(sudo_grant_lines "$e")
+  if [ -z "$missing" ]; then
+    STATUS=ok; DETAIL="sudo runs every invocation of $(field "$e" .command) without a password"
+  else
+    STATUS=needs-user; DETAIL="sudo asks for a password for $missing"
+  fi
 }
 
 # link_source ENTRY: the canonical source path of a link entry (a skill link or
@@ -1146,6 +1232,8 @@ install_location_permission() {
     || say "install: $app could not ask for Location Services"
   return 0
 }
+# A grant needs the user's password, which install never asks for.
+install_sudo_grant() { return 1; }
 
 install_skill_link() {
   local e="$1" src dir name
@@ -1323,6 +1411,11 @@ uninstall_entry() {
         [ -n "$from" ] || continue
         if [ -f "$CACHE_ROOT/$to" ]; then rm -f "$CACHE_ROOT/$to"; say "uninstall: removed $CACHE_ROOT/$to"; fi
       done < <(service_files "$e") ;;
+    sudo_grant)
+      dest="$SUDOERS_DIR/$(field "$e" .file)"
+      if [ -e "$dest" ]; then
+        say "uninstall: $dest is root's; remove it with \`sudo rm $dest\`"
+      fi ;;
     download)
       dir="$(download_dir "$e")"
       while IFS=$'\t' read -r from to want; do

@@ -24,6 +24,28 @@
         "pacman": "go",
         "zypper": "go"
       }
+    },
+    {
+      "id": "pmset-sudo-grant",
+      "kind": "sudo_grant",
+      "why": "persistent-wifi mode runs each pmset change as `sudo -n`: the sleep lines turn the mode on and off, and the powermode lines move the energy mode with the lid and the power source",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "command": "/usr/bin/pmset",
+      "invocations": [
+        "-a disablesleep 1",
+        "-a disablesleep 0",
+        "-a networkoversleep 1",
+        "-a networkoversleep 0",
+        "-a womp 1",
+        "-a womp 0",
+        "-a powermode 0",
+        "-a powermode 1",
+        "-a powermode 2"
+      ],
+      "file": "agent-repl-pmset"
     }
   ]
 }

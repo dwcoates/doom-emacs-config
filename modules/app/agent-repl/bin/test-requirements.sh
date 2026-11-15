@@ -995,6 +995,197 @@ test_a_location_permission_for_an_app_not_built_is_missing() {
   new_case; manifest "[$LOCATION]"; helper_open authorized
   run check
   if [ "$RC" -eq 1 ] && has "Helper.app is not built"; then pass "a permission for an app not built is missing"; else fail "permission without app" "rc=$RC" "$OUT"; fi
+# sudo_grant.
+# ---------------------------------------------------------------------------
+
+GRANT='{"id": "grant", "kind": "sudo_grant", "why": "w", "profile": "run", "platforms": ["darwin"], "command": "/usr/bin/pm", "invocations": ["-a x 1", "-a x 0", "-a y 1"], "file": "agent-repl-pm"}'
+
+# fake_sudo_listing LISTING: `sudo -n -l` prints the listing's grants under
+# sudo's own header; every other sudo call is recorded and refused.
+fake_sudo_listing() {
+  printf '%s\n' "User me may run the following commands on host:" "$1" >"$CASE/stubs/.sudo-listing"
+  write_stub sudo '[ "$1 $2" = "-n -l" ] || exit 1; cat "$STUB_DIR/.sudo-listing"'
+}
+
+test_a_sudo_grant_listing_every_invocation_is_ok() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (ALL) ALL
+    (root) NOPASSWD: /usr/bin/pm -a x 1
+    (root) NOPASSWD: /usr/bin/pm -a x 0
+    (root) NOPASSWD: /usr/bin/pm -a y 1"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          grant: sudo runs every invocation of /usr/bin/pm without a password"; then
+    pass "a sudo grant listing every invocation without a password is ok"
+  else fail "full sudo grant" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_lacking_invocations_needs_the_user_naming_exactly_those() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (root) NOPASSWD: /usr/bin/pm -a x 1"
+  run check
+  if [ "$RC" -eq 1 ] && has "needs-user  grant: sudo asks for a password for /usr/bin/pm -a x 0, /usr/bin/pm -a y 1. w. Fix: run this in a terminal; it asks for your password: "; then
+    pass "a sudo grant lacking invocations needs the user, naming exactly the missing ones"
+  else fail "partial sudo grant" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_that_asks_for_a_password_is_not_granted() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (ALL) ALL
+    (root) /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, /usr/bin/pm -a y 1"
+  run check
+  if [ "$RC" -eq 1 ] && has "sudo asks for a password for /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, /usr/bin/pm -a y 1."; then
+    pass "a grant that asks for a password does not count"
+  else fail "password grant" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_tag_holds_until_another_tag_on_its_line() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (root) NOPASSWD: /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, PASSWD: /usr/bin/pm -a y 1"
+  run check
+  if [ "$RC" -eq 1 ] && has "sudo asks for a password for /usr/bin/pm -a y 1."; then
+    pass "a NOPASSWD tag holds for the commands after it until PASSWD resets it"
+  else fail "tag carry-over" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_running_as_another_user_is_not_granted() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (nobody) NOPASSWD: /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, /usr/bin/pm -a y 1"
+  run check
+  if [ "$RC" -eq 1 ] && has "sudo asks for a password for /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, /usr/bin/pm -a y 1."; then
+    pass "a grant to run as another user is not a grant to run as root"
+  else fail "other runas" "rc=$RC" "$OUT"; fi
+}
+
+test_a_nopasswd_grant_of_the_bare_command_covers_every_invocation() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (ALL : ALL) NOPASSWD: /usr/bin/pm"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          grant:"; then pass "a NOPASSWD grant of the bare command covers every invocation"
+  else fail "bare command grant" "rc=$RC" "$OUT"; fi
+}
+
+test_a_nopasswd_grant_of_all_covers_every_invocation() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (ALL) NOPASSWD: ALL"
+  run check
+  if [ "$RC" -eq 0 ] && has "ok          grant:"; then pass "a NOPASSWD grant of ALL covers every invocation"
+  else fail "ALL grant" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_that_cannot_list_grants_none() {
+  new_case; manifest "[$GRANT]"
+  write_stub sudo 'echo "sudo: a password is required" >&2; exit 1'
+  run check
+  if [ "$RC" -eq 1 ] && has "needs-user  grant: sudo -n -l could not list your grants (sudo: a password is required), so none of /usr/bin/pm -a x 1, /usr/bin/pm -a x 0, /usr/bin/pm -a y 1 is granted."; then
+    pass "a sudo that cannot list without a password grants none of the invocations"
+  else fail "unlistable sudo" "rc=$RC" "$OUT"; fi
+}
+
+test_install_never_runs_sudo_beyond_listing_a_sudo_grant() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing ""
+  run install
+  if [ "$RC" -eq 1 ] && ! grep -v '^sudo -n -l$' "$CASE/transcript" | grep -q '^sudo' && has "needs-user  grant:"; then
+    pass "install leaves a sudo grant to the user and runs sudo only to list"
+  else fail "sudo grant install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+# grant_fix: the sudo_grant fix the check printed, as the one command it is.
+grant_fix() { sed -n 's/.*it asks for your password: //p' <<<"$OUT"; }
+
+# fake_sudo_installer: sudo records its argv and runs visudo and install as
+# stubs: visudo keeps the file it checked, install copies the file into the
+# stub dir. STUB_VISUDO_FAIL makes visudo refuse the file.
+fake_sudo_installer() {
+  write_stub sudo '"$@"'
+  write_stub visudo '[ -z "${STUB_VISUDO_FAIL:-}" ] || exit 1; cp "$3" "$STUB_DIR/.checked"'
+  write_stub install 'cp "$7" "$STUB_DIR/.installed"'
+  write_stub id 'echo me'
+}
+
+# run_grant_fix: run the printed fix the way the user would. Sets RC.
+run_grant_fix() {
+  local fix
+  fix="$(grant_fix)"
+  set +e
+  env -i HOME="$CASE/home" PATH="$CASE/stubs:/usr/bin:/bin" STUB_DIR="$CASE/stubs" STUB_VISUDO_FAIL="${STUB_VISUDO_FAIL:-}" /bin/bash -c "$fix" >/dev/null 2>&1
+  RC=$?
+  set -e
+}
+
+test_a_sudo_grant_fix_checks_then_installs_every_invocation() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing "    (root) NOPASSWD: /usr/bin/pm -a x 1"
+  run check
+  fake_sudo_installer
+  run_grant_fix
+  local want
+  want="$(printf '%s\n' "me ALL=(root) NOPASSWD: /usr/bin/pm -a x 1" "me ALL=(root) NOPASSWD: /usr/bin/pm -a x 0" "me ALL=(root) NOPASSWD: /usr/bin/pm -a y 1")"
+  if [ "$RC" -eq 0 ] && [ "$(cat "$CASE/stubs/.installed")" = "$want" ] && [ "$(cat "$CASE/stubs/.checked")" = "$want" ] \
+    && grep -q '^install -m 0440 -o root -g wheel .* /etc/sudoers.d/agent-repl-pm$' "$CASE/transcript"; then
+    pass "a sudo grant's fix checks with visudo, then installs every invocation as root's 0440 file"
+  else fail "sudo grant fix" "rc=$RC" "$(cat "$CASE/stubs/.installed" 2>/dev/null)" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_sudo_grant_fix_that_visudo_refuses_installs_nothing() {
+  new_case; manifest "[$GRANT]"
+  fake_sudo_listing ""
+  run check
+  fake_sudo_installer
+  STUB_VISUDO_FAIL=1 run_grant_fix
+  if [ "$RC" -ne 0 ] && [ ! -e "$CASE/stubs/.installed" ] && ! grep -q '^install ' "$CASE/transcript"; then
+    pass "a sudo grant's fix that visudo refuses installs nothing and fails"
+  else fail "visudo refusal" "rc=$RC" "$(cat "$CASE/transcript")"; fi
+}
+
+test_uninstall_names_the_command_that_removes_a_sudo_grant() {
+  new_case; manifest "[$GRANT]"
+  local sudoers
+  sudoers="$(mktemp -d "$CASE/sudoers.XXXXXX")"
+  : >"$sudoers/agent-repl-pm"
+  set +e
+  OUT="$(SUDOERS="$sudoers" REQUIREMENTS_SH_LIB=1 bash -c '. "$1"; SUDOERS_DIR="$SUDOERS"; uninstall_entry "$2"' _ "$RUNNER" "$GRANT" 2>&1)"
+  RC=$?
+  set -e
+  if [ "$RC" -eq 0 ] && has "uninstall: $sudoers/agent-repl-pm is root's; remove it with \`sudo rm $sudoers/agent-repl-pm\`" && [ -e "$sudoers/agent-repl-pm" ]; then
+    pass "uninstall leaves a sudo grant's file and names the command that removes it"
+  else fail "sudo grant uninstall" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_lacking_a_field_is_refused() {
+  new_case; manifest "[$(jq -c 'del(.file)' <<<"$GRANT")]"
+  run check
+  if [ "$RC" -eq 2 ] && has 'grant: sudo_grant needs "file"'; then pass "a sudo grant lacking a field is refused"
+  else fail "sudo grant field" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_with_a_relative_command_is_refused() {
+  new_case; manifest "[$(jq -c '.command = "pm"' <<<"$GRANT")]"
+  run check
+  if [ "$RC" -eq 2 ] && has "a sudo_grant command is an absolute path of plain characters, not pm"; then pass "a sudo grant with a relative command is refused"
+  else fail "relative sudo grant command" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_invocation_sudoers_would_misread_is_refused() {
+  new_case; manifest "[$(jq -c '.invocations = ["-a x 1, ALL"]' <<<"$GRANT")]"
+  run check
+  if [ "$RC" -eq 2 ] && has "a sudo_grant invocation is plain words, not -a x 1, ALL"; then pass "a sudo grant invocation sudoers would misread is refused"
+  else fail "unsafe sudo grant invocation" "rc=$RC" "$OUT"; fi
+}
+
+test_a_sudo_grant_file_sudo_would_skip_is_refused() {
+  new_case; manifest "[$(jq -c '.file = "agent-repl.pm"' <<<"$GRANT")]"
+  run check
+  if [ "$RC" -eq 2 ] && has "a sudo_grant file is a plain name sudo reads from /etc/sudoers.d, not agent-repl.pm"; then pass "a sudo grant file sudo would skip is refused"
+  else fail "skipped sudo grant file" "rc=$RC" "$OUT"; fi
+}
+
+test_the_real_pmset_grant_covers_every_persistent_wifi_invocation() {
+  local got want
+  got="$(jq -r '.requirements[] | select(.kind == "sudo_grant" and .command == "/usr/bin/pmset") | .platforms, .invocations | join(",")' "$MODULE/daemon/requirements.json")"
+  want="$(printf '%s\n' darwin "-a disablesleep 1,-a disablesleep 0,-a networkoversleep 1,-a networkoversleep 0,-a womp 1,-a womp 0,-a powermode 1,-a powermode 2")"
+  if [ "$got" = "$want" ]; then pass "the daemon's pmset grant is macOS-only and names every persistent-wifi invocation"
+  else fail "real pmset grant" "$got"; fi
 }
 
 # ---------------------------------------------------------------------------

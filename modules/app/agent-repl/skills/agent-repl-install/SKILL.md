@@ -1,6 +1,6 @@
 ---
 name: agent-repl-install
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (zettel-emacs, Emacs built from a pinned fork commit, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (zettel-emacs, Emacs built from a pinned fork commit, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide (environment variables, notification permission, the passwordless `pmset` sudo grant on macOS), and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Any change to what agent-repl or zettel needs to build, install or run (a new or changed toolchain, dependency, version pin, build flag, or patched program such as Emacs) updates this skill and its requirement manifests in the same change.
 argument-hint: "[check]"
 allowed-tools: Bash(.claude/skills/agent-repl-install/run.sh:*), Bash(~/.claude/skills/agent-repl-install/run.sh:*)
 lineage_root: user.dodge.skills.agent-repl-install
@@ -69,6 +69,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
     - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
     - e. For Emacs, after install replaced the app, have the user restart Emacs so the new build runs.
     - f. For a Linux package install sudo could not run without a password, have the user run the printed sudo command in a terminal.
+    - g. For a sudo grant, have the user run the printed command in a terminal; it asks for their password and installs only after the grant checks clean.
   - For each `failed` line, and each line whose install ran but left it unmet, go to step 4 with that line as the failure.
   - After the user reports each one done, return to step 0.
 
