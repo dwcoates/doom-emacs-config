@@ -223,7 +223,7 @@ func TestDrawUserBlocksMarksUpRecentCodeSpans(t *testing.T) {
 			}}
 
 			// Act.
-			blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, func(*frontendv1.ParsedProse) {}, tc.spans, dlog.NewTestLogger())
+			blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, linksNoPulls, tc.spans, dlog.NewTestLogger())
 
 			// Assert.
 			parsed := blocks[0].GetText().GetProse()
@@ -538,3 +538,8 @@ func TestLinkPullsLinksAPromptMirroredOutsideTheResolver(t *testing.T) {
 		t.Fatalf("drawn prompt = %q, want the known pull request linked", got)
 	}
 }
+
+// linksNoPulls is the pull request linker of a DrawUserBlocks case that is
+// not about pull request references: DrawUserBlocks links every text block
+// it draws, so a case hands it one that links nothing.
+func linksNoPulls(*frontendv1.ParsedProse) {}
