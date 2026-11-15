@@ -13,7 +13,7 @@ import (
 //
 // A daemon fetch holds the repository's fetch lock (fetchLockName), a record
 // lock, for the length of its git. The kernel judges a record lock wait
-// (F_SETLKW) a deadlock per PROCESS: a daemon waiting for the fetch lock that
+// a deadlock per PROCESS: a daemon waiting for the fetch lock that
 // another daemon holds, while that other daemon waits (on another goroutine,
 // for its boot claim) for a lock this daemon holds, is refused EDEADLK
 // ("resource deadlock avoided"), though the fetch holding the lock ends on
