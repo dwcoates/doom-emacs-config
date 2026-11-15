@@ -232,7 +232,10 @@ func joinPaths(a, b []string) string {
 }
 
 // EndRemediationFinishesOf removes every remediation finish of REPO's queue,
-// answering how many: its chain ended.
+// answering how many: its chain ended. A deploy escalation workspace's
+// finish is no chain's (deploy_escalations): it outlives every chain until
+// its own deploy, and a chain that ended meanwhile forgot it, stranding its
+// failed gate (2026-11-15, deploy-escalation-20261115-174608).
 func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int, error) {
 	const op = "daemon.wsm.end_remediation_finishes_of"
 	key, err := normalizeRepoKey(repo)
@@ -242,7 +245,7 @@ func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int
 	}
 	n := 0
 	err = s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ?`, string(key))
+		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND workspace_id NOT IN (SELECT workspace_id FROM deploy_escalations)`, string(key))
 		if err != nil {
 			return err
 		}

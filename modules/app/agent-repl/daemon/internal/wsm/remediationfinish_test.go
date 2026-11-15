@@ -275,3 +275,71 @@ func TestEndRemediationFinishesOfEndsOnlyThatQueuesFinishes(t *testing.T) {
 		t.Fatalf("EndRemediationFinishesOf = (%d, %v) leaving %+v, want 2 ended and c kept", n, err, all)
 	}
 }
+
+func TestAChainsEndKeepsADeployEscalationsFinish(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	for _, ws := range []WorkspaceID{"remedy", "escalation"} {
+		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordDeployEscalation(ctx, "escalation", repo, instant); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	n, err := s.EndRemediationFinishesOf(ctx, repo)
+	all, _ := s.RemediationFinishes(ctx)
+
+	// Assert
+	if err != nil || n != 1 || len(all) != 1 || all[0].Workspace != "escalation" {
+		t.Fatalf("EndRemediationFinishesOf = (%d, %v) leaving %+v, want the chain's remediation ended and the escalation kept", n, err, all)
+	}
+}
+
+func TestADeployEscalationIsRecordedAndRead(t *testing.T) {
+	tests := []struct {
+		name      string
+		record    bool
+		wantFound bool
+	}{
+		{name: "a recorded escalation", record: true, wantFound: true},
+		{name: "any other workspace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			if tt.record {
+				if err := s.RecordDeployEscalation(context.Background(), "escalation", repo, instant); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, found, err := s.DeployEscalationOf(context.Background(), "escalation")
+
+			// Assert
+			if err != nil || found != tt.wantFound || (found && got != repo) {
+				t.Fatalf("DeployEscalationOf = (%q, %v, %v), want found %v", got, found, err, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestARecordOfADeployEscalationNamingNothingIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	err := s.RecordDeployEscalation(context.Background(), "", "", instant)
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.record_deploy_escalation", "error") {
+		t.Fatalf("RecordDeployEscalation = %v, want a refusal recorded at ERROR: %v", err, log.Records())
+	}
+}
