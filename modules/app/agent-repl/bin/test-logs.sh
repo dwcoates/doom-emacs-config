@@ -435,6 +435,62 @@ test_malformed_line() {
     fi
 }
 
+# A record stamped before --since is passed over undecoded: a line whose lead
+# stamp is early is never judged, while the same malformed tail inside the
+# window still is.
+test_a_record_stamped_before_the_window_is_not_decoded() {
+    local workspace="$TMP/workspaces/early-stamp" target="$targets/early-stamp.log" rc
+    mkdir -p "$workspace/.claude/emacs"
+    printf '%s\n' '{"timestamp":"2026-09-10T09:00:00.000000Z", this tail is not json' \
+        '{"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"daemon","pid":10,"level":"warn","verbosity":"normal","operation":"daemon.inside","message":"inside","context":{}}' >"$target"
+    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    set +e
+    run_logs --workspace "$workspace" --runtime daemon --since 2026-09-10T10:00:00Z --json >"$TMP/early.out" 2>"$TMP/early.err"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ] && grep -q '"operation":"daemon.inside"' "$TMP/early.out"; then
+        pass "a record stamped before the window is passed over undecoded"
+    else
+        fail "a record stamped before the window is passed over undecoded" "rc=$rc $(cat "$TMP/early.err")"
+    fi
+}
+
+test_a_malformed_record_inside_the_window_is_still_reported() {
+    local workspace="$TMP/workspaces/late-stamp" target="$targets/late-stamp.log" rc
+    mkdir -p "$workspace/.claude/emacs"
+    printf '%s\n' '{"timestamp":"2026-09-10T10:05:00.000000Z", this tail is not json' >"$target"
+    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    set +e
+    run_logs --workspace "$workspace" --runtime daemon --since 2026-09-10T10:00:00Z --json >/dev/null 2>"$TMP/late.err"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && grep -q "late-stamp.log:1: malformed JSONL" "$TMP/late.err"; then
+        pass "a malformed record inside the window is still reported"
+    else
+        fail "a malformed record inside the window is still reported" "rc=$rc"
+    fi
+}
+
+# A rotated generation last written before --since is not read at all.
+test_a_generation_last_written_before_the_window_is_not_read() {
+    local workspace="$TMP/workspaces/old-generation" target="$targets/old-generation-daemon.log" rc
+    mkdir -p "$workspace/.claude/emacs"
+    printf '%s\n' 'not-json' >"$target.1"
+    touch -t 200001010000 "$target.1"
+    printf '%s\n' '{"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"daemon","pid":10,"level":"warn","verbosity":"normal","operation":"daemon.current","message":"current","context":{}}' >"$target"
+    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    set +e
+    run_logs --workspace "$workspace" --runtime daemon --since 2026-09-10T10:00:00Z --json >"$TMP/oldgen.out" 2>"$TMP/oldgen.err"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ] && grep -q '"operation":"daemon.current"' "$TMP/oldgen.out" &&
+        grep -q 'skipped 1 generation(s) last written before the window' "$TMP/oldgen.err"; then
+        pass "a generation last written before the window is not read"
+    else
+        fail "a generation last written before the window is not read" "rc=$rc $(cat "$TMP/oldgen.err")"
+    fi
+}
+
 run_sink_finding_case() {
     local label="$1" shape="$2" broken_runtime="$3" mode="$4" expected_rc="$5" description="$6"
     local workspace case_rows canonical target out err
@@ -989,6 +1045,9 @@ test_harvest
 test_empty_harvest_window
 test_harvest_incomplete_workspace_attribution
 test_malformed_line
+test_a_record_stamped_before_the_window_is_not_decoded
+test_a_malformed_record_inside_the_window_is_still_reported
+test_a_generation_last_written_before_the_window_is_not_read
 test_sink_findings
 test_orphan_generations
 test_orphan_generations_absent_when_none_minted

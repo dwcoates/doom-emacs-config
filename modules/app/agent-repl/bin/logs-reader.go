@@ -358,6 +358,12 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 	seen := make(map[string]struct{})
 	readable := 0
 	orphanCount := 0
+	skippedBeforeWindow := 0
+	defer func() {
+		if skippedBeforeWindow > 0 {
+			fmt.Fprintf(os.Stderr, "logs-reader: skipped %d generation(s) last written before the window\n", skippedBeforeWindow)
+		}
+	}()
 	for _, selectedSink := range sinks {
 		files, current, discovered, orphans := generationFiles(selectedSink)
 		findings = append(findings, discovered...)
@@ -367,6 +373,18 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 		for _, path := range files {
 			if _, duplicate := seen[path]; duplicate {
 				sinkReadable = true
+				continue
+			}
+			// A GENERATION LAST WRITTEN BEFORE THE WINDOW HOLDS NO RECORD IN
+			// IT: every record is stamped no later than the write that put it
+			// there. Reading every earlier daemon's orphan generation whole
+			// took a 20-minute window 70s (2026-11-15, 8.5 GB across 132
+			// orphans), past the deploy intake's 10s bound. The current file
+			// is always read, since a follow starts from it.
+			if path != current && endsBeforeWindow(path, filter) {
+				seen[path] = struct{}{}
+				sinkReadable = true
+				skippedBeforeWindow++
 				continue
 			}
 			loaded, next, nextLine, err := readFile(selectedSink, path, sequence, filter)
@@ -573,6 +591,20 @@ type unreadableLogError struct {
 func (e *unreadableLogError) Error() string { return e.err.Error() }
 func (e *unreadableLogError) Unwrap() error { return e.err }
 
+// endsBeforeWindow reports whether the generation at PATH was last written
+// before FILTER's lower bound. A file that cannot be stated is read, so its
+// failure is reported where reading it reports one.
+func endsBeforeWindow(path string, filter filters) bool {
+	if filter.since == nil {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.ModTime().Before(*filter.since)
+}
+
 func readFile(selectedSink sink, path string, sequence int64, filter filters) ([]record, int64, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -606,6 +638,28 @@ func readFile(selectedSink sink, path string, sequence int64, filter filters) ([
 	return records, next, nextLine, nil
 }
 
+// timestampLead is how every structured record begins: its stamp is the
+// first field the contract's writers emit.
+var timestampLead = []byte(`{"timestamp":"`)
+
+// leadingTimestamp reads the stamp off RAW's lead without decoding the line,
+// answering false when the line does not begin that way.
+func leadingTimestamp(raw []byte) (time.Time, bool) {
+	rest, ok := bytes.CutPrefix(raw, timestampLead)
+	if !ok {
+		return time.Time{}, false
+	}
+	end := bytes.IndexByte(rest, '"')
+	if end < 0 {
+		return time.Time{}, false
+	}
+	instant, err := time.Parse(time.RFC3339Nano, string(rest[:end]))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return instant, true
+}
+
 func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, filter filters) ([]record, int64, int, error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -615,6 +669,16 @@ func scanRecords(reader io.Reader, path string, firstLine int, sequence int64, f
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
 			return nil, sequence, line, fmt.Errorf("%s:%d: malformed JSONL: empty line", path, line)
+		}
+		// A RECORD STAMPED BEFORE THE WINDOW IS PASSED OVER UNDECODED: its
+		// stamp leads the line, and decoding every earlier record of a
+		// 60 MB generation was most of a window read's time (2026-11-15:
+		// 50s for a 20-minute window over 5.5 GB). A line whose stamp
+		// cannot be read off its lead is decoded, so it is judged whole.
+		if instant, ok := leadingTimestamp(raw); ok && filter.since != nil && instant.Before(*filter.since) {
+			sequence++
+			line++
+			continue
 		}
 		record, err := parseRecord(raw, sequence)
 		if err != nil {
