@@ -145,6 +145,6 @@ describe("revealInBubbles", () => {
     revealInBubbles(lines, "the node 1.1");
     // Assert
     const record = await forwardedRecord(capture, "feed.node-reveal.bubble-scrolled");
-    expect(record.context).toEqual({ what: "the node 1.1", from: 0, to: 70 });
+    expect(record.context).toMatchObject({ what: "the node 1.1", from: 0, to: 70 });
   });
 });

@@ -3441,6 +3441,7 @@ describe("createFeedController: the walk control on sight", () => {
 
     // Act
     fireIntersection(controlOf(host), true);
+    await settle();
 
     // Assert
     const record = await forwardedRecord(capture, "feed.load-older-empty");
