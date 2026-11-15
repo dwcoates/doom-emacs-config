@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { create } from "@bufbuild/protobuf";
 import { GetMemoryOverviewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_memory_overview_pb";
 import { factHome } from "../../src/sidebar/detail-more.js";
@@ -531,5 +532,73 @@ describe("an open row's memory", () => {
     await settle();
 
     expect([dialed, detail.querySelector(".memory")?.textContent]).toEqual([["127.0.0.1:6666"], "moving to the new daemon"]);
+  });
+
+  const transferringAway = (address: string) => () =>
+    create(GetWorkspaceMemoryResponseSchema, {
+      result: { case: "error", value: { cause: { case: "transferringAway", value: { address } } } },
+    });
+
+  it("asks the successor a transferring_away refusal names", async () => {
+    // Arrange
+    const { ws, dialed } = rowWith(transferringAway("127.0.0.1:61176"), notRunning);
+
+    // Act
+    showRowMemory(ws, true);
+    await settle();
+
+    // Assert
+    expect(dialed).toEqual(["127.0.0.1:61176"]);
+  });
+
+  it("draws the successor's answer", async () => {
+    // Arrange
+    const { ws, detail } = rowWith(transferringAway("127.0.0.1:61176"), notRunning);
+
+    // Act
+    showRowMemory(ws, true);
+    await settle();
+
+    // Assert
+    expect(detail.querySelector(".memory dd")?.textContent).toBe("not running");
+  });
+
+  it("records the successor it asked, with its arm, at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { ws } = rowWith(transferringAway("127.0.0.1:61176"), notRunning);
+
+    // Act
+    showRowMemory(ws, true);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.memory.served-elsewhere");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ arm: "transferringAway", address: "127.0.0.1:61176" });
+  });
+
+  it("says the workspace is moving when the successor refuses the same way", async () => {
+    // Arrange
+    const { ws, detail, dialed } = rowWith(transferringAway("127.0.0.1:61176"), transferringAway("127.0.0.1:7777"));
+
+    // Act
+    showRowMemory(ws, true);
+    await settle();
+
+    // Assert
+    expect([dialed, detail.querySelector(".memory")?.textContent]).toEqual([["127.0.0.1:61176"], "moving to the new daemon"]);
+  });
+
+  it("says the workspace is moving on a page that cannot dial another daemon", async () => {
+    // Arrange
+    const { ws, detail } = rowWith(transferringAway("127.0.0.1:61176"));
+
+    // Act
+    showRowMemory(ws, true);
+    await settle();
+
+    // Assert
+    expect(detail.querySelector(".memory")?.textContent).toBe("moving to the new daemon");
   });
 });
