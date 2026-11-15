@@ -232,8 +232,29 @@ export interface AgentPageSession {
    * everything and was waiting on its consumer.
    */
   servedThrough(): string | undefined;
+  /**
+   * How this session opened, for the record a tail that did not end in time
+   * writes: which side of the conclusion's pointer the session started on is
+   * the half of the story `servedThrough` cannot tell.
+   */
+  openedOn(): TailOpeningRecord;
   /** Stop following. Idempotent. */
   close(): void;
+}
+
+/** What one {@link AgentPageSession} stood on when it opened. */
+export interface TailOpeningRecord {
+  /** The opening arm the store was asked for. */
+  readonly opening: AgentOpening["case"];
+  /** The caller's `known_through` mark, when the opening named one. */
+  readonly mark: string | undefined;
+  /**
+   * The book's newest line BY PLACE as of the open, as the store named it;
+   * absent while the book held none (or was not opened yet).
+   */
+  readonly newest: string | undefined;
+  /** Whether the book was minted empty and its store session is still to open. */
+  readonly deferred: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -8381,8 +8381,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           // WHERE THE TAIL STOOD says which side held it: served short of the
           // head is a consumer not reading, served through it is one that
           // read everything and did not let the stream end (2026-11-13: 13
-          // tails ran out the budget in the minute after a handover).
-          () => ({ agent: entry.agent.value, concluded_through: head?.value, served_through: entry.page.servedThrough() }),
+          // tails ran out the budget in the minute after a handover). HOW IT
+          // OPENED says whether the head was ever on the tail's side of its
+          // opening mark at all.
+          () => {
+            const opened = entry.page.openedOn();
+            return {
+              agent: entry.agent.value,
+              concluded_through: head?.value,
+              served_through: entry.page.servedThrough(),
+              opening: opened.opening,
+              opened_through: opened.mark,
+              newest_at_open: opened.newest,
+              deferred: opened.deferred,
+            };
+          },
         );
       }),
     );

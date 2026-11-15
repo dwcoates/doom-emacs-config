@@ -35,6 +35,7 @@ import {
   type AgentOpening,
   type AgentPageSession,
   type AgentTailFrame,
+  type TailOpeningRecord,
 } from "./persistence.js";
 import {
   isRetryableRead,
@@ -676,10 +677,18 @@ export function createReader(options: ReaderOptions): Reader {
      */
     const newest =
       opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
+    const openedOn: TailOpeningRecord = {
+      opening: opening.case,
+      mark: knownThrough?.value,
+      newest: newest?.value,
+      deferred: false,
+    };
     LOGGER.debug(
       {
         agent: agent.value,
         opening: opening.case,
+        known_through: openedOn.mark,
+        newest: openedOn.newest,
         entries: page.entries.length,
       },
       "opened an agent's book and pinned its tail",
@@ -966,6 +975,7 @@ export function createReader(options: ReaderOptions): Reader {
       foundNothing: newest === undefined,
       tail,
       servedThrough: () => servedThrough?.value,
+      openedOn: () => openedOn,
       concludeThrough: (through) => {
         if (stopped) return;
         concluding = true;
@@ -1092,6 +1102,15 @@ export function createReader(options: ReaderOptions): Reader {
       }),
       foundNothing: true,
       servedThrough: () => lastServed,
+      // THE REAL SESSION'S OPENING, once there is one: until then the book is
+      // still waiting to be written, and only the caller's own mark is known.
+      openedOn: () =>
+        inner?.openedOn() ?? {
+          opening: opening.case,
+          mark: innerMark?.value,
+          newest: undefined,
+          deferred: true,
+        },
       tail: {
         async *[Symbol.asyncIterator]() {
           const session = await openWhenWritten();

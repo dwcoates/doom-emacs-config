@@ -3992,3 +3992,127 @@ describe("toHistoryEntryAt renders the shared golden cases", () => {
     });
   }
 });
+
+describe("what a session states it opened on", () => {
+  /** A pointer by its opaque value. */
+  function pointer(value: string): conversationv1.HistoryPointer {
+    return create(conversationv1.HistoryPointerSchema, { value });
+  }
+
+  it("states a catch-up open's mark beside the book's newest line", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH, "n"),
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(
+      BOOK,
+      knownThrough(pointer("q")),
+      () => true,
+    );
+    session.close();
+
+    // Assert.
+    expect(session.openedOn()).toEqual({
+      opening: "knownThrough",
+      mark: "q",
+      newest: "n",
+      deferred: false,
+    });
+  });
+
+  it("states a tail-only open with no mark", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH, "n"),
+      watchAgentSession: () => standingWatch([]),
+    });
+
+    // Act.
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY, () => true);
+    session.close();
+
+    // Assert.
+    expect(session.openedOn()).toEqual({
+      opening: "tailOnly",
+      mark: undefined,
+      newest: "n",
+      deferred: false,
+    });
+  });
+
+  it("logs the opening's mark and the book's newest line when it pins the tail", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () => opened(floorPage([]), WATCH, "n"),
+      watchAgentSession: () => standingWatch([]),
+    });
+    const mark = logSinkMark();
+
+    // Act.
+    const session = await reader.openAgentPage(
+      BOOK,
+      knownThrough(pointer("q")),
+      () => true,
+    );
+    session.close();
+
+    // Assert.
+    expect(
+      logRecordsSince(mark).find(
+        (record) => record.message === "opened an agent's book and pinned its tail",
+      )?.context,
+    ).toEqual(
+      containing({ opening: "knownThrough", known_through: "q", newest: "n" }),
+    );
+  });
+
+  it("states a minted book still waiting to be written as deferred, on the caller's mark", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+    reader.noteAgentMinted("book-1");
+
+    // Act.
+    const session = await reader.openAgentPage(
+      BOOK,
+      knownThrough(pointer("q")),
+      () => true,
+    );
+    session.close();
+
+    // Assert.
+    expect(session.openedOn()).toEqual({
+      opening: "knownThrough",
+      mark: "q",
+      newest: undefined,
+      deferred: true,
+    });
+  });
+
+  it("states a minted book's real session once its first write opened it", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () =>
+        opened(floorPage([storedLine("1", "unit-a")]), WATCH, "1"),
+      watchAgentSession: () => standingWatch([]),
+    });
+    reader.noteAgentMinted("book-1");
+    const session = await reader.openAgentPage(BOOK, TAIL_ONLY, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    // Act. The landed write opens the real session, which serves its row.
+    reader.noteAgentRows(["book-1"]);
+    await iterator.next();
+    session.close();
+
+    // Assert. A deferred tail-only open reads the real book as a repaint.
+    expect(session.openedOn()).toEqual({
+      opening: "repaint",
+      mark: undefined,
+      newest: "1",
+      deferred: false,
+    });
+  });
+});
