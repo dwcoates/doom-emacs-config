@@ -20,12 +20,35 @@ const testWS = ids.WorkspaceID("ws-1")
 // fakeStore is an in-memory summary store whose every call can be failed.
 type fakeStore struct {
 	summaries map[ids.WorkspaceID]string
+	titles    map[ids.WorkspaceID]string
 	putErr    error
 	dropErr   error
 	readErr   error
+	// titlePutErr and titleDropErr fail the vendor title's writes.
+	titlePutErr  error
+	titleDropErr error
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{summaries: map[ids.WorkspaceID]string{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{summaries: map[ids.WorkspaceID]string{}, titles: map[ids.WorkspaceID]string{}}
+}
+
+func (s *fakeStore) PutVendorTitle(_ context.Context, ws ids.WorkspaceID, title string) error {
+	if s.titlePutErr != nil {
+		return s.titlePutErr
+	}
+	s.titles[ws] = title
+	return nil
+}
+
+func (s *fakeStore) DropVendorTitle(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	if s.titleDropErr != nil {
+		return false, s.titleDropErr
+	}
+	_, stood := s.titles[ws]
+	delete(s.titles, ws)
+	return stood, nil
+}
 
 func (s *fakeStore) PutWorkspaceSummary(_ context.Context, ws ids.WorkspaceID, summary string) error {
 	if s.putErr != nil {
@@ -299,6 +322,66 @@ func TestAFailedClearDropKeepsTheSummaryDrawnAndIsLogged(t *testing.T) {
 	}
 	if rec := h.recorded(t, "error", opReset); rec.Context["workspace"] != string(testWS) || rec.Context["cause"] == nil {
 		t.Fatalf("the record = %+v, want the workspace and the cause", rec.Context)
+	}
+}
+
+func TestAVendorTitleIsRecordedAndOwesTheSummaryStill(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.k.OnVendorTitle(testWS, "Add SPC j keybinding support")
+
+	// Assert
+	if got := h.store.titles[testWS]; got != "Add SPC j keybinding support" {
+		t.Fatalf("stored title = %q, want the vendor's", got)
+	}
+	if _, owed, err := h.k.OwedNote(context.Background(), testWS); err != nil || !owed {
+		t.Fatalf("OwedNote owed = %v, %v; want a summary still owed", owed, err)
+	}
+}
+
+func TestAnEmptyVendorTitleDropsTheStoredOne(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.store.titles[testWS] = "Add SPC j keybinding support"
+
+	// Act
+	h.k.OnVendorTitle(testWS, "")
+
+	// Assert
+	if _, stood := h.store.titles[testWS]; stood {
+		t.Fatal("the retracted title still stands")
+	}
+}
+
+func TestAFailedVendorTitleWriteIsLogged(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		fail  func(s *fakeStore)
+	}{
+		{name: "a title that could not be recorded", title: "Add SPC j keybinding support", fail: func(s *fakeStore) { s.titlePutErr = errors.New("the state database is locked") }},
+		{name: "a retraction that could not be dropped", title: "", fail: func(s *fakeStore) { s.titleDropErr = errors.New("the state database is locked") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.store.titles[testWS] = "Fix the footer"
+			tt.fail(h.store)
+
+			// Act
+			h.k.OnVendorTitle(testWS, tt.title)
+
+			// Assert
+			if got := h.store.titles[testWS]; got != "Fix the footer" {
+				t.Fatalf("stored title = %q, want the one standing left as it was", got)
+			}
+			if rec := h.recorded(t, "error", opTitle); rec.Context["workspace"] != string(testWS) || rec.Context["cause"] == nil {
+				t.Fatalf("the record = %+v, want the workspace and the cause", rec.Context)
+			}
+		})
 	}
 }
 

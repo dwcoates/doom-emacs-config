@@ -93,7 +93,11 @@ func (s *server) FindWorkspaces(
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the workspace summaries: %w", err))
 	}
-	result, err := workspacefind.Find(records, repositories, summaries, drawn, query)
+	titles, err := s.deps.DB.ListVendorTitles(ctx)
+	if err != nil {
+		return nil, fail(s.log, rpc, fmt.Errorf("list the vendor titles: %w", err))
+	}
+	result, err := workspacefind.Find(records, repositories, workspacefind.Summaries(summaries, titles), drawn, query)
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}

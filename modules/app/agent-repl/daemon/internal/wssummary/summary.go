@@ -39,6 +39,7 @@ const (
 	opSet     = "daemon.wssummary.set"
 	opReset   = "daemon.wssummary.context_reset"
 	opOwed    = "daemon.wssummary.owed"
+	opTitle   = "daemon.wssummary.vendor_title"
 )
 
 // clauseMarks are the marks a summary never carries: each joins what would
@@ -69,6 +70,12 @@ type Store interface {
 	// WorkspaceSummaryOf loads the summary; the bool is false when none
 	// stands.
 	WorkspaceSummaryOf(ctx context.Context, ws ids.WorkspaceID) (string, bool, error)
+	// PutVendorTitle records the vendor's title for the conversation,
+	// replacing any it had.
+	PutVendorTitle(ctx context.Context, ws ids.WorkspaceID, title string) error
+	// DropVendorTitle deletes the vendor's title, reporting whether one
+	// stood.
+	DropVendorTitle(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 }
 
 // Topbar installs the summary the title line draws.
@@ -152,6 +159,31 @@ func (k *Keeper) OnContextReset(ws ids.WorkspaceID) {
 	k.deps.Topbar.SetSummary(ws, "")
 	fields["dropped"] = dropped
 	k.deps.Log.Info(opReset, "a /clear ended the summarized conversation; the workspace owes a new summary", fields)
+}
+
+// OnVendorTitle records the vendor's own title for the workspace's
+// conversation (its ai-title), which the topbar draws while no summary
+// stands, so `workspace find` still has words for a workspace closed before
+// its agent set a summary. An empty TITLE is the vendor retracting it, and
+// drops the stored one. It is no summary: the workspace still owes one. A
+// write that fails is recorded and leaves the stored title as it was.
+func (k *Keeper) OnVendorTitle(ws ids.WorkspaceID, title string) {
+	fields := dlog.Context{"workspace": string(ws), "title": title}
+	if title == "" {
+		dropped, err := k.deps.Store.DropVendorTitle(context.Background(), ws)
+		if err != nil {
+			k.deps.Log.Error(opTitle, "the vendor's retracted title could not be dropped; it stands", dlog.WithCause(fields, err))
+			return
+		}
+		fields["dropped"] = dropped
+		k.deps.Log.Debug(opTitle, "the vendor retracted its title; the stored one is dropped", fields)
+		return
+	}
+	if err := k.deps.Store.PutVendorTitle(context.Background(), ws, title); err != nil {
+		k.deps.Log.Error(opTitle, "the vendor's title could not be recorded", dlog.WithCause(fields, err))
+		return
+	}
+	k.deps.Log.Debug(opTitle, "recorded the vendor's title for the conversation", fields)
 }
 
 // OwedNote answers the meta-wrapped BriefOwed note a prompt to the workspace

@@ -578,6 +578,15 @@ type DB interface {
 	// ListWorkspaceSummaries loads every stored summary by workspace; a
 	// workspace with none is absent.
 	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]string, error)
+	// PutVendorTitle records the vendor's title for a workspace's
+	// conversation, replacing any it had (vendortitles.go).
+	PutVendorTitle(ctx context.Context, id WorkspaceID, title string) error
+	// DropVendorTitle deletes a workspace's vendor title, reporting whether
+	// one stood.
+	DropVendorTitle(ctx context.Context, id WorkspaceID) (bool, error)
+	// ListVendorTitles loads every stored vendor title by workspace; a
+	// workspace with none is absent.
+	ListVendorTitles(ctx context.Context) (map[WorkspaceID]string, error)
 	// PutColdReadPayment records the cold read a workspace's user paid for,
 	// replacing any it had (coldreadpayments.go).
 	PutColdReadPayment(ctx context.Context, id WorkspaceID, p ColdReadPayment) error

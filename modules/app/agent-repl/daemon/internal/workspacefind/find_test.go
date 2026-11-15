@@ -1,6 +1,7 @@
 package workspacefind
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -311,6 +312,31 @@ func TestFindNarrowsToALogin(t *testing.T) {
 			}
 			if !reflect.DeepEqual(ids(got), tc.want) {
 				t.Fatalf("found %v, want %v", ids(got), tc.want)
+			}
+		})
+	}
+}
+
+func TestSummaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		summaries map[wsm.WorkspaceID]string
+		titles    map[wsm.WorkspaceID]string
+		want      map[wsm.WorkspaceID]string
+	}{
+		{name: "a summary stands alone", summaries: map[wsm.WorkspaceID]string{"a": "Fix it"}, want: map[wsm.WorkspaceID]string{"a": "Fix it"}},
+		{name: "a vendor title stands in for no summary", titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]string{"a": "Its title"}},
+		{name: "a summary outranks the vendor title", summaries: map[wsm.WorkspaceID]string{"a": "Fix it"}, titles: map[wsm.WorkspaceID]string{"a": "Its title"}, want: map[wsm.WorkspaceID]string{"a": "Fix it"}},
+		{name: "neither is no entry", want: map[wsm.WorkspaceID]string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Summaries(tt.summaries, tt.titles)
+
+			// Assert
+			if !maps.Equal(got, tt.want) {
+				t.Fatalf("Summaries = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -60,7 +60,8 @@ type Found struct {
 	Workspace wsm.Workspace
 	// Repository is the repository the workspace belongs to.
 	Repository wsm.Repository
-	// Summary is the workspace's stored summary, nil when none stands.
+	// Summary is the workspace's stored summary, else its vendor title
+	// (Summaries), nil when neither stands.
 	Summary *string
 	// LastActiveAt is LastActiveAt(Workspace), which the answer is ordered by.
 	LastActiveAt time.Time
@@ -106,6 +107,21 @@ func closedAt(ws wsm.Workspace) *time.Time {
 // merge workspace's own worktree to it.
 func IsAgentWorkspace(ws wsm.Workspace) bool {
 	return !ws.IsThread()
+}
+
+// Summaries answers each workspace's words for a find, by the topbar's own
+// precedence: the summary its agent set (SUMMARIES), else the vendor's title
+// for its conversation (TITLES), which the topbar draws while no summary
+// stands. A workspace with neither is absent.
+func Summaries(summaries, titles map[wsm.WorkspaceID]string) map[wsm.WorkspaceID]string {
+	out := make(map[wsm.WorkspaceID]string, len(summaries)+len(titles))
+	for ws, title := range titles {
+		out[ws] = title
+	}
+	for ws, summary := range summaries {
+		out[ws] = summary
+	}
+	return out
 }
 
 // Find answers the agent workspaces among WORKSPACES that match Q, each with
