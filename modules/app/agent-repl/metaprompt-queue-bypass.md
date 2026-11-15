@@ -47,15 +47,17 @@
   - The work is done only once a deploy shows nothing to fix.
 - Report the landing: the version, and what the watch found and fixed.
 
-### This workspace dispatches like any other, and alone manages the queue
+### Bypass mode never uses the merge queue, and does its own work
 
-- This workspace creates child workspaces, one-shots and async merges as any workspace does, and they land through the merge queue, which keeps running.
-  - Every rule that dispatches work (a handed failure's fix, a noticed deficiency's fix) dispatches it from here, as a child of this workspace.
-- This workspace never marks itself a one-shot: it lands its own work with `land-direct.sh`, never through the queue.
-  - The daemon refuses the mark with `requester_bypassing_queue`.
+- Bypass mode exists to skip the merge queue, so nothing this workspace lands or dispatches ever goes through it (owner ruling, 2026-11-15).
+  - Every change lands directly on the main branch with `land-direct.sh`, never as a queued merge, an async merge, or a one-shot's finish.
+  - This workspace never marks itself a one-shot: the daemon refuses the mark with `requester_bypassing_queue`.
+- This workspace does the work itself: it creates no child workspace and runs no subagent unless the user explicitly asks for that particular thing to be done in a workspace or a subagent.
+  - Every rule that would dispatch work (a handed failure's fix, a noticed deficiency's fix) is carried out here, by this workspace itself.
+  - A child the user asked for never finishes into the queue: it commits its work on its branch, runs the full suite, and tells this workspace its branch, which this workspace lands directly as it lands its own.
+  - Several such branches are merged into one branch and land at once: one full suite, one landing, one deploy.
 - Only this workspace pauses or resumes the merge queue (owner ruling, 2026-11-14).
-  - The workspaces it creates and the subagents it runs never pause, resume, evict or move anything on the queue, and their briefs say so.
-  - One that needs the queue paused to land directly asks this workspace, which pauses it and resumes it when told the landing is done.
+  - The workspaces and subagents it runs never pause, resume, evict or move anything on the queue, and their briefs say so.
 
 ### Tests
 

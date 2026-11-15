@@ -183,6 +183,7 @@
   - A workspace that may dispatch work dispatches each fix as its own async merge the moment it notices it, per `/agent-repl-merge-queue`: `workspace async-merge -maker here -context-fork here`, its branch cut at the main branch's tip, and its `-instruction` naming the fix and its tests.
   - Fixes that are one change go in one merge; every independent fix gets its own.
   - A main workspace, which lands nothing itself, creates a one-shot workspace for the fix instead, per `/agent-repl-workspaces`.
+  - A workspace in queue bypass mode fixes it itself, and lands the fix on its own right after the change in progress lands.
   - Dispatching a fix leaves a one-shot a one-shot: the fix lands on its own, and the one-shot finishes its task as usual.
 - Recording a deficiency never replaces fixing what the current work owns.
   - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never dispatched away.
