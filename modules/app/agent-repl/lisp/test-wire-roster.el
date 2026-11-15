@@ -1959,8 +1959,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"expanded\":{\"collapsible\":{}}" member "}"))
 
 (defconst agent-repl-test-wire-roster--subject
-  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}}}"
-  "A merge queue subject's JSON: w1, named one, revealing b1, async.")
+  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}},\"merge\":{\"id\":\"w1-merge\"}}"
+  "A merge queue subject's JSON: w1, named one, revealing b1, async, as merge w1-merge.")
 
 (defun agent-repl-test-wire-roster--merged-section-with (members)
   "Return a Recently Merged section JSON carrying MEMBERS, JSON members or \"\"."
@@ -2248,6 +2248,22 @@ its place and since it joined."
                   #'agent-repl-wire-decode-roster-merge-queue-subject
                   "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\"}")
                  '("RosterMergeQueueSubject" mode "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-decodes-the-merge-itself ()
+  "A subject names the merge its queue holds apart from its credited workspace."
+  (let ((subject (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-subject
+                  agent-repl-test-wire-roster--subject)))
+    (should (equal (list (plist-get (plist-get subject :workspace) :id)
+                         (plist-get (plist-get subject :merge) :id))
+                   '("w1" "w1-merge")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-merge-is-a-breach ()
+  "The merge itself is a required message on its subject."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-subject
+                  "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\",\"mode\":{\"sync\":{}}}")
+                 '("RosterMergeQueueSubject" merge "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-refuses-a-retired-merge-queue ()
   "A repository section no longer carries a merge queue; one is refused as unknown."

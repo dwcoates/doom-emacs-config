@@ -1335,11 +1335,12 @@ ARM is `:sync' or `:async'.  It is never unset."
 
 (defun agent-repl-wire-decode-roster-merge-queue-subject (value)
   "Decode VALUE as `RosterMergeQueueSubject'.
-A plist `(:workspace REF :name NAME :reveal FEED-ID :mode MODE)': the
-workspace the merge is credited to, its name, the bubble a click reveals
-\(nil when none), and how the merge runs."
+A plist `(:workspace REF :name NAME :reveal FEED-ID :mode MODE :merge
+MERGE)': the workspace the merge is credited to, its name, the bubble a
+click reveals \(nil when none), how the merge runs, and the merge itself
+as its queue holds it (an async merge's merge workspace)."
   (let ((object (agent-repl-wire--object "RosterMergeQueueSubject" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueSubject" object '(workspace name reveal mode))
+    (agent-repl-wire--check-keys "RosterMergeQueueSubject" object '(workspace name reveal mode merge))
     (agent-repl-wire--decoded
      "RosterMergeQueueSubject"
      (list :workspace (agent-repl-wire--decode-message
@@ -1348,7 +1349,9 @@ workspace the merge is credited to, its name, the bubble a click reveals
            :reveal (agent-repl-wire--decode-optional-message
                     "RosterMergeQueueSubject" 'reveal object #'agent-repl-wire-decode-feed-id)
            :mode (agent-repl-wire--decode-message
-                  "RosterMergeQueueSubject" 'mode object #'agent-repl-wire-decode-roster-merge-queue-mode)))))
+                  "RosterMergeQueueSubject" 'mode object #'agent-repl-wire-decode-roster-merge-queue-mode)
+           :merge (agent-repl-wire--decode-message
+                   "RosterMergeQueueSubject" 'merge object #'agent-repl-wire-decode-workspace-ref)))))
 
 (defconst agent-repl-wire--roster-merge-queue-instants
   '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms)
