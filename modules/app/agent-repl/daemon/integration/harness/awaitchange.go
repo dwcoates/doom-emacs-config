@@ -42,7 +42,17 @@ func awaitChange(t testing.TB, wait context.Context, check func() bool, paths fu
 
 // followFiles answers what a wait on FILES follows: each file (its writes),
 // and every directory from its own up to the first that exists (its making,
-// its rotation and its replacement).
+// its rotation and its replacement). A file that is a symbolic link is
+// followed through its target too: the target, and every directory from the
+// target's own up to the first that exists.
+//
+// A LINK WHOSE TARGET IS NOT WRITTEN YET IS DANGLING, and a watch cannot open
+// it, so only the link's own directory was followed -- which the target's
+// making, in another directory, never changes. A workspace's sink is such a
+// link (`.claude/emacs/webapp.log` into the logs directory): a wait taken
+// before the page's first record never saw it written, and ran out its bound
+// with the record standing (2026-11-15 06:31,
+// TestWebappLayer/WebappLayerRestartHandover in a full run).
 func followFiles(files ...string) func() []string {
 	return func() []string {
 		var out []string
@@ -53,7 +63,7 @@ func followFiles(files ...string) func() []string {
 				out = append(out, p)
 			}
 		}
-		for _, f := range files {
+		addWithDirs := func(f string) {
 			add(f)
 			for dir := filepath.Dir(f); ; dir = filepath.Dir(dir) {
 				add(dir)
@@ -61,6 +71,17 @@ func followFiles(files ...string) func() []string {
 					break
 				}
 			}
+		}
+		for _, f := range files {
+			addWithDirs(f)
+			target, err := os.Readlink(f)
+			if err != nil {
+				continue
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(f), target)
+			}
+			addWithDirs(target)
 		}
 		return out
 	}
