@@ -7,6 +7,7 @@
  * No clock and no vendor: the scheduler is fired by hand, `nowMs` is a
  * variable, and delivery and the usage reading are scripted.
  */
+import { readFileSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import {
@@ -1977,5 +1978,66 @@ describe("a promised retry abandoned", () => {
         cause: "the prompt queue is closed",
       }),
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The one way a chain ends
+// ---------------------------------------------------------------------------
+
+describe("closing a chain", () => {
+  it("withdraws the standing exactly once whichever way the chain ends", async () => {
+    // Arrange: one chain given up, one ended, one abandoned.
+    const givenUp = harness();
+    await failedTurnEnds(givenUp, "turn-1");
+    await fire(givenUp);
+    givenUp.clock.now = START + VENDOR_ERROR_RETRY_WINDOW_MS;
+    const ended = harness();
+    await failedTurnEnds(ended, "turn-1");
+    const abandoned = harness();
+    await failedTurnEnds(abandoned, "turn-1");
+
+    // Act
+    givenUp.retry.turnEnded("retry-1", OVERLOADED);
+    ended.retry.promptSubmitted("turn-2");
+    abandoned.retry.stop("the session stood down");
+
+    // Assert
+    expect([givenUp.standings, ended.standings, abandoned.standings]).toEqual([
+      [true, false],
+      [true, false],
+      [true, false],
+    ]);
+  });
+
+  it("leaves no timer and no latch whichever way the chain ends", async () => {
+    // Arrange
+    const timed = harness();
+    await failedTurnEnds(timed, "turn-1");
+    const latched = harness();
+    await failedTurnEnds(latched, "turn-1", UNREACHABLE);
+
+    // Act
+    timed.retry.promptSubmitted("turn-2");
+    latched.retry.stop("the session stood down");
+
+    // Assert
+    expect([timed.retry.scheduled(), timed.retry.awaitingNetwork(), latched.retry.scheduled(), latched.retry.awaitingNetwork()]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("is the only site that withdraws a chain's standing", () => {
+    // Arrange
+    const source = readFileSync(new URL("../../src/engine/vendor-error-retry.ts", import.meta.url), "utf8");
+
+    // Act
+    const withdrawals = source.split("this.deps.standing(false)").length - 1;
+
+    // Assert: a hand-rolled ending elsewhere would withdraw it a second way.
+    expect(withdrawals).toBe(1);
   });
 });

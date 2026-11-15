@@ -693,11 +693,7 @@ export class VendorErrorRetry {
 
   /** The chain ran out: ERROR, because the turn's work is left undone. CAUSE says what ran out. */
   private giveUp(chain: Chain, why: string, cause: string, fields: Record<string, unknown>): void {
-    this.cancelTimer();
-    this.latched = false;
-    this.unschedule();
-    this.chain = undefined;
-    this.deps.standing(false);
+    this.closeChain(undefined);
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
   }
 
@@ -717,12 +713,7 @@ export class VendorErrorRetry {
       unpromised();
       return;
     }
-    this.cancelTimer();
-    this.latched = false;
-    this.chain = undefined;
-    this.pending = { abandoned: true, failedTurn: promised, cause };
-    this.deps.state(this.pending);
-    this.deps.standing(false);
+    this.closeChain({ abandoned: true, failedTurn: promised, cause });
     LOGGER[level](
       { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, failed_turn: promised, abandoned: true, ...fields },
       why,
@@ -730,12 +721,27 @@ export class VendorErrorRetry {
   }
 
   private end(chain: Chain, why: string, fields: Record<string, unknown>): void {
+    this.closeChain(undefined);
+    LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
+  }
+
+  /**
+   * THE ONE WAY A CHAIN ENDS: its timer and latch are dropped, its last
+   * statement made (ABANDONED, or that no retry is due), and its standing
+   * withdrawn. Every ending (giving up, ending, abandoning) comes through
+   * here, so none can leave a timer, a latch or a standing behind.
+   */
+  private closeChain(abandoned: AbandonedRetry | undefined): void {
     this.cancelTimer();
     this.latched = false;
-    this.unschedule();
+    if (abandoned === undefined) {
+      this.unschedule();
+    } else {
+      this.pending = abandoned;
+      this.deps.state(abandoned);
+    }
     this.chain = undefined;
     this.deps.standing(false);
-    LOGGER.info({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", ...fields }, why);
   }
 
   private cancelTimer(): void {
