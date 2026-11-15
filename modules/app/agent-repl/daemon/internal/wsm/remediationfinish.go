@@ -271,19 +271,9 @@ func (s *store) RemediationFinishes(ctx context.Context) ([]RemediationFinish, e
 	const op = "daemon.wsm.remediation_finishes"
 	var out []RemediationFinish
 	err := s.read(ctx, op, nil, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx, remediationFinishQuery+` ORDER BY started_at, workspace_id`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			f, err := scanRemediationFinishRow(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, f)
-		}
-		return rows.Err()
+		finishes, err := listRows(ctx, s.q(ctx), remediationFinishQuery+` ORDER BY started_at, workspace_id`, scanRemediationFinishRow)
+		out = finishes
+		return err
 	})
 	return out, err
 }
@@ -307,9 +297,6 @@ func (s *store) EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool,
 // remediationFinishQuery reads the finish columns; callers add the WHERE.
 const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths FROM deploy_remediation_finishes`
 
-// rowScanner is a *sql.Row or *sql.Rows.
-type rowScanner interface{ Scan(dest ...any) error }
-
 // scanRemediationFinish decodes ROW, nil when there is none.
 func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
 	f, err := scanRemediationFinishRow(row)
@@ -324,7 +311,7 @@ func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
 
 // scanRemediationFinishRow is the one decoding of a finish row. A step or a
 // version part the daemon never writes is a DecodeError.
-func scanRemediationFinishRow(row rowScanner) (RemediationFinish, error) {
+func scanRemediationFinishRow(row interface{ Scan(...any) error }) (RemediationFinish, error) {
 	var ws, repo, step, part, line, head, paths string
 	var stepAt, started int64
 	var rounds int
