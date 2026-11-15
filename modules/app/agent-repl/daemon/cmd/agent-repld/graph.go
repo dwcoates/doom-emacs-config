@@ -1366,7 +1366,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MintKey:       prompthandler.MintKey,
 		Log:           p.Surfaces,
 	})
+	deployConfig := deployConfigFiles(paths, log)
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		DeployConfig:  deployConfig,
 		Meter:         p.Metrics,
 		QueueEvents:   merge.QueueObservers{queueNotices, edges},
 		Detached:      detachedRef,
@@ -1488,7 +1490,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	verbs, err := workspace.New(workspace.Deps{
-		Instance: p.Instance,
+		Lifecycle: deployConfig,
+		Instance:  p.Instance,
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
 		Threads: chatService,
@@ -1821,7 +1824,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			Notices: p.Metrics,
+			DeployConfig: deployConfig,
+			Notices:      p.Metrics,
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
 			TestBarrier: os.Getenv(testBarrierEnv) == "1",
@@ -2015,6 +2019,9 @@ type paths struct {
 	// writes beside the daemon binary: the version the health and status
 	// surfaces show.
 	BuiltSHA string
+	// LifecycleSnapshot is the copy of the daemon's own repository's deploy
+	// config its build took (deployConfigFiles).
+	LifecycleSnapshot string
 	// Home is the user's home directory, which a producer's leading `~`
 	// expands to (dirpath.Absolute). A daemon that cannot name it does not
 	// boot.
@@ -2043,6 +2050,23 @@ func homeRepositoryCheckout(checkout string, getenv func(string) string) string 
 // it, and it beats the checkout's own prompts/.
 const envPromptsDir = "AGENT_REPL_PROMPTS_DIR"
 
+// deployConfigFiles is how the daemon reads deploy configs. A build that
+// snapshotted its own repository's config reads that repository's from the
+// snapshot (lifecycleconfig.Pinned); a binary nobody built through
+// bin/build-frontend.sh (a test harness's go build) has none, and reads every
+// repository's own file. Which one is recorded at INFO.
+func deployConfigFiles(p paths, log dlog.Logger) lifecycleconfig.Files {
+	if _, err := os.Stat(p.LifecycleSnapshot); err != nil {
+		log.Info(graphOperation, "this build carries no snapshot of its repository's deploy config; every repository's config is read from its own checkout",
+			dlog.Context{"snapshot": p.LifecycleSnapshot, "cause": err.Error()})
+		return lifecycleconfig.OnDisk{}
+	}
+	repository := checkout.Repository(p.Checkout)
+	log.Info(graphOperation, "this daemon reads its own repository's deploy config from its build's snapshot",
+		dlog.Context{"snapshot": p.LifecycleSnapshot, "repository": repository})
+	return lifecycleconfig.Pinned{Repository: repository, Snapshot: p.LifecycleSnapshot, Disk: lifecycleconfig.OnDisk{}}
+}
+
 // resolvePaths resolves the checkout and applies the flag and environment
 // overrides over it. The checkout is resolved even when every path is
 // overridden, because the render vocabulary has no flag: it is shared with
@@ -2068,6 +2092,7 @@ func resolvePaths(opts options) (paths, error) {
 		VocabDir:             checkout.VocabDir(root),
 		RequirementsManifest: checkout.RequirementsManifest(root),
 		BuiltSHA:             filepath.Join(root, "daemon", "bin", ".built-sha"),
+		LifecycleSnapshot:    checkout.LifecycleSnapshot(root),
 		Home:                 home,
 		RunDir:               runDir,
 	}

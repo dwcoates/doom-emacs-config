@@ -37,6 +37,7 @@ import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/netstate"
@@ -2358,6 +2359,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	}
 	deps := Deps{
 		Notices:           h.Notices,
+		DeployConfig:      lifecycleconfig.OnDisk{},
 		Tests:             h.Tests,
 		SubagentMakers:    h.Makers,
 		DB:                h.DB,

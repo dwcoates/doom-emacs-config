@@ -402,7 +402,7 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 		return testWorktree{}, errUnknownTestWorkspace
 	}
 	w := testWorktree{log: subject.Log, dir: subject.Record.Dir, name: subject.Record.Name, id: subject.Record.ID}
-	if w.script, err = testScriptOf(w.dir); err != nil {
+	if w.script, err = s.testScriptOf(w.dir); err != nil {
 		w.log.Error(op, "a test run has no test script to run", dlog.Context{"dir": w.dir, "cause": err.Error()})
 		return testWorktree{}, &noTestScriptError{cause: err}
 	}
@@ -445,16 +445,17 @@ func (s *server) handCutWorktreeOf(ctx context.Context, own testWorktree, dir st
 	// The run is still the main workspace's: its bypass standing decides the
 	// run's governance, so the cut worktree carries its id.
 	cut := testWorktree{log: own.log.With(dlog.Context{"worktree": dir}), dir: dir, name: filepath.Base(dir), id: own.id}
-	if cut.script, err = testScriptOf(dir); err != nil {
+	if cut.script, err = s.testScriptOf(dir); err != nil {
 		own.log.Error(opRunTests, "a test run's hand-cut worktree has no test script to run", dlog.WithCause(dlog.Context{"worktree": dir}, err))
 		return handCutWorktree{err: &noTestScriptError{cause: err}}, "", nil
 	}
 	return handCutWorktree{worktree: cut}, "", nil
 }
 
-// testScriptOf is the test script the worktree's own deploy config names.
-func testScriptOf(dir string) (string, error) {
-	cfg, err := lifecycleconfig.OnDisk{}.Load(dir)
+// testScriptOf is the test script the worktree's deploy config names, read
+// as every deploy config is (Deps.DeployConfig).
+func (s *server) testScriptOf(dir string) (string, error) {
+	cfg, err := s.deps.DeployConfig.Load(dir)
 	if err != nil {
 		return "", fmt.Errorf("read the worktree's deploy config: %w", err)
 	}

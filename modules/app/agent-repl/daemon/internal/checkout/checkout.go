@@ -171,6 +171,25 @@ func PromptsDir(root string) string {
 	return filepath.Join(root, "prompts")
 }
 
+// LifecycleSnapshot is the copy of the repository's deploy config the daemon's
+// build took beside its binary (bin/build-frontend.sh snapshot_lifecycle_config).
+func LifecycleSnapshot(root string) string {
+	return filepath.Join(root, "daemon", "bin", "lifecycle.yaml")
+}
+
+// Repository is the root of the repository the module root ROOT sits in: ROOT
+// with the marker's directories taken off. ROOT is always a module root
+// (Root answers one), so a ROOT that does not end with the marker is a
+// broken invariant and panics.
+func Repository(root string) string {
+	clean := filepath.Clean(root)
+	repo, ok := strings.CutSuffix(clean, string(filepath.Separator)+filepath.FromSlash(marker))
+	if !ok {
+		panic(fmt.Sprintf("checkout: %s is no agent-repl module root (it does not end with %s)", root, marker))
+	}
+	return repo
+}
+
 // RequirementsManifest is the installer's requirements manifest beneath root:
 // what every per-user setting a spawned daemon refreshes from the env file is
 // declared in (userenv.SettingNames).

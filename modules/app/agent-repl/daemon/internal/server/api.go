@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -55,6 +56,9 @@ import (
 // than a constructor argument list so a wave-2 agent adding a handler adds a
 // field here and nowhere else.
 type Deps struct {
+	// DeployConfig reads a worktree's deploy config, for the test script a
+	// test run runs. Required.
+	DeployConfig lifecycleconfig.Files
 	// Notices measures each prompt one workspace's agent sends another
 	// (briefprompt.Meter, notice type agent_sent), beside the daemon's own
 	// notices. REQUIRED.
@@ -549,6 +553,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the retarget operation")
 	case deps.Tests == nil:
 		return nil, missing("a test runner")
+	case deps.DeployConfig == nil:
+		return nil, missing("a deploy config reader")
 	case deps.Merge == nil:
 		return nil, missing("a merge orchestrator")
 	case deps.SubagentMakers == nil:

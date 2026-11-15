@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/internal/lifecycleconfig"
 	"errors"
 	"os"
 	"path/filepath"
@@ -945,6 +946,52 @@ func TestRequireManifest(t *testing.T) {
 			}
 			if tt.wantErr && rec.Context["cause"] == "" {
 				t.Fatalf("record = %+v, want the cause named", rec)
+			}
+		})
+	}
+}
+
+func TestDeployConfigFiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		snapshot   bool
+		wantPinned bool
+		wantRecord string
+	}{
+		{name: "a build that snapshotted its config is pinned to it", snapshot: true, wantPinned: true,
+			wantRecord: "this daemon reads its own repository's deploy config from its build's snapshot"},
+		{name: "a build with no snapshot reads every checkout's own file", snapshot: false,
+			wantRecord: "this build carries no snapshot of its repository's deploy config; every repository's config is read from its own checkout"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := t.TempDir()
+			root := filepath.Join(repo, "modules", "app", "agent-repl")
+			p := paths{Checkout: root, LifecycleSnapshot: filepath.Join(root, "daemon", "bin", "lifecycle.yaml")}
+			if tt.snapshot {
+				if err := os.MkdirAll(filepath.Dir(p.LifecycleSnapshot), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p.LifecycleSnapshot, []byte("{}\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			log := dlog.NewTestLogger()
+
+			// Act
+			files := deployConfigFiles(p, log)
+
+			// Assert
+			pinned, isPinned := files.(lifecycleconfig.Pinned)
+			if isPinned != tt.wantPinned {
+				t.Fatalf("files = %#v, want pinned %v", files, tt.wantPinned)
+			}
+			if isPinned && (pinned.Repository != repo || pinned.Snapshot != p.LifecycleSnapshot) {
+				t.Fatalf("pinned = %+v, want the repository %s and its snapshot", pinned, repo)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Message: tt.wantRecord}); !ok {
+				t.Fatalf("records = %+v, want %q", log.Records(), tt.wantRecord)
 			}
 		})
 	}

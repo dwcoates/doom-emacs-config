@@ -24,6 +24,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"agent-repld/internal/gitlayout"
 )
 
 // Rel is the config's path relative to a repository's main checkout root, as
@@ -81,6 +83,48 @@ func (OnDisk) Load(repoRoot string) (*repoconfigv1.LifecycleConfig, error) {
 		return nil, &InvalidError{Path: path, Detail: err.Error()}
 	}
 	return Parse(path, data)
+}
+
+// Pinned is the production Files of a daemon built with a snapshot of its own
+// repository's config (bin/build-frontend.sh snapshot_lifecycle_config): a
+// directory of that repository -- its main worktree or a linked worktree of
+// it -- reads the snapshot, and every other repository reads its own file
+// (Disk).
+//
+// A DAEMON ACTS ON THE CONFIG ITS OWN BUILD CARRIES. Read from the live
+// checkout, a landing that changed the config's schema broke the daemon
+// still serving before its replacement booted: on 2026-11-15 the 0.442
+// daemon refused every session start on the 0.443 deploy_checks field it
+// could not parse, and 49 workspaces lost their sessions. Read from its own
+// build, a schema change takes effect only in the daemon that understands it.
+type Pinned struct {
+	// Repository is the main worktree of the daemon's own repository.
+	Repository string
+	// Snapshot is the copy of Repository's config the daemon's build took.
+	Snapshot string
+	// Disk reads every other repository's config.
+	Disk Files
+}
+
+// Load implements Files.
+func (p Pinned) Load(dir string) (*repoconfigv1.LifecycleConfig, error) {
+	if !p.owns(dir) {
+		return p.Disk.Load(dir)
+	}
+	data, err := os.ReadFile(p.Snapshot)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, &MissingError{Path: p.Snapshot}
+	}
+	if err != nil {
+		return nil, &InvalidError{Path: p.Snapshot, Detail: err.Error()}
+	}
+	return Parse(p.Snapshot, data)
+}
+
+// owns reports whether DIR is a directory of the daemon's own repository.
+func (p Pinned) owns(dir string) bool {
+	dir = filepath.Clean(dir)
+	return dir == filepath.Clean(p.Repository) || gitlayout.LinkedWorktreeOf(dir, p.Repository) == nil
 }
 
 // Parse decodes and checks one config's bytes; path names it in refusals.

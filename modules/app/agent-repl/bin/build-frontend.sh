@@ -654,9 +654,24 @@ build_daemon() {
     ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" \
         -ldflags "-X agent-repld/internal/checkout.builtFrom=$ROOT" \
         -o "$DAEMON_ARTIFACT" ./cmd/agent-repld )
+    snapshot_lifecycle_config
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"
+}
+
+# snapshot_lifecycle_config — copy the repository's deploy config beside the
+# daemon binary, or remove a stale copy when the repository has none. The
+# daemon reads its own repository's config from this copy, never from the
+# live checkout, so a landing that changes the config's schema cannot break
+# the daemon still serving: only the daemon built with it acts on it.
+snapshot_lifecycle_config() {
+    local config="$WORKTREE_ROOT/$DEPLOY_STAMP_LIFECYCLE_CONFIG"
+    if [ -f "$config" ]; then
+        cp "$config" "$DAEMON_BIN/lifecycle.yaml"
+    else
+        rm -f "$DAEMON_BIN/lifecycle.yaml"
+    fi
 }
 
 # require_go_source_dirs MODULE_DIR — abort unless every directory a Go artifact

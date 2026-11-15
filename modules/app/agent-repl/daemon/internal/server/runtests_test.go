@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	testrunv1 "agentrepl/proto/testrun/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -899,5 +900,33 @@ func TestRunTestsGovernsEveryRunUnlessTheUserAsksForAnUngovernedOne(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// scriptConfig is a deploy config reader that answers one config naming
+// SCRIPT for every directory, and records each directory it was asked.
+type scriptConfig struct {
+	script string
+	asked  []string
+}
+
+func (c *scriptConfig) Load(dir string) (*repoconfigv1.LifecycleConfig, error) {
+	c.asked = append(c.asked, dir)
+	return &repoconfigv1.LifecycleConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{LocalMerge: &repoconfigv1.DeployLocalMerge{
+		Tests: &repoconfigv1.DeployLocalMergeTests{Kind: &repoconfigv1.DeployLocalMergeTests_AgentReplSuites{
+			AgentReplSuites: &repoconfigv1.DeployTestsAgentReplSuites{ScriptPath: c.script}}}}}}, nil
+}
+
+func TestATestRunReadsItsScriptThroughTheDeployConfigReader(t *testing.T) {
+	// Arrange
+	config := &scriptConfig{script: "bin/test-all.sh"}
+	s := &server{deps: Deps{DeployConfig: config}}
+
+	// Act
+	script, err := s.testScriptOf("/w/worktree")
+
+	// Assert
+	if err != nil || script != "bin/test-all.sh" || len(config.asked) != 1 || config.asked[0] != "/w/worktree" {
+		t.Fatalf("testScriptOf = (%q, %v), asked %v; want the reader's script for the worktree", script, err, config.asked)
 	}
 }
