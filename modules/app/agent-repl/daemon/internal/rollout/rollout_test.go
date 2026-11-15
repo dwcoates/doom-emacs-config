@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionlock"
 )
@@ -186,6 +187,59 @@ func TestASecondHandOverIsRefusedWhileOneIsInFlight(t *testing.T) {
 	}
 	if len(inFlight.WaitingOn) != 1 || inFlight.WaitingOn[0] != ws {
 		t.Fatalf("waiting on %v, want exactly %q", inFlight.WaitingOn, ws)
+	}
+}
+
+// A refused handover names only what the handover in flight transfers, never
+// a workspace this daemon adopted when it joined (2026-11-15: a refusal named
+// two closed workspaces the handover was not waiting on).
+func TestARefusedSecondHandOverNamesOnlyTheTransfersStillPending(t *testing.T) {
+	// Arrange: a busy workspace, and one this daemon adopted when it joined.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	h.c.mu.Lock()
+	h.c.rendezvous["ws-adopted-at-join"] = &entry{}
+	h.c.unlock()
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("first HandOver: %v", err)
+	}
+
+	// Act
+	_, err := h.c.HandOver(context.Background(), unforcedAsk)
+
+	// Assert
+	var inFlight *ErrAlreadyRollingOut
+	if !errors.As(err, &inFlight) || len(inFlight.WaitingOn) != 1 || inFlight.WaitingOn[0] != ws {
+		t.Fatalf("err = %v, want a refusal waiting on exactly %q", err, ws)
+	}
+}
+
+func TestAHeldTransferOfAFreeWorkspaceIsAnError(t *testing.T) {
+	tests := []struct {
+		name      string
+		free      bool
+		wantError bool
+	}{
+		{name: "a free holdout is held by something no transfer waits on", free: true, wantError: true},
+		{name: "a busy holdout waits on its work", free: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.freeness.SetFree(ws, tt.free)
+
+			// Act
+			h.c.reportHeldFreeTransfers([]string{string(ws)}, dlog.Context{})
+
+			// Assert
+			got := hasRecord(h, opHandover, "error", "free workspaces' transfers are still pending; a free workspace's transfer waits on nothing, so something holds it that never may")
+			if got != tt.wantError {
+				t.Fatalf("error recorded = %v, want %v", got, tt.wantError)
+			}
+		})
 	}
 }
 
