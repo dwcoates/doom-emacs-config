@@ -53,16 +53,22 @@ func runFetchLockHelper(path, git string, args []string) int {
 	os.Unsetenv(fetchLockEnv)
 	os.Unsetenv(fetchGitEnv)
 	if err := holdFetchLockAcrossExec(path); err != nil {
-		fmt.Fprintf(os.Stderr, "agent-repl fetch lock: taking %s: %v\n", path, err)
-		return fetchLockHelperFailed
+		return helperFailed("taking %s: %v", path, err)
 	}
 	resolved, err := exec.LookPath(git)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "agent-repl fetch lock: finding git %q: %v\n", git, err)
-		return fetchLockHelperFailed
+		return helperFailed("finding git %q: %v", git, err)
 	}
 	err = syscall.Exec(resolved, append([]string{git}, args...), os.Environ())
-	fmt.Fprintf(os.Stderr, "agent-repl fetch lock: exec %s: %v\n", resolved, err)
+	return helperFailed("exec %s: %v", resolved, err)
+}
+
+// helperFailed writes the helper's failure to its stderr and answers its
+// failed exit status. THE HELPER OPENS NO LOG SURFACE: it is the daemon's
+// child for one fetch, and the daemon records the stderr of a git that failed
+// in its own ERROR record (client.run), so stderr is the failure's one channel.
+func helperFailed(format string, args ...any) int {
+	fmt.Fprintf(os.Stderr, "agent-repl fetch lock: "+format+"\n", args...)
 	return fetchLockHelperFailed
 }
 
