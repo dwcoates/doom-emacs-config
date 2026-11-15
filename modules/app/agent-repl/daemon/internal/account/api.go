@@ -36,6 +36,19 @@ type Roots struct {
 	MultiRepoRoot string
 }
 
+// Validate refuses roots that leave a workspace without an account: the
+// account is DETERMINED by the workspace's path, so both config roots must be
+// named. An empty MultiRepoRoot is legal (every workspace routes to Default).
+func (r Roots) Validate() error {
+	if r.Default == "" {
+		return errors.New("account: Roots.Default is required (the account is determined, so every workspace must have an answer)")
+	}
+	if r.MultiRepo == "" {
+		return errors.New("account: Roots.MultiRepo is required (the account is determined, so every workspace must have an answer)")
+	}
+	return nil
+}
+
 // Account is what a config root says about who is signed in.
 type Account struct {
 	// ConfigDir is the root the facts came from.

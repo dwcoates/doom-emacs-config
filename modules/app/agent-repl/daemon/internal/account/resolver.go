@@ -35,11 +35,8 @@ func newResolver(roots Roots, log dlog.Logger) (*resolver, error) {
 	if log == nil {
 		return nil, errors.New("account: a logger is required")
 	}
-	if roots.Default == "" {
-		return nil, errors.New("account: Roots.Default is required (the account is determined, so every workspace must have an answer)")
-	}
-	if roots.MultiRepo == "" {
-		return nil, errors.New("account: Roots.MultiRepo is required (the account is determined, so every workspace must have an answer)")
+	if err := roots.Validate(); err != nil {
+		return nil, err
 	}
 	r := &resolver{roots: roots, log: log}
 	r.log.Debug("daemon.account.new", "account resolver built", dlog.Context{
