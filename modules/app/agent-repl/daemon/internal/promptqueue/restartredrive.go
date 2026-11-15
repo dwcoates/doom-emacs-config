@@ -116,6 +116,47 @@ func (q *queue) oweResumption(ctx context.Context, ws ids.WorkspaceID, turn ids.
 	log.Info(opResume, "the daemon's own stand-down cut the turn; the next session that serves the workspace resumes it", fields)
 }
 
+// oweRetry records the resumption a departure owes when it cut the shim's
+// vendor-error retry.
+//
+// A RETRY THE SHIM OWES LIVES ONLY IN THE SHIM (shim
+// engine/vendor-error-retry.ts): a failed turn's chain waits on a timer or on
+// the network, with no turn running, so neither a cut turn's close nor a
+// death under a turn records it. While it stands the shim states the session
+// busy, so no unforced bounce takes it; what takes it is the shim dying, this
+// daemon's own stand-down, or a bounce forced over the busy session. Each of
+// those cut work the user did not end, so the workspace is owed its
+// resumption exactly as a turn they cut is, and the next session that serves
+// it pays the debt with the same "continue" prompt (redriveOwedLocked).
+//
+// A DEPARTURE THE USER ORDERED (a kill or a stop with no stand-down or bounce
+// behind it) owes nothing: the user ended the session, and the retry with it.
+//
+// THE DEBT IS KEYED BY A MINTED ID, not a turn: the failed turn may have
+// closed under another daemon, and owed_resumptions references no turn row
+// (wsm.OweResumption), so nothing about the failed turn needs to be known
+// here.
+func (q *queue) oweRetry(ctx context.Context, ws ids.WorkspaceID, departed Watcher, departure sessionwatcher.Departure, bounced bool, log dlog.Logger) {
+	if !departed.RetryOwed() {
+		return
+	}
+	fields := dlog.Context{"ordered": departure.Ordered, "cause": string(departure.Cause), "bounced": bounced}
+	standingDown := q.deps.StandingDown()
+	if departure.Ordered && !standingDown && !bounced {
+		log.Info(opResume, "the session the user ended owed a vendor-error retry; it ends with the session and is not resumed", fields)
+		return
+	}
+	debt := wsm.NewTurnID()
+	fields["owed_as"] = string(debt)
+	fields["standing_down"] = standingDown
+	if err := q.deps.DB.OweResumption(ctx, ws, debt, q.deps.Now()); err != nil {
+		log.Error(opResume, "could not record the resumption a cut vendor-error retry owes; the failed turn will not be retried",
+			dlog.Merge(fields, dlog.Context{"cause": err.Error()}))
+		return
+	}
+	log.Info(opResume, "the departure cut the shim's owed vendor-error retry; the next session that serves the workspace resumes the failed turn", fields)
+}
+
 // resumeShimCrash answers how a turn its shim's death ended is closed.
 //
 // A SHIM THAT DIES UNDER A TURN CUT IT (owner ruling, 2026-10-30): the work

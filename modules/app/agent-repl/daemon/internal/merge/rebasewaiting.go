@@ -92,7 +92,7 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		o.deps.Log.Global().Error(op, "could not read the queue to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
 	}
-	paused, err := o.queueHeld(ctx, repo)
+	paused, err := o.speculationHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to rebase its waiting merges", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return
@@ -410,38 +410,58 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 }
 
 // standDownBackground gives back what a waiting member's rebase holds when
-// the daemon's exit cut it: the rebase standing in its worktree is aborted,
-// through the git client itself because the run's own gate is stopped.
+// the daemon's exit cut it: the rebase standing in its worktree is aborted
+// (abortStandingRebase), or left standing while its session's turn still
+// works there.
 func (r *run) standDownBackground(ctx context.Context) {
 	const op = "daemon.merge.rebase_waiting"
 	log := r.o.log(ctx, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID)}
+	if r.abortStandingRebase(ctx, op, fields) {
+		log.Info(op, "the daemon's exit cut a waiting merge's rebase; it was aborted, and the branch keeps its base", fields)
+	}
+	r.giveBack(ctx)
+}
+
+// abortStandingRebase aborts the rebase a run left standing in its worktree,
+// so the branch keeps its base, and reports whether one was aborted. It goes
+// through the git client itself, because the run's own gate is stopped by the
+// time a run is let go. A rebase the workspace's own turn still works under is
+// left standing, recorded at INFO, for the next run to clear
+// (clearLeftoverRebase). A rebase that cannot be read or aborted is recorded at
+// ERROR under OP with FIELDS, and left as git left it.
+func (r *run) abortStandingRebase(ctx context.Context, op string, fields dlog.Context) bool {
+	log := r.o.log(ctx, r.ws)
 	r.mu.Lock()
 	dir := r.subject.dir
 	r.mu.Unlock()
-	if dir != "" {
-		standing, err := r.o.deps.Git.RebaseInProgress(ctx, dir)
-		switch {
-		case err != nil:
-			log.Error(op, "could not read whether the cut rebase of a waiting merge stands; it is left as git left it", withField(fields, "error", err.Error()))
-		case standing && !r.o.deps.Freeness.Free(r.ws):
-			// THE MERGE NEVER ACTS ON A TREE ITS OWN TURN STILL WRITES: the
-			// conflict turn the rebase prompted runs on in the session
-			// (2026-11-15: an abort here reverted a worktree under the turn
-			// regenerating bindings in it). The rebase is left standing,
-			// and the next run clears it once it holds the free tree
-			// (clearLeftoverRebase).
-			log.Info(op, "the daemon's exit cut a waiting merge's rebase while its session's turn still works in the worktree; the rebase is left standing for the next run to clear once the turn ended",
-				withField(fields, "blockers", r.o.deps.Freeness.Blockers(r.ws)))
-		case standing:
-			if err := r.o.deps.Git.AbortRebase(ctx, dir); err != nil {
-				log.Error(op, "could not abort the cut rebase of a waiting merge; it is left as git left it", withField(fields, "error", err.Error()))
-			} else {
-				log.Info(op, "the daemon's exit cut a waiting merge's rebase; it was aborted, and the branch keeps its base", fields)
-			}
-		}
+	if dir == "" {
+		return false
 	}
-	r.giveBack(ctx)
+	standing, err := r.o.deps.Git.RebaseInProgress(ctx, dir)
+	if err != nil {
+		log.Error(op, "could not read whether a rebase stands in the merge's worktree; it is left as git left it", withField(withField(fields, "dir", dir), "error", err.Error()))
+		return false
+	}
+	if !standing {
+		return false
+	}
+	if !r.o.deps.Freeness.Free(r.ws) {
+		// THE MERGE NEVER ACTS ON A TREE ITS OWN TURN STILL WRITES: the
+		// conflict turn the rebase prompted runs on in the session
+		// (2026-11-15: an abort here reverted a worktree under the turn
+		// regenerating bindings in it). The rebase is left standing, and
+		// the next run clears it once it holds the free tree
+		// (clearLeftoverRebase).
+		log.Info(op, "a rebase stands in the merge's worktree while its session's turn still works there; the rebase is left standing for the next run to clear once the turn ended",
+			withField(withField(fields, "dir", dir), "blockers", r.o.deps.Freeness.Blockers(r.ws)))
+		return false
+	}
+	if err := r.o.deps.Git.AbortRebase(ctx, dir); err != nil {
+		log.Error(op, "could not abort the rebase standing in the merge's worktree; it is left as git left it", withField(withField(fields, "dir", dir), "error", err.Error()))
+		return false
+	}
+	return true
 }
 
 // clearLeftoverRebase aborts a rebase a cut background run left standing in

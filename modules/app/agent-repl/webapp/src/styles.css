@@ -99,9 +99,9 @@
      below step off it in the same grey. */
   /* A KNOWN SLASH COMMAND in a user prompt (src/feed/rows/known-commands.ts):
      the purple the Emacs composer marks it in while it is typed
-     (`agent-repl-command-completion-known`), deepened so it reads on the
-     prompt blue. */
-  --known-command: #7e22ce;
+     (`agent-repl-command-completion-known`), THE CANONICAL PURPLE, the purple
+     status --blocked (owner request, 2026-11-10; it was a lighter purple). */
+  --known-command: var(--blocked);
   /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S FILL (owner ruling,
      2026-10-11, "same color as the toolcard backgrounds"; the two drifted
      apart 2026-10-14 and 2026-10-24, and the owner asked on 2026-10-25 that
@@ -189,10 +189,9 @@
      draws (--compact-rule), which is what every button on the card offers. */
   --revival-gate-bg: #fcd34d;
   --revival-gate-border: #ea580c;
-  /* Tool card titles: matches the Emacs modeline "Agent Input" ai-title
-     purple (X11 medium purple); mid-lightness, so one shade reads fine
-     in both themes. */
-  --tool-title: #9370db;
+  /* Tool card titles: THE CANONICAL PURPLE, the purple status --blocked
+     (owner ruling, 2026-11-15: every purple in the feed is the one purple). */
+  --tool-title: var(--blocked);
   /* A tool card's input line, its header content (the Bash command, the Grep
      pattern): a medium-dark grey, clearly readable but quieter than the card's
      purple title (owner request, 2026-10-08; it was the --accent blue). One
@@ -215,11 +214,11 @@
   /* Textless-thinking progress indicator: orange, distinct from every other
      status color in the palette. */
   --thinking: #ea580c;
-  /* The retrying tail row's arc: purple, so the SDK auto-retrying a failed API
-     request reads as "network/infrastructure" — a third status hue distinct
-     from the interrupting alarm red ("stopping") and the working orange
-     ("working"). */
-  --retry: #8b5cf6;
+  /* The retrying tail row's arc: the canonical purple --blocked, so the SDK
+     auto-retrying a failed API request reads as "network/infrastructure",
+     distinct from the interrupting alarm red ("stopping") and the working
+     orange ("working"). */
+  --retry: var(--blocked);
   /* Topbar session datapoint values (parent workspace / model / tokens):
      the same green/cyan/amber light–dark pairs as the syntax palette. */
   --info-ws: #15803d;
@@ -231,9 +230,9 @@
   /* The "|" between the enduring usage line's allowances: the footer clock's
      blue, so the line's one non-figure mark reads as a divider. */
   --footer-rate-separator: var(--info-time);
-  /* The subagent roster chip: the --tool-title purple the tool cards title
+  /* The subagent roster chip: the canonical purple, as the tool cards title
      themselves with, since a subagent IS a tool call the session made. */
-  --info-agents: #7c3aed;
+  --info-agents: var(--blocked);
   /* The task roster chip: rose, kept clear of the subagent chip's violet so
      the two topbar counters never read as one datapoint at a glance. */
   --info-tasks: #be185d;
@@ -327,10 +326,8 @@
      unmistakable at a glance. */
   /* --async, the yellow status: render-colors.json#color_values (src/vocab.ts). */
   /* The vendor/account block: stopped until a human or the vendor acts.
-     Deliberately a MAGENTA-leaning purple rather than the violet --retry
-     (#8b5cf6) or --info-agents (#7c3aed): a retry is the system working and
-     a merged workspace is a settled success, so neither may be confusable
-     with a session that has stopped and will not restart on its own. */
+     The one purple, which --retry and --info-agents now share
+     (owner ruling, 2026-11-15). */
   /* --blocked, the purple status: render-colors.json#color_values (src/vocab.ts). */
   /* AskUserQuestion picker. Two tokens shape the "answer me" panel:
      --q-opt-bg lifts the option bubbles (and the question badge, which shares
@@ -601,8 +598,6 @@
     /* The Claude desktop app's prompt bubble (owner request, 2026-10-28), a
        touch brighter (2026-10-29). */
     --user: #292929;
-    /* A light purple, so a known command reads on the dark prompt blue. */
-    --known-command: #ca9dd9;
     /* A held prompt wears the prompt's own fill (owner request, 2026-10-28):
        its glimmer, not its fill, tells it apart. */
     --held-prompt-bg: var(--user);
@@ -4608,7 +4603,7 @@ html[data-page-unshown] {
    properties so the dark block below only has to restate the palette,
    not the selectors. */
 :root {
-  --hl-keyword: #9333ea;
+  --hl-keyword: var(--blocked);
   --hl-string: #15803d;
   --hl-number: #b45309;
   --hl-comment: #6b7280;
@@ -5994,7 +5989,7 @@ body.draining #composer-input::placeholder {
 .paint-ansi-fg-green { color: var(--ok); }
 .paint-ansi-fg-yellow { color: #b45309; }
 .paint-ansi-fg-blue { color: var(--accent); }
-.paint-ansi-fg-magenta { color: #a855f7; }
+.paint-ansi-fg-magenta { color: var(--blocked); }
 .paint-ansi-fg-cyan { color: #0891b2; }
 .paint-ansi-fg-white { color: var(--muted); }
 .paint-ansi-fg-bright-black { color: var(--muted); }
@@ -6002,7 +5997,7 @@ body.draining #composer-input::placeholder {
 .paint-ansi-fg-bright-green { color: #4ade80; }
 .paint-ansi-fg-bright-yellow { color: #fbbf24; }
 .paint-ansi-fg-bright-blue { color: #60a5fa; }
-.paint-ansi-fg-bright-magenta { color: #d8b4fe; }
+.paint-ansi-fg-bright-magenta { color: var(--blocked); }
 .paint-ansi-fg-bright-cyan { color: #22d3ee; }
 .paint-ansi-fg-bright-white { color: var(--fg); }
 
@@ -6013,7 +6008,7 @@ body.draining #composer-input::placeholder {
 .paint-ansi-bg-green { background: color-mix(in srgb, var(--ok) 25%, transparent); }
 .paint-ansi-bg-yellow { background: color-mix(in srgb, #fbbf24 30%, transparent); }
 .paint-ansi-bg-blue { background: color-mix(in srgb, var(--accent) 25%, transparent); }
-.paint-ansi-bg-magenta { background: color-mix(in srgb, #a855f7 25%, transparent); }
+.paint-ansi-bg-magenta { background: color-mix(in srgb, var(--blocked) 25%, transparent); }
 .paint-ansi-bg-cyan { background: color-mix(in srgb, #0891b2 25%, transparent); }
 .paint-ansi-bg-white { background: color-mix(in srgb, var(--fg) 12%, transparent); }
 .paint-ansi-bg-bright-black { background: color-mix(in srgb, var(--fg) 20%, transparent); }
@@ -6021,7 +6016,7 @@ body.draining #composer-input::placeholder {
 .paint-ansi-bg-bright-green { background: color-mix(in srgb, #4ade80 30%, transparent); }
 .paint-ansi-bg-bright-yellow { background: color-mix(in srgb, #fbbf24 40%, transparent); }
 .paint-ansi-bg-bright-blue { background: color-mix(in srgb, #60a5fa 30%, transparent); }
-.paint-ansi-bg-bright-magenta { background: color-mix(in srgb, #d8b4fe 30%, transparent); }
+.paint-ansi-bg-bright-magenta { background: color-mix(in srgb, var(--blocked) 30%, transparent); }
 .paint-ansi-bg-bright-cyan { background: color-mix(in srgb, #22d3ee 30%, transparent); }
 .paint-ansi-bg-bright-white { background: color-mix(in srgb, var(--fg) 18%, transparent); }
 

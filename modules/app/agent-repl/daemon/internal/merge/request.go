@@ -139,7 +139,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		// as itself, never asked for again (offqueue.go). Asked before the
 		// claim, which the merge workspace standing under the name would
 		// refuse as merely taken.
-		if err := o.refuseNameOffQueue(ctx, record, req.Detached.Name); err != nil {
+		if err := o.refuseNameOffQueue(ctx, record, o.deps.Names.MergeBranch(req.Detached.Name)); err != nil {
 			if _, refused := Refused(err); refused {
 				logRefusal(log, op, "refused an async merge whose name a merge off its queue holds", fields, err)
 			} else {
@@ -161,7 +161,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		releaseName = release
 		enqueued.MergeBranch = branch
 		source.Detach = wsm.NewDetachedMergeID()
-		source.DetachName = req.Detached.Name
+		// THE REQUEST CARRIES THE RESOLVED NAME, never the supplied one: the
+		// merge workspace stands under the resolved name (prefixed when a
+		// workspace prefix is set), so a name drawn, matched or reported
+		// before the fork is the name it stands under after it.
+		source.DetachName = branch
 		source.Pick = req.Detached.Pick
 		source.DetachMaker = req.Detached.Maker
 		source.DetachTargetMaker = req.Detached.IntoMaker
@@ -857,9 +861,13 @@ func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, re
 	if err != nil {
 		return "", err
 	}
+	// THE ANCHOR IS MATCHED AS SUPPLIED AND AS RESOLVED: a merge stands
+	// under its resolved name (prefixed when a workspace prefix is set), and
+	// the agent may name it either way.
+	resolved := o.deps.Names.MergeBranch(req.PlaceBehind)
 	var names []string
 	for _, member := range queue.Members {
-		if member.Name == req.PlaceBehind {
+		if member.Name == req.PlaceBehind || member.Name == resolved {
 			return member.Workspace, nil
 		}
 		names = append(names, member.Name)
@@ -873,7 +881,7 @@ func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, re
 		return "", err
 	}
 	for _, request := range pending {
-		if request.Repo == repo && request.Source.DetachName == req.PlaceBehind {
+		if request.Repo == repo && (request.Source.DetachName == req.PlaceBehind || request.Source.DetachName == resolved) {
 			return wsm.WorkspaceID(request.Source.Detach), nil
 		}
 		names = append(names, request.Source.DetachName)

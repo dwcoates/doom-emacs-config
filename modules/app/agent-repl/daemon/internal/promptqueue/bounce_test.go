@@ -2263,3 +2263,85 @@ func TestADrainEndingUnderAMergesLeaseDeliversOnlyTheMergesOwnBrief(t *testing.T
 		t.Fatalf("started = %v, want the merge's brief and not the user's prompt", started)
 	}
 }
+
+// drainedUnderAMerge starts a free replacement, holds a user prompt behind
+// its drain, and then stands a merge's lease over the workspace. With BRIEF,
+// the merge's own brief is submitted while the drain still runs: exempt from
+// the merge's lease, it is held by the drain's stamp alone.
+func drainedUnderAMerge(t *testing.T, h *harness, g *gate, brief bool) {
+	t.Helper()
+	startFreeReplacement(t, h, g)
+	if _, err := h.q.Submit(context.Background(), submission("t-user", "hello")); err != nil {
+		t.Fatalf("Submit the user's prompt: %v", err)
+	}
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+	if !brief {
+		return
+	}
+	sub := submission("t-brief", "repair the tests")
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR
+	got, err := h.q.Submit(context.Background(), sub)
+	if err != nil {
+		t.Fatalf("Submit the merge's brief: %v", err)
+	}
+	if got.Held == nil || *got.Held != wsm.HoldBuildRefresh {
+		t.Fatalf("the brief's disposition = %+v, want it held by the drain", got)
+	}
+}
+
+// THE 2026-10-26 22:17 DEADLOCK (governor-atomicfile-replace): the merge's
+// brief, stamped by a stale-build bounce's drain WHILE THAT DRAIN RAN, stayed
+// on the stamp once the drain ended under the merge's lease, so the merge
+// waited for its brief and the brief for the merge. However the replacement
+// ends, the drain's end unstamps what the lease exempts and delivers it; the
+// user's prompt keeps the drain's stamp for the lease's release.
+func TestADrainEndingUnderAMergeLeaseDeliversTheBriefItStampedWhileItRan(t *testing.T) {
+	tests := []struct {
+		name string
+		// outcome is how the replacement's run ends.
+		outcome error
+	}{
+		{name: "a replacement deferred behind the merge's lease", outcome: bounce.ErrDeferredBehindLease},
+		{name: "a replacement that finished under the merge's lease", outcome: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			g := newGate()
+			drainedUnderAMerge(t, h, g, true)
+
+			// Act
+			g.finish(h, tc.outcome)
+
+			// Assert
+			if started := h.sender.started(); len(started) != 1 || started[0] != "t-brief" {
+				t.Fatalf("started = %v, want the merge's own brief delivered", started)
+			}
+			if user := h.db.hold("t-user"); user.Hold == nil || *user.Hold != wsm.HoldBuildRefresh {
+				t.Fatalf("the user's hold = %v, want the drain's stamp kept for the lease's release", user.Hold)
+			}
+		})
+	}
+}
+
+func TestADrainEndingUnderAMergeLeaseWithNoBriefOfItsOwnDeliversNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	drainedUnderAMerge(t, h, g, false)
+
+	// Act
+	g.finish(h, bounce.ErrDeferredBehindLease)
+
+	// Assert
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing delivered under the merge's lease", started)
+	}
+	if user := h.db.hold("t-user"); user.Hold == nil || *user.Hold != wsm.HoldBuildRefresh {
+		t.Fatalf("the user's hold = %v, want the drain's stamp kept for the lease's release", user.Hold)
+	}
+	if !logged(h.log.Records(), "debug", opBounce, "a holding lease still stands; its release delivers what the drain held that it does not exempt") {
+		t.Fatalf("records = %+v, want the standing lease recorded", h.log.Records())
+	}
+}

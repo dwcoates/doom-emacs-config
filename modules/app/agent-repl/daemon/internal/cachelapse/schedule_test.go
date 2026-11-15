@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -803,5 +804,117 @@ func TestScheduleTimesTheBeatFromTheConfiguredInterval(t *testing.T) {
 	// Assert
 	if got, want := h.keeper.beats[theWorkspace], now.Add(100*time.Millisecond); !got.Equal(want) {
 		t.Fatalf("beat = %v, want %v", got, want)
+	}
+}
+
+// owesNoneRecords are the keeper's records of a workspace owing no beat, or
+// owing beats again, at LEVEL.
+func (h *harness) owesNoneRecords(level, message string) []dlog.Record {
+	return dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: level, Operation: opDrive, Message: message})
+}
+
+const (
+	owesNoneMessage  = "the workspace owes no keep-alive"
+	owesAgainMessage = "the workspace owes keep-alives again"
+	noSessionWhy     = "it has no session"
+	coldGateWhy      = "its session stands at the cold gate"
+)
+
+func TestTheOwesNoKeepaliveDecisionIsRecordedAtInfoWhenItChanges(t *testing.T) {
+	tests := []struct {
+		name      string
+		steps     []func(h *harness)
+		wantInfo  []string
+		wantDebug int
+	}{
+		{name: "a first decision is recorded at info", steps: []func(h *harness){
+			func(h *harness) { delete(h.db.sessions, theWorkspace) },
+		}, wantInfo: []string{noSessionWhy}},
+		{name: "the same decision again is recorded at debug only", steps: []func(h *harness){
+			func(h *harness) { delete(h.db.sessions, theWorkspace) },
+			func(h *harness) {},
+		}, wantInfo: []string{noSessionWhy}, wantDebug: 1},
+		{name: "a changed reason is recorded at info again", steps: []func(h *harness){
+			func(h *harness) { h.gate = coldLapsed() },
+			func(h *harness) { h.gate = nil; delete(h.db.sessions, theWorkspace) },
+		}, wantInfo: []string{coldGateWhy, noSessionWhy}},
+		{name: "the same reason after beats were owed again is recorded at info", steps: []func(h *harness){
+			func(h *harness) { h.gate = coldLapsed() },
+			func(h *harness) { h.gate = nil },
+			func(h *harness) { h.gate = coldLapsed() },
+		}, wantInfo: []string{coldGateWhy, coldGateWhy}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, beatable(visible(), 10*time.Minute))
+
+			// Act
+			for _, step := range tt.steps {
+				step(h)
+				h.keeper.schedule(context.Background(), theWorkspace, "test")
+			}
+
+			// Assert
+			var got []string
+			for _, rec := range h.owesNoneRecords("info", owesNoneMessage) {
+				if rec.Context["workspace"] != string(theWorkspace) {
+					t.Fatalf("record context = %v, want the workspace", rec.Context)
+				}
+				got = append(got, fmt.Sprint(rec.Context["why"]))
+			}
+			if !slices.Equal(got, tt.wantInfo) {
+				t.Fatalf("info decisions = %q, want %q", got, tt.wantInfo)
+			}
+			if debug := len(h.owesNoneRecords("debug", owesNoneMessage)); debug != tt.wantDebug {
+				t.Fatalf("debug decisions = %d, want %d", debug, tt.wantDebug)
+			}
+		})
+	}
+}
+
+func TestOwingKeepalivesAgainIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.gate = coldLapsed()
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+	h.gate = nil
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	again := h.owesNoneRecords("info", owesAgainMessage)
+	if len(again) != 1 || again[0].Context["owed_none_because"] != coldGateWhy {
+		t.Fatalf("records = %+v, want one naming the decision it ended", again)
+	}
+}
+
+func TestAWorkspaceThatOwedBeatsAllAlongRecordsNoChange(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if again := h.owesNoneRecords("info", owesAgainMessage); len(again) != 0 {
+		t.Fatalf("records = %+v, want none", again)
+	}
+}
+
+func TestAnUnregisteredWorkspaceForgetsItsDecision(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	delete(h.db.sessions, theWorkspace)
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+	delete(h.db.records, theWorkspace)
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, kept := h.keeper.noBeat[theWorkspace]; kept {
+		t.Fatal("an unregistered workspace's decision was kept")
 	}
 }

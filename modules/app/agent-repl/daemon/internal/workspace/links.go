@@ -171,11 +171,7 @@ func (v *verbs) RunInTerminal(ctx context.Context, ws ids.WorkspaceID, target *a
 
 // within reports whether path is the directory itself or lives beneath it.
 func within(dir, path string) bool {
-	dir = filepath.Clean(dir)
-	if path == dir {
-		return true
-	}
-	return strings.HasPrefix(path, dir+string(filepath.Separator))
+	return dirpath.Within(path, filepath.Clean(dir))
 }
 
 // BriefLinkUnresolved is the question a feed link that resolved to no file

@@ -3,6 +3,7 @@ package merge
 import (
 	"agent-repld/internal/wsm"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -858,4 +859,48 @@ func TestUngovernedTestArgvRunsTheCommandUngovernedAtNicenessOne(t *testing.T) {
 	if command[0] != "env" || len(command) != 4 {
 		t.Fatalf("the command handed in was changed: %q", command)
 	}
+}
+
+// TestAMergeJoiningTheChainIsAdmittedUnderTheLineLock pins where a chain
+// member's admission is written: inside extendOnce, under the line lock, as
+// admitFront writes a head's. Written later, by its run, the member stood
+// waiting in the store meanwhile, and a move, a prioritize or a dequeue in
+// that gap read it as waiting.
+func TestAMergeJoiningTheChainIsAdmittedUnderTheLineLock(t *testing.T) {
+	// Arrange: ws-a heads its chain; ws-b waits in line behind it.
+	behindEntry := queuedEntry("ws-b")
+	behindEntry.EnqueuedAt = time.UnixMilli(1)
+	behindEntry.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a"), behindEntry})
+	standChain(t, h, []ids.WorkspaceID{"ws-a"}, "")
+	underLine := make(chan bool, 1)
+	h.db.onAdmit = func(ws wsm.WorkspaceID) {
+		line := h.o.lineLock(h.repoKey())
+		free := line.TryLock()
+		if free {
+			line.Unlock()
+		}
+		underLine <- !free
+	}
+
+	// Act.
+	h.o.extendOnce(context.Background(), h.repoKey())
+
+	// Assert: the admission was written while the line was held, and stands
+	// in the store once extendOnce returns.
+	if held := receiveWithin(t, underLine, "the chain member's admission"); !held {
+		t.Fatal("the chain member was admitted outside the line lock")
+	}
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), "ws-b")
+	if err != nil || entry.State != wsm.MergeAdmitted {
+		t.Fatalf("ws-b = %+v, %v; want it admitted when extendOnce returns", entry, err)
+	}
+	h.o.mu.Lock()
+	joined := h.o.chains[h.repoKey()]
+	h.o.mu.Unlock()
+	if len(joined) != 2 {
+		t.Fatalf("chain = %d members, want ws-b joined behind ws-a", len(joined))
+	}
+	joined[1].cancel(errors.New("the test is over"))
+	receiveWithin(t, (<-chan struct{})(joined[1].finished), "the chain member's run ending")
 }

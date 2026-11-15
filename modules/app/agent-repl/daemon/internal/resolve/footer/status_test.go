@@ -1737,6 +1737,8 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 			func(m *frontendv1.FooterStatusMerging) bool {
 				return m.GetEnqueued().GetPlace() == 2 && m.GetEnqueued().GetWaiting() == 5
 			}},
+		{"finishing", MergeFacts{State: "merging", Step: StepFinishing},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetFinishing() != nil }},
 		{"pre-deploy", MergeFacts{State: "merging", Step: StepPreDeploy},
 			func(m *frontendv1.FooterStatusMerging) bool { return m.GetPreDeploy() != nil }},
 		{"rebasing carries its progress", MergeFacts{State: "merging", Step: StepRebasing, Replayed: 3, Total: 7},
@@ -1980,6 +1982,7 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 		want string
 	}{
 		{StepAwaitingFree, "waiting for the workspace to be free"},
+		{StepFinishing, "finishing"},
 		{StepEnqueued, "enqueued"},
 		{StepPreDeploy, "pre-deploy"},
 		{StepRebasing, "rebasing"},

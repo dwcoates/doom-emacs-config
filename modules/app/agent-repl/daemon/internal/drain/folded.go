@@ -4,8 +4,10 @@ import (
 	"context"
 	"time"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // opFolded is the operation a folded workspace's wait records under.
@@ -61,4 +63,57 @@ func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 		c.log.Info(opFolded, "a folded workspace's delay is over; its stand-down is asked for", fields)
 		c.StandDownWithheld(ws)
 	})
+}
+
+// A FOLD'S WAIT OUTLIVES THE DAEMON THAT STARTED IT. The wait above, and a
+// stand-down it handed the withheld path that a busy turn holds back, live in
+// this process's memory alone, so a restart or a handover lost every one of
+// them and a folded session ran on until the idle sweep's cutoff (2026-10-30).
+// The fold itself is durable (the arrangement), so the daemon that comes to
+// own the workspaces derives the pending stand-downs from it again rather than
+// persisting a timer: every open, unspared workspace a fold withholds whose
+// session is still up waits the fold's delay afresh from here.
+
+// ResumeFolded starts the fold's wait for every running session a fold
+// withholds. It is the daemon's call once it owns every workspace it serves:
+// a fresh boot's settle and a successor's takeover (rollout.Deps.ServingSettled).
+// A read that fails is recorded at ERROR and resumes nothing; the next
+// collapse asks afresh. A read cut by this daemon's context ending (its exit
+// cancels the serving context under the settle) is recorded at DEBUG
+// (readFailed): nobody is left to resume anything for.
+func (c *controller) ResumeFolded(ctx context.Context) {
+	log := c.log
+	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		readFailed(log, opFolded, "could not list the workspaces to resume the folds' stand-downs; none is resumed",
+			"the workspaces' list for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		return
+	}
+	folded, err := bringup.Folds(ctx, c.deps.DB, log)
+	if err != nil {
+		readFailed(log, opFolded, "could not read the folds to resume their stand-downs; none is resumed",
+			"the folds' read for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		return
+	}
+	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
+	if err != nil {
+		readFailed(log, opFolded, "could not read the sessions to resume the folds' stand-downs; none is resumed",
+			"the sessions' read for the folds' stand-downs ended with this daemon's context; none is resumed", nil, err)
+		return
+	}
+	resumed, spared := []string{}, map[string]string{}
+	for _, ws := range workspaces {
+		session, found := sessions[ws.ID]
+		if !folded[ws.ID] || ws.Closed || !found || session.Terminal != nil {
+			continue
+		}
+		if spare, ok := ws.FoldSpare(); ok {
+			spared[string(ws.ID)] = string(spare)
+			continue
+		}
+		resumed = append(resumed, string(ws.ID))
+		c.StandDownFolded(ws.ID)
+	}
+	log.Info(opFolded, "resumed the folds' stand-downs for the running sessions they withhold",
+		dlog.Context{"resumed": resumed, "spared": spared})
 }

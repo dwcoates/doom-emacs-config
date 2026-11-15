@@ -73,12 +73,17 @@ type verbs struct {
 	worktreeBound time.Duration
 
 	// selection serializes Select's selection section — the store's write
-	// through the roster push — and EVERY WHOLE REGISTRY READ AND ITS INSTALL
+	// through the roster push — and EVERY WHOLE REGISTRY INSTALL
 	// (installRegistry), so two concurrent selects land whole, one after the
 	// other, a registry read before a select's write is never installed after
 	// that select's push, and WSM's current and the roster's selection can
-	// never be left naming different workspaces.
+	// never be left naming different workspaces. The registry READ is not
+	// made under it: selectEpoch tells an install whether a select landed
+	// while it read.
 	selection sync.Mutex
+	// selectEpoch counts every selection this daemon has written or followed;
+	// guarded by selection.
+	selectEpoch uint64
 	// mintSelection mints each select's id (wsm.NewSelectionID).
 	mintSelection func() string
 	// names are the workspace names claimed in this process (mergenames.go).
@@ -148,35 +153,61 @@ func (v *verbs) owned(ctx context.Context, rpc string, ws ids.WorkspaceID) (wsm.
 
 // republishRegistry re-renders the roster from WSM. Every verb that changes a
 // durable registry fact calls it, which is what keeps the roster from needing
-// its own copy of the registry.
+// its own copy of the registry. A read that fails was recorded by
+// readRegistry and installs nothing.
 func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operation string) {
-	v.installRegistry(ctx, log, operation, func(reg sidebar.Registry) {
+	_ = v.installRegistry(ctx, log, operation, func(reg sidebar.Registry) {
 		v.deps.Sidebar.SetRegistry(reg)
 		logRepublished(log, operation, reg)
 	})
 }
 
 // installRegistry reads the roster's registry from WSM and hands it to
-// INSTALL, the read and the install together under the selection lock: a
-// select's store write and roster push (selectCurrent) take the same lock,
-// so a registry read before a select's write can never be installed after
-// it, putting the selection it left back on the roster. Every whole registry
-// install goes through here. A read that fails is recorded by readRegistry
-// and installs nothing.
-func (v *verbs) installRegistry(ctx context.Context, log dlog.Logger, operation string, install func(sidebar.Registry)) {
-	v.selection.Lock()
-	defer v.selection.Unlock()
-	reg, ok := v.readRegistry(ctx, log, operation)
-	if !ok {
-		return
+// INSTALL. Every whole registry install goes through here. A read that fails
+// is recorded by readRegistry, installs nothing, and is returned.
+//
+// THE READ HOLDS NO LOCK; THE INSTALL HOLDS THE SELECTION LOCK. The read
+// walks every workspace row and its sessions (15-230ms with 86 tabs, on the
+// store's one connection, 2026-11-09), and a select made meanwhile used to
+// wait behind it. A select's store write and roster push (selectCurrent)
+// take the selection lock and count the selection (selectEpoch), so an
+// install finds, under that lock, whether a select landed after its read
+// began. A read that did is never installed, since it may predate that
+// select's write and would put the selection it left back on the roster: it
+// is taken again, and only a read no select overtook is installed.
+func (v *verbs) installRegistry(ctx context.Context, log dlog.Logger, operation string, install func(sidebar.Registry)) error {
+	for {
+		v.selection.Lock()
+		epoch := v.selectEpoch
+		v.selection.Unlock()
+		reg, err := v.readRegistry(ctx, log, operation)
+		if err != nil {
+			return err
+		}
+		v.selection.Lock()
+		if v.selectEpoch == epoch {
+			install(reg)
+			v.selection.Unlock()
+			return nil
+		}
+		overtaken := v.selectEpoch
+		v.selection.Unlock()
+		log.Debug(operation, "a select landed while the registry was read, so the read may predate its selection; it is taken again", dlog.Context{
+			"read_from_epoch": epoch, "select_epoch": overtaken,
+		})
 	}
-	install(reg)
+}
+
+// selected counts a selection this daemon wrote or followed (selectEpoch).
+// Caller holds the selection lock.
+func (v *verbs) selected() {
+	v.selectEpoch++
 }
 
 // readRegistry reads the roster's registry from WSM. A read that fails is
-// recorded here and answers false; a cancelled context is this daemon going
-// away and is recorded at info.
-func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation string) (sidebar.Registry, bool) {
+// recorded here and returned; a cancelled context is this daemon going away
+// and is recorded at info.
+func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation string) (sidebar.Registry, error) {
 	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
 		// A CANCELLED CONTEXT IS THIS DAEMON GOING AWAY, not a read that
@@ -186,29 +217,29 @@ func (v *verbs) readRegistry(ctx context.Context, log dlog.Logger, operation str
 		// own read, which has always answered a cancellation at info.
 		ctxend.Log(err, log.Info, log.Error, operation, "the roster read ended when its context was cancelled",
 			"could not read the workspaces, repositories and subsections for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
+		return sidebar.Registry{}, fmt.Errorf("read the arrangement: %w", err)
 	}
 	tasks, err := v.deps.DB.Tasks(ctx)
 	if err != nil {
 		log.Error(operation, "could not list the tasks for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
+		return sidebar.Registry{}, fmt.Errorf("list the tasks: %w", err)
 	}
 	current, err := v.deps.DB.Current(ctx)
 	if err != nil {
 		log.Error(operation, "could not read the current workspace for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
+		return sidebar.Registry{}, fmt.Errorf("read the current workspace: %w", err)
 	}
 	view, err := v.deps.DB.SidebarView(ctx)
 	if err != nil {
 		log.Error(operation, "could not read the sidebar's view state for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
+		return sidebar.Registry{}, fmt.Errorf("read the sidebar's view state: %w", err)
 	}
 	sessions, err := sessionRecords(ctx, v.deps.DB, arrangement.Workspaces)
 	if err != nil {
 		log.Error(operation, "could not read the session records for the roster", dlog.Context{"cause": err.Error()})
-		return sidebar.Registry{}, false
+		return sidebar.Registry{}, fmt.Errorf("read the session records: %w", err)
 	}
-	return sidebarRegistry(log, arrangement, tasks, sessions, current, view), true
+	return sidebarRegistry(log, arrangement, tasks, sessions, current, view), nil
 }
 
 // logRepublished records a registry republish.

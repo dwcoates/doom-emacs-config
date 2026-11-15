@@ -89,6 +89,12 @@ const (
 	testrunSuite = "testrun"
 	// worktreesLibHarness greps every .claude shell script.
 	worktreesLibHarness = "worktrees-lib-harness"
+	// shellcheck lints every shell script of the module and of the
+	// repository's hooks, .claude scripts and bin/ (bin/shellcheck.sh).
+	shellcheck = "shellcheck"
+	// byteCompile byte-compiles lisp/'s sources under bin/compile-prelude.el
+	// (bin/byte-compile.sh).
+	byteCompile = "byte-compile"
 	// repoScans reads every system's go.mod, Vitest imports, integration
 	// sources and Go sources, and checks this selection and the proto helpers'
 	// call sites against them (daemon/reposcans): a change to any system can
@@ -105,6 +111,9 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "testrun/", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/test-all.sh", Full: true},
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh", Full: true},
+	// The byte-compile gate and its prelude: the gate, and the harnesses.
+	{Kind: matchExact, Path: moduleRoot + "bin/byte-compile.sh", Suites: append(append([]string(nil), scriptHarnessSuites...), byteCompile, repoScans)},
+	{Kind: matchExact, Path: moduleRoot + "bin/compile-prelude.el", Suites: append(append([]string(nil), scriptHarnessSuites...), byteCompile, repoScans)},
 	// repo-scans reads the Go sources here too.
 	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: append(append([]string(nil), scriptHarnessSuites...), repoScans)},
 
@@ -131,7 +140,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e-kit", "e2e", repoScans}},
 	// The sidecar's mocked vendor IS the shim's fake mode, built from this tree,
 	// and e2e-kit's scenario matrix reads its scenarios and its AGENTS.md.
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e-kit", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "sidecar", "e2e-kit", "e2e", repoScans, shellcheck}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e", repoScans}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e", repoScans}},
 	// zettel, the knowledge graph service: its own suite.
@@ -151,7 +160,7 @@ var suiteRules = []suiteRule{
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves
 	// that parse, and the scans that read the Go binding's go.mod. Each later
 	// consumer joins this list as it starts parsing with them.
-	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e-kit", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "tree-sitter-tldr/", Suites: []string{"tree-sitter-tldr", "daemon", "e2e-kit", "e2e", repoScans, shellcheck}},
 
 	// The wire contract every producer and consumer is generated from, and the
 	// Go helpers beside it: every system and suite reads it, so every suite
@@ -177,7 +186,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt-merge-queue.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt-queue-bypass.md", Suites: []string{"shim", "sidecar", "e2e"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-deploy-mediator.md", Suites: []string{"shim", "sidecar", "e2e"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt-deploy-intake.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three
@@ -187,39 +196,41 @@ var suiteRules = []suiteRule{
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert"}},
 	// The repo scans read the wire decoders against the schema
 	// (reposcans/wire_decoders_test.go).
-	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", byteCompile, repoScans}},
 
 	// OUTSIDE THE MODULE, the paths a roster harness reads select exactly the
 	// suites that read them (roster.Suites spells them with a leading "/").
+	// The shellcheck gate lints every script under these three roots
+	// (roster.ShellcheckRoots), so each rule selects it too.
 	// The hooks: each its own harness; the installer copies the pre-commit
 	// hook; the background harness scans every hook; testrun's roster-coverage
 	// test globs the hooks' test scripts.
-	{Kind: matchExact, Path: ".githooks/pre-commit", Suites: []string{"precommit-harness", "install-harness", backgroundHarness}},
-	{Kind: matchExact, Path: ".githooks/test-pre-commit.sh", Suites: []string{"precommit-harness", backgroundHarness, testrunSuite}},
-	{Kind: matchExact, Path: ".githooks/reference-transaction", Suites: []string{"merge-queue-hook-harness", backgroundHarness}},
-	{Kind: matchExact, Path: ".githooks/test-reference-transaction.sh", Suites: []string{"merge-queue-hook-harness", backgroundHarness, testrunSuite}},
+	{Kind: matchExact, Path: ".githooks/pre-commit", Suites: []string{"precommit-harness", "install-harness", backgroundHarness, shellcheck}},
+	{Kind: matchExact, Path: ".githooks/test-pre-commit.sh", Suites: []string{"precommit-harness", backgroundHarness, testrunSuite, shellcheck}},
+	{Kind: matchExact, Path: ".githooks/reference-transaction", Suites: []string{"merge-queue-hook-harness", backgroundHarness, shellcheck}},
+	{Kind: matchExact, Path: ".githooks/test-reference-transaction.sh", Suites: []string{"merge-queue-hook-harness", backgroundHarness, testrunSuite, shellcheck}},
 	// push-release.sh sources the pre-push hook for its version lookup.
-	{Kind: matchExact, Path: ".githooks/pre-push", Suites: []string{"release-tag-hook-harness", "push-release-harness", backgroundHarness}},
-	{Kind: matchExact, Path: ".githooks/test-pre-push.sh", Suites: []string{"release-tag-hook-harness", backgroundHarness, testrunSuite}},
-	{Kind: matchSubtree, Path: ".githooks/", Suites: []string{backgroundHarness, testrunSuite}},
+	{Kind: matchExact, Path: ".githooks/pre-push", Suites: []string{"release-tag-hook-harness", "push-release-harness", backgroundHarness, shellcheck}},
+	{Kind: matchExact, Path: ".githooks/test-pre-push.sh", Suites: []string{"release-tag-hook-harness", backgroundHarness, testrunSuite, shellcheck}},
+	{Kind: matchSubtree, Path: ".githooks/", Suites: []string{backgroundHarness, testrunSuite, shellcheck}},
 	// The .claude scripts: the safe test runner and the installer each have
 	// their harness; the background harness scans the top-level scripts, the
 	// worktrees library's harness greps every one, and testrun's
 	// roster-coverage test walks .claude for test scripts.
-	{Kind: matchExact, Path: ".claude/safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness}},
-	{Kind: matchExact, Path: ".claude/test-safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness, testrunSuite}},
-	{Kind: matchExact, Path: ".claude/install.sh", Suites: []string{"install-harness", backgroundHarness, worktreesLibHarness}},
-	{Kind: matchExact, Path: ".claude/test-install.sh", Suites: []string{"install-harness", backgroundHarness, worktreesLibHarness, testrunSuite}},
-	{Kind: matchDirFile, Path: ".claude/", Suffix: ".sh", Suites: []string{backgroundHarness, worktreesLibHarness, testrunSuite}},
-	{Kind: matchSubtreeFile, Path: ".claude/", Suffix: ".sh", Suites: []string{worktreesLibHarness, testrunSuite}},
+	{Kind: matchExact, Path: ".claude/safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness, shellcheck}},
+	{Kind: matchExact, Path: ".claude/test-safe-test-run.sh", Suites: []string{"safe-test-run-harness", backgroundHarness, worktreesLibHarness, testrunSuite, shellcheck}},
+	{Kind: matchExact, Path: ".claude/install.sh", Suites: []string{"install-harness", backgroundHarness, worktreesLibHarness, shellcheck}},
+	{Kind: matchExact, Path: ".claude/test-install.sh", Suites: []string{"install-harness", backgroundHarness, worktreesLibHarness, testrunSuite, shellcheck}},
+	{Kind: matchDirFile, Path: ".claude/", Suffix: ".sh", Suites: []string{backgroundHarness, worktreesLibHarness, testrunSuite, shellcheck}},
+	{Kind: matchSubtreeFile, Path: ".claude/", Suffix: ".sh", Suites: []string{worktreesLibHarness, testrunSuite, shellcheck}},
 	// The repository's bin/: the two workspace commands each have their
 	// harness; the background harness and testrun's roster-coverage test read
 	// its test scripts.
-	{Kind: matchExact, Path: "bin/agent_repl_workspace", Suites: []string{"workspace-cli-harness"}},
-	{Kind: matchExact, Path: "bin/test-agent_repl_workspace.sh", Suites: []string{"workspace-cli-harness", backgroundHarness, testrunSuite}},
-	{Kind: matchExact, Path: "bin/agent_repl_workspace_open", Suites: []string{"workspace-open-cli-harness"}},
-	{Kind: matchExact, Path: "bin/test-agent_repl_workspace_open.sh", Suites: []string{"workspace-open-cli-harness", backgroundHarness, testrunSuite}},
-	{Kind: matchSubtree, Path: "bin/", Suites: []string{backgroundHarness, testrunSuite}},
+	{Kind: matchExact, Path: "bin/agent_repl_workspace", Suites: []string{"workspace-cli-harness", shellcheck}},
+	{Kind: matchExact, Path: "bin/test-agent_repl_workspace.sh", Suites: []string{"workspace-cli-harness", backgroundHarness, testrunSuite, shellcheck}},
+	{Kind: matchExact, Path: "bin/agent_repl_workspace_open", Suites: []string{"workspace-open-cli-harness", shellcheck}},
+	{Kind: matchExact, Path: "bin/test-agent_repl_workspace_open.sh", Suites: []string{"workspace-open-cli-harness", backgroundHarness, testrunSuite, shellcheck}},
+	{Kind: matchSubtree, Path: "bin/", Suites: []string{backgroundHarness, testrunSuite, shellcheck}},
 }
 
 // maxReasonPaths bounds how many touched paths the recorded reason names before

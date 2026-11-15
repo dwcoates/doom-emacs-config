@@ -1238,6 +1238,51 @@ func TestRunASelectionRunsOnlyWhatItNames(t *testing.T) {
 	}
 }
 
+func TestRunAPlanOnlySelectionPlansAndRunsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	req := harnessSelection()
+	req.PlanOnly = true
+
+	// Act
+	code := h.run(t, "--selection", writeSelection(t, req))
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	if len(h.exec.ran) != 0 {
+		t.Fatalf("ran %v, want no unit run by a plan-only run", h.exec.ran)
+	}
+	evs := eventsOf(t, &stream)
+	if len(evs) != 2 || evs[0].GetPlanned() == nil || evs[1].GetEnded().GetPlanned().GetPlannedUnits() != int32(len(evs[0].GetPlanned().GetUnits())) {
+		t.Fatalf("events = %v, want planned, then ended planned naming every planned unit", evs)
+	}
+}
+
+func TestRunAPlanOnlySelectionFailsASuiteItCannotPlan(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, map[string]error{"orchestrator-harness": errors.New("listing exploded")})
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	req := harnessSelection()
+	req.PlanOnly = true
+
+	// Act
+	code := h.run(t, "--selection", writeSelection(t, req))
+
+	// Assert
+	evs := eventsOf(t, &stream)
+	if code != 1 || len(h.exec.ran) != 0 || evs[len(evs)-1].GetEnded().GetFailed().GetFailedUnits() != 1 {
+		t.Fatalf("exit = %d, ran %v, events = %v; want 1, nothing run, and ended failed for the unplanned suite", code, h.exec.ran, evs)
+	}
+	if !strings.Contains(h.errOut.String(), "orchestrator-harness could not be planned: listing exploded") {
+		t.Fatalf("stderr = %s, want the suite's planning failure logged", h.errOut)
+	}
+}
+
 func TestRunAFailingSelectionEndsFailed(t *testing.T) {
 	// Arrange
 	h := newHarness(t, map[string]int{"orchestrator-harness": 1}, nil)

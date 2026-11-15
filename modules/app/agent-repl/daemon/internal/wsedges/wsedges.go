@@ -120,6 +120,10 @@ func (h *Hub) QueueChanged(change merge.QueueChange) {
 	}
 }
 
+// Subscribed implements merge.QueueObserver: a queue subscription is no
+// workspace edge.
+func (h *Hub) Subscribed(ids.WorkspaceID, wsm.RepoKey, uint64) {}
+
 // ReportingEdges answers DB with the edges its writes make told to HUB.
 //
 // A CLOSE of an open workspace is told: every close path -- the user's close

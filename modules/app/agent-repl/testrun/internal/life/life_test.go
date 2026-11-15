@@ -373,7 +373,46 @@ func pipeRunner(t *testing.T, reapErr error) (*Runner, *os.File, *recLog) {
 		log:    log,
 		reap:   func(reap.Members) (reap.Result, error) { return reap.Result{}, reapErr },
 		warden: w,
+		now:    func() time.Time { return time.Unix(100, 0) },
 	}, r, log
+}
+
+func TestACutRunsFinishSaysHowLongAfterTheCutItReleased(t *testing.T) {
+	// Arrange: the lifeline's watcher saw the cut at 100s; Finish ends at 102.5s.
+	r, lifeline, log := pipeRunner(t, nil)
+	r.cutAt = time.Unix(100, 0)
+	r.now = func() time.Time { return time.Unix(102, 500_000_000) }
+	gone := make(chan struct{})
+	close(gone)
+
+	// Act.
+	r.Finish(0, gone, func() error { return nil })
+
+	// Assert.
+	if !has(log.errs, "it reaped its session 77 and released its disk 2.500s after the cut") {
+		t.Fatalf("errors = %q, want the cut's span", log.errs)
+	}
+	if _, _, err := wardenMessages(lifeline); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAFinishThatSeesTheCutFirstMeasuresFromItself(t *testing.T) {
+	// Arrange: no watcher marked the cut before Finish saw it.
+	r, lifeline, log := pipeRunner(t, nil)
+	gone := make(chan struct{})
+	close(gone)
+
+	// Act.
+	r.Finish(0, gone, func() error { return nil })
+
+	// Assert.
+	if !has(log.errs, "released its disk 0.000s after the cut") {
+		t.Fatalf("errors = %q, want a span measured from Finish's own sight of the cut", log.errs)
+	}
+	if _, _, err := wardenMessages(lifeline); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFinish(t *testing.T) {

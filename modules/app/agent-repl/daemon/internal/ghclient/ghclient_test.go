@@ -3,6 +3,7 @@ package ghclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -305,5 +306,76 @@ func TestAGraphQLErrorIsTheFailureItsTypeNames(t *testing.T) {
 				t.Fatalf("Failure = %+v, want %+v", *got, want)
 			}
 		})
+	}
+}
+
+func TestGhEnvironDropsEveryTokenVariable(t *testing.T) {
+	tests := []struct {
+		name    string
+		environ []string
+		want    []string
+	}{
+		{name: "GITHUB_TOKEN", environ: []string{"HOME=/h", "GITHUB_TOKEN=ghp_stale"}, want: []string{"HOME=/h"}},
+		{name: "GH_TOKEN", environ: []string{"GH_TOKEN=x", "PATH=/b"}, want: []string{"PATH=/b"}},
+		{name: "the enterprise tokens", environ: []string{"GH_ENTERPRISE_TOKEN=x", "GITHUB_ENTERPRISE_TOKEN=y"}, want: nil},
+		{name: "a name that only begins like one", environ: []string{"GITHUB_TOKEN_FILE=/f", "GH_TOKENS=z"}, want: []string{"GITHUB_TOKEN_FILE=/f", "GH_TOKENS=z"}},
+		{name: "no token", environ: []string{"HOME=/h"}, want: []string{"HOME=/h"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := ghEnviron(tt.environ)
+
+			// Assert
+			want := append(append([]string{}, tt.want...), "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_NO_UPDATE_NOTIFIER=1")
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("ghEnviron(%q) = %q, want %q", tt.environ, got, want)
+			}
+		})
+	}
+}
+
+func TestACallRunsGhWithoutTheDaemonsTokenVariable(t *testing.T) {
+	// Arrange
+	t.Setenv("GITHUB_TOKEN", "ghp_stale")
+	dir := t.TempDir()
+	seen := filepath.Join(dir, "seen")
+	bin := filepath.Join(dir, "gh")
+	script := "#!/bin/sh\nprintf '%s' \"${GITHUB_TOKEN-unset}\" > '" + seen + "'\nprintf 'HTTP/2.0 200 OK\\r\\n\\r\\n{}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := newClient(t, bin)
+
+	// Act
+	_, err := c.Get(context.Background(), "user", "")
+
+	// Assert
+	got, _ := os.ReadFile(seen)
+	if err != nil || string(got) != "unset" {
+		t.Fatalf("Get = %v; gh saw GITHUB_TOKEN %q, want it unset", err, got)
+	}
+}
+
+func TestNewRecordsATokenVariableInTheDaemonsEnvironmentByNameOnly(t *testing.T) {
+	// Arrange
+	t.Setenv("GITHUB_TOKEN", "ghp_stale")
+
+	// Act
+	_, log := newClient(t, "gh")
+
+	// Assert
+	recs := log.Records()
+	found := false
+	for _, r := range recs {
+		if r.Level == "info" && r.Operation == opClient {
+			found = reflect.DeepEqual(r.Context["variables"], []string{"GITHUB_TOKEN"})
+			if strings.Contains(r.Message+fmt.Sprint(r.Context), "ghp_stale") {
+				t.Fatalf("the record %+v carries the token's value", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("records = %+v, want one INFO naming GITHUB_TOKEN", recs)
 	}
 }

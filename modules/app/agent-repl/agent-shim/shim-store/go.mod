@@ -8,6 +8,7 @@ require (
 	agentrepl/protohelpers v0.0.0
 	agentrepl/testrun v0.0.0
 	connectrpc.com/connect v1.17.0
+	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.43.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.46.1
@@ -21,7 +22,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect

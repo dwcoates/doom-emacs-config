@@ -17592,15 +17592,30 @@ describe("the vendor-error retry", () => {
     expect(submitted.map((record) => record.context["prompt"])).toEqual([VENDOR_ERROR_RETRY_SOURCE.label]);
   });
 
-  it("makes the scheduled retry at once when the probe finds the API reachable again", async () => {
+  it("moves a retry waiting out its interval onto the network latch when the network fault opens", async () => {
+    // Arrange: the retry waits out its interval.
+    const h = harness();
+    await started(h);
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Act: a request fails below an answer, standing the network fault.
+    await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
+
+    // Assert
+    expect([h.retryScheduler.pendingTimeout(), (await replayedSchedule(h))?.stated.case]).toEqual([
+      undefined,
+      "awaitingNetwork",
+    ]);
+  });
+
+  it("makes the retry at once when the probe finds the API reachable again", async () => {
     // Arrange: the turn failed below an answer, standing the network fault
-    // and its probe loop, and the retry waits out its interval.
+    // and its probe loop, which moved the retry onto the latch.
     const delivered: string[] = [];
     const h = harness({ drainPrompts: delivered });
     await started(h);
     await failedTurn(h, "turn-1", [], OVERLOADED);
     await h.engine.onSdkMessage(errorResultMessage({ errors: ["TypeError: fetch failed"] }));
-    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(VENDOR_ERROR_RETRY_INTERVAL_MS);
 
     // Act: the API answers the loop's probe.
     h.networkScheduler.fire(0);
@@ -18550,6 +18565,9 @@ describe("the vendor's echoes of user messages", () => {
 /** The uuid a prompt typed on claude.ai runs under, in these tests. */
 const REMOTE = "00000000-0000-4000-8000-0000000000re";
 
+/** A prompt typed on claude.ai under a uuid of the vendor's own hex shape. */
+const REMOTE_HEX = "00000000-0000-4000-8000-00000000c1a1";
+
 /** The vendor's echo of a prompt typed on claude.ai, under `uuid`. */
 const remoteEcho = (text: string, uuid = REMOTE): SdkMessage =>
   ({
@@ -18743,6 +18761,43 @@ describe("a prompt typed on claude.ai", () => {
       { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "first" },
       { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "second", foldedInto: adoptedId },
     ]);
+  });
+
+  it("runs the turn it starts under its own record's uuid, the uuid its prompt is found by", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("run the tests", REMOTE_HEX));
+
+    // Act
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE_HEX));
+
+    // Assert
+    const adoptedId = h.persistence.buffered.find((entry) => entry.item.kind === "prompt")?.turn?.value;
+    expect([adoptedId, promptVendorUuid(adoptedId ?? "")]).toEqual([REMOTE_HEX, REMOTE_HEX]);
+  });
+
+  it("is rolled back past like a prompt sent here", async () => {
+    // Arrange: turn-0 and turn-1 sent here, then a prompt typed on claude.ai
+    // whose turn ran and ended, all on disk.
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("from the phone", REMOTE_HEX));
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a2"), REMOTE_HEX));
+    await h.engine.onSdkMessage(resultMessage());
+    const adoptedId = h.persistence.buffered.find((entry) => entry.item.kind === "prompt")?.turn?.value ?? "";
+    writeTranscript(h.configDir, h.cwd, freshSessionId((await untilQuery(h, 0)).spec), [
+      { type: "user", uuid: promptVendorUuid("turn-0"), parentUuid: null, message: { role: "user", content: "first" } },
+      { type: "assistant", uuid: "a0", parentUuid: promptVendorUuid("turn-0"), message: { role: "assistant", content: [] } },
+      { type: "user", uuid: promptVendorUuid("turn-1"), parentUuid: "a0", message: { role: "user", content: "second" } },
+      { type: "assistant", uuid: "a1", parentUuid: promptVendorUuid("turn-1"), message: { role: "assistant", content: [] } },
+      { type: "user", uuid: REMOTE_HEX, parentUuid: "a1", message: { role: "user", content: "from the phone" } },
+      { type: "assistant", uuid: "a2", parentUuid: REMOTE_HEX, message: { role: "assistant", content: [] } },
+    ]);
+
+    // Act
+    const response = await h.engine.rollBackSession(rollBackSessionRequestFor("turn-1", ["turn-1", adoptedId]));
+
+    // Assert
+    expect(response.result.case).toBe("success");
   });
 
   it("is adopted all the same, and said so at warn, when Remote Control is off here", async () => {
@@ -19097,7 +19152,8 @@ describe("HoldParkedBridge", () => {
 
     // Assert
     const inFlight = response.result.case === "success" ? response.result.value.session?.turnInFlight?.value : undefined;
-    expect(inFlight?.startsWith("adopted-")).toBe(true);
+    // The turn runs under the remote prompt's own uuid (mintAdoptedTurn).
+    expect(inFlight).toBe(REMOTE);
   });
 
   it("answers the pay StartSession with no turn in flight when no remote prompt started one", async () => {

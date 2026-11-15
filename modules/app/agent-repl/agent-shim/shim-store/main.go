@@ -168,6 +168,11 @@ func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot st
 		return err
 	}
 	defer joinClose(&err, database.Close)
+	// THE CROSS-SESSION MESSAGE COUNT is read from the database it counts, so
+	// it is served from the moment the database is open.
+	if err := registerPeerMessages(metricsSurface, database, log); err != nil {
+		return err
+	}
 
 	// THE LEDGER SWEEP RUNS FOR AS LONG AS THE STORE SERVES, AND STOPS BEFORE
 	// THE DATABASE CLOSES. Its defer is registered AFTER database.Close's, so

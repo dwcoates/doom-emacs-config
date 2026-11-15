@@ -68,7 +68,9 @@ message FinishWorkspaceRequest {
   // before the landing, so deploys reordered in the queue still produce
   // consecutive versions.
   optional MergeWorkspaceVersionIncrement version_increment = 3;
-  // Where the deploy joins its queue. REQUIRED.
+  // Where the deploy joins its queue. REQUIRED. A deploy remediation
+  // workspace's finish never joins the queue (FinishWorkspaceSuccess
+  // .landing_directly), so its placement is not read.
   MergeQueuePlacement placement = 4;
 }
 
@@ -80,8 +82,29 @@ message FinishWorkspaceResponse {
   }
 }
 
-// Enqueued; every visible effect arrives on the streams.
-message FinishWorkspaceSuccess {}
+// The finish was accepted; every visible effect arrives on the streams.
+message FinishWorkspaceSuccess {
+  // REQUIRED. How the workspace's work lands; the arm IS the path.
+  oneof landing {
+    // The deploy joined its repository's merge queue, at the placement
+    // asked for.
+    FinishWorkspaceSuccessQueued queued = 1;
+    // The workspace is a deploy remediation workspace
+    // (repoconfig.v1.LifecycleConfig.deploy_checks), whose work lands
+    // without the queue: the daemon runs the full test gate on its branch,
+    // and on a failure resumes this workspace with the failures to fix them
+    // and finish again; on a pass it lands the branch directly on the main
+    // branch and deploys, and the deploy is checked by the chain's intake.
+    // Each step is recorded before it runs, so the daemon that serves after
+    // the deploy carries on where it stood.
+    FinishWorkspaceSuccessLandingDirectly landing_directly = 2;
+  }
+}
+// Queued. No fields: the queue's notices say where it stands.
+message FinishWorkspaceSuccessQueued {}
+// Landing directly. No fields: the gate's outcome reaches the workspace as
+// a resumed turn on a failure, and the landing and deploy as notices.
+message FinishWorkspaceSuccessLandingDirectly {}
 
 // Why nothing was enqueued. Validation failures (unset field, blank string)
 // are Connect InvalidArgument, never an arm.

@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -334,16 +336,19 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 		paused    bool
 		mediation *merge.OwedMediation
 		want      string
-		wantRef   string
 	}{
-		{name: "a queue neither paused nor owing a mediation runs", want: "running"},
+		{name: "a queue neither paused nor owing a check runs", want: "running"},
 		{name: "a paused queue is paused", paused: true, want: "paused"},
-		{name: "a queue owing a mediation waits on its mediator", want: "mediating", wantRef: "ws-mediator",
-			mediation: &merge.OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator", Told: true}},
-		{name: "a queue owing a mediation whose mediator is not made yet names no workspace", want: "mediating",
-			mediation: &merge.OwedMediation{Name: "deploy-mediator"}},
-		{name: "a paused queue owing a mediation is paused", paused: true, want: "paused",
-			mediation: &merge.OwedMediation{Name: "deploy-mediator", Mediator: "ws-mediator"}},
+		{name: "a paused queue owing a check is paused", paused: true, want: "paused",
+			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
+		{name: "a chain's first deploy rolls out with no intake", want: "rolling_out: in a row 0",
+			mediation: &merge.OwedMediation{Stage: merge.CheckRollingOut}},
+		{name: "a later deploy rolls out with its chain's intake", want: "rolling_out ws-intake: in a row 1",
+			mediation: &merge.OwedMediation{Stage: merge.CheckRollingOut, Intake: "ws-intake", InARow: 1}},
+		{name: "an assessed deploy names its intake", want: "assessing ws-intake: in a row 0",
+			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
+		{name: "a fixed deploy names its remediation and intake", want: "fixing ws-remedy ws-intake: in a row 2",
+			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Intake: "ws-intake", Remediation: "ws-remedy", InARow: 2}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -355,20 +360,26 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 			advance := mergeQueueStatusOf(status).GetAdvance()
 
 			// Assert
-			var got, ref, name string
+			var got string
 			switch state := advance.GetState().(type) {
 			case *agentreplv1.MergeQueueStatusAdvance_Running:
 				got = "running"
 			case *agentreplv1.MergeQueueStatusAdvance_Paused:
 				got = "paused"
 			case *agentreplv1.MergeQueueStatusAdvance_Mediating:
-				got, ref, name = "mediating", state.Mediating.GetMediator().GetId(), state.Mediating.GetName()
+				m := state.Mediating
+				switch stage := m.GetStage().(type) {
+				case *agentreplv1.MergeQueueStatusAdvanceMediating_RollingOut:
+					got = strings.TrimSpace("rolling_out " + stage.RollingOut.GetIntake().GetId())
+				case *agentreplv1.MergeQueueStatusAdvanceMediating_Assessing:
+					got = "assessing " + stage.Assessing.GetIntake().GetId()
+				case *agentreplv1.MergeQueueStatusAdvanceMediating_Fixing:
+					got = "fixing " + stage.Fixing.GetRemediation().GetId() + " " + stage.Fixing.GetIntake().GetId()
+				}
+				got += fmt.Sprintf(": in a row %d", m.GetRemediationsInARow())
 			}
-			if got != tt.want || ref != tt.wantRef {
-				t.Fatalf("advance = %s naming %q, want %s naming %q", got, ref, tt.want, tt.wantRef)
-			}
-			if got == "mediating" && name != "deploy-mediator" {
-				t.Fatalf("mediating names %q, want the mediator's name", name)
+			if got != tt.want {
+				t.Fatalf("advance = %q, want %q", got, tt.want)
 			}
 		})
 	}

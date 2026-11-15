@@ -2410,9 +2410,15 @@ describe("a session reached from claude.ai (Remote Control)", () => {
     shim.store?.entryLanded((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes(needle)) ??
     Promise.reject(new Error("this shim has no store"));
 
-  /** Resolves once a turn the shim adopted closed. */
+  /**
+   * Resolves once a turn the shim adopted closed: one no StartTurn named
+   * (the tests send only `t1`) and no keep-alive. A turn a claude.ai prompt
+   * opened runs under that prompt's own uuid, so its id carries no prefix.
+   */
   const adoptedClosed = (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<unknown> =>
-    shim.log.record((record) => record.message === "closed a turn" && String(record.context.turn_id).startsWith("adopted-"));
+    shim.log.record(
+      (record) => record.message === "closed a turn" && record.context.turn_id !== "t1" && record.context.keepalive === false,
+    );
 
   test("a prompt typed on claude.ai is adopted as REMOTE_CONTROL, saying what was typed", async () => {
     const shim = await bridged();

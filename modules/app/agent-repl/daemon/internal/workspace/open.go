@@ -183,6 +183,22 @@ func (v *verbs) blockedClose(ctx context.Context, ws ids.WorkspaceID, ownTurn bo
 		blocked.MergeQueued = true
 		mergeState = facts.State
 	}
+	// THE QUEUE'S OWN ROW STANDS FOR THE MERGE TOO: a merge this daemon has
+	// published no facts for (one a pause suspended mid-step, one a restart
+	// or handover left on its queue) still holds its queue's line, and a
+	// workspace closed under it leaves the queue credited to a workspace whose
+	// session can no longer run the step (2026-10-27,
+	// remove-analyze-position-skill).
+	if !blocked.MergeQueued {
+		entry, standing, err := queuedMergeOf(ctx, v.deps.DB, ws)
+		if err != nil {
+			return nil, fmt.Errorf("read the merge queues: %w", err)
+		}
+		if standing {
+			blocked.MergeQueued = true
+			mergeState = entry.State.String() + " on its queue"
+		}
+	}
 
 	switch {
 	case blocked.TurnInFlight:
@@ -201,6 +217,23 @@ func (v *verbs) blockedClose(ctx context.Context, ws ids.WorkspaceID, ownTurn bo
 		return nil, nil
 	}
 	return &blocked, nil
+}
+
+// queuedMergeOf answers the merge queue entry WS's own merge holds on any
+// repository's queue, false when it holds none.
+func queuedMergeOf(ctx context.Context, db wsm.DB, ws ids.WorkspaceID) (wsm.MergeQueueEntry, bool, error) {
+	queues, err := db.AllMergeQueues(ctx)
+	if err != nil {
+		return wsm.MergeQueueEntry{}, false, err
+	}
+	for _, entries := range queues {
+		for _, entry := range entries {
+			if entry.Workspace == ws {
+				return entry, true, nil
+			}
+		}
+	}
+	return wsm.MergeQueueEntry{}, false, nil
 }
 
 // mergeIsPending reports whether a merge state still owes the workspace work.

@@ -154,7 +154,6 @@ message SetWorkspaceParentTransferringAway {
 }
 
 // A joining daemon has not finished adopting this workspace yet.
-// DELIBERATELY EMPTY.
 message SetWorkspaceParentNotYetAdopted {
   // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
   // joining daemon adopts it: the handover's incumbent. A client views and

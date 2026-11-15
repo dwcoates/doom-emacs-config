@@ -28,7 +28,8 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // interrupts a turn or live detached work: a busy session stays PENDING and is
 // asked again on the daemon's own edges (RetryWithheld), never by a poll. And
 // it stands nothing down for the workspace the user is looking at, for a
-// hidden or closed one (the cache keeper's lapse owns those), for one whose
+// hidden or closed one with no merge queued (the cache keeper's lapse owns
+// those), for one whose
 // remote control is on (claude.ai reaches it only through its shim; owner
 // ruling, 2026-10-31), or once a real turn has run since the beat -- that turn
 // is engagement, and the next beat decides again.
@@ -49,6 +50,26 @@ var visitReason = standDownReason{
 	detail: "stood down on the switch away from a settings pick; the transcript was left as it stood",
 	done:   "stood down the shim a settings pick started",
 	life:   shimlife.StandDownSettingsVisit,
+}
+
+// A SESSION WHOSE CACHE GOES COLD IS PARKED AT ONCE (owner ruling,
+// 2026-11-15). A cold cache owes no keep-alive (cachelapse.Keeper), so the
+// keep-alive cycle never comes round to park it, and it stayed up until the
+// idle sweep's cutoff: 76 of 87 live sessions on 2026-11-14 were marked cold
+// when a Wi-Fi outage lapsed their beats, and stayed live all night. The cache
+// keeper asks for this stand-down (ColdDown) the moment it knows the cache
+// cold, under the keep-alive cycle's rules, a merge-queued workspace
+// included; the next prompt revives the park.
+
+// opCold is the operation a cold cache's stand-down records under.
+const opCold = "daemon.drain.cold_park"
+
+// coldReason is a cold cache's stand-down reason.
+var coldReason = standDownReason{
+	op:     opCold,
+	detail: "parked the moment its cache was known cold; the transcript was left as it stood",
+	done:   "parked an idle session whose cache went cold",
+	life:   shimlife.StandDownCacheCold,
 }
 
 // cycleState is one pending cycle stand-down's bookkeeping, under c.mu.
@@ -83,6 +104,12 @@ func (c *controller) CycleDown(ws ids.WorkspaceID, beat time.Time) {
 // started it at SINCE, the user having switched away. It returns at once.
 func (c *controller) VisitDown(ws ids.WorkspaceID, since time.Time) {
 	c.askDown(ws, since, visitReason)
+}
+
+// ColdDown asks for the stand-down of WS's session, its cache having been
+// known cold at SINCE. It returns at once.
+func (c *controller) ColdDown(ws ids.WorkspaceID, since time.Time) {
+	c.askDown(ws, since, coldReason)
 }
 
 // askDown asks for WS's stand-down for REASON unless a real turn has run
@@ -171,9 +198,22 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
 		return withheldSettled
 	}
+	// A CLOSED WORKSPACE WITH A MERGE QUEUED IS STOOD DOWN AS AN OPEN ONE IS:
+	// the cache keeper's lapse keeps every queued workspace's session for as
+	// long as its entry stands (cachelapse.Keeper.lapse), so the lapse would
+	// never stand it down, and it stayed up between beats (2026-11-14, 27 of
+	// 87 live sessions had a merge waiting). The next prompt the merge sends
+	// revives it, as it revives any park.
 	if record.Closed {
-		log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
-		return withheldSettled
+		queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
+		if err != nil {
+			log.Error(op, "could not read whether the closed workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
+			return withheldSettled
+		}
+		if !queued {
+			log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
+			return withheldSettled
+		}
 	}
 	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
 	// 2026-10-31): claude.ai reaches the session only through a shim that is

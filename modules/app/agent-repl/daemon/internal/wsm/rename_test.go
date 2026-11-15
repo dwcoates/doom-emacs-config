@@ -69,3 +69,91 @@ func TestSetNameOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
 		t.Fatalf("SetName = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSetNameOwesTheNameToTheAgentOnce(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	ctx := context.Background()
+	if err := s.SetName(ctx, ws.ID, "first-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	// Act
+	if err := s.SetName(ctx, ws.ID, "second-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	first, firstFound, firstErr := s.TakeOwedRename(ctx, ws.ID)
+	_, secondFound, secondErr := s.TakeOwedRename(ctx, ws.ID)
+
+	// Assert
+	if firstErr != nil || !firstFound || first != "second-name" {
+		t.Fatalf("first take = (%q, %v, %v), want the latest name", first, firstFound, firstErr)
+	}
+	if secondErr != nil || secondFound {
+		t.Fatalf("second take = (%v, %v), want nothing left", secondFound, secondErr)
+	}
+}
+
+func TestRestoringATakenNameKeepsANewerOne(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	ctx := context.Background()
+	if err := s.SetName(ctx, ws.ID, "older-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+	taken, _, _ := s.TakeOwedRename(ctx, ws.ID)
+	if err := s.SetName(ctx, ws.ID, "newer-name"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	// Act
+	err := s.RestoreOwedRename(ctx, ws.ID, taken)
+
+	// Assert
+	got, found, _ := s.TakeOwedRename(ctx, ws.ID)
+	if err != nil || !found || got != "newer-name" {
+		t.Fatalf("RestoreOwedRename = %v, owed = (%q, %v); want the newer name kept", err, got, found)
+	}
+}
+
+func TestRestoringAnEmptyNameIsRefusedAndRecorded(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.RestoreOwedRename(context.Background(), ws.ID, "")
+
+	// Assert
+	if !errors.Is(err, errEmptyName) {
+		t.Fatalf("RestoreOwedRename(\"\") = %v, want errEmptyName", err)
+	}
+	found := false
+	for _, r := range log.Records() {
+		if r.Operation == "daemon.wsm.restore_owed_rename" && r.Level == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no error record of daemon.wsm.restore_owed_rename: %v", log.Records())
+	}
+}
+
+func TestABindForgetsTheNameTheOldConversationOwed(t *testing.T) {
+	// Arrange
+	s, _, ws := ownForkStore(t)
+	ctx := context.Background()
+	if err := s.SetName(ctx, ws.ID, "renamed"); err != nil {
+		t.Fatalf("SetName: %v", err)
+	}
+
+	// Act
+	err := s.BindSession(ctx, boundSession(t, s, ws), nil)
+
+	// Assert
+	if _, found, _ := s.TakeOwedRename(ctx, ws.ID); err != nil || found {
+		t.Fatalf("BindSession = %v, owed found = %v; want the name forgotten", err, found)
+	}
+}

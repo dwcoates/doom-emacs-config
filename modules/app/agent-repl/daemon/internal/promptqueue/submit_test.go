@@ -208,8 +208,40 @@ func TestSubmitRefusesAWorkspaceWithNoSessionAndNoRevivalWired(t *testing.T) {
 	// Act
 	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
 	// Assert
-	if !errors.Is(err, ErrNoSession) {
-		t.Fatalf("err = %v, want ErrNoSession", err)
+	var cause *NoSessionError
+	if !errors.As(err, &cause) || cause.Cause != causeNoRevival {
+		t.Fatalf("err = %v, want ErrNoSession stating %q", err, causeNoRevival)
+	}
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Operation: opSubmit, Message: "the workspace has no session to submit to"}); !ok || rec.Context["cause"] != causeNoRevival {
+		t.Fatalf("records = %+v, want the refusal recorded with its cause", h.log.Records())
+	}
+}
+
+func TestNoSessionErrorMatchesErrNoSessionAndStatesItsCause(t *testing.T) {
+	// Arrange
+	err := noSession(causeNoWatcher)
+
+	// Act
+	matches, text := errors.Is(err, ErrNoSession), err.Error()
+
+	// Assert
+	if !matches || text != ErrNoSession.Error()+": "+causeNoWatcher {
+		t.Fatalf("errors.Is = %v, Error = %q; want a match stating the cause", matches, text)
+	}
+}
+
+// TestEveryNoSessionRefusalStatesItsCause pins every refusal site to
+// noSession: a bare ErrNoSession would reach the client with no account, which
+// the server refuses as an invariant break.
+func TestEveryNoSessionRefusalStatesItsCause(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "ErrNoSession")
+
+	// Assert
+	for _, site := range sites {
+		if site != "api.go" {
+			t.Fatalf("ErrNoSession named outside api.go in %v; refuse with noSession(cause)", sites)
+		}
 	}
 }
 
@@ -1734,5 +1766,130 @@ func TestEveryColdGateRefusalGoesThroughRefuseAtColdGate(t *testing.T) {
 	// Assert
 	if want := []string{"submit.go"}; !reflect.DeepEqual(sites, want) {
 		t.Fatalf("ColdGateRefusal construction sites = %v, want %v", sites, want)
+	}
+}
+
+// --- counting submissions -----------------------------------------------------
+
+func TestSubmitCountsEachTakenSubmissionByItsOrigin(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		sub     Submission
+		want    conversationv1.PromptOrigin
+	}{
+		{
+			name:    "an agent-sent prompt delivered at once",
+			arrange: func(*harness) {},
+			sub:     agentSubmission("t1", "from another workspace"),
+			want:    conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT,
+		},
+		{
+			name:    "a user's prompt held behind a running turn",
+			arrange: func(h *harness) { running(t, h, "running-turn", "the running work") },
+			sub:     submission("t1", "next"),
+			want:    conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			if _, err := h.q.Submit(context.Background(), tt.sub); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+			h.q.waitForClassifications()
+
+			// Assert
+			if got := h.submissions.counted(); !reflect.DeepEqual(got, []conversationv1.PromptOrigin{tt.want}) {
+				t.Fatalf("counted = %v, want [%v]", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubmitCountsNoRefusedSubmission(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		sub     func() Submission
+	}{
+		{
+			name:    "no origin",
+			arrange: func(*harness) {},
+			sub: func() Submission {
+				sub := submission("t1", "hello")
+				sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED
+				return sub
+			},
+		},
+		{
+			name:    "an undeclared origin",
+			arrange: func(*harness) {},
+			sub: func() Submission {
+				sub := submission("t1", "hello")
+				sub.Origin = conversationv1.PromptOrigin(9999)
+				return sub
+			},
+		},
+		{
+			name:    "an agent-sent prompt naming no sender",
+			arrange: func(*harness) {},
+			sub: func() Submission {
+				sub := agentSubmission("t1", "hello")
+				sub.SentBy = nil
+				return sub
+			},
+		},
+		{
+			name:    "the merge lease's refusal",
+			arrange: func(h *harness) { h.lease(wsm.HolderMerge, wsm.PolicyRefuse) },
+			sub:     func() Submission { return agentSubmission("t1", "hello") },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			_, err := h.q.Submit(context.Background(), tt.sub())
+
+			// Assert
+			if err == nil {
+				t.Fatal("the submission must be refused")
+			}
+			if got := h.submissions.counted(); len(got) != 0 {
+				t.Fatalf("counted = %v, want a refused submission uncounted", got)
+			}
+		})
+	}
+}
+
+func TestSubmitRefusesAnOriginTheContractDoesNotDeclare(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	sub := submission("t1", "hello")
+	sub.Origin = conversationv1.PromptOrigin(9999)
+
+	// Act
+	_, err := h.q.Submit(context.Background(), sub)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a submission with an undeclared origin must be refused")
+	}
+	if len(h.sender.started()) != 0 {
+		t.Fatal("nothing may reach the shim before the origin is checked")
+	}
+	if _, recorded := h.db.startedTurn("t1"); recorded {
+		t.Fatal("a refused submission recorded a turn")
+	}
+	if !logged(h.log.Records(), "error", opSubmit, "a submission reached the queue with an origin conversation.v1.PromptOrigin does not declare") {
+		t.Fatalf("records = %+v, want the undeclared origin recorded at error", h.log.Records())
 	}
 }

@@ -641,6 +641,15 @@ export function convertSessionMessage(
       LOGGER.logVerbose({ uuid, state: record.state }, "session state relayed by the turn's own frames; consumed");
       return [];
 
+    case "task_summary":
+      // THE VENDOR'S ONE-LINE STATUS FOR ITS REMOTE CLIENTS, restated around
+      // every tool call and at each turn's end. Its `detail` paraphrases work
+      // the conversation already carries as its own entries (the calls, their
+      // results, the turn's terminal), so a row per restatement would be a
+      // second, lossier account of the same facts.
+      LOGGER.logVerbose({ uuid, detail: record.detail }, "the vendor restated the turn's status for its remote clients; consumed");
+      return [];
+
     case "api_retry":
       // NOTHING ON THE WIRE, BY DESIGN: a retried request did not end the turn
       // and did not fail it, so there is no conversation fact yet. The evidence

@@ -90,9 +90,8 @@ func (k MigrationKind) String() string {
 }
 
 // migrations is the ordered list of every step this build can apply, ascending
-// by To. The last entry's To IS LayoutVersion; a build that bumps
-// LayoutVersion without appending its step here refuses every older file,
-// which is the defect this list exists to prevent.
+// by To, each one past the step before it. The last entry's To IS
+// LayoutVersion, which is derived from it.
 //
 // EACH STEP REUSES THE FRESH-FILE DDL rather than restating it, so a migrated
 // file and a created one cannot drift into two different shapes. The one
@@ -257,6 +256,22 @@ var migrations = []migration{
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
 	{To: 137, Name: "merge_queue_pause_purpose", Kind: MigrationAdditive, DDL: mergeQueuePausePurposeDDL},
+	// IT IS ADDITIVE: see mediationRolesDDL.
+	{To: 138, Name: "merge_queue_mediation_roles", Kind: MigrationAdditive, DDL: mediationRolesDDL},
+	// IT IS ADDITIVE: see remediationFinishesDDL.
+	{To: 139, Name: "deploy_remediation_finishes", Kind: MigrationAdditive, DDL: remediationFinishesDDL},
+	// IT IS BREAKING: see retiredColumnsDDL.
+	{To: 140, Name: "retired_columns_dropped", Kind: MigrationBreaking, DDL: retiredColumnsDDL},
+	// IT IS BREAKING: see forkLineageByConversationDDL.
+	{To: 141, Name: "fork_lineage_by_conversation", Kind: MigrationBreaking, DDL: forkLineageByConversationDDL},
+	{To: 142, Name: "owed_nukes", Kind: MigrationAdditive, DDL: owedNukeDDL},
+	{To: 143, Name: "owed_placement_notes", Kind: MigrationAdditive, DDL: owedPlacementNotesDDL},
+	// undeployed_landings: every landing in the daemon's own checkout until
+	// the deploy that carries it ends, so its notice names one-shots too.
+	// IT IS ADDITIVE: the build before it neither reads nor writes the table.
+	{To: 144, Name: "undeployed_landings", Kind: MigrationAdditive, DDL: undeployedLandingsDDL},
+	{To: 145, Name: "owed_response_revisions", Kind: MigrationAdditive, DDL: owedRevisionsDDL},
+	{To: 146, Name: "owed_renames", Kind: MigrationAdditive, DDL: owedRenamesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

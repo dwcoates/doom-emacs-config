@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/runecap"
 	"agent-repld/internal/sessioncommand"
 	"agent-repld/internal/wsm"
 )
@@ -26,6 +27,14 @@ import (
 // summary of the queue conversation is composed from.
 const BriefContextSummary = "queue-bypass-context-summary"
 
+// BriefRevisionsTold is the brief the note telling the agent what its revised
+// final responses now say is composed from.
+const BriefRevisionsTold = "response-revision-told"
+
+// BriefRenameTold is the brief the note telling the agent the workspace's new
+// name is composed from.
+const BriefRenameTold = "workspace-renamed"
+
 const (
 	opNew       = "daemon.prompthandler.new"
 	opSubmit    = "daemon.prompthandler.submit"
@@ -35,6 +44,15 @@ const (
 	// opContextSummary files the summary a queue-bypass switch carried into
 	// the bypass conversation, delivered by the workspace's next prompt.
 	opContextSummary = "daemon.prompthandler.context_summary"
+	// opRevisionsTold files the revised final responses a workspace's next
+	// prompt tells its agent of.
+	opRevisionsTold = "daemon.prompthandler.revisions_told"
+	// opRenameTold files the new name a workspace's next prompt tells its
+	// agent.
+	opRenameTold = "daemon.prompthandler.rename_told"
+	// opPlacementTold files the subsection placement note a prompt-less
+	// root's next prompt carries.
+	opPlacementTold = "daemon.prompthandler.placement_told"
 )
 
 // handler is SubmitPrompt's body: thin, stateless, done at submission. It owns
@@ -63,6 +81,8 @@ func newHandler(deps Deps) (*handler, error) {
 		return nil, fmt.Errorf("the prompt handler needs a standing-ask answerer")
 	case deps.Summaries == nil:
 		return nil, fmt.Errorf("the prompt handler needs the workspace summaries' keeper")
+	case deps.Placements == nil:
+		return nil, fmt.Errorf("the prompt handler needs the owed placement notes")
 	case deps.PromptsDir == "":
 		return nil, fmt.Errorf("the prompt handler needs the briefs' directory")
 	}
@@ -172,15 +192,33 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if err != nil {
 		return Outcome{}, err
 	}
-	said, restore, err := h.openWithContextSummary(ctx, ws, said, origin, sentBy, target, ask, log)
-	if err != nil {
-		return Outcome{}, err
+	// THE NOTES THE DAEMON OWES THE AGENT ride the prompt, each taken once:
+	// the name, then the revised responses, then the context summary open it,
+	// the summary nearest the person's words, and the subsection placement
+	// note closes it, after the summary ask. A failure puts back every note
+	// already taken, and so does a refusal by the queue.
+	carries := carriesWorkspaceNote(said, origin, sentBy, target, ask)
+	var restores []func()
+	restoreAll := func() {
+		for _, restore := range restores {
+			restore()
+		}
+	}
+	for _, open := range []func(context.Context, ids.WorkspaceID, *conversationv1.UserSaid, bool, dlog.Logger) (*conversationv1.UserSaid, func(), error){
+		h.closeWithOwedPlacement, h.openWithContextSummary, h.openWithOwedRevisions, h.openWithOwedRename,
+	} {
+		opened, restore, err := open(ctx, ws, said, carries, log)
+		if err != nil {
+			restoreAll()
+			return Outcome{}, err
+		}
+		said, restores = opened, append(restores, restore)
 	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
 	})
 	if err != nil {
-		restore()
+		restoreAll()
 		return Outcome{}, err
 	}
 	if err := h.accept(ctx, ws, c, log); err != nil {
@@ -221,54 +259,224 @@ func (h *handler) askForOwedSummary(ctx context.Context, ws ids.WorkspaceID, sai
 	if err != nil || !owed {
 		return said, err
 	}
-	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
-	blocks = append(blocks, said.GetContent().GetBlocks()...)
-	blocks = append(blocks, &conversationv1.UserContentBlock{
+	return withNote(said, note, noteCloses), nil
+}
+
+// Where withNote puts its note.
+const (
+	noteOpens  = true
+	noteCloses = false
+)
+
+// withNote answers SAID with NOTE as a text block of its own, ahead of every
+// block the person sent when OPENS (noteOpens), after them otherwise. The one
+// way a daemon note rides a prompt, so the bubble draws the person's words
+// alone whichever note it carries.
+func withNote(said *conversationv1.UserSaid, note string, opens bool) *conversationv1.UserSaid {
+	block := &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
-	})
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, nil
+	}
+	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
+	if opens {
+		blocks = append(blocks, block)
+	}
+	blocks = append(blocks, said.GetContent().GetBlocks()...)
+	if !opens {
+		blocks = append(blocks, block)
+	}
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
+}
+
+// owedNote is one note the daemon owes a workspace's agent, delivered by the
+// workspace's next prompt that carries a workspace note (carriesWorkspaceNote)
+// and TAKEN from the store, so exactly one prompt carries it. T is what is
+// owed.
+type owedNote[T any] struct {
+	// op is the operation every record of the note carries.
+	op string
+	// take takes what is owed, false when nothing is.
+	take func(context.Context, ids.WorkspaceID) (T, bool, error)
+	// restore puts back what a prompt the queue refused had taken.
+	restore func(context.Context, ids.WorkspaceID, T) error
+	// compose is the meta-wrapped note telling it.
+	compose func(T) (string, error)
+	// fields is what each record says of it.
+	fields func(T) dlog.Context
+	// closes rides the note after the person's words; it opens them
+	// otherwise.
+	closes bool
+	// The records: the take that failed, the note that could not be
+	// composed, the restore that failed, and the note delivered. An empty
+	// failure record is the take's owner's: it records its own failures,
+	// so they are recorded once.
+	takeFailed, composeFailed, restoreFailed, told string
+}
+
+// openWithOwed opens SAID with NOTE when it is owed, or closes it with NOTE
+// when the note closes. Only a prompt that carries a workspace note carries
+// it. What it takes, RESTORE puts back for
+// the next prompt when the queue refuses this one; what cannot be composed is
+// put back before the failure is answered, so nothing owed is lost.
+func openWithOwed[T any](ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, note owedNote[T], log dlog.Logger) (_ *conversationv1.UserSaid, restore func(), _ error) {
+	none := func() {}
+	if !carries {
+		return said, none, nil
+	}
+	owed, found, err := note.take(ctx, ws)
+	if err != nil {
+		if note.takeFailed != "" {
+			log.Error(note.op, note.takeFailed, dlog.Context{"cause": err.Error()})
+		}
+		return nil, none, fmt.Errorf("take what %q's next prompt owes (%s): %w", ws, note.op, err)
+	}
+	if !found {
+		return said, none, nil
+	}
+	restore = func() {
+		if err := note.restore(context.WithoutCancel(ctx), ws, owed); err != nil && note.restoreFailed != "" {
+			log.Error(note.op, note.restoreFailed, dlog.WithCause(note.fields(owed), err))
+		}
+	}
+	text, err := note.compose(owed)
+	if err != nil {
+		log.Error(note.op, note.composeFailed, dlog.WithCause(note.fields(owed), err))
+		restore()
+		return nil, none, fmt.Errorf("compose what %q's next prompt owes (%s): %w", ws, note.op, err)
+	}
+	log.Info(note.op, note.told, note.fields(owed))
+	return withNote(said, text, !note.closes), restore, nil
+}
+
+// owedPlacement is the subsection placement note a prompt-less root owes,
+// taken with the restore that owes it again.
+type owedPlacement struct {
+	note    string
+	restore func()
+}
+
+// closeWithOwedPlacement closes SAID with the note asking the workspace's
+// agent to file itself into a subsection, owed because it was created with no
+// first message to carry it (workspace.Verbs.TakeOwedPlacementNote). The
+// verbs compose the note and record their own failures; a prompt the queue
+// refuses owes it again.
+func (h *handler) closeWithOwedPlacement(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, log dlog.Logger) (*conversationv1.UserSaid, func(), error) {
+	return openWithOwed(ctx, ws, said, carries, owedNote[owedPlacement]{
+		op: opPlacementTold,
+		take: func(ctx context.Context, ws ids.WorkspaceID) (owedPlacement, bool, error) {
+			note, owed, restore, err := h.deps.Placements.TakeOwedPlacementNote(ctx, ws)
+			return owedPlacement{note: note, restore: restore}, owed, err
+		},
+		restore: func(_ context.Context, _ ids.WorkspaceID, owed owedPlacement) error {
+			owed.restore()
+			return nil
+		},
+		compose: func(owed owedPlacement) (string, error) { return owed.note, nil },
+		fields:  func(owed owedPlacement) dlog.Context { return dlog.Context{"note_chars": len(owed.note)} },
+		closes:  true,
+		told:    "the prompt closes with the note asking the agent to file the workspace into a subsection",
+	}, log)
 }
 
 // openWithContextSummary opens SAID with the summary of the workspace's queue
 // conversation that a queue-bypass switch carried into its bypass
 // conversation (wsm.TakeOwedContextSummary), meta-wrapped through the
 // BriefContextSummary brief, so it is in context when the agent reads the
-// prompt and no agent turn is started for it. Only a prompt that carries a
-// workspace note opens with it (carriesWorkspaceNote). The summary is TAKEN,
-// so exactly one prompt carries it; RESTORE puts it back for the next prompt
-// when the queue refuses this one. A summary that cannot be composed is
-// restored before the failure is answered, so it is never lost.
-func (h *handler) openWithContextSummary(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk, log dlog.Logger) (_ *conversationv1.UserSaid, restore func(), _ error) {
-	none := func() {}
-	if !carriesWorkspaceNote(said, origin, sentBy, target, ask) {
-		return said, none, nil
-	}
-	summary, owed, err := h.deps.DB.TakeOwedContextSummary(ctx, ws)
+// prompt and no agent turn is started for it.
+func (h *handler) openWithContextSummary(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, log dlog.Logger) (*conversationv1.UserSaid, func(), error) {
+	return openWithOwed(ctx, ws, said, carries, owedNote[string]{
+		op:      opContextSummary,
+		take:    h.deps.DB.TakeOwedContextSummary,
+		restore: h.deps.DB.RestoreOwedContextSummary,
+		compose: func(summary string) (string, error) { return contextSummaryNote(h.deps.PromptsDir, summary) },
+		fields: func(summary string) dlog.Context {
+			return dlog.Context{"summary_chars": len(summary), "brief": BriefContextSummary}
+		},
+		takeFailed:    "could not take the context summary the workspace's next prompt owes; the prompt was not forwarded",
+		composeFailed: "could not compose the note carrying the context summary; the prompt was not forwarded",
+		restoreFailed: "could not put back the context summary of a prompt the queue refused; it is lost",
+		told:          "the prompt opens with the context summary the queue-bypass switch carried",
+	}, log)
+}
+
+// openWithOwedRevisions opens SAID with the note telling the workspace's
+// agent what its revised final responses now say (wsm.TakeOwedRevisions):
+// each revision ran on a fork that persisted nothing, so the agent's own
+// record still holds its original words.
+func (h *handler) openWithOwedRevisions(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, log dlog.Logger) (*conversationv1.UserSaid, func(), error) {
+	return openWithOwed(ctx, ws, said, carries, owedNote[[]wsm.OwedRevision]{
+		op: opRevisionsTold,
+		take: func(ctx context.Context, ws ids.WorkspaceID) ([]wsm.OwedRevision, bool, error) {
+			owed, err := h.deps.DB.TakeOwedRevisions(ctx, ws)
+			return owed, len(owed) > 0, err
+		},
+		restore: h.deps.DB.RestoreOwedRevisions,
+		compose: func(owed []wsm.OwedRevision) (string, error) { return revisionsNote(h.deps.PromptsDir, owed) },
+		fields: func(owed []wsm.OwedRevision) dlog.Context {
+			units := make([]string, 0, len(owed))
+			for _, one := range owed {
+				units = append(units, one.Unit)
+			}
+			return dlog.Context{"units": units, "brief": BriefRevisionsTold}
+		},
+		takeFailed:    "could not take the revisions the workspace's next prompt owes its agent; the prompt was not forwarded",
+		composeFailed: "could not compose the note telling the agent of its revised responses; the prompt was not forwarded",
+		restoreFailed: "could not put back the revisions of a prompt the queue refused; the agent will not be told of them",
+		told:          "the prompt opens by telling the agent what its revised responses now say",
+	}, log)
+}
+
+// openWithOwedRename opens SAID with the note telling the workspace's agent
+// the workspace's new name (wsm.TakeOwedRename): a session is told its name
+// only at its start, so after a rename its instructions name the old one.
+func (h *handler) openWithOwedRename(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, carries bool, log dlog.Logger) (*conversationv1.UserSaid, func(), error) {
+	return openWithOwed(ctx, ws, said, carries, owedNote[string]{
+		op:            opRenameTold,
+		take:          h.deps.DB.TakeOwedRename,
+		restore:       h.deps.DB.RestoreOwedRename,
+		compose:       func(name string) (string, error) { return renameNote(h.deps.PromptsDir, name) },
+		fields:        func(name string) dlog.Context { return dlog.Context{"name": name, "brief": BriefRenameTold} },
+		takeFailed:    "could not take the name the workspace's next prompt owes its agent; the prompt was not forwarded",
+		composeFailed: "could not compose the note telling the agent the workspace's new name; the prompt was not forwarded",
+		restoreFailed: "could not put back the name of a prompt the queue refused; the agent will not be told it",
+		told:          "the prompt opens by telling the agent the workspace's new name",
+	}, log)
+}
+
+// renameNote composes the meta-wrapped note telling the agent the workspace's
+// new NAME, from the BriefRenameTold brief in PROMPTSDIR.
+func renameNote(promptsDir, name string) (string, error) {
+	brief, err := prompts.Load(promptsDir, BriefRenameTold)
 	if err != nil {
-		log.Error(opContextSummary, "could not take the context summary the workspace's next prompt owes; the prompt was not forwarded", dlog.Context{"cause": err.Error()})
-		return nil, none, fmt.Errorf("take the context summary of %q: %w", ws, err)
+		return "", fmt.Errorf("read the %s brief: %w", BriefRenameTold, err)
 	}
-	if !owed {
-		return said, none, nil
-	}
-	restore = func() {
-		if err := h.deps.DB.RestoreOwedContextSummary(context.WithoutCancel(ctx), ws, summary); err != nil {
-			log.Error(opContextSummary, "could not put back the context summary of a prompt the queue refused; it is lost", dlog.Context{"summary_chars": len(summary), "cause": err.Error()})
-		}
-	}
-	note, err := contextSummaryNote(h.deps.PromptsDir, summary)
+	note, err := brief.Splice(map[string]string{"name": name})
 	if err != nil {
-		log.Error(opContextSummary, "could not compose the note carrying the context summary; the prompt was not forwarded", dlog.Context{"brief": BriefContextSummary, "cause": err.Error()})
-		restore()
-		return nil, none, fmt.Errorf("compose the context summary of %q: %w", ws, err)
+		return "", fmt.Errorf("splice the %s brief: %w", BriefRenameTold, err)
 	}
-	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
-	blocks = append(blocks, &conversationv1.UserContentBlock{
-		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
-	})
-	blocks = append(blocks, said.GetContent().GetBlocks()...)
-	log.Info(opContextSummary, "the prompt opens with the context summary the queue-bypass switch carried", dlog.Context{"summary_chars": len(summary)})
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, restore, nil
+	return prompts.Wrap(note + "\n\n"), nil
+}
+
+// revisionHeadRunes is how much of a response's original words the note
+// quotes to name which response was revised.
+const revisionHeadRunes = 200
+
+// revisionsNote composes the meta-wrapped note telling the agent what each of
+// OWED now says, from the BriefRevisionsTold brief in PROMPTSDIR. Each names
+// its response by the words it opened with, and quotes it as revised whole.
+func revisionsNote(promptsDir string, owed []wsm.OwedRevision) (string, error) {
+	brief, err := prompts.Load(promptsDir, BriefRevisionsTold)
+	if err != nil {
+		return "", fmt.Errorf("read the %s brief: %w", BriefRevisionsTold, err)
+	}
+	parts := make([]string, 0, len(owed))
+	for _, one := range owed {
+		parts = append(parts, fmt.Sprintf("Your response that opened with:\n\n%s\n\nnow reads:\n\n%s", runecap.Head(one.Original, revisionHeadRunes), one.Revised))
+	}
+	note, err := brief.Splice(map[string]string{"revisions": strings.Join(parts, "\n\n---\n\n")})
+	if err != nil {
+		return "", fmt.Errorf("splice the %s brief: %w", BriefRevisionsTold, err)
+	}
+	return prompts.Wrap(note + "\n\n"), nil
 }
 
 // contextSummaryNote composes the meta-wrapped note carrying SUMMARY from the

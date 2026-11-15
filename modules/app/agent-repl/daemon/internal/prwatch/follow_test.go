@@ -167,3 +167,99 @@ func TestTheMergeQueueEventRoundTripsThroughTheContract(t *testing.T) {
 		t.Fatalf("an owned link's events = %v, want every event, the merge queue last", got)
 	}
 }
+
+// followFromFirstRead subscribes the rig's workspace to the pull request as
+// an owned link does: without a read.
+func (r *rig) followFromFirstRead(t *testing.T) wsm.PullRequestSubscription {
+	t.Helper()
+	sub := r.w.FollowFromFirstRead(r.ws, prK, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
+	if _, err := r.db.SubscribePullRequest(context.Background(), sub); err != nil {
+		t.Fatalf("SubscribePullRequest: %v", err)
+	}
+	return sub
+}
+
+func TestFollowFromFirstReadReadsNothing(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.gh.set(pathPull(), &ghclient.Failure{Kind: ghclient.KindUnreachable, Message: "down"})
+
+	// Act
+	sub := r.w.FollowFromFirstRead(r.ws, prK, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
+
+	// Assert
+	r.gh.mu.Lock()
+	calls := append([]string(nil), r.gh.calls...)
+	r.gh.mu.Unlock()
+	if len(calls) != 0 {
+		t.Fatalf("GitHub was asked %v, want no read", calls)
+	}
+	if sub.Subscriber != r.ws || sub.PullRequest != prK || sub.Origin != wsm.PullRequestOriginOwnedLink || !sub.SubscribedAt.Equal(t0) || sub.Told == "" {
+		t.Fatalf("FollowFromFirstRead = %+v, want the owned link's subscription, marked for its first read", sub)
+	}
+}
+
+func TestTheFirstReadOfASubscriptionTakenWithoutOneTellsNothingAlreadyThere(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.followFromFirstRead(t)
+	r.gh.set(pathComments(), mustJSON([]any{commentJSONOf(11, "alice", "already here", t0, t0, nil)}))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if told := r.told(); len(told) != 0 {
+		t.Fatalf("told = %q, want nothing: the first read anchors", told)
+	}
+}
+
+func TestASubscriptionTakenWithoutAReadTellsWhatComesAfterItsFirst(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.followFromFirstRead(t)
+	r.gh.set(pathComments(), mustJSON([]any{commentJSONOf(11, "alice", "already here", t0, t0, nil)}))
+	r.tick()
+
+	// Act
+	r.gh.set(pathComments(), mustJSON([]any{commentJSONOf(11, "alice", "already here", t0, t0, nil), commentJSONOf(12, "bob", "a new one", t0, t0, nil)}))
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], "a new one") || contains(told[0], "already here") {
+		t.Fatalf("told = %q, want only the comment after the first read", told)
+	}
+}
+
+func TestTheFirstReadOfASubscriptionTakenWithoutOneStillTellsItsEnd(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.followFromFirstRead(t)
+	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
+
+	// Act
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], endedSentence) {
+		t.Fatalf("told = %q, want the subscription's end", told)
+	}
+}
+
+func TestACommentPostedBeforeTheFirstReadIsAnchoredWithTheRest(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	sub := r.followFromFirstRead(t)
+	r.gh.posts[fmt.Sprintf("%s/issues/%d/comments", base, prK.Number)] = mustJSON(map[string]any{"id": 77, "html_url": "u77", "updated_at": t0})
+
+	// Act
+	_, err := r.w.Comment(context.Background(), r.ws, prK, nil, "done")
+
+	// Assert
+	subs, readErr := r.db.WorkspacePullRequestSubscriptions(context.Background(), r.ws)
+	if err != nil || readErr != nil || len(subs) != 1 || subs[0].Told != sub.Told {
+		t.Fatalf("Comment = %v; subscriptions %+v, %v; want the snapshot left for the first read", err, subs, readErr)
+	}
+}

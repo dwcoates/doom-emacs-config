@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"agentrepl/testrun/internal/cores"
 )
 
 // GoPackage is the part of one `go list -json` record the input set needs.
@@ -231,6 +233,35 @@ func AddPatternWalk(set *InputSet, repo, dir string) error {
 		}
 		return set.AddDir(filepath.ToSlash(rel))
 	})
+}
+
+// SeatHolder holds the host's core seats for work that is test load
+// (cores.Host).
+type SeatHolder interface {
+	Hold(id string, width int, cores float64) (release func() error, err error)
+}
+
+// PlanningListID is the core ledger's name for a planning listing of DIR.
+func PlanningListID(dir string) string { return "planning:go-list:" + dir }
+
+// HeldGoList is l run while holding one of the host's core seats.
+//
+// PLANNING IS TEST LOAD: a run's `go list -deps -test ./...` measured 109% of
+// a core outside every unit (2026-10-26), so the CPU governor neither held it
+// back nor, until the runner marked its children (cores.NestedEnv), counted
+// it. Each listing now waits for its seat as a unit does.
+func HeldGoList(seats SeatHolder, l GoLister) GoLister {
+	return func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		release, err := seats.Hold(PlanningListID(dir), 1, cores.ExpectedCores(1, 0, false))
+		if err != nil {
+			return nil, fmt.Errorf("reuse: hold a core seat to list %s: %w", dir, err)
+		}
+		pkgs, err := l(dir, tags, tests, patterns...)
+		if relErr := release(); relErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("reuse: give back the core seat that listed %s: %w", dir, relErr))
+		}
+		return pkgs, err
+	}
 }
 
 // MemoGoList is l answering each distinct listing once per run: every keyed

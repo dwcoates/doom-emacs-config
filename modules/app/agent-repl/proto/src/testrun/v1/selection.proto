@@ -49,6 +49,13 @@ message TestRunRequest {
   // reuses anyway, so this matters for suites and whole files. The daemon
   // passes it only at the user's request (agentrepl.v1.RunTestsUserOnlyRefused).
   bool no_reuse = 5;
+  // Build and plan the selection, then stop: no unit runs, nothing is reused
+  // or recorded, and the run ends `planned` (TestRunEnded.planned) after its
+  // `planned` event, or refused or failed as a real run would before its
+  // first unit. `agent-repld test run -dry-run` sends it, so a selection the
+  // planner refuses fails its dry run (2026-11-02: an atomic unit's refusal
+  // passed every dry run and failed only the real one).
+  bool plan_only = 6;
 }
 
 // One target and the tests within it to run.

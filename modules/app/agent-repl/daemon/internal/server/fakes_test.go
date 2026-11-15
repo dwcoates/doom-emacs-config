@@ -170,6 +170,8 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// listWorkspacesErr fails ListWorkspaces.
+	listWorkspacesErr error
 	// subsections are the subsections ReadArrangement answers.
 	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
@@ -484,8 +486,10 @@ type fakeVerbs struct {
 	// registerAllAnswers is what it answers.
 	registerAllDirs    [][]string
 	registerAllAnswers []workspace.Registered
-	// registerRecord is what a lone Register answers.
+	// registerRecord is what a lone Register answers, or registerErr when
+	// set.
 	registerRecord wsm.Workspace
+	registerErr    error
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -899,8 +903,11 @@ func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary str
 	return summary, nil
 }
 
-// Register answers registerRecord.
+// Register answers registerRecord, or registerErr when set.
 func (f *fakeVerbs) Register(context.Context, string, wsm.RegisterFacts) (wsm.Workspace, error) {
+	if f.registerErr != nil {
+		return wsm.Workspace{}, f.registerErr
+	}
 	return f.registerRecord, nil
 }
 
@@ -1209,11 +1216,18 @@ func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldProm
 type fakeMerge struct {
 	merge.Orchestrator
 	// decisions records every DecideMediation, which decideErr answers.
-	decisions  []fakeDecision
-	decideErr  error
-	enqueueErr error
-	pauseErr   error
-	pauseScope *merge.RepositoryScope
+	decisions []fakeDecision
+	decideErr error
+	// remediations answers IsDeployRemediation, which remediationErr fails;
+	// remediationFinishes records every FinishRemediation, which
+	// remediationFinishErr answers.
+	remediations         map[ids.WorkspaceID]bool
+	remediationErr       error
+	remediationFinishes  []ids.WorkspaceID
+	remediationFinishErr error
+	enqueueErr           error
+	pauseErr             error
+	pauseScope           *merge.RepositoryScope
 	// pauser is who the last pause or hard stop was asked by.
 	pauser *merge.Pauser
 	// movesTo are the moves to a place asked of the queue, in order.
@@ -1440,13 +1454,21 @@ func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by
 // fakeDecision is one DecideMediation the fake was asked for.
 type fakeDecision struct {
 	ws       ids.WorkspaceID
-	decision merge.MediationDecision
-	summary  string
+	decision merge.Decision
 }
 
-func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, decision merge.MediationDecision, summary string) error {
-	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: decision, summary: summary})
+func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {
+	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: d})
 	return f.decideErr
+}
+
+func (f *fakeMerge) IsDeployRemediation(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	return f.remediations[ws], f.remediationErr
+}
+
+func (f *fakeMerge) FinishRemediation(_ context.Context, ws ids.WorkspaceID, _ *wsm.VersionIncrement) error {
+	f.remediationFinishes = append(f.remediationFinishes, ws)
+	return f.remediationFinishErr
 }
 
 // fakeDrain answers the schedule verbs and records what it was handed.
@@ -3024,6 +3046,9 @@ func (f *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (boo
 
 // ListWorkspaces answers every registered workspace, by id.
 func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	if d.listWorkspacesErr != nil {
+		return nil, d.listWorkspacesErr
+	}
 	out := make([]wsm.Workspace, 0, len(d.workspaces))
 	for _, ws := range d.workspaces {
 		out = append(out, ws)

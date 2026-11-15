@@ -62,6 +62,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// roles are the deploy check roles workspaces hold; rolesErr fails
+	// their read.
+	roles    map[ids.WorkspaceID]*wsm.MediationRole
+	rolesErr error
+
 	// bypass is each workspace's queue-bypass standing; bypassErr fails its read.
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
 	bypassErr error
@@ -337,7 +342,15 @@ type fakeDB struct {
 	// fake's own map cannot do either on its own.
 	forgetReport wsm.ForgetReport
 	forgetErr    error
-	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
+	// owedNukes is every nuke OweNuke recorded, in order; oweNukeErr fails it.
+	owedNukes  []ids.WorkspaceID
+	oweNukeErr error
+	// owedPlacements are the workspaces whose next prompt owes the placement
+	// note; owePlacementErr fails owing one and takePlacementErr taking one.
+	owedPlacements   map[ids.WorkspaceID]bool
+	owePlacementErr  error
+	takePlacementErr error
+	terminals        map[ids.WorkspaceID]wsm.SessionTerminal
 	// clearTerminalErr fails the terminal RETIREMENT, which the fake's own map
 	// cannot, so the live-shim invariant's failure arm is reachable.
 	clearTerminalErr error
@@ -1058,6 +1071,12 @@ func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	}
 	d.closedFlags[id] = true
 	d.closures[id] = append(d.closures[id], closure)
+	// The record reads closed from here on, as the store's does, so a
+	// roster read after the close carries it closed.
+	if ws, ok := d.workspaces[id]; ok {
+		ws.Closed = true
+		d.workspaces[id] = ws
+	}
 	return nil
 }
 
@@ -1208,6 +1227,38 @@ func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLaps
 func (d *fakeDB) SetPriority(_ context.Context, id ids.WorkspaceID, p *wsm.Priority) error {
 	d.priorities[id] = p
 	return nil
+}
+
+func (d *fakeDB) OweNuke(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	if d.oweNukeErr != nil {
+		return d.oweNukeErr
+	}
+	d.owedNukes = append(d.owedNukes, id)
+	if ws, ok := d.workspaces[id]; ok {
+		ws.NukeOwedAt = &at
+		d.workspaces[id] = ws
+	}
+	return nil
+}
+
+func (d *fakeDB) OwePlacementNote(_ context.Context, id ids.WorkspaceID, _ time.Time) error {
+	if d.owePlacementErr != nil {
+		return d.owePlacementErr
+	}
+	if d.owedPlacements == nil {
+		d.owedPlacements = map[ids.WorkspaceID]bool{}
+	}
+	d.owedPlacements[id] = true
+	return nil
+}
+
+func (d *fakeDB) TakeOwedPlacementNote(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.takePlacementErr != nil {
+		return false, d.takePlacementErr
+	}
+	owed := d.owedPlacements[id]
+	delete(d.owedPlacements, id)
+	return owed, nil
 }
 
 func (d *fakeDB) Forget(_ context.Context, id ids.WorkspaceID) (wsm.ForgetReport, error) {
@@ -1588,6 +1639,12 @@ func (d *fakeDB) AssignWorkspaceTask(_ context.Context, id ids.WorkspaceID, task
 type fakeGit struct {
 	gitclient.Git
 
+	// origins answers RemoteURL's `origin` per repository directory; a
+	// directory it does not name answers defaultOrigin. originErr fails it.
+	origins       map[string]string
+	defaultOrigin string
+	originErr     error
+
 	commonDir    string
 	mainWorktree string
 	// mainOf answers MainWorktree per directory, as git does: a worktree
@@ -1691,6 +1748,22 @@ func (g *fakeGit) ResolveRef(_ context.Context, dir, ref string) (string, error)
 		return head, nil
 	}
 	return "sha-of-" + ref, nil
+}
+
+// RemoteURL answers the arranged origin of DIR; an empty one is a
+// repository with no origin.
+func (g *fakeGit) RemoteURL(_ context.Context, dir, remote string) (string, bool, error) {
+	if remote != "origin" {
+		return "", false, fmt.Errorf("fakeGit: no remote %q", remote)
+	}
+	if g.originErr != nil {
+		return "", false, g.originErr
+	}
+	origin, ok := g.origins[dir]
+	if !ok {
+		origin = g.defaultOrigin
+	}
+	return origin, origin != "", nil
 }
 
 func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
@@ -3617,7 +3690,7 @@ func newFixture(t *testing.T) *fixture {
 		db:      newFakeDB(),
 		// The main worktree is a REAL worktree directory: every registration
 		// of a linked worktree registers it first.
-		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
+		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t), defaultOrigin: "git@github.com:ChessCom/fixture-repo.git"},
 		account:    &fakeAccounts{configDir: "/config"},
 		pullOwners: pullrefs.Owners{},
 		queue:      newFakeQueue(),
@@ -4314,6 +4387,14 @@ func (f *fakeDB) ReleaseQueueBypass(_ context.Context, ws ids.WorkspaceID) error
 	return nil
 }
 
+// MediationRoleOf answers the role recorded for WS, or rolesErr.
+func (f *fakeDB) MediationRoleOf(_ context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
+	if f.rolesErr != nil {
+		return nil, f.rolesErr
+	}
+	return f.roles[ws], nil
+}
+
 func (f *fakeDB) QueueBypass(_ context.Context, ws ids.WorkspaceID) (wsm.QueueBypass, error) {
 	if f.bypassErr != nil {
 		return wsm.QueueBypass{}, f.bypassErr
@@ -4691,21 +4772,15 @@ func (d *fakeDB) WorkspacePullRequestSubscriptions(_ context.Context, id ids.Wor
 	return d.prSubs[id], nil
 }
 
-// fakeAnchors answers each Anchor with a subscription told "anchored", or
-// with err and an unanchored one, recording every pull request asked.
+// fakeAnchors answers each FollowFromFirstRead with a subscription told
+// "first read", recording every pull request asked.
 type fakeAnchors struct {
-	err   error
 	asked []wsm.PullRequestKey
 }
 
-func (a *fakeAnchors) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error) {
+func (a *fakeAnchors) FollowFromFirstRead(ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) wsm.PullRequestSubscription {
 	a.asked = append(a.asked, pr)
-	sub := wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr, Events: events, Origin: origin}
-	if a.err != nil {
-		return sub, nil, a.err
-	}
-	sub.Told = "anchored"
-	return sub, &agentreplv1.PullRequestStatus{}, nil
+	return wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr, Events: events, Origin: origin, Told: "first read"}
 }
 
 // WorkspaceSummaryOf answers the stored summary, or summaryErr.

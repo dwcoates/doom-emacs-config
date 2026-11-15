@@ -137,7 +137,7 @@ func TestGatherWorkspacesHandsATargetsRefusalBackTyped(t *testing.T) {
 	h := newHarness(t)
 	sentBy := registerSender(h)
 	h.Gathers.target = h.DB.workspaces[testWorkspaceID]
-	h.Prompts.err = promptqueue.ErrNoSession
+	h.Prompts.err = &promptqueue.NoSessionError{Cause: "no revival is wired for this workspace"}
 
 	// Act
 	_, err := h.Client.GatherWorkspaces(context.Background(), connect.NewRequest(gatherRequest(sentBy)))

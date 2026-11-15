@@ -154,6 +154,16 @@ t_status_dirtied_by_the_command_is_drift() {
     fi
 }
 
+t_status_drift_names_each_path_that_moved() {
+    new_case
+    run_net -- sh -c 'echo dirty >"$0"' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"+  M modules/app/agent-repl/lisp/test-agent-repl.el"* ]]; then
+        pass "a working tree the command dirtied is reported naming the path, on the after side"
+    else
+        fail "a working tree the command dirtied is reported naming the path, on the after side" "rc=$RC out=$OUT"
+    fi
+}
+
 t_failure_outranks_drift() {
     new_case
     run_net -- sh -c 'echo dirty >"$0"; exit 7' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"

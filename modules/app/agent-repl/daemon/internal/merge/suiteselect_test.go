@@ -48,9 +48,19 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"ert"},
 		},
 		{
-			name:  "lisp/ selects ert and the repo scans, which read its wire decoders",
+			name:  "lisp/ selects ert, the byte-compile gate and the repo scans, which read its wire decoders",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "repo-scans"},
+			want:  []string{"ert", "byte-compile", "repo-scans"},
+		},
+		{
+			name:  "the byte-compile gate selects itself, the script harnesses and the scans",
+			paths: []string{"modules/app/agent-repl/bin/byte-compile.sh"},
+			want:  append(append([]string(nil), scriptHarnessSuites...), "byte-compile", "repo-scans"),
+		},
+		{
+			name:  "the byte-compile prelude selects the gate, the script harnesses and the scans",
+			paths: []string{"modules/app/agent-repl/bin/compile-prelude.el"},
+			want:  append(append([]string(nil), scriptHarnessSuites...), "byte-compile", "repo-scans"),
 		},
 		{
 			name:  "several regions union their selections",
@@ -70,7 +80,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "a shim change selects the shim suite, the sidecar's mocked vendor and the end-to-end suites",
 			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
-			want:  []string{"shim", "sidecar", "e2e-kit", "e2e", "repo-scans"},
+			want:  []string{"shim", "sidecar", "e2e-kit", "e2e", "repo-scans", "shellcheck"},
 		},
 		{
 			name:  "a sidecar change selects the sidecar suite and the end-to-end suites",
@@ -105,72 +115,72 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the pre-commit hook selects its harness, the installer's and the background scan",
 			paths: []string{".githooks/pre-commit"},
-			want:  []string{"precommit-harness", "install-harness", "background-harness"},
+			want:  []string{"precommit-harness", "install-harness", "background-harness", "shellcheck"},
 		},
 		{
 			name:  "the pre-commit hook's own test selects its harness, the background scan and testrun",
 			paths: []string{".githooks/test-pre-commit.sh"},
-			want:  []string{"precommit-harness", "background-harness", "testrun"},
+			want:  []string{"precommit-harness", "background-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "the reference-transaction hook selects its harness and the background scan",
 			paths: []string{".githooks/reference-transaction"},
-			want:  []string{"merge-queue-hook-harness", "background-harness"},
+			want:  []string{"merge-queue-hook-harness", "background-harness", "shellcheck"},
 		},
 		{
 			name:  "the pre-push hook selects its harness, push-release's and the background scan",
 			paths: []string{".githooks/pre-push"},
-			want:  []string{"release-tag-hook-harness", "push-release-harness", "background-harness"},
+			want:  []string{"release-tag-hook-harness", "push-release-harness", "background-harness", "shellcheck"},
 		},
 		{
 			name:  "the pre-push hook's own test selects its harness, the background scan and testrun",
 			paths: []string{".githooks/test-pre-push.sh"},
-			want:  []string{"release-tag-hook-harness", "background-harness", "testrun"},
+			want:  []string{"release-tag-hook-harness", "background-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "another hook selects the background scan and testrun",
 			paths: []string{".githooks/post-checkout"},
-			want:  []string{"background-harness", "testrun"},
+			want:  []string{"background-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "the safe test runner selects its harness, the background scan and the worktrees library's",
 			paths: []string{".claude/safe-test-run.sh"},
-			want:  []string{"safe-test-run-harness", "background-harness", "worktrees-lib-harness"},
+			want:  []string{"safe-test-run-harness", "background-harness", "worktrees-lib-harness", "shellcheck"},
 		},
 		{
 			name:  "the installer selects its harness, the background scan and the worktrees library's",
 			paths: []string{".claude/install.sh"},
-			want:  []string{"install-harness", "background-harness", "worktrees-lib-harness"},
+			want:  []string{"install-harness", "background-harness", "worktrees-lib-harness", "shellcheck"},
 		},
 		{
 			name:  "another top-level .claude script selects the scans that read it",
 			paths: []string{".claude/check-external-boundaries.sh"},
-			want:  []string{"background-harness", "worktrees-lib-harness", "testrun"},
+			want:  []string{"background-harness", "worktrees-lib-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "a deeper .claude script selects the worktrees library's harness and testrun",
 			paths: []string{".claude/skills/other/run.sh"},
-			want:  []string{"worktrees-lib-harness", "testrun"},
+			want:  []string{"worktrees-lib-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "the workspace command selects its harness",
 			paths: []string{"bin/agent_repl_workspace"},
-			want:  []string{"workspace-cli-harness"},
+			want:  []string{"workspace-cli-harness", "shellcheck"},
 		},
 		{
 			name:  "the workspace-open command selects its harness",
 			paths: []string{"bin/agent_repl_workspace_open"},
-			want:  []string{"workspace-open-cli-harness"},
+			want:  []string{"workspace-open-cli-harness", "shellcheck"},
 		},
 		{
 			name:  "the workspace command's test selects its harness, the background scan and testrun",
 			paths: []string{"bin/test-agent_repl_workspace.sh"},
-			want:  []string{"workspace-cli-harness", "background-harness", "testrun"},
+			want:  []string{"workspace-cli-harness", "background-harness", "testrun", "shellcheck"},
 		},
 		{
 			name:  "another repository bin script selects the background scan and testrun",
 			paths: []string{"bin/new-tool"},
-			want:  []string{"background-harness", "testrun"},
+			want:  []string{"background-harness", "testrun", "shellcheck"},
 		},
 	}
 	for _, tc := range tests {
@@ -263,8 +273,8 @@ func TestSelectSuitesMapsTheGrammarToItsConsumers(t *testing.T) {
 	got := SelectSuites([]string{"modules/app/agent-repl/tree-sitter-tldr/tldr/grammar.js"})
 
 	// Assert.
-	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,e2e-kit,e2e" {
-		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, e2e-kit, e2e and repo-scans", got.Suites, got.Full)
+	if got.Full || strings.Join(got.Suites, ",") != "daemon,repo-scans,tree-sitter-tldr,shellcheck,e2e-kit,e2e" {
+		t.Fatalf("the grammar selected %v (full=%v), want the daemon, tree-sitter-tldr, shellcheck, e2e-kit, e2e and repo-scans", got.Suites, got.Full)
 	}
 }
 
@@ -368,7 +378,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e-kit,e2e" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,byte-compile,e2e-kit,e2e" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

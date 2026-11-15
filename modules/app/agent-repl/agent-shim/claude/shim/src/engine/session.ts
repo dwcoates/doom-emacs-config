@@ -2678,13 +2678,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       await concludeAbsorbed(adopted);
     }
-    const turn = mintAdoptedTurn();
-    adopted = turn;
-    cadence?.pause();
     // A PROMPT TYPED ON claude.ai IS WHAT STARTED IT, when one waits: the
     // first waiting is the turn's own prompt, and any other waiting beside it
     // was merged into the same turn by the vendor.
     const remote = remotePromptsWaiting.shift();
+    const turn = mintAdoptedTurn(remote);
+    adopted = turn;
+    cadence?.pause();
     writeAdoptedPrompt(
       turn,
       remote === undefined
@@ -2728,11 +2728,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return lastMainRecordMs > 0 ? { atMs: lastMainRecordMs, ordinal: LAST_ORDINAL } : undefined;
   }
 
-  /** A shim-minted id for a turn no StartTurn stands behind. */
-  function mintAdoptedTurn(): OpenTurn {
+  /**
+   * The id of a turn no StartTurn stands behind. A turn a prompt typed on
+   * claude.ai opened runs under that prompt's own record uuid, which
+   * `promptVendorUuid` answers verbatim, so a rollback finds the prompt by
+   * its turn as it finds one the shim sent; any other is shim-minted.
+   */
+  function mintAdoptedTurn(remote?: RemotePrompt): OpenTurn {
     // NOT `newUuid`: that minter names SENDS, whose uuids the vendor echoes
     // back, and a turn id must never shift which uuid a send carries.
-    const turn = create(conversationv1.TurnIdSchema, { value: `adopted-${randomUUID()}` });
+    const turn = create(conversationv1.TurnIdSchema, { value: remote?.uuid ?? `adopted-${randomUUID()}` });
     return { id: turn, keepalive: false, adopted: true, startedAtMs: deps.nowMs() };
   }
 
@@ -6017,6 +6022,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (reach.kind === "unreachable") {
       pushes.fault(sessionFault({ kind: "networkUnreachable" }, NETWORK_COMPONENT, reach.detail));
       networkResume.faultOpened();
+      // A RETRY WAITING OUT ITS INTERVAL moves onto the latch, so no timer
+      // fires a retry into the outage.
+      vendorErrorRetry.networkFaultOpened();
       return;
     }
     networkResume.faultResolved();

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"connectrpc.com/connect"
 )
@@ -616,6 +617,9 @@ func userPrimaryCreate(dir string) *agentreplv1.CreateWorkspaceRequest {
 		Requester: &agentreplv1.WorkspaceRequester{
 			Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}},
 		},
+		Originator: &agentreplv1.WorkspaceOriginator{
+			Originator: &agentreplv1.WorkspaceOriginator_UserOrWorkspace{UserOrWorkspace: &agentreplv1.WorkspaceOriginatorUserOrWorkspace{}},
+		},
 		ContextOrigin: &agentreplv1.WorkspaceContextOrigin{
 			Origin: &agentreplv1.WorkspaceContextOrigin_Fresh{Fresh: &agentreplv1.WorkspaceContextOriginFresh{}},
 		},
@@ -703,11 +707,13 @@ func TestTheGatherVerbsAreServedAsUnaries(t *testing.T) {
 		call func(agentreplv1connectClient) error
 	}{
 		{"GatherWorkspaces", func(c agentreplv1connectClient) error {
-			_, err := c.GatherWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.GatherWorkspacesRequest{}))
+			_, err := c.GatherWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.GatherWorkspacesRequest{
+				Caller: &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/tmp/ws-1"}, TargetNames: []string{"peer"},
+				Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{}}, IdempotencyKey: "gather-1"}))
 			return err
 		}},
 		{"GetGatherStatus", func(c agentreplv1connectClient) error {
-			_, err := c.GetGatherStatus(context.Background(), connect.NewRequest(&agentreplv1.GetGatherStatusRequest{}))
+			_, err := c.GetGatherStatus(context.Background(), connect.NewRequest(&agentreplv1.GetGatherStatusRequest{Gather: &agentreplv1.GatherRef{Id: "gather-1"}}))
 			return err
 		}},
 	}

@@ -872,7 +872,11 @@ async function rowCall(
         return true;
       }
       drawRefusalAfter(row, REFUSAL_KIND, refused.arm, refused.say);
-      log.warn(`${rpc} refused a ${action}`, {
+      // A TYPED REFUSAL IS THE DAEMON'S ANSWER TO A STATE, not a defect: a
+      // release while a turn the vendor started runs is refused because such
+      // a turn is never joined, and the row says so. Info, so an expected
+      // answer never reads as a warning in the shared log.
+      log.info(`${rpc} refused a ${action}`, {
         operation: "held.held-prompt.action-refused",
         context: { turn, action, arm: refused.arm, sentence: refused.say },
       });

@@ -169,7 +169,7 @@ func newFixture(subs fakeSubscriptions) *fixture {
 		Subscriptions: f.subs,
 		Holds:         f.holds,
 		Untold:        f.untold,
-		Notices: &briefprompttest.Meter{},
+		Notices:       &briefprompttest.Meter{},
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
@@ -1163,5 +1163,70 @@ func TestInScopeIsTheChangesQueueOrEveryQueue(t *testing.T) {
 				t.Fatalf("InScope = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// madeAt is CHANGE as the queue made it, in its place SEQ in the changes'
+// order.
+func madeAt(change merge.QueueChange, seq uint64) merge.QueueChange {
+	change.Seq = seq
+	return change
+}
+
+func TestASubscriptionTakenAfterAChangeIsNotToldIt(t *testing.T) {
+	// Arrange: bob subscribed after the landing was made, before it was delivered.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom), sub(bob, repoDoom)}})
+	f.s.Subscribed(alice, repoDoom, 4)
+	f.s.Subscribed(bob, repoDoom, 5)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, madeAt(landedLast, 5))
+
+	// Assert.
+	got := f.prompts.submissions()
+	if len(got) != 1 || got[0].ws != alice {
+		t.Fatalf("submissions = %+v, want alice alone", got)
+	}
+}
+
+func TestASubscriptionTakenAfterADepletionIsNotEndedByIt(t *testing.T) {
+	// Arrange: bob subscribed just after the depletion, his answer showing the empty queue.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom), sub(bob, repoDoom)}})
+	f.s.Subscribed(alice, repoDoom, 1)
+	f.s.Subscribed(bob, repoDoom, 2)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, madeAt(landedLast, 2))
+
+	// Assert.
+	if len(f.subs.ended) != 1 || f.subs.ended[0].Subscriber != alice {
+		t.Fatalf("ended = %+v, want alice's subscription alone", f.subs.ended)
+	}
+}
+
+func TestASubscriptionThisDaemonNeverSawTakenIsToldEveryChange(t *testing.T) {
+	// Arrange: alice subscribed before this daemon made any change.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, madeAt(landedLast, 1))
+
+	// Assert.
+	if got := f.prompts.submissions(); len(got) != 1 || got[0].ws != alice {
+		t.Fatalf("submissions = %+v, want alice told", got)
+	}
+}
+
+func TestADeploysEndNoQueueWriteMadeIsToldToEverySubscription(t *testing.T) {
+	// Arrange: the deploy's end carries no place in the changes' order.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
+	f.s.Subscribed(alice, repoDoom, 9)
+
+	// Act.
+	f.s.deliver(context.Background(), f.prompts, merge.QueueChange{Kind: merge.QueueChangeDeployed})
+
+	// Assert.
+	if got := f.prompts.submissions(); len(got) != 1 {
+		t.Fatalf("submissions = %+v, want the deploy's end told", got)
 	}
 }

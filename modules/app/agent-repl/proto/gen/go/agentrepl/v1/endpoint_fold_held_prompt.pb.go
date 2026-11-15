@@ -708,8 +708,7 @@ func (x *FoldHeldPromptTransferringAway) GetAddress() string {
 	return ""
 }
 
-// A joining daemon has not finished adopting the workspace. DELIBERATELY
-// EMPTY: the arm's presence is the whole fact.
+// A joining daemon has not finished adopting the workspace.
 type FoldHeldPromptNotYetAdopted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the

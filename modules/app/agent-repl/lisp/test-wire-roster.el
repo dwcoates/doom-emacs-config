@@ -1959,8 +1959,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"expanded\":{\"collapsible\":{}}" member "}"))
 
 (defconst agent-repl-test-wire-roster--subject
-  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}}}"
-  "A merge queue subject's JSON: w1, named one, revealing b1, async.")
+  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}},\"merge\":{\"id\":\"w1-merge\"}}"
+  "A merge queue subject's JSON: w1, named one, revealing b1, async, as merge w1-merge.")
 
 (defun agent-repl-test-wire-roster--merged-section-with (members)
   "Return a Recently Merged section JSON carrying MEMBERS, JSON members or \"\"."
@@ -2096,22 +2096,37 @@ workspace its requeue and discard controls name."
                    '("one" "evicted" "m1" "m1")))))
 
 (ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-decodes-its-standing ()
-  "The deploy mediation a queue waits on decodes whether it is checking
-the deploy."
+  "The deploy check a queue waits on decodes its standing and the workspace
+a click on its label selects."
   (should (equal (plist-get
                   (agent-repl-test-wire-roster--decode
                    #'agent-repl-wire-decode-roster-repo-merge-queue
-                   "{\"mediation\":{\"checking\":{}}}")
+                   "{\"mediation\":{\"checking\":{\"target\":{\"workspace\":{\"id\":\"intake\",\"dir\":\"/wt/intake\"}}}}}")
                   :mediation)
-                 '(:standing :checking))))
+                 '(:standing :checking :target (:id "intake" :dir "/wt/intake")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-fixing-deploy-mediation-selects-its-remediation ()
+  "A check whose fix is at work decodes `:fixing', selecting the remediation."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"fixing\":{\"target\":{\"workspace\":{\"id\":\"remedy\",\"dir\":\"/wt/remedy\"}}}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get (plist-get decoded :target) :id))
+                   '(:fixing "remedy")))))
 
 (ert-deftest agent-repl-test-wire-roster-a-waiting-deploy-mediation-decodes-waiting ()
-  "A mediation whose deploy still rolls out decodes `:waiting'."
-  (should (eq (plist-get (agent-repl-test-wire-roster--decode
-                          #'agent-repl-wire-decode-roster-merge-queue-mediation
-                          "{\"waiting\":{}}")
-                         :standing)
-              :waiting)))
+  "A check whose deploy still rolls out decodes `:waiting', with no target
+for a chain's first deploy."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"waiting\":{}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get decoded :target))
+                   '(:waiting nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-checking-deploy-mediation-without-a-target-is-a-breach ()
+  "A check being assessed always names the intake its label selects."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation "{\"checking\":{}}")
+                 '("RosterMergeQueueMediationChecking" target "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-without-a-standing-is-a-breach ()
   "A deploy mediation always says where it stands."
@@ -2248,6 +2263,22 @@ its place and since it joined."
                   #'agent-repl-wire-decode-roster-merge-queue-subject
                   "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\"}")
                  '("RosterMergeQueueSubject" mode "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-decodes-the-merge-itself ()
+  "A subject names the merge its queue holds apart from its credited workspace."
+  (let ((subject (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-subject
+                  agent-repl-test-wire-roster--subject)))
+    (should (equal (list (plist-get (plist-get subject :workspace) :id)
+                         (plist-get (plist-get subject :merge) :id))
+                   '("w1" "w1-merge")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-merge-is-a-breach ()
+  "The merge itself is a required message on its subject."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-subject
+                  "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\",\"mode\":{\"sync\":{}}}")
+                 '("RosterMergeQueueSubject" merge "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-refuses-a-retired-merge-queue ()
   "A repository section no longer carries a merge queue; one is refused as unknown."

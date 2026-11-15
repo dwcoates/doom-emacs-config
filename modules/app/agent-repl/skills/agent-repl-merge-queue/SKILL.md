@@ -177,16 +177,17 @@ Either kind:
   `still_queued` (dequeue first).
 - `workspace async-merge` under a name an off-queue merge holds is refused
   `async_merge_name_off_queue`, naming that merge: requeue it instead.
-- `merge-queue pause` and `merge-queue resume [-repository here|DIR]` suspend
-  or resume a queue.
-- `merge-queue pause -hard [-repository here|DIR]` is a HARD STOP: it pauses
+- `merge-queue pause -repository here|DIR|all` and `merge-queue resume
+  -repository here|DIR|all` suspend or resume a queue. `-repository` is
+  required; `all` names every repository's queue.
+- `merge-queue pause -hard -repository here|DIR|all` is a HARD STOP: it pauses
   the queue and also interrupts the agent turn of every merge stopped at a
   fixing attempt or a conflict resolution, and of every waiting merge's
   background rebase. A turn at any other step (a pick, a deploy-stage prompt)
   is left to finish. A queue already paused is not refused. On resume, each
   interrupted step is prompted again without spending an attempt.
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
-- `merge-queue pause -to-land` marks a pause made to land a change: the only
+- `merge-queue pause -to-land -repository here|DIR|all` marks a pause made to land a change: the only
   pause the queue bypass holder's turn end lets through. A pause without it,
   such as one the user asked for, stands until it is resumed explicitly.
 - A queue the HOST paused (`by the host` in its hover) stands for a merge
@@ -234,17 +235,28 @@ Either kind:
   queue in scope depletes (a merge leaves and none is left in line), that
   notice being its last; subscribe again to follow the next work, and to hear
   a deploy that ends after the depletion.
-- A repository whose `.agent-repl/lifecycle.yaml` names a `deploy_mediator`
-  holds its queue after every deploy until its mediator decides the deploy;
-  the sidebar labels the repository "hot reloading" while the build rolls
-  out, then "assessing reload" while the mediator checks it, beside its name
-  in purple, and
-  `merge-queue status` answers its advance as `mediating`, naming the
-  mediator (`paused` wins while the queue is also paused). Only the mediator
-  decides, with
-  `merge-queue mediation approve|escalate -summary TEXT` (the repository is the mediator's own);
-  any other workspace is refused `not_mediator`, and a decision while no
-  deploy owes one is refused `no_mediation_owed`.
+- A repository whose `.agent-repl/lifecycle.yaml` sets `deploy_checks` holds
+  its queue's head after every deploy until the deploy is checked.
+  - Deploys in a row form a chain, which one hidden intake workspace checks.
+  - The sidebar labels the repository in purple: "hot reloading" while the
+    build rolls out, "assessing reload" while the intake checks it, "fixing
+    reload" while a remediation workspace fixes it. A click selects the
+    workspace at work.
+  - `merge-queue status` answers its advance as `mediating`, with its stage
+    (`rolling_out`, `assessing` or `fixing`, naming the intake and the
+    remediation) and `remediations_in_a_row`; `paused` wins while the queue
+    is also paused.
+  - Only the chain's intake decides, with
+    `merge-queue mediation approve|escalate -summary TEXT`, or
+    `merge-queue mediation dispatch -fresh|-restore -summary TEXT` reading the
+    problems from standard input as a JSON list of `{"statement", "evidence"}`.
+  - Refusals: `not_mediator` (not the chain's intake), `no_mediation_owed` (a
+    fix is dispatched already), `no_remediation_to_restore` (`-restore` with
+    no earlier remediation), `remediation_bound_reached` (the chain's bound;
+    only an escalation is accepted).
+  - A remediation workspace's `workspace finished` answers `landing_directly`:
+    it never joins the queue. Its gate, direct landing and deploy run
+    unattended; a failed gate comes back to it as a resumed turn.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.
 
 ### Commandeering the running spot

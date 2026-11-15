@@ -131,6 +131,12 @@ func (e *Emitter) Ended(results []run.Result, unplannable int, runFailures []str
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: ended}})
 }
 
+// PlannedOnly states that a plan-only run planned N units and ran none.
+func (e *Emitter) PlannedOnly(n int) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+		Outcome: &testrunv1.TestRunEnded_Planned{Planned: &testrunv1.TestRunEndedPlanned{PlannedUnits: int32(n)}}}}})
+}
+
 // Aborted states that the run stopped before it planned, on the runner's
 // own failure: what it was asked to run, and why it stopped.
 func (e *Emitter) Aborted(selection, detail string) {

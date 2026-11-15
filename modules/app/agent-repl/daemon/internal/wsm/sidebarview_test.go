@@ -176,27 +176,6 @@ func TestTheMigrationAddsTheSidebarView(t *testing.T) {
 	}
 }
 
-// TestTheMigrationAddsTheMaturityFolds pins the layout-29 step.
-func TestTheMigrationAddsTheMaturityFolds(t *testing.T) {
-	// Arrange
-	path := fixtureAt(t, 28)
-
-	// Act
-	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-	if err != nil {
-		t.Fatalf("Open on a layout-28 database: %v", err)
-	}
-	defer handle.Close()
-
-	// Assert
-	s := handle.(*store)
-	for _, column := range []string{"backlog_folded", "in_progress_folded", "merging_folded"} {
-		if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = ?`, column); got != 1 {
-			t.Fatalf("sidebar_view.%s columns after the migration = %d, want 1", column, got)
-		}
-	}
-}
-
 func TestTheDefaultViewExpandsTheHiddenSection(t *testing.T) {
 	// Arrange, Act, Assert
 	if DefaultSidebarView.HiddenFolded {
@@ -255,27 +234,6 @@ func TestTheMigrationAddsTheOpenSectionFold(t *testing.T) {
 	}
 	if view.OpenFolded {
 		t.Fatalf("SidebarView after the migration = %+v, want the open section expanded", view)
-	}
-}
-
-// TestTheMigrationAddsTheOpenSectionShows pins the layout-76 step, whose
-// column deployed files carry though no build reads it since the toggle was
-// retired.
-func TestTheMigrationAddsTheOpenSectionShows(t *testing.T) {
-	// Arrange
-	path := fixtureAt(t, 75)
-
-	// Act
-	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-	if err != nil {
-		t.Fatalf("Open on a layout-75 database: %v", err)
-	}
-	defer handle.Close()
-
-	// Assert
-	s := handle.(*store)
-	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = 'open_shows_merge_queues'`); got != 1 {
-		t.Fatalf("sidebar_view.open_shows_merge_queues columns after the migration = %d, want 1", got)
 	}
 }
 

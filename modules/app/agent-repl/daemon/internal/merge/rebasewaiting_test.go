@@ -3,11 +3,13 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
@@ -620,5 +622,63 @@ func TestAResolvingRebaseClearsARebaseACutRunLeftStandingOnceFree(t *testing.T) 
 	}
 	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
 		t.Fatalf("C's session got %d conflict prompts, want the fresh rebase's one", got)
+	}
+}
+
+func TestAbortStandingRebase(t *testing.T) {
+	failure := errors.New("git broke")
+	tests := []struct {
+		name        string
+		noDir       bool
+		standing    bool
+		standingErr error
+		abortErr    error
+		busy        bool
+		want        bool
+		wantAbort   bool
+		wantError   string
+		wantInfo    string
+	}{
+		{name: "a run with no worktree yet aborts nothing", noDir: true, standing: true},
+		{name: "a worktree with no rebase standing aborts nothing"},
+		{name: "a standing rebase is aborted", standing: true, want: true, wantAbort: true},
+		{name: "a rebase the session's turn still works under is left standing", standing: true, busy: true,
+			wantInfo: "the rebase is left standing for the next run to clear once the turn ended"},
+		{name: "an unreadable worktree is left as git left it", standingErr: failure, wantError: "could not read whether a rebase stands in the merge's worktree"},
+		{name: "a rebase that will not abort is left as git left it", standing: true, abortErr: failure, wantError: "could not abort the rebase standing in the merge's worktree"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := ledgeredRun(t, h)
+			if !tt.noDir {
+				r.subject = subject{dir: h.sourceD, branch: "feature", targetDir: h.targetD}
+			}
+			h.git.mu.Lock()
+			h.git.standing, h.git.standingErr, h.git.abortErr = tt.standing, tt.standingErr, tt.abortErr
+			h.git.mu.Unlock()
+			h.freeness.busy = tt.busy
+
+			// Act.
+			got := r.abortStandingRebase(context.Background(), "daemon.merge.abandoned", dlog.Context{"workspace": string(theWorkspace)})
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("abortStandingRebase = %v, want %v", got, tt.want)
+			}
+			h.git.mu.Lock()
+			aborted := slices.Contains(h.git.rebaseCommands, "abort")
+			h.git.mu.Unlock()
+			if aborted != tt.wantAbort {
+				t.Fatalf("aborted = %v, want %v", aborted, tt.wantAbort)
+			}
+			if tt.wantInfo != "" && !loggedLike(h, logLike{level: "info", op: "daemon.merge.abandoned", text: tt.wantInfo}) {
+				t.Fatalf("no INFO record %q: %+v", tt.wantInfo, h.logs.Records())
+			}
+			if tt.wantError != "" && !loggedLike(h, logLike{level: "error", op: "daemon.merge.abandoned", text: tt.wantError, context: map[string]string{"dir": h.sourceD, "error": failure.Error()}}) {
+				t.Fatalf("no ERROR record %q: %+v", tt.wantError, h.logs.Records())
+			}
+		})
 	}
 }

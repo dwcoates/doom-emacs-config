@@ -125,12 +125,12 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 // it IS a turn; a pick starts it as a settings start, stood down on the switch
 // away unless a turn runs meanwhile. A standing cold gate refuses the act by
 // the gate's own name, and a queue with no revival wired, a workspace that
-// cannot come back, refuses it as ErrNoSession. The caller holds the delivery
+// cannot come back, refuses it as no_session (noSession). The caller holds the delivery
 // lock.
 func (q *queue) holdActForRevival(ctx context.Context, ws ids.WorkspaceID, act Act, cut bool, log dlog.Logger) error {
 	if q.deps.Revive == nil {
-		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on and none can be started", nil)
-		return ErrNoSession
+		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on and none can be started", dlog.Context{"cause": causeNoRevival})
+		return noSession(causeNoRevival)
 	}
 	if err := q.refuseAtColdGate(ctx, ws, opAct, "the act", log); err != nil {
 		return err
@@ -247,8 +247,8 @@ func (q *queue) runAct(ctx context.Context, d *delivery, act Act, claims []ids.T
 	ws := d.ws
 	sender, ok := q.deps.Client(ws)
 	if !ok {
-		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on", nil)
-		return ErrNoSession
+		refusalLevel(ctx, log, log.Warn)(opAct, "the workspace has no session to act on", dlog.Context{"cause": causeShimGone})
+		return noSession(causeShimGone)
 	}
 
 	switch act.Kind {

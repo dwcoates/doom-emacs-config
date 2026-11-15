@@ -639,7 +639,14 @@ func (x *UpdateRemoteControlModeTransferringAway) GetAddress() string {
 }
 
 type UpdateRemoteControlModeNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -672,6 +679,13 @@ func (x *UpdateRemoteControlModeNotYetAdopted) ProtoReflect() protoreflect.Messa
 // Deprecated: Use UpdateRemoteControlModeNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*UpdateRemoteControlModeNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_remote_control_mode_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UpdateRemoteControlModeNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type UpdateRemoteControlModeVendorRefused struct {
@@ -749,8 +763,11 @@ const file_agentrepl_v1_endpoint_update_remote_control_mode_proto_rawDesc = "" +
 	"+UpdateRemoteControlModeWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"C\n" +
 	"'UpdateRemoteControlModeTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"&\n" +
-	"$UpdateRemoteControlModeNotYetAdopted\">\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"Q\n" +
+	"$UpdateRemoteControlModeNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\">\n" +
 	"$UpdateRemoteControlModeVendorRefused\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -822,6 +839,7 @@ func file_agentrepl_v1_endpoint_update_remote_control_mode_proto_init() {
 		(*UpdateRemoteControlModeError_NotYetAdopted)(nil),
 		(*UpdateRemoteControlModeError_VendorRefused)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_remote_control_mode_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

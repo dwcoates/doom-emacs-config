@@ -66,6 +66,7 @@ import {
   PERMISSION_ANSWERS,
   PLAN_STATES,
   QUESTION_ONE,
+  QUESTION_REMOTE_LABEL,
   QUESTION_STATES,
   QUESTION_TWO,
   RESPONSE_STATES,
@@ -1536,6 +1537,25 @@ describe("an expired question", () => {
   it("offers no controls but the question mark every card carries", async () => {
     // Arrange / Act
     const row = await drawRow(questionRow("expired"));
+    // Assert
+    expect(row.querySelector(`ar-button:not(.${QUESTION_CONTROL_CLASS})`)).toBeNull();
+  });
+});
+
+describe("a question answered on claude.ai", () => {
+  it("draws as answered there, under the daemon's marker", async () => {
+    // Arrange / Act
+    const row = await drawRow(questionRow("answeredRemotely"));
+    // Assert
+    expect([row.dataset.state, row.querySelector(".tool-head .badge")?.textContent]).toEqual([
+      "answeredRemotely",
+      QUESTION_REMOTE_LABEL,
+    ]);
+  });
+
+  it("offers no controls but the question mark every card carries", async () => {
+    // Arrange / Act
+    const row = await drawRow(questionRow("answeredRemotely"));
     // Assert
     expect(row.querySelector(`ar-button:not(.${QUESTION_CONTROL_CLASS})`)).toBeNull();
   });

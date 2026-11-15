@@ -103,8 +103,12 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 // beatPlanFor answers WS's next beat, false when it owes none. ONE PARK,
 // WHATEVER STOOD IT DOWN: a session the idle sweep parked owes none by the
 // cutoff below, and a withheld one by its withholding, so no reader here asks
-// which stand-down it was. Every reason it owes none is recorded at DEBUG:
-// they are the ordinary states of a fleet.
+// which stand-down it was.
+//
+// THE DECISION IS RECORDED AT INFO WHEN IT CHANGES, at DEBUG while it stands
+// (owesNone): every reason it owes none is an ordinary state of a fleet, but
+// at DEBUG alone it never reached the disk, and 76 sessions marked cold on
+// 2026-11-14 left no record of why the keeper stopped beating them.
 //
 // BOTH CONVERSATIONS ARE KEPT WARM IN TANDEM (owner request, 2026-11-10). A
 // workspace that took the queue bypass mode parks the conversation it does
@@ -117,6 +121,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
 			k.forget(ws)
+			delete(k.noBeat, ws)
 			return beatPlan{}, false
 		}
 		if !leaving(ctx, log, opDrive, "reading the workspace to time its keep-alive", err) {
@@ -125,7 +130,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		return beatPlan{}, false
 	}
 	none := func(why string) (beatPlan, bool) {
-		log.Debug(opDrive, "the workspace owes no keep-alive", dlog.Context{"why": why})
+		k.owesNone(log, ws, why)
 		return beatPlan{}, false
 	}
 	// A WORKSPACE WHOSE DIRECTORY IS GONE OWES NO KEEP-ALIVE: no session can
@@ -222,7 +227,31 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(plan.due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
+	k.owesAgain(log, ws)
 	return plan, true
+}
+
+// owesNone records that WS owes no keep-alive for WHY: at INFO when the
+// decision changed since the last one, at DEBUG when it stands as it was.
+func (k *Keeper) owesNone(log dlog.Logger, ws ids.WorkspaceID, why string) {
+	fields := dlog.Context{"why": why}
+	if was, ok := k.noBeat[ws]; ok && was == why {
+		log.Debug(opDrive, "the workspace owes no keep-alive", fields)
+		return
+	}
+	k.noBeat[ws] = why
+	log.Info(opDrive, "the workspace owes no keep-alive", fields)
+}
+
+// owesAgain records at INFO that WS owes keep-alives again after a decision
+// that it owed none; a workspace that owed them all along is no change.
+func (k *Keeper) owesAgain(log dlog.Logger, ws ids.WorkspaceID) {
+	was, ok := k.noBeat[ws]
+	if !ok {
+		return
+	}
+	delete(k.noBeat, ws)
+	log.Info(opDrive, "the workspace owes keep-alives again", dlog.Context{"owed_none_because": was})
 }
 
 // beatsDue sends every keep-alive that has come due.
@@ -351,9 +380,11 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		if k.markCold(ctx, ws, "the shim judged the cache lapsed") != nil {
 			// UNMARKED, the beat would be asked again at once and judged lapsed
 			// again: it is asked again shortly instead, and markCold recorded
-			// why at ERROR.
+			// why at ERROR. The retry's own mark parks the session.
 			k.beats[ws] = now.Add(BeatRetry)
+			return
 		}
+		k.parkCold(ws, now, "the shim judged the cache lapsed")
 	default:
 		observe(BeatOutcomeUnnamedJudgment)
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{

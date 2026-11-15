@@ -11,14 +11,30 @@ import (
 // under.
 const opStanding = "daemon.merge.standing"
 
-// queueHeld reports whether REPO's queue may advance nothing now: it is
-// paused, this daemon may not advance its queues across a handover
-// (Standing.ServesQueue), or the repository owes a deploy mediation its
-// mediator has not decided (wsm.Mediation). It is THE ONE ANSWER every step
-// that advances a queue asks -- an admission, a chain, a resume, a drain, a
-// waiting rebase -- so none of them can advance a queue another of them
-// holds.
+// queueHeld reports whether REPO's queue's HEAD may advance nothing now: it
+// is paused, this daemon may not advance its queues across a handover
+// (Standing.ServesQueue), or the repository owes a deploy check its intake
+// has not decided (wsm.Mediation). It is THE ONE ANSWER every step that moves
+// the head asks -- an admission, a resume, a drain -- so none of them can
+// advance a queue another of them holds.
 func (o *orchestrator) queueHeld(ctx context.Context, repo wsm.RepoKey) (bool, error) {
+	return o.held(ctx, repo, func(m *wsm.Mediation) bool { return m != nil })
+}
+
+// speculationHeld reports whether REPO's queue may start no new SPECULATIVE
+// work behind its head now -- a chain's extension, a waiting merge's rebase:
+// it is paused, a handover holds it, or a fix is dispatched for the deploy
+// its check is owed of (owner ruling, 2026-11-14). While the intake only
+// assesses, that work goes on: most checks approve, and stopping it would
+// add the assessment to every merge's wait. Once a fix is dispatched its
+// landing would make that work stale, so none starts until it lands.
+func (o *orchestrator) speculationHeld(ctx context.Context, repo wsm.RepoKey) (bool, error) {
+	return o.held(ctx, repo, func(m *wsm.Mediation) bool { return m != nil && m.Dispatched })
+}
+
+// held answers whether REPO's queue is paused, held by a handover, or held
+// by its owed check as HOLDS judges it.
+func (o *orchestrator) held(ctx context.Context, repo wsm.RepoKey, holds func(*wsm.Mediation) bool) (bool, error) {
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return false, err
@@ -30,7 +46,7 @@ func (o *orchestrator) queueHeld(ctx context.Context, repo wsm.RepoKey) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return mediation != nil, nil
+	return holds(mediation), nil
 }
 
 // FollowStanding implements Orchestrator.

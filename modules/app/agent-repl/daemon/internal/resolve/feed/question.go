@@ -105,6 +105,13 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 			// card is expired rather than standing forever.
 			card.State = &frontendv1.FeedQuestion_Expired{Expired: &frontendv1.FeedQuestionExpired{}}
 			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
+		case *conversationv1.AgentQuestionSuccess_AnsweredRemotely:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "case *conversationv1.AgentQuestionSuccess_AnsweredRemotely"})
+			// ANSWERED ON claude.ai: settled, with no answers to draw because
+			// the vendor relays none, under the neutral marker a permission
+			// answered there carries.
+			card.State = &frontendv1.FeedQuestion_AnsweredRemotely{AnsweredRemotely: &frontendv1.FeedQuestionAnsweredRemotely{Marker: answeredRemotelyMarker()}}
+			card.Clock = settledClock(served.startedAtMs, frame.Success.GetSettledAt())
 		default:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "draw", "branch": "default"})
 			return

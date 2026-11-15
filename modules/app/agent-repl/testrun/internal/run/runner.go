@@ -46,6 +46,11 @@ type Spec struct {
 	// Display, when set, is what of the unit's output the run log shows,
 	// given whether the unit passed. Nil shows it whole.
 	Display func(output []byte, passed bool) []byte
+	// NamesTests marks a chunk a selection narrowed to named tests: one that
+	// runs none of them fails, never passes on nothing (2026-11-15: a
+	// multi-file ERT selection handed the names to the wrong file and passed
+	// on zero tests).
+	NamesTests bool
 }
 
 // Usage is what a unit's process and its reaped descendants used, as the
@@ -413,6 +418,11 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 				r.Log.Infof("unit %s (%s) failed, and its test timings are unreadable: %v", c.id, spec.Suite, err)
 			}
 			res.Tests = tests
+		}
+		if res.Outcome == Passed && spec.NamesTests && len(res.Tests) == 0 {
+			r.Log.Errorf("unit %s (%s) was narrowed to named tests and ran none of them; a selection that runs nothing fails", c.id, spec.Suite)
+			fmt.Fprintf(c.output, "\n%s unit %s ran NONE of the tests it was narrowed to: a selection that runs nothing fails.\n", Prefix, c.id)
+			res.Outcome, res.Exit = Failed, 1
 		}
 		// The block is bracketed by a line naming its unit and suite and by
 		// the unit's verdict line, so a reader of the interleaved run (the

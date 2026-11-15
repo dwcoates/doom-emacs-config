@@ -65,9 +65,23 @@ message RegisterWorkspaceError {
     // the open child of a parent that is not open (agentrepl.v1 family.proto).
     // The workspace stays closed; the user opens its parent first.
     WorkspaceParentNotOpen parent_not_open = 3;
+    // The dir is a workspace this daemon handed to its successor during a
+    // handover, so it registers there and nowhere else; dial `address`.
+    RegisterWorkspaceTransferringAway transferring_away = 4;
   }
 }
 message RegisterWorkspaceNotAWorktree {}
+// A registration of a workspace this daemon has transferred to its successor.
+// It is REFUSED BEFORE ANYTHING IS WRITTEN: the row is not re-opened, no
+// serving ownership is claimed and no resolver is bound here, so the
+// successor stays the workspace's one server. It is handover news, not a
+// failure: the client re-registers the workspace at `address` and views it
+// there. Answered both by RegisterWorkspace and, per dir, by
+// RegisterWorkspaces' `refused` arm.
+message RegisterWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, where the workspace registers.
+  string address = 1;
+}
 // The directory lies inside a temporary directory (owner ruling,
 // 2026-10-06): agent-repl does not register temporary folders. A temporary
 // folder is scratch space the OS or a test run purges, so a roster row for

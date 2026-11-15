@@ -3,9 +3,14 @@ package server
 import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sourcescan"
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"io"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +21,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
@@ -977,6 +983,116 @@ func TestAPerWorkspaceWatchOnARefTheRegistryRefusesIsTransportClosed(t *testing.
 				}
 			})
 		}
+	}
+}
+
+// TestARefusedHandoverStreamNamesItsDaemon pins every per-workspace stream's
+// handover refusal naming the daemon its arm points at, in the error's
+// metadata under RefusalAddressKey and on the INFO record, as a unary rpc's
+// arm names it in `address`. A not_yet_adopted with no live incumbent names
+// none.
+func TestARefusedHandoverStreamNamesItsDaemon(t *testing.T) {
+	standings := []struct {
+		name        string
+		standing    workspace.Standing
+		incumbent   string
+		wantAddress string
+	}{
+		{name: "transferring_away names the successor", standing: workspace.StandingTransferringAway, incumbent: "127.0.0.1:8888", wantAddress: "127.0.0.1:9999"},
+		{name: "not_yet_adopted names the incumbent", standing: workspace.StandingNotYetAdopted, incumbent: "127.0.0.1:8888", wantAddress: "127.0.0.1:8888"},
+		{name: "not_yet_adopted with no incumbent names none", standing: workspace.StandingNotYetAdopted, incumbent: "", wantAddress: ""},
+	}
+	for _, watch := range perWorkspaceWatches() {
+		for _, tc := range standings {
+			t.Run(watch.rpc+" "+tc.name, func(t *testing.T) {
+				// Arrange.
+				log := &recordingLogger{}
+				h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+				h.Ownership.standing = tc.standing
+				h.IncumbentAddress = tc.incumbent
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+
+				// Act.
+				err := watch.open(h, ctx, ref())
+
+				// Assert.
+				var connectErr *connect.Error
+				if !errors.As(err, &connectErr) {
+					t.Fatalf("%s opened (err %v), want a transport-level refusal", watch.rpc, err)
+				}
+				if got := connectErr.Meta().Get(RefusalAddressKey); got != tc.wantAddress {
+					t.Fatalf("%s metadata = %q, want %q", RefusalAddressKey, got, tc.wantAddress)
+				}
+				var recorded []map[string]any
+				for _, rec := range log.at("INFO") {
+					if rec.Operation == opTransportClosed {
+						recorded = append(recorded, rec.Context)
+					}
+				}
+				if len(recorded) != 1 {
+					t.Fatalf("transport-closed records = %v, want one", recorded)
+				}
+				if got, _ := recorded[0]["address"].(string); got != tc.wantAddress {
+					t.Fatalf("transport-closed records = %v, want one naming address %q", recorded, tc.wantAddress)
+				}
+			})
+		}
+	}
+}
+
+// TestARefusedHandoverStreamNamesItsDaemonInTheEndFrame pins the wire shape
+// Emacs reads (lisp/connect.el): a refused stream is a 200 whose end-stream
+// frame carries the error and, in its `metadata` object, the address.
+func TestARefusedHandoverStreamNamesItsDaemonInTheEndFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Ownership.standing = workspace.StandingNotYetAdopted
+	payload := []byte(`{"workspace":{"id":"` + string(testWorkspaceID) + `","dir":"` + testWorkspaceDir + `"}}`)
+	body := make([]byte, 5, 5+len(payload))
+	binary.BigEndian.PutUint32(body[1:], uint32(len(payload)))
+	body = append(body, payload...)
+	req, err := http.NewRequest(http.MethodPost, h.HTTP.URL+agentreplv1connect.AgentReplWatchHostWorkspaceProcedure, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build the request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/connect+json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+
+	// Act.
+	resp, err := h.HTTP.Client().Do(req)
+	if err != nil {
+		t.Fatalf("WatchHostWorkspace: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the response: %v", err)
+	}
+
+	// Assert.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (%s), want a 200 whose end frame refuses", resp.StatusCode, raw)
+	}
+	var end struct {
+		Error    *struct{ Code string } `json:"error"`
+		Metadata map[string][]string    `json:"metadata"`
+	}
+	for len(raw) >= 5 {
+		flags, size := raw[0], binary.BigEndian.Uint32(raw[1:5])
+		frame := raw[5 : 5+size]
+		raw = raw[5+size:]
+		if flags&0x02 != 0 {
+			if err := json.Unmarshal(frame, &end); err != nil {
+				t.Fatalf("unparsable end frame %s: %v", frame, err)
+			}
+		}
+	}
+	if end.Error == nil || end.Error.Code != "failed_precondition" {
+		t.Fatalf("end frame error = %+v, want failed_precondition", end.Error)
+	}
+	if got := end.Metadata[RefusalAddressKey]; len(got) != 1 || got[0] != "127.0.0.1:8888" {
+		t.Fatalf("end frame metadata = %v, want %s naming the incumbent", end.Metadata, RefusalAddressKey)
 	}
 }
 

@@ -52,11 +52,11 @@ func TestRepositoryOfRemoteReadsEveryGitHubSpelling(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.remote, func(t *testing.T) {
 			// Act
-			owner, repo, ok := RepositoryOfRemote(tt.remote)
+			owner, repo, ok := repositoryOfRemote(tt.remote)
 
 			// Assert
 			if ok != tt.ok || owner != tt.owner || repo != tt.repo {
-				t.Fatalf("RepositoryOfRemote = %q, %q, %v; want %q, %q, %v", owner, repo, ok, tt.owner, tt.repo, tt.ok)
+				t.Fatalf("repositoryOfRemote = %q, %q, %v; want %q, %q, %v", owner, repo, ok, tt.owner, tt.repo, tt.ok)
 			}
 		})
 	}
@@ -67,7 +67,9 @@ type fakeRemotes struct {
 	err error
 }
 
-func (f fakeRemotes) RemoteURL(context.Context, string, string) (string, error) { return f.url, f.err }
+func (f fakeRemotes) RemoteURL(context.Context, string, string) (string, bool, error) {
+	return f.url, f.url != "", f.err
+}
 
 func TestResolveNamesAPullRequestOrSaysWhyNot(t *testing.T) {
 	gitErr := errors.New("no such remote")
@@ -83,6 +85,7 @@ func TestResolveNamesAPullRequestOrSaysWhyNot(t *testing.T) {
 		{name: "a number in the repository, by its remote rather than its directory", text: "#4",
 			remotes: fakeRemotes{url: "git@github.com:/dwcoates/doom-emacs-config.git"}, want: wsm.PullRequestKey{Owner: "dwcoates", Repo: "doom-emacs-config", Number: 4}},
 		{name: "a number in a repository not on github.com", text: "#4", remotes: fakeRemotes{url: "git@gitlab.com:a/b.git"}, unparsable: true},
+		{name: "a number in a repository with no origin", text: "#4", unparsable: true},
 		{name: "text that names nothing", text: "the PR", unparsable: true},
 		{name: "a remote that cannot be read", text: "#4", remotes: fakeRemotes{err: gitErr}, err: gitErr},
 	}
@@ -126,5 +129,35 @@ func TestPullPathIsThePullrefsPattern(t *testing.T) {
 	// Assert: the path ParseURL reads is the shape pullrefs scans text for.
 	if !strings.Contains(pullPath.String(), pullrefs.PullPathPattern) {
 		t.Fatalf("pullPath = %q, want it built on pullrefs.PullPathPattern", pullPath.String())
+	}
+}
+
+func TestOriginRepositoryReadsTheOriginsGitHubIdentity(t *testing.T) {
+	broken := errors.New("No such remote 'origin'")
+	tests := []struct {
+		name                    string
+		remotes                 fakeRemotes
+		wantOwner, wantRepo     string
+		wantOnGithub, wantError bool
+	}{
+		{name: "an origin on github.com", remotes: fakeRemotes{url: "git@github.com:dwcoates/doom-emacs-config.git"},
+			wantOwner: "dwcoates", wantRepo: "doom-emacs-config", wantOnGithub: true},
+		{name: "an origin off github.com", remotes: fakeRemotes{url: "git@gitlab.com:x/y.git"}},
+		{name: "a repository with no origin", remotes: fakeRemotes{}},
+		{name: "an origin that cannot be read", remotes: fakeRemotes{err: broken}, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			owner, repo, remote, onGithub, err := OriginRepository(context.Background(), tt.remotes, "/r")
+
+			// Assert
+			if (err != nil) != tt.wantError || tt.wantError && !errors.Is(err, broken) {
+				t.Fatalf("err = %v, want error %v wrapping the read's", err, tt.wantError)
+			}
+			if owner != tt.wantOwner || repo != tt.wantRepo || onGithub != tt.wantOnGithub || !tt.wantError && remote != tt.remotes.url {
+				t.Fatalf("OriginRepository = %q, %q, %q, %v; want %q, %q, the remote, %v", owner, repo, remote, onGithub, tt.wantOwner, tt.wantRepo, tt.wantOnGithub)
+			}
+		})
 	}
 }

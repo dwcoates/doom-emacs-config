@@ -849,3 +849,28 @@ func TestADrainWhoseOffQueueJudgementOutlivesItsBoundIsAnError(t *testing.T) {
 		t.Fatalf("records = %+v, want the overrun recorded at error", h.logs.Records())
 	}
 }
+
+func TestAnAsyncMergeUnderTheSuppliedNameOfAMergeOffItsQueueIsRefused(t *testing.T) {
+	// Arrange: a workspace prefix is set; the async merge evicted, its merge
+	// workspace open under the resolved name.
+	h := newHarness(t)
+	h.names.prefix = "agent"
+	h.detached.byName = true
+	if err := requestDetached(t, h, RequestedByUser); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	merged := mergeWorkspaceNamed("agent/reconnect-fix")
+	if err := h.o.Evict(context.Background(), merged); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Act: asked again under the name as supplied, unprefixed.
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: asyncSource, By: RequestedByUser,
+		Detached: &DetachedRun{Maker: theWorkspace, Name: "reconnect-fix"}})
+
+	// Assert
+	refusal, ok := Refused(err)
+	if !ok || refusal.Arm != ArmNameOffQueue || refusal.Fields["name"] != "agent/reconnect-fix" {
+		t.Fatalf("Enqueue = %v, want the %s refusal naming agent/reconnect-fix", err, ArmNameOffQueue)
+	}
+}

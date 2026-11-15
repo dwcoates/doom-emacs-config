@@ -66,7 +66,9 @@ var (
 	// the ones standing: the plan no longer describes what would be dropped,
 	// so nothing was performed.
 	ErrHoldsChanged = errors.New("promptqueue: the held prompts changed since the rollback was planned")
-	// ErrNoSession is a submission to a workspace with no live shim.
+	// ErrNoSession is a submission to a workspace with no live shim. It is
+	// only ever MATCHED (errors.Is): every refusal is a *NoSessionError, which
+	// carries the daemon's account of why.
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
 	// ErrShimHasNoSession is the SHIM's own refusal of a delivery because it
 	// holds no session (StartTurnFailure.no_session). The sender's typed
@@ -133,6 +135,33 @@ var (
 	// never recorded (shim.v1 RollBackSessionPromptNotRecorded): there is
 	// nothing in the vendor conversation to cut.
 	ErrPromptNotRecorded = errors.New("promptqueue: the vendor never recorded the prompt")
+)
+
+// NoSessionError is ErrNoSession with the daemon's account of why the
+// workspace has no session it could act on (SubmitPromptError.no_session's
+// detail): no revival is wired, the revival did not bring it back, or the
+// session came up without its watcher. errors.Is(err, ErrNoSession) holds.
+type NoSessionError struct {
+	// Cause is the account, one plain clause.
+	Cause string
+}
+
+// Error is the sentinel's sentence with the cause after it.
+func (e *NoSessionError) Error() string { return ErrNoSession.Error() + ": " + e.Cause }
+
+// Is makes a *NoSessionError match ErrNoSession.
+func (e *NoSessionError) Is(target error) bool { return target == ErrNoSession }
+
+// noSession is the refusal of a workspace with no session, for CAUSE.
+func noSession(cause string) error { return &NoSessionError{Cause: cause} }
+
+// The causes a no_session refusal states.
+const (
+	causeNoRevival          = "no revival is wired for this workspace"
+	causeNotRevived         = "the revival did not bring the session back"
+	causeNoShimAfterRevival = "the session was revived but has no shim to deliver to"
+	causeNoWatcher          = "the session is up but its watcher is missing"
+	causeShimGone           = "the session's shim went away before the act could be applied"
 )
 
 // The session-act kinds the one delivery path carries. They are constants
@@ -456,6 +485,12 @@ type TurnEdges interface {
 	TurnEndedUnobserved(ws ids.WorkspaceID)
 }
 
+// SubmissionTelemetry counts every submission the queue took, by its origin
+// (Deps.Submissions; runtimemetrics.Surface, agentrepl_prompts_submitted_total).
+type SubmissionTelemetry interface {
+	CountPromptSubmitted(origin conversationv1.PromptOrigin)
+}
+
 // LeaseWatcher is told each lease change of a workspace (Deps.Leases).
 type LeaseWatcher interface {
 	LeaseChanged(ws ids.WorkspaceID)
@@ -486,6 +521,9 @@ type Deps struct {
 	// reaches): a merge waiting for a workspace another holder held takes it
 	// from here (merge.Orchestrator.LeaseChanged). REQUIRED.
 	Leases LeaseWatcher
+	// Submissions counts every submission Submit took, delivered or held, by
+	// its origin; a refused one is not counted. REQUIRED.
+	Submissions SubmissionTelemetry
 	// Merges says which turn asked for a merge, so that turn's end raises no
 	// banner: the merge queue's own banners announce it. REQUIRED.
 	Merges MergeRequests
@@ -739,6 +777,9 @@ type WatcherFunc func(ws ids.WorkspaceID) (Watcher, bool)
 type Watcher interface {
 	// TurnInFlight reports the open turn, nil when none is.
 	TurnInFlight() *ids.TurnID
+	// RetryOwed reports that the shim's latest vendor-error retry statement is
+	// a retry still to be made (sessionwatcher.Watcher.RetryOwed).
+	RetryOwed() bool
 	// Departed reports that the watched shim is gone. A departed watcher's
 	// turn and live work ended with the shim, so a bounce never waits on them.
 	Departed() (sessionwatcher.Departure, bool)

@@ -150,7 +150,14 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 	case errors.Is(err, promptqueue.ErrMerging):
 		return s.fill(refusal{Arm: "merging", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoSession):
-		return s.fill(refusal{Arm: "no_session", Reason: err.Error()}), true
+		// THE DAEMON'S ACCOUNT RIDES THE ARM'S detail, so the composer says
+		// why nothing was sent. Every queue refusal is a *NoSessionError
+		// (promptqueue TestEveryNoSessionRefusalStatesItsCause).
+		var cause *promptqueue.NoSessionError
+		if !errors.As(err, &cause) {
+			panic(fmt.Sprintf("server: a no_session refusal carries no account (%v)", err))
+		}
+		return s.fill(refusal{Arm: "no_session", Reason: err.Error(), Fields: map[string]any{"detail": cause.Cause}}), true
 	case errors.Is(err, promptqueue.ErrNoSuchHold):
 		return s.fill(refusal{Arm: "no_such_hold", Reason: err.Error(), NotFound: true}), true
 	case errors.Is(err, promptqueue.ErrBeingDelivered):

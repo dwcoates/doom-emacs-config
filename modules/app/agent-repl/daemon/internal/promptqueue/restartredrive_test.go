@@ -12,6 +12,7 @@ import (
 
 	"agent-repld/internal/classifier"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
 
@@ -318,5 +319,111 @@ func TestAReleaseIntoASessionThatDoesNotServeIsReportedNotNow(t *testing.T) {
 	// Assert
 	if got := resumeKinds(reports()); !slices.Equal(got, []ResumeKind{ResumeNotNow}) {
 		t.Fatalf("reports = %v, want not_now", got)
+	}
+}
+
+// owingRetry makes the harness's shim state a vendor-error retry still to be
+// made.
+func owingRetry(h *harness) {
+	h.watcher.mu.Lock()
+	defer h.watcher.mu.Unlock()
+	h.watcher.retryOwed = true
+}
+
+const (
+	retryOwedMessage    = "the departure cut the shim's owed vendor-error retry; the next session that serves the workspace resumes the failed turn"
+	retryEndedMessage   = "the session the user ended owed a vendor-error retry; it ends with the session and is not resumed"
+	retryOweFailMessage = "could not record the resumption a cut vendor-error retry owes; the failed turn will not be retried"
+)
+
+func TestADepartureThatCutsAnOwedRetryOwesTheWorkspaceItsResumption(t *testing.T) {
+	tests := []struct {
+		name         string
+		departure    sessionwatcher.Departure
+		standingDown bool
+		bounced      bool
+		owing        bool
+		wantOwed     int
+		wantMessage  string
+	}{
+		{
+			name:        "a shim that died owing a retry owes its resumption",
+			departure:   departedUnasked,
+			owing:       true,
+			wantOwed:    1,
+			wantMessage: retryOwedMessage,
+		},
+		{
+			name:         "the daemon's own stand-down owing a retry owes its resumption",
+			departure:    departedOrdered,
+			standingDown: true,
+			owing:        true,
+			wantOwed:     1,
+			wantMessage:  retryOwedMessage,
+		},
+		{
+			name:        "a bounce forced over an owed retry owes its resumption",
+			departure:   departedOrdered,
+			bounced:     true,
+			owing:       true,
+			wantOwed:    1,
+			wantMessage: retryOwedMessage,
+		},
+		{
+			name:        "a session the user ended owes nothing for its retry",
+			departure:   departedOrdered,
+			owing:       true,
+			wantOwed:    0,
+			wantMessage: retryEndedMessage,
+		},
+		{
+			name:      "a shim that died owing no retry owes nothing",
+			departure: departedUnasked,
+			wantOwed:  0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.bounced {
+				registerBehindWork(t, h, newGate().request("a forced deploy", false))
+			}
+			h.standingDown.Store(tc.standingDown)
+			if tc.owing {
+				owingRetry(h)
+			}
+
+			// Act
+			depart(h, h.watcher, tc.departure)
+
+			// Assert
+			if got := h.db.oweCalls(); got != tc.wantOwed {
+				t.Fatalf("debts recorded = %d, want %d", got, tc.wantOwed)
+			}
+			if tc.wantMessage != "" && !logged(h.log.Records(), "info", opResume, tc.wantMessage) {
+				t.Fatalf("records = %+v, want %q at info", h.log.Records(), tc.wantMessage)
+			}
+		})
+	}
+}
+
+func TestAnOwedRetryWhoseDebtCannotBeRecordedIsLoggedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	owingRetry(h)
+	h.db.mu.Lock()
+	h.db.oweErr = errors.New("disk full")
+	h.db.mu.Unlock()
+
+	// Act
+	depart(h, h.watcher, departedUnasked)
+
+	// Assert
+	if !logged(h.log.Records(), "error", opResume, retryOweFailMessage) {
+		t.Fatalf("records = %+v, want %q at error", h.log.Records(), retryOweFailMessage)
+	}
+	if got := h.db.owedCount(theWorkspace); got != 0 {
+		t.Fatalf("owed = %d, want no debt left by the failed write", got)
 	}
 }

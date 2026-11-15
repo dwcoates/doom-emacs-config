@@ -504,7 +504,9 @@ func Confine(self string, v SuiteVerdict, u suites.Units) suites.Units {
 		chunk, profile := sp.Chunk, profileOf(sp.Group)
 		sp.Chunk = func(id string, items []string) run.Spec { return wrap(profile, chunk(id, items)) }
 		if named := sp.Named; named != nil {
-			sp.Named = func(id string, items, names []string) run.Spec { return wrap(profile, named(id, items, names)) }
+			sp.Named = func(id string, items []string, names map[string][]string) run.Spec {
+				return wrap(profile, named(id, items, names))
+			}
 		}
 		out.Splits = append(out.Splits, sp)
 	}

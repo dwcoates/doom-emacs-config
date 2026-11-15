@@ -58,6 +58,9 @@ func pruneStorageSuccess(r storagesweep.Report) *agentreplv1.PruneStorageSuccess
 		out.Kept = append(out.Kept, &agentreplv1.PruneStorageKept{Reason: pruneStorageKeepReason(reason), Count: uint32(n)})
 	}
 	slices.SortFunc(out.Kept, func(a, b *agentreplv1.PruneStorageKept) int { return cmp.Compare(a.Reason, b.Reason) })
+	for _, m := range r.Measured {
+		out.Measured = append(out.Measured, &agentreplv1.PruneStorageMeasured{Name: m.Name, Dir: m.Dir, Bytes: uint64(m.Bytes), Bound: uint64(m.Bound)})
+	}
 	return out
 }
 
@@ -72,6 +75,8 @@ func pruneStorageReason(r storagesweep.Reason) agentreplv1.PruneStorageReason {
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_CLOSED_BACKUPS
 	case storagesweep.ReasonAged:
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_AGED
+	case storagesweep.ReasonOverBound:
+		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND
 	}
 	panic("server: a storage sweep deleted for a reason the contract does not draw: " + string(r))
 }

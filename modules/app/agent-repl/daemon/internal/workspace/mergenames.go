@@ -32,6 +32,12 @@ type nameClaims struct {
 	claimed map[string]bool
 }
 
+// MergeBranch is the name an async merge's SUPPLIED name resolves to: the
+// branch, and the registry name, its merge workspace is created under
+// (merge.Names). It is the one resolution, so the name a request reserves and
+// draws is the name its merge workspace stands under after the fork.
+func MergeBranch(name string) string { return suppliedBranch(name) }
+
 // suppliedBranch is the branch a SUPPLIED name resolves to: taken as it stands
 // when it already carries a prefix component, prefixed otherwise. A create's
 // supplied name and an async merge's name resolve alike.

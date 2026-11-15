@@ -555,6 +555,10 @@ func (s *fakeServer) FindWorkspaces(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](ctx, s, "FindWorkspaces", req.Msg)
 }
 
+func (s *fakeServer) LocateWorkspace(ctx context.Context, req *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error) {
+	return handleUnary[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse](ctx, s, "LocateWorkspace", req.Msg)
+}
+
 func (s *fakeServer) ParkWorkspace(ctx context.Context, req *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error) {
 	return handleUnary[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse](ctx, s, "ParkWorkspace", req.Msg)
 }

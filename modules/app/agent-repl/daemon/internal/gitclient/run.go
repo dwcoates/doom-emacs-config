@@ -207,8 +207,15 @@ func Binary() string { return gitBinary }
 // extra are the method's own bindings, appended after the scrub so a marker
 // the method sets is the only one present.
 func (c *client) invoke(ctx context.Context, dir string, extra []string, args ...string) (invocation, error) {
+	return c.invokeVia(ctx, gitBinary, dir, extra, args...)
+}
+
+// invokeVia is invoke run through the executable EXE, which runs git with
+// `-C dir args...` itself: gitBinary, or the fetch lock's helper
+// (fetchlock.go), which execs gitBinary once it holds the lock.
+func (c *client) invokeVia(ctx context.Context, exe, dir string, extra []string, args ...string) (invocation, error) {
 	full := append([]string{"-C", dir}, args...)
-	cmd := childproc.CommandContext(ctx, childproc.Stable, gitBinary, full...)
+	cmd := childproc.CommandContext(ctx, childproc.Stable, exe, full...)
 	cmd.Env = append(scrubEnv(os.Environ()), extra...)
 
 	in := invocation{args: args, dir: dir}
@@ -287,7 +294,12 @@ func (c *client) run(ctx context.Context, operation, dir string, args ...string)
 
 // runWithEnv is run with the method's own bindings added to git's environment.
 func (c *client) runWithEnv(ctx context.Context, operation, dir string, extra []string, args ...string) (string, error) {
-	in, err := c.runRawWithEnv(ctx, operation, dir, extra, args...)
+	return c.runVia(ctx, operation, gitBinary, dir, extra, args...)
+}
+
+// runVia is runWithEnv through the executable EXE (invokeVia).
+func (c *client) runVia(ctx context.Context, operation, exe, dir string, extra []string, args ...string) (string, error) {
+	in, err := c.runRawVia(ctx, operation, exe, dir, extra, args...)
 	if err != nil {
 		return "", err
 	}
@@ -309,7 +321,12 @@ func (c *client) runRaw(ctx context.Context, operation, dir string, args ...stri
 // runRawWithEnv is runRaw with the method's own bindings added to git's
 // environment.
 func (c *client) runRawWithEnv(ctx context.Context, operation, dir string, extra []string, args ...string) (invocation, error) {
-	in, err := c.invoke(ctx, dir, extra, args...)
+	return c.runRawVia(ctx, operation, gitBinary, dir, extra, args...)
+}
+
+// runRawVia is runRawWithEnv through the executable EXE (invokeVia).
+func (c *client) runRawVia(ctx context.Context, operation, exe, dir string, extra []string, args ...string) (invocation, error) {
+	in, err := c.invokeVia(ctx, exe, dir, extra, args...)
 	if err != nil {
 		var cancelled *Cancelled
 		if errors.As(err, &cancelled) {

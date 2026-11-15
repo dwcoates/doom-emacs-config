@@ -2027,7 +2027,7 @@ describe("an ask the vendor withdraws", () => {
     expect(settledAs(opened.written)).toBe("denied");
   });
 
-  it("settles a withdrawn question as unanswered here when its turn goes on", async () => {
+  it("settles a withdrawn question as answered on claude.ai when its turn goes on", async () => {
     // Arrange
     const opened = gate(true);
     const controller = new AbortController();
@@ -2043,6 +2043,6 @@ describe("an ask the vendor withdraws", () => {
     const update = item?.kind === "frame" && item.frame.result.case === "update" ? item.frame.result.value.update : undefined;
     expect(
       update?.case === "question" && update.value.result.case === "success" ? update.value.result.value.outcome.case : undefined,
-    ).toBe("unanswered");
+    ).toBe("answeredRemotely");
   });
 });

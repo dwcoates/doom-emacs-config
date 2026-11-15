@@ -4,21 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
 // This file is a deploy's FINISH STAGE (repoconfig.v1.LifecycleConfig
 // .finish): the hooks a finishing workspace runs once the turn that asked for
 // its deploy has ended, and BEFORE the deploy is put in line. Nothing about the
-// deploy is drawn while they run, since it has no ledger yet (request.go), and
-// they never wait on another deploy: an explanation-engine workspace opens its
+// deploy is drawn while they run but the footer's `finishing` step and the
+// running hook's line (drawFinishing), since it has no ledger yet
+// (request.go), and they never wait on another deploy: an explanation-engine workspace opens its
 // pull request here, while every deploy ahead of it in the queue is still
 // waiting on its own.
 //
@@ -44,6 +48,10 @@ type finishTarget struct {
 	dir    string
 	target deployTarget
 	hooks  []*repoconfigv1.Hook
+	// repo and queuedAt are the queue the deploy will stand in and when it
+	// was asked for, which the finishing step is drawn with.
+	repo     wsm.RepoKey
+	queuedAt time.Time
 }
 
 // finishTargetOf reads the finish stage WS's deploy runs: none for an async
@@ -83,7 +91,7 @@ func (o *orchestrator) hasFinishStage(deploy deployTarget, record wsm.Workspace)
 // succeeded (or there were none). An error is a stage that could not be run
 // at all; the request then stays recorded for the next boot, as any wait that
 // could not finish does.
-func (o *orchestrator) runFinishStage(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) (string, error) {
+func (o *orchestrator) runFinishStage(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) (failure string, err error) {
 	log := o.log(ctx, ws)
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
 	entry, found, err := o.requestOf(ctx, repo, ws)
@@ -111,12 +119,22 @@ func (o *orchestrator) runFinishStage(ctx context.Context, ws ids.WorkspaceID, r
 		log.Debug(opFinishStage, "the workspace's kind runs no finish-stage hook", fields)
 		return "", o.clearFinish(ctx, log, fields, ws)
 	}
+	ft.repo, ft.queuedAt = repo, entry.EnqueuedAt
 	fields["originator"], fields["hooks"] = ft.target.owner.kind.String(), len(ft.hooks)
 	progress, resuming, err := o.deps.DB.WorkspaceFinishProgress(ctx, ws)
 	if err != nil {
 		log.Error(opFinishStage, "could not read where the finish stage stands", withField(fields, "error", err.Error()))
 		return "", err
 	}
+	// THE STAGE IS DRAWN WHILE IT RUNS (finishing, with the running hook's
+	// line: drawFinishing), and a stage that does not end in line takes its
+	// drawing back, so a withdrawn deploy, or a stage that could not run,
+	// leaves no step standing.
+	defer func() {
+		if err != nil || failure != "" {
+			o.forget(ws)
+		}
+	}()
 	start := 0
 	if resuming {
 		start = progress.HookIndex
@@ -129,8 +147,7 @@ func (o *orchestrator) runFinishStage(ctx context.Context, ws ids.WorkspaceID, r
 		if resuming && i == start {
 			resumed = &progress
 		}
-		failure, err := o.runFinishHook(ctx, log, withField(fields, "hook", i), ws, ft, i, resumed)
-		if err != nil || failure != "" {
+		if failure, err = o.runFinishHook(ctx, log, withField(fields, "hook", i), ws, ft, i, resumed); err != nil || failure != "" {
 			return failure, err
 		}
 	}
@@ -148,6 +165,7 @@ func (o *orchestrator) runFinishHook(ctx context.Context, log dlog.Logger, field
 			log.Error(opFinishStage, "a finish prompt hook names the originating Slack thread of a workspace created for none; the deploy is withdrawn", withField(fields, "cause", err.Error()))
 			return fmt.Sprintf("its finish prompt hook %v", err), nil
 		}
+		o.drawFinishing(ws, ft, &frontendv1.FooterMergeStepHook{Hook: &frontendv1.FooterMergeStepHook_Prompt{Prompt: &frontendv1.FooterMergeStepPrompt{Text: text}}})
 		origin := conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK
 		var close wsm.TurnClose
 		if resumed != nil && resumed.Turn != "" {
@@ -181,6 +199,7 @@ func (o *orchestrator) runFinishHook(ctx context.Context, log dlog.Logger, field
 			log.Error(opFinishStage, "could not record the finish stage's progress; its script is not run", withField(fields, "error", err.Error()))
 			return "", err
 		}
+		o.drawFinishing(ws, ft, &frontendv1.FooterMergeStepHook{Hook: &frontendv1.FooterMergeStepHook_Script{Script: &frontendv1.FooterMergeStepScript{Path: h.Script.GetPath()}}})
 		logPath := LifecycleLogPath(o.deps.StateDir, lifecycleconfig.StageFinish, o.deps.Now(), i)
 		fields = withField(withField(withField(fields, "script", h.Script.GetPath()), "log", logPath), "repo_root", ft.target.repoRoot)
 		ran := RunKeptScript(ctx, o.deps.HookRunner, ft.target.repoRoot, h.Script, ft.target.owner.env(ft.dir, lifecycleconfig.StageFinish), logPath)
@@ -199,6 +218,17 @@ func (o *orchestrator) runFinishHook(ctx context.Context, log dlog.Logger, field
 		return "", nil
 	}
 	panic("merge: a finish hook the config resolved is neither a script nor a prompt")
+}
+
+// drawFinishing draws WS's deploy finishing, on the line of the HOOK it
+// runs: the footer's `finishing` step, before the deploy has a ledger or a
+// place in line (2026-11-03: a slow finish script read as the workspace
+// idling).
+func (o *orchestrator) drawFinishing(ws ids.WorkspaceID, ft finishTarget, hook *frontendv1.FooterMergeStepHook) {
+	o.publish(ft.repo, ws, MergeFacts{
+		State: StateMerging, Step: footer.StepFinishing, QueuedAt: ft.queuedAt, LineAt: o.deps.Now(),
+		Line: &frontendv1.FooterStatusActivityMergeStep{Step: &frontendv1.FooterStatusActivityMergeStep_Finishing{Finishing: hook}},
+	})
 }
 
 // clearFinish forgets WS's finish progress once its stage has nothing left to

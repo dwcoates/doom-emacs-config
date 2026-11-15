@@ -308,16 +308,23 @@ func TestPlanMigrationsAnswersTheChainItCanApply(t *testing.T) {
 	}
 }
 
-// TestTheMigrationListReachesThisBuildsLayout pins the defect that started
-// this file: a build whose LayoutVersion has moved past the last migration
-// refuses every database the previous build wrote.
+// TestTheMigrationListReachesThisBuildsLayout pins that the list is one
+// unbroken chain ending at the layout this build writes: every step's To is
+// one past the step before it, so planMigrations reaches LayoutVersion from
+// every layout the list starts at.
 func TestTheMigrationListReachesThisBuildsLayout(t *testing.T) {
 	// Arrange / Act
 	last := migrations[len(migrations)-1]
 
 	// Assert
 	if last.To != LayoutVersion {
-		t.Fatalf("the last migration carries a file to layout %d, but this build writes %d; every older database would be refused", last.To, LayoutVersion)
+		t.Fatalf("the last migration carries a file to layout %d, but this build writes %d", last.To, LayoutVersion)
+	}
+	for i := 1; i < len(migrations); i++ {
+		if migrations[i].To != migrations[i-1].To+1 {
+			t.Fatalf("step %q carries a file to layout %d after step %q's %d; every step is one past the step before it",
+				migrations[i].Name, migrations[i].To, migrations[i-1].Name, migrations[i-1].To)
+		}
 	}
 }
 

@@ -1006,8 +1006,25 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 				"held":     held,
 				"after":    after,
 			})
-			return srv.Close()
+			err = srv.Close()
 		}
+		// NO CALL IS ADMITTED AND THEN CUT. A client keeps calling on the h2c
+		// connection it already holds, and `Shutdown` above neither closes nor
+		// waits for one, so a call that arrived after the waits above was
+		// admitted, answered by nobody the exit waited for, and cut by the
+		// process exit: an incumbent asked something in its last milliseconds
+		// after a handover read `unexpected EOF` instead of its typed
+		// `transferring_away` (`TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`).
+		// The listener is closed now, so no connection arrives; every h2
+		// connection is sent its GOAWAY, after which a new stream is never
+		// admitted and its client opens it anew; and the streams admitted
+		// before the GOAWAY are awaited onto the socket. Both waits ride the
+		// exit's one deadline, like every wait above: a GOAWAY is one frame,
+		// and a call admitted late is answered as any other.
+		start = time.Now()
+		gate.GoAway(deadline)
+		gate.AwaitStreamsEnded(deadline)
+		mark("serve_go_away", start)
 		return err
 	}
 }

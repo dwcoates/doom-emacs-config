@@ -278,6 +278,10 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
 
+// MergeBranch is the merge orchestrator's name resolution (merge.Names). It
+// is pure, so it needs no bound verbs.
+func (f *verbsForwarder) MergeBranch(name string) string { return workspace.MergeBranch(name) }
+
 // interruptTurn is the merge orchestrator's turn stop (merge.InterruptTurnFunc):
 // the user's own turn interrupt, confirmed, so the agent's detached work stops
 // with it. It reads the verbs out of the forwarder when it runs.
@@ -334,15 +338,57 @@ func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws 
 	return verbs.LetQueueThroughAfterBypassTurn(ctx, ws)
 }
 
-// createMediator is the merge queue's making of a deploy mediator
-// (merge.Deps.CreateMediator), read out of the verbs, which are built after
-// the merge orchestrator.
-func (f *verbsForwarder) createMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	verbs, err := f.bound("the merge queue made a deploy mediator")
+// deployChecks is the merge queue's reach into the deploy checks'
+// workspaces (merge.Deps.DeployChecks), read out of the verbs, which are
+// built after the merge orchestrator.
+type deployChecks struct{ f *verbsForwarder }
+
+func (d deployChecks) CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a deploy intake")
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return verbs.CreateMediator(ctx, repoDir, name)
+	return verbs.CreateDeployIntake(ctx, repoDir, name)
+}
+
+func (d deployChecks) CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a deploy remediation")
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return verbs.CreateDeployRemediation(ctx, repoDir, name)
+}
+
+func (d deployChecks) CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a deploy escalation")
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return verbs.CreateDeployEscalation(ctx, repoDir, name)
+}
+
+func (d deployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error {
+	verbs, err := d.f.bound("the merge queue set a deploy check workspace's effort")
+	if err != nil {
+		return err
+	}
+	return verbs.SetDeployCheckEffort(ctx, ws, intake)
+}
+
+func (d deployChecks) Reopen(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue restored a deploy remediation")
+	if err != nil {
+		return err
+	}
+	return verbs.Open(ctx, ws, nil)
+}
+
+func (d deployChecks) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	verbs, err := d.f.bound("the merge queue closed a deploy check workspace")
+	if err != nil {
+		return false, err
+	}
+	return verbs.CloseSelf(ctx, ws)
 }
 
 // unfoldSubsectionForWork is the turn-start edge's unfold

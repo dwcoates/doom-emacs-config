@@ -102,21 +102,33 @@ func Seen(h wsm.HeldPrompt) bool {
 	return !promptorigin.UnseenNamed(h.Origin)
 }
 
-// Ahead answers the seen standing hold directly ahead of TURN in STANDING,
-// which is in queue order (queued_at, then the turn id), passing over every
-// hold that is not Seen. False when no seen hold stands ahead of TURN, or when
-// TURN does not stand or is not seen itself: nothing is ahead of it to fold
-// into.
+// InLine reports whether a hold stands in the line the queue judges, folds
+// and delivers by. It must stand (no tombstone) and be Seen, and it must not
+// be a prompt kept at a cold gate's answer (wsm.HoldColdGateAnswered): only
+// the user sends that one, so nothing is judged against it, folded into it or
+// queued behind it (promptqueue gatefate.go). A kept prompt is still drawn,
+// so it is Seen; it simply stands outside the line.
+func InLine(h wsm.HeldPrompt) bool {
+	if h.Tombstone != nil || !Seen(h) {
+		return false
+	}
+	return h.Hold == nil || *h.Hold != wsm.HoldColdGateAnswered
+}
+
+// Ahead answers the hold in line directly ahead of TURN in STANDING, which is
+// in queue order (queued_at, then the turn id), passing over every hold not
+// InLine. False when no hold in line stands ahead of TURN, or when TURN does
+// not stand or is not in line itself: nothing is ahead of it to fold into.
 func Ahead(standing []wsm.HeldPrompt, turn ids.TurnID) (wsm.HeldPrompt, bool) {
 	var prev *wsm.HeldPrompt
 	for i, h := range standing {
 		if h.Turn == turn {
-			if prev == nil || !Seen(h) {
+			if prev == nil || !InLine(h) {
 				return wsm.HeldPrompt{}, false
 			}
 			return *prev, true
 		}
-		if Seen(h) {
+		if InLine(h) {
 			prev = &standing[i]
 		}
 	}

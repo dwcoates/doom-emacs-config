@@ -137,9 +137,47 @@ func TestSeen(t *testing.T) {
 	}
 }
 
+// held answers H held under KIND.
+func held(h wsm.HeldPrompt, kind wsm.HoldKind) wsm.HeldPrompt {
+	h.Hold = &kind
+	return h
+}
+
+// kept answers H as a prompt kept at a cold gate's answer.
+func kept(h wsm.HeldPrompt) wsm.HeldPrompt {
+	return held(h, wsm.HoldColdGateAnswered)
+}
+
+func TestInLine(t *testing.T) {
+	retired := prompt("a")
+	retired.Tombstone = &wsm.Tombstone{Kind: "dropped"}
+	tests := []struct {
+		name string
+		hold wsm.HeldPrompt
+		want bool
+	}{
+		{name: "the user's prompt is in line", hold: prompt("a"), want: true},
+		{name: "a prompt held at a standing cold gate is in line", hold: held(prompt("a"), wsm.HoldColdGate), want: true},
+		{name: "a prompt kept at a cold gate's answer is not", hold: kept(prompt("a")), want: false},
+		{name: "a prompt drawn nowhere is not", hold: unseen(prompt("a")), want: false},
+		{name: "a retired hold is not", hold: retired, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := InLine(tt.hold)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("InLine = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAhead(t *testing.T) {
 	standing := []wsm.HeldPrompt{prompt("a"), prompt("b"), prompt("c")}
 	withUnseen := []wsm.HeldPrompt{unseen(prompt("u0")), prompt("a"), unseen(prompt("u1")), prompt("b"), unseen(prompt("u2"))}
+	withKept := []wsm.HeldPrompt{prompt("a"), kept(prompt("k1")), prompt("b"), kept(prompt("k2"))}
 	tests := []struct {
 		name     string
 		standing []wsm.HeldPrompt
@@ -153,6 +191,8 @@ func TestAhead(t *testing.T) {
 		{name: "an unseen entry between two is passed over", standing: withUnseen, turn: "b", want: "a", wantSeen: true},
 		{name: "nothing ahead when only an unseen entry is", standing: withUnseen, turn: "a", wantSeen: false},
 		{name: "nothing ahead of an unseen entry", standing: withUnseen, turn: "u2", wantSeen: false},
+		{name: "a prompt kept at a cold gate's answer between two is passed over", standing: withKept, turn: "b", want: "a", wantSeen: true},
+		{name: "nothing ahead of a prompt kept at a cold gate's answer", standing: withKept, turn: "k2", wantSeen: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

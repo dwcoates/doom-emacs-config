@@ -1246,6 +1246,8 @@ type harness struct {
 	startHold func(ws ids.WorkspaceID)
 	// marker records every bring-up marker edge, in order.
 	marker []markerEdge
+	// servingSettled receives once per ServingSettled call.
+	servingSettled chan struct{}
 }
 
 // incumbentExits releases the boot claim, as the outgoing daemon's exit does.
@@ -1325,31 +1327,32 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 	order := &steps{}
 	freeness := newFakeFreeness()
 	h := &harness{
-		endLifetime:   endLifetime,
-		db:            db,
-		clock:         newFakeClock(instant),
-		spawner:       &fakeSpawner{address: "127.0.0.1:7788"},
-		announcer:     &fakeAnnouncer{},
-		pusher:        &fakePusher{},
-		participants:  newFakeParticipants(),
-		freeness:      freeness,
-		fleet:         newFakeFleet(order),
-		registry:      newFakeRegistry(freeness),
-		order:         order,
-		log:           log,
-		state:         state,
-		onFile:        onFile,
-		exits:         make(chan struct{}, 4),
-		claimFree:     make(chan struct{}),
-		lockStates:    make(map[string]sessionlock.State),
-		lockErr:       make(map[string]error),
-		shimBuild:     "installed-build",
-		progress:      &fakeProgress{},
-		startErr:      make(map[ids.WorkspaceID]error),
-		merges:        &fakeMerges{order: order},
-		queuedCreates: &fakeQueuedCreates{},
-		restarts:      &restarttimingtest.Recorder{},
-		creates:       creategate.New(),
+		endLifetime:    endLifetime,
+		db:             db,
+		clock:          newFakeClock(instant),
+		spawner:        &fakeSpawner{address: "127.0.0.1:7788"},
+		announcer:      &fakeAnnouncer{},
+		pusher:         &fakePusher{},
+		participants:   newFakeParticipants(),
+		freeness:       freeness,
+		fleet:          newFakeFleet(order),
+		registry:       newFakeRegistry(freeness),
+		order:          order,
+		log:            log,
+		state:          state,
+		onFile:         onFile,
+		exits:          make(chan struct{}, 4),
+		servingSettled: make(chan struct{}, 16),
+		claimFree:      make(chan struct{}),
+		lockStates:     make(map[string]sessionlock.State),
+		lockErr:        make(map[string]error),
+		shimBuild:      "installed-build",
+		progress:       &fakeProgress{},
+		startErr:       make(map[ids.WorkspaceID]error),
+		merges:         &fakeMerges{order: order},
+		queuedCreates:  &fakeQueuedCreates{},
+		restarts:       &restarttimingtest.Recorder{},
+		creates:        creategate.New(),
 	}
 	h.reports = &fakeReports{registry: h.registry}
 	h.rosterDials = make(chan *rostermirrortest.Stream, 4)
@@ -1437,6 +1440,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 			h.started = append(h.started, ws)
 			return h.startErr[ws]
 		},
+		ServingSettled: func(context.Context) { h.servingSettled <- struct{}{} },
 		BringingUp: func(ws ids.WorkspaceID, up bool) {
 			order.record(fmt.Sprintf("bringing_up:%v", up))
 			h.mu.Lock()

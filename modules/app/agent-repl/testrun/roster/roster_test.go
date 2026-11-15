@@ -61,7 +61,12 @@ func TestEveryHarnessTestsAScriptInTheModulesBin(t *testing.T) {
 	for _, n := range names {
 		s, _ := Lookup(n)
 		isHarnessKind := s.Kind == Script || s.Kind == SplitScript
-		if !isHarnessKind || len(s.Path) < len("bin/test-") || s.Path[:len("bin/test-")] != "bin/test-" {
+		// A harness runs a bin/test- script, or is a lint gate in bin/ that
+		// reads bin/'s scripts (shellcheck): either way a change under bin/
+		// is in its blast radius.
+		testsBin := strings.HasPrefix(s.Path, "bin/test-")
+		lintsBin := strings.HasPrefix(s.Path, "bin/") && s.Reuse != nil && slices.Contains(s.Reuse.Inputs, "bin/")
+		if !isHarnessKind || !(testsBin || lintsBin) {
 			t.Errorf("%s is marked a bin/ harness but runs %q", n, s.Path)
 		}
 	}
@@ -332,17 +337,42 @@ func TestEverySuiteDeclaresItsInputs(t *testing.T) {
 // TestTheWifiHelperIsReadByNoSuite pins the Wi-Fi helper app's placement: no
 // suite builds or runs it, so its sources sit in ReadByNoSuite and nowhere
 // else. Unplaced, they failed every run's placement check (2026-11-14).
-func TestTheWifiHelperIsReadByNoSuite(t *testing.T) {
-	// Assert
-	if !slices.Contains(ReadByNoSuite, "wifi-helper/") {
-		t.Fatalf("ReadByNoSuite = %v, want wifi-helper/ among them", ReadByNoSuite)
+func TestTheWifiHelperIsReadOnlyByTheShellcheckGate(t *testing.T) {
+	// Assert: shellcheck lints its build.sh; no suite builds or runs the app.
+	if slices.Contains(ReadByNoSuite, "wifi-helper/") {
+		t.Fatalf("ReadByNoSuite = %v, but the shellcheck gate reads wifi-helper/", ReadByNoSuite)
 	}
-	if slices.Contains(AlwaysRunRegions, "wifi-helper/") {
-		t.Fatalf("wifi-helper/ is in AlwaysRunRegions too, but no suite reads it")
-	}
+	var readers []string
 	for _, s := range Suites {
 		if s.Reuse != nil && slices.Contains(s.Reuse.Inputs, "wifi-helper/") {
-			t.Fatalf("%s declares wifi-helper/ among its inputs, but no suite reads it", s.Name)
+			readers = append(readers, s.Name)
 		}
+	}
+	if !slices.Equal(readers, []string{"shellcheck"}) {
+		t.Fatalf("suites reading wifi-helper/ = %v, want only shellcheck", readers)
+	}
+}
+
+// TestTheERTSuitesFakeDaemonModuleIsASuite pins that the fake daemon the ert
+// suite builds from lisp/testsupport/fakedaemon has its Go tests run by a
+// suite of their own: the ert suite only builds the binary.
+func TestTheERTSuitesFakeDaemonModuleIsASuite(t *testing.T) {
+	// Arrange
+	ert, ok := Lookup("ert")
+	if !ok {
+		t.Fatal("the roster holds no ert suite")
+	}
+
+	// Act
+	var found []Suite
+	for _, s := range Suites {
+		if s.Path == ert.Path+"/testsupport/fakedaemon" {
+			found = append(found, s)
+		}
+	}
+
+	// Assert
+	if len(found) != 1 || found[0].Kind != GoModule {
+		t.Fatalf("suites at %s/testsupport/fakedaemon = %+v, want one Go module suite", ert.Path, found)
 	}
 }

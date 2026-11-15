@@ -181,7 +181,6 @@ export const userSaid = (text = "hello") =>
 
 /** The origin every webapp submission carries; re-exported so suites assert it. */
 export const WEBAPP_ORIGIN = PromptOrigin.WEBAPP_USER_SENT;
-export const CARD_ACTION_ORIGIN = PromptOrigin.WEBAPP_CARD_ACTION;
 
 // ---------------------------------------------------------------------------
 // Feed rows
@@ -550,9 +549,6 @@ export const planUnit = (state: PlanState): ActivityUnit => ({
           : { case: "planning", value: {} },
   },
 });
-
-export const FINDINGS_VERDICTS = ["confirmed", "plausible"] as const;
-export const FINDINGS_OUTCOMES = ["fixed", "skipped", "noChange"] as const;
 
 /** The first findings row's location: the one that carries a line number. */
 export const FINDINGS_LOCATION = { text: "feed.ts:42", path: "/repo/src/feed.ts", line: 42 } as const;
@@ -1022,7 +1018,10 @@ export function permissionRow(
 
 // ---- FeedQuestion ---------------------------------------------------------
 
-export const QUESTION_STATES = ["open", "answered", "expired"] as const;
+export const QUESTION_STATES = ["open", "answered", "expired", "answeredRemotely"] as const;
+
+/** The daemon's wording of a question answered on claude.ai, in these fixtures. */
+export const QUESTION_REMOTE_LABEL = "answered on claude.ai";
 export type QuestionState = (typeof QUESTION_STATES)[number];
 
 /** The two questions every question fixture poses; suites echo these verbatim. */
@@ -1097,7 +1096,12 @@ export function questionRow(
               }
             : state === "expired"
               ? { case: "expired", value: {} }
-              : {
+              : state === "answeredRemotely"
+                ? {
+                    case: "answeredRemotely",
+                    value: { marker: { label: { text: QUESTION_REMOTE_LABEL }, family: { case: "neutral", value: {} } } },
+                  }
+                : {
                   case: "open",
                   value: {
                     active: draft.active ?? 0,
@@ -1682,6 +1686,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   question: [],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
+    "finishing",
     "enqueued",
     "preDeploy",
     "rebasing",
@@ -1754,6 +1759,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     committing: "committing",
     deploying: "deploying",
     postDeploy: "post-deploy",
+    finishing: "finishing",
     waitingOnUser: "waiting on user",
   },
   mergeFailed: { conflicts: "merge conflicts", tests: "tests failed", other: "merge failed", hook: "hook failed" },
@@ -1776,6 +1782,7 @@ export const MERGE_STEP_LINES: Record<string, { value: object; words: string }> 
   committing: { value: { subject: "Merge branch 'ws-1' into master" }, words: "Merge branch 'ws-1' into master" },
   deploying: { value: { hook: { case: "script", value: { path: "bin/deploy-landing.sh" } } }, words: "bin/deploy-landing.sh" },
   postDeploy: { value: { hook: { case: "prompt", value: { text: "deploy it" } } }, words: "deploy it" },
+  finishing: { value: { hook: { case: "script", value: { path: "bin/open-pr.sh" } } }, words: "bin/open-pr.sh" },
 };
 
 /** The suite edges a testing line draws, with the words and tone each takes. */

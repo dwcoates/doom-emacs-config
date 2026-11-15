@@ -139,8 +139,7 @@ message FoldHeldPromptTransferringAway {
   string address = 1;
 }
 
-// A joining daemon has not finished adopting the workspace. DELIBERATELY
-// EMPTY: the arm's presence is the whole fact.
+// A joining daemon has not finished adopting the workspace.
 message FoldHeldPromptNotYetAdopted {
   // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
   // joining daemon adopts it: the handover's incumbent. A client views and

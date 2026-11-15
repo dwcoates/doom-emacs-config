@@ -31,7 +31,7 @@ export interface CopyGaps {
   inside: boolean;
   /** Whether every line of the text beside the control ends short of it (none beside is clear). */
   clearOfText: boolean;
-  /** How many line boxes of the text sit beside the control. */
+  /** How many lines of the text sit beside the control, however many text nodes each is drawn in. */
   besideLines: number;
   /** Whether the first line of text is one of the lines beside the control. */
   firstLineBeside: boolean;
@@ -119,7 +119,9 @@ function measure(bubble: HTMLElement): CopyGaps {
       r.top >= b.top + bubble.clientTop &&
       r.bottom <= b.top + bubble.clientTop + bubble.clientHeight,
     clearOfText: beside.every((line) => line.right <= r.left),
-    besideLines: beside.length,
+    // A line drawn in several text nodes (a tree's glyphs, each its own
+    // span) returns a box per node, all at the line's top: one line.
+    besideLines: new Set(beside.map((line) => line.top)).size,
     firstLineBeside: first.length > 0 && first.every(isBeside),
     slack: beside.length === 0 ? null : Math.round((r.left - Math.max(...beside.map((line) => line.right))) * 100) / 100,
     height: Math.round(r.height * 100) / 100,
@@ -161,7 +163,7 @@ window.bubbleCopy = {
         usage: { text: "12.3k", atMs: 1_000n, heat: { position: 0.5 } },
         result: { case: "success", value: { prose: { prose: servedProse(c.text) } } },
       }),
-      pagedRowContext(),
+      pagedRowContext("bubble-copy-response"),
     );
     return measure(bubble);
   },

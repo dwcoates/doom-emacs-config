@@ -294,6 +294,7 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 func TestAnAsyncRequestWhoseNameIsTakenIsRefusedWithTheBranch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	h.names.prefix = "agent"
 	h.names.taken = map[string]bool{"reconnect-fix": true}
 
 	// Act
@@ -870,6 +871,90 @@ func TestALandingsReportIsHandedOverBeforeItsDeployIsTold(t *testing.T) {
 	if h.rollout.fired != 1 || h.rollout.handbacksAtFire != 1 {
 		t.Fatalf("deploy fired %d time(s) with %d report(s) handed over, want once, after the report", h.rollout.fired, h.rollout.handbacksAtFire)
 	}
+}
+
+// undeployed answers the landings the harness recorded as waiting for
+// their deploy.
+func (h *harness) undeployedLandings() []wsm.UndeployedLanding {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return append([]wsm.UndeployedLanding(nil), h.db.undeployed...)
+}
+
+func TestAnAsyncLandingInTheDaemonsOwnCheckoutIsRecordedBeforeItsDeployIsTold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+
+	// Act
+	landedAsync(t, h)
+
+	// Assert
+	got := h.undeployedLandings()
+	if len(got) != 1 || got[0].MergeWorkspace != theMergeWorkspace || got[0].MergeName != h.db.workspaces[theMergeWorkspace].Name {
+		t.Fatalf("undeployed = %+v, want the merge workspace's landing", got)
+	}
+	h.rollout.mu.Lock()
+	defer h.rollout.mu.Unlock()
+	if h.rollout.fired != 1 || h.rollout.landingsAtFire != 1 {
+		t.Fatalf("deploy fired %d time(s) with %d landing(s) recorded, want once, after the record", h.rollout.fired, h.rollout.landingsAtFire)
+	}
+}
+
+func TestAOneShotLandingInTheDaemonsOwnCheckoutIsRecordedForItsDeploy(t *testing.T) {
+	// Arrange: a workspace finishing itself, which owes nobody a report.
+	h := newHarness(t)
+	h.ownCheckout()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	got := h.undeployedLandings()
+	if len(got) != 1 || got[0].MergeWorkspace != theWorkspace || got[0].MergeName != h.db.workspaces[theWorkspace].Name {
+		t.Fatalf("undeployed = %+v, want the workspace's own landing", got)
+	}
+}
+
+func TestALandingWithNothingToDeployIsNotRecordedForADeploy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.emacsRepo()
+
+	// Act
+	landedAsync(t, h)
+
+	// Assert
+	if got := h.undeployedLandings(); len(got) != 0 {
+		t.Fatalf("undeployed = %+v, want nothing waiting for a deploy", got)
+	}
+}
+
+func TestALandingThatCannotBeRecordedForItsDeployIsStillHandedBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ownCheckout()
+	h.db.undeployedErr = errors.New("locked")
+
+	// Act
+	sent := landedAsync(t, h)
+
+	// Assert
+	if sent.outcome.Deploy != LandingDeployOwed {
+		t.Fatalf("deploy = %v, want the report owed its deploy", sent.outcome.Deploy)
+	}
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.merge.record_undeployed" {
+			if rec.Context["cause"] != "locked" || rec.Context["workspace"] != string(theMergeWorkspace) {
+				t.Fatalf("record context = %v, want the cause and the workspace", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no daemon.merge.record_undeployed error among %v", h.logs.Records())
 }
 
 func TestALandingInASiblingWorktreeIsHandedBackWithNothingToDeploy(t *testing.T) {

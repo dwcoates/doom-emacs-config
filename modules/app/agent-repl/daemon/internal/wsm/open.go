@@ -25,9 +25,12 @@ import (
 // user's data and is never thrown away over an additive schema change. Only a
 // layout this build genuinely cannot interpret is refused — see LayoutError.
 //
-// A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
-// makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 137
+// A NEW VERSION IS A NEW ENTRY IN `migrations`, and nothing else: the
+// version is the last step's To, so a build cannot write a layout no step
+// reaches, nor carry a step past the layout it writes (2026-11-10:
+// intake_workspaces landed as step 115 with a hand-kept constant left at 114,
+// and the step never ran).
+var LayoutVersion = migrations[len(migrations)-1].To
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.

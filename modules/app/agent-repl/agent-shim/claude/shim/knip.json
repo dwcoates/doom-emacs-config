@@ -8,5 +8,8 @@
   ],
   "project": [
     "src/**/*.ts"
-  ]
+  ],
+  "ignoreExportsUsedInFile": true,
+  "ignoreDependencies": ["@stryker-mutator/core", "@stryker-mutator/vitest-runner", "c8"],
+  "ignoreBinaries": ["go"]
 }

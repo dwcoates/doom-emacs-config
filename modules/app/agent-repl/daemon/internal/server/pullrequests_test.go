@@ -58,11 +58,11 @@ func (f *fakePullRequests) Comment(_ context.Context, _ ids.WorkspaceID, _ wsm.P
 // fakeRemotes answers every workspace's origin with url.
 type fakeRemotes struct{ url string }
 
-func (f *fakeRemotes) RemoteURL(context.Context, string, string) (string, error) {
+func (f *fakeRemotes) RemoteURL(context.Context, string, string) (string, bool, error) {
 	if f.url == "" {
-		return "", errors.New("fakeRemotes: no origin scripted")
+		return "", false, errors.New("fakeRemotes: no origin scripted")
 	}
-	return f.url, nil
+	return f.url, true, nil
 }
 
 func (d *fakeDB) SubscribePullRequest(_ context.Context, sub wsm.PullRequestSubscription) (bool, error) {

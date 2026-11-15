@@ -182,7 +182,8 @@ with the failure ARM and VALUE).  Each is optional."
 (defun agent-repl-mutation-progress--dispatch-steps (op-id callbacks progress failure)
   "Dispatch one decoded step-shaped PROGRESS for OP-ID to CALLBACKS.
 PROGRESS is `(:arm STEP :value V)': an `entered_stage', a create's
-`waiting_for_network' or `waiting_for_requester_turn', or a terminal `succeeded' or `failed'.  FAILURE
+`waiting_for_network' or `waiting_for_requester_turn', or a terminal
+`succeeded' or `failed'.  FAILURE
 maps a failed value to the list (ARM VALUE) `:on-failed' is called
 with, since each mutation words its failure in its own message.  Every
 mutation whose progress ends on this channel dispatches through here, so

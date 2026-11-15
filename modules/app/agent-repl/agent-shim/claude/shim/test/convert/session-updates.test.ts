@@ -574,6 +574,10 @@ describe("records relayed by other frames", () => {
     expect(convert({ type: "system", subtype: "session_state_changed", state: "idle" })).toEqual([]);
   });
 
+  it("consumes the vendor's task summary, which restates work the conversation's entries carry", () => {
+    expect(convert({ type: "system", subtype: "task_summary", detail: "Reading files" })).toEqual([]);
+  });
+
   it("records nothing for an API retry, which neither ended nor failed the turn", () => {
     expect(convert({ type: "system", subtype: "api_retry", attempt: 2 })).toEqual([]);
   });

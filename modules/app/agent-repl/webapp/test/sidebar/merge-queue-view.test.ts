@@ -62,6 +62,7 @@ import {
   MERGE_QUEUE_POSITION_CLASS,
   pausedText,
   queueDrag,
+  waitingMergeRef,
   queueHoverText,
   queueCount,
   queueLine,
@@ -668,25 +669,72 @@ describe("drawRosterMergeQueue", () => {
 
 });
 
-/** The deploy mediation the queue waits on, CHECKING once its mediator was told of the deploy. */
+/** A click target selecting workspace ID. */
+function target(id: string) {
+  return { workspace: { id, dir: `/wt/${id}` } };
+}
+
+/** The deploy check the queue waits on: CHECKING once the intake was told of the deploy. */
 function mediation(checking: boolean) {
   return create(RosterMergeQueueMediationSchema, {
-    standing: checking ? { case: "checking", value: {} } : { case: "waiting", value: {} },
+    standing: checking ? { case: "checking", value: { target: target("intake") } } : { case: "waiting", value: {} },
   });
 }
 
 describe("drawQueueMediationLabel", () => {
-  it("says the reload is being assessed once the mediator was told of it", () => {
-    const label = drawQueueMediationLabel(mediation(true), "m");
-    expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual(["assessing reload", true]);
+  /** A context recording every SelectWorkspace ask. */
+  /** A context recording every select a click asks of the editor or the daemon. */
+  function selecting() {
+    const asked: Array<SelectWorkspaceRequest | SelectInEditorRequest> = [];
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: (request) => {
+          asked.push(request);
+          return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+        },
+        selectInEditor: (request) => {
+          asked.push(request);
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+        },
+      }),
+    );
+    return { asked, sc };
+  }
+
+  it.each([
+    ["hot reloading", { case: "waiting" as const, value: {} }],
+    ["assessing reload", { case: "checking" as const, value: { target: target("intake") } }],
+    ["fixing reload", { case: "fixing" as const, value: { target: target("remedy") } }],
+  ])("reads %s for its standing", (want, standing) => {
+    const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
+    expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, true]);
   });
 
-  it("says the landing is hot reloading before the mediator is told of it", () => {
-    expect(drawQueueMediationLabel(mediation(false), "m").textContent).toBe("hot reloading");
+  it.each([
+    ["a rollout's label selects the chain's intake", { case: "waiting" as const, value: { target: target("intake") } }, "intake"],
+    ["an assessment's label selects the intake", { case: "checking" as const, value: { target: target("intake") } }, "intake"],
+    ["a fix's label selects the remediation", { case: "fixing" as const, value: { target: target("remedy") } }, "remedy"],
+  ])("%s on a click", async (_name, standing, want) => {
+    const { asked, sc } = selecting();
+    drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
+    await settled();
+    expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", want]]);
   });
 
-  it("refuses a mediation with no standing as a malformed view", () => {
-    expect(() => drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, {}), "m")).toThrow(MalformedView);
+  it("selects nothing on a click while a chain's first deploy rolls out", async () => {
+    const { asked, sc } = selecting();
+    const label = drawQueueMediationLabel(mediation(false), sc, "m");
+    label.click();
+    await settled();
+    expect([asked.length, label.hasAttribute("data-select")]).toEqual([0, false]);
+  });
+
+  it.each([
+    ["no standing", create(RosterMergeQueueMediationSchema, {})],
+    ["an assessment with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "checking", value: {} } })],
+    ["a fix with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "fixing", value: {} } })],
+  ])("refuses %s as a malformed view", (_name, malformed) => {
+    expect(() => drawQueueMediationLabel(malformed, daemon().sc, "m")).toThrow(MalformedView);
   });
 
   it("draws no row in the queue's body for the mediation", () => {
@@ -757,6 +805,19 @@ describe("dragging a waiting merge", () => {
     queueDrag(sc, body, lines[1], refs as never)?.dropped(body, lines[0]);
     await settled();
     expect([sc.arrange.status.parentElement?.querySelector('.refusal[data-arm="noSuchQueuedMerge"]') !== null || sc.arrange.status.querySelector('.refusal[data-arm="noSuchQueuedMerge"]') !== null, sc.arrange.hold.holding()]).toEqual([true, false]);
+  });
+});
+
+describe("waitingMergeRef", () => {
+  it("names the merge itself, never the requester two async merges share", () => {
+    const first = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-a", merge: "merge-a" }) });
+    const second = waitingMerge("asker", { subject: queueSubject("asker", { async: true, name: "fix-b", merge: "merge-b" }) });
+    expect([waitingMergeRef(first, "w[0]").id, waitingMergeRef(second, "w[1]").id]).toEqual(["merge-a", "merge-b"]);
+  });
+
+  it("refuses a subject that names no merge", () => {
+    const subject = create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "sync", value: {} } } });
+    expect(() => waitingMergeRef(waitingMerge("w1", { subject }), "w[0]")).toThrow(MalformedView);
   });
 });
 

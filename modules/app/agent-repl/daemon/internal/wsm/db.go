@@ -85,6 +85,14 @@ type DB interface {
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
+	// OweNuke records that a nuke of the workspace began (owednuke.go).
+	OweNuke(ctx context.Context, id WorkspaceID, at time.Time) error
+	// OwePlacementNote records that the workspace's next prompt owes the
+	// subsection placement note (owedplacement.go).
+	OwePlacementNote(ctx context.Context, id WorkspaceID, at time.Time) error
+	// TakeOwedPlacementNote takes the placement note the workspace's next
+	// prompt owes, answering whether one was owed.
+	TakeOwedPlacementNote(ctx context.Context, id WorkspaceID) (bool, error)
 	// RequireOpenParent answers ParentNotOpenError when the parent is hidden,
 	// closed or closing, nil when it is open (family.go).
 	RequireOpenParent(ctx context.Context, parent WorkspaceID) error
@@ -385,6 +393,22 @@ type DB interface {
 	// RestoreOwedContextSummary puts back a taken summary whose prompt the
 	// queue refused.
 	RestoreOwedContextSummary(ctx context.Context, id WorkspaceID, summary string) error
+	// OweRevision records a revised final response the workspace's agent has
+	// yet to be told of; a response already owed keeps its original.
+	OweRevision(ctx context.Context, id WorkspaceID, owed OwedRevision) error
+	// TakeOwedRevisions takes every revision the workspace's next prompt
+	// tells the agent of, oldest first, deleting them in the same
+	// transaction.
+	TakeOwedRevisions(ctx context.Context, id WorkspaceID) ([]OwedRevision, error)
+	// RestoreOwedRevisions puts back taken revisions whose prompt the queue
+	// refused; a response revised again meanwhile keeps its newer words.
+	RestoreOwedRevisions(ctx context.Context, id WorkspaceID, owed []OwedRevision) error
+	// TakeOwedRename takes the new name the workspace's next prompt tells its
+	// agent, deleting it in the same transaction.
+	TakeOwedRename(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// RestoreOwedRename puts back a taken name whose prompt the queue
+	// refused; a name owed again meanwhile stands.
+	RestoreOwedRename(ctx context.Context, id WorkspaceID, name string) error
 	// PutPendingFork records that a workspace is to be forked from its parent
 	// at its first bring-up.
 	PutPendingFork(ctx context.Context, fork PendingFork) error
@@ -432,6 +456,15 @@ type DB interface {
 	// PayHandBack deletes mergeWS's owed report once it was submitted, and
 	// answers whether one was there.
 	PayHandBack(ctx context.Context, mergeWS WorkspaceID) (bool, error)
+	// RecordUndeployedLanding records a landing as waiting for the deploy
+	// that carries it (undeployedlandings.go).
+	RecordUndeployedLanding(ctx context.Context, landing UndeployedLanding) error
+	// CoverUndeployedLandings marks every waiting landing covered by the
+	// deploy committing now, and answers how many it newly covered.
+	CoverUndeployedLandings(ctx context.Context) (int, error)
+	// TakeDeployedLandings deletes and answers, oldest first, the landings a
+	// deploy that ended carries: only the covered ones when coveredOnly.
+	TakeDeployedLandings(ctx context.Context, coveredOnly bool) ([]UndeployedLanding, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
 	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
 	// binds nothing; a key claimed for a submission that never reached
@@ -660,6 +693,34 @@ type DB interface {
 	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time, turn TurnID) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
+	// RecordMediationIntake records a chain's intake workspace on the
+	// mediation owed at OWED (mediation.go).
+	RecordMediationIntake(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
+	// DispatchMediation records a fix dispatched to remediation workspace WS
+	// for the mediation owed at OWED (mediation.go).
+	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID) (bool, error)
+	// MediationRoleOf answers the owed mediation a workspace is the intake
+	// or the last remediation of, nil for neither (mediation.go).
+	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// BeginRemediationFinish records a remediation workspace's finish at its
+	// gate (remediationfinish.go).
+	BeginRemediationFinish(ctx context.Context, f RemediationFinish) (RemediationFinish, error)
+	// AdvanceRemediationFinish moves a remediation finish from one step to
+	// the next, if it still stands at the first.
+	AdvanceRemediationFinish(ctx context.Context, ws WorkspaceID, from, to RemediationStep, at time.Time) (bool, error)
+	// RemediationFinishOf answers one workspace's remediation finish, nil for
+	// none.
+	RemediationFinishOf(ctx context.Context, ws WorkspaceID) (*RemediationFinish, error)
+	// RemediationFinishes answers every remediation finish recorded.
+	RemediationFinishes(ctx context.Context) ([]RemediationFinish, error)
+	// EndRemediationFinish removes a workspace's remediation finish.
+	EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool, error)
+	// RecordRemediationLanded records what a remediation's landing made and
+	// moves its finish to deploying.
+	RecordRemediationLanded(ctx context.Context, ws WorkspaceID, head string, paths []string, at time.Time) (bool, error)
+	// EndRemediationFinishesOf removes every remediation finish of a queue
+	// whose chain ended.
+	EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int, error)
 	// SubscribeMergeQueue records a merge queue subscription, replacing the
 	// detail of the one its subscriber holds in the same scope, and answers
 	// whether it replaced one. A closed subscriber is ErrSubscriberClosed.

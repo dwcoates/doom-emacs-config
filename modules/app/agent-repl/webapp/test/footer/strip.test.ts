@@ -247,6 +247,7 @@ describe("drawFooterStatus: a step is drawn as the status", () => {
   });
 
   it.each([
+    ["finishing", {}, "finishing"],
     ["enqueued", { place: 2, waiting: 5 }, "enqueued 2/5"],
     ["preDeploy", {}, "pre-deploy"],
     ["rebasing", { replayed: 3, total: 7 }, "rebasing 3/7"],

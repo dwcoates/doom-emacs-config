@@ -412,7 +412,10 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("%v", err)
 		return 1
 	}
-	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
+	// THE HOST'S CORE SEATS, taken before planning: the planning's `go list`
+	// holds one as a unit does (reuse.HeldGoList).
+	host := cores.NewHost(plan.Dir, slots, rank, log)
+	reuseDeps, err := reuse.HostDeps(args.Module, self, work, &host, log)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1
@@ -429,7 +432,6 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		defer stream.Close()
 		emitter = events.New(stream, log)
 	}
-	host := cores.NewHost(plan.Dir, slots, rank, log)
 	if emitter != nil {
 		host.WaitingForCPU = func(id string, state cores.CPUState) {
 			emitter.WaitingForCPU(id, state.BusyPercent, state.CapPercent)
@@ -754,7 +756,20 @@ func planCmd(log *run.Log, argv []string) int {
 	defer os.RemoveAll(work)
 	// The plan's own notes go to stderr, so --json leaves stdout one document.
 	quiet := &run.Log{Out: os.Stderr, Err: os.Stderr}
-	d, err := reuse.HostDeps(args.Module, self, work, quiet)
+	// A PLAN'S LISTINGS ARE TEST LOAD as a run's are: they hold the host's
+	// core seats (reuse.HeldGoList).
+	rank, err := cores.Rank(os.Getenv)
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
+	seatPlan, err := cores.PlanFor(os.Getenv, runtime.NumCPU(), cores.DefaultDir, filepath.Join(work, "cores"))
+	if err != nil {
+		log.Errorf("size the plan's core seats: %v", err)
+		return 1
+	}
+	host := cores.NewHost(seatPlan.Dir, seatPlan.Budget, rank, quiet)
+	d, err := reuse.HostDeps(args.Module, self, work, &host, quiet)
 	if err != nil {
 		log.Errorf("%v", err)
 		return 1

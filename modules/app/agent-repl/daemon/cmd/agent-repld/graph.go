@@ -824,6 +824,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
 		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
+		ColdDown:        func(ws ids.WorkspaceID, since time.Time) { drainController.ColdDown(ws, since) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
 		// bring-up retires the park's terminal under; the views' park is
 		// lifted once it is back, as a revival lifts it.
@@ -883,7 +884,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
-		Mediates: workspace.MediatesFrom(lifecycleconfig.OnDisk{}, p.DB),
 		// THE STORE'S READ-ONLY FACE, dialled beside the store socket every
 		// shim is handed: the daemon reads every workspace's history there,
 		// and never writes the store.
@@ -1032,26 +1032,28 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SettingsStarted: settingsVisits.Note,
 		Leases:          mergeMover,
 		Merges:          mergeMover,
-		RestartSlots:    startSlots,
-		TurnBanners:     turnBanners,
-		Commits:         commitRecounter,
-		CacheClocks:     cacheKeeper,
-		StripSentinels:  stripSentinels,
-		ResolveImage:    resolveImage,
-		DB:              p.DB,
-		Judge:           judge,
-		Network:         network,
-		Feed:            feedResolver,
-		Footer:          footerResolver,
-		Sidebar:         sidebarResolver,
-		Edges:           edges,
-		Holds:           feedResolver,
-		Client:          fleet.Sender,
-		Revive:          fleet.Start,
-		Watcher:         fleet.Watcher,
-		SessionStarted:  fleet.Serving,
-		SessionAbsent:   fleet.SessionAbsent,
-		StandingDown:    supervisor.StandingDown,
+		// Every submission the queue takes lands in the metrics surface.
+		Submissions:    p.Metrics,
+		RestartSlots:   startSlots,
+		TurnBanners:    turnBanners,
+		Commits:        commitRecounter,
+		CacheClocks:    cacheKeeper,
+		StripSentinels: stripSentinels,
+		ResolveImage:   resolveImage,
+		DB:             p.DB,
+		Judge:          judge,
+		Network:        network,
+		Feed:           feedResolver,
+		Footer:         footerResolver,
+		Sidebar:        sidebarResolver,
+		Edges:          edges,
+		Holds:          feedResolver,
+		Client:         fleet.Sender,
+		Revive:         fleet.Start,
+		Watcher:        fleet.Watcher,
+		SessionStarted: fleet.Serving,
+		SessionAbsent:  fleet.SessionAbsent,
+		StandingDown:   supervisor.StandingDown,
 		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
@@ -1230,7 +1232,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		LockProbe:               fleet.ProbeLock,
 		StartSession:            fleet.Start,
 		BringingUp:              bringingUp,
-		PublishViews:            views.PublishViews,
+		// THE FOLDS' STAND-DOWNS ARE DERIVED AGAIN once this daemon owns what
+		// it serves: their waits lived in the previous daemon's memory alone.
+		// The drain controller is built after this one, so it is read at the
+		// call, never captured nil.
+		ServingSettled: func(ctx context.Context) { drainController.ResumeFolded(ctx) },
+		PublishViews:   views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
@@ -1402,7 +1409,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TurnInFlight:      turnInFlight(fleet),
 		Rollout:           deployer,
 		Standing:          rolloutController,
-		CreateMediator:    verbsRef.createMediator,
+		DeployChecks:      deployChecks{f: verbsRef},
+		ReadLogs:          logsReader(scripts, filepath.Dir(paths.PromptsDir)),
 		Log:               p.Surfaces,
 	})
 	if err != nil {
@@ -1544,6 +1552,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:         p.DB,
 		Asks:       verbs,
 		Summaries:  summaries,
+		Placements: verbs,
 		PromptsDir: paths.PromptsDir,
 		Panels:     server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
 		MintTurn:   wsm.NewTurnID,
@@ -1854,7 +1863,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Chat:             chatService,
 			Gathers:          gathers,
 			Revisions: revision.New(revision.Deps{
-				Shims: fleet, Feed: feedResolver, Status: footerResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
+				Shims: fleet, Feed: feedResolver, Status: footerResolver, Owed: p.DB, Bound: revision.Bound, Now: time.Now,
+				PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
 			}),
 			LoudFaults:        loudFaults.Topic(),
 			Focus:             focus,
@@ -1886,6 +1896,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			EnsureHomeRepository: func(ctx context.Context) error {
 				return verbs.EnsureHomeRepository(ctx, homeRepositoryCheckout(paths.Checkout, os.Getenv))
 			},
+			FinishOwedNukes:        verbs.FinishOwedNukes,
 			OpenThreads:            verbs.OpenThreads,
 			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,

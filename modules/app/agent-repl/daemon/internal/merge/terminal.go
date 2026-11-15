@@ -114,7 +114,11 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.head(landedHead{success: r.success(endedMS, out), version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: r.landingDeploy(ctx, out)})
+		deploy := r.landingDeploy(ctx, out)
+		if deploy == LandingDeployOwed {
+			r.recordUndeployed(ctx, log, out)
+		}
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: deploy})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -123,6 +127,27 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		}
 		log.Info(op, "a merge landed", fields)
 	}
+}
+
+// recordUndeployed records a landing whose deploy is owed as waiting for
+// it, before the deploy is told (selfReload), so the deploy that carries it
+// names it when it ends: every landing, a one-shot's as much as an async
+// merge's (wsm undeployed_landings). A failed record leaves the landing
+// standing; only the deploy's notice will not name it.
+func (r *run) recordUndeployed(ctx context.Context, log dlog.Logger, out outcome) {
+	name, err := r.o.workspaceName(ctx, "daemon.merge.record_undeployed", r.ws)
+	if err != nil {
+		// workspaceName recorded the failed read; the landing stands, and
+		// only the deploy's notice will not name it.
+		return
+	}
+	landing := wsm.UndeployedLanding{MergeWorkspace: r.ws, MergeName: name, LandedAt: r.o.deps.Now()}
+	fields := dlog.Context{"workspace": string(r.ws), "merge_name": name, "commit": out.landed}
+	if err := r.o.deps.DB.RecordUndeployedLanding(ctx, landing); err != nil {
+		log.Error("daemon.merge.record_undeployed", "could not record the landing as waiting for its deploy; the deploy's notice will not name it", dlog.WithCause(fields, err))
+		return
+	}
+	log.Debug("daemon.merge.record_undeployed", "recorded the landing as waiting for the deploy that carries it", fields)
 }
 
 // success is the head's merged arm: the commit the target now carries, and
@@ -568,28 +593,37 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 			"workspace": string(closes), "error": err.Error()})
 		return
 	}
-	dir := job.Layout.SourceDir
+	// A failure is recorded by the teardown itself; the landing stands.
+	_ = r.o.retireLandedWorktree(ctx, log, op, r.git, closes, string(r.repo), job.Layout.SourceDir, job.Layout.TargetDir, job.Layout.SourceBranch)
+}
+
+// retireLandedWorktree tears down landed workspace WS: its session stopped,
+// its worktree DIR removed from the repository REPO through GIT, and its
+// landed BRANCH retired against TARGETDIR's checkout. It is the ONE teardown
+// of a landed workspace, the queue's merges' and a deploy remediation's
+// direct landing's alike. Each failure is recorded under OP and answered.
+func (o *orchestrator) retireLandedWorktree(ctx context.Context, log dlog.Logger, op string, git gitclient.Git, ws ids.WorkspaceID, repo, dir, targetDir, branch string) error {
 	// NO RELAUNCH REACHES THE WORKSPACE BETWEEN THE STOP AND THE REMOVAL. A
 	// stale-build bounce fired as the merge's work ended once installed its
 	// replacement after this stop, and the shim then ran in a worktree that
 	// was gone (2026-10-25, settings-page-land).
-	release := r.o.deps.HoldStarts(closes)
+	release := o.deps.HoldStarts(ws)
 	defer release()
-	if err := r.o.deps.StopSession(ctx, closes, true); err != nil {
+	if err := o.deps.StopSession(ctx, ws, true); err != nil {
 		log.Error(op, "could not stop the merged workspace's session before removing its worktree", dlog.Context{
-			"workspace": string(closes), "worktree": dir, "force": true, "error": err.Error()})
-		return
+			"workspace": string(ws), "worktree": dir, "force": true, "error": err.Error()})
+		return err
 	}
-	if err := r.git.RemoveWorktree(ctx, string(r.repo), dir); err != nil {
+	if err := git.RemoveWorktree(ctx, repo, dir); err != nil {
 		log.Error(op, "could not remove the merged worktree", dlog.Context{
-			"workspace": string(closes), "worktree": dir, "error": err.Error()})
-		return
+			"workspace": string(ws), "worktree": dir, "error": err.Error()})
+		return err
 	}
 	// INFO, not DEBUG: the worktree going is the edge every client sees its
 	// workspace's directory vanish at, and a diagnosis of what a client did
 	// next reads the removal off this record (owner SOP, 2026-10-06).
 	log.Info(op, "stopped the merged workspace's session and removed its worktree", dlog.Context{
-		"workspace": string(closes), "worktree": dir, "force": true})
+		"workspace": string(ws), "worktree": dir, "force": true})
 	// THE LANDED BRANCH GOES WITH ITS WORKTREE, verified against what the
 	// target checkout now holds (landedbranch.Retire): a branch left behind
 	// refuses every later create of the same name. Retire records its own
@@ -600,8 +634,9 @@ func (r *run) closeLanded(ctx context.Context, log dlog.Logger, closes ids.Works
 	// merge commit's second parent is the branch's tip. Only a detached
 	// merge lands rebased copies the branch never points at, and its
 	// requester's retirement passes the head it recorded (RetireLanded).
-	_, _ = landedbranch.Retire(ctx, r.git, log, op, job.Layout.TargetDir, job.Layout.SourceBranch, landedbranch.Landing{Into: "HEAD"},
-		dlog.Context{"workspace": string(closes)})
+	_, _ = landedbranch.Retire(ctx, git, log, op, targetDir, branch, landedbranch.Landing{Into: "HEAD"},
+		dlog.Context{"workspace": string(ws)})
+	return nil
 }
 
 // cleanupLanded removes the worktree a landed async merge asked to clean up
@@ -1388,8 +1423,11 @@ func (o *orchestrator) abandonRunning(ctx context.Context, r *run, cause Abandon
 
 // abandonTerminal ends a RUNNING merge that was taken out: the abandoned
 // terminal, its ledger's open intervals closed as abandoned, and the one
-// teardown. The workspace's work is untouched: nothing landed, so its
-// worktree stays.
+// teardown. Nothing landed, so the worktree stays, but a rebase the merge
+// left standing in it (one taken out mid conflict resolution) is aborted, so
+// the branch keeps its base rather than sitting mid-rebase with nobody
+// resolving it (2026-11-11: linux-metrics-release, evicted while its session
+// resolved a conflict), and the requester is told so.
 func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 	const op = "daemon.merge.abandoned"
 	r.enterTerminal(terminalOwedFailed)
@@ -1399,9 +1437,13 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		return
 	}
 	summary := r.o.abandonedSentence(r.ws, cause, true)
+	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause)}
+	if r.abortStandingRebase(ctx, op, fields) {
+		summary += "; the rebase it left standing was aborted, and the branch keeps its base"
+		fields["rebase_aborted"] = true
+	}
 	r.closeOpenRounds(ctx, "abandoned")
-	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", dlog.Context{
-		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "summary": summary})
+	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", withField(fields, "summary", summary))
 	r.teardown(ctx, outcome{abandoned: cause}, func() {
 		r.head(&frontendv1.FeedMergeError{
 			EndedAtMs: r.o.nowMS(),

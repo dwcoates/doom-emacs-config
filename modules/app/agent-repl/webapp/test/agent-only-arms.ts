@@ -29,9 +29,6 @@ export const AGENT_ONLY_REFUSAL_ARMS = {
   submitPrompt: new Set<string>(["slashCommandFromAgent", "unknownSender", "fanOutRefused"]),
 } as const satisfies Record<string, ReadonlySet<string>>;
 
-/** The rpcs that have agent-only refusal arms. */
-export type AgentOnlyRpc = keyof typeof AGENT_ONLY_REFUSAL_ARMS;
-
 /** ARMS without RPC's agent-only ones: what the webapp's call site must word. */
 export function userRefusalArms(rpc: string, arms: readonly string[]): string[] {
   const agentOnly: ReadonlySet<string> | undefined =

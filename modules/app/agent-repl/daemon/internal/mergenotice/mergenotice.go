@@ -58,6 +58,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -121,15 +122,53 @@ type Deps struct {
 type Service struct {
 	deps Deps
 	loop *noticeloop.Loop[merge.QueueChange]
+
+	mu sync.Mutex
+	// through is, for each subscription this daemon saw taken, the Seq of
+	// the last change made before it (merge.QueueObserver.Subscribed). A
+	// subscription with no entry was taken before this daemon made any
+	// change, and is told every one.
+	through map[subscriptionKey]uint64
+}
+
+// subscriptionKey names one subscription: its subscriber and its scope.
+type subscriptionKey struct {
+	subscriber ids.WorkspaceID
+	repo       wsm.RepoKey
 }
 
 var _ merge.QueueObserver = (*Service)(nil)
 
 // New builds the service.
 func New(deps Deps) *Service {
-	s := &Service{deps: deps}
+	s := &Service{deps: deps, through: map[subscriptionKey]uint64{}}
 	s.loop = noticeloop.New(s.untold)
 	return s
+}
+
+// Subscribed implements merge.QueueObserver: it records where in the
+// changes' order the subscription was taken, and never blocks.
+func (s *Service) Subscribed(subscriber ids.WorkspaceID, repo wsm.RepoKey, through uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.through[subscriptionKey{subscriber, repo}] = through
+}
+
+// takenBefore answers the subscriptions among SUBS taken before CHANGE was
+// made: a subscription taken after it (its answer already showing the
+// change's effect) is neither told the change nor ended by it, however late
+// the change is delivered.
+func (s *Service) takenBefore(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []wsm.MergeQueueSubscription {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []wsm.MergeQueueSubscription
+	for _, sub := range subs {
+		through, seen := s.through[subscriptionKey{sub.Subscriber, sub.Repo}]
+		if !seen || change.Seq == 0 || change.Seq > through {
+			out = append(out, sub)
+		}
+	}
+	return out
 }
 
 // QueueChanged implements merge.QueueObserver: it appends CHANGE for the loop
@@ -177,6 +216,9 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		log.Error(op, "could not read the merge queue subscriptions; nobody is told of the change", dlog.WithCause(changeFields(change), err))
 		return
 	}
+	// THE SUBSCRIPTIONS ARE READ AS THEY STOOD WHEN THE CHANGE WAS MADE, not
+	// when it is delivered (2026-10-31).
+	subs = s.takenBefore(subs, change)
 	ended := s.endDepleted(ctx, subs, change)
 	for _, subscriber := range Recipients(subs, change) {
 		s.notify(ctx, prompts, subscriber, ended[subscriber], change)

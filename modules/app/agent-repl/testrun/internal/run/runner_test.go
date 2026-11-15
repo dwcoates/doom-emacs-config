@@ -1244,3 +1244,41 @@ func TestRunFailsAUnitWhoseGoCacheCannotBeKeptUntrimmed(t *testing.T) {
 		t.Fatalf("released %v with %d seats still held, want a's cores given back", c.released, c.held)
 	}
 }
+
+func TestRunFailsANamedChunkThatRanNoneOfItsTests(t *testing.T) {
+	tests := []struct {
+		name      string
+		named     bool
+		ran       []testtimes.Test
+		want      Outcome
+		wantError bool
+	}{
+		{name: "a named chunk that ran none fails", named: true, want: Failed, wantError: true},
+		{name: "a named chunk that ran its test passes", named: true, ran: []testtimes.Test{{Suite: "ert", Name: "case-a"}}, want: Passed},
+		{name: "a whole chunk that ran none passes", want: Passed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := spec("ert#00", "ert")
+			s.NamesTests = tt.named
+			s.Tests = func([]byte, bool) ([]testtimes.Test, error) { return tt.ran, nil }
+			r, _, errOut := newRunner(1, &fakeExec{scripts: map[string]script{}})
+
+			// Act
+			results, _, err := r.Run(context.Background(), []Spec{s})
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if results[0].Outcome != tt.want {
+				t.Fatalf("outcome = %v, want %v", results[0].Outcome, tt.want)
+			}
+			logged := strings.Contains(errOut.String(), "unit ert#00 (ert) was narrowed to named tests and ran none of them")
+			if logged != tt.wantError {
+				t.Fatalf("error logged %v, want %v:\n%s", logged, tt.wantError, errOut)
+			}
+		})
+	}
+}

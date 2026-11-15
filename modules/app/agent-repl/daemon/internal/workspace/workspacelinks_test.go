@@ -364,21 +364,15 @@ func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
 	prURL := "https://github.com/ChessCom/explanation-engine/pull/42"
 	pr := wsm.PullRequestKey{Owner: "ChessCom", Repo: "explanation-engine", Number: 42}
 	tests := []struct {
-		name             string
-		url              string
-		owned            bool
-		held             bool
-		anchorErr        error
-		wantPR           bool
-		wantAnchor       bool
-		wantSub          bool
-		wantTold         string
-		wantUnreadRecord bool
+		name       string
+		url        string
+		owned      bool
+		held       bool
+		wantPR     bool
+		wantFollow bool
 	}{
-		{name: "an owned pull request is anchored and subscribed", url: prURL, owned: true, wantPR: true, wantAnchor: true, wantSub: true, wantTold: "anchored"},
-		{name: "an owned pull request already followed reads nothing", url: prURL, owned: true, held: true, wantPR: true},
-		{name: "an owned pull request that cannot be read is subscribed unanchored", url: prURL, owned: true, anchorErr: errors.New("down"),
-			wantPR: true, wantAnchor: true, wantSub: true, wantUnreadRecord: true},
+		{name: "an owned pull request is followed from the watcher's first read", url: prURL, owned: true, wantPR: true, wantFollow: true},
+		{name: "an owned pull request already followed is not followed again", url: prURL, owned: true, held: true, wantPR: true},
 		{name: "a referenced pull request names it and subscribes nothing", url: prURL, wantPR: true},
 		{name: "an owned link that is no pull request subscribes nothing", url: docLink.URL, owned: true},
 	}
@@ -387,7 +381,6 @@ func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
 			f.workspace("w1", t.TempDir())
-			f.anchors.err = tt.anchorErr
 			if tt.held {
 				f.db.prSubs = map[ids.WorkspaceID][]wsm.PullRequestSubscription{"w1": {{Subscriber: "w1", PullRequest: pr}}}
 			}
@@ -403,16 +396,11 @@ func TestSetLinkFollowsAnOwnedPullRequest(t *testing.T) {
 			if set.Owned != tt.owned || (set.PullRequest != nil) != tt.wantPR || (set.PullRequest != nil && *set.PullRequest != pr) {
 				t.Errorf("set = %+v, want owned %v naming the pull request %v", set, tt.owned, tt.wantPR)
 			}
-			if (len(f.anchors.asked) == 1) != tt.wantAnchor || (set.Subscribe != nil) != tt.wantSub {
-				t.Errorf("anchored %v, subscribe %+v; want anchored %v subscribing %v", f.anchors.asked, set.Subscribe, tt.wantAnchor, tt.wantSub)
+			if (len(f.anchors.asked) == 1) != tt.wantFollow || (set.Subscribe != nil) != tt.wantFollow {
+				t.Errorf("followed %v, subscribe %+v; want following %v", f.anchors.asked, set.Subscribe, tt.wantFollow)
 			}
-			if tt.wantSub && (set.Subscribe.Told != tt.wantTold || set.Subscribe.Origin != wsm.PullRequestOriginOwnedLink || set.Subscribe.Events != wsm.AllPullRequestEvents()) {
-				t.Errorf("subscription = %+v, want every event for the owned link, told %q", set.Subscribe, tt.wantTold)
-			}
-			_, recorded := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opChangeLinks,
-				Message: "the owned pull request could not be read, so it is followed unanchored: its first successful read tells what is already on it"})
-			if recorded != tt.wantUnreadRecord {
-				t.Errorf("unread record %v, want %v", recorded, tt.wantUnreadRecord)
+			if tt.wantFollow && (set.Subscribe.Told != "first read" || set.Subscribe.Origin != wsm.PullRequestOriginOwnedLink || set.Subscribe.Events != wsm.AllPullRequestEvents()) {
+				t.Errorf("subscription = %+v, want every event for the owned link, from the watcher's first read", set.Subscribe)
 			}
 		})
 	}

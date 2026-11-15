@@ -37,9 +37,12 @@ post_deploy:
 queue_drained:
   - path: modules/app/agent-repl/bin/push-release.sh
     timeout_seconds: 120
-# After every deploy the merge queue is held until this hidden workspace (opus,
-# medium effort) checks the deploy and decides it: approve, escalate to the
-# user, or remediate and deploy again (repoconfig.v1.LifecycleConfig
-# .deploy_mediator; docs/investigations/2026-11-13-deploy-mediator-plan.md).
-deploy_mediator:
-  name: deploy-mediator
+# Every deploy holds the merge queue's head until it is checked
+# (repoconfig.v1.LifecycleConfig.deploy_checks;
+# docs/investigations/2026-11-14-deploy-intake-plan.md). Each chain of
+# deploys has a hidden intake (sonnet, low effort) that approves, escalates,
+# or dispatches what the deploy broke to a visible remediation workspace
+# (opus, medium effort), whose finish gates, lands directly and deploys. After
+# 4 remediations in a row the intake may only escalate.
+deploy_checks:
+  remediations_before_escalation: 4

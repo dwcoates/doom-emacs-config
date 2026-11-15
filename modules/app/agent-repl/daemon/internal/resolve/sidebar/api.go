@@ -488,9 +488,25 @@ func (v VendorStart) String() string {
 	}
 }
 
-// QueueMediation is a deploy mediation a queue waits on: the repository
-// whose queue it holds, and whether the mediator was told of the deploy.
+// QueueMediation is a deploy check a queue waits on: the repository whose
+// queue it holds, where the check stands, and the workspaces at work on it.
 type QueueMediation struct {
-	Repo ids.RepoID
-	Told bool
+	Repo  ids.RepoID
+	Stage MediationStage
+	// Intake is the chain's intake, empty while a chain's first deploy rolls
+	// out; Remediation the workspace fixing, set at MediationFixing.
+	Intake      ids.WorkspaceID
+	Remediation ids.WorkspaceID
 }
+
+// MediationStage is where a deploy check stands, as its label draws it.
+type MediationStage int
+
+const (
+	// MediationWaiting: the deploy rolls out (`hot reloading`).
+	MediationWaiting MediationStage = iota + 1
+	// MediationChecking: the chain's intake checks it (`assessing reload`).
+	MediationChecking
+	// MediationFixing: a remediation workspace fixes it (`fixing reload`).
+	MediationFixing
+)

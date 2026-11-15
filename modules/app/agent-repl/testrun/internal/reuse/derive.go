@@ -145,9 +145,22 @@ func (b *unitBuilder) list() []Unit {
 func unitDesc(s roster.Suite, name string, extra ...string) string {
 	r := s.Reuse
 	return strings.Join(append([]string{
-		fmt.Sprintf("suite=%q kind=%d path=%q unit=%q inputs=%q generated=%q own=%q",
-			s.Name, s.Kind, s.Path, name, r.Inputs, r.Generated, r.Units[name]),
+		fmt.Sprintf("suite=%q kind=%d path=%q unit=%q inputs=%q generated=%q own=%q entry=%s",
+			s.Name, s.Kind, s.Path, name, r.Inputs, r.Generated, r.Units[name], suiteFacts(s)),
 	}, extra...), " ")
+}
+
+// suiteFacts is S's whole roster entry, its maps in key order: every fact of
+// its own suite a unit's key holds, since the roster package is no part of
+// the runner graph (runnerPackages).
+func suiteFacts(s roster.Suite) string {
+	r := s.Reuse
+	s.Reuse = nil
+	facts := fmt.Sprintf("%#v", s)
+	if r != nil {
+		facts += fmt.Sprintf(" reuse=%#v", *r)
+	}
+	return facts
 }
 
 // batchDesc is unitDesc for a batched unit, with its members and what the
@@ -187,9 +200,27 @@ func batchSet(d Deps, s roster.Suite, name string, members []string, runner []Go
 	return set, nil
 }
 
-// runnerPackages is the runner's own build graph.
+// rosterPackage is the roster's import path, which runnerPackages leaves out.
+const rosterPackage = "agentrepl/testrun/roster"
+
+// runnerPackages is the runner's own build graph, but for the roster.
+//
+// THE ROSTER KEYS A UNIT ONLY THROUGH ITS OWN SUITE'S ENTRY (suiteFacts in
+// unitDesc). Until 2026-11-15 the roster package was part of every unit's
+// key, so editing one suite's Reuse declaration moved all 968 units' keys and
+// the next run reran everything.
 func runnerPackages(d Deps) ([]GoPackage, error) {
-	return d.GoList(roster.Resolve(d.Repo, d.Module, "testrun"), "", false, ".")
+	pkgs, err := d.GoList(roster.Resolve(d.Repo, d.Module, "testrun"), "", false, ".")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GoPackage, 0, len(pkgs))
+	for _, p := range pkgs {
+		if p.ImportPath != rosterPackage {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // GO MODULES. A package's unit is its split and its checks (the compiled
@@ -369,7 +400,7 @@ func addProgramGraphs(d Deps, set *InputSet, s roster.Suite, names []string) err
 // its batch, confined as a whole: its inputs are every member's import graph,
 // with its config's and the config's setup files', the package's manifests,
 // and the runner's reporter, so a member reading what no member declares
-// fails loudly. The typecheck is one unit over the package's
+// fails loudly. The typecheck and knip are each one unit over the package's
 // tree and every file's graph; the integration bundle is infra.
 
 // vitestManifests are the package files every vitest unit reads when present.
@@ -408,18 +439,19 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		b.own(batch, sp.Group).Members = append([]string(nil), sp.Items...)
 		configOf[batch] = config
 	}
-	typecheck := ""
+	var checks []string
 	for _, a := range u.Atomic {
 		switch a.ID {
-		case s.Name + ":typecheck":
-			typecheck = "typecheck"
-			b.own(typecheck, a.ID)
+		case s.Name + ":typecheck", s.Name + ":knip":
+			check := strings.TrimPrefix(a.ID, s.Name+":")
+			checks = append(checks, check)
+			b.own(check, a.ID)
 		case s.Name + ":integration-build":
 			b.infra = append(b.infra, a.ID)
 		case s.Name + ":coverage":
 			b.own("coverage", a.ID).Never = "a coverage report is rebuilt by every coverage run, which reuses nothing"
 		default:
-			return nil, nil, fmt.Errorf("reuse: %s's unit %s is no file's, typecheck's or build's", s.Name, a.ID)
+			return nil, nil, fmt.Errorf("reuse: %s's unit %s is no file's, typecheck's, knip's or build's", s.Name, a.ID)
 		}
 	}
 	graph := NewImportGraph(d.Repo)
@@ -481,16 +513,20 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		unit.Desc = batchDesc(s, name, unit.Members, fmt.Sprintf("config=%q", config))
 		all.AddAll(set)
 	}
-	if typecheck != "" && b.units[typecheck].Never == "" {
-		// tsc reads the package's whole tree and every file it imports.
-		set, err := unitSet(d, s, typecheck, runner)
+	for _, check := range checks {
+		if b.units[check].Never != "" {
+			continue
+		}
+		// tsc and knip each read the package's whole tree and every file it
+		// imports.
+		set, err := unitSet(d, s, check, runner)
 		if err != nil {
 			return nil, nil, err
 		}
 		set.AddAll(env)
 		set.AddAll(all)
-		b.units[typecheck].Set = set
-		b.units[typecheck].Desc = unitDesc(s, typecheck)
+		b.units[check].Set = set
+		b.units[check].Desc = unitDesc(s, check)
 	}
 	return b.list(), b.infra, nil
 }

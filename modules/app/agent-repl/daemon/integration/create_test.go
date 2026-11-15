@@ -417,7 +417,7 @@ func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testi
 
 	// Assert
 	pre := shim.ExpectStartTurn()
-	if text(pre.GetSaid()) != "run the pre-merge checklist" {
+	if !strings.HasPrefix(text(pre.GetSaid()), "run the pre-merge checklist\n\nIf this turn opens a pull request") {
 		t.Fatalf("the merge's pre-prompt turn = %q, want the recorded pre-deploy hook read back", text(pre.GetSaid()))
 	}
 	if pre.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION {

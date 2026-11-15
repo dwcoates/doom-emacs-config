@@ -24,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file testrun/v1/run_event.proto.
  */
 export const file_testrun_v1_run_event: GenFile = /*@__PURE__*/
-  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSL7AgoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAEi0KB2Fib3J0ZWQYByABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5BYm9ydGVkSABCBwoFZXZlbnQiZAoOVGVzdFJ1blBsYW5uZWQSLQoFdW5pdHMYASADKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkVW5pdBIjCgNsb2cYAiABKAsyFi50ZXN0cnVuLnYxLlRlc3RSdW5Mb2ciNAoSVGVzdFJ1blBsYW5uZWRVbml0Eg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkiGgoKVGVzdFJ1bkxvZxIMCgRwYXRoGAEgASgJIqUCChBUZXN0UnVuVW5pdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkSDwoHd2FsbF9tcxgDIAEoAxIvCgZwYXNzZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0UGFzc2VkSAASLwoGZmFpbGVkGAUgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdEZhaWxlZEgAEjUKCWNhbmNlbGxlZBgHIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1blVuaXRDYW5jZWxsZWRIABIsCgV0ZXN0cxgIIAMoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RSZXN1bHRCCQoHdmVyZGljdEoECAYQB1IIZGVjbGluZWQiEwoRVGVzdFJ1blVuaXRQYXNzZWQiOwoRVGVzdFJ1blVuaXRGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEhMKC291dHB1dF90YWlsGAIgASgJIjQKFFRlc3RSdW5Vbml0Q2FuY2VsbGVkEhwKFGNhbmNlbGxlZF9ieV91bml0X2lkGAEgASgJItIBChFUZXN0UnVuVGVzdFJlc3VsdBIMCgRuYW1lGAEgASgJEg8KB3dhbGxfbXMYAiABKAMSLwoGcGFzc2VkGAMgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFBhc3NlZEgAEi8KBmZhaWxlZBgEIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RGYWlsZWRIABIxCgdza2lwcGVkGAUgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVRlc3RSdW5UZXN0UGFzc2VkIhMKEVRlc3RSdW5UZXN0RmFpbGVkIhQKElRlc3RSdW5UZXN0U2tpcHBlZCJ9CgxUZXN0UnVuRW5kZWQSMAoGcGFzc2VkGAEgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRQYXNzZWRIABIwCgZmYWlsZWQYAiABKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5FbmRlZEZhaWxlZEgAQgkKB291dGNvbWUiQAoSVGVzdFJ1bkVuZGVkUGFzc2VkEhQKDHBhc3NlZF91bml0cxgBIAEoBUoECAIQA1IOZGVjbGluZWRfdW5pdHMibwoSVGVzdFJ1bkVuZGVkRmFpbGVkEhQKDGZhaWxlZF91bml0cxgBIAEoBRIXCg9jYW5jZWxsZWRfdW5pdHMYAiABKAUSFAoMcGFzc2VkX3VuaXRzGAMgASgFEhQKDHJ1bl9mYWlsdXJlcxgEIAMoCSIzCg5UZXN0UnVuQWJvcnRlZBIRCglzZWxlY3Rpb24YASABKAkSDgoGZGV0YWlsGAIgASgJIiAKDlRlc3RSdW5SZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSJSChRUZXN0UnVuV2FpdGluZ0ZvckNwdRIPCgd1bml0X2lkGAEgASgJEhQKDGJ1c3lfcGVyY2VudBgCIAEoARITCgtjYXBfcGVyY2VudBgDIAEoDSI5ChNUZXN0UnVuQ3B1V2FpdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSEQoJd2FpdGVkX21zGAIgASgDQiZaJGFnZW50cmVwbC9wcm90by90ZXN0cnVuL3YxO3Rlc3RydW52MWIGcHJvdG8z");
+  fileDesc("Chp0ZXN0cnVuL3YxL3J1bl9ldmVudC5wcm90bxIKdGVzdHJ1bi52MSL7AgoMVGVzdFJ1bkV2ZW50Ei0KB3BsYW5uZWQYASABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkSAASMgoKdW5pdF9lbmRlZBgCIAEoCzIcLnRlc3RydW4udjEuVGVzdFJ1blVuaXRFbmRlZEgAEikKBWVuZGVkGAMgASgLMhgudGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRIABItCgdyZWZ1c2VkGAQgASgLMhoudGVzdHJ1bi52MS5UZXN0UnVuUmVmdXNlZEgAEjsKD3dhaXRpbmdfZm9yX2NwdRgFIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1bldhaXRpbmdGb3JDcHVIABI5Cg5jcHVfd2FpdF9lbmRlZBgGIAEoCzIfLnRlc3RydW4udjEuVGVzdFJ1bkNwdVdhaXRFbmRlZEgAEi0KB2Fib3J0ZWQYByABKAsyGi50ZXN0cnVuLnYxLlRlc3RSdW5BYm9ydGVkSABCBwoFZXZlbnQiZAoOVGVzdFJ1blBsYW5uZWQSLQoFdW5pdHMYASADKAsyHi50ZXN0cnVuLnYxLlRlc3RSdW5QbGFubmVkVW5pdBIjCgNsb2cYAiABKAsyFi50ZXN0cnVuLnYxLlRlc3RSdW5Mb2ciNAoSVGVzdFJ1blBsYW5uZWRVbml0Eg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkiGgoKVGVzdFJ1bkxvZxIMCgRwYXRoGAEgASgJIqUCChBUZXN0UnVuVW5pdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSDQoFc3VpdGUYAiABKAkSDwoHd2FsbF9tcxgDIAEoAxIvCgZwYXNzZWQYBCABKAsyHS50ZXN0cnVuLnYxLlRlc3RSdW5Vbml0UGFzc2VkSAASLwoGZmFpbGVkGAUgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVW5pdEZhaWxlZEgAEjUKCWNhbmNlbGxlZBgHIAEoCzIgLnRlc3RydW4udjEuVGVzdFJ1blVuaXRDYW5jZWxsZWRIABIsCgV0ZXN0cxgIIAMoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RSZXN1bHRCCQoHdmVyZGljdEoECAYQB1IIZGVjbGluZWQiEwoRVGVzdFJ1blVuaXRQYXNzZWQiOwoRVGVzdFJ1blVuaXRGYWlsZWQSEQoJZXhpdF9jb2RlGAEgASgFEhMKC291dHB1dF90YWlsGAIgASgJIjQKFFRlc3RSdW5Vbml0Q2FuY2VsbGVkEhwKFGNhbmNlbGxlZF9ieV91bml0X2lkGAEgASgJItIBChFUZXN0UnVuVGVzdFJlc3VsdBIMCgRuYW1lGAEgASgJEg8KB3dhbGxfbXMYAiABKAMSLwoGcGFzc2VkGAMgASgLMh0udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFBhc3NlZEgAEi8KBmZhaWxlZBgEIAEoCzIdLnRlc3RydW4udjEuVGVzdFJ1blRlc3RGYWlsZWRIABIxCgdza2lwcGVkGAUgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuVGVzdFNraXBwZWRIAEIJCgdvdXRjb21lIhMKEVRlc3RSdW5UZXN0UGFzc2VkIhMKEVRlc3RSdW5UZXN0RmFpbGVkIhQKElRlc3RSdW5UZXN0U2tpcHBlZCKxAQoMVGVzdFJ1bkVuZGVkEjAKBnBhc3NlZBgBIAEoCzIeLnRlc3RydW4udjEuVGVzdFJ1bkVuZGVkUGFzc2VkSAASMAoGZmFpbGVkGAIgASgLMh4udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRGYWlsZWRIABIyCgdwbGFubmVkGAMgASgLMh8udGVzdHJ1bi52MS5UZXN0UnVuRW5kZWRQbGFubmVkSABCCQoHb3V0Y29tZSIsChNUZXN0UnVuRW5kZWRQbGFubmVkEhUKDXBsYW5uZWRfdW5pdHMYASABKAUiQAoSVGVzdFJ1bkVuZGVkUGFzc2VkEhQKDHBhc3NlZF91bml0cxgBIAEoBUoECAIQA1IOZGVjbGluZWRfdW5pdHMibwoSVGVzdFJ1bkVuZGVkRmFpbGVkEhQKDGZhaWxlZF91bml0cxgBIAEoBRIXCg9jYW5jZWxsZWRfdW5pdHMYAiABKAUSFAoMcGFzc2VkX3VuaXRzGAMgASgFEhQKDHJ1bl9mYWlsdXJlcxgEIAMoCSIzCg5UZXN0UnVuQWJvcnRlZBIRCglzZWxlY3Rpb24YASABKAkSDgoGZGV0YWlsGAIgASgJIiAKDlRlc3RSdW5SZWZ1c2VkEg4KBmRldGFpbBgBIAEoCSJSChRUZXN0UnVuV2FpdGluZ0ZvckNwdRIPCgd1bml0X2lkGAEgASgJEhQKDGJ1c3lfcGVyY2VudBgCIAEoARITCgtjYXBfcGVyY2VudBgDIAEoDSI5ChNUZXN0UnVuQ3B1V2FpdEVuZGVkEg8KB3VuaXRfaWQYASABKAkSEQoJd2FpdGVkX21zGAIgASgDQiZaJGFnZW50cmVwbC9wcm90by90ZXN0cnVuL3YxO3Rlc3RydW52MWIGcHJvdG8z");
 
 /**
  * One thing a run reports.
@@ -458,6 +458,15 @@ export type TestRunEnded = Message<"testrun.v1.TestRunEnded"> & {
      */
     value: TestRunEndedFailed;
     case: "failed";
+  } | {
+    /**
+     * A plan-only run (TestRunRequest.plan_only) planned every unit and ran
+     * none.
+     *
+     * @generated from field: testrun.v1.TestRunEndedPlanned planned = 3;
+     */
+    value: TestRunEndedPlanned;
+    case: "planned";
   } | { case: undefined; value?: undefined };
 };
 
@@ -467,6 +476,27 @@ export type TestRunEnded = Message<"testrun.v1.TestRunEnded"> & {
  */
 export const TestRunEndedSchema: GenMessage<TestRunEnded> = /*@__PURE__*/
   messageDesc(file_testrun_v1_run_event, 12);
+
+/**
+ * A plan-only run planned every unit and ran none.
+ *
+ * @generated from message testrun.v1.TestRunEndedPlanned
+ */
+export type TestRunEndedPlanned = Message<"testrun.v1.TestRunEndedPlanned"> & {
+  /**
+   * How many units the run planned.
+   *
+   * @generated from field: int32 planned_units = 1;
+   */
+  plannedUnits: number;
+};
+
+/**
+ * Describes the message testrun.v1.TestRunEndedPlanned.
+ * Use `create(TestRunEndedPlannedSchema)` to create a new message.
+ */
+export const TestRunEndedPlannedSchema: GenMessage<TestRunEndedPlanned> = /*@__PURE__*/
+  messageDesc(file_testrun_v1_run_event, 13);
 
 /**
  * No unit failed.
@@ -487,7 +517,7 @@ export type TestRunEndedPassed = Message<"testrun.v1.TestRunEndedPassed"> & {
  * Use `create(TestRunEndedPassedSchema)` to create a new message.
  */
 export const TestRunEndedPassedSchema: GenMessage<TestRunEndedPassed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 13);
+  messageDesc(file_testrun_v1_run_event, 14);
 
 /**
  * At least one unit failed or was cancelled, or the run itself failed a check
@@ -535,7 +565,7 @@ export type TestRunEndedFailed = Message<"testrun.v1.TestRunEndedFailed"> & {
  * Use `create(TestRunEndedFailedSchema)` to create a new message.
  */
 export const TestRunEndedFailedSchema: GenMessage<TestRunEndedFailed> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 14);
+  messageDesc(file_testrun_v1_run_event, 15);
 
 /**
  * The run stopped before it planned, on a failure of the runner's own rather
@@ -568,7 +598,7 @@ export type TestRunAborted = Message<"testrun.v1.TestRunAborted"> & {
  * Use `create(TestRunAbortedSchema)` to create a new message.
  */
 export const TestRunAbortedSchema: GenMessage<TestRunAborted> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 15);
+  messageDesc(file_testrun_v1_run_event, 16);
 
 /**
  * The selection could not be run.
@@ -590,7 +620,7 @@ export type TestRunRefused = Message<"testrun.v1.TestRunRefused"> & {
  * Use `create(TestRunRefusedSchema)` to create a new message.
  */
 export const TestRunRefusedSchema: GenMessage<TestRunRefused> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 16);
+  messageDesc(file_testrun_v1_run_event, 17);
 
 /**
  * A unit waits to start for the host's CPU. Every test and build on the host
@@ -627,7 +657,7 @@ export type TestRunWaitingForCpu = Message<"testrun.v1.TestRunWaitingForCpu"> & 
  * Use `create(TestRunWaitingForCpuSchema)` to create a new message.
  */
 export const TestRunWaitingForCpuSchema: GenMessage<TestRunWaitingForCpu> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 17);
+  messageDesc(file_testrun_v1_run_event, 18);
 
 /**
  * A unit that waited for the host's CPU has its cores and starts.
@@ -655,5 +685,5 @@ export type TestRunCpuWaitEnded = Message<"testrun.v1.TestRunCpuWaitEnded"> & {
  * Use `create(TestRunCpuWaitEndedSchema)` to create a new message.
  */
 export const TestRunCpuWaitEndedSchema: GenMessage<TestRunCpuWaitEnded> = /*@__PURE__*/
-  messageDesc(file_testrun_v1_run_event, 18);
+  messageDesc(file_testrun_v1_run_event, 19);
 

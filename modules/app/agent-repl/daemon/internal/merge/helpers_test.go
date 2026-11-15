@@ -95,16 +95,26 @@ type fakeDB struct {
 	// drainOwed is each queue's owed drain, which AdmitMerge sets as the
 	// store's does; drainReadErr and drainClearErr fail its read and clear.
 	drainOwed map[wsm.RepoKey]bool
-	// mediations is each repository's owed deploy mediation; mediationErr
-	// fails its read.
-	mediations   map[wsm.RepoKey]*wsm.Mediation
-	mediationErr error
+	// checks is a real in-memory store every deploy check and remediation
+	// finish call goes to, so the harness keeps the store's own rules;
+	// mediationErr fails a check's read, dispatchErr a dispatch's record,
+	// and finishErr a remediation finish's record.
+	checks               wsm.DB
+	mediationErr         error
+	dispatchErr          error
+	remediationFinishErr error
+	// contextUsage is each workspace's last context reading.
+	contextUsage map[ids.WorkspaceID]wsm.ContextUsageRecord
 	// listWorkspacesErr fails ListWorkspaces.
 	listWorkspacesErr error
 	// hasTurnsErr fails HasTurns.
 	hasTurnsErr   error
 	drainReadErr  error
 	drainClearErr error
+	// undeployed are the landings recorded as waiting for their deploy, and
+	// undeployedErr fails the next record.
+	undeployed    []wsm.UndeployedLanding
+	undeployedErr error
 
 	mu sync.Mutex
 
@@ -317,56 +327,100 @@ func newFakeDB() *fakeDB {
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
 		drainOwed:     map[wsm.RepoKey]bool{},
-		mediations:    map[wsm.RepoKey]*wsm.Mediation{},
+		checks:        inMemoryChecks(),
+		contextUsage:  map[ids.WorkspaceID]wsm.ContextUsageRecord{},
 	}
 }
 
-func (f *fakeDB) OweMediation(_ context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// The store's chain rule (wsm.OweMediation): begun where nothing was
-	// owed, passed on, and counting a replaced mediation that was told.
-	replaced := f.mediations[repo]
-	owed := &wsm.Mediation{OwedAt: at, Version: version, ChainStartedAt: at}
-	if replaced != nil {
-		owed.ChainStartedAt, owed.ChainRedeploys = replaced.ChainStartedAt, replaced.ChainRedeploys
-		if replaced.Prompted() {
-			owed.ChainRedeploys++
-		}
+// inMemoryChecks opens the real in-memory store the deploy checks' calls go
+// to. A store that cannot open is a broken test build.
+func inMemoryChecks() wsm.DB {
+	db, err := wsm.OpenInMemory(context.Background(), wsm.WithLogger(dlog.NewTestLogger()))
+	if err != nil {
+		panic(fmt.Sprintf("merge test: open the in-memory store: %v", err))
 	}
-	f.mediations[repo] = owed
-	return replaced, nil
+	return db
 }
 
-func (f *fakeDB) MarkMediationPrompted(_ context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	m := f.mediations[repo]
-	if m == nil || !m.OwedAt.Equal(owed) {
-		return false, nil
-	}
-	m.PromptedAt, m.Turn = &at, turn
-	return true, nil
+func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
+	return f.checks.OweMediation(ctx, repo, at, version)
 }
 
-func (f *fakeDB) ReleaseMediation(_ context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	m := f.mediations[repo]
-	if m == nil || !m.OwedAt.Equal(owed) {
-		return false, nil
-	}
-	delete(f.mediations, repo)
-	return true, nil
+func (f *fakeDB) MarkMediationPrompted(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
+	return f.checks.MarkMediationPrompted(ctx, repo, owed, at, turn)
 }
 
-func (f *fakeDB) MediationOf(_ context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {
+func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	return f.checks.ReleaseMediation(ctx, repo, owed)
+}
+
+func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediation, error) {
+	f.mu.Lock()
+	err := f.mediationErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return f.checks.MediationOf(ctx, repo)
+}
+
+func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
+	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
+}
+
+func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	err := f.dispatchErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.DispatchMediation(ctx, repo, owed, at, ws)
+}
+
+func (f *fakeDB) MediationRoleOf(ctx context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
+	return f.checks.MediationRoleOf(ctx, ws)
+}
+
+func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationFinish) (wsm.RemediationFinish, error) {
+	f.mu.Lock()
+	err := f.remediationFinishErr
+	f.mu.Unlock()
+	if err != nil {
+		return wsm.RemediationFinish{}, err
+	}
+	return f.checks.BeginRemediationFinish(ctx, rf)
+}
+
+func (f *fakeDB) AdvanceRemediationFinish(ctx context.Context, ws ids.WorkspaceID, from, to wsm.RemediationStep, at time.Time) (bool, error) {
+	return f.checks.AdvanceRemediationFinish(ctx, ws, from, to, at)
+}
+
+func (f *fakeDB) RemediationFinishOf(ctx context.Context, ws ids.WorkspaceID) (*wsm.RemediationFinish, error) {
+	return f.checks.RemediationFinishOf(ctx, ws)
+}
+
+func (f *fakeDB) RemediationFinishes(ctx context.Context) ([]wsm.RemediationFinish, error) {
+	return f.checks.RemediationFinishes(ctx)
+}
+
+func (f *fakeDB) EndRemediationFinish(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	return f.checks.EndRemediationFinish(ctx, ws)
+}
+
+func (f *fakeDB) RecordRemediationLanded(ctx context.Context, ws ids.WorkspaceID, head string, paths []string, at time.Time) (bool, error) {
+	return f.checks.RecordRemediationLanded(ctx, ws, head, paths, at)
+}
+
+func (f *fakeDB) EndRemediationFinishesOf(ctx context.Context, repo wsm.RepoKey) (int, error) {
+	return f.checks.EndRemediationFinishesOf(ctx, repo)
+}
+
+func (f *fakeDB) WorkspaceContextUsage(_ context.Context, ws ids.WorkspaceID) (wsm.ContextUsageRecord, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.mediationErr != nil {
-		return nil, f.mediationErr
-	}
-	return f.mediations[repo], nil
+	usage, ok := f.contextUsage[ws]
+	return usage, ok, nil
 }
 
 func (f *fakeDB) QueueDrainOwed(_ context.Context, repo wsm.RepoKey) (bool, error) {
@@ -1093,13 +1147,19 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 		f.onAdmit(id)
 	}
 	for i, entry := range f.queues[repo] {
-		if entry.Workspace == id {
-			f.queues[repo][i].State = wsm.MergeAdmitted
-			f.drainOwed[repo] = true
-			return nil
+		if entry.Workspace != id {
+			continue
 		}
+		// ONLY A WAITING ENTRY IS ADMITTED, as the durable queue refuses any
+		// other prior state (wsm.AdmitMerge).
+		if entry.State != wsm.MergeQueued {
+			return fmt.Errorf("admit %s while %s, not %s", id, entry.State, wsm.MergeQueued)
+		}
+		f.queues[repo][i].State = wsm.MergeAdmitted
+		f.drainOwed[repo] = true
+		return nil
 	}
-	return fmt.Errorf("no queue entry for %s", id)
+	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
 // StartMergePick stands for the durable pick start: the merge workspace's
@@ -1477,6 +1537,10 @@ type fakeGit struct {
 	// than inferred.
 	seq func() int
 	at  map[string]int
+
+	// standingErr fails RebaseInProgress; abortErr fails AbortRebase.
+	standingErr error
+	abortErr    error
 
 	defaultBranch string
 	commonDirs    map[string]string
@@ -1976,6 +2040,9 @@ func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.abortErr != nil {
+		return g.abortErr
+	}
 	g.leftStanding = false
 	g.rebaseCommands = append(g.rebaseCommands, "abort")
 	return nil
@@ -2015,7 +2082,7 @@ func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.standing || g.leftStanding, nil
+	return g.standing || g.leftStanding, g.standingErr
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
@@ -2141,6 +2208,8 @@ func (g *fakeGit) seen(call string) bool {
 // fakeNames stands for the async merge name check: a name in taken is
 // refused, every claim's release is counted, and err fails the check.
 type fakeNames struct {
+	// prefix is the workspace prefix names resolve under; unset is none.
+	prefix   string
 	mu       sync.Mutex
 	taken    map[string]bool
 	err      error
@@ -2148,10 +2217,19 @@ type fakeNames struct {
 	releases int
 }
 
+// MergeBranch resolves NAME as the workspace verbs do: a name that already
+// carries a prefix component stands as it is, any other takes the prefix.
+func (n *fakeNames) MergeBranch(name string) string {
+	if n.prefix == "" || strings.Contains(name, "/") {
+		return name
+	}
+	return n.prefix + "/" + name
+}
+
 func (n *fakeNames) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
+	branch := n.MergeBranch(name)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	branch := "agent/" + name
 	if n.err != nil {
 		return "", nil, false, n.err
 	}
@@ -2857,11 +2935,9 @@ type harness struct {
 	// pauseInTerminal is the terminal seam the drain's tests wire.
 	pauseInTerminal AdmissionPause
 	rollout         *fakeRollout
-	// mediatorsMade names every mediator CreateMediator made, which
-	// createMediatorErr fails, in the repository mediatorRepo.
-	mediatorsMade     []string
-	createMediatorErr error
-	mediatorRepo      wsm.RepoID
+	// checks is the deploy check workspaces' fake; logs answers ReadLogs.
+	checks     *fakeDeployChecks
+	logRecords func(since, until time.Time) ([]LogRecord, error)
 	// standing is the rollout controller's queue standing: serving, and
 	// every workspace served, unless a test says otherwise.
 	standing *fakeStanding
@@ -2877,6 +2953,9 @@ type harness struct {
 	// local merge and no hook: a deploy that runs nothing but its terminal.
 	config    *repoconfigv1.LifecycleConfig
 	configErr error
+	// configErrAt fails the read of the checkout at its key alone, so a
+	// rebased branch's config can be unreadable while its target's is not.
+	configErrAt map[string]error
 	// hooks is the scripted hook runner, and every script hook it ran.
 	hooks *fakeHookRunner
 	// repoRoot is the harness repository's main checkout root, which is where
@@ -3020,8 +3099,11 @@ type fakeRollout struct {
 	// handbacksAtFire records how many reports had been handed back when it
 	// fired, which is how "the report is owed before the deploy" is asserted.
 	handbacksAtFire int
-	db              *fakeDB
-	detached        *fakeDetached
+	// landingsAtFire records how many landings were recorded as waiting for
+	// their deploy when it fired.
+	landingsAtFire int
+	db             *fakeDB
+	detached       *fakeDetached
 }
 
 func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
@@ -3030,11 +3112,22 @@ func (t *fakeRollout) Landed(_ context.Context, landed []gitclient.Commit) {
 	t.landed = landed
 	t.db.mu.Lock()
 	t.leasesAtFire = len(t.db.releasedLeases)
+	t.landingsAtFire = len(t.db.undeployed)
 	t.db.mu.Unlock()
 	if t.detached != nil {
 		t.handbacksAtFire = len(t.detached.sent())
 	}
 	t.mu.Unlock()
+}
+
+func (d *fakeDB) RecordUndeployedLanding(_ context.Context, landing wsm.UndeployedLanding) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.undeployedErr != nil {
+		return d.undeployedErr
+	}
+	d.undeployed = append(d.undeployed, landing)
+	return nil
 }
 
 // theWorkspace is the workspace every harness merges.
@@ -3049,9 +3142,12 @@ const theRepository = ids.RepoID("repo-1")
 // exactly the config the harness holds, and nothing touches a disk.
 type harnessConfig struct{ h *harness }
 
-func (c harnessConfig) Load(string) (*repoconfigv1.LifecycleConfig, error) {
+func (c harnessConfig) Load(root string) (*repoconfigv1.LifecycleConfig, error) {
 	c.h.mu.Lock()
 	defer c.h.mu.Unlock()
+	if err := c.h.configErrAt[root]; err != nil {
+		return nil, err
+	}
 	if c.h.configErr != nil {
 		return nil, c.h.configErr
 	}
@@ -3267,6 +3363,7 @@ func newHarness(t *testing.T) *harness {
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
+	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository}
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
@@ -3274,6 +3371,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
+	h.briefs[BriefHookPrompt] = []string{"prompt"}
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")
@@ -3383,6 +3481,12 @@ func (h *harness) deps() Deps {
 			if failed != nil {
 				return 0, failed
 			}
+			// A WAIT CUT BEFORE THE TURN ENDS ANSWERS THE CUT, as production's
+			// (sessionwatcher.watcher.AwaitTurnEnd) does: a fake that answered
+			// the turn completed let a run that never read its own cut pass.
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			if gate != nil {
 				select {
 				case <-gate:
@@ -3426,20 +3530,14 @@ func (h *harness) deps() Deps {
 			h.interrupted = append(h.interrupted, ws)
 			return h.interruptRunning, h.interruptErr
 		},
-		Rollout:  h.rollout,
-		Standing: h.standing,
-		CreateMediator: func(_ context.Context, repoDir, name string) (wsm.Workspace, error) {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			h.mediatorsMade = append(h.mediatorsMade, name)
-			if h.createMediatorErr != nil {
-				return wsm.Workspace{}, h.createMediatorErr
+		Rollout:      h.rollout,
+		Standing:     h.standing,
+		DeployChecks: h.checks,
+		ReadLogs: func(_ context.Context, _ string, since, until time.Time) ([]LogRecord, error) {
+			if h.logRecords == nil {
+				return nil, nil
 			}
-			ws := wsm.Workspace{ID: ids.WorkspaceID("ws-mediator"), Name: name, Repo: h.mediatorRepo}
-			h.db.mu.Lock()
-			h.db.workspaces[ws.ID] = ws
-			h.db.mu.Unlock()
-			return ws, nil
+			return h.logRecords(since, until)
 		},
 		Now: h.clock,
 		Log: h.logs,
@@ -3925,9 +4023,9 @@ func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int
 	return 0, 0, errors.New("fakeGit: the merge never counts ahead/behind")
 }
 
-func (g *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
+func (g *fakeGit) RemoteURL(context.Context, string, string) (string, bool, error) {
 	g.record("remote_url")
-	return "", errors.New("fakeGit: the merge never reads a remote's url")
+	return "", false, errors.New("fakeGit: the merge never reads a remote's url")
 }
 
 // everyAttemptLeaves scripts every conflict resolution attempt the bound
@@ -3963,6 +4061,22 @@ func attemptsUpTo(n int) []int {
 type fakeQueueEvents struct {
 	mu      sync.Mutex
 	changes []QueueChange
+	// subscribed is every subscription told, in order.
+	subscribed []subscribedAt
+}
+
+// subscribedAt is one Subscribed call.
+type subscribedAt struct {
+	subscriber ids.WorkspaceID
+	repo       wsm.RepoKey
+	through    uint64
+}
+
+// Subscribed records the subscription.
+func (f *fakeQueueEvents) Subscribed(subscriber ids.WorkspaceID, repo wsm.RepoKey, through uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subscribed = append(f.subscribed, subscribedAt{subscriber, repo, through})
 }
 
 // QueueChanged records CHANGE.
@@ -4041,6 +4155,18 @@ func (f *fakeMeter) ObserveMediationChain(outcome string, redeploys int, took ti
 	defer f.mu.Unlock()
 	f.got = append(f.got, fmt.Sprintf("chain:%s:%d", outcome, redeploys))
 	f.chainTook = append(f.chainTook, took)
+}
+
+func (f *fakeMeter) ObserveRemediation(outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "remediation:"+outcome)
+}
+
+func (f *fakeMeter) ObserveRemediationGateRounds(outcome string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("remediation_gates:%s:%d", outcome, n))
 }
 
 func (f *fakeMeter) SetRemediationsInARow(n int) {
@@ -4267,4 +4393,87 @@ func (f *fakeStanding) serve(ws ids.WorkspaceID, served bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.notServed[ws] = !served
+}
+
+// fakeDeployChecks is the deploy check workspaces (merge.DeployCheckWorkspaces):
+// each made workspace is registered in the harness's store under the
+// repository REPO, and every call is recorded.
+type fakeDeployChecks struct {
+	mu   sync.Mutex
+	db   *fakeDB
+	repo wsm.RepoID
+	// made names every workspace made, in order; createErr fails a make.
+	made      []string
+	createErr error
+	// escalationErr fails the make of an escalation workspace only.
+	escalationErr error
+	// reopened and closed are the workspaces reopened and closed; reopenErr
+	// and closeErr fail them.
+	reopened, closed    []ids.WorkspaceID
+	reopenErr, closeErr error
+	// efforts records each effort set, "intake:WS" or "remediation:WS", and
+	// whether the role was recorded then; effortErr fails one.
+	efforts   []string
+	effortErr error
+}
+
+func (f *fakeDeployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error {
+	role, err := f.db.MediationRoleOf(ctx, ws)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kind := "remediation"
+	if intake {
+		kind = "intake"
+	}
+	f.efforts = append(f.efforts, fmt.Sprintf("%s:%s:recorded=%v", kind, ws, role != nil))
+	return f.effortErr
+}
+
+func (f *fakeDeployChecks) make(prefix, name string) (wsm.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.made = append(f.made, name)
+	if f.createErr != nil {
+		return wsm.Workspace{}, f.createErr
+	}
+	ws := wsm.Workspace{ID: ids.WorkspaceID(prefix), Name: name, Repo: f.repo}
+	f.db.mu.Lock()
+	f.db.workspaces[ws.ID] = ws
+	f.db.mu.Unlock()
+	return ws, nil
+}
+
+func (f *fakeDeployChecks) CreateDeployIntake(_ context.Context, _, name string) (wsm.Workspace, error) {
+	return f.make("ws-intake", name)
+}
+
+func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name string) (wsm.Workspace, error) {
+	return f.make("ws-remedy", name)
+}
+
+func (f *fakeDeployChecks) CreateDeployEscalation(_ context.Context, _, name string) (wsm.Workspace, error) {
+	f.mu.Lock()
+	err := f.escalationErr
+	f.mu.Unlock()
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return f.make("ws-escalate", name)
+}
+
+func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reopened = append(f.reopened, ws)
+	return f.reopenErr
+}
+
+func (f *fakeDeployChecks) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = append(f.closed, ws)
+	return false, f.closeErr
 }

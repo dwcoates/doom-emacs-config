@@ -92,11 +92,16 @@ message SessionProfileAgent {
 
 // How the agent's workspace lands its changes. The set arm IS the landing.
 message SessionProfileAgentLanding {
+  // Tag 3 (`mediating`) was the standing deploy mediator's landing, which
+  // checked and fixed every deploy itself; the per-chain deploy intake
+  // replaces it.
+  reserved 3;
+  reserved "mediating";
   // Exactly one is set.
   oneof landing {
     SessionProfileAgentLandingThroughQueue through_queue = 1;
     SessionProfileAgentLandingBypassingQueue bypassing_queue = 2;
-    SessionProfileAgentLandingMediating mediating = 3;
+    SessionProfileAgentLandingDeployIntake deploy_intake = 4;
   }
 }
 // The ordinary landing: every change reaches the main branch through the
@@ -107,11 +112,13 @@ message SessionProfileAgentLandingThroughQueue {}
 // on the main branch itself, and the queue is let through at the end of each
 // of its turns.
 message SessionProfileAgentLandingBypassingQueue {}
-// The deploy mediator's landing: the workspace is its repository's deploy
-// mediator (repoconfig.v1.LifecycleConfig.deploy_mediator). It checks each
-// deploy, remediates what it can itself, lands each fix on the main branch
-// directly and deploys it, and decides the deploy through the merge queue.
-message SessionProfileAgentLandingMediating {}
+// A deploy intake's landing: the workspace is the intake of a chain of its
+// repository's deploys (repoconfig.v1.LifecycleConfig.deploy_checks). It
+// changes nothing: it states the problems each deploy of its chain caused,
+// from the facts its brief hands it, and decides the deploy through the
+// merge queue (agentrepl.v1.UpdateMergeQueueMediation): approve, escalate,
+// or dispatch a fix to a remediation workspace.
+message SessionProfileAgentLandingDeployIntake {}
 
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.

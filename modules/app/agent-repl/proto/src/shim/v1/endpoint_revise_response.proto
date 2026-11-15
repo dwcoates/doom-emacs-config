@@ -53,6 +53,10 @@ message ReviseResponseResponse {
 message ReviseResponseSuccess {
   // The model the side query answered with, as its own opening stated it.
   string model = 1;
+  // The revised prose, exactly as the response_revision page line carries
+  // it, so the daemon tells the agent what its response now says without
+  // waiting for the page line to come back to it.
+  conversation.v1.AgentResponseProse prose = 2;
 }
 
 // No revision was written. THE ARM IS WHY.

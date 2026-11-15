@@ -2686,6 +2686,38 @@ flash never claims a start is under way."
     (should (member "agent-repl: no session, and the daemon could not start one; nothing was sent"
                     agent-repl-test-input--messages))))
 
+(ert-deftest agent-repl-input-no-session-echoes-the-daemons-account ()
+  "The daemon's account of why it could not start a session follows the echo."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :no-session
+                                                   :value (:detail "no revival is wired for this workspace"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (member "agent-repl: no session, and the daemon could not start one; nothing was sent (no revival is wired for this workspace)"
+                    agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-refusal-detail-reads-the-arms-detail ()
+  "A refusal's `detail' is read off its value, and is \"\" when absent."
+  (should (equal (list (agent-repl--input-refusal-detail '(:arm :no-session :value (:detail "why")))
+                       (agent-repl--input-refusal-detail '(:arm :no-session :value nil)))
+                 '("why" ""))))
+
+(ert-deftest agent-repl-input-no-arm-hand-rolls-the-refusal-detail ()
+  "Every refusal arm reads its `detail' through the one helper."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "input.el" (file-name-directory
+                                                 (symbol-file (quote agent-repl--input-refusal-detail) (quote defun)))))
+                  (buffer-string))))
+    (should-not (string-match-p (regexp-quote "(plist-get (plist-get reason :value) :detail)")
+                                (replace-regexp-in-string
+                                 (regexp-quote "(or (plist-get (plist-get reason :value) :detail) \"\")")
+                                 "" source)))))
+
 (ert-deftest agent-repl-input-no-session-records-at-warn ()
   "A session the daemon could not bring back is a WARN, under its own token."
   (agent-repl-test-input--with

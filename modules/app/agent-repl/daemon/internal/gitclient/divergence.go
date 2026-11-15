@@ -100,10 +100,30 @@ func parseLeftRightCount(out string) (int, int, error) {
 }
 
 // RemoteURL answers the url REMOTE fetches from in REPODIR, as `git remote
-// get-url` prints it. A remote that does not exist is git's failure.
-func (c *client) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
-	return c.run(ctx, "daemon.gitclient.remote_url", repoDir, "remote", "get-url", remote)
+// get-url` prints it. A repository with no such remote is an ANSWER, not a
+// failure: `remote get-url` exits 2 for exactly that (a local-only
+// repository has no origin), and it is never recorded as git failing. Any
+// other exit is git failing to tell, recorded once at ERROR.
+func (c *client) RemoteURL(ctx context.Context, repoDir, remote string) (string, bool, error) {
+	const operation = "daemon.gitclient.remote_url"
+	in, err := c.runRaw(ctx, operation, repoDir, "remote", "get-url", remote)
+	if err != nil {
+		return "", false, err
+	}
+	switch in.exitCode {
+	case 0:
+		return strings.TrimRight(in.stdout, "\n"), true, nil
+	case noSuchRemoteExit:
+		return "", false, nil
+	}
+	failure := in.fail()
+	c.log.Global().Error(operation, "git could not tell what url the remote fetches from", in.logContext())
+	return "", false, failure
 }
+
+// noSuchRemoteExit is `git remote get-url`'s exit status for a remote the
+// repository does not have.
+const noSuchRemoteExit = 2
 
 // AnyPatchEquivalent implements Git: `git cherry UPSTREAM HEAD` lists each
 // commit of HEAD that UPSTREAM does not reach, "-" when UPSTREAM holds a

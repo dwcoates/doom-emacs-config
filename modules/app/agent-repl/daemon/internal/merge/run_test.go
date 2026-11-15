@@ -854,6 +854,7 @@ func TestTakeSessionFailsOnAnUnusableDeployConfig(t *testing.T) {
 func TestAwaitWorkspacesFreeWaitsForTheOtherWorkspaceToo(t *testing.T) {
 	// Arrange: a merge of another workspace's branch, both busy.
 	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "agent/two")
 	r := ledgeredRun(t, h)
 	r.subject.other = otherWorkspace
 	h.freeness.busy = true
@@ -1255,7 +1256,23 @@ func TestEveryRunOpensItsLedgerThroughOpenLedger(t *testing.T) {
 // failure branches of workspaceName: a read cut by the merge's own context
 // ending is the merge winding down with its daemon (DEBUG, never ERROR), and
 // any other read failure, even one under an ended context, is recorded at
-// ERROR. Either way the id is drawn.
+// ERROR. Either way the failure is returned, and no id stands in for the name.
+func TestWorkspaceNameAnswersTheRecordsName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	want := h.db.workspaces[theWorkspace].Name
+	h.db.mu.Unlock()
+
+	// Act
+	got, err := h.o.workspaceName(context.Background(), "daemon.merge.await_free", theWorkspace)
+
+	// Assert
+	if err != nil || got != want || got == "" {
+		t.Fatalf("workspaceName = %q, %v, want %q", got, err, want)
+	}
+}
+
 func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1280,11 +1297,11 @@ func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) 
 			}
 
 			// Act
-			got := h.o.workspaceName(ctx, theWorkspace)
+			got, err := h.o.workspaceName(ctx, "daemon.merge.await_free", theWorkspace)
 
 			// Assert
-			if got != string(theWorkspace) {
-				t.Fatalf("workspaceName = %q, want the id %q drawn", got, theWorkspace)
+			if got != "" || !errors.Is(err, tt.readErr) {
+				t.Fatalf("workspaceName = %q, %v, want no name and the read's error", got, err)
 			}
 			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.await_free"})
 			if !ok {
@@ -1295,6 +1312,64 @@ func TestWorkspaceNameRecordsAReadFailureByWhetherItsContextEnded(t *testing.T) 
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.absent, Operation: "daemon.merge.await_free"}); ok {
 				t.Fatalf("a %s daemon.merge.await_free record was written: %+v", tt.absent, h.logs.Records())
+			}
+		})
+	}
+}
+
+func TestAwaitFreeFailsWhenTheAwaitedWorkspacesNameCannotBeRead(t *testing.T) {
+	// Arrange: the awaited workspace is busy, and the registry does not hold it.
+	h := newHarness(t)
+	r := ledgeredRun(t, h)
+	h.freeness.busyWS = map[ids.WorkspaceID]bool{"ws-gone": true}
+
+	// Act.
+	err := r.awaitFree(context.Background(), "ws-gone")
+
+	// Assert.
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("awaitFree = %v, want the name's read failure", err)
+	}
+	h.freeness.mu.Lock()
+	awaited := h.freeness.awaited
+	h.freeness.mu.Unlock()
+	if awaited != 0 {
+		t.Fatalf("the merge waited %d times on a workspace it could not name, want none", awaited)
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.await_free", text: "could not read a workspace's name", context: map[string]string{"workspace": "ws-gone"}}) {
+		t.Fatalf("no ERROR record names the unreadable workspace: %+v", h.logs.Records())
+	}
+}
+
+// TestTheHarnessAwaitTurnEndAnswersAWaitCutBeforeItBegan pins the harness's
+// AwaitTurnEnd to production's: a wait whose context is already cut answers
+// the cut, gate or no gate, never the turn completed.
+func TestTheHarnessAwaitTurnEndAnswersAWaitCutBeforeItBegan(t *testing.T) {
+	tests := []struct {
+		name  string
+		gated bool
+	}{
+		{name: "no gate"},
+		{name: "a gate", gated: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.gated {
+				h.mu.Lock()
+				h.awaitGate = make(chan struct{})
+				h.mu.Unlock()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			// Act.
+			_, err := h.o.deps.AwaitTurnEnd(ctx, theWorkspace, "turn-1")
+
+			// Assert.
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("AwaitTurnEnd = %v, want the cut answered", err)
 			}
 		})
 	}

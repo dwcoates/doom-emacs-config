@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -314,4 +315,106 @@ func (h *harness) recordClosedTurn(ws wsm.WorkspaceID, turn wsm.TurnID, how wsm.
 	defer h.db.mu.Unlock()
 	at := h.clock()
 	h.db.turns[ws] = append(h.db.turns[ws], wsm.Turn{ID: turn, Workspace: ws, Close: &how, ClosedAt: &at})
+}
+
+func TestAFinishPromptIsDrawnAsTheFinishingStepOnItsText(t *testing.T) {
+	// Arrange: the footer's facts are observed while the finish prompt runs.
+	h := newHarness(t)
+	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	var whileRunning MergeFacts
+	h.queue.onSubmit = func(promptqueue.Submission) { whileRunning, _ = h.o.Facts(theWorkspace) }
+
+	// Act
+	h.runWait(t)
+
+	// Assert
+	if whileRunning.State != StateMerging || whileRunning.Step != footer.StepFinishing || whileRunning.QueuedAt.IsZero() {
+		t.Fatalf("facts while the finish prompt ran = %+v, want merging on the finishing step with its queue instant", whileRunning)
+	}
+	if got := whileRunning.Line.GetFinishing().GetPrompt().GetText(); got != "open the pull request" {
+		t.Fatalf("line = %+v, want the finish prompt's text", whileRunning.Line)
+	}
+}
+
+func TestAFinishScriptIsDrawnAsTheFinishingStepOnItsPath(t *testing.T) {
+	// Arrange: the finish script is held while it runs.
+	h := newHarness(t)
+	h.finishHooks(anyTarget(scriptHookOf(finishScript)))
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entered, release := h.hooks.hold(filepath.Join(h.targetD, finishScript), h.sourceD)
+	done := make(chan struct{})
+	go func() { defer close(done); h.runWait(t) }()
+
+	// Act
+	<-entered
+	whileRunning, _ := h.o.Facts(theWorkspace)
+	close(release)
+	<-done
+
+	// Assert
+	if whileRunning.Step != footer.StepFinishing || whileRunning.Line.GetFinishing().GetScript().GetPath() != finishScript {
+		t.Fatalf("facts while the finish script ran = %+v, want the finishing step on the script's path", whileRunning)
+	}
+}
+
+func TestAFinishStageThatSucceedsLeavesTheDeployDrawnInLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act
+	h.runWait(t)
+
+	// Assert
+	if facts, _ := h.o.Facts(theWorkspace); facts.Step == footer.StepFinishing {
+		t.Fatalf("facts = %+v, want the finishing step replaced once the deploy is in line", facts)
+	}
+}
+
+func TestAWithdrawnFinishStageLeavesNoStepDrawn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act
+	h.runWait(t)
+
+	// Assert
+	if facts, found := h.o.Facts(theWorkspace); found {
+		t.Fatalf("facts = %+v, want none once the finish stage's deploy was withdrawn", facts)
+	}
+}
+
+func TestAFinishingStepIsToldToNoQueueSubscriber(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.finishHooks(anyTarget(promptHookOf("open the pull request")))
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act
+	h.runWait(t)
+
+	// Assert
+	for _, change := range h.events.reported() {
+		if change.Kind == QueueChangeStepped && change.Subject.Step == footer.StepFinishing {
+			t.Fatalf("changes = %v, want no finishing step reported", h.events.kinds())
+		}
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opQueueEvents}); ok {
+		t.Fatalf("records = %+v, want no queue-event error for a deploy not yet in line", h.logs.Records())
+	}
 }

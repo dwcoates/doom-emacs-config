@@ -365,6 +365,13 @@ type Verbs interface {
 	// does not hold it: agent-repl is always a known project. An empty DIR
 	// registers nothing. The boot calls it before EnsureMainWorktrees.
 	EnsureHomeRepository(ctx context.Context, dir string) error
+	// FinishOwedNukes finishes every nuke that stopped part way, leaving one
+	// that fails again owed. The boot calls it before it reads the registry.
+	FinishOwedNukes(ctx context.Context) error
+	// TakeOwedPlacementNote answers the subsection placement note a
+	// prompt-less root's first prompt owes, and the restore that owes it
+	// again when the queue refuses the prompt (prompthandler.OwedPlacements).
+	TakeOwedPlacementNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, func(), error)
 	// OpenThreads has the chat service open every chat thread, naming each
 	// after its first question and abbreviating its questions; the threads
 	// open on their own goroutine.
@@ -408,9 +415,20 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// CreateMediator makes the hidden deploy mediator NAME of the repository
-	// at REPODIR, on the mediator's model and effort (mediator.go).
-	CreateMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployIntake makes the hidden deploy intake NAME of the repository at
+	// REPODIR, unprompted, on the intake's model (deploychecks.go).
+	CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployRemediation makes the visible deploy remediation workspace NAME of
+	// the repository at REPODIR, unprompted, on the remediation's model
+	// (deploychecks.go).
+	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployEscalation makes the visible escalation workspace NAME of
+	// the repository at REPODIR, unprompted, on the remediation's model
+	// (deploychecks.go).
+	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// SetDeployCheckEffort sets a deploy check workspace to its role's
+	// effort, once its role is recorded (deploychecks.go).
+	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.
@@ -854,9 +872,9 @@ type Deps struct {
 	Topbar  topbar.Resolver
 	Sidebar sidebar.Resolver
 	Host    HostRelay
-	// PullRequests anchors the subscription an owned pull-request link takes
-	// (prwatch.Watcher.Anchor).
-	PullRequests PullRequestAnchor
+	// PullRequests answers the subscription an owned pull-request link takes,
+	// anchored by the watcher's first read (prwatch.Watcher.FollowFromFirstRead).
+	PullRequests PullRequestFollower
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own

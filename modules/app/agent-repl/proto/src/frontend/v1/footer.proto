@@ -989,6 +989,12 @@ message FooterStatusMerging {
     // queue and restates the place on each read; nothing here is the
     // workspace's own doing beyond owning the pull request.
     FooterSubStatusMergingGithubMergeQueue github_merge_queue = 27;
+    // A `finish` hook is running: the finishing workspace's own hooks, run
+    // once the turn that asked for the deploy has ended and BEFORE the
+    // deploy is put in line (repoconfig.v1.LifecycleConfig.finish). Its
+    // bubble is not in the feed yet; a script hook shows nothing else while
+    // it runs.
+    FooterSubStatusMergingFinishing finishing = 28;
   }
   // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
   // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
@@ -1050,6 +1056,8 @@ message FooterSubStatusMergingEnqueued {
   // How many merges are waiting, this one included. At least `place`.
   uint32 waiting = 2;
 }
+// A `finish` hook is running, drawn "finishing".
+message FooterSubStatusMergingFinishing {}
 // A `pre_deploy` hook is running, drawn "pre-deploy".
 message FooterSubStatusMergingPreDeploy {}
 // The replay, drawn "rebasing 3/7".
@@ -1203,6 +1211,8 @@ message FooterStatusActivityMergeStep {
     FooterMergeStepHook deploying = 11;
     // Post-deploy: the `post_deploy` hook running.
     FooterMergeStepHook post_deploy = 12;
+    // Finishing: the `finish` hook running.
+    FooterMergeStepHook finishing = 13;
   }
   // Tags 2 (`preprocessing`) and 9 (`postprocessing`) are RETIRED: a running
   // hook is a script or a prompt (FooterMergeStepHook), in the stage its arm

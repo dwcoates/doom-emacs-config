@@ -18,7 +18,7 @@ import (
 // HostDeps are Deps over the real host: the checkout holding module, every
 // checkout of its repository, the host's pass store, and the real go, git and
 // sandbox-exec.
-func HostDeps(module, self, profileDir string, log Logger) (Deps, error) {
+func HostDeps(module, self, profileDir string, seats SeatHolder, log Logger) (Deps, error) {
 	abs, err := filepath.Abs(module)
 	if err != nil {
 		return Deps{}, fmt.Errorf("reuse: resolve the module root %s: %w", module, err)
@@ -47,7 +47,7 @@ func HostDeps(module, self, profileDir string, log Logger) (Deps, error) {
 	return Deps{
 		Repo: repo, Module: realModule, DenyRoots: roots, Ignored: ignored, Bindings: bindings,
 		ListIgnored: func() (Ignored, error) { return ExecIgnored(repo) },
-		Store:       Store{Dir: storeDir}, GoList: MemoGoList(ExecGoList), Hashes: NewHashCache(),
+		Store:       Store{Dir: storeDir}, GoList: MemoGoList(HeldGoList(seats, ExecGoList)), Hashes: NewHashCache(),
 		Toolchain: hostToolchain(), Environ: os.Environ(),
 		Self: self, ProfileDir: profileDir,
 		Probe: func() error {

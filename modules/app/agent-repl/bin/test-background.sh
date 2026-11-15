@@ -431,9 +431,7 @@ scan() {
         for named in bin/coverage-honesty.sh bin/e2e-perf.sh; do
             [ -e "$module/$named" ] && echo "$module/$named"
         done
-        for named in .claude/safe-test-run.sh; do
-            [ -e "$root/$named" ] && echo "$root/$named"
-        done
+        [ -e "$root/.claude/safe-test-run.sh" ] && echo "$root/.claude/safe-test-run.sh"
     } | sort -u | while IFS= read -r file; do
         check_prologue "$file" "$helper"
     done

@@ -10,7 +10,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
@@ -101,7 +101,24 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// its re-announcement re-opens and re-admits the row it already is, and
 	// git is asked about nothing. Only a repository workspace's facts are
 	// git's to say.
-	switch held, err := v.deps.DB.WorkspaceByDir(ctx, normalized); {
+	held, err := v.deps.DB.WorkspaceByDir(ctx, normalized)
+	// A WORKSPACE THIS DAEMON HANDED TO ITS SUCCESSOR REGISTERS THERE, and is
+	// refused here before anything is written: no re-open, no serving claim,
+	// no resolver binding. During the 13:55 handover on 2026-10-31 Emacs,
+	// pointed at this daemon by the successor's not_yet_adopted, kept
+	// re-registering workspaces the successor had already adopted; each
+	// registration wrote this daemon back into the serving row and both
+	// daemons served the same workspaces. Answering success without the claim
+	// still left Emacs attached here, so the refusal names the successor
+	// (transferring_away{address}) and Emacs walks on to it. Taking a
+	// workspace back is the take-back's own arbitrated claim (rollout
+	// reclaim), never a registration.
+	if err == nil {
+		if err := v.refuseHandedAway(ctx, global, held); err != nil {
+			return wsm.Workspace{}, false, err
+		}
+	}
+	switch {
 	case err == nil && held.Kind != wsm.WorkspaceKindRepository:
 		global.Debug(opRegister, "the announced directory is a workspace of a kind git does not describe", dlog.Context{
 			"workspace": string(held.ID), "kind": string(held.Kind),
@@ -321,22 +338,8 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 	// over, and what tells a joining successor which workspaces are still the
 	// incumbent's; a workspace nobody claimed is transferred by nobody. A
 	// closed workspace is served by nobody (MarkClosed releases the claim), so
-	// one born closed claims nothing.
-	//
-	// A WORKSPACE THIS DAEMON HANDED TO ITS SUCCESSOR IS NOT CLAIMED BACK HERE.
-	// The claim is unconditional, and during the 13:55 handover on 2026-10-31
-	// Emacs, pointed at this daemon by the successor's not_yet_adopted, kept
-	// re-registering workspaces the successor had already adopted: each
-	// registration wrote this daemon back into the serving row, the expired
-	// adoption window's take-back then "claimed" a row it already held, and
-	// both daemons served the same workspaces. Taking a workspace back is the
-	// take-back's own arbitrated claim (rollout reclaim), never a registration.
-	if !record.Closed && !created && v.handedOver(ctx, log, record.ID) {
-		log.Info(opRegister, "the workspace was handed to the successor; its registration here claims no serving ownership", dlog.Context{
-			"workspace": string(record.ID), "instance": string(v.deps.Instance),
-		})
-		return nil
-	}
+	// one born closed claims nothing. A workspace handed to the successor
+	// never reaches here: registerRow refused it (refuseHandedAway).
 	if !record.Closed {
 		if err := v.deps.DB.ClaimServing(ctx, record.ID, v.deps.Instance); err != nil {
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
@@ -349,21 +352,25 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 	return nil
 }
 
-// handedOver reports whether this daemon has handed WS to its successor. A
-// standing that cannot be read is recorded and answered false: the claim
-// then stands as it always did.
-func (v *verbs) handedOver(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) bool {
-	if v.deps.Ownership == nil {
-		return false
-	}
-	standing, err := v.deps.Ownership.Standing(ctx, ws)
+// refuseHandedAway refuses the registration of HELD, the row the announced
+// directory already is, when this daemon has handed it to its successor. A
+// standing that cannot be read fails the registration, recorded at ERROR: a
+// registration that went ahead on it could claim back a workspace the
+// successor serves.
+func (v *verbs) refuseHandedAway(ctx context.Context, log dlog.Logger, held wsm.Workspace) error {
+	standing, err := v.deps.Ownership.Standing(ctx, held.ID)
 	if err != nil {
-		log.Error(opRegister, "could not read whether the workspace was handed to a successor; its serving is claimed", dlog.Context{
-			"workspace": string(ws), "cause": err.Error(),
+		log.Error(opRegister, "could not read whether the workspace was handed to a successor; nothing is registered", dlog.Context{
+			"workspace": string(held.ID), "cause": err.Error(),
 		})
-		return false
+		return fmt.Errorf("register %q: serving standing: %w", held.Dir, err)
 	}
-	return standing == StandingTransferringAway
+	if standing != StandingTransferringAway {
+		return nil
+	}
+	// THE RPC IS THE CALLER'S TO NAME, as for not_a_worktree.
+	return refuse(log, "", ArmTransferringAway,
+		fmt.Sprintf("workspace %q has been handed to a successor daemon, where it registers", held.ID), false)
 }
 
 // repositoryOfWorktree answers the main worktree of the repository the
@@ -752,34 +759,20 @@ func (v *verbs) BindViews(ctx context.Context) error {
 // deliver, and the first client would wait for a workspace to change before it
 // saw the roster at all — including the EMPTY roster, which is a roster.
 //
-// IT HOLDS THE SELECTION LOCK FROM ITS READ TO ITS INSTALL, as every whole
-// registry install does (installRegistry), so the registry it read can never
-// be installed after a select's push that came later.
+// ITS WALK HOLDS NO LOCK, AND ITS INSTALL IS EVERY OTHER'S (installRegistry).
+// The walk can restore a missing worktree (SettleMissingDirectory, a git
+// `worktree add`), and a select made meanwhile used to wait for the restore
+// behind the selection lock. The roster it installs is read after the walk,
+// so it carries every row the walk settled, and installRegistry never
+// installs a read a select overtook.
 func (v *verbs) PublishRegistry(ctx context.Context) error {
-	v.selection.Lock()
-	defer v.selection.Unlock()
 	log := v.deps.Log.Global()
 	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
 		log.Error(opRegister, "could not read the workspaces, repositories and subsections for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: read the arrangement: %w", err)
 	}
-	workspaces, repositories := arrangement.Workspaces, arrangement.Repositories
-	tasks, err := v.deps.DB.Tasks(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not list the tasks for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: list the tasks: %w", err)
-	}
-	current, err := v.deps.DB.Current(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not read the current workspace for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: read the current workspace: %w", err)
-	}
-	view, err := v.deps.DB.SidebarView(ctx)
-	if err != nil {
-		log.Error(opRegister, "could not read the sidebar's view state for the opening roster", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("publish the opening roster: read the sidebar's view state: %w", err)
-	}
+	workspaces := arrangement.Workspaces
 	// Every workspace the registry already holds is bound too: a daemon that
 	// has just restarted did not run Register for the rows it inherited, and
 	// an unbound resolver cannot serve their views.
@@ -810,10 +803,11 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 				}
 				// A RECREATED WORKSPACE IS PUBLISHED OPEN: the restore bound
 				// its views and published its naming.
+				// An unrestored one was closed in WSM, which the roster
+				// installed below reads.
 				if restored {
 					continue
 				}
-				ws.Closed = true
 			}
 			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
 				"workspace": string(ws.ID), "dir": ws.Dir,
@@ -827,16 +821,15 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}
-	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
+	err = v.installRegistry(ctx, log, opRegister, func(reg sidebar.Registry) {
+		v.deps.Sidebar.SetRegistry(reg)
+		log.Debug(opRegister, "published the opening roster", dlog.Context{
+			"workspaces": len(reg.Workspaces), "repositories": len(reg.Repositories), "tasks": len(reg.Tasks),
+			"sessions": len(reg.Sessions),
+		})
+	})
 	if err != nil {
-		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("publish the opening roster: %w", err)
 	}
-	arrangement.Workspaces = workspaces
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(log, arrangement, tasks, sessions, current, view))
-	log.Debug(opRegister, "published the opening roster", dlog.Context{
-		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
-		"sessions": len(sessions),
-	})
 	return nil
 }

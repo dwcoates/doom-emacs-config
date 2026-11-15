@@ -460,8 +460,15 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 		// left, it is killed now rather than after the window.
 		select {
 		case info := <-exited:
-			c.log.Warn(opRelaunch, "the forced stand-down call failed, but the shim left; the gate is passed",
-				dlog.Merge(dlog.WithCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+			left := dlog.Merge(dlog.WithCause(fields, err), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal})
+			// A STAND-DOWN THIS DAEMON HAD ALREADY ORDERED (a keep-alive
+			// cycle's drain.CycleDown racing the restart) is no failure:
+			// the shim left as it was told, by the other order.
+			if errors.Is(err, shimclient.ErrStandDownOrdered) {
+				c.log.Info(opRelaunch, "the forced stand-down lost a race with a stand-down this daemon had already ordered, and the shim left; the gate is passed", left)
+				return nil
+			}
+			c.log.Warn(opRelaunch, "the forced stand-down call failed, but the shim left; the gate is passed", left)
 			return nil
 		default:
 		}

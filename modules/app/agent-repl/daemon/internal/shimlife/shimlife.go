@@ -72,6 +72,9 @@ const (
 	// StandDownSettingsVisit is a shim a settings pick started, stood down on
 	// the switch away from its workspace with no prompt run since.
 	StandDownSettingsVisit StandDownReason = "settings_visit"
+	// StandDownCacheCold is an idle session parked the moment its cache was
+	// known cold, so no keep-alive would ever stand it down.
+	StandDownCacheCold StandDownReason = "cache_cold"
 	// StandDownReplaced is a held shim replaced by a fresh one inside a start
 	// (it runs another account's root).
 	StandDownReplaced StandDownReason = "replaced"

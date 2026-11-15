@@ -649,10 +649,11 @@ still live.  Forgetting a live workspace would strand its persp, buffers
 and session with no hash entry to reach them by, so the caller's bug must
 surface rather than be absorbed.
 
-The ONLY sanctioned caller is the snapshot tombstone-eviction path
-\(`agent-repl--snapshot-evict-expired-tombstones'), which archives the
-entry to a loadable snapshot file BEFORE calling this — the identity
-record is moved out of the live roster, never destroyed."
+The ONLY sanctioned caller is the roster's purge of a tombstone whose
+name the daemon now gives another workspace
+\(`agent-repl-roster--purge-foreign-tombstone'): the daemon frees a name
+once its workspace is forgotten or nuked, so the identity it held there is
+one nothing can revive."
   (unless (agent-repl--ws-known-p ws)
     (agent-repl--log ws "ws-forget: REJECT ws=%S reason=unregistered" ws)
     (error "agent-repl: ws-forget: workspace %S is not registered" ws))
@@ -2636,7 +2637,7 @@ perspective activation funnels through, so the project picker
         (agent-repl--note-workspace-visit name))))))
 
 (defun agent-repl--note-workspace-visit (name)
-  "Record a visit to workspace NAME: stamp it viewed, and put it first in the history.
+  "Record a visit to workspace NAME: stamp it viewed and first in the history.
 Removes any prior occurrence of NAME, so `agent-repl--workspace-history'
 stays most-recently-visited-first with no duplicates.  The one writer of a
 visit, for an activation (`agent-repl--record-workspace-history') and for

@@ -25,33 +25,35 @@ type QueueStatus struct {
 // Status implements Orchestrator.
 func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]QueueStatus, error) {
 	const op = "daemon.merge.status"
-	var repositories []wsm.Repository
+	var queues []registeredQueue
 	if scope != nil {
-		repository, _, err := o.scopedRepository(ctx, op, "a merge queue status", *scope)
+		repository, key, err := o.scopedRepository(ctx, op, "a merge queue status", *scope)
+		if _, refused := Refused(err); err != nil && !refused {
+			o.deps.Log.Global().Error(op, "could not resolve the scoped repository's queue key", dlog.WithCause(dlog.Context{"repository": string(scope.ID), "dir": scope.Dir}, err))
+		}
 		if err != nil {
 			return nil, err
 		}
-		repositories = []wsm.Repository{repository}
+		queues = []registeredQueue{{repository: repository, key: key}}
 	} else {
-		all, err := o.deps.DB.ListRepositories(ctx)
+		// ONE UNREADABLE REGISTRATION NEVER FAILS THE REST: a repository
+		// whose queue key cannot be resolved (its checkout deleted) is
+		// passed over at WARN, as every other sweep of the registry does.
+		all, err := o.registeredQueues(ctx, op)
 		if err != nil {
 			o.deps.Log.Global().Error(op, "could not read the repository registry to answer the merge queues' status", dlog.WithCause(nil, err))
 			return nil, fmt.Errorf("merge: reading the repository registry: %w", err)
 		}
-		repositories = all
+		queues = all
 	}
 	// THE MERGES OFF THEIR QUEUES ARE JUDGED NOW: a status read is an
 	// agent's, which may wait on git, and it answers what holds now.
 	if o.judgeOffQueue(ctx) {
 		o.publishOffQueue(ctx)
 	}
-	out := make([]QueueStatus, 0, len(repositories))
-	for _, repository := range repositories {
-		key, err := o.repoKeyFor(ctx, repository.Dir)
-		if err != nil {
-			o.deps.Log.Global().Error(op, "could not resolve a repository's queue key", dlog.WithCause(dlog.Context{"repository": string(repository.ID), "dir": repository.Dir}, err))
-			return nil, err
-		}
+	out := make([]QueueStatus, 0, len(queues))
+	for _, registered := range queues {
+		repository, key := registered.repository, registered.key
 		queue, err := o.readQueue(ctx, o.deps.DB, key)
 		if err != nil {
 			o.deps.Log.Global().Error(op, "could not read a repository's merge queue", dlog.WithCause(dlog.Context{"repository": string(repository.ID), "repo": string(key)}, err))

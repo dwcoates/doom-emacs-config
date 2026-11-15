@@ -1102,6 +1102,16 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 		} else {
 			log.Debug(opCreate, "created without an initial prompt", nil)
 		}
+		// THE PLACEMENT NOTE IS OWED TO THE FIRST PROMPT INSTEAD: with no
+		// first message to carry it, a root would never be asked to file
+		// itself (TakeOwedPlacementNote answers it to that prompt).
+		if spec.filesItself() {
+			if err := v.deps.DB.OwePlacementNote(ctx, record.ID, v.now()); err != nil {
+				log.Error(opSubsectionPlacement, "could not record the placement note a prompt-less workspace's first prompt owes", dlog.Context{"cause": err.Error()})
+				return fmt.Errorf("create %q: owe the placement note: %w", record.Name, err)
+			}
+			log.Debug(opSubsectionPlacement, "created without a first message; the placement note is owed to the workspace's first prompt", nil)
+		}
 		return nil
 	}
 	text := spec.InitialPrompt
@@ -1338,6 +1348,58 @@ func (v *verbs) placementOwed(ctx context.Context, log dlog.Logger, record wsm.W
 		return false, nil
 	}
 	return true, nil
+}
+
+// TakeOwedPlacementNote answers the placement note workspace WS's prompt
+// owes because it was created with no first message to carry it
+// (OwePlacementNote), and RESTORE, which owes it again when the queue refuses
+// the prompt. The owed mark is taken whether or not a note is answered: a
+// workspace that has since been filed, been given a parent, or whose
+// repository no longer offers anywhere to file it is not asked. A read, a
+// brief or a take that fails is recorded and returned, with the mark owed
+// again, so the prompt is never sent without the note it owes.
+func (v *verbs) TakeOwedPlacementNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, func(), error) {
+	log := v.deps.Log.Global().With(dlog.Context{dlog.KeyWorkspaceID: string(ws)})
+	none := func() {}
+	owed, err := v.deps.DB.TakeOwedPlacementNote(ctx, ws)
+	if err != nil {
+		log.Error(opSubsectionPlacement, "could not take the placement note the workspace's prompt owes; the prompt was not forwarded", dlog.Context{"cause": err.Error()})
+		return "", false, none, fmt.Errorf("take the placement note of %q: %w", ws, err)
+	}
+	if !owed {
+		return "", false, none, nil
+	}
+	restore := func() {
+		if err := v.deps.DB.OwePlacementNote(context.WithoutCancel(ctx), ws, v.now()); err != nil {
+			log.Error(opSubsectionPlacement, "could not owe again the placement note of a prompt the queue refused; it is lost", dlog.Context{"cause": err.Error()})
+		}
+	}
+	record, err := v.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		restore()
+		log.Error(opSubsectionPlacement, "could not read the workspace whose prompt owes the placement note", dlog.Context{"cause": err.Error()})
+		return "", false, none, fmt.Errorf("read the workspace %q owing the placement note: %w", ws, err)
+	}
+	if !filesItself(record.Parent, record.MergeOf != nil) || record.Subsection != nil {
+		log.Debug(opSubsectionPlacement, "the workspace was filed or given a parent before its first prompt; the owed placement note is retired unsent", dlog.Context{
+			"has_parent": record.Parent != nil, "in_subsection": record.Subsection != nil,
+		})
+		return "", false, none, nil
+	}
+	wanted, err := v.placementOwed(ctx, log, record)
+	if err != nil {
+		restore()
+		return "", false, none, fmt.Errorf("decide the placement note of %q: %w", ws, err)
+	}
+	if !wanted {
+		return "", false, none, nil
+	}
+	note, err := v.decorateSubsectionPlacement(log, "", record)
+	if err != nil {
+		restore()
+		return "", false, none, err
+	}
+	return note, true, restore, nil
 }
 
 // placementGatherMin is how many other open top-level workspaces in no

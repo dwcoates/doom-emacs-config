@@ -32,6 +32,7 @@ const ARM_VALUES: Readonly<Record<string, Record<string, unknown>>> = {
   committing: { subject: "Merge branch 'fix-reconnect'" },
   deploying: { hook: { case: "script", value: { path: "bin/deploy-landing.sh" } } },
   postDeploy: { hook: { case: "prompt", value: { text: "deploy it" } } },
+  finishing: { hook: { case: "script", value: { path: "bin/open-pr.sh" } } },
 };
 
 describe("drawFooterStatusActivityMergeStep: every arm", () => {
@@ -59,6 +60,7 @@ describe("the hook lines", () => {
     ["preDeploy", { case: "prompt", value: { text: "update the changelog" } }, "update the changelog"],
     ["deploying", { case: "script", value: { path: "bin/deploy-landing.sh" } }, "bin/deploy-landing.sh"],
     ["postDeploy", { case: "prompt", value: { text: "deploy it" } }, "deploy it"],
+    ["finishing", { case: "script", value: { path: "bin/open-pr.sh" } }, "bin/open-pr.sh"],
   ])("draws the %s hook's own words verbatim", (stage, hook, words) => {
     expect(step(stage, { hook }).textContent).toBe(words);
   });

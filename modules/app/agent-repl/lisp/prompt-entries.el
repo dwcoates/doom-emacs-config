@@ -593,7 +593,7 @@ its label, and the composer says so."
   (agent-repl-prompt-entries--step :previous "%s is the first node to answer"))
 
 (defun agent-repl-prompt-entries--entry-empty-p ()
-  "Non-nil when point's entry line holds nothing after its label but ` -' and blanks."
+  "Non-nil when point's entry line holds only ` -' and blanks after its label."
   (let ((label (agent-repl-prompt-entries--label-at-point)))
     (and label
          (string-match-p "\\`[ \t]*-?[ \t]*\\'"

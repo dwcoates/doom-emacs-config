@@ -257,6 +257,28 @@ func BlockExclusive(f *os.File, path string) (*Record, error) {
 	return &Record{f: f, gate: gate, path: path}, nil
 }
 
+// HoldAcrossExec takes the exclusive lock on the file at PATH, creating it
+// when absent, waiting in the kernel for every other holder, for a process
+// that is about to exec in its own place and lets the exec'd program hold the
+// lock until it exits: the descriptor is opened WITHOUT close-on-exec and is
+// never closed, since closing it is releasing the lock. It is the fetch lock's
+// helper's (gitclient/fetchlock.go), and only a process that holds no other
+// lock and runs nothing else may take it: that one process owns the lock and
+// nothing in it ever closes the descriptor, so the in-process gate this
+// package keeps for every other holder has nothing to arbitrate, and a
+// waiter that owns no other lock can never be judged part of a deadlock.
+func HoldAcrossExec(path string) error {
+	fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_CREAT, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := syscall.FcntlFlock(uintptr(fd), syscall.F_SETLKW, wholeFile(syscall.F_WRLCK)); err != nil {
+		syscall.Close(fd)
+		return err
+	}
+	return nil
+}
+
 // Path is the lock file, for the log record.
 func (r *Record) Path() string { return r.path }
 

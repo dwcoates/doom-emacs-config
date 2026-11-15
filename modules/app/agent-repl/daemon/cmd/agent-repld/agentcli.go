@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -93,11 +94,16 @@ type cliDeps struct {
 	client func(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient
 	// roster reads the daemon's roster once.
 	roster func(ctx context.Context, client agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error)
+	// locate answers the workspaces a LocateWorkspace request names.
+	locate func(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error)
 	getwd  func() (string, error)
 	// mintKey mints an idempotency key.
 	mintKey func(prefix string) (string, error)
 	// now is the current instant, which a relative time flag counts back from.
 	now func() time.Time
+	// stdin is what a verb reading its input from standard input reads (a
+	// deploy intake's dispatched problems).
+	stdin io.Reader
 }
 
 // productionCLIDeps reaches the real serving daemon.
@@ -112,9 +118,11 @@ func productionCLIDeps() cliDeps {
 		},
 		client:  newDaemonClient,
 		roster:  readRoster,
+		locate:  locateWorkspaces,
 		getwd:   os.Getwd,
 		mintKey: prompthandler.MintKey,
 		now:     time.Now,
+		stdin:   os.Stdin,
 	}
 }
 
@@ -135,6 +143,21 @@ func readRoster(ctx context.Context, client agentreplv1connect.AgentReplClient) 
 		return nil, err
 	}
 	return nil, errors.New("the roster stream ended before its first frame")
+}
+
+// locateWorkspaces asks the daemon which workspaces REQ names. The registry
+// answers, not the roster, so a hidden merge workspace and an open workspace
+// the sidebar does not draw are found (agentrepl.v1.LocateWorkspace).
+func locateWorkspaces(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
+	resp, err := client.LocateWorkspace(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, err
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		return nil, errors.New("the daemon's locate answer carried no outcome")
+	}
+	return success.GetWorkspaces(), nil
 }
 
 // cliCommand is one subcommand of a noun.
@@ -187,10 +210,10 @@ var cliNouns = map[string]map[string]cliCommand{
 		"move-down":   {usage: "move-down MERGE|here", run: queueMove(false)},
 		"requeue":     {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
 		"discard":     {usage: "discard MERGE|here", run: queueDiscard},
-		"pause":       {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
-		"resume":      {usage: "resume [-repository here|DIR]", run: queuePause(false)},
+		"pause":       {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
+		"resume":      {usage: "resume -repository here|DIR|all", run: queuePause(false)},
 		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
-		"mediation":   {usage: "mediation approve|escalate -summary TEXT", run: queueMediation},
+		"mediation":   {usage: "mediation approve|escalate [-problems]|dispatch -fresh|-restore -summary TEXT (problems are JSON on stdin)", run: queueMediation},
 		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
@@ -245,6 +268,11 @@ type cliCall struct {
 	roster *frontendv1.WorkspaceRoster
 	// dryRun is the command's -dry-run flag, set by flags.
 	dryRun *bool
+	// planOnly says the command's dry run sends its one request because the
+	// request itself changes nothing: `test run -dry-run` sends a plan-only
+	// run (testrun.v1.TestRunRequest.plan_only), so no dry-run interceptor
+	// stops it.
+	planOnly bool
 }
 
 // flags is the command's flag set, carrying the shared -state-dir and
@@ -288,7 +316,7 @@ func (c *cliCall) dial(stateDir string) bool {
 // dialAddress makes the command's client for the daemon at ADDRESS.
 func (c *cliCall) dialAddress(address string) {
 	var options []connect.ClientOption
-	if c.dryRun != nil && *c.dryRun {
+	if c.dryRun != nil && *c.dryRun && !c.planOnly {
 		options = append(options, connect.WithInterceptors(dryRunInterceptor(c.out)))
 	}
 	c.client = c.deps.client(address, options...)
@@ -346,53 +374,69 @@ func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
 }
 
 // callingRef answers the ref of the workspace whose worktree contains the
-// working directory, nil when none does, with that directory.
+// working directory, nil when none does, with that directory. The registry
+// answers (locate), so a hidden merge workspace's own worktree is its caller's.
 func (c *cliCall) callingRef() (*workspacev1.WorkspaceRef, string, bool) {
 	cwd, err := c.deps.getwd()
 	if err != nil {
 		return nil, "", c.failed("read the working directory: %v", err)
 	}
-	roster, ok := c.readRoster()
+	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{
+		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: canonicalDir(cwd)}}})
 	if !ok {
 		return nil, cwd, false
 	}
-	row := callingRow(roster, canonicalDir(cwd))
-	if row == nil {
+	switch len(refs) {
+	case 0:
 		return nil, cwd, true
+	case 1:
+		return refs[0], cwd, true
 	}
-	return row.GetWorkspace().GetWorkspace(), cwd, true
+	return nil, cwd, c.failed("the daemon located %d workspaces containing %s, where a directory lies in at most one", len(refs), cwd)
 }
 
-// named answers the workspace NAME names: `here`, a directory, or a roster
-// name, which must name exactly one workspace.
+// named answers the workspace NAME names: `here`, a directory, or a name,
+// which must name exactly one workspace. The registry answers (locate), so a
+// hidden merge workspace is named by its directory or its name.
 func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	if name == here {
 		return c.calling()
 	}
-	roster, ok := c.readRoster()
+	if strings.Contains(name, "/") {
+		dir := canonicalDir(name)
+		refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}})
+		if !ok {
+			return nil, false
+		}
+		switch len(refs) {
+		case 0:
+			return nil, c.failed("the daemon holds no workspace at %s", dir)
+		case 1:
+			return refs[0], true
+		}
+		return nil, c.failed("%d workspaces are at %s", len(refs), dir)
+	}
+	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}})
 	if !ok {
 		return nil, false
 	}
-	if strings.Contains(name, "/") {
-		row := findRosterRow(roster, canonicalDir(name))
-		if row == nil {
-			return nil, c.failed("the daemon's roster holds no workspace at %s", name)
-		}
-		return row.GetWorkspace().GetWorkspace(), true
-	}
-	var found []*frontendv1.RosterRow
-	for _, row := range rosterwalk.AllRows(roster) {
-		if row.GetName().GetText() == name {
-			found = append(found, row)
-		}
-	}
-	switch len(found) {
+	switch len(refs) {
 	case 0:
-		return nil, c.failed("the daemon's roster holds no workspace named %q", name)
+		return nil, c.failed("the daemon holds no workspace named %q", name)
 	case 1:
-		return found[0].GetWorkspace().GetWorkspace(), true
+		return refs[0], true
 	}
-	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(found), name)
+	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(refs), name)
+}
+
+// locate asks the daemon which workspaces REQ names, failing the call when
+// the daemon cannot answer.
+func (c *cliCall) locate(req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, bool) {
+	refs, err := c.deps.locate(c.ctx, c.client, req)
+	if err != nil {
+		return nil, c.failed("locate the workspace: %v", err)
+	}
+	return refs, true
 }
 
 // requester answers who asks: the user when ASUSER, else the calling
@@ -668,8 +712,11 @@ func workspaceCreate(c *cliCall, args []string) int {
 		}
 		kind.Kind = &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}}
 	case "child":
+		if *parent == "" {
+			return c.usageFailed("a child names its -parent")
+		}
 		parentRef, ok := c.named(*parent)
-		if *parent == "" || !ok {
+		if !ok {
 			return c.usageFailed("a child names its -parent")
 		}
 		kind.Kind = &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parentRef}}
@@ -2055,6 +2102,27 @@ func (c *cliCall) scopeFlag(repository string) (*workspacev1.RepositoryRef, bool
 	return c.repository(repository)
 }
 
+// allRepositories is the -repository value a verb that changes queues takes
+// to act on every registered repository's queue.
+const allRepositories = "all"
+
+// requiredScopeFlag reads the -repository flag of a verb that changes queues,
+// which must name its scope: `all` is every repository (nil), anything else
+// one repository. An unset flag is refused, because a pause that silently
+// reached every repository stopped another repository's queue for 9 hours
+// (2026-10-26: the `doom` workspace's hard stop paused `explanation-engine`,
+// and every resume after it was scoped to `~/.config/doom`).
+func (c *cliCall) requiredScopeFlag(repository string) (*workspacev1.RepositoryRef, bool) {
+	switch repository {
+	case "":
+		c.usageFailed("-repository is required: here, a main checkout, or all for every repository")
+		return nil, false
+	case allRepositories:
+		return nil, true
+	}
+	return c.repository(repository)
+}
+
 func queueStatus(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
@@ -2239,7 +2307,7 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 func queuePause(pause bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
-		repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
+		repository := fs.String("repository", "", "here, a main checkout, or all (every repository); required")
 		hard, toLand := false, false
 		if pause {
 			fs.BoolVar(&hard, "hard", false, "a hard stop: also interrupt the turns the queue's merges drive")
@@ -2248,7 +2316,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
 			return exitFailure
 		}
-		scope, ok := c.scopeFlag(*repository)
+		scope, ok := c.requiredScopeFlag(*repository)
 		if !ok {
 			return exitFailure
 		}
@@ -2260,34 +2328,100 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 	}
 }
 
-// queueMediation is the deploy mediator's decision on the deploy its
-// repository owes a mediation of: approve or escalate, with what it found.
+// queueMediation is the deploy intake's decision on the deploy its chain
+// owes a check of: approve, escalate, or dispatch the problems the deploy
+// caused, read from standard input as JSON, to a fresh or the restored
+// remediation workspace.
 func queueMediation(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
+	fresh := fs.Bool("fresh", false, "dispatch to a fresh remediation workspace")
+	restore := fs.Bool("restore", false, "dispatch to the chain's last remediation workspace, reopened")
+	withProblems := fs.Bool("problems", false, "an escalation's findings follow on stdin as JSON, as a dispatch's do")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
 	}
 	if len(positionals) != 1 {
-		return c.usageFailed("name the decision: approve or escalate")
+		return c.usageFailed("name the decision: approve, escalate or dispatch")
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
+	if positionals[0] != "dispatch" && (*fresh || *restore) {
+		return c.usageFailed("-fresh and -restore choose a dispatch's remediation workspace")
+	}
+	if positionals[0] != "escalate" && *withProblems {
+		return c.usageFailed("-problems reads an escalation's findings; a dispatch always reads its problems")
+	}
 	switch positionals[0] {
 	case "approve":
 		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}
 	case "escalate":
-		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}
+		escalate := &agentreplv1.UpdateMergeQueueMediationEscalate{}
+		if *withProblems {
+			problems, err := readProblems(c.deps.stdin)
+			if err != nil {
+				return c.usageFailed("%v", err)
+			}
+			escalate.Problems = problems
+		}
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: escalate}
+	case "dispatch":
+		dispatch, err := readDispatch(c.deps.stdin, *fresh, *restore)
+		if err != nil {
+			return c.usageFailed("%v", err)
+		}
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: dispatch}
 	default:
-		return c.usageFailed("the decision is approve or escalate, not %q", positionals[0])
+		return c.usageFailed("the decision is approve, escalate or dispatch, not %q", positionals[0])
 	}
 	if strings.TrimSpace(*summary) == "" {
-		return c.usageFailed("-summary is required: what the mediation found")
+		return c.usageFailed("-summary is required: what the check found")
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
 	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
+}
+
+// readDispatch reads a dispatch's problems from IN (readProblems), to the
+// remediation workspace FRESH or RESTORE chooses (exactly one).
+func readDispatch(in io.Reader, fresh, restore bool) (*agentreplv1.UpdateMergeQueueMediationDispatch, error) {
+	if fresh == restore {
+		return nil, errors.New("a dispatch names exactly one of -fresh or -restore")
+	}
+	problems, err := readProblems(in)
+	if err != nil {
+		return nil, err
+	}
+	out := &agentreplv1.UpdateMergeQueueMediationDispatch{Problems: problems}
+	if fresh {
+		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}
+	} else {
+		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Restore{Restore: &agentreplv1.UpdateMergeQueueMediationDispatchRestore{}}
+	}
+	return out, nil
+}
+
+// readProblems reads a decision's problems from IN: a JSON list of
+// {"statement", "evidence"} objects, at least one.
+func readProblems(in io.Reader) ([]*agentreplv1.DeployProblem, error) {
+	var problems []struct {
+		Statement string   `json:"statement"`
+		Evidence  []string `json:"evidence"`
+	}
+	decoder := json.NewDecoder(in)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&problems); err != nil {
+		return nil, fmt.Errorf("read the problems from standard input as a JSON list of {\"statement\", \"evidence\"}: %w", err)
+	}
+	if len(problems) == 0 {
+		return nil, errors.New("the problems name at least one problem")
+	}
+	out := make([]*agentreplv1.DeployProblem, 0, len(problems))
+	for _, p := range problems {
+		out = append(out, &agentreplv1.DeployProblem{Statement: p.Statement, Evidence: p.Evidence})
+	}
+	return out, nil
 }
 
 // queueSubscribe has the caller told of a merge put in line, a merge leaving

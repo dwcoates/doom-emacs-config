@@ -11,6 +11,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/workspace"
@@ -124,6 +125,28 @@ func (s *server) mergeQueueStatus(ctx context.Context, ref *workspacev1.Reposito
 	return out, nil
 }
 
+// mediatingOf renders the deploy check a queue waits on: its stage, with the
+// workspaces at work, and the chain's remediations in a row.
+func mediatingOf(m merge.OwedMediation) *agentreplv1.MergeQueueStatusAdvanceMediating {
+	ref := func(ws ids.WorkspaceID) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: string(ws)} }
+	out := &agentreplv1.MergeQueueStatusAdvanceMediating{RemediationsInARow: uint32(m.InARow)}
+	switch m.Stage {
+	case merge.CheckRollingOut:
+		rolling := &agentreplv1.MergeQueueStatusAdvanceMediatingRollingOut{}
+		if m.Intake != "" {
+			rolling.Intake = ref(m.Intake)
+		}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_RollingOut{RollingOut: rolling}
+	case merge.CheckAssessing:
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Assessing{Assessing: &agentreplv1.MergeQueueStatusAdvanceMediatingAssessing{Intake: ref(m.Intake)}}
+	case merge.CheckFixing:
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{Remediation: ref(m.Remediation), Intake: ref(m.Intake)}}
+	default:
+		panic(fmt.Sprintf("server: a deploy check stands at no stage (%+v)", m))
+	}
+	return out
+}
+
 // mergeQueueStatusOf renders one queue's status.
 func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus {
 	advance := &agentreplv1.MergeQueueStatusAdvance{State: &agentreplv1.MergeQueueStatusAdvance_Running{Running: &agentreplv1.MergeQueueStatusAdvanceRunning{}}}
@@ -131,11 +154,7 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 	case status.Queue.Paused:
 		advance.State = &agentreplv1.MergeQueueStatusAdvance_Paused{Paused: &agentreplv1.MergeQueueStatusAdvancePaused{}}
 	case status.Mediation != nil:
-		mediating := &agentreplv1.MergeQueueStatusAdvanceMediating{Name: status.Mediation.Name}
-		if status.Mediation.Mediator != "" {
-			mediating.Mediator = &workspacev1.WorkspaceRef{Id: string(status.Mediation.Mediator)}
-		}
-		advance.State = &agentreplv1.MergeQueueStatusAdvance_Mediating{Mediating: mediating}
+		advance.State = &agentreplv1.MergeQueueStatusAdvance_Mediating{Mediating: mediatingOf(*status.Mediation)}
 	}
 	out := &agentreplv1.MergeQueueStatus{
 		Repository: &workspacev1.RepositoryRef{Id: string(status.Repository.ID), Dir: status.Repository.Dir},

@@ -23,9 +23,11 @@ func TestPruneStorageAnswersTheSweepsReport(t *testing.T) {
 			{Path: "/s/shim/bbbb/backups", Reason: storagesweep.ReasonClosedBackups, Bytes: 5},
 			{Path: "/c/profiles/x", Reason: storagesweep.ReasonAged, Bytes: 1},
 			{Path: "/s/shim/cccc", Reason: storagesweep.ReasonLanded, Bytes: 2},
+			{Path: "/c/go-build", Reason: storagesweep.ReasonOverBound, Bytes: 7},
 		},
 		Kept:     map[storagesweep.KeepReason]int{storagesweep.KeepYoung: 3, storagesweep.KeepOpenWorkspace: 2},
 		Failures: 1,
+		Measured: []storagesweep.Measured{{Name: "go-build", Dir: "/c/go-build", Bytes: 107, Bound: 100}},
 	}
 	want := &agentreplv1.PruneStorageSuccess{
 		DryRun: true,
@@ -34,13 +36,15 @@ func TestPruneStorageAnswersTheSweepsReport(t *testing.T) {
 			{Path: "/s/shim/bbbb/backups", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_CLOSED_BACKUPS, Bytes: 5},
 			{Path: "/c/profiles/x", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_AGED, Bytes: 1},
 			{Path: "/s/shim/cccc", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_LANDED, Bytes: 2},
+			{Path: "/c/go-build", Reason: agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND, Bytes: 7},
 		},
-		Bytes: 18,
+		Bytes: 25,
 		Kept: []*agentreplv1.PruneStorageKept{
 			{Reason: agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE, Count: 2},
 			{Reason: agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_YOUNG, Count: 3},
 		},
 		Failures: 1,
+		Measured: []*agentreplv1.PruneStorageMeasured{{Name: "go-build", Dir: "/c/go-build", Bytes: 107, Bound: 100}},
 	}
 
 	// Act.
@@ -85,7 +89,7 @@ func TestPruneStorageAnswersEachRefusal(t *testing.T) {
 func TestEverySweepReasonHasAWireValue(t *testing.T) {
 	// A reason the contract does not draw panics; every one the sweep can
 	// give is drawn, each as its own value.
-	reasons := []storagesweep.Reason{storagesweep.ReasonNoWorkspace, storagesweep.ReasonLanded, storagesweep.ReasonClosedBackups, storagesweep.ReasonAged}
+	reasons := []storagesweep.Reason{storagesweep.ReasonNoWorkspace, storagesweep.ReasonLanded, storagesweep.ReasonClosedBackups, storagesweep.ReasonAged, storagesweep.ReasonOverBound}
 	keeps := []storagesweep.KeepReason{
 		storagesweep.KeepOpenWorkspace, storagesweep.KeepRecentlyClosed, storagesweep.KeepNotADirectory,
 		storagesweep.KeepNoBackups, storagesweep.KeepYoung, storagesweep.KeepKeptByDirectory,

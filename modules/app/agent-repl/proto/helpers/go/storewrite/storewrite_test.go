@@ -53,11 +53,39 @@ func TestValidateWriteBatchRequest(t *testing.T) {
 		{name: "an entry with no arm", req: request(&storev1.EntryBatch{Entries: []*storev1.StoreEntry{func() *storev1.StoreEntry { e := entry(); e.Entry = nil; return e }()}}), wantSite: SiteEntryArmUnset, wantField: "entries[0].entry"},
 		{name: "a nil entry", req: request(&storev1.EntryBatch{Entries: []*storev1.StoreEntry{nil}}), wantSite: SiteEntryArmUnset, wantField: "entries[0]"},
 		{name: "a cursor naming no file", req: request(&storev1.EntryBatch{CursorAdvance: &storev1.CursorState{}}), wantSite: SiteCursorFileIDEmpty, wantField: "cursor_advance.file_id"},
-		{name: "an unset shape", req: func() *storev1.WriteBatchRequest { r := request(&storev1.EntryBatch{}); r.Shapes = []*storev1.ShapeObservation{nil}; return r }(), wantSite: SiteShapeUnset, wantField: "shapes[0]"},
-		{name: "a shape with no hash", req: func() *storev1.WriteBatchRequest { r := request(&storev1.EntryBatch{}); s := shape(); s.ShapeHash = ""; r.Shapes = []*storev1.ShapeObservation{s}; return r }(), wantSite: SiteShapeHashEmpty, wantField: "shapes[0].shape_hash"},
-		{name: "a shape with no kind", req: func() *storev1.WriteBatchRequest { r := request(&storev1.EntryBatch{}); s := shape(); s.Kind = ""; r.Shapes = []*storev1.ShapeObservation{s}; return r }(), wantSite: SiteShapeKindEmpty, wantField: "shapes[0].kind"},
-		{name: "a shape with no structure", req: func() *storev1.WriteBatchRequest { r := request(&storev1.EntryBatch{}); s := shape(); s.KeyStructure = ""; r.Shapes = []*storev1.ShapeObservation{s}; return r }(), wantSite: SiteShapeStructureEmpty, wantField: "shapes[0].key_structure"},
-		{name: "a shape with no instant", req: func() *storev1.WriteBatchRequest { r := request(&storev1.EntryBatch{}); s := shape(); s.SeenMs = 0; r.Shapes = []*storev1.ShapeObservation{s}; return r }(), wantSite: SiteShapeSeenMsUnset, wantField: "shapes[0].seen_ms"},
+		{name: "an unset shape", req: func() *storev1.WriteBatchRequest {
+			r := request(&storev1.EntryBatch{})
+			r.Shapes = []*storev1.ShapeObservation{nil}
+			return r
+		}(), wantSite: SiteShapeUnset, wantField: "shapes[0]"},
+		{name: "a shape with no hash", req: func() *storev1.WriteBatchRequest {
+			r := request(&storev1.EntryBatch{})
+			s := shape()
+			s.ShapeHash = ""
+			r.Shapes = []*storev1.ShapeObservation{s}
+			return r
+		}(), wantSite: SiteShapeHashEmpty, wantField: "shapes[0].shape_hash"},
+		{name: "a shape with no kind", req: func() *storev1.WriteBatchRequest {
+			r := request(&storev1.EntryBatch{})
+			s := shape()
+			s.Kind = ""
+			r.Shapes = []*storev1.ShapeObservation{s}
+			return r
+		}(), wantSite: SiteShapeKindEmpty, wantField: "shapes[0].kind"},
+		{name: "a shape with no structure", req: func() *storev1.WriteBatchRequest {
+			r := request(&storev1.EntryBatch{})
+			s := shape()
+			s.KeyStructure = ""
+			r.Shapes = []*storev1.ShapeObservation{s}
+			return r
+		}(), wantSite: SiteShapeStructureEmpty, wantField: "shapes[0].key_structure"},
+		{name: "a shape with no instant", req: func() *storev1.WriteBatchRequest {
+			r := request(&storev1.EntryBatch{})
+			s := shape()
+			s.SeenMs = 0
+			r.Shapes = []*storev1.ShapeObservation{s}
+			return r
+		}(), wantSite: SiteShapeSeenMsUnset, wantField: "shapes[0].seen_ms"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -714,27 +714,40 @@ func TestVitestCoverageModes(t *testing.T) {
 	}
 }
 
-func TestVitestTypecheckHoldsTheTwoCoresItUses(t *testing.T) {
-	// Arrange
-	dir := t.TempDir()
-	l := Layout{Module: dir, Work: t.TempDir()}
-
-	// Act
-	u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
+func TestVitestChecksRunInThePackageOnTheCoresTheyUse(t *testing.T) {
+	tests := []struct {
+		id    string
+		argv  string
+		width int
+	}{
+		{id: "webapp:typecheck", argv: "npm run typecheck", width: TypecheckSlots},
+		{id: "webapp:knip", argv: "npm run knip", width: KnipSlots},
 	}
-	for _, unit := range u.Atomic {
-		if unit.ID == "webapp:typecheck" {
-			if unit.Width() != 2 {
-				t.Fatalf("typecheck width = %d, want 2", unit.Width())
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			l := Layout{Module: dir, Work: t.TempDir()}
+
+			// Act
+			u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
 			}
-			return
-		}
+			for _, unit := range u.Atomic {
+				if unit.ID != tt.id {
+					continue
+				}
+				if unit.Width() != tt.width || strings.Join(unit.Argv, " ") != tt.argv || unit.Dir != dir {
+					t.Fatalf("%s = width %d argv %q dir %s, want width %d argv %q dir %s", tt.id, unit.Width(), unit.Argv, unit.Dir, tt.width, tt.argv, dir)
+				}
+				return
+			}
+			t.Fatalf("no %s unit in %v", tt.id, u.Atomic)
+		})
 	}
-	t.Fatalf("no typecheck unit in %v", u.Atomic)
 }
 
 func TestQuietGoTestOutput(t *testing.T) {
@@ -1389,7 +1402,7 @@ func TestGoPkgNamedChunkRunsOneTestPath(t *testing.T) {
 	}
 
 	// Act
-	argv := split.Named("m:p#00", []string{"TestA"}, []string{"TestA/a_case/inner"}).Argv
+	argv := split.Named("m:p#00", []string{"TestA"}, map[string][]string{"TestA": {"TestA/a_case/inner"}}).Argv
 
 	// Assert
 	if !slices.Contains(argv, "-test.run=^TestA$/^a_case$/^inner$") {
@@ -1411,7 +1424,7 @@ func TestGoPkgNamedChunkRefusesTwoPaths(t *testing.T) {
 	}()
 
 	// Act
-	split.Named("m:p#00", []string{"TestA"}, []string{"TestA/x", "TestA/y/z"})
+	split.Named("m:p#00", []string{"TestA"}, map[string][]string{"TestA": {"TestA/x", "TestA/y/z"}})
 }
 
 func TestVitestNamedChunkPassesItsNames(t *testing.T) {
@@ -1423,7 +1436,7 @@ func TestVitestNamedChunkPassesItsNames(t *testing.T) {
 	}
 
 	// Act
-	argv := u.Splits[0].Named("webapp#00", []string{"src/a.test.ts"}, []string{"a suite"}).Argv
+	argv := u.Splits[0].Named("webapp#00", []string{"src/a.test.ts"}, map[string][]string{"src/a.test.ts": {"a suite"}}).Argv
 
 	// Assert
 	i := slices.Index(argv, "-t")
@@ -1552,5 +1565,40 @@ func TestUnitTagSpellsSlashesSoTwoDirectoriesNeverShareOne(t *testing.T) {
 	// Assert
 	if a == b || strings.Contains(a, "/") {
 		t.Fatalf("tags = %q %q, want distinct names with no slash", a, b)
+	}
+}
+
+func TestFlatNamesJoinsEachItemsNamesInItemOrder(t *testing.T) {
+	// Act
+	got := FlatNames([]string{"b", "a", "c"}, map[string][]string{"a": {"a1"}, "b": {"b1", "b2"}, "z": {"z1"}})
+
+	// Assert
+	if !reflect.DeepEqual(got, []string{"b1", "b2", "a1"}) {
+		t.Fatalf("FlatNames = %v, want b's then a's names, and no name of an item outside the chunk", got)
+	}
+}
+
+func TestLispNamesByFilePairsEachNamedFileWithItsNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		names map[string][]string
+		want  string
+	}{
+		{name: "no file named", want: ""},
+		{name: "one named file of two", names: map[string][]string{"test-b.el": {"b-1"}},
+			want: `(list (cons "test-b.el" (list (intern "b-1"))))`},
+		{name: "two named files in item order", names: map[string][]string{"test-b.el": {"b-1"}, "test-a.el": {"a-1", "a-2"}},
+			want: `(list (cons "test-a.el" (list (intern "a-1") (intern "a-2"))) (cons "test-b.el" (list (intern "b-1"))))`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := lispNamesByFile([]string{"test-a.el", "test-b.el"}, tt.names)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("lispNamesByFile = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

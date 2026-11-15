@@ -25,7 +25,7 @@ const (
 	ERT
 	// GoModule is a Go module's tests, split by top-level test.
 	GoModule
-	// Vitest is a TypeScript package: a typecheck and split test files.
+	// Vitest is a TypeScript package: a typecheck, knip and split test files.
 	Vitest
 	// E2E is the cross-system Go suite: one build, its top-level tests split
 	// into chunks.
@@ -138,7 +138,7 @@ type Suite struct {
 // integration, named by its path relative to Suite.Path, "." the root, and
 // "[tags]" after a tagged pass's: "integration[integration]"), a vitest test
 // file or an ERT test file (named by its path relative to Suite.Path), a
-// suite-wide check ("vet", "vet[perf]", "typecheck"), or, for a script or e2e
+// suite-wide check ("vet", "vet[perf]", "typecheck", "knip"), or, for a script or e2e
 // suite, the whole suite (named "").
 //
 // Paths are spelled as Suite.Path is: relative to the module root, or to the
@@ -252,6 +252,7 @@ var Suites = []Suite{
 	{Name: "store-reset-harness", Kind: Script, Path: "bin/test-store-reset.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "requirements-harness", Kind: Script, Path: "bin/test-requirements.sh", Harness: true, NeverReused: "it walks the whole module for every requirements.json, so no input set short of the checkout covers it"},
 	{Name: "push-release-harness", Kind: Script, Path: "bin/test-push-release.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
+	{Name: "land-direct-harness", Kind: Script, Path: "bin/test-land-direct.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
 	{Name: "slack-merged-reaction-harness", Kind: Script, Path: "bin/test-slack-merged-reaction.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "worktrees-lib-harness", Kind: Script, Path: "bin/test-lib-worktrees.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
 	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
@@ -268,6 +269,8 @@ var Suites = []Suite{
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: scripts(moduleScripts, "e2e/realtest/")},
+	{Name: "byte-compile-harness", Kind: Script, Path: "bin/test-byte-compile.sh", Harness: true, Reuse: scripts(moduleScripts, "bin/compile-prelude.el")},
+	{Name: "shellcheck-harness", Kind: Script, Path: "bin/test-shellcheck.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
 	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
@@ -353,6 +356,11 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
+	// THE ERT SUITE'S FAKE DAEMON IS TESTED AS ITS OWN MODULE: the ert suite
+	// only builds the binary, so until 2026-11-15 its Go tests gated no
+	// landing and every change to them was run by hand. Its tests read only
+	// their own package's sources.
+	{Name: "fakedaemon", Kind: GoModule, Path: "lisp/testsupport/fakedaemon", Reuse: &Reuse{}},
 	// The tests that read the whole module rather than one system's tree:
 	// the merge gate's selection checked against every suite's real
 	// dependencies, the mock-rule source scan, and the scans pinning that
@@ -385,7 +393,7 @@ var Suites = []Suite{
 			// with the logging module it imports,
 			// the metaprompt its suite reads back, and the scripts its npm
 			// hooks run. What it imports is each file's import graph.
-			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "testdata/",
+			"proto/vocab/", "agent-shim/shim-lock/", "agent-shim/logging/go/", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-intake.md", "testdata/",
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
@@ -407,6 +415,14 @@ var Suites = []Suite{
 	// against what grammar.js generates.
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh",
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
+	// THE LINT GATES, each failing on any warning so none lands to
+	// accumulate. The byte-compiler over lisp/'s sources:
+	{Name: "byte-compile", Kind: Script, Path: "bin/byte-compile.sh", Reuse: harness("lisp/", "bin/compile-prelude.el")},
+	// shellcheck over every shell script of the module and of the
+	// repository's hooks, .claude scripts and bin/. It reads exactly the
+	// roots `bin/shellcheck.sh --roots` prints (ShellcheckRoots, which
+	// daemon/reposcans holds to the script).
+	{Name: "shellcheck", Kind: Script, Path: "bin/shellcheck.sh", Harness: true, Reuse: harness(ShellcheckRoots...)},
 	// The density report scans every system's logging calls.
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	// THE E2E HARNESS and its tests: the world every scenario builds
@@ -440,6 +456,13 @@ var Suites = []Suite{
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
+}
+
+// ShellcheckRoots are the directories the shellcheck suite's script walks for
+// shell scripts: `bin/shellcheck.sh --roots`, spelled as Suite.Path is.
+var ShellcheckRoots = []string{
+	"bin/", "scripts/", "hooks/", "proto/scripts/", "skills/", "tree-sitter-tldr/", "wifi-helper/",
+	"agent-shim/claude/shim/test/integration-support/", "/.githooks/", "/.claude/", "/bin/",
 }
 
 // harness is a script suite's declaration: its one unit, the whole suite,
@@ -605,7 +628,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/commandcatalog/catalogtest": {"daemon/internal/"},
 	"internal/creategate":                 {"daemon/"},
 	"internal/ctxend":                     {"daemon/"},
-	"internal/dirpath":                    {"daemon/internal/"},
+	"internal/dirpath":                    {"daemon/"},
 	"internal/effortlevel":                {"daemon/internal/"},
 	"internal/envc":                       {"daemon/"},
 	"internal/freshinput":                 {"daemon/internal/"},
@@ -722,7 +745,7 @@ var AlwaysRunRegions = []string{
 	// The Doom module files the ERT suite loads, the metaprompt the shim
 	// suite reads, the logging contract ERT reads, the requirement manifest
 	// and timing history the harnesses read.
-	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-mediator.md", "logging-contract.md",
+	"config.el", "doctor.el", "packages.el", "metaprompt.md", "metaprompt-merge-queue.md", "metaprompt-queue-bypass.md", "metaprompt-deploy-intake.md", "logging-contract.md",
 	"requirements.json", "test_time.csv",
 	// Outside the module: the hooks, the .claude scripts and the repository's
 	// bin/ each have their harness.
@@ -743,22 +766,11 @@ var ReadByNoSuite = []string{
 	"test-coverage-input.md", "test-coverage-keybindings.md", "test-coverage-notifications.md",
 	"test-coverage-overlay.md", "test-coverage-panels.md", "test-coverage-sentinel.md", "test-coverage-session.md",
 	"test-coverage-status.md", "test-coverage-worktree.md",
-	// The Wi-Fi helper app's Swift source, plist and build script: no suite
-	// builds or runs the app (the requirements harness tests app_build
-	// against its own fixture helper), and the daemon names only the built
-	// app's path.
-	"wifi-helper/",
 	// The owner's own Doom configuration, which no agent-repl suite loads.
 	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
 	// The agents' sandbox's own state, which no suite reads.
 	"/.agents-sandbox/",
-	// The persistent-wifi helper app's sources: built by the installer and run
-	// only on the user's Mac (CoreWLAN under Location Services), which no
-	// suite can grant. The daemon's side of it is tested through a fake app
-	// (daemon/internal/persistentwifi); the helper itself is untested
-	// (org/todo.md).
-	"wifi-helper/",
 	// The repository's prose.
 	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
 }

@@ -18,18 +18,21 @@ import (
 // ---- the session's standing stream ----
 
 // routeSessionUpdateLocked routes one SessionUpdate and then records, at
-// DEBUG, that it was routed: every view it reaches under the watcher's lock
-// has taken it by the time the record is written, so a reader of the log
-// knows the update's effect is in place rather than on its way.
+// DEBUG, that it was routed: every view told under the watcher's lock has
+// taken it by the time the record is written, so a reader of the log knows
+// the update's effect is in place rather than on its way. The roster and the
+// topbar take theirs once the lock is released, which
+// `daemon.sessionwatcher.view_edges_delivered` records (viewedges.go).
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
 	w.routeSessionUpdateArmLocked(update)
-	w.log.Debug("daemon.sessionwatcher.session_update_routed", "a session update was routed: every view it reaches under the watcher's lock has taken it", dlog.Context{
+	w.log.Debug("daemon.sessionwatcher.session_update_routed", "a session update was routed: every view told under the watcher's lock has taken it, and the roster and topbar take theirs once the lock is released", dlog.Context{
 		"arm": sessionArm(update),
 	})
 }
 
 // routeSessionUpdateArmLocked routes one SessionUpdate arm to the views that
-// resolve from it. The split is per arm and stated once here: session identity
+// resolve from it; the roster's and topbar's edges are queued for the lock's
+// release (viewedges.go). The split is per arm and stated once here: session identity
 // and health are the topbar's, accounting and the rate-limit status are the
 // footer's, and the session's death is everyone's.
 func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpdate) {
@@ -75,13 +78,13 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// closes it in BOTH directions: the published view is never ahead of
 		// the health the daemon will answer with.
 		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
-		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
 		// THE ROSTER READS THE SAME PUSH. An open degraded window is what the
 		// row's `degraded` arm is made of, and without this route that arm has
 		// no producer at all: the dot would read `ready` for a session the
 		// topbar is drawing as degraded, and the two surfaces would disagree
 		// about one fact.
-		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Sidebar.OnSessionUpdate(w.ws, update) })
 		// THE FOOTER READS IT TOO: an open window is its `degraded ·
 		// observation` step, and the roster's dot projects the footer's
 		// status, so a window the footer never saw would draw on no surface.
@@ -95,7 +98,7 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the footer", dlog.Context{
 			"arm": sessionArm(update),
 		})
-		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_McpServer:
@@ -106,7 +109,7 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the footer", dlog.Context{
 			"arm": sessionArm(update),
 		})
-		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_FastMode,
@@ -132,15 +135,15 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar", dlog.Context{
 			"arm": sessionArm(update),
 		})
-		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
 
 	case *conversationv1.SessionUpdate_ModelChanged,
 		*conversationv1.SessionUpdate_PermissionModeChanged:
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar, the roster and the footer", dlog.Context{
 			"arm": sessionArm(update),
 		})
-		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
-		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+		w.mu.later(func() { w.sinks.Topbar.OnSessionUpdate(w.ws, update) })
+		w.mu.later(func() { w.sinks.Sidebar.OnSessionUpdate(w.ws, update) })
 		// The footer's session_change transient announces the change.
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
@@ -208,10 +211,16 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// THE SCHEDULE OF AGENT-REPL'S RETRY OF A FAILED TURN is the footer's
 		// to draw (its countdown) and to read (a scheduled retry holds no
 		// prompt, footer.Resolver.VendorBlock); no other rule reads it.
+		// The watcher keeps one fact of it: whether a retry is still to be
+		// made, which a departure that cuts the shim owes the workspace
+		// (promptqueue's owed retry).
+		w.retryOwed = u.VendorErrorRetry.GetScheduled() != nil || u.VendorErrorRetry.GetAwaitingNetwork() != nil
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
-			"arm":        sessionArm(update),
-			"scheduled":  u.VendorErrorRetry.GetScheduled() != nil,
-			"attempting": u.VendorErrorRetry.GetAttempting() != nil,
+			"arm":              sessionArm(update),
+			"scheduled":        u.VendorErrorRetry.GetScheduled() != nil,
+			"attempting":       u.VendorErrorRetry.GetAttempting() != nil,
+			"awaiting_network": u.VendorErrorRetry.GetAwaitingNetwork() != nil,
+			"retry_owed":       w.retryOwed,
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
@@ -272,7 +281,7 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 		w.sinks.Feed.OnTurnOpened(w.ws, *w.turn)
 	}
 	w.sinks.Feed.OnSessionUpdate(w.ws, update)
-	w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+	w.mu.later(func() { w.sinks.Sidebar.OnSessionUpdate(w.ws, update) })
 
 	// EVERY TURN THE QUERY HELD DIES WITH IT: the one in flight, then each
 	// one waiting behind it as it stands in flight in turn.
@@ -671,7 +680,7 @@ func (w *watcher) routePageCutLocked(a *agentWatch, frame *conversationv1.AgentF
 // their way.
 func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
 	w.routeEntryArmLocked(a, at)
-	w.log.Debug("daemon.sessionwatcher.entry_routed", "a history entry was routed: every view it reaches under the watcher's lock has taken it, and a turn end it closed is dispatched once the lock is released", dlog.Context{
+	w.log.Debug("daemon.sessionwatcher.entry_routed", "a history entry was routed: every view told under the watcher's lock has taken it, and the roster and topbar edges and a turn end it closed are handed over once the lock is released", dlog.Context{
 		"agent_id": a.id.GetValue(), "main": a.id == nil, "pointer": at.GetAt().GetValue(), "turn": at.GetTurn().GetValue(), "arm": entryArm(at.GetEntry()),
 	})
 }
@@ -1036,7 +1045,7 @@ func (w *watcher) routePermissionLocked(agent *conversationv1.AgentId, permissio
 	})
 	w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place)
 	w.sinks.Footer.OnPermission(w.ws, agent, permission)
-	w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+	w.mu.later(func() { w.sinks.Sidebar.OnPermission(w.ws, agent, permission) })
 	if w.sinks.Merge != nil {
 		w.sinks.Merge.OnPermission(w.ws, agent, permission)
 	}
@@ -1085,7 +1094,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		})
 		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place)
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
-		w.sinks.Sidebar.OnApiError(w.ws, agent, update.GetApiError())
+		w.mu.later(func() { w.sinks.Sidebar.OnApiError(w.ws, agent, update.GetApiError()) })
 
 	default:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "default"})
@@ -1130,7 +1139,7 @@ func (w *watcher) routeContextCutLocked(agent *conversationv1.AgentId, cut *conv
 		w.sinks.Feed.OnContextCut(w.ws, agent, cut, at, turn, place)
 	}
 	w.sinks.Footer.OnContextCut(w.ws, agent, cut)
-	w.sinks.Topbar.OnContextCut(w.ws, agent, cut)
+	w.mu.later(func() { w.sinks.Topbar.OnContextCut(w.ws, agent, cut) })
 	// A CLEAR ends the conversation the workspace's summary described, so
 	// the summary is dropped and the workspace owes a new one. A compaction
 	// keeps the conversation, so the summary stands.
@@ -1150,12 +1159,12 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 	// retried call (ladder.RetryAnswered) is what ends both surfaces'
 	// `api_retrying`; a roster never handed the answer stood teal after the
 	// vendor reconnected, beside a footer that had already recovered.
-	w.sinks.Sidebar.OnActivity(w.ws, agent, act)
+	w.mu.later(func() { w.sinks.Sidebar.OnActivity(w.ws, agent, act) })
 	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
 	// but it also accumulates the SESSION's token spend from the usage every
 	// activity carries (internal/resolve/topbar's observeUsage), and a sink
 	// handed only the unmodeled frames would count nothing at all.
-	w.sinks.Topbar.OnActivity(w.ws, agent, act)
+	w.mu.later(func() { w.sinks.Topbar.OnActivity(w.ws, agent, act) })
 	if act.GetUnmodeled() != nil {
 		w.log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", dlog.Context{
 			"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(act.GetUnmodeled()),
@@ -1474,7 +1483,7 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 // names ends when the agent is the main one, and the agent leaves live work.
 func (w *watcher) endAgentRunLocked(agent *conversationv1.AgentId, isMain bool, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
 	w.sinks.Footer.OnAgentTerminal(w.ws, agent, turn, success, failure)
-	w.sinks.Sidebar.OnAgentTerminal(w.ws, agent, turn, success, failure)
+	w.mu.later(func() { w.sinks.Sidebar.OnAgentTerminal(w.ws, agent, turn, success, failure) })
 
 	switch {
 	case isMain && turn != nil:
@@ -1600,7 +1609,7 @@ func (w *watcher) flushHeldTerminalLocked() {
 	})
 	w.sinks.Feed.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure, held.place)
 	w.sinks.Footer.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
-	w.sinks.Sidebar.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
+	w.mu.later(func() { w.sinks.Sidebar.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure) })
 	if w.retireAgentLocked(held.agent.GetValue(), concludedAgentTerminal) {
 		w.publishLiveWorkLocked()
 	}
@@ -1677,7 +1686,7 @@ func (w *watcher) takeDetachedLocked(announcer *conversationv1.AgentId, work *co
 	}
 	toFeed()
 	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
-	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
+	w.mu.later(func() { w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work) })
 
 	w.log.Debug("daemon.sessionwatcher.detached_work", "work left its stream", dlog.Context{
 		"work_id": handle.GetValue(), "kind": kind.String(), "agent_id": agent.GetValue(),

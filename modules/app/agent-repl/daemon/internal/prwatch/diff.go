@@ -51,6 +51,11 @@ type told struct {
 	GroupHead string `json:"group_head,omitempty"`
 	// GroupChecks is Checks' meaning, for the merge group commit.
 	GroupChecks map[string]string `json:"group_checks,omitempty"`
+	// AnchorOnRead marks a subscription taken without a read
+	// (Watcher.FollowFromFirstRead): its first successful read anchors it,
+	// counting everything already on the pull request as told, as Anchor's
+	// read would have. Left out of every anchored snapshot's encoding.
+	AnchorOnRead bool `json:"anchor_on_read,omitempty"`
 }
 
 // decodeTold reads a row's snapshot. Empty is a subscription never anchored:

@@ -44,10 +44,10 @@ func (r KeptRun) Failure(script *repoconfigv1.HookScript) string {
 }
 
 // RunKeptScript runs SCRIPT once from the repository's main checkout root
-// REPOROOT, bounded by its timeout and with ENV beside the daemon's own, and
-// keeps its whole output at logPath.
-func RunKeptScript(ctx context.Context, runner HookScriptRunner, repoRoot string, script *repoconfigv1.HookScript, env []string, logPath string) KeptRun {
-	run, err := runner.RunLinesWith(ctx, repoRoot, lifecycleconfig.ScriptArgv(repoRoot, script),
+// REPOROOT, with ARGS after it, bounded by its timeout and with ENV beside the
+// daemon's own, and keeps its whole output at logPath.
+func RunKeptScript(ctx context.Context, runner HookScriptRunner, repoRoot string, script *repoconfigv1.HookScript, env []string, logPath string, args ...string) KeptRun {
+	run, err := runner.RunLinesWith(ctx, repoRoot, append(lifecycleconfig.ScriptArgv(repoRoot, script), args...),
 		scriptrunner.Options{Env: env, Timeout: time.Duration(script.GetTimeoutSeconds()) * time.Second}, nil)
 	return KeptRun{Run: run, Err: err, LogErr: writeLog(logPath, run.Output)}
 }

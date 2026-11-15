@@ -58,6 +58,14 @@ import (
 // standing stream sent before it ended. Nothing here is a quiet window or a
 // clock: the wait is the count's own zero, bounded by the exit's deadline.
 //
+// A STREAM IS ADMITTED ONLY UP TO ITS CONNECTION'S GOAWAY. Once the server
+// has written a GOAWAY naming its last stream, it discards every stream the
+// client opens above that id -- the client learns from the same frame that
+// they were never processed, and opens them anew elsewhere -- so the barrier
+// counts no stream above it either, and drops any it counted before the frame
+// was written. That makes the set of streams an exit waits for CLOSED once
+// every connection's GOAWAY is on the socket (GoAway).
+//
 // A CONNECTION THAT IS NOT h2 IS NOT COUNTED. Its first bytes are not the h2
 // client preface, so it is HTTP/1.1, which `http.Server.Shutdown` already
 // waits on exactly: such a connection turns idle only once its response is
@@ -72,6 +80,16 @@ type WriteBarrier struct {
 	total int
 	// drained is closed when total reaches zero, only while somebody waits.
 	drained chan struct{}
+
+	// owing is every counted connection that may carry h2 and has not
+	// written its GOAWAY: accepted and not yet known to be HTTP/1.1, gone, or
+	// gone away.
+	owing map[*barrierConn]struct{}
+	// send, once GoAway began, sends every h2 connection served from then
+	// on its GOAWAY; nil before.
+	send func()
+	// wentAway is closed when owing empties, only while somebody waits.
+	wentAway chan struct{}
 }
 
 // Listener wraps a listener so every connection it accepts is counted.
@@ -124,12 +142,127 @@ func (b *WriteBarrier) AwaitStreamsWritten(deadline time.Time) int {
 	}
 }
 
+// GoAway refuses every new stream on every counted connection: it runs send,
+// which makes the h2 server write a GOAWAY on each connection it serves, runs
+// it again for each connection whose serving starts afterwards, and waits
+// until every connection that may carry h2 has its GOAWAY on the socket (or
+// is gone, or turned out to be HTTP/1.1), or deadline passes. It answers how
+// many connections had not.
+//
+// THE LATE CONNECTION IS WHY send RUNS AGAIN. The h2 server writes a GOAWAY
+// only on the connections it already holds; one whose serving starts after
+// send ran would admit streams after the exit's last wait. Its serving
+// starts before its first write (the server's SETTINGS), so that first write
+// is where send runs for it: either it began after GoAway did, and sends it
+// itself, or it began before, and the first send already held it.
+//
+// Only connections the listener has handed out are owed, so the caller
+// stops the listener accepting first.
+func (b *WriteBarrier) GoAway(send func(), deadline time.Time) int {
+	b.mu.Lock()
+	b.send = send
+	b.mu.Unlock()
+	send()
+	b.mu.Lock()
+	if len(b.owing) == 0 {
+		b.mu.Unlock()
+		return 0
+	}
+	if b.wentAway == nil {
+		b.wentAway = make(chan struct{})
+	}
+	wentAway := b.wentAway
+	b.mu.Unlock()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-wentAway:
+		return 0
+	case <-timer.C:
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return len(b.owing)
+	}
+}
+
+// Owing answers the connections that still owe their GOAWAY, as remote
+// addresses, for a record.
+func (b *WriteBarrier) Owing() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]string, 0, len(b.owing))
+	for c := range b.owing {
+		out = append(out, c.RemoteAddr().String())
+	}
+	sort.Strings(out)
+	return out
+}
+
+// accepted records a connection the listener handed out.
+func (b *WriteBarrier) accepted(c *barrierConn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.owing == nil {
+		b.owing = map[*barrierConn]struct{}{}
+	}
+	b.owing[c] = struct{}{}
+}
+
+// settledLocked records that c owes no GOAWAY. b.mu is held.
+func (b *WriteBarrier) settledLocked(c *barrierConn) {
+	delete(b.owing, c)
+	if len(b.owing) == 0 && b.wentAway != nil {
+		close(b.wentAway)
+		b.wentAway = nil
+	}
+}
+
+// http1 records a connection that turned out to carry HTTP/1.1, which
+// `http.Server.Shutdown` waits on itself.
+func (b *WriteBarrier) http1(c *barrierConn) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.settledLocked(c)
+}
+
+// wentAwayOn records c's GOAWAY on the socket, naming last as the last
+// stream the server admits on it: every stream counted above it was
+// discarded, and is owed nothing.
+func (b *WriteBarrier) wentAwayOn(c *barrierConn, last uint32) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !c.away || last < c.lastStream {
+		c.away, c.lastStream = true, last
+	}
+	open := b.open[c]
+	for stream := range open {
+		if stream > c.lastStream {
+			delete(open, stream)
+			b.total--
+		}
+	}
+	b.settledLocked(c)
+	b.wakeLocked()
+}
+
+// lateSend answers the GOAWAY send a connection whose serving starts now
+// must run, or nil before GoAway began.
+func (b *WriteBarrier) lateSend() func() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.send
+}
+
 // opened records a stream its client opened.
 func (b *WriteBarrier) opened(c *barrierConn, stream uint32) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if c.gone {
 		// The connection already closed: nothing can be written for it.
+		return
+	}
+	if c.away && stream > c.lastStream {
+		// Opened after the GOAWAY: the server discards it unprocessed.
 		return
 	}
 	if b.open == nil {
@@ -172,6 +305,7 @@ func (b *WriteBarrier) gone(c *barrierConn) {
 	c.gone = true
 	b.total -= len(b.open[c])
 	delete(b.open, c)
+	b.settledLocked(c)
 	b.wakeLocked()
 }
 
@@ -203,7 +337,9 @@ func (l *barrierListener) Accept() (net.Conn, error) {
 // count wraps one connection. Separated from Accept so a suite can drive the
 // counting over a plain pipe, with no listener in the way.
 func (l *barrierListener) count(conn net.Conn) net.Conn {
-	return &barrierConn{Conn: conn, barrier: l.barrier}
+	c := &barrierConn{Conn: conn, barrier: l.barrier}
+	l.barrier.accepted(c)
+	return c
 }
 
 // clientPreface is what every prior-knowledge h2 connection opens with.
@@ -214,6 +350,7 @@ const (
 	frameData         = 0x0
 	frameHeaders      = 0x1
 	frameRSTStream    = 0x3
+	frameGoAway       = 0x7
 	frameContinuation = 0x9
 
 	flagEndStream  = 0x1
@@ -250,9 +387,14 @@ type barrierConn struct {
 	// endingHeaders are the server's streams whose END_STREAM header block is
 	// still being continued; each ends with its last CONTINUATION.
 	endingHeaders map[uint32]bool
+	// wrote is whether the server has written on it yet.
+	wrote bool
 
-	// gone is guarded by barrier.mu.
-	gone bool
+	// gone, away and lastStream are guarded by barrier.mu: away once the
+	// server's GOAWAY is on the socket, naming lastStream.
+	gone       bool
+	away       bool
+	lastStream uint32
 }
 
 func (c *barrierConn) Read(p []byte) (int, error) {
@@ -267,6 +409,7 @@ func (c *barrierConn) readFrames(p []byte) {
 		take := min(len(clientPreface)-c.preface, len(p))
 		if !bytes.Equal(p[:take], clientPreface[c.preface:c.preface+take]) {
 			c.proto.Store(protocolHTTP1)
+			c.barrier.http1(c)
 			return
 		}
 		c.preface += take
@@ -295,8 +438,13 @@ func (c *barrierConn) Write(p []byte) (int, error) {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	var ends []uint32
+	first := !c.wrote
+	c.wrote = true
+	var ends, lasts []uint32
 	c.outgoing.feed(p, func(h frameHeader) {
+		if h.kind == frameGoAway {
+			lasts = append(lasts, h.lastStream)
+		}
 		if stream, ok := c.endOf(h); ok {
 			ends = append(ends, stream)
 		}
@@ -307,6 +455,14 @@ func (c *barrierConn) Write(p []byte) (int, error) {
 		return n, err
 	}
 	c.barrier.ended(c, ends...)
+	for _, last := range lasts {
+		c.barrier.wentAwayOn(c, last)
+	}
+	if first {
+		if send := c.barrier.lateSend(); send != nil {
+			send()
+		}
+	}
 	return n, nil
 }
 
@@ -349,6 +505,9 @@ type frameHeader struct {
 	kind   byte
 	flags  byte
 	stream uint32
+	// lastStream is a GOAWAY's last admitted stream, the first four bytes of
+	// its payload; zero on every other frame.
+	lastStream uint32
 }
 
 // frameScanner finds the frame headers in one direction's byte stream, fed in
@@ -358,11 +517,31 @@ type frameScanner struct {
 	have   int
 	// skip is how many payload bytes of the current frame are still to come.
 	skip int
+	// goAway is a GOAWAY whose last-stream id is still being read, while
+	// reading; haveLast of its four bytes are in last.
+	goAway   frameHeader
+	reading  bool
+	last     [4]byte
+	haveLast int
 }
 
 // feed scans p, calling found for every frame header it completes.
 func (s *frameScanner) feed(p []byte, found func(frameHeader)) {
 	for len(p) > 0 {
+		if s.reading {
+			n := copy(s.last[s.haveLast:], p)
+			s.haveLast += n
+			s.skip -= n
+			p = p[n:]
+			if s.haveLast < len(s.last) {
+				return
+			}
+			h := s.goAway
+			h.lastStream = binary.BigEndian.Uint32(s.last[:]) & 0x7fffffff
+			s.reading, s.haveLast = false, 0
+			found(h)
+			continue
+		}
 		if s.skip > 0 {
 			n := min(s.skip, len(p))
 			s.skip -= n
@@ -377,10 +556,15 @@ func (s *frameScanner) feed(p []byte, found func(frameHeader)) {
 		}
 		s.have = 0
 		s.skip = int(s.header[0])<<16 | int(s.header[1])<<8 | int(s.header[2])
-		found(frameHeader{
+		h := frameHeader{
 			kind:   s.header[3],
 			flags:  s.header[4],
 			stream: binary.BigEndian.Uint32(s.header[5:9]) & 0x7fffffff,
-		})
+		}
+		if h.kind == frameGoAway && s.skip >= len(s.last) {
+			s.goAway, s.reading = h, true
+			continue
+		}
+		found(h)
 	}
 }

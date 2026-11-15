@@ -1136,18 +1136,36 @@ register; VALUE carries the canonical `dir' and `temporary_root'."
   (agent-repl-wire-decode-inside-temporary-directory
    "RegisterWorkspaceInsideTemporaryDirectory" value))
 
+(defun agent-repl-wire-decode-register-workspace-transferring-away (value)
+  "Decode VALUE as `RegisterWorkspaceTransferringAway', a plist (`:address').
+This daemon handed the workspace to its successor, where it registers;
+dial `address'."
+  (let ((object (agent-repl-wire--object "RegisterWorkspaceTransferringAway" value)))
+    (agent-repl-wire--check-keys "RegisterWorkspaceTransferringAway" object '(address))
+    (agent-repl-wire--decoded
+     "RegisterWorkspaceTransferringAway"
+     (list :address (agent-repl-wire--decode-string
+                    "RegisterWorkspaceTransferringAway" 'address object)))))
+
+(defun agent-repl-wire-decode-register-workspace-error-transferring-away (value)
+  "Decode RegisterWorkspaceError's `transferring_away' cause arm from VALUE."
+  (agent-repl-wire-decode-register-workspace-transferring-away value))
+
 (defun agent-repl-wire-decode-register-workspace-error-cause (value)
   "Decode RegisterWorkspaceError's `cause' oneof from the object VALUE.
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((object (agent-repl-wire--object "RegisterWorkspaceError" value)))
-    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree insideTemporaryDirectory parentNotOpen))
+    (agent-repl-wire--check-keys "RegisterWorkspaceError" object
+                                 '(notAWorktree insideTemporaryDirectory parentNotOpen transferringAway))
     (agent-repl-wire--decode-oneof
      "RegisterWorkspaceError" 'cause object
      '((notAWorktree :not-a-worktree agent-repl-wire-decode-register-workspace-error-not-a-worktree)
        (insideTemporaryDirectory :inside-temporary-directory
                                  agent-repl-wire-decode-register-workspace-error-inside-temporary-directory)
-       (parentNotOpen :parent-not-open agent-repl-wire-decode-workspace-parent-not-open)))))
+       (parentNotOpen :parent-not-open agent-repl-wire-decode-workspace-parent-not-open)
+       (transferringAway :transferring-away
+                         agent-repl-wire-decode-register-workspace-error-transferring-away)))))
 
 (defun agent-repl-wire-decode-register-workspace-error (value)
   "Decode VALUE as `RegisterWorkspaceError', a plist (:cause ONEOF)."

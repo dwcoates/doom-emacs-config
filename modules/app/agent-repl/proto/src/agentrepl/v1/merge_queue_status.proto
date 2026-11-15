@@ -127,10 +127,11 @@ message MergeQueueStatusAdvance {
     // The queue is paused: merges still join it, but nothing runs until it
     // is resumed.
     MergeQueueStatusAdvancePaused paused = 2;
-    // The queue waits on its deploy mediator to decide the last deploy
-    // (repoconfig.v1.LifecycleConfig.deploy_mediator): merges still join it,
-    // but nothing runs until the mediator approves or escalates the deploy.
-    // A paused queue answers `paused` even while a mediation is owed.
+    // The queue's head waits on the check of the last deploy
+    // (repoconfig.v1.LifecycleConfig.deploy_checks): merges still join it
+    // and keep their work in flight, but none lands until the chain's intake
+    // approves or escalates. A paused queue answers `paused` even while a
+    // check is owed.
     MergeQueueStatusAdvanceMediating mediating = 3;
   }
 }
@@ -138,13 +139,44 @@ message MergeQueueStatusAdvance {
 message MergeQueueStatusAdvanceRunning {}
 // Paused. No fields.
 message MergeQueueStatusAdvancePaused {}
-// Held for the deploy mediator.
+// Held for a deploy check. Tags 1 (`mediator`) and 2 (`name`) named the
+// standing mediator workspace, which per-chain workspaces replace.
 message MergeQueueStatusAdvanceMediating {
-  // The mediator workspace, absent while it is not made yet (the round
-  // that makes it runs once the deploy finished).
-  workspace.v1.WorkspaceRef mediator = 1;
-  // The mediator's name, as the lifecycle config names it.
-  string name = 2;
+  reserved 1, 2;
+  reserved "mediator", "name";
+  // REQUIRED. Where the check stands; the arm IS the stage.
+  oneof stage {
+    // The deploy is still rolling out, so nobody is checking it yet.
+    MergeQueueStatusAdvanceMediatingRollingOut rolling_out = 3;
+    // The chain's intake is checking the deploy.
+    MergeQueueStatusAdvanceMediatingAssessing assessing = 4;
+    // A remediation workspace is fixing what the intake dispatched; no new
+    // speculative work starts in the queue until its fix lands.
+    MergeQueueStatusAdvanceMediatingFixing fixing = 5;
+  }
+  // How many remediations the chain has deployed in a row so far, 0 for a
+  // chain's first deploy.
+  uint32 remediations_in_a_row = 6;
+}
+// Rolling out.
+message MergeQueueStatusAdvanceMediatingRollingOut {
+  // The chain's intake, which checks the deploy once it has rolled out.
+  // UNSET for a chain's first deploy, whose intake is made when the rollout
+  // ends.
+  optional workspace.v1.WorkspaceRef intake = 1;
+}
+// Assessing.
+message MergeQueueStatusAdvanceMediatingAssessing {
+  // REQUIRED. The chain's intake, a hidden workspace.
+  workspace.v1.WorkspaceRef intake = 1;
+}
+// Fixing.
+message MergeQueueStatusAdvanceMediatingFixing {
+  // REQUIRED. The remediation workspace doing the fix, visible in the
+  // sidebar like any workspace.
+  workspace.v1.WorkspaceRef remediation = 1;
+  // REQUIRED. The chain's intake, which checks the fix's deploy.
+  workspace.v1.WorkspaceRef intake = 2;
 }
 
 // One merge in line.

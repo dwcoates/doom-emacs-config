@@ -555,6 +555,19 @@ describe("regionStops", () => {
     expect(regionStops(rows)).toEqual([0, 20, 50]);
   });
 
+  it("ends on the region's drawn height in fractional pixels, not its rounded scrollHeight", () => {
+    // Arrange — a 14.5px region, whose scrollHeight the engine rounds to 15.
+    const rows = document.createElement("div");
+    const line = document.createElement("div");
+    line.className = "row";
+    line.getBoundingClientRect = () => rect(0, 14.5);
+    rows.appendChild(line);
+    rows.getBoundingClientRect = () => rect(0, 14.5);
+    Object.defineProperty(rows, "scrollHeight", { configurable: true, value: 15 });
+    // Act / Assert
+    expect(regionStops(rows)).toEqual([0, 14.5]);
+  });
+
   it("counts a line that draws no box as no line", () => {
     // Arrange — the middle line sits in a collapsed repository's group.
     const rows = document.createElement("div");
@@ -708,6 +721,18 @@ describe("fitBands", () => {
     // Arrange — 900px of room, 200px of lines.
     const rail = drawn({ open: 3, hidden: 3, merged: 4 });
     laidOut(rail, 1000, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "760px"]);
+  });
+
+  it("lets a viewport an earlier fit capped go before measuring its lines", () => {
+    // Arrange — Deploys left capped at one line by a shorter rail's fit, in a
+    // rail that now holds every line: 900px of room, 200px of lines.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4 });
+    laidOut(rail, 1000, 100);
+    region(rail.pane, "merged-section")!.style.maxHeight = "20px";
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert

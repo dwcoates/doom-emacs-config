@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/workspacefind"
 	"agent-repld/internal/workspacesubs"
 	"agent-repld/internal/wsm"
 )
@@ -53,6 +54,8 @@ type cliClient struct {
 	queues     *agentreplv1.GetMergeQueueStatusResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
+	// located answers LocateWorkspace.
+	located *agentreplv1.LocateWorkspaceResponse
 	// arrangement answers GetSidebarArrangement; arrange answers
 	// ArrangeSidebar, a success when nil.
 	arrangement *agentreplv1.GetSidebarArrangementResponse
@@ -127,7 +130,7 @@ func (c *cliClient) FinishWorkspace(_ context.Context, req *connect.Request[agen
 	if c.finish != nil {
 		return connect.NewResponse(c.finish), nil
 	}
-	return connect.NewResponse(&agentreplv1.FinishWorkspaceResponse{Result: &agentreplv1.FinishWorkspaceResponse_Success{Success: &agentreplv1.FinishWorkspaceSuccess{}}}), nil
+	return connect.NewResponse(&agentreplv1.FinishWorkspaceResponse{Result: &agentreplv1.FinishWorkspaceResponse_Success{Success: &agentreplv1.FinishWorkspaceSuccess{Landing: &agentreplv1.FinishWorkspaceSuccess_Queued{Queued: &agentreplv1.FinishWorkspaceSuccessQueued{}}}}}), nil
 }
 
 func (c *cliClient) GetWorkspaceStatus(_ context.Context, req *connect.Request[agentreplv1.GetWorkspaceStatusRequest]) (*connect.Response[agentreplv1.GetWorkspaceStatusResponse], error) {
@@ -279,6 +282,13 @@ func (c *cliClient) FindWorkspaces(_ context.Context, req *connect.Request[agent
 		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{}}}}}), nil
 }
 
+func (c *cliClient) LocateWorkspace(_ context.Context, req *connect.Request[agentreplv1.LocateWorkspaceRequest]) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(c.located), nil
+}
+
 func (c *cliClient) GetMergeQueueStatus(_ context.Context, req *connect.Request[agentreplv1.GetMergeQueueStatusRequest]) (*connect.Response[agentreplv1.GetMergeQueueStatusResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
@@ -312,6 +322,13 @@ type cliFixture struct {
 	dialOptions int
 	// dialed is every address the command dialed, in order.
 	dialed []string
+	// unrostered are workspaces the registry holds and the roster leaves
+	// out, such as a hidden merge workspace.
+	unrostered []*frontendv1.RosterRow
+	// locateErr fails every locate.
+	locateErr error
+	// stdin is what the command reads from standard input.
+	stdin string
 }
 
 // cliNow is the instant the fixture's commands read as now.
@@ -326,6 +343,31 @@ func cliRow(id, dir, name string) *frontendv1.RosterRow {
 		Name: &frontendv1.RosterRowName{Text: name}}
 }
 
+// locateOver is a cliDeps.locate answering as a registry holding ROWS, every
+// one open, would: through the daemon's own matching (workspacefind.Locate).
+func locateOver(rows ...*frontendv1.RosterRow) func(context.Context, agentreplv1connect.AgentReplClient, *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
+	return func(_ context.Context, _ agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
+		var records []wsm.Workspace
+		for _, row := range rows {
+			ref := row.GetWorkspace().GetWorkspace()
+			records = append(records, wsm.Workspace{ID: wsm.WorkspaceID(ref.GetId()), Dir: ref.GetDir(), Name: row.GetName().GetText()})
+		}
+		by := workspacefind.LocateBy{Name: req.GetNamed().GetName(), At: req.GetAt().GetDir(), Containing: req.GetContaining().GetDir()}
+		var refs []*workspacev1.WorkspaceRef
+		for _, ws := range workspacefind.Locate(records, &frontendv1.WorkspaceRoster{}, by) {
+			refs = append(refs, ws.Ref())
+		}
+		return refs, nil
+	}
+}
+
+// cliRows are the fixture's rostered workspaces: the caller, its peer and two
+// twins.
+func cliRows() []*frontendv1.RosterRow {
+	return []*frontendv1.RosterRow{cliRow("ws-caller", "/wt/caller", "caller"), cliRow("ws-peer", "/wt/peer", "peer"),
+		cliRow("ws-twin-1", "/wt/twin-1", "twin"), cliRow("ws-twin-2", "/wt/twin-2", "twin")}
+}
+
 func (f *cliFixture) run(noun string, args ...string) int {
 	deps := cliDeps{
 		address: func(string) (string, error) { return "127.0.0.1:1", nil },
@@ -335,12 +377,18 @@ func (f *cliFixture) run(noun string, args ...string) int {
 			return f.client
 		},
 		roster: func(context.Context, agentreplv1connect.AgentReplClient) (*frontendv1.WorkspaceRoster, error) {
-			return roster(cliRow("ws-caller", "/wt/caller", "caller"), cliRow("ws-peer", "/wt/peer", "peer"),
-				cliRow("ws-twin-1", "/wt/twin-1", "twin"), cliRow("ws-twin-2", "/wt/twin-2", "twin")), nil
+			return roster(cliRows()...), nil
+		},
+		locate: func(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error) {
+			if f.locateErr != nil {
+				return nil, f.locateErr
+			}
+			return locateOver(append(cliRows(), f.unrostered...)...)(ctx, client, req)
 		},
 		getwd:   func() (string, error) { return f.cwd, nil },
 		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
 		now:     func() time.Time { return cliNow },
+		stdin:   strings.NewReader(f.stdin),
 	}
 	return runNoun(context.Background(), noun, args, deps, &f.out, &f.errOut)
 }
@@ -709,6 +757,7 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 	tests := []struct {
 		name string
 		arg  string
+		cwd  string
 		want string
 		code int
 	}{
@@ -717,11 +766,19 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 		{name: "here", arg: here, want: "ws-caller", code: exitSuccess},
 		{name: "a name two workspaces share", arg: "twin", code: exitFailure},
 		{name: "a name nobody has", arg: "ghost", code: exitFailure},
+		{name: "a hidden merge workspace by name", arg: "merge", want: "ws-merge", code: exitSuccess},
+		{name: "a hidden merge workspace by directory", arg: "/wt/merge", want: "ws-merge", code: exitSuccess},
+		{name: "here in a hidden merge workspace's worktree", arg: here, cwd: "/wt/merge/daemon", want: "ws-merge", code: exitSuccess},
+		{name: "here outside every worktree", arg: here, cwd: "/elsewhere", code: exitFailure},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
+			f.unrostered = []*frontendv1.RosterRow{cliRow("ws-merge", "/wt/merge", "merge")}
+			if tt.cwd != "" {
+				f.cwd = tt.cwd
+			}
 
 			// Act
 			code := f.run(workspaceNoun, "status", tt.arg)
@@ -732,6 +789,58 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 			}
 			if tt.want != "" && only[*agentreplv1.GetWorkspaceStatusRequest](t, f).GetWorkspace().GetId() != tt.want {
 				t.Errorf("status of %v, want %s", f.client.requests, tt.want)
+			}
+		})
+	}
+}
+
+func TestAWorkspaceTheDaemonCannotLocateFailsTheCommand(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.locateErr = errors.New("daemon gone")
+
+	// Act
+	code := f.run(workspaceNoun, "status", "peer")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "locate the workspace: daemon gone") {
+		t.Fatalf("exit %d, stderr %q; want the locate's failure", code, f.errOut.String())
+	}
+	if len(f.client.requests) != 0 {
+		t.Fatalf("requests = %v, want none sent for a workspace never located", f.client.requests)
+	}
+}
+
+func TestLocateWorkspacesAnswersTheDaemonsWorkspaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		resp    *agentreplv1.LocateWorkspaceResponse
+		err     error
+		want    []string
+		wantErr string
+	}{
+		{name: "a success", resp: &agentreplv1.LocateWorkspaceResponse{Result: &agentreplv1.LocateWorkspaceResponse_Success{Success: &agentreplv1.LocateWorkspaceSuccess{
+			Workspaces: []*workspacev1.WorkspaceRef{{Id: "ws-merge", Dir: "/wt/merge"}}}}}, want: []string{"ws-merge"}},
+		{name: "an answer with no outcome", resp: &agentreplv1.LocateWorkspaceResponse{}, wantErr: "carried no outcome"},
+		{name: "a failed call", err: errors.New("daemon gone"), wantErr: "daemon gone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			client := &cliClient{located: tt.resp, err: tt.err}
+
+			// Act
+			refs, err := locateWorkspaces(context.Background(), client, &agentreplv1.LocateWorkspaceRequest{})
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("locateWorkspaces = %v, %v; want %q", refs, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || len(refs) != 1 || refs[0].GetId() != tt.want[0] {
+				t.Fatalf("locateWorkspaces = %v, %v; want %v", refs, err, tt.want)
 			}
 		})
 	}
@@ -2475,6 +2584,70 @@ func TestPauseSendsToLandOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestPauseAndResumeRefuseAnUnsetRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "a hard stop", args: []string{"pause", "-hard"}},
+		{name: "an ordinary pause", args: []string{"pause"}},
+		{name: "a resume", args: []string{"resume"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d with %d requests, want a refusal that sends nothing", code, len(f.client.requests))
+			}
+			if !strings.Contains(f.errOut.String(), "-repository is required") {
+				t.Fatalf("stderr = %q, want the required flag named", f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestPauseAndResumeScopeAllToEveryRepository(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		scope func(*agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef
+	}{
+		{name: "a pause", args: []string{"pause", "-repository", "all"}, scope: func(r *agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef {
+			return r.GetPause().GetRepository()
+		}},
+		{name: "a resume", args: []string{"resume", "-repository", "all"}, scope: func(r *agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef {
+			return r.GetResume().GetRepository()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateMergeQueueRequest](t, f)
+			if req.GetPause() == nil && req.GetResume() == nil {
+				t.Fatalf("request = %v, want a pause or a resume", req)
+			}
+			if got := tt.scope(req); got != nil {
+				t.Fatalf("repository = %v, want unset (every repository)", got)
+			}
+		})
+	}
+}
+
 func TestResumeTakesNoHardFlag(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
@@ -3371,20 +3544,98 @@ func TestMediationSendsTheDecisionAndItsSummary(t *testing.T) {
 	}
 }
 
-func TestMediationRefusesAMalformedCall(t *testing.T) {
+// aProblemJSON is a dispatch's one problem, as an intake writes it.
+const aProblemJSON = `[{"statement": "the reaper errors on every pass", "evidence": ["{\"level\":\"error\"}"]}]`
+
+func TestMediationDispatchesTheProblemsReadFromStandardInput(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want string
+		name        string
+		flag        string
+		wantRestore bool
 	}{
-		{name: "no decision", args: []string{"mediation", "-summary", "x"}, want: "approve or escalate"},
-		{name: "an unknown decision", args: []string{"mediation", "reject", "-summary", "x"}, want: "not \"reject\""},
-		{name: "no summary", args: []string{"mediation", "approve"}, want: "-summary is required"},
+		{name: "to a fresh remediation workspace", flag: "-fresh"},
+		{name: "to the chain's last remediation workspace", flag: "-restore", wantRestore: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
+			f.stdin = aProblemJSON
+
+			// Act
+			code := f.run(mergeQueueNoun, "mediation", "dispatch", tt.flag, "-summary", "the reaper broke")
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			m := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation()
+			d := m.GetDispatch()
+			if d == nil || (d.GetRestore() != nil) != tt.wantRestore || (d.GetFresh() != nil) == tt.wantRestore || m.GetSummary() != "the reaper broke" {
+				t.Fatalf("mediation = %v, want a dispatch restoring %v", m, tt.wantRestore)
+			}
+			if len(d.GetProblems()) != 1 || d.GetProblems()[0].GetStatement() != "the reaper errors on every pass" || d.GetProblems()[0].GetEvidence()[0] != `{"level":"error"}` {
+				t.Fatalf("problems = %v, want the one read, its evidence verbatim", d.GetProblems())
+			}
+		})
+	}
+}
+
+func TestMediationEscalatesWithItsFindingsWhenAsked(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		stdin        string
+		wantProblems int
+	}{
+		{name: "an escalation on its summary alone", args: []string{"mediation", "escalate", "-summary", "over to you"}},
+		{name: "an escalation with its findings", args: []string{"mediation", "escalate", "-problems", "-summary", "over to you"}, stdin: aProblemJSON, wantProblems: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.stdin = tt.stdin
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			e := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation().GetEscalate()
+			if e == nil || len(e.GetProblems()) != tt.wantProblems {
+				t.Fatalf("escalate = %v, want %d problems", e, tt.wantProblems)
+			}
+		})
+	}
+}
+
+func TestMediationRefusesAMalformedCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		stdin string
+		want  string
+	}{
+		{name: "no decision", args: []string{"mediation", "-summary", "x"}, want: "approve, escalate or dispatch"},
+		{name: "an unknown decision", args: []string{"mediation", "reject", "-summary", "x"}, want: "not \"reject\""},
+		{name: "no summary", args: []string{"mediation", "approve"}, want: "-summary is required"},
+		{name: "a remediation choice on an approval", args: []string{"mediation", "approve", "-fresh", "-summary", "x"}, want: "choose a dispatch's remediation workspace"},
+		{name: "a dispatch choosing neither", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: aProblemJSON, want: "exactly one of -fresh or -restore"},
+		{name: "a dispatch choosing both", args: []string{"mediation", "dispatch", "-fresh", "-restore", "-summary", "x"}, stdin: aProblemJSON, want: "exactly one of -fresh or -restore"},
+		{name: "a dispatch whose problems are not JSON", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
+		{name: "a dispatch with an unknown field", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: `[{"statement":"s","evidence":["e"],"cause":"c"}]`, want: "as a JSON list"},
+		{name: "a dispatch of no problem", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "[]", want: "at least one problem"},
+		{name: "a dispatch reading -problems", args: []string{"mediation", "dispatch", "-fresh", "-problems", "-summary", "x"}, stdin: aProblemJSON, want: "a dispatch always reads its problems"},
+		{name: "an escalation whose problems are not JSON", args: []string{"mediation", "escalate", "-problems", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.stdin = tt.stdin
 
 			// Act
 			code := f.run(mergeQueueNoun, tt.args...)

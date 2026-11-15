@@ -526,24 +526,45 @@ func narrowItems(u suites.Units, t target) ([]suites.Split, error) {
 		}
 		// A FILE IS ONE ITEM OF ITS BATCH'S SPLIT (suites.BatchFiles): the
 		// split narrows to it under the batch's group, and two files of one
-		// batch fold into one group (mergeGroups). A narrowed run is Targeted,
-		// so it neither reuses nor records the batch.
-		return []suites.Split{withItems(sp, sp.Group, []string{t.where}, t.names)}, nil
+		// batch fold into one group (mergeGroups) when the suite scopes each
+		// file's names to that file. Where it cannot (one vitest -t pattern
+		// for the whole process), a named file is a group of its own, so its
+		// names never filter another file. A narrowed run is Targeted, so it
+		// neither reuses nor records the batch.
+		group := sp.Group
+		if !sp.ScopesNamesPerItem {
+			group = sp.Group + "/" + t.where
+		}
+		return []suites.Split{withItems(sp, group, []string{t.where}, t.names)}, nil
 	}
 	return nil, fmt.Errorf("%s: its suite does not run it", t.what)
 }
 
 // withItems is sp narrowed to items, under group, its chunks running only
-// names when there are any.
+// names, each item's own, when there are any.
 func withItems(sp suites.Split, group string, items, names []string) suites.Split {
 	out := sp
 	out.Group = group
 	out.Items = items
+	out.ItemNames = nil
 	if len(names) > 0 {
-		named := sp.Named
-		out.Chunk = func(id string, items []string) run.Spec { return named(id, items, names) }
+		out.ItemNames = map[string][]string{}
+		for _, item := range items {
+			out.ItemNames[item] = names
+		}
+		out.Chunk = namedChunk(sp.Named, out.ItemNames)
 	}
 	return out
+}
+
+// namedChunk is a chunk builder running, of each chunk's items, the names
+// BYITEM holds for it, and every test of an item it holds none for.
+func namedChunk(named func(string, []string, map[string][]string) run.Spec, byItem map[string][]string) func(string, []string) run.Spec {
+	return func(id string, items []string) run.Spec {
+		s := named(id, items, byItem)
+		s.NamesTests = true
+		return s
+	}
 }
 
 // mergeGroups folds narrowed splits that share a group into one, their items
@@ -562,6 +583,23 @@ func mergeGroups(splits []suites.Split) []suites.Split {
 			if !slices.Contains(out[i].Items, it) {
 				out[i].Items = append(out[i].Items, it)
 			}
+		}
+		// EACH ITEM KEEPS ITS OWN NAMES: the group's chunks run every item's
+		// names against that item alone (Split.ScopesNamesPerItem), and an
+		// item named by neither split runs whole.
+		if len(out[i].ItemNames) > 0 || len(sp.ItemNames) > 0 {
+			if !sp.ScopesNamesPerItem {
+				panic(fmt.Sprintf("selection: two named splits share group %s, whose suite cannot scope names per item", sp.Group))
+			}
+			merged := map[string][]string{}
+			for item, names := range out[i].ItemNames {
+				merged[item] = names
+			}
+			for item, names := range sp.ItemNames {
+				merged[item] = names
+			}
+			out[i].ItemNames = merged
+			out[i].Chunk = namedChunk(sp.Named, merged)
 		}
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Group < out[b].Group })

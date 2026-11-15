@@ -1,8 +1,10 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -209,4 +211,122 @@ func TestThePeerDeliveryStatementSeeksTheDeliveryIndex(t *testing.T) {
 
 	// Assert
 	assertNoTableScan(t, "the books holding a delivery", plan)
+}
+
+// --- counting each end ---------------------------------------------------------
+
+// peerEnds is PeerMessageEnds's answer, failing the test on an error.
+func peerEnds(t *testing.T, d *DB) map[string]int64 {
+	t.Helper()
+	ends, err := d.PeerMessageEnds(ctx())
+	if err != nil {
+		t.Fatalf("PeerMessageEnds: %v", err)
+	}
+	return ends
+}
+
+func TestPeerMessageEndsCountsEachEnd(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []*storev1.StoreEntry
+		want    map[string]int64
+	}{
+		{
+			name: "no message answers zero for both ends",
+			want: map[string]int64{"sender": 0, "recipient": 0},
+		},
+		{
+			name: "two sent and one delivered",
+			entries: []*storev1.StoreEntry{
+				sentLine("toolu_1", "session-a", "m-1"),
+				sentLine("toolu_2", "session-a", "m-2"),
+				deliveredLine("u1", "session-b", "m-1"),
+			},
+			want: map[string]int64{"sender": 2, "recipient": 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+			if len(tt.entries) > 0 {
+				writeOK(t, d, tt.entries...)
+			}
+
+			// Act
+			got := peerEnds(t, d)
+
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ends = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPeerMessageEndsCountsARewrittenLineOnce(t *testing.T) {
+	// Arrange: the same page line written again under a new write.
+	d, _ := newStore(t)
+	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
+	again := deliveredLine("u1", "session-b", "m-1")
+	again.WriteId = "w-u1-again"
+	writeOK(t, d, again)
+
+	// Act
+	got := peerEnds(t, d)
+
+	// Assert
+	if got["recipient"] != 1 {
+		t.Fatalf("ends = %v, want the rewritten line counted once", got)
+	}
+}
+
+func TestPeerMessageEndsExcludesARetiredLine(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	line := onFilePlane(deliveredLine("u1", "session-b", "m-1"))
+	version := uint32(1)
+	line.ConversionVersion = &version
+	healBatch(t, d, 100, 1, []*storev1.StoreEntry{line})
+	healBatch(t, d, 200, 2, nil, retirement("peer:u1", 2))
+
+	// Act
+	got := peerEnds(t, d)
+
+	// Assert
+	if got["recipient"] != 0 {
+		t.Fatalf("ends = %v, want the retired line uncounted", got)
+	}
+}
+
+func TestPeerMessageEndsRefusesAnEndTheIndexNeverWrites(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	writeOK(t, d, deliveredLine("u1", "session-b", "m-1"))
+	if _, err := d.sql.ExecContext(ctx(), `UPDATE peer_delivery SET end_kind = 'bystander'`); err != nil {
+		t.Fatalf("corrupt the end: %v", err)
+	}
+
+	// Act
+	_, err := d.PeerMessageEnds(ctx())
+
+	// Assert
+	if !errors.Is(err, ErrStorage) || !errors.Is(err, errUnknownDeliveryEnd) {
+		t.Fatalf("err = %v, want a storage failure naming the unknown end", err)
+	}
+}
+
+func TestPeerMessageEndsFailsOnAContextAlreadyDone(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	done, cancel := context.WithCancel(ctx())
+	cancel()
+
+	// Act
+	_, err := d.PeerMessageEnds(done)
+
+	// Assert
+	if !errors.Is(err, ErrStorage) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want a storage failure caused by the cancelled context", err)
+	}
 }

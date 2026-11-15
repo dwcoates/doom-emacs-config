@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
 )
 
@@ -238,10 +239,7 @@ func underDirNormalized(root, dir string) bool {
 	if root == "" || dir == "" {
 		return false
 	}
-	if dir == root {
-		return true
-	}
-	return strings.HasPrefix(dir, root+string(filepath.Separator))
+	return dirpath.Within(dir, root)
 }
 
 // normalizePathForCompare folds case and applies Unicode NFC so two spellings

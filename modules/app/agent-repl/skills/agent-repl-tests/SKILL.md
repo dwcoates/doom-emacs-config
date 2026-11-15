@@ -142,10 +142,10 @@ hold it:
 3. **Keep all of its work inside its own process tree, and reap it.** A
    daemon, VM or worker a test starts and leaves running, or reparents
    away, uses CPU no seat accounts for.
-4. **Runner-side work that is test load must hold a seat too.** This
-   includes testrun's own planning, e.g. its `go list -deps ... -test ./...`,
-   which measured 109% CPU outside any unit. Adding more such work outside
-   units is refused. This is a known gap, recorded in `org/todo.md`.
+4. **Runner-side work that is test load must hold a seat too.** testrun's
+   planning `go list -deps ... -test ./...` (measured 109% CPU outside any
+   unit) holds one core seat per listing (`reuse.HeldGoList`). Adding
+   runner-side work that holds no seat is refused.
 
 A test's own timeouts are unaffected by CPU waits, since the wait happens
 before the unit starts; a harness bound that spans a whole run must allow

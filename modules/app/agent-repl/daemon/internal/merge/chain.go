@@ -139,7 +139,7 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		o.deps.Log.Global().Error(op, "could not read the queue to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
 	}
-	paused, err := o.queueHeld(ctx, repo)
+	paused, err := o.speculationHeld(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(op, "could not read whether the queue is paused to extend its chain", dlog.Context{"repo": string(repo), "error": err.Error()})
 		return false
@@ -216,73 +216,101 @@ func (o *orchestrator) extendOnce(ctx context.Context, repo wsm.RepoKey) bool {
 		r.suspendLocked(suspendExit)
 		r.git.stop()
 	}
+	draining := o.draining
 	o.signalChainLocked(repo)
 	o.mu.Unlock()
 	o.deps.Log.Global().Info(op, "a merge joined its queue's chain behind the merge ahead of it", dlog.Context{
 		"repo": string(repo), "workspace": string(r.ws), "behind": string(tail.ws), "rank": len(chain), "resumed": resuming})
+	// THE ADMISSION IS WRITTEN HERE, UNDER THE LINE LOCK, as admitFront writes
+	// a head's: a chain member left waiting in the store until its run wrote
+	// its admission read as waiting to every move, prioritize and dequeue made
+	// in that gap, which could put another merge ahead of it or drop its entry
+	// under its run.
+	var admitted speculativeAdmission
+	if !resuming && !draining {
+		var ok bool
+		if admitted, ok = o.admitBehind(r.ctx, r); !ok {
+			return false
+		}
+	}
 	o.live.Add(1)
 	inflight.Standing(func() {
 		defer o.live.Done()
 		defer close(r.finished)
-		if resuming {
+		switch {
+		case resuming:
 			// A RESUME'S FAILURE ENDED ITS RUN THROUGH THE ONE
 			// CLASSIFICATION, which recorded it.
 			_ = o.resumeInto(r.ctx, r, doc)
-			return
+		case draining:
+			o.unstart(r.ctx, r, nil)
+		default:
+			o.startSpeculative(r.ctx, r, admitted)
 		}
-		o.startSpeculative(r.ctx, r)
 	})
 	return resuming
 }
 
-// startSpeculative admits one merge behind its chain's head: its lease, its
-// admission and its ledger, then the same run a head's admission makes. Its
-// steps run ahead of its turn until the pump promotes it.
-func (o *orchestrator) startSpeculative(ctx context.Context, r *run) {
+// speculativeAdmission is what admitting a merge behind its chain's head took:
+// its entry, its creation job and its lease.
+type speculativeAdmission struct {
+	entry wsm.MergeQueueEntry
+	job   wsm.CreationJob
+	lease wsm.Lease
+}
+
+// admitBehind admits the merge R starts behind its chain's head, under the
+// line lock its caller (extendOnce) holds: it reads what the merge lands and
+// its creation job, takes its lease, then writes its admission. A failure
+// lets the run go (unstart), recorded, and answers false; the entry then
+// waits in line as it was.
+func (o *orchestrator) admitBehind(ctx context.Context, r *run) (speculativeAdmission, bool) {
 	const op = "daemon.merge.start"
 	ws := r.ws
 	log := o.log(ctx, ws)
-	if !o.enterAdmission() {
-		o.unstart(ctx, r, nil)
-		return
-	}
 	entry, err := o.entryOf(ctx, r.repo, ws)
 	if err == nil {
 		_, err = enqueuedMS(entry)
 	}
 	if err != nil {
-		o.leaveAdmission()
 		log.Error(op, "could not read what the merge behind the head lands", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)
-		return
+		return speculativeAdmission{}, false
 	}
 	job, _, err := o.deps.DB.CreationJob(ctx, ws)
 	if err != nil {
-		o.leaveAdmission()
 		log.Error(op, "could not read the requester's creation job", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)
-		return
+		return speculativeAdmission{}, false
 	}
 	// THE LEASE GOES FIRST, THE ADMISSION AFTER: an admitted entry always has
 	// a run holding a lease, so nothing ever reads one as a merge another
 	// daemon drives while this one lets it go.
 	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
 	if err != nil {
-		o.leaveAdmission()
 		log.Error(op, "could not take the merge lease of the merge behind the head", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)
-		return
+		return speculativeAdmission{}, false
 	}
 	if err := o.deps.DB.AdmitMerge(ctx, r.repo, ws); err != nil {
-		o.leaveAdmission()
 		if releaseErr := o.deps.DB.ReleaseLease(ctx, lease.ID); releaseErr != nil {
 			log.Error(op, "could not release the lease of a merge whose admission failed", dlog.Context{"workspace": string(ws), "lease": string(lease.ID), "error": releaseErr.Error()})
 		}
 		log.Error(op, "could not admit the merge behind the head", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)
-		return
+		return speculativeAdmission{}, false
 	}
-	o.leaveAdmission()
+	return speculativeAdmission{entry: entry, job: job, lease: lease}, true
+}
+
+// startSpeculative starts one merge admitted behind its chain's head
+// (admitBehind): the same run a head's admission makes. Its steps run ahead of
+// its turn until the pump promotes it.
+func (o *orchestrator) startSpeculative(ctx context.Context, r *run, admitted speculativeAdmission) {
+	const op = "daemon.merge.start"
+	ws := r.ws
+	log := o.log(ctx, ws)
+	entry, job, lease := admitted.entry, admitted.job, admitted.lease
 	o.deps.Queue.OnLeaseChanged(ws)
 	o.mu.Lock()
 	r.displaces = o.displaces[ws]

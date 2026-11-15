@@ -186,7 +186,7 @@ if [ -n "$violations" ]; then
     status=1
 fi
 if [ -n "$storeread_violations" ]; then
-    printf 'conversation-isolation: INVARIANT I8 VIOLATED — storeread.v1 is the daemon’s read-only view of the store, and its files may import only conversation/v1 and storeread/v1.\n' >&2
+    printf 'conversation-isolation: INVARIANT I8 VIOLATED — storeread.v1 is the read-only view the daemon has of the store, and its files may import only conversation/v1 and storeread/v1.\n' >&2
     printf '%s\n' "$storeread_violations" >&2
     printf 'conversation-isolation: the daemon never writes the store and never sees its storage types; a fact it needs is served in the conversation vocabulary, and a write belongs to a producer through store.v1.WriteBatch.\n' >&2
     status=1

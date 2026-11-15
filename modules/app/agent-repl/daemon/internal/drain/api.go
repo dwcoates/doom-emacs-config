@@ -73,6 +73,10 @@ type Controller interface {
 	// latest collapse that folded the workspace (folded.go). It returns at
 	// once.
 	StandDownFolded(ws ids.WorkspaceID)
+	// ResumeFolded starts the fold's wait again for every running session a
+	// fold withholds, once this daemon owns the workspaces it serves: a
+	// restart or a handover loses the waits held in memory (folded.go).
+	ResumeFolded(ctx context.Context)
 	// RetryWithheld is the daemon's own edge for a workspace (the free edge
 	// a turn's end raises, a session coming up): a stand-down pending on it --
 	// a withheld one or a keep-alive cycle's -- is asked again.
@@ -90,6 +94,11 @@ type Controller interface {
 	// never in remote control, and never once a real turn has run since. It
 	// returns at once.
 	VisitDown(ws ids.WorkspaceID, since time.Time)
+	// ColdDown parks a session the moment its cache is known cold at SINCE
+	// (owner ruling, 2026-11-15; cycle.go), under CycleDown's rules: never
+	// under a turn, never for the workspace in view, never in remote
+	// control, and never once a real turn has run since. It returns at once.
+	ColdDown(ws ids.WorkspaceID, since time.Time)
 }
 
 // Deps are the controller's collaborators.

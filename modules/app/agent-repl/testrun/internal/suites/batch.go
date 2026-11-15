@@ -111,7 +111,7 @@ func cut(area string, members []string) []FileBatch {
 
 // batchSplits is one split per batch under prefix ("<prefix>/<batch>"), every
 // one built by chunk and named.
-func batchSplits(prefix, suite string, batches []FileBatch, chunk func(id string, items []string) run.Spec, named func(id string, items, names []string) run.Spec) []Split {
+func batchSplits(prefix, suite string, batches []FileBatch, chunk func(id string, items []string) run.Spec, named func(id string, items []string, names map[string][]string) run.Spec) []Split {
 	out := make([]Split, 0, len(batches))
 	for _, b := range batches {
 		out = append(out, Split{Group: prefix + "/" + b.Name, Suite: suite, Items: b.Files, Chunk: chunk, Named: named})

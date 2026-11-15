@@ -2,10 +2,12 @@ package drain
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
@@ -98,11 +100,9 @@ func TestACycleStandDownSkips(t *testing.T) {
 		{name: "a hidden workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.hidden(t)
 		}},
-		{name: "a closed workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		{name: "a closed workspace with no merge queued, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
-			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
-				t.Fatalf("MarkClosed: %v", err)
-			}
+			h.closedAt(t, ws)
 			return ws
 		}},
 		{name: "a session a real turn engaged since the beat", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
@@ -284,6 +284,9 @@ func TestARemoteControlWorkspaceIsNotStoodDown(t *testing.T) {
 		{name: "a mode turned on on the switch away from a settings pick", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.remoteControlOn(t)
 		}, ask: func(c *controller, ws ids.WorkspaceID) { c.VisitDown(ws, beatAfter) }},
+		{name: "a mode turned on when its cache went cold", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.remoteControlOn(t)
+		}, ask: func(c *controller, ws ids.WorkspaceID) { c.ColdDown(ws, beatAfter) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -347,4 +350,149 @@ func (h *harness) remoteControlOn(t *testing.T) ids.WorkspaceID {
 		t.Fatalf("SetRemoteControlMode: %v", err)
 	}
 	return ws
+}
+
+// closedAt marks ws closed by the user at instant.
+func (h *harness) closedAt(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+}
+
+// A CLOSED WORKSPACE WITH A MERGE QUEUED is parked as an open one is: the
+// cache keeper's lapse never stands a queued workspace down.
+func TestAClosedWorkspaceWithAMergeQueuedIsStoodDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.closedAt(t, ws)
+	queuedAt(t, h, ws, instant)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want the queued closed workspace parked", term)
+	}
+}
+
+func TestAClosedWorkspaceWhoseQueuesCannotBeReadIsNotStoodDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.DB = sweepReadErrDB{DB: d.DB, read: "queues", err: errFake} })
+	ws := h.workspace(t, instant)
+	h.closedAt(t, ws)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none when the queues cannot be read", killed)
+	}
+	if h.cyclePending(ws) {
+		t.Fatal("a dropped stand-down stayed pending")
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opCycle,
+		Message: "could not read whether the closed workspace has a merge queued; its stand-down is dropped"})
+	if !ok {
+		t.Fatalf("records = %+v, want the queue read's failure at error", records(h.log, opCycle))
+	}
+	if rec.Context["workspace"] != string(ws) || !strings.Contains(fmt.Sprint(rec.Context["cause"]), errFake.Error()) {
+		t.Fatalf("record context = %v, want the workspace and the cause", rec.Context)
+	}
+}
+
+func TestAColdStandDownParksTheSessionForItsOwnReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].WS != ws || killed[0].Force || killed[0].Life != shimlife.StandDownCacheCold {
+		t.Fatalf("kills = %+v, want one graceful cache_cold stand-down", killed)
+	}
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != coldReason.detail {
+		t.Fatalf("terminal = %+v, want the one park with the cold cache's detail", term)
+	}
+}
+
+func TestAColdStandDownSkips(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+	}{
+		{name: "the workspace the user is looking at", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+			return ws
+		}},
+		{name: "a session a real turn engaged since the cache went cold", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			return h.workspace(t, beatAfter.Add(time.Minute))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := tt.arrange(t, h)
+
+			// Act
+			h.c.ColdDown(ws, beatAfter)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none", killed)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a skipped stand-down stayed pending")
+			}
+		})
+	}
+}
+
+func TestAColdStandDownOfABusySessionIsTakenWhenItFallsFree(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+	h.c.ColdDown(ws, beatAfter)
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none under work", killed)
+	}
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].Life != shimlife.StandDownCacheCold {
+		t.Fatalf("kills = %+v, want the cold stand-down taken on the free edge", killed)
+	}
+	if h.cyclePending(ws) {
+		t.Fatal("a stand-down taken stayed pending")
+	}
+}
+
+func TestAColdStandDownParksAWorkspaceWithAMergeQueued(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	queuedAt(t, h, ws, instant)
+
+	// Act
+	h.c.ColdDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want the queued workspace parked", term)
+	}
 }

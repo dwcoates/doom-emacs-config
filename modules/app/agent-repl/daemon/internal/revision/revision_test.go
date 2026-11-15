@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -16,6 +17,7 @@ import (
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // repoPromptsDir is the checkout's own briefs.
@@ -88,12 +90,19 @@ type fakeShim struct {
 	mu       sync.Mutex
 	requests []*shimv1.ReviseResponseRequest
 	answer   func(*shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error)
+	// hangs makes the call answer only when its context ends, as a shim that
+	// never answers does.
+	hangs bool
 }
 
-func (s *fakeShim) ReviseResponse(_ context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+func (s *fakeShim) ReviseResponse(ctx context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
 	s.mu.Lock()
 	s.requests = append(s.requests, req)
 	s.mu.Unlock()
+	if s.hangs {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return s.answer(req)
 }
 
@@ -113,9 +122,40 @@ func (f fakeShims) Client(ids.WorkspaceID) (shimclient.Client, bool) {
 	return f.shim, true
 }
 
+// revisedWords is the prose every successful fake revision answers.
+const revisedWords = "1 🔎 the revised words"
+
 func succeeded(*shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
-	return &shimv1.ReviseResponseResponse{Result: &shimv1.ReviseResponseResponse_Success{Success: &shimv1.ReviseResponseSuccess{Model: "claude-sonnet-5"}}}, nil
+	return &shimv1.ReviseResponseResponse{Result: &shimv1.ReviseResponseResponse_Success{Success: &shimv1.ReviseResponseSuccess{
+		Model: "claude-sonnet-5", Prose: &conversationv1.AgentResponseProse{Markdown: revisedWords},
+	}}}, nil
 }
+
+// fakeOwed records every revision owed to the agent, failing with ERR.
+type fakeOwed struct {
+	mu   sync.Mutex
+	owed []wsm.OwedRevision
+	err  error
+}
+
+func (f *fakeOwed) OweRevision(_ context.Context, _ wsm.WorkspaceID, owed wsm.OwedRevision) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.owed = append(f.owed, owed)
+	return nil
+}
+
+func (f *fakeOwed) recorded() []wsm.OwedRevision {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.OwedRevision(nil), f.owed...)
+}
+
+// revisedAt is the instant every fake revision lands at.
+var revisedAt = time.Unix(1_800_000_000, 0)
 
 // harness is one Reviser over the fakes, with a signal per finished revision.
 type harness struct {
@@ -123,6 +163,7 @@ type harness struct {
 	feed     *fakeFeed
 	status   *fakeStatus
 	shim     *fakeShim
+	owed     *fakeOwed
 	log      *dlog.TestLogger
 	finished chan struct{}
 }
@@ -131,9 +172,10 @@ func newHarness(t *testing.T, shim *fakeShim, promptsDir string) *harness {
 	t.Helper()
 	f := &fakeFeed{responses: map[string]feed.RevisableResponse{"row-1": {Unit: "msg_1:0", Markdown: "1 🔎 the original"}}}
 	log := dlog.NewTestLogger()
-	h := &harness{feed: f, status: &fakeStatus{}, shim: shim, log: log, finished: make(chan struct{}, 8)}
+	h := &harness{feed: f, status: &fakeStatus{}, shim: shim, owed: &fakeOwed{}, log: log, finished: make(chan struct{}, 8)}
 	shims := fakeShims{shim: shim}
-	h.reviser = New(Deps{Shims: shims, Feed: f, Status: h.status, PromptsDir: promptsDir, Life: context.Background(), Log: log})
+	h.reviser = New(Deps{Shims: shims, Feed: f, Status: h.status, Owed: h.owed, Bound: Bound, Now: func() time.Time { return revisedAt },
+		PromptsDir: promptsDir, Life: context.Background(), Log: log})
 	h.reviser.done = func() { h.finished <- struct{}{} }
 	return h
 }
@@ -333,6 +375,9 @@ func TestAFailedRevisionMarksTheResponseFailedAndRecordsTheCause(t *testing.T) {
 		}}, repoPromptsDir, "Couldn't revise: the session could not be asked: connection refused", "transport"},
 		{"no live shim", nil, repoPromptsDir, "Couldn't revise: the workspace has no running session", "no_shim"},
 		{"no brief", &fakeShim{answer: succeeded}, "/nonexistent-prompts-dir", "", "brief"},
+		{"no prose", &fakeShim{answer: func(*shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+			return &shimv1.ReviseResponseResponse{Result: &shimv1.ReviseResponseResponse_Success{Success: &shimv1.ReviseResponseSuccess{Model: "m"}}}, nil
+		}}, repoPromptsDir, "Couldn't revise: the session answered a written revision with no words", "no_prose"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -461,4 +506,84 @@ func TestTheRevisionBriefDiscouragesToolUse(t *testing.T) {
 			t.Fatalf("the brief lacks %q:\n%s", want, text)
 		}
 	}
+}
+
+func TestARevisionTheSessionNeverAnswersTimesOutAtItsBound(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeShim{hangs: true}, repoPromptsDir)
+	h.reviser.deps.Bound = time.Millisecond
+
+	// Act.
+	h.reviseAndWait(t, ask("word", "what does this mean"))
+
+	// Assert.
+	failed := h.feed.lastState().GetFailed()
+	if failed == nil || !strings.Contains(failed.GetText(), "did not answer within 1ms") {
+		t.Fatalf("last state = %v, want failed naming the bound", h.feed.lastState())
+	}
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opRun})
+	if !ok || record.Context["arm"] != "timed_out" {
+		t.Fatalf("error record = %+v (%v), want arm timed_out", record.Context, ok)
+	}
+}
+
+func TestALandedRevisionIsOwedToTheAgent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeShim{answer: succeeded}, repoPromptsDir)
+
+	// Act.
+	h.reviseAndWait(t, ask("word", "what does this mean"))
+
+	// Assert.
+	want := []wsm.OwedRevision{{Unit: "msg_1:0", Original: "1 🔎 the original", Revised: revisedWords, OwedAtNs: revisedAt.UnixNano()}}
+	if got := h.owed.recorded(); len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("owed = %+v, want %+v", got, want)
+	}
+}
+
+func TestAFailedRevisionOwesTheAgentNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeShim{answer: func(*shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+		return nil, errors.New("connection refused")
+	}}, repoPromptsDir)
+
+	// Act.
+	h.reviseAndWait(t, ask("word", "what does this mean"))
+
+	// Assert.
+	if got := h.owed.recorded(); len(got) != 0 {
+		t.Fatalf("owed = %+v, want nothing", got)
+	}
+}
+
+func TestARevisionThatCannotBeOwedIsRecordedAtError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeShim{answer: succeeded}, repoPromptsDir)
+	h.owed.err = errors.New("disk full")
+
+	// Act.
+	h.reviseAndWait(t, ask("word", "what does this mean"))
+
+	// Assert.
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opRun,
+		Message: "the revision landed but could not be recorded for the agent; its next prompt will not say what the response now says"})
+	if !ok || record.Context["cause"] != "disk full" || record.Context["unit"] != "msg_1:0" {
+		t.Fatalf("records = %+v, want the failed record naming its cause and unit", h.log.Records())
+	}
+	if h.feed.lastState().GetFailed() != nil {
+		t.Fatalf("last state = %v, want the landed revision left standing", h.feed.lastState())
+	}
+}
+
+func TestNewRefusesAReviserWithNoBound(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("New built a Reviser with no bound")
+		}
+	}()
+
+	// Act.
+	New(Deps{Owed: &fakeOwed{}, Now: time.Now})
 }

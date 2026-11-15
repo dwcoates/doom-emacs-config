@@ -47,6 +47,8 @@
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl--ws-known-p "workspace" (ws))
+(declare-function agent-repl--ws-render-status "workspace" (ws))
 
 (declare-function agent-repl--async-command "core" (label dir command callback &optional input))
 

@@ -207,3 +207,24 @@ func TestUpdateRemoteControlModeAnswersAnUnspecifiedShimRefusalAsUnlanded(t *tes
 		t.Fatalf("err = %v, want the unlanded arm's FailedPrecondition", err)
 	}
 }
+
+// TestUpdateRemoteControlModeNotYetAdoptedNamesTheIncumbent pins that a toggle
+// refused mid-handover names the daemon serving the workspace meanwhile, so
+// the client acts there rather than waiting out the adoption.
+func TestUpdateRemoteControlModeNotYetAdoptedNamesTheIncumbent(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Ownership.standing = workspace.StandingNotYetAdopted
+	h.IncumbentAddress = "127.0.0.1:8888"
+
+	// Act.
+	resp, err := h.Client.UpdateRemoteControlMode(context.Background(), connect.NewRequest(remoteControlRequest("toggle")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateRemoteControlMode: %v", err)
+	}
+	if got := resp.Msg.GetError().GetNotYetAdopted(); got == nil || got.GetAddress() != "127.0.0.1:8888" {
+		t.Fatalf("result = %v, want not_yet_adopted naming 127.0.0.1:8888", resp.Msg.GetResult())
+	}
+}

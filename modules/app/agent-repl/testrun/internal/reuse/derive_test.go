@@ -3,6 +3,7 @@ package reuse
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -266,7 +267,7 @@ func webUnits() suites.Units {
 		return suites.Split{Group: g, Items: []string{file}, Chunk: func(id string, _ []string) run.Spec { return spec(id) }}
 	}
 	return suites.Units{
-		Atomic: []run.Spec{spec("web:typecheck"), spec("web:integration-build")},
+		Atomic: []run.Spec{spec("web:typecheck"), spec("web:knip"), spec("web:integration-build")},
 		Splits: []suites.Split{split("web/test/a.test.ts", "test/a.test.ts"), split("web/test/b.test.ts", "test/b.test.ts"),
 			split("web[integration]/test/integration/i.test.ts", "test/integration/i.test.ts")},
 	}
@@ -348,9 +349,11 @@ func TestDeriveVitestKeysEachFileOnItsOwnImportGraph(t *testing.T) {
 	if i.Contains(fixtureModule + "/web/test/integration/unimported.json") {
 		t.Error("the integration file's set places what nothing names")
 	}
-	tc := byName["typecheck"].Set
-	if !tc.Contains(fixtureModule+"/web/src/b.ts") || !tc.Contains(fixtureModule+"/web/test/integration/unimported.json") {
-		t.Error("the typecheck does not read the package's whole tree")
+	for _, check := range []string{"typecheck", "knip"} {
+		set := byName[check].Set
+		if set == nil || !set.Contains(fixtureModule+"/web/src/b.ts") || !set.Contains(fixtureModule+"/web/test/integration/unimported.json") {
+			t.Errorf("the %s does not read the package's whole tree", check)
+		}
 	}
 	if !slices.Equal(su.Infra, []string{"web:integration-build"}) {
 		t.Errorf("infra = %v", su.Infra)
@@ -366,7 +369,7 @@ func TestDeriveVitestFailures(t *testing.T) {
 		arrange func(f fixture, u *suites.Units)
 		want    string
 	}{
-		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("web:mystery")) }, "is no file's, typecheck's or build's"},
+		{"a spec of no known kind", func(_ fixture, u *suites.Units) { u.Atomic = append(u.Atomic, spec("web:mystery")) }, "is no file's, typecheck's, knip's or build's"},
 		{"a group of no batch", func(_ fixture, u *suites.Units) { u.Splits[0].Group = "web" }, "is no batch group of web"},
 		{"one file in two batches", func(_ fixture, u *suites.Units) {
 			u.Splits = append(u.Splits, suites.Split{Group: "web[integration]/again", Items: []string{"test/a.test.ts"}})
@@ -552,5 +555,88 @@ func TestCheckDeclaredUnitsTakesAFileInsideABatchForAUnitOfTheSuite(t *testing.T
 				t.Fatalf("checkDeclaredUnits = %v, want an error %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRunnerPackagesLeaveOutTheRoster(t *testing.T) {
+	tests := []struct {
+		name    string
+		listed  []GoPackage
+		listErr error
+		want    []string
+		wantErr string
+	}{
+		{name: "the roster is left out and the rest kept",
+			listed: []GoPackage{{ImportPath: "agentrepl/testrun"}, {ImportPath: rosterPackage}, {ImportPath: "agentrepl/testrun/internal/plan"}},
+			want:   []string{"agentrepl/testrun", "agentrepl/testrun/internal/plan"}},
+		{name: "a failed listing fails", listErr: errors.New("go list broke"), wantErr: "go list broke"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.d.GoList = func(string, string, bool, ...string) ([]GoPackage, error) { return tt.listed, tt.listErr }
+
+			// Act
+			pkgs, err := runnerPackages(f.d)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("runnerPackages = %v, %v; want %q", pkgs, err, tt.wantErr)
+				}
+				return
+			}
+			var got []string
+			for _, p := range pkgs {
+				got = append(got, p.ImportPath)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("runnerPackages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAUnitsDescriptionHoldsItsOwnSuitesWholeEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*roster.Suite)
+	}{
+		{name: "its width", edit: func(s *roster.Suite) { s.Slots = 4 }},
+		{name: "a unit it never reuses", edit: func(s *roster.Suite) { s.Reuse.Never = map[string]string{".": "reads the clock"} }},
+		{name: "its scripts", edit: func(s *roster.Suite) { s.Reuse.Scripts = []string{"bin"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			before := lockSuite
+			after := lockSuite
+			reuse := *lockSuite.Reuse
+			after.Reuse = &reuse
+			tt.edit(&after)
+
+			// Act
+			was, now := unitDesc(before, "."), unitDesc(after, ".")
+
+			// Assert
+			if was == now {
+				t.Fatalf("unitDesc = %q both before and after the edit; want the entry's change to move it", now)
+			}
+		})
+	}
+}
+
+func TestAUnitsDescriptionIsTheSameForTheSameEntry(t *testing.T) {
+	// Arrange: an equal entry built separately, its maps filled in another order.
+	a := roster.Suite{Name: "s", Reuse: &roster.Reuse{Units: map[string][]string{"x": {"a"}, "y": {"b"}}}}
+	b := roster.Suite{Name: "s", Reuse: &roster.Reuse{Units: map[string][]string{"y": {"b"}, "x": {"a"}}}}
+
+	// Act
+	da, db := unitDesc(a, "x"), unitDesc(b, "x")
+
+	// Assert
+	if da != db {
+		t.Fatalf("unitDesc = %q and %q for one entry; want them equal, with no pointer in either", da, db)
 	}
 }

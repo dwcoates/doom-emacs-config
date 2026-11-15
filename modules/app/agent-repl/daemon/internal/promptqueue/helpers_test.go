@@ -60,6 +60,11 @@ type fakeDB struct {
 	engagements      int
 	engagementCtxErr error
 
+	// owedCalls is every debt OweResumption was asked to record, claimed or
+	// not, and oweErr is what it answers.
+	owedCalls []ids.TurnID
+	oweErr    error
+
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
 	held       map[ids.TurnID]*wsm.HeldPrompt
@@ -480,6 +485,10 @@ func (d *fakeDB) Turn(_ context.Context, id ids.WorkspaceID, turn ids.TurnID) (w
 func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, _ time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.owedCalls = append(d.owedCalls, turn)
+	if d.oweErr != nil {
+		return d.oweErr
+	}
 	if d.owed == nil {
 		d.owed = map[ids.WorkspaceID]map[ids.TurnID]bool{}
 	}
@@ -533,6 +542,13 @@ func (d *fakeDB) OwedTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.TurnID,
 }
 
 // owedCount answers how many resumptions ws is owed.
+// oweCalls answers how many debts OweResumption was asked to record.
+func (d *fakeDB) oweCalls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.owedCalls)
+}
+
 func (d *fakeDB) owedCount(ws ids.WorkspaceID) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -910,6 +926,9 @@ type fakeWatcher struct {
 	refuseJoins bool
 	// departure is the watched shim's departure, nil while it runs.
 	departure *sessionwatcher.Departure
+	// retryOwed is the shim's latest vendor-error retry statement naming a
+	// retry still to be made (RetryOwed).
+	retryOwed bool
 	// reaped reports the shim's client reaped while its departure has not
 	// been recorded yet.
 	reaped bool
@@ -972,6 +991,13 @@ func (w *fakeWatcher) Free() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return !w.factsPending && w.inFlight == nil && len(w.live.Agents)+len(w.live.Shells)+len(w.live.Monitors) == 0
+}
+
+// RetryOwed answers the fixture's retry statement.
+func (w *fakeWatcher) RetryOwed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.retryOwed
 }
 
 func (w *fakeWatcher) Departed() (sessionwatcher.Departure, bool) {
@@ -1768,6 +1794,24 @@ func (j *scriptedJudge) questions() [][2]string {
 	return out
 }
 
+// fakeSubmissions records every origin Submit counted (Deps.Submissions).
+type fakeSubmissions struct {
+	mu      sync.Mutex
+	origins []conversationv1.PromptOrigin
+}
+
+func (f *fakeSubmissions) CountPromptSubmitted(origin conversationv1.PromptOrigin) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.origins = append(f.origins, origin)
+}
+
+func (f *fakeSubmissions) counted() []conversationv1.PromptOrigin {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]conversationv1.PromptOrigin(nil), f.origins...)
+}
+
 // noteRecorder records the drain refusals reported to the controller.
 type noteRecorder struct {
 	mu    sync.Mutex
@@ -1808,9 +1852,11 @@ type harness struct {
 	// moves it (the classifier's measured latency).
 	elapsed atomic.Int64
 	drain   *noteRecorder
-	banners *fakeTurnBanners
-	commits *fakeRecounter
-	clocks  *fakeCacheClocks
+	// submissions is what Submit counted.
+	submissions *fakeSubmissions
+	banners     *fakeTurnBanners
+	commits     *fakeRecounter
+	clocks      *fakeCacheClocks
 	// reviveCauses are the start causes the revivals stated.
 	reviveCauses []shimlife.StartCause
 	// settingsStarts are the instants SettingsStarted was told of.
@@ -1859,22 +1905,23 @@ func (h *harness) waitRevivals() { h.q.reviving.Wait() }
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		db:      newFakeDB(),
-		sender:  newFakeSender(),
-		watcher: &fakeWatcher{},
-		feed:    &fakeFeed{},
-		footer:  &fakeFooter{},
-		sidebar: &fakeSidebar{},
-		edges:   &fakeEdges{},
-		leases:  &fakeLeases{},
-		holds:   &fakeHolds{},
-		judge:   &scriptedJudge{},
-		network: &fakeNetwork{},
-		drain:   &noteRecorder{},
-		banners: &fakeTurnBanners{},
-		commits: &fakeRecounter{},
-		clocks:  &fakeCacheClocks{},
-		log:     dlog.NewTestSurfaces(),
+		db:          newFakeDB(),
+		sender:      newFakeSender(),
+		watcher:     &fakeWatcher{},
+		feed:        &fakeFeed{},
+		footer:      &fakeFooter{},
+		sidebar:     &fakeSidebar{},
+		edges:       &fakeEdges{},
+		leases:      &fakeLeases{},
+		holds:       &fakeHolds{},
+		judge:       &scriptedJudge{},
+		network:     &fakeNetwork{},
+		drain:       &noteRecorder{},
+		submissions: &fakeSubmissions{},
+		banners:     &fakeTurnBanners{},
+		commits:     &fakeRecounter{},
+		clocks:      &fakeCacheClocks{},
+		log:         dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
 		TurnBanners: h.banners,
@@ -1886,17 +1933,18 @@ func newHarness(t *testing.T) *harness {
 		ResolveImage: func(b *conversationv1.ImageBlock) (string, string, error) {
 			return "src:" + b.GetLocation().(*conversationv1.ImageBlock_Path).Path.GetPath(), "alt", nil
 		},
-		DB:      h.db,
-		Judge:   h.judge,
-		Network: h.network,
-		Feed:    h.feed,
-		Footer:  h.footer,
-		Sidebar: h.sidebar,
-		Edges:   h.edges,
-		Leases:  h.leases,
-		Merges:  h.leases,
-		Holds:   h.holds,
-		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
+		DB:          h.db,
+		Judge:       h.judge,
+		Network:     h.network,
+		Feed:        h.feed,
+		Footer:      h.footer,
+		Sidebar:     h.sidebar,
+		Edges:       h.edges,
+		Leases:      h.leases,
+		Merges:      h.leases,
+		Submissions: h.submissions,
+		Holds:       h.holds,
+		Client:      func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(ctx context.Context, _ ids.WorkspaceID) error {
 			h.revivals++
 			if cause, ok := shimlife.StartOf(ctx); ok {

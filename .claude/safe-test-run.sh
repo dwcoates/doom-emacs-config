@@ -208,7 +208,13 @@ fi
 
 if [ "$PRE_STATUS_FILTERED" != "$POST_STATUS" ]; then
   DRIFT=1
-  DRIFT_REPORT="${DRIFT_REPORT}  - Working tree status changed (see 'git status' for detail).\n"
+  DRIFT_REPORT="${DRIFT_REPORT}  - Working tree status changed; each status line only one side holds (- before the run, + after it):\n"
+  # Each path whose status line differs, so the report says what moved
+  # without a second look at a tree that may have moved again since.
+  while IFS= read -r line; do
+    [ -n "$line" ] && DRIFT_REPORT="${DRIFT_REPORT}        $line\n"
+  done < <(diff <(printf '%s\n' "$PRE_STATUS_FILTERED" | sort) <(printf '%s\n' "$POST_STATUS" | sort) \
+    | sed -n 's/^< /- /p; s/^> /+ /p')
 fi
 
 # ---- Report + cleanup ------------------------------------------------------

@@ -72,6 +72,16 @@ func TestLockHelperProcess(t *testing.T) {
 		}
 		fmt.Printf("child %d\n", child.Process.Pid)
 		os.Exit(0)
+	case "across-exec":
+		// THE LOCK OUTLIVES THE EXEC: the program exec'd in this process's
+		// place holds it, under this same pid, until it exits.
+		if err := HoldAcrossExec(path); err != nil {
+			fail(err)
+		}
+		fmt.Printf("ready %d\n", os.Getpid())
+		if err := syscall.Exec("/bin/cat", []string{"cat"}, os.Environ()); err != nil {
+			fail(err)
+		}
 	case "probe":
 		holder, err := HolderOf(path)
 		if err != nil {
@@ -652,5 +662,44 @@ func TestASharedHoldReleasesTwiceSafely(t *testing.T) {
 	// Act and assert
 	if err := nilHold.Release(); err != nil {
 		t.Fatalf("Release() on nil = %v", err)
+	}
+}
+
+func TestHoldAcrossExecIsHeldByTheExecdProgramUntilItExits(t *testing.T) {
+	// Arrange: a process takes the lock, then execs cat in its own place.
+	path := lockPath(t)
+	h := startLockHelper(t, "across-exec", path)
+	pid := h.field(t, "ready")
+
+	// Act: the lock is read while cat runs, then cat is let go.
+	holder, err := HolderOf(path)
+	h.stdin.Close()
+	waitErr := h.cmd.Wait()
+
+	// Assert: the exec'd program held it under the same pid, and it was
+	// released when that program exited.
+	if err != nil || holder.PID != pid {
+		t.Fatalf("holder = %+v, %v; want the exec'd process %d", holder, err, pid)
+	}
+	if waitErr != nil {
+		t.Fatalf("the exec'd program ended on %v", waitErr)
+	}
+	rec, _, err := TryExclusive(path)
+	if err != nil {
+		t.Fatalf("the lock is still held after the exec'd program exited: %v", err)
+	}
+	rec.Release()
+}
+
+func TestHoldAcrossExecThatCannotOpenItsFileSaysWhy(t *testing.T) {
+	// Arrange: a lock file in a directory that does not exist.
+	path := filepath.Join(t.TempDir(), "gone", "x.lock")
+
+	// Act.
+	err := HoldAcrossExec(path)
+
+	// Assert.
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("HoldAcrossExec = %v, want the missing directory", err)
 	}
 }

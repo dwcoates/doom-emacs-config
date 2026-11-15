@@ -91,6 +91,9 @@ const (
 	StatementLiveShellRuns = "live_shell_runs"
 	// StatementPeerDelivery is the delivery index lookup by delivery id.
 	StatementPeerDelivery = "peer_delivery"
+	// StatementPeerMessageEnds is the count of each end of the cross-session
+	// messages the delivery index holds (agentrepl_peer_messages).
+	StatementPeerMessageEnds = "peer_message_ends"
 	// StatementDetachedWorkByUnit is the shim's detached-work lookup by unit.
 	StatementDetachedWorkByUnit = "detached_work_by_unit"
 	StatementListCursors        = "list_cursors"

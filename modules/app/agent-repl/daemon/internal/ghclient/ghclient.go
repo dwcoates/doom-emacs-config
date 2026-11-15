@@ -10,7 +10,11 @@
 // wrote none (no network, no login, no `gh`) is a failure to reach GitHub.
 //
 // THE TOKEN NEVER PASSES THROUGH THE DAEMON. `gh` reads it from the keyring;
-// nothing here sees it, logs it or stores it.
+// nothing here sees it, logs it or stores it. A token variable in the
+// daemon's own environment is never handed to `gh` (ghEnviron): `gh` prefers
+// one to the keyring, and the daemon's environment is inherited across every
+// handover, so a token that went stale once refused every call until a
+// restart (2026-11-15, "Bad credentials" on every call).
 //
 // EVERY FAILURE IS RECORDED HERE, ONCE, the ownership point: a caller that
 // propagates a *Failure does not record it again.
@@ -172,7 +176,55 @@ func New(cfg Config) (Client, error) {
 	if cfg.Binary == "" {
 		cfg.Binary = ghBinary
 	}
+	if set := tokenVariablesSet(os.Environ()); len(set) > 0 {
+		cfg.Log.Info(opClient, "the daemon's environment carries a GitHub token variable; gh runs without it, as the user's keyring login",
+			dlog.Context{"variables": set})
+	}
 	return &client{cfg: cfg}, nil
+}
+
+// opClient is the operation the client's construction is recorded under.
+const opClient = "daemon.ghclient.client"
+
+// tokenVariables are the environment variables `gh` takes a token from in
+// place of its keyring login.
+var tokenVariables = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+
+// isTokenVariable reports whether the environment entry KV sets a token
+// variable.
+func isTokenVariable(kv string) bool {
+	name, _, _ := strings.Cut(kv, "=")
+	for _, v := range tokenVariables {
+		if name == v {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenVariablesSet answers the token variables ENVIRON sets, by name only.
+func tokenVariablesSet(environ []string) []string {
+	var set []string
+	for _, kv := range environ {
+		if isTokenVariable(kv) {
+			name, _, _ := strings.Cut(kv, "=")
+			set = append(set, name)
+		}
+	}
+	return set
+}
+
+// ghEnviron answers `gh`'s environment: ENVIRON without any token variable,
+// so `gh` answers as the user's keyring login, and with its prompts, color
+// and update notices off.
+func ghEnviron(environ []string) []string {
+	env := make([]string, 0, len(environ)+3)
+	for _, kv := range environ {
+		if !isTokenVariable(kv) {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_NO_UPDATE_NOTIFIER=1")
 }
 
 type client struct {
@@ -253,7 +305,7 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_NO_UPDATE_NOTIFIER=1")
+	cmd.Env = ghEnviron(os.Environ())
 	fields := dlog.Context{"method": method, "path": path}
 	// The output goes to files, never pipes, as every captured child's does
 	// (childproc.Run).

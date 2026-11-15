@@ -60,6 +60,7 @@
 
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
 (declare-function agent-repl-connect-refused-arm "connect" (detail))
+(declare-function agent-repl-connect-refusal-address "connect" (detail))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
@@ -488,7 +489,7 @@ there to say it."
                                   dir (plist-get response :value))
                 (funcall on-refused (plist-get response :value)))
             (funcall on-done (agent-repl-host--record-registration
-                              log-scope dir :refused (plist-get response :value)))))
+                              log-scope dir :refused (plist-get response :value) workspace))))
          (arm
           (agent-repl--error log-scope "elisp.host.register-unknown-arm dir=%S arm=%S" dir arm)
           (funcall on-done nil))))
@@ -503,6 +504,11 @@ ARM is `:registered' (VALUE the decoded `RegisterWorkspaceSuccess'),
 \(VALUE what broke).  A registration of the existing workspace WS also
 records the page the daemon last knew it to hold
 \(`agent-repl-host-last-known-page').
+A registration of WS refused `transferring_away' is HANDOVER NEWS, not a
+failure: the daemon handed WS to the successor it names, so it is
+recorded at INFO and handed to `agent-repl-host-handle-refusal', which
+walks WS onto that successor; it still answers nil, since this daemon
+registered nothing.
 THE ONE RECORD of a registration\='s fate, a lone RegisterWorkspace
 \(`agent-repl-host-register') and each dir of a RegisterWorkspaces
 \(`agent-repl-host--outcome-ref') alike, so a reader asks for one
@@ -517,7 +523,13 @@ registration\='s outcome the same way however it was sent."
                          dir (plist-get ref :id) page)
        ref))
     (:refused
-     (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)
+     (let ((cause (plist-get value :cause)))
+       (if (and ws (eq (plist-get cause :arm) :transferring-away))
+           (progn
+             (agent-repl--info scope "elisp.host.register-transferring-away dir=%S fields=%S"
+                               dir (plist-get cause :value))
+             (agent-repl-host-handle-refusal ws cause))
+         (agent-repl--error scope "elisp.host.register-refused dir=%S error=%S" dir value)))
      nil)
     (:failed
      (agent-repl--error scope "elisp.host.register-failed dir=%S detail=%S" dir value)
@@ -576,7 +588,7 @@ registration\='s own."
       (:registered
        (agent-repl-host--record-registration ws dir :registered value ws))
       (:refused
-       (agent-repl-host--record-registration ws dir :refused value))
+       (agent-repl-host--record-registration ws dir :refused value ws))
       (:failed
        (agent-repl-host--record-registration ws dir :failed (plist-get value :cause)))
       (other
@@ -1463,27 +1475,43 @@ it.  STREAM nil means the caller did not name the stream."
     ;; only once the incumbent exits -- and an incumbent still serving another
     ;; workspace never did (2026-10-26: a fresh Emacs, linked by daemon.addr
     ;; to the incumbent, drew all 45 of its workspaces severed).
-    (agent-repl-host--put ws :ending-stream nil)
-    (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s" ws)
-    (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
-    (agent-repl-host--put ws :stream nil)
-    (agent-repl-host--put ws :detached t)
-    (agent-repl-host--transferred ws))
+    ;;
+    ;; THE REFUSAL NAMES THE SUCCESSOR (`agent-repl-connect-refusal-address'),
+    ;; so WS walks there as a unary `transferring_away' walks it, rather than
+    ;; onto whichever successor the link recorded.
+    (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
+      (agent-repl-host--put ws :ending-stream nil)
+      (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s address=%S" ws address)
+      (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
+      (agent-repl-host--put ws :stream nil)
+      (agent-repl-host--put ws :detached t)
+      (if address
+          (agent-repl-host-handle-refusal
+           ws (list :arm :transferring-away :value (list :address address)))
+        (agent-repl-host--transferred ws))))
    ((equal (agent-repl-host--refused-arm outcome) "not_yet_adopted")
     ;; THE DAEMON HAS NOT TAKEN WS OVER YET, AND SAID SO.  Nothing is lost:
     ;; a standing successor is the one to adopt onto, and otherwise WS
     ;; follows the live daemon, which registers it once the link settles
     ;; (2026-10-26: the promoted successor refused a workspace its
     ;; predecessor still held at its exit, and that was drawn as a loss).
-    (agent-repl-host--put ws :ending-stream nil)
-    (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s" ws)
-    (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
-    (agent-repl-host--put ws :stream nil)
-    (agent-repl-host--put ws :detached t)
-    (let ((new (agent-repl-link-successor)))
-      (if new
-          (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
-        (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))
+    ;;
+    ;; A REFUSAL NAMING THE DAEMON THAT SERVES WS MEANWHILE is viewed there
+    ;; (`agent-repl-host-view-where-served'), as a unary `not_yet_adopted'
+    ;; is: nothing waits on the takeover.  One naming the very daemon that
+    ;; refused walks nothing there, and takes the walk below.
+    (let ((address (agent-repl-connect-refusal-address (cadr outcome))))
+      (agent-repl-host--put ws :ending-stream nil)
+      (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s serving=%S" ws address)
+      (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
+      (agent-repl-host--put ws :stream nil)
+      (agent-repl-host--put ws :detached t)
+      (unless (and address
+                   (agent-repl-host-view-where-served ws address "stream-refused-not-yet-adopted"))
+        (let ((new (agent-repl-link-successor)))
+          (if new
+              (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
+            (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))))
    (t
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
@@ -1874,6 +1902,16 @@ severed until a hand-triggered walk."
   (cond
    ((not (agent-repl-host--reattach-current-p ws token))
     (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+   ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
+   ;; waiting for that successor to be accepted (`:adopt-pending',
+   ;; `agent-repl-host--adopt-on-acceptance').  WS is not detached: the
+   ;; acceptance walks it, so this walk ends without arming another.  A
+   ;; successor already accepted took a NEW walk at once, and the branch
+   ;; above dropped this one as superseded.
+   ((and (null ref) (plist-get (agent-repl-host--entry ws) :adopt-pending))
+    (agent-repl-host--put ws :reattach nil)
+    (agent-repl--info ws (format "elisp.host.%s-register-handed-over ws=%%s dir=%%S address=%%S" trigger)
+                      ws dir (agent-repl-connect-connection-address new)))
    ;; THE SLUG NAMES THE TRIGGER (`elisp.host.link-up-register-failed',
    ;; `elisp.host.stream-lost-webview-repointed', ...), a closed
    ;; vocabulary, so a reader can ask for one edge's walks alone.
@@ -2012,14 +2050,15 @@ Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
     (agent-repl--info ws "elisp.host.call-held ws=%s method=%s held=%d" ws method (length held))))
 
 (defun agent-repl-host--release-held (ws outcome &optional to)
-  "Send every call held for WS, in the order it was made: its adopt is OUTCOME.
-OUTCOME names how the hold ended (`adopted', `refused', `failed',
-`superseded', `withdrawn', `forgotten').  Each call goes to TO when given
-\(a retrying adopt names the daemon that still serves WS), and otherwise
-to the daemon WS stands on NOW (`agent-repl-host-conn-or-primary'): the
-successor once WS is adopted, the daemon it was put back on otherwise.  A call with no
-daemon to go to, and a send that signals, answers its own ON-FAILURE, at
-ERROR, and the calls after it are still sent."
+  "Send every call held for WS, in the order it was made.
+Its adopt is OUTCOME, which names how the hold ended (`adopted',
+`refused', `failed', `superseded', `withdrawn', `forgotten').  Each call
+goes to TO when given \(a retrying adopt names the daemon that still
+serves WS), and otherwise to the daemon WS stands on NOW
+\(`agent-repl-host-conn-or-primary'): the successor once WS is adopted,
+the daemon it was put back on otherwise.  A call with no daemon to go
+to, and a send that signals, answers its own ON-FAILURE, at ERROR, and
+the calls after it are still sent."
   (let ((held (plist-get (agent-repl-host--entry ws) :held-calls)))
     (when held
       (agent-repl-host--put ws :held-calls nil)
@@ -2087,8 +2126,8 @@ webview are put back where they were, so a refusal or a transport failure
 leaves the workspace on the daemon that still serves it.
 
 A TRANSPORT FAILURE IS RETRIED, AND NOT RETRYING IT COST THE WHOLE
-ADOPTION WINDOW.  The adopt is an ordinary unary call under
-`agent-repl-connect-unary-timeout-seconds' (10s, connect.el), while the
+ADOPTION WINDOW.  The adopt is a unary call under its own bound,
+`agent-repl-host-adopt-timeout-seconds', while the
 rendezvous it joins completes only when EVERY participant has called —
 so on a loaded box this call can expire on a rendezvous that is merely
 still waiting for the page, and a dropped socket does the same thing.
@@ -2148,6 +2187,18 @@ standing successor, `closed' when NEW\='s connection is closed, and
    ((agent-repl-connect-failure-unreached-p detail) 'unreached)
    (t t)))
 
+(defconst agent-repl-host-adopt-timeout-seconds 30
+  "How long an AdoptHostWorkspace call may wait for the daemon's answer.
+The adopt joins a rendezvous the successor answers only once every
+participant has called and the workspace is adopted, so it waits as long
+as the handover's adoption does.  Measured from each `reattach' to its
+`adopted' over the twelve handovers of 2026-11-14 and 2026-11-15 (114 to
+142 workspaces each): p90 3.5 to 11.1s, the worst 13.6s (11-14 18:13).
+The generic `agent-repl-connect-unary-timeout-seconds' (10s) sat below
+that tail, so every handover timed the slow adopts out at the instant the
+daemon answered them, recorded each at ERROR and adopted it again (36
+workspaces at 12:55, 2026-11-15).  30s is a little over twice the worst.")
+
 (defun agent-repl-host--adopt-call (ws new token trigger old)
   "Issue AdoptHostWorkspace for WS on NEW, for reattach walk TOKEN.
 WS already stands moved onto NEW (`agent-repl-host--adopt-onto'); OLD is
@@ -2172,6 +2223,7 @@ is recorded."
        (lambda ()
          (agent-repl-rpc-adopt-host-workspace
           new (list :workspace ref)
+          :timeout agent-repl-host-adopt-timeout-seconds
           :on-response
           (lambda (response)
             (cond

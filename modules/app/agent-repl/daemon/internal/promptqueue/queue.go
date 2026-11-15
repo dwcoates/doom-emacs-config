@@ -257,6 +257,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the network's state")
 	case deps.Sidebar == nil:
 		return nil, fmt.Errorf("the prompt queue needs the roster resolver")
+	case deps.Submissions == nil:
+		return nil, fmt.Errorf("the prompt queue needs the submissions' telemetry")
 	case deps.Leases == nil:
 		return nil, fmt.Errorf("the prompt queue needs the lease watcher")
 	case deps.Merges == nil:

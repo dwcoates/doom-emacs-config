@@ -41,6 +41,11 @@ type RequestGate interface {
 	// handler to return AND every h2 stream's end -- each answer's and each
 	// end frame -- to be on the socket, and reports how many were not.
 	AwaitStreamsEnded(deadline time.Time) int
+	// GoAway refuses every new stream: it sends every h2 connection its
+	// GOAWAY and waits, up to deadline, until each is on the socket, and
+	// reports how many connections were not. The listener must have stopped
+	// accepting first.
+	GoAway(deadline time.Time) int
 }
 
 // Serving is the daemon's one serving handler: h2c over the loopback listener,
@@ -67,6 +72,14 @@ type RequestGate interface {
 // AwaitStreamsEnded -- so every client reads its stream's end frame rather
 // than a connection cut under it.
 //
+// A STREAM IS EITHER ANSWERED OR NEVER ADMITTED. A client keeps calling on a
+// connection it already holds while the exit runs, so a call can reach the
+// daemon after every wait above has ended; admitted, it would be cut by the
+// process exit. GoAway ends admission itself: every h2 connection gets its
+// GOAWAY, after which the server discards every new stream unprocessed and
+// the client knows to open it anew, so the streams admitted before it are a
+// closed set the exit's last wait sees whole.
+//
 // A HANDLER RETURNING IS NOT ITS ANSWER LEAVING. The counts here come down
 // when handlers return; what the sockets have written is the barrier's
 // (WriteBarrier), which the exit's last wait reads.
@@ -85,6 +98,13 @@ type Serving struct {
 	// pushes counts the values on their way to a standing stream
 	// (publish.StreamPushes in the daemon).
 	pushes *inflight.Tracker
+	// goAwaySender is never served: its Shutdown is the one exported way to
+	// make the h2 server write a GOAWAY on every connection it holds, the
+	// hook http2.ConfigureServer registers on it. See sendGoAway.
+	goAwaySender *http.Server
+	// startGoAway starts goAwaySender's GOAWAY: its Shutdown, and a test's
+	// failing stand-in, so the failure's record is pinned.
+	startGoAway func(context.Context) error
 
 	mu       sync.Mutex
 	inFlight int
@@ -115,9 +135,47 @@ func (s *Serving) Listener(inner net.Listener) net.Listener {
 // The counting sits INSIDE the h2c handler, because outside it there is only
 // the single hijacked connection to see and never the streams carried on it.
 func H2C(h http.Handler, log dlog.Logger) *Serving {
-	s := &Serving{log: log, pushes: publish.StreamPushes}
-	s.handler = h2c.NewHandler(s.counted(h), &http2.Server{})
+	s := &Serving{log: log, pushes: publish.StreamPushes, goAwaySender: &http.Server{}}
+	h2 := &http2.Server{}
+	// CONFIGURED SO ITS CONNECTIONS ARE HELD: an h2 server that was never
+	// configured keeps no set of the connections it serves, and so has none
+	// to send a GOAWAY (GoAway).
+	if err := http2.ConfigureServer(s.goAwaySender, h2); err != nil {
+		panic(fmt.Sprintf("server: configuring the h2 server for its GOAWAY: %v", err))
+	}
+	s.startGoAway = s.goAwaySender.Shutdown
+	s.handler = h2c.NewHandler(s.counted(h), h2)
 	return s
+}
+
+// GoAway refuses every new stream on every h2 connection and waits, up to
+// deadline, until each connection's GOAWAY is on the socket, saying so loudly
+// when the deadline passes first: a stream those connections admit after it
+// is cut by the exit rather than answered or refused.
+func (s *Serving) GoAway(deadline time.Time) int {
+	left := s.barrier.GoAway(s.sendGoAway, deadline)
+	if left > 0 && s.log != nil {
+		s.log.Error("daemon.server.go_away",
+			"the exit's deadline passed with connections whose GOAWAY never reached the socket; a call they admit from here is cut by the exit",
+			dlog.Context{"connections": left, "remote": s.barrier.Owing(), "deadline": deadline.Format(time.RFC3339Nano)})
+	}
+	return left
+}
+
+// sendGoAway makes the h2 server write a GOAWAY on every connection it holds.
+// It returns at once; the frames are written by each connection's own serve
+// loop, which the barrier reads.
+func (s *Serving) sendGoAway() {
+	if s.log != nil {
+		s.log.Info("daemon.server.go_away", "refusing every new stream: a GOAWAY is sent on every h2 connection", nil)
+	}
+	if err := s.startGoAway(context.Background()); err != nil {
+		if s.log == nil {
+			panic(fmt.Sprintf("server: the h2 server's GOAWAY could not be started, and there is no logger to say so: %v", err))
+		}
+		s.log.Error("daemon.server.go_away", "the h2 server's GOAWAY could not be started; its connections keep admitting calls the exit will cut",
+			dlog.Context{"cause": err.Error()})
+	}
 }
 
 // ServeHTTP serves one request through the h2c handler.

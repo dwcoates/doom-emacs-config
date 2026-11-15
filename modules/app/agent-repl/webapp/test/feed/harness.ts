@@ -1039,10 +1039,11 @@ export function rowContext(ctx: AppContext, row: FeedRow, extra: Partial<RowCont
 
 /**
  * A row context for a card drawn from a page, so its title shows whole: what a
- * test of anything but the title's type-out hands `foldTitle`.
+ * test of anything but the title's type-out hands `foldTitle`. ID names the
+ * row, which a final response needs: its question control asks about it.
  */
-export function pagedRowContext(): RowContext {
-  return rowContext(harness().ctx, create(FeedRowSchema, {}));
+export function pagedRowContext(id?: string): RowContext {
+  return rowContext(harness().ctx, create(FeedRowSchema, id === undefined ? {} : { id: feedId(id) }));
 }
 
 /** Let every scripted answer settle; the router hands them back on timers. */

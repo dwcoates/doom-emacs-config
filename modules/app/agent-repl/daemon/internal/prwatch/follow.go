@@ -39,6 +39,18 @@ func (w *Watcher) Anchor(ctx context.Context, subscriber ids.WorkspaceID, pr wsm
 	return sub, statusProto(snap), nil
 }
 
+// FollowFromFirstRead answers the subscription SUBSCRIBER takes to PR
+// without reading it: the watcher's first successful read anchors it
+// (told.AnchorOnRead), so nothing already on the pull request is told, and
+// the caller never waits on GitHub (2026-11-10: storing an owned link held its
+// caller over 60s while GitHub was unreachable).
+func (w *Watcher) FollowFromFirstRead(subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) wsm.PullRequestSubscription {
+	t, _, _ := decodeTold("")
+	t.AnchorOnRead = true
+	return wsm.PullRequestSubscription{Subscriber: subscriber, PullRequest: pr, Events: events, Origin: origin,
+		SubscribedAt: w.deps.Clock.Now(), Told: encodeTold(t)}
+}
+
 // FailureProto is a call's error as the contract's GitHub failure.
 func FailureProto(err error) *agentreplv1.PullRequestGitHubFailure {
 	return failureProtoOf(failureOf(err, time.Time{}), err)
@@ -229,6 +241,11 @@ func (w *Watcher) recordOwn(ctx context.Context, ws ids.WorkspaceID, pr wsm.Pull
 		t, _, err := decodeTold(sub.Told)
 		if err != nil {
 			return err
+		}
+		// A subscription its first read anchors counts this comment as told
+		// with everything else on the pull request.
+		if t.AnchorOnRead {
+			return nil
 		}
 		key, stamp := strconv.FormatUint(id, 10), updated.Format(time.RFC3339Nano)
 		if line {

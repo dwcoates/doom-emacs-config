@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_register_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_register_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQifwoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoPbGFzdF9rbm93bl9wYWdlGAIgASgLMhsuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2UiiQEKDUxhc3RLbm93blBhZ2USMwoGbG9hZGVkGAEgASgLMiEuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VMb2FkZWRIABI6Cgpub3RfbG9hZGVkGAIgASgLMiQuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VOb3RMb2FkZWRIAEIHCgVzdGF0ZSIVChNMYXN0S25vd25QYWdlTG9hZGVkIhgKFkxhc3RLbm93blBhZ2VOb3RMb2FkZWQiiAIKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAEj8KD3BhcmVudF9ub3Rfb3BlbhgDIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSABCBwoFY2F1c2UiHwodUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWUiUAopUmVnaXN0ZXJXb3Jrc3BhY2VJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVnaXN0ZXJfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiJwoYUmVnaXN0ZXJXb3Jrc3BhY2VSZXF1ZXN0EgsKA2RpchgBIAEoCSKXAQoZUmVnaXN0ZXJXb3Jrc3BhY2VSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLlJlZ2lzdGVyV29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQifwoYUmVnaXN0ZXJXb3Jrc3BhY2VTdWNjZXNzEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoPbGFzdF9rbm93bl9wYWdlGAIgASgLMhsuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2UiiQEKDUxhc3RLbm93blBhZ2USMwoGbG9hZGVkGAEgASgLMiEuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VMb2FkZWRIABI6Cgpub3RfbG9hZGVkGAIgASgLMiQuYWdlbnRyZXBsLnYxLkxhc3RLbm93blBhZ2VOb3RMb2FkZWRIAEIHCgVzdGF0ZSIVChNMYXN0S25vd25QYWdlTG9hZGVkIhgKFkxhc3RLbm93blBhZ2VOb3RMb2FkZWQi1gIKFlJlZ2lzdGVyV29ya3NwYWNlRXJyb3ISRQoObm90X2Ffd29ya3RyZWUYASABKAsyKy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWVIABJdChppbnNpZGVfdGVtcG9yYXJ5X2RpcmVjdG9yeRgCIAEoCzI3LmFnZW50cmVwbC52MS5SZWdpc3RlcldvcmtzcGFjZUluc2lkZVRlbXBvcmFyeURpcmVjdG9yeUgAEj8KD3BhcmVudF9ub3Rfb3BlbhgDIAEoCzIkLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQYXJlbnROb3RPcGVuSAASTAoRdHJhbnNmZXJyaW5nX2F3YXkYBCABKAsyLy5hZ2VudHJlcGwudjEuUmVnaXN0ZXJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SABCBwoFY2F1c2UiHwodUmVnaXN0ZXJXb3Jrc3BhY2VOb3RBV29ya3RyZWUiNAohUmVnaXN0ZXJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiUAopUmVnaXN0ZXJXb3Jrc3BhY2VJbnNpZGVUZW1wb3JhcnlEaXJlY3RvcnkSCwoDZGlyGAEgASgJEhYKDnRlbXBvcmFyeV9yb290GAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RegisterWorkspaceRequest
@@ -209,6 +209,15 @@ export type RegisterWorkspaceError = Message<"agentrepl.v1.RegisterWorkspaceErro
      */
     value: WorkspaceParentNotOpen;
     case: "parentNotOpen";
+  } | {
+    /**
+     * The dir is a workspace this daemon handed to its successor during a
+     * handover, so it registers there and nowhere else; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.RegisterWorkspaceTransferringAway transferring_away = 4;
+     */
+    value: RegisterWorkspaceTransferringAway;
+    case: "transferringAway";
   } | { case: undefined; value?: undefined };
 };
 
@@ -231,6 +240,33 @@ export type RegisterWorkspaceNotAWorktree = Message<"agentrepl.v1.RegisterWorksp
  */
 export const RegisterWorkspaceNotAWorktreeSchema: GenMessage<RegisterWorkspaceNotAWorktree> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_register_workspace, 7);
+
+/**
+ * A registration of a workspace this daemon has transferred to its successor.
+ * It is REFUSED BEFORE ANYTHING IS WRITTEN: the row is not re-opened, no
+ * serving ownership is claimed and no resolver is bound here, so the
+ * successor stays the workspace's one server. It is handover news, not a
+ * failure: the client re-registers the workspace at `address` and views it
+ * there. Answered both by RegisterWorkspace and, per dir, by
+ * RegisterWorkspaces' `refused` arm.
+ *
+ * @generated from message agentrepl.v1.RegisterWorkspaceTransferringAway
+ */
+export type RegisterWorkspaceTransferringAway = Message<"agentrepl.v1.RegisterWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, where the workspace registers.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RegisterWorkspaceTransferringAway.
+ * Use `create(RegisterWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const RegisterWorkspaceTransferringAwaySchema: GenMessage<RegisterWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 8);
 
 /**
  * The directory lies inside a temporary directory (owner ruling,
@@ -262,5 +298,5 @@ export type RegisterWorkspaceInsideTemporaryDirectory = Message<"agentrepl.v1.Re
  * Use `create(RegisterWorkspaceInsideTemporaryDirectorySchema)` to create a new message.
  */
 export const RegisterWorkspaceInsideTemporaryDirectorySchema: GenMessage<RegisterWorkspaceInsideTemporaryDirectory> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_register_workspace, 9);
 
