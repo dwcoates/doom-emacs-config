@@ -721,7 +721,8 @@ func (q *queue) checkRegistryLocked(d *delivery, edge freenessEdge, log dlog.Log
 // Such a bounce stays registered, the workspace is never drained for it, and
 // the lease's release takes it (OnLeaseChanged's lease edge): what the merge
 // drives the session with -- its own turns, delivered past its holding lease
-// -- never waits on a bounce that waits on the merge.
+// -- never waits on a bounce that waits on the merge. A dispatch-quiet move
+// registered beside the replacement is never held: it overtakes it.
 //
 // A lease that cannot be read takes nothing: the bounce stays registered, the
 // failure is recorded at ERROR, and the next edge judges it again. The caller
@@ -743,6 +744,22 @@ func (q *queue) heldBehindMergeLocked(ctx context.Context, d *delivery, pending 
 		return true
 	}
 	if !held || lease.Holder != wsm.HolderMerge {
+		return false
+	}
+	// A DISPATCH-QUIET MOVE NEVER WAITS BEHIND A MERGE: the handover it runs
+	// for suspends the merge at its step, and the merge keeps its lease until
+	// the daemon the move takes the workspace to resumes it. Held here, the
+	// move waited on the lease and the merge on the move, and the deploy
+	// never finished (2026-11-15 21:36: two merges' workspaces kept 0.444.10's
+	// rollout from settling). The move overtakes the replacement, which runs
+	// on the next daemon behind the merge there.
+	q.mu.Lock()
+	overtook := pending.quietMove() && pending.overtake()
+	q.mu.Unlock()
+	if overtook {
+		log.Info(opBounce, "a merge's lease holds the workspace; the dispatch-quiet move runs now and carries the replacement waiting behind the merge to the daemon it moves to", dlog.Context{
+			"reason": reason, "lease": string(lease.ID),
+		})
 		return false
 	}
 	log.Info(opBounce, "a merge's lease holds the workspace; the bounce stays registered, the workspace is not drained, and the lease's release takes it", dlog.Context{
