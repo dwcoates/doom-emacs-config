@@ -662,6 +662,33 @@ func TestOnlyTheFrontOfTheRosterLineCarriesItsStages(t *testing.T) {
 	}
 }
 
+func TestAHeadNotAdmittedCarriesNoStagesFromAnEarlierAttempt(t *testing.T) {
+	// Arrange: the head waits with an earlier attempt's settled rebase.
+	h := newHarness(t)
+	h.register("ws-a", "a")
+	started := time.UnixMilli(5_000)
+	ended := started.Add(time.Second)
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{
+		{Repo: h.repoKey(), Workspace: "ws-a", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+	}
+	h.db.ledger["ws-a"] = []wsm.MergeLedgerEntry{{Workspace: "ws-a", Lease: "lease-a", Intervals: []wsm.TabInterval{
+		{Round: 1, Kind: TabRebasing, StartedAt: started, EndedAt: &ended, Outcome: "succeeded"}}}}
+	h.db.mu.Unlock()
+	h.o.mu.Lock()
+	h.o.ledgerOf["ws-a"] = "lease-a"
+	h.o.mu.Unlock()
+
+	// Act
+	h.o.publishRosterQueue(context.Background(), h.repoKey())
+
+	// Assert
+	line := h.sidebar.queueOf(h.repoKey()).Line
+	if len(line) != 1 || line[0].Admitted || len(line[0].Stages) != 0 {
+		t.Fatalf("line = %+v, want the waiting head drawn with no stages", line)
+	}
+}
+
 func TestAnUnreadableLedgerTellsTheRosterNothingAndIsAnError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

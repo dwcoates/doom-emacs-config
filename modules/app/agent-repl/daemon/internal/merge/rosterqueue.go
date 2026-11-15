@@ -321,8 +321,8 @@ func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) 
 
 // rosterLine answers the merges of LINE as the roster draws them, front
 // first: each one's credit and the bubble a click on it opens. HEADED says
-// LINE is the queue's line, whose front is the head: its stages are read from
-// its ledger. Every merge carries the moment it took its slot, durable on its
+// LINE is the queue's line, whose front is the head: an admitted head's stages
+// are read from its ledger. Every merge carries the moment it took its slot, durable on its
 // queue entry (wsm.MergeQueueEntry.SlotSince). The merges remediating out of
 // line are drawn unheaded.
 func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed bool) ([]sidebar.QueueEntry, error) {
@@ -344,7 +344,10 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			drawn.Reveal = o.bubbleHeadID(entry.Workspace, lease)
-			if headed && i == 0 {
+			// A HEAD NOT ADMITTED RUNS NOTHING: its ledger holds an earlier
+			// attempt's rounds, which drawn under it read as steps it is taking
+			// (2026-11-15: a waiting head drew "rebasing" settled hours before).
+			if headed && i == 0 && drawn.Admitted {
 				stages, err := o.ledgerStages(ctx, entry.Workspace, lease)
 				if err != nil {
 					return nil, err
