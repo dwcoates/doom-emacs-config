@@ -111,14 +111,16 @@ func (c *controller) RollingOut() ([]ids.WorkspaceID, bool) {
 	return c.waitingLocked(), true
 }
 
-// waitingLocked lists the workspaces the handover in flight has not
-// transferred, sorted. The caller holds c.mu.
+// waitingLocked lists the workspaces the handover in flight is still
+// transferring, sorted: its own holdouts. It never reads the adopt
+// rendezvous, which on a daemon that once joined still holds the workspaces
+// it adopted then, closed ones among them (2026-11-15: a refused deploy named
+// two closed workspaces the handover was not waiting on). The caller holds
+// c.mu.
 func (c *controller) waitingLocked() []ids.WorkspaceID {
-	var waiting []ids.WorkspaceID
-	for ws := range c.rendezvous {
-		if _, moved := c.transferred[ws]; !moved {
-			waiting = append(waiting, ws)
-		}
+	waiting := make([]ids.WorkspaceID, 0, len(c.handover.holdouts))
+	for ws := range c.handover.holdouts {
+		waiting = append(waiting, ws)
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i] < waiting[j] })
 	return waiting
@@ -140,6 +142,10 @@ type handoverSlot struct {
 	served map[ids.WorkspaceID]bool
 	// servedSuccessor is the address served's absentees are pointed to.
 	servedSuccessor string
+	// holdouts is every workspace this handover asked to transfer whose
+	// transfer has not finished: what a refused second handover names. Nil
+	// until the served set is fixed.
+	holdouts map[ids.WorkspaceID]bool
 }
 
 // claimHandover claims the successor slot, or refuses naming what the
@@ -202,8 +208,12 @@ func (c *controller) fixServed(slot *handoverSlot, successor string, workspaces,
 	for _, ws := range untransferable {
 		served[ws.ID] = true
 	}
+	holdouts := make(map[ids.WorkspaceID]bool, len(workspaces))
+	for _, ws := range workspaces {
+		holdouts[ws.ID] = true
+	}
 	c.mu.Lock()
-	slot.served, slot.servedSuccessor = served, successor
+	slot.served, slot.servedSuccessor, slot.holdouts = served, successor, holdouts
 	c.unlock()
 	c.log.Info(opHandover, "fixed the handover's served set; any other workspace is the successor's", dlog.Merge(fields, dlog.Context{
 		"served": len(served),
@@ -495,6 +505,26 @@ func (c *controller) requestTransfer(ctx context.Context, ws wsm.Workspace, plan
 	return true
 }
 
+// reportHeldFreeTransfers records at ERROR every holdout of HOLDOUTS that is
+// free: a transfer waits only on a delivery mid-flight, or on freeness when
+// it is offered again, so a free workspace whose transfer is still pending is
+// held by something no transfer may wait on (2026-11-15: two merges' leases
+// held 0.444.10's handover for half an hour behind a 10m WARN cadence).
+func (c *controller) reportHeldFreeTransfers(holdouts []string, fields dlog.Context) {
+	var free []string
+	for _, ws := range holdouts {
+		if c.deps.Freeness != nil && c.deps.Freeness.Free(ids.WorkspaceID(ws)) {
+			free = append(free, ws)
+		}
+	}
+	if len(free) == 0 {
+		return
+	}
+	c.log.Error(opHandover, "free workspaces' transfers are still pending; a free workspace's transfer waits on nothing, so something holds it that never may",
+		dlog.Merge(fields, dlog.Context{"free_holdouts": free,
+			"invariant_violation": "a handover's transfer of a free workspace is taken at once"}))
+}
+
 // transferOutcome is one transfer's end.
 type transferOutcome struct {
 	ws  ids.WorkspaceID
@@ -528,6 +558,9 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 		case out := <-outcomes:
 			requested--
 			delete(pending, out.ws)
+			c.mu.Lock()
+			delete(c.handover.holdouts, out.ws)
+			c.unlock()
 			c.log.Debug(opTransfer, transferFinishedMessage,
 				dlog.Merge(fields, dlog.Context{"workspace": string(out.ws), "pending": requested}))
 			switch {
@@ -556,6 +589,7 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 				holdouts = append(holdouts, string(ws))
 			}
 			sort.Strings(holdouts)
+			c.reportHeldFreeTransfers(holdouts, fields)
 			c.log.Warn(opHandover, "still waiting for workspaces to fall free; nothing will be interrupted to hurry them",
 				dlog.Merge(fields, dlog.Context{
 					"holdouts": holdouts,
