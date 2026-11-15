@@ -172,6 +172,17 @@ embeds another's new messages.
   `deploy_intake` to `metaprompt-deploy-intake.md`;
   `daemon/internal/workspace/sessions.go` (`sessionProfile`) chooses it.
 
+### 7. `agentrepl.v1.UpdateMergeQueueMediationEscalate` carries the findings
+
+- WHAT: `repeated DeployProblem problems = 1`, empty for an escalation that
+  rests on its summary alone.
+- WHY (owner ruling, 2026-11-15): the intake never talks to the user; the
+  daemon makes a visible escalation workspace whose prompt is the intake's
+  findings with their evidence, and a notification whose click opens it, so
+  the findings must reach the daemon as a dispatch's do.
+- CONSEQUENCES: `agent-repld merge-queue mediation escalate -problems` reads
+  them from standard input; the server validates them as a dispatch's.
+
 ## Implementation notes (2026-11-14)
 
 - `conversation.v1.PromptOrigin.PROMPT_ORIGIN_DEPLOY_MEDIATION` (52) carries

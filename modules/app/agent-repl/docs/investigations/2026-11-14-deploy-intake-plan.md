@@ -79,8 +79,14 @@ Each deploy's check ends in exactly one of:
 - `approve`: nothing this deploy caused is wrong. The hold is released and
   the queue advances.
 - `escalate`: something is wrong that should go before the user (no
-  confident fix, or a user-facing choice). The hold is released, the user is
-  notified, and the chain ends.
+  confident fix, a user-facing choice, or a NEW test reuse fact). The hold
+  is released and the chain ends. The intake never talks to the user (owner
+  ruling, 2026-11-15): the daemon makes a NEW VISIBLE workspace, on opus at
+  medium effort, whose prompt is the summary and the intake's findings with
+  their evidence, and a desktop notification whose click opens it. Every
+  escalation the daemon makes for the intake (a turn that decided nothing,
+  a remediation given up past its fixing bound or closed before it landed)
+  goes the same way.
 - `dispatch`: a defect THIS DEPLOY CAUSED, which an agent can fix. The hold
   stays, owned by the remediation workspace (below).
 - Every defect the deploy did NOT cause (it predates the window's deploy, or
@@ -198,6 +204,14 @@ would otherwise reason out, and hands it facts, not questions:
   or that change, and creates a fresh one otherwise.
 - The chain's count against the bound, so escalation at the bound is a rule
   it reads, not a judgement it makes.
+- Test reuse (owner ruling, 2026-11-15): the last gate before the deploy, read
+  from its log's runner lines (units total, reused, run, and why each ran:
+  inputs changed, failed before, never reused, never recorded), against the
+  20 gates before it. A gate of 100 or more units reusing under a quarter of
+  their median rate is a NEW fact the intake escalates; the bounds were
+  measured over 60 gates on 2026-11-15 (large gates 24-92%, median about
+  45%, nine at 0%; gates under 100 units 0-46% with no pattern) and are
+  stated at their site (`daemon/internal/merge/reusefacts.go`).
 
 ## Order of work
 
