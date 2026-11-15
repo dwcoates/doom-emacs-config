@@ -152,7 +152,9 @@ func awaitLogRecord(t testing.TB, wait context.Context, path, what string, pred 
 func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, after, pred func(LogRecord) bool) LogRecord {
 	t.Helper()
 	var found LogRecord
+	var looks lookCount
 	check := func() bool {
+		looks.note(time.Now())
 		anchored := false
 		for _, r := range readLog(t, path) {
 			if !anchored && after(r) {
@@ -167,9 +169,30 @@ func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, 
 	}
 	if !awaitChange(t, wait, check, followFiles(path)) {
 		records := readLog(t, path)
-		t.Fatalf("waiting for %s in %s: %v\n%s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), logTail(records, failureTailRecords))
+		t.Fatalf("waiting for %s in %s: %v\n%s; %s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), looks, logTail(records, failureTailRecords))
 	}
 	return found
+}
+
+// lookCount counts the looks a log wait took, each at a change the kernel
+// reported, and when the last one ran. A failed wait whose awaited record is
+// in the log says by it whether the wait never looked after the record was
+// written (no change was reported to it) or looked and passed it over.
+type lookCount struct {
+	n    int
+	last time.Time
+}
+
+func (c *lookCount) note(at time.Time) {
+	c.n++
+	c.last = at
+}
+
+func (c lookCount) String() string {
+	if c.n == 0 {
+		return "the log was never read"
+	}
+	return fmt.Sprintf("the log was read %d times, the last at %s", c.n, c.last.UTC().Format("15:04:05.000000"))
 }
 
 // anchorAccount says, for a failed ordered wait, whether its anchor was ever

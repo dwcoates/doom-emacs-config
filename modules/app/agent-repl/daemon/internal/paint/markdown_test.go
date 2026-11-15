@@ -89,3 +89,40 @@ func TestHighlightMarkdownLinkWithoutTargetStaysPlain(t *testing.T) {
 		}
 	}
 }
+
+func TestHighlightMarkdownFenceLengthRule(t *testing.T) {
+	tests := []struct {
+		name    string
+		code    string
+		content string
+	}{
+		{name: "a shorter bare fence inside a longer one is its content", code: "````markdown\n```\n# x\n```\n````\n", content: "\n```\n# x\n```\n"},
+		{name: "a delimiter carrying a language inside a fence is its content", code: "```\n```go\n# x\n```\n", content: "\n```go\n# x\n"},
+		{name: "a tilde run inside a backtick fence is its content", code: "```\n~~~\n# x\n```\n", content: "\n~~~\n# x\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			spans := highlight(t, "markdown", tc.code)
+
+			// Assert.
+			if got := classOf(t, spans, tc.content); got != "" {
+				t.Fatalf("class of %q = %q, want plain", tc.content, got)
+			}
+		})
+	}
+}
+
+func TestHighlightMarkdownLongerBareRunClosesTheFence(t *testing.T) {
+	// Arrange: the five-backtick run closes the three-backtick fence, so the
+	// heading after it is a heading again.
+	code := "```\nx\n`````\n# after\n"
+
+	// Act.
+	spans := highlight(t, "markdown", code)
+
+	// Assert.
+	if got := classOf(t, spans, "# after"); got != "heading" {
+		t.Fatalf("class of %q = %q, want heading", "# after", got)
+	}
+}

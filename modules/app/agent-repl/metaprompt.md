@@ -485,6 +485,9 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Code longer than one statement is NEVER inlined; it is always relayed in a fenced markdown code block.
   - Fenced means triple backticks WITH a language specification (```protobuf, ```go, ```elisp, ```python, …).
   - Single-backtick inline code stays reserved for single tokens and single statements per the section above.
+- A fenced block that holds another fence opens and closes on more backticks than the fence it holds.
+  - e.g. a ````markdown block around a ```go block, closed by its own ````.
+  - A fence closes only on a bare run of backticks at least as long as the one that opened it, so an inner fence of the same length closes the outer one early.
 - A shell command for the user to run is always its own fenced block, opened with ```bash (or ```shell).
   - The fence names the shell so the reader's feed draws the block's run control, which runs it in the editor's terminal.
   - The block holds exactly ONE runnable command: the whole block pasted into a terminal at once runs correctly and completely.

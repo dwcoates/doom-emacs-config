@@ -204,6 +204,13 @@ func TestParseRepairsAndShapesTrees(t *testing.T) {
 			want: lines("tree", `  1 🔧 ^- "A"`, `  1.1 ^0 "a"`, `    code : "plain"`, `  1.2 ^0 "b"`, ""),
 		},
 		{
+			// 2026-11-10: the inner bare ``` closed the outer fence, and the
+			// fences after it opened and closed out of step.
+			name: "a longer fence beneath a branch holds a shorter one as one block",
+			text: lines("1 🔧 A", "├── 1.1 a", "│   ````markdown", "│   ```", "│   x := 1", "│   ```", "│   ````", "└── 1.2 b"),
+			want: lines("tree", `  1 🔧 ^- "A"`, `  1.1 ^0 "a"`, "    code markdown: \"```\\nx := 1\\n```\"", `  1.2 ^0 "b"`, ""),
+		},
+		{
 			name: "prose around the tree is plain markdown",
 			text: lines("Some preamble.", "", "1 🔧 A", "└── 1.1 a", "", "A closing note."),
 			want: lines(`plain "Some preamble.\n"`, "tree", `  1 🔧 ^- "A"`, `  1.1 ^0 "a"`, `plain "\nA closing note."`, ""),

@@ -3,6 +3,8 @@ package prose
 import (
 	"strings"
 	"unicode/utf8"
+
+	"agent-repld/internal/mdfence"
 )
 
 // placeholderLabel is the label repairUnlabeledRoots writes in front of a root
@@ -67,12 +69,17 @@ func nextNonBlank(items []item, from int) int {
 // that drop the wrapper's open and close lines; none when there is nothing to
 // repair.
 //
-// The wrapper's close is matched on column-0 delimiters only: one with a
-// language opens a code block nested in the tree, a bare one closes the
-// innermost. A delimiter after a rail or an indent is the tree's own code and
-// never closes the wrapper. While a response is ARRIVING, its last line,
-// still unterminated, may be a delimiter whose language has not arrived, so it
-// is never taken as the close; an unclosed wrapper loses only its open line.
+// The wrapper's close is matched on column-0 delimiters only, by markdown's
+// length rule as the grammar's scanner reads it (mdfence): a run
+// shorter than the innermost open fence's is that fence's content, and a bare
+// run at least as long closes it. Where the length rule alone would read a
+// fence's content, a run at least as long that carries a language opens a
+// code block nested in the tree: the model nested a fence without
+// lengthening the wrapper, the very mistake repaired here. A delimiter after
+// a rail or an indent is the tree's own code and never closes the wrapper.
+// While a response is ARRIVING, its last line, still unterminated, may be a
+// delimiter whose language has not arrived, so it is never taken as the
+// close; an unclosed wrapper loses only its open line.
 func repairFencedResponseTree(text string, stage Stage) []edit {
 	ls := rawLines(text)
 	header := nextNonBlankLine(ls, 0)
@@ -80,22 +87,30 @@ func repairFencedResponseTree(text string, stage Stage) []edit {
 		return nil
 	}
 	open := nextNonBlankLine(ls, header+1)
-	if open < 0 || !strings.HasPrefix(ls[open].text, "```") || !onlyHeader(text[:ls[open].start]) {
+	if open < 0 || !onlyHeader(text[:ls[open].start]) {
 		return nil
 	}
-	closing, depth := -1, 0
+	wrapper := mdfence.Parse(ls[open].text)
+	if !wrapper.Opens() || wrapper.Char != '`' {
+		return nil
+	}
+	closing, nested := -1, []mdfence.Delimiter{wrapper}
 	for j := open + 1; j < len(ls) && closing < 0; j++ {
 		l := ls[j]
-		if !strings.HasPrefix(l.text, "```") || (stage == Arriving && l.end == len(text) && !strings.HasSuffix(text, "\n")) {
+		if stage == Arriving && l.end == len(text) && !strings.HasSuffix(text, "\n") {
 			continue
 		}
+		d := mdfence.Parse(l.text)
+		innermost := nested[len(nested)-1]
 		switch {
-		case strings.TrimSpace(strings.TrimLeft(l.text, "`")) != "":
-			depth++
-		case depth > 0:
-			depth--
-		default:
+		case !d.Opens() || d.Char != '`' || d.Run < innermost.Run:
+			// The innermost fence's content, by the length rule.
+		case d.Closes(innermost) && len(nested) > 1:
+			nested = nested[:len(nested)-1]
+		case d.Closes(innermost):
 			closing = j
+		default:
+			nested = append(nested, d)
 		}
 	}
 	bodyEnd := len(text)

@@ -1,0 +1,116 @@
+========================================================================
+A longer fence holds a shorter bare fence as one block
+========================================================================
+````markdown
+```
+x := 1
+```
+````
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks)
+        (language))
+      (fence_line
+        (other)
+        (text))
+      (fence_line
+        (other)
+        (text))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))))
+
+========================================================================
+A shorter run never closes a longer fence
+========================================================================
+````
+```
+x := 1
+````
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks))
+      (fence_line
+        (other)
+        (text))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))))
+
+========================================================================
+A run carrying a language never closes the fence
+========================================================================
+```
+```go
+x := 1
+```
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks))
+      (fence_line
+        (other)
+        (text))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))))
+
+========================================================================
+A longer bare run closes a shorter fence
+========================================================================
+```
+x := 1
+`````
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))))
+
+========================================================================
+A bare run with trailing whitespace closes the fence
+========================================================================
+```
+x := 1
+```  
+
+------------------------------------------------------------------------
+
+(document
+  (before
+    (fence
+      (fence_open
+        (ticks))
+      (fence_line
+        (other)
+        (text))
+      (fence_close
+        (ticks)))))

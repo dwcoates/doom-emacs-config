@@ -159,6 +159,10 @@ func TestStripFence(t *testing.T) {
 		{name: "a json fence", text: "```json\n{\"a\":1}\n```", want: `{"a":1}`},
 		{name: "a bare fence", text: "```\n{\"a\":1}\n```", want: `{"a":1}`},
 		{name: "a one-line fence is left alone", text: "```{}```", want: "```{}```"},
+		{name: "a longer fence holding a shorter one", text: "````markdown\n```\nx\n```\n````", want: "```\nx\n```"},
+		{name: "a fence whose last line is a shorter run is left alone", text: "````\nx\n```", want: "````\nx\n```"},
+		{name: "a fence whose last line carries text is left alone", text: "```\n{}```", want: "```\n{}```"},
+		{name: "an empty fence", text: "```\n```", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

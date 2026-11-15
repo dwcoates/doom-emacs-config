@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/headless"
+	"agent-repld/internal/mdfence"
 	"agent-repld/internal/prompts"
 )
 
@@ -346,18 +347,23 @@ func validLink(l answerLink) (*frontendv1.NewsDigestLink, error) {
 	return &frontendv1.NewsDigestLink{Label: label, Url: l.URL}, nil
 }
 
-// stripFence removes one markdown code fence enclosing the whole text.
+// stripFence removes one markdown code fence enclosing the whole text: its
+// first line opens the fence and its last closes it, by mdfence's length rule.
 func stripFence(text string) string {
 	t := strings.TrimSpace(text)
-	if !strings.HasPrefix(t, "```") || !strings.HasSuffix(t, "```") || len(t) < 6 {
+	first, rest, ok := strings.Cut(t, "\n")
+	open := mdfence.Parse(first)
+	if !ok || !open.Opens() {
 		return t
 	}
-	inner := strings.TrimSuffix(t, "```")
-	newline := strings.IndexByte(inner, '\n')
-	if newline < 0 {
+	body, last := "", rest
+	if i := strings.LastIndexByte(rest, '\n'); i >= 0 {
+		body, last = rest[:i], rest[i+1:]
+	}
+	if !mdfence.Parse(last).Closes(open) {
 		return t
 	}
-	return strings.TrimSpace(inner[newline+1:])
+	return strings.TrimSpace(body)
 }
 
 // kindByToken finds a kind by its answer token.

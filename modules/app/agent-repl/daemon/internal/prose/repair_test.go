@@ -39,6 +39,26 @@ func TestRepairFencedResponseTree(t *testing.T) {
 			want: lines(header, "1 🔧 A", "├── 1.1 a", "```bash", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", ""),
 		},
 		{
+			name: "a longer wrapper's shorter bare inner fence stays its content",
+			text: lines(header, "````markdown", "1 🔧 A", "├── 1.1 a", "```", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", "````"),
+			want: lines(header, "1 🔧 A", "├── 1.1 a", "```", "ls", "```", "├── 1.2 c", "├── 1.3 d", "└── 1.4 b", ""),
+		},
+		{
+			name: "a run shorter than the wrapper's never closes it",
+			text: lines(header, "````text", tree, "```", "````", "after"),
+			want: lines(header, tree, "```", "after"),
+		},
+		{
+			name: "a bare run longer than the wrapper's closes it",
+			text: lines(header, "```text", tree, "`````", "after"),
+			want: lines(header, tree, "after"),
+		},
+		{
+			name: "a bare run with trailing whitespace closes the wrapper",
+			text: lines(header, "```text", tree, "```  ", "after"),
+			want: lines(header, tree, "after"),
+		},
+		{
 			name: "prose after the wrapper stays",
 			text: lines(header, "```text", tree, "```", "after"),
 			want: lines(header, tree, "after"),

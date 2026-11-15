@@ -551,6 +551,36 @@ func TestAnchorAccountSaysWhetherTheAnchorWasWritten(t *testing.T) {
 	}
 }
 
+func TestLookCountSaysHowOftenAndWhenTheLogWasRead(t *testing.T) {
+	at := time.Date(2026, 11, 15, 8, 37, 53, 29825000, time.UTC)
+	tests := []struct {
+		name  string
+		looks []time.Time
+		want  string
+	}{
+		{"no look", nil, "the log was never read"},
+		{"one look", []time.Time{at}, "the log was read 1 times, the last at 08:37:53.029825"},
+		{"the last of several looks", []time.Time{at.Add(-time.Second), at}, "the log was read 2 times, the last at 08:37:53.029825"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var c lookCount
+			for _, l := range tt.looks {
+				c.note(l)
+			}
+
+			// Act
+			got := c.String()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("lookCount = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAwaitLogRecordWithinReturnsTheRecordThePredicateAccepts(t *testing.T) {
 	// Arrange: a workspace log beside a bare Daemon carrying its run budget.
 	d := &Daemon{t: t, ctx: context.Background(), StateDir: t.TempDir(), daemonProc: newDaemonProc(nil)}

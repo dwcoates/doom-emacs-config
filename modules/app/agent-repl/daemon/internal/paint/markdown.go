@@ -1,6 +1,10 @@
 package paint
 
-import "strings"
+import (
+	"strings"
+
+	"agent-repld/internal/mdfence"
+)
 
 // highlightMarkdown is markdown's own pass: markdown is line-oriented rather
 // than token-oriented, so it does not go through the generic lexer.
@@ -12,7 +16,10 @@ func (p *painter) highlightMarkdown(code string) (Spans, error) {
 		return err == nil
 	}
 
-	inFence := false
+	// The open fence's delimiter, the zero Delimiter outside a fence. A fence
+	// closes only on a bare run at least as long (mdfence's length rule), so
+	// a ``` block inside a ````markdown one stays the outer fence's content.
+	var open mdfence.Delimiter
 	for _, line := range splitKeepingNewlines(code) {
 		body, newline := line, ""
 		if strings.HasSuffix(body, "\n") {
@@ -21,13 +28,20 @@ func (p *painter) highlightMarkdown(code string) (Spans, error) {
 		trimmed := strings.TrimLeft(body, " \t")
 		indent := body[:len(body)-len(trimmed)]
 
+		d, delimiter := mdfence.Parse(trimmed), false
 		switch {
-		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
-			inFence = !inFence
+		case open.Opens() && d.Closes(open):
+			open, delimiter = mdfence.Delimiter{}, true
+		case !open.Opens() && d.Opens():
+			open, delimiter = d, true
+		}
+
+		switch {
+		case delimiter:
 			if !add(indent, "") || !add(trimmed, "punctuation") {
 				return nil, err
 			}
-		case inFence:
+		case open.Opens():
 			if !add(body, "") {
 				return nil, err
 			}

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"agent-repld/internal/mdfence"
 )
 
 // The old webapp line parser's own answers, recorded before the grammar
@@ -132,11 +134,74 @@ func nonNil(s []string) []string {
 	return s
 }
 
+// fenceRole is what a line is to the fences around it.
+type fenceRole int
+
+const (
+	fenceNone fenceRole = iota
+	fenceOpens
+	fenceCloses
+)
+
+// railedTicks is the backtick run after LINE's leading rail of spaces and │
+// (the scanner's fence_ticks), and whether nothing but whitespace follows it.
+func railedTicks(line string) (ticks int, bare bool) {
+	rest := strings.TrimLeft(line, " │")
+	run := strings.TrimLeft(rest, "`")
+	return len(rest) - len(run), strings.TrimSpace(run) == ""
+}
+
+// departsFromLengthRule is whether the old parser placed TEXT's fence
+// delimiters other than markdown's length rule does (2026-11-10). The old
+// parser toggled a fence at every line of three backticks or more, so a
+// delimiter carrying a language, or a shorter run, closed the open fence;
+// the grammar's scanner now closes a fence only on a bare run at least as
+// long as the one that opened it, so such a line is the fence's content.
+// And the old parser read an open's backticks past the third as its
+// language, where the scanner reads the whole run as the delimiter. The old
+// parser's answer for such a text is no longer the grammar's, and
+// the length rule's own cases hold the grammar's answer instead
+// (tree-sitter-tldr/tldr/test/corpus/fence.txt, mdfence's tests).
+func departsFromLengthRule(text string) bool {
+	oldOpen, open := false, 0
+	for _, line := range strings.Split(text, "\n") {
+		ticks, bare := railedTicks(line)
+		oldRole, role := fenceNone, fenceNone
+		if ticks >= mdfence.Min {
+			oldRole = fenceOpens
+			if oldOpen {
+				oldRole = fenceCloses
+			}
+			oldOpen = !oldOpen
+		}
+		switch {
+		case open > 0 && bare && ticks >= open:
+			role, open = fenceCloses, 0
+		case open == 0 && ticks >= mdfence.Min:
+			role, open = fenceOpens, ticks
+		}
+		if role != oldRole || (role == fenceOpens && ticks > mdfence.Min) {
+			return true
+		}
+	}
+	return false
+}
+
+// goldenLengthRuleDepartures is how many golden cases departsFromLengthRule
+// picks out, pinned so that a change to the rule's reach is made on purpose.
+const goldenLengthRuleDepartures = 391
+
 func TestReadAnswersTheOldParsersGoldenCases(t *testing.T) {
 	// Arrange.
 	g := loadGolden(t)
 
+	departed := 0
 	for i, c := range g.Cases {
+		if departsFromLengthRule(c.Text) {
+			departed++
+			continue
+		}
+
 		// Act.
 		d, err := read(c.Text)
 
@@ -170,6 +235,38 @@ func TestReadAnswersTheOldParsersGoldenCases(t *testing.T) {
 		if gotS, wantS := actualSegments(d), expectedSegments(c); !reflect.DeepEqual(gotS, wantS) {
 			t.Errorf("case %d %q: segments = %#v, want %#v", i, c.Text, gotS, wantS)
 		}
+	}
+	if departed != goldenLengthRuleDepartures {
+		t.Errorf("%d golden cases depart from the length rule, want %d", departed, goldenLengthRuleDepartures)
+	}
+}
+
+func TestDepartsFromLengthRule(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "one fence", text: lines("```go", "x := 1", "```"), want: false},
+		{name: "a railed fence", text: lines("│   ```go", "│   x := 1", "│   ```"), want: false},
+		{name: "two fences in turn", text: lines("```", "a", "```", "```go", "b", "```"), want: false},
+		{name: "an unclosed fence", text: lines("```go", "x := 1"), want: false},
+		{name: "no fence", text: lines("1 🔧 A", "└── 1.1 a"), want: false},
+		{name: "a delimiter carrying a language inside a fence", text: lines("```", "```go", "x := 1", "```"), want: true},
+		{name: "a shorter run inside a longer fence", text: lines("````", "```", "x := 1", "````"), want: true},
+		{name: "a longer bare run closing a fence", text: lines("```", "x := 1", "````"), want: false},
+		{name: "a fence opened on more than three backticks", text: lines("````", "x := 1", "````"), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := departsFromLengthRule(tt.text)
+
+			// Assert.
+			if got != tt.want {
+				t.Errorf("departsFromLengthRule(%q) = %v, want %v", tt.text, got, tt.want)
+			}
+		})
 	}
 }
 
