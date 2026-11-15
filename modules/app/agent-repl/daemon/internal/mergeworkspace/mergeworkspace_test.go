@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1592,7 +1593,13 @@ func TestPayOwedCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
 	f.svc.PayOwed(ctx, true, nil)
 
 	// Assert
-	if r, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-payment"); !ok || r.Context["left_undone"] != "could not read the owed landing reports; they stay owed" {
+	var undone []any
+	for _, r := range f.logs.Records() {
+		if r.Level == dlog.LevelInfo && r.Message == "the daemon stood down mid-payment" {
+			undone = append(undone, r.Context["left_undone"])
+		}
+	}
+	if !slices.Contains(undone, any("could not read the owed landing reports; they stay owed")) {
 		t.Fatalf("records = %+v, want the cut-short payment at INFO with what it left undone", f.logs.Records())
 	}
 	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); ok {

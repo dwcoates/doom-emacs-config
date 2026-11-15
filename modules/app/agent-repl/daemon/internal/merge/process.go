@@ -909,9 +909,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 // repository's config in the same landing would leave this daemon refusing
 // the whole config (deploy_config_invalid) for every merge it admits after
 // it. So the field's support lands first, and a later change names it; this
-// check makes the order the gate's, not the author's memory. A branch whose
-// config is missing is refused the same way, since landing it would leave
-// the repository stating no lifecycle at all.
+// check makes the order the gate's, not the author's memory.
 func (r *run) branchConfigUnreadable(ctx context.Context, head string) (*outcome, error) {
 	const op = "daemon.merge.branch_config"
 	_, err := r.o.deps.DeployConfig.Load(r.subject.dir)
@@ -923,7 +921,12 @@ func (r *run) branchConfigUnreadable(ctx context.Context, head string) (*outcome
 	var why string
 	switch {
 	case errors.As(err, &missing):
-		why = fmt.Sprintf("the branch has no lifecycle config at %s, so landing it would leave the repository stating no lifecycle", missing.Path)
+		// A BRANCH THAT CARRIES NO CONFIG names no field this daemon could
+		// lack: the repository's config is its main checkout's, read as it
+		// always is (deployTargetFor).
+		r.o.log(ctx, r.ws).Debug(op, "the rebased branch carries no lifecycle config; nothing on it to check", dlog.Context{
+			"workspace": string(r.ws), "dir": r.subject.dir, "path": missing.Path})
+		return nil, nil
 	case errors.As(err, &invalid):
 		why = fmt.Sprintf("the branch's lifecycle config %s is one the daemon running this queue cannot read (%s); land the support for a new field first, and name the field in a later change", invalid.Path, invalid.Detail)
 	default:

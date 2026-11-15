@@ -713,8 +713,6 @@ func TestABranchConfigThisDaemonCannotReadFailsTheMergeBeforeItsGate(t *testing.
 	}{
 		{name: "a field this build does not read", err: &lifecycleconfig.InvalidError{Path: "/ws/.agent-repl/lifecycle.yaml", Detail: `unknown field "new_field"`},
 			wantDetail: "cannot read (unknown field \"new_field\"); land the support for a new field first"},
-		{name: "no config at all", err: &lifecycleconfig.MissingError{Path: "/ws/.agent-repl/lifecycle.yaml"},
-			wantDetail: "the branch has no lifecycle config at /ws/.agent-repl/lifecycle.yaml"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -729,6 +727,19 @@ func TestABranchConfigThisDaemonCannotReadFailsTheMergeBeforeItsGate(t *testing.
 				t.Fatalf("facts = %+v, want the merge failed in other naming %q", got, tt.wantDetail)
 			}
 		})
+	}
+}
+
+func TestABranchCarryingNoLifecycleConfigIsGatedAsUsual(t *testing.T) {
+	// Arrange: the repository's config lives in its main checkout alone.
+	h := branchConfigFails(t, &lifecycleconfig.MissingError{Path: "/ws/.agent-repl/lifecycle.yaml"})
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", got)
 	}
 }
 

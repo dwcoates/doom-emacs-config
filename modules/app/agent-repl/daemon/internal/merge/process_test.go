@@ -581,7 +581,7 @@ func TestTheRepositorysPreDeployHooksRun(t *testing.T) {
 
 	// Assert.
 	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
-	if len(got) != 1 || got[0] != "run the repository's checklist" {
+	if len(got) != 1 || got[0] != BriefHookPrompt+" run the repository's checklist" {
 		t.Fatalf("pre-deploy submissions = %v, want the repository's own hook", got)
 	}
 }
@@ -604,7 +604,7 @@ func TestTheRepositorysPostDeployHooksRun(t *testing.T) {
 
 	// Assert.
 	got := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
-	if len(got) != 1 || got[0] != "announce the landing" {
+	if len(got) != 1 || got[0] != BriefHookPrompt+" announce the landing" {
 		t.Fatalf("post-deploy submissions = %v, want the repository's own hook", got)
 	}
 }
@@ -632,10 +632,10 @@ func TestARequestsHooksReplaceTheRepositorysForTheirStage(t *testing.T) {
 	// Assert.
 	pre := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION)
 	post := submittedWith(h, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION)
-	if len(pre) != 1 || pre[0] != "the workspace's own precondition" {
+	if len(pre) != 1 || pre[0] != BriefHookPrompt+" the workspace's own precondition" {
 		t.Fatalf("pre-deploy submissions = %v, want the workspace's hook alone", pre)
 	}
-	if len(post) != 1 || post[0] != "the repository's announcement" {
+	if len(post) != 1 || post[0] != BriefHookPrompt+" the repository's announcement" {
 		t.Fatalf("post-deploy submissions = %v, want the repository's hook", post)
 	}
 }
