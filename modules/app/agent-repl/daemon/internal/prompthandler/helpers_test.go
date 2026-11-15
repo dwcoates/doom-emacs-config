@@ -45,6 +45,15 @@ type fakeDB struct {
 	takeErr        error
 	restoreErr     error
 	restored       []string
+	// revisions is the revisions the workspace's next prompt owes its
+	// agent; revisionsTakeErr fails their take and revisionsRestoreErr
+	// their restore.
+	revisions           []wsm.OwedRevision
+	revisionsTakeErr    error
+	revisionsRestoreErr error
+	// renamed is the name the workspace's next prompt owes its agent, ""
+	// for none.
+	renamed string
 	// acceptErr fails the acceptance stamp when set.
 	acceptErr error
 	// standing, when set, overrides the standing every claim answers.
@@ -83,6 +92,46 @@ func (d *fakeDB) RestoreOwedContextSummary(_ context.Context, _ ids.WorkspaceID,
 	}
 	d.restored = append(d.restored, summary)
 	d.contextSummary = summary
+	return nil
+}
+
+// TakeOwedRevisions takes the owed revisions, as the store does.
+func (d *fakeDB) TakeOwedRevisions(_ context.Context, _ ids.WorkspaceID) ([]wsm.OwedRevision, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.revisionsTakeErr != nil {
+		return nil, d.revisionsTakeErr
+	}
+	taken := d.revisions
+	d.revisions = nil
+	return taken, nil
+}
+
+// RestoreOwedRevisions puts taken revisions back.
+func (d *fakeDB) RestoreOwedRevisions(_ context.Context, _ ids.WorkspaceID, owed []wsm.OwedRevision) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.revisionsRestoreErr != nil {
+		return d.revisionsRestoreErr
+	}
+	d.revisions = append(d.revisions, owed...)
+	return nil
+}
+
+// TakeOwedRename takes the owed name, as the store does.
+func (d *fakeDB) TakeOwedRename(_ context.Context, _ ids.WorkspaceID) (string, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	name := d.renamed
+	d.renamed = ""
+	return name, name != "", nil
+}
+
+// RestoreOwedRename puts a taken name back.
+func (d *fakeDB) RestoreOwedRename(_ context.Context, _ ids.WorkspaceID, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.renamed = name
 	return nil
 }
 
@@ -385,13 +434,21 @@ func (h *harness) moved() []ids.WorkspaceID {
 // contextSummaryBriefText is the test corpus's context-summary brief.
 const contextSummaryBriefText = "<!-- used by: test; placeholders: {{summary}} -->\nthe queue conversation: {{summary}}\n"
 
-// contextSummaryBriefDir is a briefs directory holding only the context
-// summary's brief.
+// revisionsBriefText is the test corpus's revisions-told brief.
+const revisionsBriefText = "<!-- used by: test; placeholders: {{revisions}} -->\nrevised: {{revisions}}\n"
+
+// renameBriefText is the test corpus's rename brief.
+const renameBriefText = "<!-- used by: test; placeholders: {{name}} -->\nrenamed: {{name}}\n"
+
+// contextSummaryBriefDir is a briefs directory holding the context summary's
+// brief and the revisions-told brief.
 func contextSummaryBriefDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, BriefContextSummary+".md"), []byte(contextSummaryBriefText), 0o600); err != nil {
-		t.Fatalf("write the context summary brief: %v", err)
+	for name, text := range map[string]string{BriefContextSummary: contextSummaryBriefText, BriefRevisionsTold: revisionsBriefText, BriefRenameTold: renameBriefText} {
+		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(text), 0o600); err != nil {
+			t.Fatalf("write the %s brief: %v", name, err)
+		}
 	}
 	return dir
 }

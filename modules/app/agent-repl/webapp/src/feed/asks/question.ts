@@ -100,7 +100,7 @@ export const ANSWERED_TEXT = "answered";
 export const TAB_GLYPHS = { answered: "✓", pending: "?" } as const;
 
 /** Every state this build draws, for the suite to hold to the schema. */
-export const QUESTION_STATE_ARMS: readonly string[] = ["open", "answered", "expired"];
+export const QUESTION_STATE_ARMS: readonly string[] = ["open", "answered", "expired", "answeredRemotely"];
 
 /** The question card. */
 export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
@@ -119,7 +119,7 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
   card.append(
     drawToolCardHead({
       title: QUESTION_TITLE,
-      badge: drawFeedQuestionBadge(state.case),
+      badge: drawFeedQuestionBadge(state),
       clock: tabbed ? undefined : u.clock,
       clockPath: `${PATH}.clock`,
       ticker: rc.ctx.ticker,
@@ -136,7 +136,9 @@ export function drawFeedQuestion(u: FeedQuestion, rc: RowContext): HTMLElement {
       card.append(drawFeedQuestionAnswered(state.value, `${PATH}.answered`));
       return card;
     case "expired":
-      // The badge says it all: an expired ask drew no answers.
+    case "answeredRemotely":
+      // The badge says it all: an expired ask drew no answers, and one
+      // answered on claude.ai has none relayed to draw.
       card.className = "tool-card ask-card question resolved";
       return card;
     default:
@@ -417,16 +419,27 @@ export function drawFeedQuestionOption(
 }
 
 /** The head's badge: the ask's state, in the question card's own words. */
-export function drawFeedQuestionBadge(state: string): HTMLElement {
-  switch (state) {
+export function drawFeedQuestionBadge(state: FeedQuestion["state"]): HTMLElement {
+  switch (state.case) {
     case "open":
-      return drawToolCardBadge(ASK_WAITING_WORD, [], state);
+      return drawToolCardBadge(ASK_WAITING_WORD, [], state.case);
     case "answered":
-      return drawToolCardBadge(ANSWERED_TEXT, ["ok"], state);
+      return drawToolCardBadge(ANSWERED_TEXT, ["ok"], state.case);
     case "expired":
-      return drawToolCardBadge(EXPIRED_TEXT, ["muted"], state);
+      return drawToolCardBadge(EXPIRED_TEXT, ["muted"], state.case);
+    case "answeredRemotely":
+      // ANSWERED ON claude.ai, in the daemon's own words: a neutral badge, as
+      // a permission answered there wears, and never "expired".
+      return drawToolCardBadge(
+        requireMessage(
+          requireMessage(state.value.marker, `${PATH}.answered_remotely.marker`).label,
+          `${PATH}.answered_remotely.marker.label`,
+        ).text,
+        ["muted"],
+        state.case,
+      );
     default:
-      return unreachableArm(`${PATH}.state`, state);
+      return unreachableArm(`${PATH}.state`, String(state.case));
   }
 }
 

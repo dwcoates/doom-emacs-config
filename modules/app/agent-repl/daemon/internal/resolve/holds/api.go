@@ -16,6 +16,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holdfold"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -104,16 +105,21 @@ type DrawBody func(content *conversationv1.UserContent) *frontendv1.FeedUserProm
 // section's caller keys each item by the hold's turn.
 func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, start ShimStart, draw DrawBody, log dlog.Logger) []Card {
 	cards := make([]Card, 0, len(held))
-	// ahead is the standing entry drawn just before this one: what its "fold
-	// above" button would fold it into.
-	var ahead *wsm.HeldPrompt
-	for _, h := range orderedHolds(held) {
+	ordered := orderedHolds(held)
+	for _, h := range ordered {
 		prompt := heldPrompt(h, editing != "" && h.Turn == editing, start, draw, log)
 		if prompt == nil {
 			continue
 		}
+		// THE "FOLD ABOVE" TARGET IS holdfold.Ahead's, the one FoldHeldPrompt
+		// folds into, so the button stands exactly when the fold is taken: a
+		// card out of line (a prompt kept at a cold gate's answer) neither
+		// offers a fold nor takes one.
+		var ahead *wsm.HeldPrompt
+		if above, ok := holdfold.Ahead(ordered, h.Turn); ok {
+			ahead = &above
+		}
 		prompt.FoldAbove = foldAbove(h, ahead, editing, log)
-		ahead = &h
 		cards = append(cards, Card{Turn: h.Turn, Prompt: prompt})
 	}
 	return cards

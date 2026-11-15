@@ -167,14 +167,14 @@ func (s *store) BindSessionToOwnFork(ctx context.Context, sess Session, parentVe
 
 // bindSessionTx is the one bind, inside the caller's transaction: the session
 // upsert, then the forgetting of the fork the workspace still owed, and of the
-// start work and the context summary the previous binding owed, which were
-// about the conversation it bound. A made fork's lineage is its
-// conversation's, and stays.
+// start work, the context summary, the response revisions and the name the
+// previous binding owed, which were about the conversation it bound. A made
+// fork's lineage is its conversation's, and stays.
 func bindSessionTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	if err := putSessionTx(ctx, tx, sess); err != nil {
 		return err
 	}
-	for _, table := range []string{"pending_forks", "owed_start_work", "owed_context_summaries"} {
+	for _, table := range []string{"pending_forks", "owed_start_work", "owed_context_summaries", "owed_response_revisions", "owed_renames"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE workspace_id = ?`, sess.Workspace); err != nil {
 			return err
 		}

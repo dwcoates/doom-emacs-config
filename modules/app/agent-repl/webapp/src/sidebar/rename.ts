@@ -62,7 +62,7 @@ export function setWorkspaceNameRefusal(cause: CauseOf<SetWorkspaceNameError>): 
       const rule = cause.value.rule.case;
       if (rule === "slug") return `"${cause.value.component}" is not lowercase words joined by hyphens`;
       if (rule === "prefix") return `the prefix "${cause.value.component}" is not letters and digits`;
-      return unreachableArm("SetWorkspaceNameInvalidName.rule", String(rule));
+      return unreachableArm("CreateWorkspaceInvalidName.rule", String(rule));
     }
     case "nameTaken": {
       const holder = cause.value.holder.case;

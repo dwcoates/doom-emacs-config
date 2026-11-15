@@ -1018,7 +1018,10 @@ export function permissionRow(
 
 // ---- FeedQuestion ---------------------------------------------------------
 
-export const QUESTION_STATES = ["open", "answered", "expired"] as const;
+export const QUESTION_STATES = ["open", "answered", "expired", "answeredRemotely"] as const;
+
+/** The daemon's wording of a question answered on claude.ai, in these fixtures. */
+export const QUESTION_REMOTE_LABEL = "answered on claude.ai";
 export type QuestionState = (typeof QUESTION_STATES)[number];
 
 /** The two questions every question fixture poses; suites echo these verbatim. */
@@ -1093,7 +1096,12 @@ export function questionRow(
               }
             : state === "expired"
               ? { case: "expired", value: {} }
-              : {
+              : state === "answeredRemotely"
+                ? {
+                    case: "answeredRemotely",
+                    value: { marker: { label: { text: QUESTION_REMOTE_LABEL }, family: { case: "neutral", value: {} } } },
+                  }
+                : {
                   case: "open",
                   value: {
                     active: draft.active ?? 0,

@@ -109,10 +109,11 @@ export async function reviseResponse(
     );
     return refused({ case: "emptyAnswer", value: create(shimv1.ReviseResponseEmptyAnswerSchema, {}) });
   }
+  const prose = create(conversationv1.AgentResponseProseSchema, { markdown: asked.text });
   deps.writeRevision(
     create(conversationv1.AgentResponseRevisionSchema, {
       response: create(conversationv1.AgentActivityIdSchema, { value: response }),
-      prose: create(conversationv1.AgentResponseProseSchema, { markdown: asked.text }),
+      prose,
       settledAt: create(conversationv1.AgentActivitySettledAtSchema, { atMs: BigInt(deps.nowMs()) }),
     }),
   );
@@ -122,7 +123,9 @@ export async function reviseResponse(
     "wrote the response revision",
   );
   return create(shimv1.ReviseResponseResponseSchema, {
-    result: { case: "success", value: create(shimv1.ReviseResponseSuccessSchema, { model }) },
+    // THE REVISED WORDS RIDE THE ANSWER, so the daemon tells the agent what
+    // its response now says without waiting for the page line.
+    result: { case: "success", value: create(shimv1.ReviseResponseSuccessSchema, { model, prose }) },
   });
 }
 

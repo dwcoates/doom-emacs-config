@@ -38,6 +38,8 @@ var promptRefusalCases = []promptRefusalCase{
 		want: "the prompt named a feed the daemon cannot read"},
 	{name: "no_session", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_NoSession{NoSession: &agentreplv1.SubmitPromptNoSession{}}},
 		want: "peer has no live session to deliver to"},
+	{name: "no_session with the daemon's account", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_NoSession{NoSession: &agentreplv1.SubmitPromptNoSession{Detail: "no revival is wired for this workspace"}}},
+		want: "peer has no live session to deliver to (no revival is wired for this workspace)"},
 	{name: "duplicate_submission", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_DuplicateSubmission{DuplicateSubmission: &agentreplv1.SubmitPromptDuplicateSubmission{}}},
 		want: "peer already took this prompt, so it was not sent twice"},
 	{name: "bubble_refused", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_BubbleRefused{BubbleRefused: &agentreplv1.SubmitPromptBubbleRefused{

@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -90,6 +91,7 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 			dlog.Context{"fault": id, "standing": len(s.networkFaults)})
 		return
 	}
+	s.networkBackAtMs = r.deps.Now().UnixMilli()
 	answer := turnAnswer{
 		op:       opReconnected,
 		names:    unreachableEnding,
@@ -107,6 +109,37 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 	// The recording's failure is already logged and raised, and the fault
 	// sink this edge comes from has no caller to return it to.
 	_ = r.answerTurns(s, answer)
+}
+
+// answerLateUnreachable answers ROW, a turn's ending about to be drawn, when it
+// is a connection-failed card whose failure the network's return already
+// answered: it failed (FeedTurnEnded.ended_at_ms, the failure's own record
+// time) at or before the last network fault closed. Its turn joins the
+// answered set, so the upsert door refuses the card as it refuses one drawn
+// before the return, and is recorded so a later process refuses it too. A
+// card that failed after the return is a new outage's, and stands.
+//
+// THE RETURN'S INSTANT IS THIS PROCESS'S: a terminal first delivered after a
+// daemon restart that followed the return is not judged by it, and stands
+// until a later served turn answers it (vendorrecovery.go).
+func (r *resolver) answerLateUnreachable(s *wsState, row *frontendv1.FeedRow) {
+	turn := ids.TurnID(row.GetTurn().GetValue())
+	endedAt := row.GetTurnEnded().GetEndedAtMs()
+	if !unreachableEnding(row) || s.networkBackAtMs == 0 || endedAt > s.networkBackAtMs || s.reconnected[turn] {
+		return
+	}
+	s.reconnected[turn] = true
+	log := r.logger(s.id)
+	fields := dlog.Context{"turn": string(turn), "failed_at_ms": endedAt, "network_back_at_ms": s.networkBackAtMs}
+	if r.deps.Reconnected != nil {
+		if err := r.deps.Reconnected.RecordReconnectedTurns(context.Background(), s.id, []ids.TurnID{turn}); err != nil {
+			fields["error"] = err.Error()
+			log.Error(opReconnected, "a late connection-failed card the network's return answered was not drawn but could not be recorded; a daemon restart will draw it again", fields)
+			r.raiseWarning(s, opReconnected, fmt.Sprintf("an answered connection failure could not be saved and will reappear after a daemon restart: %v", err))
+			return
+		}
+	}
+	log.Info(opReconnected, "a connection-failed card that failed before the network came back arrived late; it was answered and not drawn", fields)
 }
 
 // restoreReconnected loads the workspace's reconnection-answered turns when a

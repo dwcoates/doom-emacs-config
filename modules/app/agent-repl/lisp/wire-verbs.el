@@ -2984,9 +2984,11 @@ decode."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptFeedUndecodable" json))
 
 (defun agent-repl-wire-decode-submit-prompt-no-session (json)
-  "Decode SubmitPromptNoSession from JSON.  Empty: The workspace has no session
-to submit to."
-  (agent-repl-wire-verbs--decode-empty "SubmitPromptNoSession" json))
+  "Decode SubmitPromptNoSession from JSON into (`:detail').
+The workspace has no session the daemon could submit to, and `detail' is
+the daemon's own account of why (no revival wired, the revival failed, the
+watcher missing), echoed verbatim and never switched on."
+  (agent-repl-wire-verbs--decode-detail "SubmitPromptNoSession" json))
 
 (defun agent-repl-wire-decode-submit-prompt-duplicate-submission (json)
   "Decode SubmitPromptDuplicateSubmission from JSON.  Empty: the client-minted

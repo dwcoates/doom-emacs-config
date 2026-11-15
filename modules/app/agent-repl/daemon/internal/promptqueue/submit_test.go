@@ -208,8 +208,40 @@ func TestSubmitRefusesAWorkspaceWithNoSessionAndNoRevivalWired(t *testing.T) {
 	// Act
 	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
 	// Assert
-	if !errors.Is(err, ErrNoSession) {
-		t.Fatalf("err = %v, want ErrNoSession", err)
+	var cause *NoSessionError
+	if !errors.As(err, &cause) || cause.Cause != causeNoRevival {
+		t.Fatalf("err = %v, want ErrNoSession stating %q", err, causeNoRevival)
+	}
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Operation: opSubmit, Message: "the workspace has no session to submit to"}); !ok || rec.Context["cause"] != causeNoRevival {
+		t.Fatalf("records = %+v, want the refusal recorded with its cause", h.log.Records())
+	}
+}
+
+func TestNoSessionErrorMatchesErrNoSessionAndStatesItsCause(t *testing.T) {
+	// Arrange
+	err := noSession(causeNoWatcher)
+
+	// Act
+	matches, text := errors.Is(err, ErrNoSession), err.Error()
+
+	// Assert
+	if !matches || text != ErrNoSession.Error()+": "+causeNoWatcher {
+		t.Fatalf("errors.Is = %v, Error = %q; want a match stating the cause", matches, text)
+	}
+}
+
+// TestEveryNoSessionRefusalStatesItsCause pins every refusal site to
+// noSession: a bare ErrNoSession would reach the client with no account, which
+// the server refuses as an invariant break.
+func TestEveryNoSessionRefusalStatesItsCause(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "ErrNoSession")
+
+	// Assert
+	for _, site := range sites {
+		if site != "api.go" {
+			t.Fatalf("ErrNoSession named outside api.go in %v; refuse with noSession(cause)", sites)
+		}
 	}
 }
 

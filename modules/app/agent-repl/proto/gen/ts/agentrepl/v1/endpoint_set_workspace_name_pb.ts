@@ -25,6 +25,8 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { CreateWorkspaceInvalidName } from "./endpoint_create_workspace_pb";
+import { file_agentrepl_v1_endpoint_create_workspace } from "./endpoint_create_workspace_pb";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -33,7 +35,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_name.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_name: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJAChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBCLWAwoVU2V0V29ya3NwYWNlTmFtZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTm90WWV0QWRvcHRlZEgAEkEKDGludmFsaWRfbmFtZRgFIAEoCzIpLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lSW52YWxpZE5hbWVIABI5CgpuYW1lX3Rha2VuGAYgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVUYWtlbkgAQgcKBWNhdXNlIiIKIFNldFdvcmtzcGFjZU5hbWVVbmtub3duV29ya3NwYWNlIjwKJFNldFdvcmtzcGFjZU5hbWVXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMwogU2V0V29ya3NwYWNlTmFtZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSJBCh1TZXRXb3Jrc3BhY2VOYW1lTm90WWV0QWRvcHRlZBIUCgdhZGRyZXNzGAEgASgJSACIAQFCCgoIX2FkZHJlc3MiyAEKG1NldFdvcmtzcGFjZU5hbWVJbnZhbGlkTmFtZRIMCgRuYW1lGAEgASgJEhEKCWNvbXBvbmVudBgCIAEoCRI9CgRzbHVnGAMgASgLMi0uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVJbnZhbGlkTmFtZVNsdWdIABJBCgZwcmVmaXgYBCABKAsyLy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZUludmFsaWROYW1lUHJlZml4SABCBgoEcnVsZSIhCh9TZXRXb3Jrc3BhY2VOYW1lSW52YWxpZE5hbWVTbHVnIiMKIVNldFdvcmtzcGFjZU5hbWVJbnZhbGlkTmFtZVByZWZpeCKfAQoVU2V0V29ya3NwYWNlTmFtZVRha2VuEgwKBG5hbWUYASABKAkSLwoJd29ya3NwYWNlGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEj0KB3BlbmRpbmcYAyABKAsyKi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuUGVuZGluZ0gAQggKBmhvbGRlciIeChxTZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9uYW1lLnByb3RvEgxhZ2VudHJlcGwudjEiVgoXU2V0V29ya3NwYWNlTmFtZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJIpQBChhTZXRXb3Jrc3BhY2VOYW1lUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVFcnJvckgAQggKBnJlc3VsdCJAChdTZXRXb3Jrc3BhY2VOYW1lU3VjY2VzcxIMCgRuYW1lGAEgASgJEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBCLVAwoVU2V0V29ya3NwYWNlTmFtZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZU5hbWVVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VOYW1lTm90WWV0QWRvcHRlZEgAEkAKDGludmFsaWRfbmFtZRgFIAEoCzIoLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VJbnZhbGlkTmFtZUgAEjkKCm5hbWVfdGFrZW4YBiABKAsyIy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuSABCBwoFY2F1c2UiIgogU2V0V29ya3NwYWNlTmFtZVVua25vd25Xb3Jrc3BhY2UiPAokU2V0V29ya3NwYWNlTmFtZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBTZXRXb3Jrc3BhY2VOYW1lVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIkEKHVNldFdvcmtzcGFjZU5hbWVOb3RZZXRBZG9wdGVkEhQKB2FkZHJlc3MYASABKAlIAIgBAUIKCghfYWRkcmVzcyKfAQoVU2V0V29ya3NwYWNlTmFtZVRha2VuEgwKBG5hbWUYASABKAkSLwoJd29ya3NwYWNlGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAEj0KB3BlbmRpbmcYAyABKAsyKi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlTmFtZVRha2VuUGVuZGluZ0gAQggKBmhvbGRlciIeChxTZXRXb3Jrc3BhY2VOYW1lVGFrZW5QZW5kaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceNameRequest
@@ -178,11 +180,13 @@ export type SetWorkspaceNameError = Message<"agentrepl.v1.SetWorkspaceNameError"
     case: "notYetAdopted";
   } | {
     /**
-     * The name breaks the naming rule.
+     * The name breaks the naming rule. ONE RULE, ONE BREACH: the arm carries
+     * the create's own message, as ValidateWorkspaceName's verdict does, so a
+     * client words a rename's refusal and a create's alike.
      *
-     * @generated from field: agentrepl.v1.SetWorkspaceNameInvalidName invalid_name = 5;
+     * @generated from field: agentrepl.v1.CreateWorkspaceInvalidName invalid_name = 5;
      */
-    value: SetWorkspaceNameInvalidName;
+    value: CreateWorkspaceInvalidName;
     case: "invalidName";
   } | {
     /**
@@ -262,7 +266,6 @@ export const SetWorkspaceNameTransferringAwaySchema: GenMessage<SetWorkspaceName
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
- * DELIBERATELY EMPTY.
  *
  * @generated from message agentrepl.v1.SetWorkspaceNameNotYetAdopted
  */
@@ -286,94 +289,6 @@ export type SetWorkspaceNameNotYetAdopted = Message<"agentrepl.v1.SetWorkspaceNa
  */
 export const SetWorkspaceNameNotYetAdoptedSchema: GenMessage<SetWorkspaceNameNotYetAdopted> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 7);
-
-/**
- * A name that breaks the naming rule, refused before anything is recorded.
- * The rule and its two component kinds are the ones a supplied create name
- * is held to (CreateWorkspaceInvalidName), so one name is legal for both.
- *
- * @generated from message agentrepl.v1.SetWorkspaceNameInvalidName
- */
-export type SetWorkspaceNameInvalidName = Message<"agentrepl.v1.SetWorkspaceNameInvalidName"> & {
-  /**
-   * The name as requested, with surrounding whitespace trimmed.
-   *
-   * @generated from field: string name = 1;
-   */
-  name: string;
-
-  /**
-   * The `/`-separated component of `name` that broke its rule, exactly as it
-   * appears in `name`. Empty when that component is empty (a leading,
-   * trailing or doubled `/`), which is itself the breach.
-   *
-   * @generated from field: string component = 2;
-   */
-  component: string;
-
-  /**
-   * Which rule `component` broke, set from where the component sits in the
-   * name, so a client words the refusal from the arm alone.
-   *
-   * @generated from oneof agentrepl.v1.SetWorkspaceNameInvalidName.rule
-   */
-  rule: {
-    /**
-     * The last component is not a slug.
-     *
-     * @generated from field: agentrepl.v1.SetWorkspaceNameInvalidNameSlug slug = 3;
-     */
-    value: SetWorkspaceNameInvalidNameSlug;
-    case: "slug";
-  } | {
-    /**
-     * A component before the last is not a prefix.
-     *
-     * @generated from field: agentrepl.v1.SetWorkspaceNameInvalidNamePrefix prefix = 4;
-     */
-    value: SetWorkspaceNameInvalidNamePrefix;
-    case: "prefix";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message agentrepl.v1.SetWorkspaceNameInvalidName.
- * Use `create(SetWorkspaceNameInvalidNameSchema)` to create a new message.
- */
-export const SetWorkspaceNameInvalidNameSchema: GenMessage<SetWorkspaceNameInvalidName> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 8);
-
-/**
- * The name's last component, its slug, is not lowercase hyphen-separated
- * ASCII alphanumeric words. DELIBERATELY EMPTY.
- *
- * @generated from message agentrepl.v1.SetWorkspaceNameInvalidNameSlug
- */
-export type SetWorkspaceNameInvalidNameSlug = Message<"agentrepl.v1.SetWorkspaceNameInvalidNameSlug"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SetWorkspaceNameInvalidNameSlug.
- * Use `create(SetWorkspaceNameInvalidNameSlugSchema)` to create a new message.
- */
-export const SetWorkspaceNameInvalidNameSlugSchema: GenMessage<SetWorkspaceNameInvalidNameSlug> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 9);
-
-/**
- * A prefix component of the name is empty, or is not ASCII letters and digits
- * joined by single `.`, `_` or `-`. DELIBERATELY EMPTY.
- *
- * @generated from message agentrepl.v1.SetWorkspaceNameInvalidNamePrefix
- */
-export type SetWorkspaceNameInvalidNamePrefix = Message<"agentrepl.v1.SetWorkspaceNameInvalidNamePrefix"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SetWorkspaceNameInvalidNamePrefix.
- * Use `create(SetWorkspaceNameInvalidNamePrefixSchema)` to create a new message.
- */
-export const SetWorkspaceNameInvalidNamePrefixSchema: GenMessage<SetWorkspaceNameInvalidNamePrefix> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 10);
 
 /**
  * The name is already held. Names and branches are one namespace: a
@@ -424,7 +339,7 @@ export type SetWorkspaceNameTaken = Message<"agentrepl.v1.SetWorkspaceNameTaken"
  * Use `create(SetWorkspaceNameTakenSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenSchema: GenMessage<SetWorkspaceNameTaken> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 11);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 8);
 
 /**
  * The name is reserved by a pending async merge or claimed by a create in
@@ -440,5 +355,5 @@ export type SetWorkspaceNameTakenPending = Message<"agentrepl.v1.SetWorkspaceNam
  * Use `create(SetWorkspaceNameTakenPendingSchema)` to create a new message.
  */
 export const SetWorkspaceNameTakenPendingSchema: GenMessage<SetWorkspaceNameTakenPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 12);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_name, 9);
 

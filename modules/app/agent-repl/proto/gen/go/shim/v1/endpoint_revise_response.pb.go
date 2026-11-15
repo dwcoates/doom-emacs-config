@@ -190,7 +190,11 @@ func (*ReviseResponseResponse_Error) isReviseResponseResponse_Result() {}
 type ReviseResponseSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The model the side query answered with, as its own opening stated it.
-	Model         string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	Model string `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// The revised prose, exactly as the response_revision page line carries
+	// it, so the daemon tells the agent what its response now says without
+	// waiting for the page line to come back to it.
+	Prose         *v1.AgentResponseProse `protobuf:"bytes,2,opt,name=prose,proto3" json:"prose,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -230,6 +234,13 @@ func (x *ReviseResponseSuccess) GetModel() string {
 		return x.Model
 	}
 	return ""
+}
+
+func (x *ReviseResponseSuccess) GetProse() *v1.AgentResponseProse {
+	if x != nil {
+		return x.Prose
+	}
+	return nil
 }
 
 // No revision was written. THE ARM IS WHY.
@@ -528,9 +539,10 @@ const file_shim_v1_endpoint_revise_response_proto_rawDesc = "" +
 	"\x16ReviseResponseResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.shim.v1.ReviseResponseSuccessH\x00R\asuccess\x124\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.shim.v1.ReviseResponseErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"-\n" +
+	"\x06result\"h\n" +
 	"\x15ReviseResponseSuccess\x12\x14\n" +
-	"\x05model\x18\x01 \x01(\tR\x05model\"\xc0\x02\n" +
+	"\x05model\x18\x01 \x01(\tR\x05model\x129\n" +
+	"\x05prose\x18\x02 \x01(\v2#.conversation.v1.AgentResponseProseR\x05prose\"\xc0\x02\n" +
 	"\x13ReviseResponseError\x12A\n" +
 	"\n" +
 	"no_session\x18\x01 \x01(\v2 .shim.v1.ReviseResponseNoSessionH\x00R\tnoSession\x12H\n" +
@@ -569,21 +581,23 @@ var file_shim_v1_endpoint_revise_response_proto_goTypes = []any{
 	(*ReviseResponseEmptyAnswer)(nil),  // 7: shim.v1.ReviseResponseEmptyAnswer
 	(*v1.AgentActivityId)(nil),         // 8: conversation.v1.AgentActivityId
 	(*v1.UserSaid)(nil),                // 9: conversation.v1.UserSaid
+	(*v1.AgentResponseProse)(nil),      // 10: conversation.v1.AgentResponseProse
 }
 var file_shim_v1_endpoint_revise_response_proto_depIdxs = []int32{
-	8, // 0: shim.v1.ReviseResponseRequest.response:type_name -> conversation.v1.AgentActivityId
-	9, // 1: shim.v1.ReviseResponseRequest.instruction:type_name -> conversation.v1.UserSaid
-	2, // 2: shim.v1.ReviseResponseResponse.success:type_name -> shim.v1.ReviseResponseSuccess
-	3, // 3: shim.v1.ReviseResponseResponse.error:type_name -> shim.v1.ReviseResponseError
-	4, // 4: shim.v1.ReviseResponseError.no_session:type_name -> shim.v1.ReviseResponseNoSession
-	5, // 5: shim.v1.ReviseResponseError.no_fork_point:type_name -> shim.v1.ReviseResponseNoForkPoint
-	6, // 6: shim.v1.ReviseResponseError.vendor_failed:type_name -> shim.v1.ReviseResponseVendorFailed
-	7, // 7: shim.v1.ReviseResponseError.empty_answer:type_name -> shim.v1.ReviseResponseEmptyAnswer
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	8,  // 0: shim.v1.ReviseResponseRequest.response:type_name -> conversation.v1.AgentActivityId
+	9,  // 1: shim.v1.ReviseResponseRequest.instruction:type_name -> conversation.v1.UserSaid
+	2,  // 2: shim.v1.ReviseResponseResponse.success:type_name -> shim.v1.ReviseResponseSuccess
+	3,  // 3: shim.v1.ReviseResponseResponse.error:type_name -> shim.v1.ReviseResponseError
+	10, // 4: shim.v1.ReviseResponseSuccess.prose:type_name -> conversation.v1.AgentResponseProse
+	4,  // 5: shim.v1.ReviseResponseError.no_session:type_name -> shim.v1.ReviseResponseNoSession
+	5,  // 6: shim.v1.ReviseResponseError.no_fork_point:type_name -> shim.v1.ReviseResponseNoForkPoint
+	6,  // 7: shim.v1.ReviseResponseError.vendor_failed:type_name -> shim.v1.ReviseResponseVendorFailed
+	7,  // 8: shim.v1.ReviseResponseError.empty_answer:type_name -> shim.v1.ReviseResponseEmptyAnswer
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_revise_response_proto_init() }

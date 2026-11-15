@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/replyquote"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1481,5 +1482,332 @@ func TestAFailedPlacementNoteTakeForwardsNothing(t *testing.T) {
 	}
 	if n := len(h.queue.forwarded()); n != 0 {
 		t.Fatalf("forwarded %d submissions, want none", n)
+	}
+}
+
+// owedRevision is one revision the agent is owed, in these tests.
+var owedRevision = wsm.OwedRevision{Unit: "msg_1:0", Original: "the footer is fixed", Revised: "the footer is fixed, and the topbar too", OwedAtNs: 1}
+
+// wantRevisionsNote is the note the test corpus composes for owedRevision.
+func wantRevisionsNote() string {
+	return prompts.Wrap("revised: Your response that opened with:\n\nthe footer is fixed\n\nnow reads:\n\nthe footer is fixed, and the topbar too\n\n")
+}
+
+func TestAPromptOpensByTellingTheAgentItsRevisedResponses(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.revisions = []wsm.OwedRevision{owedRevision}
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got, want := forwardedTexts(t, h), []string{wantRevisionsNote(), "now land it"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want the note as its own block then the user's words %q", got, want)
+	}
+	if len(h.db.revisions) != 0 {
+		t.Fatalf("revisions = %+v, want them taken", h.db.revisions)
+	}
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opRevisionsTold}); !ok || !reflect.DeepEqual(rec.Context["units"], []string{"msg_1:0"}) {
+		t.Fatalf("records = %+v, want the telling at INFO naming its units", h.log.Records())
+	}
+}
+
+func TestAPromptCarryingNoDirectiveLeavesTheRevisionsOwed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.revisions = []wsm.OwedRevision{owedRevision}
+
+	// Act
+	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, nil, wsm.DeliveryOrdinary, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got := forwardedTexts(t, h); !reflect.DeepEqual(got, []string{"hello"}) {
+		t.Fatalf("forwarded blocks = %q, want the prompt alone", got)
+	}
+	if len(h.db.revisions) != 1 {
+		t.Fatalf("revisions = %+v, want them still owed", h.db.revisions)
+	}
+}
+
+func TestAPromptTheQueueRefusesPutsTheRevisionsBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.revisions = []wsm.OwedRevision{owedRevision}
+	h.queue.submitErr = errors.New("the queue is closed")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) {
+		t.Fatalf("Submit = %v, want the queue's refusal", err)
+	}
+	if !reflect.DeepEqual(h.db.revisions, []wsm.OwedRevision{owedRevision}) {
+		t.Fatalf("revisions = %+v, want them put back for the next prompt", h.db.revisions)
+	}
+}
+
+func TestRevisionsThatCannotBeToldFailTheSubmission(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		message string
+	}{
+		{
+			name:    "the revisions cannot be taken",
+			arrange: func(h *harness) { h.db.revisionsTakeErr = errors.New("the state database is locked") },
+			message: "could not take the revisions the workspace's next prompt owes its agent; the prompt was not forwarded",
+		},
+		{
+			name:    "the note cannot be composed",
+			arrange: func(h *harness) { h.h.deps.PromptsDir = t.TempDir() },
+			message: "could not compose the note telling the agent of its revised responses; the prompt was not forwarded",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.revisions = []wsm.OwedRevision{owedRevision}
+			tt.arrange(h)
+
+			// Act
+			_, err := h.submit("now land it")
+
+			// Assert
+			if err == nil {
+				t.Fatal("Submit = nil, want the failure")
+			}
+			if n := len(h.queue.forwarded()); n != 0 {
+				t.Fatalf("forwarded %d submissions, want none", n)
+			}
+			if !reflect.DeepEqual(h.db.revisions, []wsm.OwedRevision{owedRevision}) {
+				t.Fatalf("revisions = %+v, want them still owed", h.db.revisions)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opRevisionsTold, Message: tt.message}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", h.log.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestAFailedRestoreOfTheRevisionsIsLogged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.revisions = []wsm.OwedRevision{owedRevision}
+	h.db.revisionsRestoreErr = errors.New("the state database is locked")
+	h.queue.submitErr = errors.New("the queue is closed")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) {
+		t.Fatalf("Submit = %v, want the queue's refusal", err)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opRevisionsTold,
+		Message: "could not put back the revisions of a prompt the queue refused; the agent will not be told of them"}); !ok {
+		t.Fatalf("records = %+v, want the lost revisions at ERROR", h.log.Records())
+	}
+}
+
+func TestTheRevisionsBriefSplicesItsRevisions(t *testing.T) {
+	// Arrange
+	dir := filepath.Join("..", "..", "..", "prompts")
+
+	// Act
+	note, err := revisionsNote(dir, []wsm.OwedRevision{owedRevision})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("revisionsNote over the shipped corpus: %v", err)
+	}
+	if !strings.HasPrefix(note, prompts.MetaOpen) || !strings.Contains(note, owedRevision.Revised) {
+		t.Fatalf("note = %q, want the meta-wrapped brief carrying the revised words", note)
+	}
+}
+
+func TestWithNoteOpensOrClosesTheSaid(t *testing.T) {
+	tests := []struct {
+		name  string
+		opens bool
+		want  []string
+	}{
+		{name: "an opening note leads", opens: noteOpens, want: []string{"NOTE", "words"}},
+		{name: "a closing note follows", opens: noteCloses, want: []string{"words", "NOTE"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := withNote(userSaid("words"), "NOTE", tt.opens)
+
+			// Assert
+			texts := make([]string, 0, 2)
+			for _, block := range got.GetContent().GetBlocks() {
+				texts = append(texts, block.GetText().GetText())
+			}
+			if !reflect.DeepEqual(texts, tt.want) {
+				t.Fatalf("blocks = %q, want %q", texts, tt.want)
+			}
+		})
+	}
+}
+
+// TestNoNoteSiteHandRollsItsBlocks pins every daemon note to withNote: a site
+// that splices a note block by hand fails here rather than drifting from it.
+func TestNoNoteSiteHandRollsItsBlocks(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "&conversationv1.UserContentBlock{")
+
+	// Assert
+	if !reflect.DeepEqual(sites, []string{"handler.go"}) || sourcescan.Count(t, "&conversationv1.UserContentBlock{") != 1 {
+		t.Fatalf("note blocks built in %v; build them only in withNote", sites)
+	}
+}
+
+func TestAPromptOpensByTellingTheAgentTheWorkspacesNewName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.renamed = "footer-fix"
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if got, want := forwardedTexts(t, h), []string{prompts.Wrap("renamed: footer-fix\n\n"), "now land it"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want %q", got, want)
+	}
+	if h.db.renamed != "" {
+		t.Fatalf("owed name = %q, want it taken", h.db.renamed)
+	}
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opRenameTold}); !ok || rec.Context["name"] != "footer-fix" {
+		t.Fatalf("records = %+v, want the telling at INFO naming the name", h.log.Records())
+	}
+}
+
+func TestAPromptOwingEveryNoteOpensWithTheNameThenTheRevisionsThenTheSummary(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.renamed = "footer-fix"
+	h.db.revisions = []wsm.OwedRevision{owedRevision}
+	h.db.contextSummary = "the queue fixed the footer"
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	want := []string{prompts.Wrap("renamed: footer-fix\n\n"), wantRevisionsNote(), wantContextNote("the queue fixed the footer"), "now land it"}
+	if got := forwardedTexts(t, h); !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want %q", got, want)
+	}
+}
+
+func TestANoteThatFailsPutsBackTheNotesTakenBeforeIt(t *testing.T) {
+	// Arrange: the summary is taken, then the revisions cannot be.
+	h := newHarness(t)
+	h.db.contextSummary = "the queue fixed the footer"
+	h.db.revisionsTakeErr = errors.New("the state database is locked")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err == nil {
+		t.Fatal("Submit = nil, want the failure")
+	}
+	if h.db.contextSummary != "the queue fixed the footer" {
+		t.Fatalf("context summary = %q, want it put back", h.db.contextSummary)
+	}
+}
+
+func TestAPromptTheQueueRefusesPutsTheNameBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.renamed = "footer-fix"
+	h.queue.submitErr = errors.New("the queue is closed")
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) || h.db.renamed != "footer-fix" {
+		t.Fatalf("Submit = %v, owed name = %q; want the refusal and the name put back", err, h.db.renamed)
+	}
+}
+
+func TestTheRenameBriefSplicesItsName(t *testing.T) {
+	// Arrange
+	dir := filepath.Join("..", "..", "..", "prompts")
+
+	// Act
+	note, err := renameNote(dir, "footer-fix")
+
+	// Assert
+	if err != nil || !strings.HasPrefix(note, prompts.MetaOpen) || !strings.Contains(note, "`footer-fix`") {
+		t.Fatalf("renameNote = (%q, %v), want the meta-wrapped brief naming the workspace", note, err)
+	}
+}
+
+func TestAPromptOwingEveryNoteClosesWithThePlacementAfterTheSummaryAsk(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.renamed = "footer-fix"
+	h.owed.note = owedNoteText
+	h.place.note = placementNoteText
+
+	// Act
+	_, err := h.submit("now land it")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	want := []string{prompts.Wrap("renamed: footer-fix\n\n"), "now land it", owedNoteText, placementNoteText}
+	if got := forwardedTexts(t, h); !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want %q", got, want)
+	}
+}
+
+func TestADeliveredPlacementNoteIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.place.note = placementNoteText
+
+	// Act
+	_, err := h.submit("fix the footer")
+
+	// Assert
+	if rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPlacementTold}); err != nil || !ok || rec.Context["note_chars"] != len(placementNoteText) {
+		t.Fatalf("Submit = %v, records = %+v; want the delivery at INFO", err, h.log.Records())
+	}
+}
+
+func TestAFailedPlacementNoteTakeIsLeftToItsOwnersRecord(t *testing.T) {
+	// Arrange: the verbs record their own failure (workspace.TakeOwedPlacementNote).
+	h := newHarness(t)
+	h.place.err = errors.New("the state database is locked")
+
+	// Act
+	_, err := h.submit("fix the footer")
+
+	// Assert
+	if !errors.Is(err, h.place.err) {
+		t.Fatalf("Submit = %v, want the take's failure", err)
+	}
+	if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPlacementTold}); ok {
+		t.Fatalf("records = %+v, want the failure recorded only by its owner", h.log.Records())
 	}
 }

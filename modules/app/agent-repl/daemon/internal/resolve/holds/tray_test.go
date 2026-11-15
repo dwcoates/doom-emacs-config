@@ -1006,6 +1006,20 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 			},
 			want: []string{"", "t1"},
 		},
+		{
+			name: "a prompt kept at a cold gate's answer between two prompts is passed over, and offers no fold itself",
+			holds: []wsm.HeldPrompt{
+				hold("t1", "first"),
+				func() wsm.HeldPrompt {
+					h := queuedSecond("t2", "kept")
+					kind := wsm.HoldColdGateAnswered
+					h.Hold = &kind
+					return h
+				}(),
+				func() wsm.HeldPrompt { h := hold("t3", "third"); h.QueuedAt = queuedAt.Add(2 * time.Second); return h }(),
+			},
+			want: []string{"", "", "t1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

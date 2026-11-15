@@ -95,13 +95,14 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, start ShimStart, draw DrawBody, 
 }
 
 // foldAbove is the entry's "fold above" button, or nil when it is not offered:
-// there is no entry ahead of it, or holdfold.Foldable refuses the pair. It is
+// no entry in line stands ahead of it (holdfold.Ahead), or holdfold.Foldable
+// refuses the pair. It is
 // the same reading FoldHeldPrompt refuses by, so the button stands exactly
 // when the fold would be taken.
 func foldAbove(h wsm.HeldPrompt, ahead *wsm.HeldPrompt, editing ids.TurnID, log dlog.Logger) *frontendv1.HeldPromptFoldAbove {
 	ctx := dlog.Context{"turn_id": string(h.Turn)}
 	if ahead == nil {
-		log.Debug("daemon.holds.fold_above", "the first entry offers no fold: nothing stands ahead of it", ctx)
+		log.Debug("daemon.holds.fold_above", "the entry offers no fold: no entry in line stands ahead of it", ctx)
 		return nil
 	}
 	ctx["above_turn"] = string(ahead.Turn)

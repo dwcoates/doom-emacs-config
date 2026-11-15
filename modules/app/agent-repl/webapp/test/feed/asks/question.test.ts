@@ -114,11 +114,22 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The daemon's wording of an ask answered on claude.ai, in these tests. */
+const REMOTE_LABEL = "answered on claude.ai";
+
+/** The state of an ask answered on claude.ai, under the daemon's neutral marker. */
+const answeredRemotely = () =>
+  ({
+    case: "answeredRemotely",
+    value: { marker: { label: { text: REMOTE_LABEL }, family: { case: "neutral", value: {} } } },
+  }) as const;
+
 describe("the card's chrome", () => {
   it.each([
     ["open", open()],
     ["answered", question({ case: "answered", value: { answers: [] } })],
     ["expired", question({ case: "expired", value: {} })],
+    ["answered remotely", question(answeredRemotely())],
   ] as const)("wears the tool card's chrome when %s", (_state, u) => {
     const el = drawFeedQuestion(u, askHarness().rc);
     expect(el.classList.contains("tool-card")).toBe(true);
@@ -698,6 +709,15 @@ describe("the settled card", () => {
 
   it("offers no controls on an expired ask", () => {
     const el = drawFeedQuestion(question({ case: "expired", value: {} }), askHarness().rc);
+    expect(el.querySelector("ar-button")).toBeNull();
+  });
+  it("draws an ask answered on claude.ai under the daemon's marker, never as expired", () => {
+    const el = drawFeedQuestion(question(answeredRemotely()), askHarness().rc);
+    expect(el.querySelector(".tool-head .badge")?.textContent).toBe(REMOTE_LABEL);
+  });
+
+  it("offers no controls on an ask answered on claude.ai", () => {
+    const el = drawFeedQuestion(question(answeredRemotely()), askHarness().rc);
     expect(el.querySelector("ar-button")).toBeNull();
   });
 });

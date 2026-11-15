@@ -106,6 +106,15 @@ describe("revising a response", () => {
     expect(answered.result).toMatchObject({ case: "success", value: { model: "claude-opus-5" } });
   });
 
+  it("answers success carrying the revised prose it wrote", async () => {
+    // Arrange
+    const h = harness(answering("1 🔎 revised tree"));
+    // Act
+    const answered = await reviseResponse(h.deps, request());
+    // Assert
+    expect(answered.result).toMatchObject({ case: "success", value: { prose: { markdown: "1 🔎 revised tree" } } });
+  });
+
   it("aborts the side query when the caller goes away", async () => {
     // Arrange
     const query = new ScriptedQuery();

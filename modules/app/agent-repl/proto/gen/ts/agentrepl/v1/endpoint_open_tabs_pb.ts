@@ -868,7 +868,6 @@ export const OpenTabsRefusedTransferringAwaySchema: GenMessage<OpenTabsRefusedTr
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
- * DELIBERATELY EMPTY.
  *
  * @generated from message agentrepl.v1.OpenTabsRefusedNotYetAdopted
  */

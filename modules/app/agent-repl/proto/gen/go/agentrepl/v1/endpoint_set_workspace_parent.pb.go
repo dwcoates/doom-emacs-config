@@ -810,7 +810,6 @@ func (x *SetWorkspaceParentTransferringAway) GetAddress() string {
 }
 
 // A joining daemon has not finished adopting this workspace yet.
-// DELIBERATELY EMPTY.
 type SetWorkspaceParentNotYetAdopted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the

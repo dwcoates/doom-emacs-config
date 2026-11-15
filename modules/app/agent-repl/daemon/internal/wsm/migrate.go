@@ -270,6 +270,8 @@ var migrations = []migration{
 	// the deploy that carries it ends, so its notice names one-shots too.
 	// IT IS ADDITIVE: the build before it neither reads nor writes the table.
 	{To: 144, Name: "undeployed_landings", Kind: MigrationAdditive, DDL: undeployedLandingsDDL},
+	{To: 145, Name: "owed_response_revisions", Kind: MigrationAdditive, DDL: owedRevisionsDDL},
+	{To: 146, Name: "owed_renames", Kind: MigrationAdditive, DDL: owedRenamesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

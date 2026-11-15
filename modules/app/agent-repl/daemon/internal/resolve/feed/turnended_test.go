@@ -240,6 +240,14 @@ func (h *harness) terminal(turn string, success *conversationv1.AgentSuccess, fa
 	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, success, failure, nil)
 }
 
+// terminalAt hands the resolver TURN's terminal, its record placed at AT
+// epoch ms.
+func (h *harness) terminalAt(turn string, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, at int64) {
+	h.t.Helper()
+	id := ids.TurnID(turn)
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, success, failure, &conversationv1.ConversationPlace{AtMs: at})
+}
+
 // terminalRow finds the terminal row for a turn.
 // queryDied hands the resolver one session-level query death.
 func (h *harness) queryDied(died *conversationv1.SessionQueryDied) {
@@ -1709,5 +1717,37 @@ func TestARestatedShellPastTheReplayedPageIsNoFaultAtAReplayedTurnEnd(t *testing
 	}
 	if got := h.warnings.keys(); len(got) != 0 {
 		t.Fatalf("raised = %v, want nothing on the topbar", got)
+	}
+}
+
+func TestATerminalIsStampedWithWhenItsRecordSaysItEnded(t *testing.T) {
+	// Arrange: the terminal reaches the daemon a minute after it failed.
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	failedAt := h.nowMs - 60_000
+
+	// Act
+	h.terminalAt("t1", nil, unreachableFailure(), failedAt)
+
+	// Assert
+	if got := h.terminalRow("t1").GetEndedAtMs(); got != failedAt {
+		t.Fatalf("ended_at_ms = %d, want the record's %d", got, failedAt)
+	}
+}
+
+func TestAnUnplacedTerminalIsStampedWithTheDaemonsReceipt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+
+	// Act
+	h.terminal("t1", nil, unreachableFailure())
+
+	// Assert
+	if got := h.terminalRow("t1").GetEndedAtMs(); got != h.nowMs {
+		t.Fatalf("ended_at_ms = %d, want the receipt %d", got, h.nowMs)
+	}
+	if !h.hasRecord("debug", "daemon.feed.terminal_unplaced") {
+		t.Fatalf("records = %+v, want the receipt's stand-in recorded", h.records())
 	}
 }

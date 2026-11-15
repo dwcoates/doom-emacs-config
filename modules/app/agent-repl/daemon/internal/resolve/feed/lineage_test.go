@@ -154,7 +154,9 @@ func TestAForksInheritedAnswerIsDrawnAsItsParentDrawsIt(t *testing.T) {
 	// as a fork's inherited past.
 	plain := newHarness(t)
 	plainStore := plain.withHistory(newFakeHistory(10))
-	plainStore.books[""] = newestFirst(bookTurn(mainAgent(), "turn-1", "unit-1"))
+	// Both copies sit at the same places: a turn's ending is stamped with its
+	// record's place, so the same turn placed elsewhere would end elsewhere.
+	plainStore.books[""] = newestFirstFrom(bookTurn(mainAgent(), "turn-1", "unit-1"), generationStart(1))
 	fork, _ := forkHarness(t, 10, nil,
 		[]LineageSegment{segment("ws-parent", parentBook, 10_000)},
 		map[string][]bookEntry{parentBook.GetValue(): bookTurn(parentBook, "turn-1", "unit-1")})

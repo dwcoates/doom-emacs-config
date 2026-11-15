@@ -163,6 +163,12 @@ message AgentQuestionSuccess {
     // The session that held the ask ended before anyone answered it. See
     // AgentQuestionAbandoned.
     AgentQuestionAbandoned abandoned = 5;
+    // The ask was answered on claude.ai, through the session's Remote Control
+    // bridge, not here. The vendor relays no answers, so this arm states only
+    // WHERE it was answered; the question's tool result carries what was
+    // chosen. The permission ask's twin is
+    // AgentPermissionSuccess.answered_remotely.
+    AgentQuestionAnsweredRemotely answered_remotely = 6;
   }
   // When the ask concluded, with the instant it was posed restated
   // (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -237,6 +243,8 @@ message AgentQuestionUnanswered {}
 // without a teardown). A daemon that finds a view standing an ask the session's
 // facts no longer name open settles its views with this same arm.
 message AgentQuestionAbandoned {}
+// The ask was answered on claude.ai, not here.
+message AgentQuestionAnsweredRemotely {}
 
 // The question could not be put to the user.
 message AgentQuestionFailure {

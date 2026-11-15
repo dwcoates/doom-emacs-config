@@ -2544,6 +2544,10 @@ message FeedQuestion {
     FeedQuestionOpen open = 2;
     FeedQuestionAnswered answered = 3;
     FeedQuestionExpired expired = 4;
+    // The ask was answered on claude.ai (conversation.v1.AgentQuestionSuccess
+    // .answered_remotely): settled, and no longer the reader's to answer, but
+    // with no answers to draw, because the vendor relays none.
+    FeedQuestionAnsweredRemotely answered_remotely = 6;
   }
   // The head's clock: how long the ask has taken, counting up while it
   // waits on the user and stopped once it settles. UNSET when the producer stated no
@@ -2655,6 +2659,13 @@ message FeedQuestionOtherText {
 message FeedQuestionExpired {
   reserved 1;
   reserved "at_ms";
+}
+// The ask was answered on claude.ai. Drawn as a settled card whose badge is
+// the marker's label, worded by the daemon, never as expired: someone answered.
+message FeedQuestionAnsweredRemotely {
+  // The neutral marker the badge draws ("answered on claude.ai"), the same
+  // one a permission answered there carries.
+  FeedOutcomeMarker marker = 1;
 }
 
 // ① What a person typed — or, nested inside a detached bubble, the prompt

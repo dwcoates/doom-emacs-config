@@ -108,6 +108,10 @@ type wsState struct {
 	// networkFaults is the network faults standing for the workspace, by
 	// record id (reconnect.go): the last one closing is the connection back.
 	networkFaults map[string]bool
+	// networkBackAtMs is when the last network fault closed, epoch ms, 0 when
+	// none has closed in this process (reconnect.go): a connection-failed
+	// ending that failed at or before it was answered by that return.
+	networkBackAtMs int64
 	// promptSaid is each delivered prompt as said, by the turn it opened, so a
 	// rollback can hand it back to the composer (rollback.go).
 	promptSaid map[ids.TurnID]*conversationv1.UserSaid

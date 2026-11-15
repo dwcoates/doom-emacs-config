@@ -339,7 +339,7 @@ func (x *SetWorkspaceNameError) GetNotYetAdopted() *SetWorkspaceNameNotYetAdopte
 	return nil
 }
 
-func (x *SetWorkspaceNameError) GetInvalidName() *SetWorkspaceNameInvalidName {
+func (x *SetWorkspaceNameError) GetInvalidName() *CreateWorkspaceInvalidName {
 	if x != nil {
 		if x, ok := x.Cause.(*SetWorkspaceNameError_InvalidName); ok {
 			return x.InvalidName
@@ -382,8 +382,10 @@ type SetWorkspaceNameError_NotYetAdopted struct {
 }
 
 type SetWorkspaceNameError_InvalidName struct {
-	// The name breaks the naming rule.
-	InvalidName *SetWorkspaceNameInvalidName `protobuf:"bytes,5,opt,name=invalid_name,json=invalidName,proto3,oneof"`
+	// The name breaks the naming rule. ONE RULE, ONE BREACH: the arm carries
+	// the create's own message, as ValidateWorkspaceName's verdict does, so a
+	// client words a rename's refusal and a create's alike.
+	InvalidName *CreateWorkspaceInvalidName `protobuf:"bytes,5,opt,name=invalid_name,json=invalidName,proto3,oneof"`
 }
 
 type SetWorkspaceNameError_NameTaken struct {
@@ -534,7 +536,6 @@ func (x *SetWorkspaceNameTransferringAway) GetAddress() string {
 }
 
 // A joining daemon has not finished adopting this workspace yet.
-// DELIBERATELY EMPTY.
 type SetWorkspaceNameNotYetAdopted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
@@ -585,192 +586,6 @@ func (x *SetWorkspaceNameNotYetAdopted) GetAddress() string {
 	return ""
 }
 
-// A name that breaks the naming rule, refused before anything is recorded.
-// The rule and its two component kinds are the ones a supplied create name
-// is held to (CreateWorkspaceInvalidName), so one name is legal for both.
-type SetWorkspaceNameInvalidName struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The name as requested, with surrounding whitespace trimmed.
-	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// The `/`-separated component of `name` that broke its rule, exactly as it
-	// appears in `name`. Empty when that component is empty (a leading,
-	// trailing or doubled `/`), which is itself the breach.
-	Component string `protobuf:"bytes,2,opt,name=component,proto3" json:"component,omitempty"`
-	// Which rule `component` broke, set from where the component sits in the
-	// name, so a client words the refusal from the arm alone.
-	//
-	// Types that are valid to be assigned to Rule:
-	//
-	//	*SetWorkspaceNameInvalidName_Slug
-	//	*SetWorkspaceNameInvalidName_Prefix
-	Rule          isSetWorkspaceNameInvalidName_Rule `protobuf_oneof:"rule"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceNameInvalidName) Reset() {
-	*x = SetWorkspaceNameInvalidName{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceNameInvalidName) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceNameInvalidName) ProtoMessage() {}
-
-func (x *SetWorkspaceNameInvalidName) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceNameInvalidName.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceNameInvalidName) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SetWorkspaceNameInvalidName) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *SetWorkspaceNameInvalidName) GetComponent() string {
-	if x != nil {
-		return x.Component
-	}
-	return ""
-}
-
-func (x *SetWorkspaceNameInvalidName) GetRule() isSetWorkspaceNameInvalidName_Rule {
-	if x != nil {
-		return x.Rule
-	}
-	return nil
-}
-
-func (x *SetWorkspaceNameInvalidName) GetSlug() *SetWorkspaceNameInvalidNameSlug {
-	if x != nil {
-		if x, ok := x.Rule.(*SetWorkspaceNameInvalidName_Slug); ok {
-			return x.Slug
-		}
-	}
-	return nil
-}
-
-func (x *SetWorkspaceNameInvalidName) GetPrefix() *SetWorkspaceNameInvalidNamePrefix {
-	if x != nil {
-		if x, ok := x.Rule.(*SetWorkspaceNameInvalidName_Prefix); ok {
-			return x.Prefix
-		}
-	}
-	return nil
-}
-
-type isSetWorkspaceNameInvalidName_Rule interface {
-	isSetWorkspaceNameInvalidName_Rule()
-}
-
-type SetWorkspaceNameInvalidName_Slug struct {
-	// The last component is not a slug.
-	Slug *SetWorkspaceNameInvalidNameSlug `protobuf:"bytes,3,opt,name=slug,proto3,oneof"`
-}
-
-type SetWorkspaceNameInvalidName_Prefix struct {
-	// A component before the last is not a prefix.
-	Prefix *SetWorkspaceNameInvalidNamePrefix `protobuf:"bytes,4,opt,name=prefix,proto3,oneof"`
-}
-
-func (*SetWorkspaceNameInvalidName_Slug) isSetWorkspaceNameInvalidName_Rule() {}
-
-func (*SetWorkspaceNameInvalidName_Prefix) isSetWorkspaceNameInvalidName_Rule() {}
-
-// The name's last component, its slug, is not lowercase hyphen-separated
-// ASCII alphanumeric words. DELIBERATELY EMPTY.
-type SetWorkspaceNameInvalidNameSlug struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceNameInvalidNameSlug) Reset() {
-	*x = SetWorkspaceNameInvalidNameSlug{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceNameInvalidNameSlug) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceNameInvalidNameSlug) ProtoMessage() {}
-
-func (x *SetWorkspaceNameInvalidNameSlug) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceNameInvalidNameSlug.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceNameInvalidNameSlug) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{9}
-}
-
-// A prefix component of the name is empty, or is not ASCII letters and digits
-// joined by single `.`, `_` or `-`. DELIBERATELY EMPTY.
-type SetWorkspaceNameInvalidNamePrefix struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceNameInvalidNamePrefix) Reset() {
-	*x = SetWorkspaceNameInvalidNamePrefix{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceNameInvalidNamePrefix) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceNameInvalidNamePrefix) ProtoMessage() {}
-
-func (x *SetWorkspaceNameInvalidNamePrefix) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceNameInvalidNamePrefix.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceNameInvalidNamePrefix) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{10}
-}
-
 // The name is already held. Names and branches are one namespace: a
 // workspace's name is refused when any OTHER registered workspace, open or
 // closed, of any repository, has it as its name or as its branch, because a
@@ -794,7 +609,7 @@ type SetWorkspaceNameTaken struct {
 
 func (x *SetWorkspaceNameTaken) Reset() {
 	*x = SetWorkspaceNameTaken{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +621,7 @@ func (x *SetWorkspaceNameTaken) String() string {
 func (*SetWorkspaceNameTaken) ProtoMessage() {}
 
 func (x *SetWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +634,7 @@ func (x *SetWorkspaceNameTaken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameTaken.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameTaken) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SetWorkspaceNameTaken) GetName() string {
@@ -884,7 +699,7 @@ type SetWorkspaceNameTakenPending struct {
 
 func (x *SetWorkspaceNameTakenPending) Reset() {
 	*x = SetWorkspaceNameTakenPending{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -896,7 +711,7 @@ func (x *SetWorkspaceNameTakenPending) String() string {
 func (*SetWorkspaceNameTakenPending) ProtoMessage() {}
 
 func (x *SetWorkspaceNameTakenPending) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -909,14 +724,14 @@ func (x *SetWorkspaceNameTakenPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceNameTakenPending.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceNameTakenPending) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP(), []int{9}
 }
 
 var File_agentrepl_v1_endpoint_set_workspace_name_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_set_workspace_name.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"g\n" +
+	".agentrepl/v1/endpoint_set_workspace_name.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_create_workspace.proto\x1a\x1cworkspace/v1/workspace.proto\"g\n" +
 	"\x17SetWorkspaceNameRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\xa4\x01\n" +
@@ -926,13 +741,13 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\x06result\"V\n" +
 	"\x17SetWorkspaceNameSuccess\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\"\xb7\x04\n" +
+	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\"\xb6\x04\n" +
 	"\x15SetWorkspaceNameError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.SetWorkspaceNameUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.SetWorkspaceNameTransferringAwayH\x00R\x10transferringAway\x12U\n" +
-	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.SetWorkspaceNameNotYetAdoptedH\x00R\rnotYetAdopted\x12N\n" +
-	"\finvalid_name\x18\x05 \x01(\v2).agentrepl.v1.SetWorkspaceNameInvalidNameH\x00R\vinvalidName\x12D\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.SetWorkspaceNameNotYetAdoptedH\x00R\rnotYetAdopted\x12M\n" +
+	"\finvalid_name\x18\x05 \x01(\v2(.agentrepl.v1.CreateWorkspaceInvalidNameH\x00R\vinvalidName\x12D\n" +
 	"\n" +
 	"name_taken\x18\x06 \x01(\v2#.agentrepl.v1.SetWorkspaceNameTakenH\x00R\tnameTakenB\a\n" +
 	"\x05cause\"\"\n" +
@@ -944,15 +759,7 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\x1dSetWorkspaceNameNotYetAdopted\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
 	"\n" +
-	"\b_address\"\xe7\x01\n" +
-	"\x1bSetWorkspaceNameInvalidName\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12C\n" +
-	"\x04slug\x18\x03 \x01(\v2-.agentrepl.v1.SetWorkspaceNameInvalidNameSlugH\x00R\x04slug\x12I\n" +
-	"\x06prefix\x18\x04 \x01(\v2/.agentrepl.v1.SetWorkspaceNameInvalidNamePrefixH\x00R\x06prefixB\x06\n" +
-	"\x04rule\"!\n" +
-	"\x1fSetWorkspaceNameInvalidNameSlug\"#\n" +
-	"!SetWorkspaceNameInvalidNamePrefix\"\xb9\x01\n" +
+	"\b_address\"\xb9\x01\n" +
 	"\x15SetWorkspaceNameTaken\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12:\n" +
 	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\tworkspace\x12F\n" +
@@ -972,7 +779,7 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_set_workspace_name_proto_goTypes = []any{
 	(*SetWorkspaceNameRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceNameRequest
 	(*SetWorkspaceNameResponse)(nil),             // 1: agentrepl.v1.SetWorkspaceNameResponse
@@ -982,32 +789,28 @@ var file_agentrepl_v1_endpoint_set_workspace_name_proto_goTypes = []any{
 	(*SetWorkspaceNameWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
 	(*SetWorkspaceNameTransferringAway)(nil),     // 6: agentrepl.v1.SetWorkspaceNameTransferringAway
 	(*SetWorkspaceNameNotYetAdopted)(nil),        // 7: agentrepl.v1.SetWorkspaceNameNotYetAdopted
-	(*SetWorkspaceNameInvalidName)(nil),          // 8: agentrepl.v1.SetWorkspaceNameInvalidName
-	(*SetWorkspaceNameInvalidNameSlug)(nil),      // 9: agentrepl.v1.SetWorkspaceNameInvalidNameSlug
-	(*SetWorkspaceNameInvalidNamePrefix)(nil),    // 10: agentrepl.v1.SetWorkspaceNameInvalidNamePrefix
-	(*SetWorkspaceNameTaken)(nil),                // 11: agentrepl.v1.SetWorkspaceNameTaken
-	(*SetWorkspaceNameTakenPending)(nil),         // 12: agentrepl.v1.SetWorkspaceNameTakenPending
-	(*v1.WorkspaceRef)(nil),                      // 13: workspace.v1.WorkspaceRef
+	(*SetWorkspaceNameTaken)(nil),                // 8: agentrepl.v1.SetWorkspaceNameTaken
+	(*SetWorkspaceNameTakenPending)(nil),         // 9: agentrepl.v1.SetWorkspaceNameTakenPending
+	(*v1.WorkspaceRef)(nil),                      // 10: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceInvalidName)(nil),           // 11: agentrepl.v1.CreateWorkspaceInvalidName
 }
 var file_agentrepl_v1_endpoint_set_workspace_name_proto_depIdxs = []int32{
-	13, // 0: agentrepl.v1.SetWorkspaceNameRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	10, // 0: agentrepl.v1.SetWorkspaceNameRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.SetWorkspaceNameResponse.success:type_name -> agentrepl.v1.SetWorkspaceNameSuccess
 	3,  // 2: agentrepl.v1.SetWorkspaceNameResponse.error:type_name -> agentrepl.v1.SetWorkspaceNameError
 	4,  // 3: agentrepl.v1.SetWorkspaceNameError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceNameUnknownWorkspace
 	5,  // 4: agentrepl.v1.SetWorkspaceNameError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatch
 	6,  // 5: agentrepl.v1.SetWorkspaceNameError.transferring_away:type_name -> agentrepl.v1.SetWorkspaceNameTransferringAway
 	7,  // 6: agentrepl.v1.SetWorkspaceNameError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceNameNotYetAdopted
-	8,  // 7: agentrepl.v1.SetWorkspaceNameError.invalid_name:type_name -> agentrepl.v1.SetWorkspaceNameInvalidName
-	11, // 8: agentrepl.v1.SetWorkspaceNameError.name_taken:type_name -> agentrepl.v1.SetWorkspaceNameTaken
-	9,  // 9: agentrepl.v1.SetWorkspaceNameInvalidName.slug:type_name -> agentrepl.v1.SetWorkspaceNameInvalidNameSlug
-	10, // 10: agentrepl.v1.SetWorkspaceNameInvalidName.prefix:type_name -> agentrepl.v1.SetWorkspaceNameInvalidNamePrefix
-	13, // 11: agentrepl.v1.SetWorkspaceNameTaken.workspace:type_name -> workspace.v1.WorkspaceRef
-	12, // 12: agentrepl.v1.SetWorkspaceNameTaken.pending:type_name -> agentrepl.v1.SetWorkspaceNameTakenPending
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 7: agentrepl.v1.SetWorkspaceNameError.invalid_name:type_name -> agentrepl.v1.CreateWorkspaceInvalidName
+	8,  // 8: agentrepl.v1.SetWorkspaceNameError.name_taken:type_name -> agentrepl.v1.SetWorkspaceNameTaken
+	10, // 9: agentrepl.v1.SetWorkspaceNameTaken.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 10: agentrepl.v1.SetWorkspaceNameTaken.pending:type_name -> agentrepl.v1.SetWorkspaceNameTakenPending
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_name_proto_init() }
@@ -1015,6 +818,7 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 	if File_agentrepl_v1_endpoint_set_workspace_name_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_create_workspace_proto_init()
 	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[1].OneofWrappers = []any{
 		(*SetWorkspaceNameResponse_Success)(nil),
 		(*SetWorkspaceNameResponse_Error)(nil),
@@ -1029,10 +833,6 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[7].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[8].OneofWrappers = []any{
-		(*SetWorkspaceNameInvalidName_Slug)(nil),
-		(*SetWorkspaceNameInvalidName_Prefix)(nil),
-	}
-	file_agentrepl_v1_endpoint_set_workspace_name_proto_msgTypes[11].OneofWrappers = []any{
 		(*SetWorkspaceNameTaken_Workspace)(nil),
 		(*SetWorkspaceNameTaken_Pending)(nil),
 	}
@@ -1042,7 +842,7 @@ func file_agentrepl_v1_endpoint_set_workspace_name_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -358,8 +358,7 @@ export const FoldHeldPromptTransferringAwaySchema: GenMessage<FoldHeldPromptTran
   messageDesc(file_agentrepl_v1_endpoint_fold_held_prompt, 7);
 
 /**
- * A joining daemon has not finished adopting the workspace. DELIBERATELY
- * EMPTY: the arm's presence is the whole fact.
+ * A joining daemon has not finished adopting the workspace.
  *
  * @generated from message agentrepl.v1.FoldHeldPromptNotYetAdopted
  */

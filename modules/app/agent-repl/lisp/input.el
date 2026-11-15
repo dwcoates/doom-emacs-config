@@ -2275,6 +2275,13 @@ started.  The text stays in the composer.  It used to read \"no session;
 the daemon is starting it\", which on 2026-11-09 was false for a
 /compact sent to a hibernated workspace.")
 
+(defun agent-repl--input-refusal-detail (reason)
+  "The daemon's `detail' sentence a refusal REASON carries, or \"\".
+REASON is a decoded `SubmitPromptError' reason, (:arm ARM :value VALUE).
+The one reading of the arms that carry the daemon's own account (the cold
+gate, a refused model, no session), so no arm reads it differently."
+  (or (plist-get (plist-get reason :value) :detail) ""))
+
 (defun agent-repl--input-say-refusal (ws flash &optional detail)
   "Tell the user about a refused submission of WS: FLASH in the composer,
 and FLASH in the echo area followed by \=` (DETAIL)\=' when DETAIL is a
@@ -2344,7 +2351,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; gate), and the text stays where it is.  The gate's own `detail'
          ;; -- the same sentence the gate card and the footer carry -- is
          ;; echoed verbatim; it is never switched on.
-         (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+         (let ((detail (agent-repl--input-refusal-detail reason)))
            (agent-repl--warn ws "elisp.input.refused-cold-gate ws=%s origin=%S arm=%S detail=%s"
                              ws origin arm detail)
            (agent-repl--input-say-refusal ws agent-repl--input-cold-gate-flash detail)))
@@ -2358,7 +2365,7 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; Recorded at INFO (a refusal the user asked for, not a defect),
          ;; not queued (a re-drive meets the same refusal), and the refusal's
          ;; own sentence is shown verbatim.
-         (let ((detail (or (plist-get (plist-get reason :value) :detail) "")))
+         (let ((detail (agent-repl--input-refusal-detail reason)))
            (agent-repl--info ws "elisp.input.refused-model ws=%s origin=%S arm=%S detail=%s"
                              ws origin arm detail)
            (agent-repl--input-flash ws "model change refused")
@@ -2393,9 +2400,12 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; refused).  Like the cold gate this is an answer rather than a
          ;; transport failure, but a genuine refusal, so it is recorded at
          ;; WARN and the prompt is not queued; the text stays so the user can
-         ;; resubmit once a session is up.
-         (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S" ws origin arm)
-         (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash))
+         ;; resubmit once a session is up.  The daemon's `detail' says why
+         ;; it could not, echoed verbatim; it is never switched on.
+         (let ((detail (agent-repl--input-refusal-detail reason)))
+           (agent-repl--warn ws "elisp.input.refused-no-session ws=%s origin=%S arm=%S detail=%s"
+                             ws origin arm detail)
+           (agent-repl--input-say-refusal ws agent-repl--input-no-session-flash detail)))
         (:bubble-refused
          ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
          ;; the refusal BY KIND.  Both kinds are the same answer to the user

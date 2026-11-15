@@ -32,6 +32,9 @@ func describePromptRefusal(ws string, e *agentreplv1.SubmitPromptError) (string,
 	case *agentreplv1.SubmitPromptError_FeedUndecodable:
 		return "the prompt named a feed the daemon cannot read", nil
 	case *agentreplv1.SubmitPromptError_NoSession:
+		if detail := r.NoSession.GetDetail(); detail != "" {
+			return fmt.Sprintf("%s has no live session to deliver to (%s)", ws, detail), nil
+		}
 		return fmt.Sprintf("%s has no live session to deliver to", ws), nil
 	case *agentreplv1.SubmitPromptError_DuplicateSubmission:
 		return fmt.Sprintf("%s already took this prompt, so it was not sent twice", ws), nil
