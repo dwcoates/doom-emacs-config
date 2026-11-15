@@ -1305,7 +1305,10 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 				t.Fatalf("the detached bubble's work id = %q, want %q", got, tt.work)
 			}
 			// The footer is handed the agent as live work, which is what its
-			// expanded section lists.
+			// expanded section lists. A turn is in flight, so no status moves
+			// with the set: the wait first reads the watcher's own live-work
+			// edge, so the chip is never matched on a spawn not yet detached.
+			awaitLiveWork(t, f, 1)
 			awaitFooter(t, f, footer, "the running agent on the live-work chip", func(v *frontendv1.FooterView) bool {
 				return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
 			})

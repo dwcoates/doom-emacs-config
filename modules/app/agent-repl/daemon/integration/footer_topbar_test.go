@@ -381,17 +381,13 @@ func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
-	})
+	awaitDetachedRunLive(t, f, footer)
 
 	// Act: the run settles on ITS OWN stream, under that book's own unit id.
 	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
 
 	// Assert
-	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents() == nil
-	})
+	awaitDetachedRunsSettled(t, f, footer)
 }
 
 // AND THE OTHER DELIVERY, which is the one the vendor's task notification
@@ -404,17 +400,13 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
-	})
+	awaitDetachedRunLive(t, f, footer)
 
 	// Act
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
 
 	// Assert
-	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents() == nil
-	})
+	awaitDetachedRunsSettled(t, f, footer)
 }
 
 // ---------------------------------------------------------------------------
@@ -1347,17 +1339,9 @@ func TestFooterANetworkResumeWaitKeepsTheAgentsRowAndMarksTheChip(t *testing.T) 
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
-	// Each wait names the live-work set's own edge (the background status), not
-	// the chip alone: the chip counts the spawn before the run is detached and
-	// drops for one push while the run moves to the live-work set, and a wait
-	// that matched either would let the next push overtake the frame before it.
-	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1 && v.GetStrip().GetStatus().GetBackground() != nil
-	})
+	awaitDetachedRunLive(t, f, footer)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
-	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents() == nil && v.GetStrip().GetStatus().GetIdle() != nil
-	})
+	awaitDetachedRunsSettled(t, f, footer)
 
 	// Act: the shim opens a wait for the failed run.
 	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_NetworkResumeWaits{

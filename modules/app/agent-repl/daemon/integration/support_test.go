@@ -414,6 +414,32 @@ func awaitLiveWork(t *testing.T, f *fixture, want int) {
 	})
 }
 
+// THE LIVE-WORK EDGE, NEVER THE CHIP ALONE. The agents chip counts a spawn
+// before its run is detached, and drops for one push while the run moves into
+// the live-work set, so a wait on the chip alone can return on an intermediate
+// view and let the test's next push overtake the frame before it across the
+// shim's separate agent and session streams. With no turn in flight, the
+// status moves with the set: background while it holds work, idle once empty.
+
+// awaitDetachedRunLive waits for the footer push where one detached run stands
+// in the live-work set, no turn in flight: the agents chip counting it, drawn
+// background.
+func awaitDetachedRunLive(t *testing.T, f *fixture, footer *harness.Stream[*frontendv1.FooterView]) *frontendv1.FooterView {
+	t.Helper()
+	return awaitFooter(t, f, footer, "the agents chip counting the detached run, drawn background", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1 && v.GetStrip().GetStatus().GetBackground() != nil
+	})
+}
+
+// awaitDetachedRunsSettled waits for the footer push where the live-work set
+// emptied, no turn in flight: no agents chip, drawn idle.
+func awaitDetachedRunsSettled(t *testing.T, f *fixture, footer *harness.Stream[*frontendv1.FooterView]) *frontendv1.FooterView {
+	t.Helper()
+	return awaitFooter(t, f, footer, "the agents chip retired at the run's terminal, drawn idle", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents() == nil && v.GetStrip().GetStatus().GetIdle() != nil
+	})
+}
+
 // mainAgent is the agent id the fake shim answers StartTurn with.
 const mainAgent = "main"
 
