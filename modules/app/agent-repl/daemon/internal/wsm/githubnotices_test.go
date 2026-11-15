@@ -11,11 +11,6 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// githubKinds is every GitHub subscription kind the shared helpers serve. A
-// kind added without its entry here goes unchecked by
-// TestEveryGithubKindsTablesFitTheSharedHelpers.
-var githubKinds = []githubTables{pullRequestTables, githubMergeQueueTables}
-
 func TestKeyWhereMatchesEveryKeyColumn(t *testing.T) {
 	// Act
 	got := pullRequestTables.keyWhere()
@@ -65,6 +60,35 @@ func TestEveryGithubKindsTablesFitTheSharedHelpers(t *testing.T) {
 				if !notices[c] {
 					t.Fatalf("%s has no column %s: %v", kind.notices, c, notices)
 				}
+			}
+		})
+	}
+}
+
+func TestEndGithubSubscriptionsDropsTheClosedSubscribersNoticesOfEveryKind(t *testing.T) {
+	for _, kind := range githubKinds {
+		t.Run(kind.noun, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			closing, other := testWorkspaceNamed(t, s, "closing"), testWorkspaceNamed(t, s, "other")
+			ctx := context.Background()
+			for _, ws := range []WorkspaceID{closing.ID, other.ID} {
+				if err := s.write(ctx, "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+					return appendOwedInTx(ctx, tx, kind, ws, "subject", []string{"owed."}, "")
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			err := s.write(ctx, "test", nil, func(ctx context.Context, tx *sql.Tx) error {
+				return endGithubSubscriptionsInTx(ctx, tx, closing.ID)
+			})
+
+			// Assert
+			owed, rerr := s.owedGithubNotices(ctx, "test", kind)
+			if err != nil || rerr != nil || len(owed) != 1 || owed[0].Subscriber != other.ID {
+				t.Fatalf("end = %v; owed after = %+v, %v; want only the other workspace's notice", err, owed, rerr)
 			}
 		})
 	}

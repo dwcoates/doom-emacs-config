@@ -46,6 +46,25 @@ var pullRequestTables = githubTables{
 	subject:       "pull_request",
 }
 
+// githubKinds is every GitHub subscription kind's tables: what a
+// subscriber's close ends (endGithubSubscriptionsInTx). A new kind joins it,
+// so a closed workspace is never left following one.
+var githubKinds = []githubTables{pullRequestTables, githubMergeQueueTables}
+
+// endGithubSubscriptionsInTx ends every GitHub subscription WS holds, of
+// every kind, and drops the notices it is owed about them.
+func endGithubSubscriptionsInTx(ctx context.Context, tx *sql.Tx, ws WorkspaceID) error {
+	for _, t := range githubKinds {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.subscriptions+` WHERE subscriber = ?`, ws); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t.notices+` WHERE subscriber = ?`, ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // keyWhere is the condition matching one subject's subscription rows.
 func (t githubTables) keyWhere() string {
 	parts := make([]string, len(t.key))
