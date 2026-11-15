@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -204,58 +205,53 @@ func (r *resolver) RetryStanding(ws ids.WorkspaceID) bool {
 	return ok && s.retryBlocks()
 }
 
-// logOf answers the workspace's logger. An unbound workspace is an invariant
-// violation, recorded as one on the global sink — the only sink that exists
-// before a directory is known — rather than silently dropped.
+// logOf answers the workspace's logger. Every workspace is bound
+// (SetWorkspaceDir) at registration or resolvable through the registry
+// (resolveUnboundLocked), so a frame for one that is neither is an invariant
+// violation: it is recorded at ERROR, with the registry's cause,
+// on the global sink, the only one that exists before a directory is known,
+// and the resolver panics rather than serve a view for a workspace the daemon
+// never registered with it.
 func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if s.log != nil {
 		return s.log
 	}
-	if log, ok := r.resolveUnboundLocked(ws, s); ok {
+	log, cause := r.resolveUnboundLocked(ws, s)
+	if cause == nil {
 		return log
 	}
-	log := r.log.Global().With(dlog.Context{
-		"workspace_id":        string(ws),
-		"invariant_violation": "footer resolver frame for a workspace with no bound directory",
-		"remediation":         "call SetWorkspaceDir at registration",
-	})
-	// THE VIOLATION IS AN ERROR, stated ONCE per workspace. Every record after
-	// it keeps its own level and carries the violation as context; before
-	// this, the only trace was that context on records logged at INFO and
-	// DEBUG, so a level sweep never saw the invariant break.
-	if !s.unboundReported {
-		s.unboundReported = true
-		log.Error("daemon.footer.unbound_workspace", "a footer record arrived for a workspace whose directory was never bound", nil)
-	}
-	return log
+	r.log.Global().Error("daemon.footer.unbound_workspace", "a footer record arrived for a workspace whose directory was never bound",
+		dlog.Context{
+			"workspace_id":        string(ws),
+			"invariant_violation": "footer resolver frame for a workspace with no bound directory",
+			"remediation":         "call SetWorkspaceDir at registration",
+			"cause":               cause.Error(),
+		})
+	panic(fmt.Sprintf("footer: a frame for workspace %q, whose directory was never bound: %v", ws, cause))
 }
 
 // resolveUnboundLocked resolves the logger of a workspace the footer was never
 // bound to, through the registry (WithWorkspaceDir), and binds it. A
 // directory since removed is ordinary: its records go to the central sink
-// naming it. A workspace the registry cannot answer is not resolved, and
-// logOf records the violation. Caller holds r.mu.
-func (r *resolver) resolveUnboundLocked(ws ids.WorkspaceID, s *wsState) (dlog.Logger, bool) {
+// naming it. A workspace the registry cannot answer is not resolved: the cause
+// is returned, and logOf records the violation with it. Caller holds r.mu.
+func (r *resolver) resolveUnboundLocked(ws ids.WorkspaceID, s *wsState) (dlog.Logger, error) {
 	if r.opts.workspaceDir == nil {
-		return nil, false
+		return nil, errors.New("the footer has no registry to resolve an unbound workspace through (WithWorkspaceDir)")
 	}
 	dir, err := r.opts.workspaceDir(ws)
 	if err != nil {
-		r.log.Global().Debug("daemon.footer.resolve_unbound", "the registry could not answer an unbound workspace's directory",
-			dlog.Context{"workspace_id": string(ws), "cause": err.Error()})
-		return nil, false
+		return nil, fmt.Errorf("the registry could not answer the workspace's directory: %w", err)
 	}
 	log, err := dlog.WorkspaceUnlessGone(r.log, dir)
 	if err != nil {
-		r.log.Global().Debug("daemon.footer.resolve_unbound", "an unbound workspace's log sink could not be opened",
-			dlog.Context{"workspace_id": string(ws), "workspace_dir": dir, "cause": err.Error()})
-		return nil, false
+		return nil, fmt.Errorf("the log sink of directory %q could not be opened: %w", dir, err)
 	}
 	s.dir = dir
 	s.log = log.With(dlog.Context{"workspace_id": string(ws)})
 	s.log.Debug("daemon.footer.bind", "the footer resolved an unbound workspace through the registry",
 		dlog.Context{"workspace_dir": dir})
-	return s.log, true
+	return s.log, nil
 }
 
 // mutate runs one accumulation change under the lock and republishes the whole

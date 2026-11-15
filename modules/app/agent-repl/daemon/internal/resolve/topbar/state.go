@@ -140,9 +140,6 @@ type wsState struct {
 	dir string
 	// log is the workspace-bound logger, nil until the directory is bound.
 	log dlog.Logger
-	// unboundReported latches that a record for this workspace already
-	// arrived unbound and the invariant violation was stated at ERROR.
-	unboundReported bool
 
 	// naming is the WSM-derived workspace name and session line.
 	naming Naming

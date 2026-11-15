@@ -685,24 +685,6 @@ func TestTheChipsBreakdownIsAlwaysPopulated(t *testing.T) {
 	}
 }
 
-func TestAFrameForAnUnboundWorkspaceIsRecordedLoudly(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestSurfaces()
-	r, err := newResolver(testColors(), log, WithClock(fixedClock{now: instant}))
-	if err != nil {
-		t.Fatalf("newResolver: %v", err)
-	}
-
-	// Act
-	r.OnLink("ws-unbound", shimclient.LinkConnected)
-
-	// Assert
-	records := log.Records()
-	if len(records) == 0 || records[len(records)-1].Context["invariant_violation"] == nil {
-		t.Fatalf("records = %+v, want the invariant violation named", records)
-	}
-}
-
 // contains reports whether needle appears in haystack.
 func contains(haystack, needle string) bool {
 	if len(needle) > len(haystack) {
@@ -1634,9 +1616,10 @@ func TestAOneRootMachineStillOffersThatOneOption(t *testing.T) {
 	}
 }
 
-// TestAFactForAnUnboundWorkspaceStatesTheViolationAtError pins that the
-// violation is an ERROR, stated once, rather than context on quieter records.
-func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
+// TestAFactForAnUnboundWorkspaceFailsHard pins that the resolver asserts
+// rather than serves a view for a workspace it never bound: the violation is
+// recorded at ERROR, then the resolver panics.
+func TestAFactForAnUnboundWorkspaceFailsHard(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestSurfaces()
 	r, err := New(testColors(), log)
@@ -1645,10 +1628,16 @@ func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 
 	// Act
-	r.SetParked("ws-unbound", true)
-	r.SetParked("ws-unbound", false)
+	recovered := func() (got any) {
+		defer func() { got = recover() }()
+		r.SetParked("ws-unbound", true)
+		return nil
+	}()
 
 	// Assert
+	if recovered == nil {
+		t.Fatal("SetParked on an unbound workspace did not panic")
+	}
 	n := 0
 	for _, rec := range log.Records() {
 		if rec.Level == "error" && rec.Operation == "daemon.topbar.unbound_workspace" {
@@ -1657,6 +1646,9 @@ func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
+	}
+	if rec := log.Records()[len(log.Records())-1]; rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound" {
+		t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
 	}
 }
 

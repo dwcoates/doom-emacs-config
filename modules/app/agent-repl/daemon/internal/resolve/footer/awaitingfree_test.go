@@ -89,6 +89,9 @@ func TestAMergeAwaitingAnotherWorkspaceIsRedrawnByItsChange(t *testing.T) {
 	// Arrange
 	const other = ids.WorkspaceID("ws-other")
 	h := newHarness(t)
+	if err := h.r.SetWorkspaceDir(other, t.TempDir()); err != nil {
+		t.Fatalf("SetWorkspaceDir: %v", err)
+	}
 	connected(h)
 	h.r.OnLiveWorkChanged(other, liveSet(nil, []string{"s-1"}, nil))
 	facts := awaiting()
