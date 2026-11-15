@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/kernelevent"
@@ -17,12 +18,29 @@ import (
 // PATHS IS ASKED AGAIN EACH ROUND, so a file that a change made (a log target
 // rotated in, a workspace's sink linked) is followed from the next round on.
 // Each round's watch is taken before its check, so a change in between is
-// reported. A watch that fails fails t: a wait that can no longer see changes
+// reported, and a round whose paths changed while its watch was taken is taken
+// again before it checks. A watch that fails fails t: a wait that can no longer see changes
 // would otherwise only ever end at its bound.
 func awaitChange(t testing.TB, wait context.Context, check func() bool, paths func() []string) bool {
 	t.Helper()
 	for {
-		changes, stop := kernelevent.Follow(wait, paths()...)
+		followed := paths()
+		changes, stop := kernelevent.Follow(wait, followed...)
+		if !slices.Equal(paths(), followed) {
+			// WHAT TO FOLLOW CHANGED WHILE THE WATCH WAS TAKEN, so the watch
+			// may have missed the change that moved it: a sink's link renamed
+			// into place after paths was asked and before its directory was
+			// watched leaves its target unfollowed, and the target's first
+			// write was never reported (2026-11-15 20:19,
+			// TestWebappLayer/WebappLayerRestartHandover in a merge gate). The
+			// round is taken again, so every check runs under a watch of what
+			// paths answers after that watch was in place.
+			stop()
+			if wait.Err() != nil {
+				return false
+			}
+			continue
+		}
 		if check() {
 			stop()
 			return true
