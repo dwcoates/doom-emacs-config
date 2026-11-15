@@ -1103,17 +1103,21 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 	}
 }
 
-func TestPlaceWorkspacesExpandsTheCollapsedSubsectionItPlacesInto(t *testing.T) {
+func TestPlacingIntoACollapsedSubsection(t *testing.T) {
 	tests := []struct {
 		name         string
+		byAgent      bool
 		folded       bool
 		into         bool
 		wantFolded   bool
 		wantExpanded bool
 	}{
-		{name: "into a collapsed subsection expands it", folded: true, into: true, wantExpanded: true},
-		{name: "into an open subsection leaves it open", into: true},
-		{name: "into no subsection leaves a collapsed one collapsed", folded: true, wantFolded: true},
+		{name: "an agent placing into a collapsed subsection expands it", byAgent: true, folded: true, into: true, wantExpanded: true},
+		{name: "an agent placing into an open subsection leaves it open", byAgent: true, into: true},
+		{name: "an agent placing into no subsection leaves a collapsed one collapsed", byAgent: true, folded: true, wantFolded: true},
+		{name: "the user's drop into a collapsed subsection keeps it collapsed", folded: true, into: true, wantFolded: true},
+		{name: "the user's drop into an open subsection leaves it open", into: true},
+		{name: "the user's drop into no subsection leaves a collapsed one collapsed", folded: true, wantFolded: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1135,13 +1139,17 @@ func TestPlaceWorkspacesExpandsTheCollapsedSubsectionItPlacesInto(t *testing.T) 
 			if tt.into {
 				into = &later.ID
 			}
+			place, op := s.PlaceWorkspaces, "daemon.wsm.place_workspaces"
+			if tt.byAgent {
+				place, op = s.PlaceWorkspacesByAgent, "daemon.wsm.place_workspaces_by_agent"
+			}
 
 			// Act
-			err := s.PlaceWorkspaces(ctx, []WorkspaceID{ws.ID}, into, AtEnd{})
+			err := place(ctx, []WorkspaceID{ws.ID}, into, AtEnd{})
 
 			// Assert
 			if err != nil {
-				t.Fatalf("PlaceWorkspaces: %v", err)
+				t.Fatalf("place: %v", err)
 			}
 			if got := subsectionNow(t, s, later.ID).Folded; got != tt.wantFolded {
 				t.Errorf("subsection folded = %v, want %v", got, tt.wantFolded)
@@ -1149,7 +1157,7 @@ func TestPlaceWorkspacesExpandsTheCollapsedSubsectionItPlacesInto(t *testing.T) 
 			if !repositoryFolded(t, s, ws.Repo) {
 				t.Error("the repository's own fold was expanded")
 			}
-			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.place_workspaces", Message: "expanded the collapsed subsection the workspaces were placed in"})
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: op, Message: "expanded the collapsed subsection the workspaces were placed in"})
 			if ok != tt.wantExpanded {
 				t.Fatalf("expansion record found = %v, want %v: %v", ok, tt.wantExpanded, log.Records())
 			}
