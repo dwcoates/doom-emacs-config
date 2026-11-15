@@ -41,27 +41,27 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name: "a fake host freezes nothing unless told to",
-			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open"},
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
 		},
 		{
 			name: "a fake host freezes what it is told to",
-			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", appfreeze.EnvApps: "Slack"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FreezeApps: []string{"Slack"}},
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac", appfreeze.EnvApps: "Slack"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac", FreezeApps: []string{"Slack"}},
 		},
 		{
 			name: "a tools dir resolves every tool there by its base name, with its fake lid",
-			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "/fake/lid"},
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "/fake/lid", EnvPowerSource: "ac"},
 			want: Config{Tools: Tools{
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Caffeinate: "/fake/bin/caffeinate", Brightness: "/fake/bin/mac-brightness", Ps: "/fake/bin/ps",
 				Open: "/fake/bin/open", WifiApp: "/fake/bin/AgentReplWifi.app",
-			}, FakeLid: "/fake/lid"},
+			}, FakeLid: "/fake/lid", FakePowerSource: "ac"},
 		},
 		{
 			name:    "a tools dir without a fake lid is refused",
-			env:     map[string]string{EnvToolsDir: "/fake/bin"},
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvPowerSource: "ac"},
 			wantErr: true,
 		},
 		{
@@ -70,13 +70,38 @@ func TestConfigFromEnv(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "a tools dir and a fake lid without a fake power source are refused",
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open"},
+			wantErr: true,
+		},
+		{
+			name:    "a fake power source without a tools dir is refused",
+			env:     map[string]string{"HOME": "/home/owner", EnvPowerSource: "battery"},
+			wantErr: true,
+		},
+		{
+			name: "a power source state is a fixed power source",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "battery"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "battery"},
+		},
+		{
+			name: "an absolute power source socket is a socket power source",
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "/fake/power"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "/fake/power"},
+		},
+		{
+			name:    "a relative power source socket is refused",
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "fake/power"},
+			wantErr: true,
+		},
+		{
 			name: "a lid state is a fixed lid",
-			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open"},
-			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open"},
+			env:  map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "open", EnvPowerSource: "ac"},
+			want: Config{Tools: ToolsIn("/fake/bin"), FakeLid: "open", FakePowerSource: "ac"},
 		},
 		{
 			name:    "a relative lid socket is refused",
-			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "fake/lid"},
+			env:     map[string]string{EnvToolsDir: "/fake/bin", EnvLid: "fake/lid", EnvPowerSource: "ac"},
 			wantErr: true,
 		},
 		{
@@ -86,7 +111,7 @@ func TestConfigFromEnv(t *testing.T) {
 		},
 		{
 			name:    "a relative tools dir is refused",
-			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLid: "/fake/lid"},
+			env:     map[string]string{EnvToolsDir: "fake/bin", EnvLid: "/fake/lid", EnvPowerSource: "ac"},
 			wantErr: true,
 		},
 		{

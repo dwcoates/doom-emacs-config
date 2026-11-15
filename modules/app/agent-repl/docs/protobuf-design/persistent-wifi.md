@@ -238,6 +238,39 @@ quiet state, not the switch.
   - The sudoers grant gains `powermode 0`, since the mode restored may be
     Automatic (`docs/USER-GUIDE.md`).
 
+### 10a. Low Power Mode under a closed lid follows the power source (2026-11-14, comments only)
+
+- WHAT: the power source is a heard fact, like the lid
+  (`daemon/internal/persistentwifi/power.go`): IOKit's limited-power
+  notification (`IOPSCreateLimitedPowerNotification`, read by
+  `IOPSGetProvidingPowerSourceType`) in `notify_darwin.go`, a fake socket or
+  fixed state through `AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE` beside the
+  fake lid. `energyWanted` (`energy.go`) is the one decision: the quiet state
+  on battery lowers (recording the mode in use first, as section 10); on AC
+  power, or with the quiet state left, a recorded mode is restored; with the
+  lid, or under a closed lid the power source, not yet heard, nothing is
+  written. An unwatched power source is never a battery.
+- WHY: the owner ruling of 2026-11-14: with the lid closed on AC power Low
+  Power Mode must not be engaged; losing AC power under the closed lid
+  engages it; regaining AC power with the lid still closed disengages it.
+- Consequences:
+  - Supersedes section 10's "the power source never writes the energy mode"
+    and "closing always means Low Power Mode". Every change of power source
+    is an edge (`WatchPowerSource`), held by state like the lid's, so a
+    failed write is retried on the next beat.
+  - Durable across a restart by the same record: a successor booting under
+    a closed lid writes nothing until both facts are heard, then adopts the
+    record on battery or restores it on AC. Before this, a beat that ran
+    before the lid was heard restored the record and the lid then lowered
+    again.
+  - Every engage and disengage is recorded at INFO under
+    `daemon.persistentwifi.energy` with the trigger (`lid_closed`,
+    `power_source_battery`, `power_source_ac`, `lid_open`, ...) and the
+    decision's reason (`because`); every change of power source at INFO
+    under `daemon.persistentwifi.power_source`, and a watch that failed at
+    ERROR.
+  - No wire change: the standing carries no power source.
+
 ### 11. The failover rejoins saved networks by name, lid closed only (2026-11-13, no wire change; SUPERSEDED by section 12)
 
 - WHAT: the failover acts only while the lid-closed quiet state stands, and
