@@ -29,6 +29,53 @@ func TestAdmitMergeRefusesAnEntryNotInTheQueue(t *testing.T) {
 	}
 }
 
+func TestAdmitMergeRefusesAnEntryThatIsNotWaiting(t *testing.T) {
+	tests := []struct {
+		name  string
+		state func(t *testing.T, s *store, repo RepoKey, id WorkspaceID)
+		want  MergeQueueState
+	}{
+		{name: "an admitted entry", want: MergeAdmitted, state: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
+			if err := s.AdmitMerge(context.Background(), repo, id); err != nil {
+				t.Fatalf("AdmitMerge: %v", err)
+			}
+		}},
+		{name: "a remediating entry", want: MergeRemediating, state: func(t *testing.T, s *store, repo RepoKey, id WorkspaceID) {
+			if err := s.AdmitMerge(context.Background(), repo, id); err != nil {
+				t.Fatalf("AdmitMerge: %v", err)
+			}
+			if _, err := s.StepAsideMerge(context.Background(), repo, id, MergeAsideTests); err != nil {
+				t.Fatalf("StepAsideMerge: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, logs := testStore(t)
+			repo := RepoKey(t.TempDir())
+			ws := testWorkspace(t, s)
+			queued(t, s, repo, ws.ID, instant)
+			tt.state(t, s, repo, ws.ID)
+
+			// Act
+			err := s.AdmitMerge(context.Background(), repo, ws.ID)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "while "+tt.want.String()) {
+				t.Fatalf("AdmitMerge = %v, want a refusal naming the prior state %s", err, tt.want)
+			}
+			entries, readErr := s.MergeQueue(context.Background(), repo)
+			if readErr != nil || len(entries) != 1 || entries[0].State != tt.want {
+				t.Fatalf("queue = %+v, %v; want the entry left %s", entries, readErr, tt.want)
+			}
+			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.admit_merge"}); !ok {
+				t.Fatalf("no ERROR daemon.wsm.admit_merge record: %+v", logs.Records())
+			}
+		})
+	}
+}
+
 func TestRemoveMergeQueueEntryRefusesAnEntryNotInTheQueue(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -1757,9 +1804,10 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 
 	// Assert: the helper's own query, and one call per reordering (move,
 	// move to a place, prioritize, a merge stepping aside and a remediated
-	// merge returning).
-	if reads != 1 || calls != 5 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 5", reads, calls)
+	// merge returning) and per state write guarded on its prior state
+	// (setMergeQueueState, an admission).
+	if reads != 1 || calls != 6 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 6", reads, calls)
 	}
 }
 

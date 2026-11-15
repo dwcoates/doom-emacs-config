@@ -813,10 +813,18 @@ func (r *run) awaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 	// WHAT IT WAITS ON IS DRAWN: the footer reads the awaited workspace's turn
 	// and live work from its own state, so the step names the workspace and
 	// the footer keeps the rest current.
+	var awaitedName string
+	if ws != r.ws {
+		name, err := r.o.workspaceName(ctx, op, ws)
+		if err != nil {
+			return err
+		}
+		awaitedName = name
+	}
 	r.setStep(ctx, footer.StepAwaitingFree, func(f *footer.MergeFacts) {
 		if ws != r.ws {
 			f.AwaitOther = ws
-			f.AwaitOtherName = r.o.workspaceName(ctx, ws)
+			f.AwaitOtherName = awaitedName
 		}
 	})
 	fields["blockers"] = r.o.deps.Freeness.Blockers(ws)
@@ -1114,22 +1122,24 @@ func readEscalation(dir string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
-// workspaceName is a workspace's name as drawn. A record that cannot be read
-// is recorded and the id stands in: a name must not stop the merge's waiting
-// state from being drawn. A read cut by CTX ending (cutUnder) is the merge
-// winding down with its daemon (a handover or deploy cancels it), so it is
-// recorded at DEBUG; every other read failure is recorded at ERROR.
-func (o *orchestrator) workspaceName(ctx context.Context, ws ids.WorkspaceID) string {
+// workspaceName is a workspace's name as drawn, read for the operation OP. A
+// record that cannot be read is an error returned to the caller, never an id
+// drawn in the name's place: the name is drawn in the bubble and written into
+// a gate runner's RAM disk seat, where an id would silently pass for a name.
+// A read cut by CTX ending (cutUnder) is the merge winding down with its
+// daemon (a handover or deploy cancels it), so it is recorded at DEBUG; every
+// other read failure is recorded at ERROR.
+func (o *orchestrator) workspaceName(ctx context.Context, op string, ws ids.WorkspaceID) (string, error) {
 	record, err := o.deps.DB.Workspace(ctx, ws)
 	if err == nil {
-		return record.Name
+		return record.Name, nil
 	}
 	fields := dlog.Context{"workspace": string(ws), "error": err.Error()}
 	if cutUnder(ctx, err) {
 		fields["cause"] = context.Cause(ctx).Error()
-		o.deps.Log.Global().Debug("daemon.merge.await_free", "the merge's context ended while reading the awaited workspace's name; the merge winds down with its daemon and its id is drawn", fields)
-		return string(ws)
+		o.deps.Log.Global().Debug(op, "the merge's context ended while reading a workspace's name; the merge winds down with its daemon", fields)
+	} else {
+		o.deps.Log.Global().Error(op, "could not read a workspace's name", fields)
 	}
-	o.deps.Log.Global().Error("daemon.merge.await_free", "could not read the awaited workspace's name; its id is drawn", fields)
-	return string(ws)
+	return "", fmt.Errorf("merge: reading the name of workspace %s: %w", ws, err)
 }

@@ -627,6 +627,36 @@ func TestAMergeResumedAtAPrePromptReattachesToItsTurn(t *testing.T) {
 	}
 }
 
+func TestAMergeResumedAtAPromptWhoseTurnEndedWhileSuspendedGoesOnWithoutWaiting(t *testing.T) {
+	// Arrange: a suspension (a pause, a restart) left the run at its
+	// before-merge prompt, and that prompt's turn ended meanwhile
+	// (2026-10-26: a deploy turn ended with its pull request merged while
+	// its queue stood paused).
+	h := newHarness(t)
+	h.configurePromptHooks([]string{"prepare"}, nil)
+	interruptedAt(t, h, func(d *progressDoc) {
+		d.Step, d.PromptIndex, d.Turn = TabPreDeploy, 0, string(deadTurn)
+		d.Rounds = map[string]int{TabQueue: 1, TabPreDeploy: 1}
+		d.Active = roundDoc{Kind: TabPreDeploy, N: 1, StartedMS: d.StartedMS}
+		d.Open = []roundDoc{d.Active}
+	})
+	completed := wsm.CloseCompleted
+	recordTurn(h, &completed)
+	landsAfterResume(h)
+	h.git.ancestry = map[string]bool{}
+
+	// Act.
+	resume(t, h)
+
+	// Assert: the step is not run again, and its ended turn is not waited on.
+	if slices.Contains(h.awaitedTurns, deadTurn) {
+		t.Fatalf("awaited = %v, want no wait on a turn that already ended", h.awaitedTurns)
+	}
+	if len(h.queue.submissions) != 0 {
+		t.Fatalf("submissions = %+v, want the finished prompt never submitted again", h.queue.submissions)
+	}
+}
+
 func TestAResumedMergeOnAPausedQueueWaitsForTheQueueToResume(t *testing.T) {
 	// Arrange: a paused queue advances nothing (owner ruling, 2026-10-12).
 	h := newHarness(t)

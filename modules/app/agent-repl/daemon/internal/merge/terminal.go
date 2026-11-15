@@ -135,7 +135,12 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 // merge's (wsm undeployed_landings). A failed record leaves the landing
 // standing; only the deploy's notice will not name it.
 func (r *run) recordUndeployed(ctx context.Context, log dlog.Logger, out outcome) {
-	name := r.o.workspaceName(ctx, r.ws)
+	name, err := r.o.workspaceName(ctx, "daemon.merge.record_undeployed", r.ws)
+	if err != nil {
+		// workspaceName recorded the failed read; the landing stands, and
+		// only the deploy's notice will not name it.
+		return
+	}
 	landing := wsm.UndeployedLanding{MergeWorkspace: r.ws, MergeName: name, LandedAt: r.o.deps.Now()}
 	fields := dlog.Context{"workspace": string(r.ws), "merge_name": name, "commit": out.landed}
 	if err := r.o.deps.DB.RecordUndeployedLanding(ctx, landing); err != nil {
@@ -1418,8 +1423,11 @@ func (o *orchestrator) abandonRunning(ctx context.Context, r *run, cause Abandon
 
 // abandonTerminal ends a RUNNING merge that was taken out: the abandoned
 // terminal, its ledger's open intervals closed as abandoned, and the one
-// teardown. The workspace's work is untouched: nothing landed, so its
-// worktree stays.
+// teardown. Nothing landed, so the worktree stays, but a rebase the merge
+// left standing in it (one taken out mid conflict resolution) is aborted, so
+// the branch keeps its base rather than sitting mid-rebase with nobody
+// resolving it (2026-11-11: linux-metrics-release, evicted while its session
+// resolved a conflict), and the requester is told so.
 func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 	const op = "daemon.merge.abandoned"
 	r.enterTerminal(terminalOwedFailed)
@@ -1429,9 +1437,13 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 		return
 	}
 	summary := r.o.abandonedSentence(r.ws, cause, true)
+	fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause)}
+	if r.abortStandingRebase(ctx, op, fields) {
+		summary += "; the rebase it left standing was aborted, and the branch keeps its base"
+		fields["rebase_aborted"] = true
+	}
 	r.closeOpenRounds(ctx, "abandoned")
-	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", dlog.Context{
-		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": string(cause), "summary": summary})
+	r.o.log(ctx, r.ws).Info(op, "abandoned a running merge", withField(fields, "summary", summary))
 	r.teardown(ctx, outcome{abandoned: cause}, func() {
 		r.head(&frontendv1.FeedMergeError{
 			EndedAtMs: r.o.nowMS(),

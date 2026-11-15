@@ -142,63 +142,65 @@ func TestFetchBranchWhoseLockCannotBeTakenFetchesNothingAndSaysWhy(t *testing.T)
 	// Act.
 	ref, err := git.FetchBranch(context.Background(), repoDir, "origin", "master")
 
-	// Assert.
+	// Assert: the helper's own words name the lock it could not take.
 	if ref != "" || err == nil {
 		t.Fatalf("FetchBranch = %q, %v; want a failure", ref, err)
 	}
 	fake.assertNever("fetch")
 	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.fetch_branch")
-	if !found || record.Context["dir"] != repoDir || record.Context["refspec"] != "+refs/heads/master:refs/agent-repl/origin/master" ||
-		record.Context["lock"] != filepath.Join(commonDir, fetchLockName) {
-		t.Fatalf("the ERROR record = %+v (found %v), want the dir, the refspec and the lock", record.Context, found)
+	stderr, _ := record.Context["stderr"].(string)
+	if !found || record.Context["dir"] != repoDir || !strings.Contains(stderr, "agent-repl fetch lock: taking "+filepath.Join(commonDir, fetchLockName)) {
+		t.Fatalf("the ERROR record = %+v (found %v), want the dir and the lock the helper could not take", record.Context, found)
 	}
 }
 
-func TestHoldFetchLockAbandonedByItsContextAnswersTheContextsEnd(t *testing.T) {
-	// Arrange: another holder has the lock, and the waiter's context is over.
-	path := filepath.Join(t.TempDir(), fetchLockName)
-	held, _, err := recordlock.TryExclusive(path)
-	if err != nil {
-		t.Fatalf("taking the lock: %v", err)
-	}
-	defer held.Release()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// Act.
-	rec, err := holdFetchLock(ctx, path)
-
-	// Assert.
-	if rec != nil || !errors.Is(err, context.Canceled) {
-		t.Fatalf("holdFetchLock = %v, %v; want the context's end", rec, err)
-	}
-}
-
-func TestHoldFetchLockAbandonedWaitReleasesTheLockOnceGranted(t *testing.T) {
-	// Arrange: a wait abandoned while another holder had the lock.
-	path := filepath.Join(t.TempDir(), fetchLockName)
-	held, _, err := recordlock.TryExclusive(path)
+func TestFetchBranchCalledOffWhileAnotherHoldsTheLockFetchesNothing(t *testing.T) {
+	// Arrange: another holder has the repository's fetch lock.
+	git, _ := newTestClient(t)
+	repoDir, commonDir := fetchRepo(t)
+	fake := newFakeGit(t, ok(commonDir+"\n", "rev-parse"), ok("", "fetch"))
+	held, _, err := recordlock.TryExclusive(filepath.Join(commonDir, fetchLockName))
 	if err != nil {
 		t.Fatalf("taking the lock: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := holdFetchLock(ctx, path); !errors.Is(err, context.Canceled) {
-		t.Fatalf("the abandoned wait answered %v, want the context's end", err)
-	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := git.FetchBranch(ctx, repoDir, "origin", "master")
+		done <- err
+	}()
 
-	// Act: the holder lets go, and a second waiter asks. It is granted only
-	// once the abandoned wait has taken the lock and released it.
+	// Act: the fetch is called off while the lock is still held.
+	cancel()
+	err = <-done
 	held.Release()
-	rec, err := holdFetchLock(context.Background(), path)
 
-	// Assert.
-	if err != nil {
-		t.Fatalf("holdFetchLock after the abandoned wait: %v", err)
+	// Assert: it answers the cancellation and no fetch ran.
+	var cancelled *Cancelled
+	if !errors.As(err, &cancelled) {
+		t.Fatalf("FetchBranch = %v, want the cancellation", err)
 	}
-	rec.Release()
+	fake.assertNever("fetch")
 }
 
+func TestFetchEnvNamesTheLockGitAndTheRefLockWait(t *testing.T) {
+	// Act.
+	got := fetchEnv("/repo/.git/agent-repl-fetch.lock")
+
+	// Assert.
+	want := []string{
+		fetchLockEnv + "=/repo/.git/agent-repl-fetch.lock",
+		fetchGitEnv + "=" + gitBinary,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=core.filesRefLockTimeout",
+		"GIT_CONFIG_VALUE_0=" + fetchRefLockWait,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("fetchEnv = %v, want %v", got, want)
+	}
+}
+
+// containsArg reports whether ARGS holds WANT.
 func containsArg(args []string, want string) bool {
 	for _, a := range args {
 		if a == want {

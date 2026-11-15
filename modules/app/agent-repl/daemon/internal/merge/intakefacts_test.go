@@ -184,3 +184,30 @@ func TestTheChainSoFarNamesWhatEachRemediationLanded(t *testing.T) {
 		}
 	}
 }
+
+func TestTheChainSoFarWhoseRemediationNameCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	ctx := context.Background()
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+		t.Fatal(err)
+	}
+	q, _, _ := h.o.checkedQueueOf(ctx, mediationKey(h))
+	m := *owedCheck(t, h)
+	h.db.mu.Lock()
+	h.db.workspaceErr = errors.New("db gone")
+	h.db.mu.Unlock()
+
+	// Act
+	got, err := h.o.chainSoFar(ctx, q, m)
+
+	// Assert
+	if err == nil || got != "" {
+		t.Fatalf("chainSoFar = (%q, %v), want an error and no account", got, err)
+	}
+	if rec, ok := h.recordFor("error", opMediation); !ok || rec.Context["workspace"] != "ws-remedy" {
+		t.Fatalf("ERROR record = %+v (%v), want the unread name recorded", rec, ok)
+	}
+}

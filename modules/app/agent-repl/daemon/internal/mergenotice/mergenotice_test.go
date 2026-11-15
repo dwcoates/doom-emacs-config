@@ -169,7 +169,7 @@ func newFixture(subs fakeSubscriptions) *fixture {
 		Subscriptions: f.subs,
 		Holds:         f.holds,
 		Untold:        f.untold,
-		Notices: &briefprompttest.Meter{},
+		Notices:       &briefprompttest.Meter{},
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)

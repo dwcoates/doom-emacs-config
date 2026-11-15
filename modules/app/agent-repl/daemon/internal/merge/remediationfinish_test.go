@@ -378,3 +378,23 @@ func TestARemediationClosedBeforeItsFixDeploysHandsTheHoldBack(t *testing.T) {
 		})
 	}
 }
+
+func TestARemediationClosedWhoseNameCannotBeReadKeepsTheHoldAndSaysSo(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	ctx := context.Background()
+	h.db.mu.Lock()
+	h.db.workspaceErr = errors.New("db gone")
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.OnWorkspaceClosed(ctx, "ws-remedy")
+
+	// Assert
+	if owedCheck(t, h) == nil {
+		t.Fatal("the check was escalated with no name to put before the user")
+	}
+	if !loggedLike(h, logLike{level: "error", op: opRemediationFinish, text: "could not be escalated without its name; the queue stays held", context: map[string]string{"workspace": "ws-remedy"}}) {
+		t.Fatal("no ERROR record names the held queue and the workspace")
+	}
+}

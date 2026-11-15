@@ -39,7 +39,7 @@ type GateReuse struct {
 	// Units, Reused and Run are the run's unit counts; Why counts the run
 	// units by why they ran ("inputs changed", "failed before", ...).
 	Units, Reused, Run int
-	Why               map[string]int
+	Why                map[string]int
 }
 
 // Rate is the share of the gate's units it reused.

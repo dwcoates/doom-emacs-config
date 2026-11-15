@@ -181,8 +181,10 @@ type Git interface {
 	// PROBE: a branch that tracks nothing is an ordinary answer (false, nil
 	// error); a branch that does not exist is a failure.
 	Upstream(ctx context.Context, repoDir, branch string) (Upstream, bool, error)
-	// RemoteURL answers the url a remote fetches from (`remote get-url`).
-	RemoteURL(ctx context.Context, repoDir, remote string) (string, error)
+	// RemoteURL answers the url a remote fetches from (`remote get-url`). It
+	// is a PROBE: a repository with no such remote is an ordinary answer
+	// (false, nil error); git failing to tell is a failure.
+	RemoteURL(ctx context.Context, repoDir, remote string) (url string, set bool, err error)
 	// AheadBehind counts the commits on local that upstream lacks (ahead) and
 	// on upstream that local lacks (behind).
 	AheadBehind(ctx context.Context, dir, local, upstream string) (ahead, behind int, err error)

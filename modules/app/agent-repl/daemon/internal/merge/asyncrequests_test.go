@@ -352,3 +352,46 @@ func TestReadyRequestsAreTheLeadingRunWhoseTurnEnded(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAsyncRequestCarriesTheNameItsMergeWorkspaceStandsUnder(t *testing.T) {
+	// Arrange: a workspace prefix is set, so a supplied name resolves to a
+	// prefixed one.
+	h := asyncHarness(t)
+	h.names.prefix = "agent"
+
+	// Act
+	err := requestAsyncNamed(h, "first", "")
+	requests, _ := h.db.AsyncMergeRequestsOf(context.Background(), theWorkspace)
+	h.runWait(t)
+
+	// Assert: the request names its merge workspace as the fork does, so the
+	// name drawn before the fork is the name drawn after it.
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if len(requests) != 1 || requests[0].Source.DetachName != "agent/first" {
+		t.Fatalf("requests = %+v, want the request under agent/first", requests)
+	}
+	if forks := h.detached.forks; !slices.Equal(forks, []string{string(theWorkspace) + ":agent/first:" + asyncBranch}) {
+		t.Fatalf("forks = %v, want the merge workspace forked under agent/first", forks)
+	}
+}
+
+func TestAnAsyncRequestMayBePlacedBehindAnEarlierRequestByItsSuppliedName(t *testing.T) {
+	// Arrange: a workspace prefix is set, and the earlier request stands
+	// under its resolved name.
+	h := asyncHarness(t)
+	h.names.prefix = "agent"
+	if err := requestAsyncNamed(h, "first", ""); err != nil {
+		t.Fatalf("Enqueue(first): %v", err)
+	}
+
+	// Act
+	err := requestAsyncNamed(h, "second", "first")
+	h.runWait(t)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Enqueue(second) = %v, want it placed behind the first", err)
+	}
+}

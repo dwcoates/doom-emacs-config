@@ -316,7 +316,11 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 // never left held by a remediation that cannot land.
 func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateGivenUp, f.GateRounds)
-	summary := fmt.Sprintf("the deploy remediation %s could not pass its gate after %d fixing attempts; the queue moved on", o.workspaceName(ctx, f.Workspace), MaxFixAttempts)
+	name, err := o.workspaceName(ctx, opRemediationFinish, f.Workspace)
+	if err != nil {
+		return err
+	}
+	summary := fmt.Sprintf("the deploy remediation %s could not pass its gate after %d fixing attempts; the queue moved on", name, MaxFixAttempts)
 	return o.escalateForIntake(ctx, f.Repo, f.Workspace, summary, withField(fields, "gave_up", true))
 }
 
@@ -526,7 +530,12 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 	if f != nil && (f.Step == wsm.RemediationDeploying || f.Step == wsm.RemediationDeployed) {
 		return
 	}
-	summary := fmt.Sprintf("the deploy remediation %s was closed before its fix landed; the queue moved on", o.workspaceName(ctx, ws))
+	name, err := o.workspaceName(ctx, opRemediationFinish, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated without its name; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
+	summary := fmt.Sprintf("the deploy remediation %s was closed before its fix landed; the queue moved on", name)
 	if err := o.escalateForIntake(ctx, role.Repo, ws, summary, fields); err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
 	}

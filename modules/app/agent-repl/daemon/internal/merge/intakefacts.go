@@ -189,14 +189,22 @@ func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Med
 	if err != nil {
 		return "", fmt.Errorf("merge: read what the chain's remediations landed: %w", err)
 	}
+	last, err := o.workspaceName(ctx, opMediation, m.Remediation)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "the chain began at %s and has deployed %d remediations in a row; its last remediation workspace is %s.",
-		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys, o.workspaceName(ctx, m.Remediation))
+		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys, last)
 	for _, f := range finishes {
 		if !sameQueue(f.Repo, q.key) || f.LandedHead == "" {
 			continue
 		}
-		fmt.Fprintf(&b, " %s landed %s, changing %s.", o.workspaceName(ctx, f.Workspace), f.LandedHead, strings.Join(f.LandedPaths, ", "))
+		name, err := o.workspaceName(ctx, opMediation, f.Workspace)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, " %s landed %s, changing %s.", name, f.LandedHead, strings.Join(f.LandedPaths, ", "))
 	}
 	return b.String(), nil
 }

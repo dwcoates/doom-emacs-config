@@ -278,6 +278,10 @@ func (f *verbsForwarder) ClaimMergeName(ctx context.Context, repoDir, name strin
 	return verbs.ClaimMergeName(ctx, repoDir, name)
 }
 
+// MergeBranch is the merge orchestrator's name resolution (merge.Names). It
+// is pure, so it needs no bound verbs.
+func (f *verbsForwarder) MergeBranch(name string) string { return workspace.MergeBranch(name) }
+
 // interruptTurn is the merge orchestrator's turn stop (merge.InterruptTurnFunc):
 // the user's own turn interrupt, confirmed, so the agent's detached work stops
 // with it. It reads the verbs out of the forwarder when it runs.

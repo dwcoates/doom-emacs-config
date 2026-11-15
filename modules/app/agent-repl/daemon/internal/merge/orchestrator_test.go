@@ -228,9 +228,9 @@ func TestRegisteredQueuesSurfacesAFailedRegistryRead(t *testing.T) {
 	}
 }
 
-func TestOnlyRegisteredQueuesAndTheStatusReadKeyTheRegistry(t *testing.T) {
-	// Arrange: the status read refuses a repository it cannot key, so it
-	// keys the registry itself; every other walk of it is registeredQueues'.
+func TestOnlyRegisteredQueuesKeysTheRegistry(t *testing.T) {
+	// Arrange: every walk of the registry, the status read's included, is
+	// registeredQueues', which passes an unresolvable repository over.
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestOnlyRegisteredQueuesAndTheStatusReadKeyTheRegistry(t *testing.T) {
 	}
 
 	// Assert
-	if !slices.Equal(walkers, []string{"orchestrator.go", "status.go"}) {
-		t.Fatalf("the registry is keyed by hand in %v, want orchestrator.go (registeredQueues) and status.go alone", walkers)
+	if !slices.Equal(walkers, []string{"orchestrator.go"}) {
+		t.Fatalf("the registry is keyed by hand in %v, want orchestrator.go (registeredQueues) alone", walkers)
 	}
 }

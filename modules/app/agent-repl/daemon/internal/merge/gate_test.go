@@ -944,3 +944,35 @@ func TestABranchConfigReadThatFailsOtherwiseEndsTheMergeOnTheError(t *testing.T)
 		t.Fatalf("the runner was started %d times, want none", len(h.runner.argv))
 	}
 }
+
+func TestAGateWhoseWorkspaceNameCannotBeReadRunsNothing(t *testing.T) {
+	// Arrange: the merging workspace's record is gone, so the runner's RAM
+	// disk seat has no name to be written under.
+	h := newHarness(t)
+	r := failingTestsRun(t, h)
+	h.git.changedErr = errors.New("git diff failed")
+	round := r.openTab(context.Background(), TabTests)
+	h.o.mu.Lock()
+	h.o.running[h.repoKey()] = r
+	h.o.mu.Unlock()
+	h.db.mu.Lock()
+	delete(h.db.workspaces, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	_, err := r.gate(context.Background(), round, "tip", "head")
+
+	// Assert.
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("gate err = %v, want the name's read failure", err)
+	}
+	h.runner.mu.Lock()
+	started := len(h.runner.argv)
+	h.runner.mu.Unlock()
+	if started != 0 {
+		t.Fatalf("the runner was started %d times with no name for its seat, want none", started)
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.tests", text: "could not read a workspace's name", context: map[string]string{"workspace": string(theWorkspace)}}) {
+		t.Fatalf("no ERROR record names the unreadable workspace: %+v", h.logs.Records())
+	}
+}

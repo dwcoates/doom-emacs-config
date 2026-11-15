@@ -273,12 +273,6 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 	return out
 }
 
-// queueSubject is the subject a merge in the queue is drawn as: the name it is
-// drawn under, the workspace it is credited to, where a click on it goes, and
-// how it runs. A sync merge is named by the workspace it is credited to and an
-// async merge by its own name (QueueEntry.AsyncName), so several async merges
-// one workspace asked for are drawn apart; a click on either selects the
-// credited workspace and reveals the merge's own bubble on its root feed.
 // drawMediation is the label of deploy check M beside the repository's name,
 // with the workspace a click selects: the chain's intake while the deploy
 // rolls out (none for a chain's first deploy) or is assessed, and the
@@ -321,6 +315,14 @@ func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log
 	return nil
 }
 
+// queueSubject is the subject a merge in the queue is drawn as: the name it is
+// drawn under, the workspace it is credited to, where a click on it goes, and
+// how it runs. A sync merge is named by the workspace it is credited to and an
+// async merge by its own name (QueueEntry.AsyncName), so several async merges
+// one workspace asked for are drawn apart; a click on either selects the
+// credited workspace and reveals the merge's own bubble on its root feed. The
+// merge itself is named by its queue entry's workspace, which every ask about
+// it addresses.
 func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
 	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
 	name := credited.Name
@@ -328,7 +330,8 @@ func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMe
 		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{}}
 		name = entry.AsyncName
 	}
-	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode}
+	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode,
+		Merge: &workspacev1.WorkspaceRef{Id: string(entry.Workspace)}}
 }
 
 // asyncName is the name an async merge off its queue is drawn under: its

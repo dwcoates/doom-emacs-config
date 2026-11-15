@@ -202,3 +202,34 @@ func TestAnAskedForReleaseIsRecordedAtInfoNotWarn(t *testing.T) {
 		t.Fatalf("the eviction's release record = %+v (found %v), want it at info", r, ok)
 	}
 }
+
+func TestEvictingAMergeWithARebaseStandingAbortsItAndSaysSo(t *testing.T) {
+	// Arrange: the merge holds inside its gate, and a rebase stands in its
+	// worktree, as one taken out mid conflict resolution leaves it.
+	c := newChain(t)
+	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	enqueue(t, c.h)
+	done := admitAsync(c.h, context.Background())
+	<-inGate
+	dir := c.dirs[theWorkspace]
+	c.git.cmu.Lock()
+	c.git.rebases[dir] = &chainRebase{}
+	c.git.cmu.Unlock()
+
+	// Act.
+	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+	<-done
+
+	// Assert.
+	c.git.cmu.Lock()
+	_, standing := c.git.rebases[dir]
+	c.git.cmu.Unlock()
+	if standing {
+		t.Fatal("the rebase standing in the evicted merge's worktree was not aborted")
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.abandoned", text: "abandoned a running merge", context: map[string]string{"rebase_aborted": "true"}}) {
+		t.Fatalf("no record says the rebase was aborted: %+v", c.h.logs.Records())
+	}
+}

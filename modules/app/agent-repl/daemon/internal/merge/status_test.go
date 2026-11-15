@@ -86,7 +86,30 @@ func TestStatusRefusesAnUnknownRepository(t *testing.T) {
 	}
 }
 
-func TestStatusFailsHardWhenAQueueCannotBeRead(t *testing.T) {
+func TestStatusPassesOverAnUnresolvableRegistrationAndAnswersTheRest(t *testing.T) {
+	// Arrange
+	h := statusHarness(t)
+	h.registerRepo("repo-gone", "/gone/checkout")
+	h.git.mu.Lock()
+	h.git.commonDirErrs = map[string]error{"/gone/checkout": errors.New("not a git repository")}
+	h.git.mu.Unlock()
+
+	// Act
+	got, err := h.o.Status(context.Background(), nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Status: %v, want the readable queues answered", err)
+	}
+	if len(got) != 1 || got[0].Repository.ID != theRepository {
+		t.Fatalf("Status = %+v, want only the readable repository's queue", got)
+	}
+	if !loggedLike(h, logLike{level: "warn", op: "daemon.merge.status", text: "could not resolve a registered repository's queue; it is passed over"}) {
+		t.Errorf("no record of the passed-over repository: %+v", h.logs.Records())
+	}
+}
+
+func TestStatusFailsHardWhenTheScopedRepositorysKeyCannotBeRead(t *testing.T) {
 	// Arrange
 	h := statusHarness(t)
 	h.git.mu.Lock()
@@ -94,13 +117,32 @@ func TestStatusFailsHardWhenAQueueCannotBeRead(t *testing.T) {
 	h.git.mu.Unlock()
 
 	// Act
-	_, err := h.o.Status(context.Background(), nil)
+	_, err := h.o.Status(context.Background(), &RepositoryScope{ID: theRepository})
 
 	// Assert
 	if _, refused := Refused(err); err == nil || refused {
 		t.Fatalf("Status = %v, want a hard failure", err)
 	}
-	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.status", text: "could not resolve a repository's queue key"}) {
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.status", text: "could not resolve the scoped repository's queue key"}) {
+		t.Errorf("no error record: %+v", h.logs.Records())
+	}
+}
+
+func TestStatusFailsHardWhenTheRegistryCannotBeRead(t *testing.T) {
+	// Arrange
+	h := statusHarness(t)
+	h.db.mu.Lock()
+	h.db.reposErr = errors.New("database locked")
+	h.db.mu.Unlock()
+
+	// Act
+	_, err := h.o.Status(context.Background(), nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Status answered without the registry")
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.status", text: "could not read the repository registry"}) {
 		t.Errorf("no error record: %+v", h.logs.Records())
 	}
 }

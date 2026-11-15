@@ -531,7 +531,7 @@ func TestFamilyNoticesOffTellsNoFamilyAndCountsWhatItSuppressed(t *testing.T) {
 		{name: "a created child: its siblings and itself are not told; its owner still is",
 			event:          Event{Kind: Created, Workspace: derived(idp(owner), nil, nil)},
 			wantSuppressed: []string{BriefSibling, BriefSibling, BriefChild},
-			wantTold: []submission{{ws: owner, text: "derived|workspace `child`: created|is a child of this workspace and was cut from this workspace's branch and lands into it|It was just created, at branch `b-child`.", origin: OriginDerived, defer_: true}}},
+			wantTold:       []submission{{ws: owner, text: "derived|workspace `child`: created|is a child of this workspace and was cut from this workspace's branch and lands into it|It was just created, at branch `b-child`.", origin: OriginDerived, defer_: true}}},
 		{name: "an adopted child: its siblings are not told",
 			event:          Event{Kind: Adopted, Workspace: wsm.Workspace{ID: child}, unread: true},
 			wantSuppressed: []string{BriefSibling, BriefSibling}},

@@ -54,12 +54,13 @@ func (s *server) SubscribeGithubMergeQueue(
 	}
 	owner, repo := req.Msg.GetNamed().GetOwner(), req.Msg.GetNamed().GetRepo()
 	if req.Msg.GetSubscribers() != nil {
-		remote, err := s.deps.Remotes.RemoteURL(ctx, subscriber.Record.Dir, "origin")
-		if err != nil {
-			return nil, fail(log, rpc, fmt.Errorf("read the origin remote of %s: %w", subscriber.Record.Dir, err))
-		}
+		var remote string
 		var ok bool
-		if owner, repo, ok = prwatch.RepositoryOfRemote(remote); !ok {
+		var err error
+		if owner, repo, remote, ok, err = prwatch.OriginRepository(ctx, s.deps.Remotes, subscriber.Record.Dir); err != nil {
+			return nil, fail(log, rpc, err)
+		}
+		if !ok {
 			return refuse(&agentreplv1.SubscribeGithubMergeQueueError{Cause: &agentreplv1.SubscribeGithubMergeQueueError_NotOnGithub{NotOnGithub: &agentreplv1.SubscribeGithubMergeQueueNotOnGithub{Origin: remote}}},
 				fmt.Sprintf("the repository's origin %q is not on github.com", remote))
 		}

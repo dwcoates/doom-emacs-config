@@ -294,6 +294,7 @@ func TestAnAsyncRequestThatContradictsItselfIsAnErrorWithNothingRecorded(t *test
 func TestAnAsyncRequestWhoseNameIsTakenIsRefusedWithTheBranch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	h.names.prefix = "agent"
 	h.names.taken = map[string]bool{"reconnect-fix": true}
 
 	// Act

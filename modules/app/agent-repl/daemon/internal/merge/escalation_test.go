@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/wsm"
 )
 
 // bannerRaisedFor reports whether a banner of KIND was raised whose click
@@ -57,8 +58,13 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
 					t.Fatal(err)
 				}
+				// A closed workspace's record stays readable, as the
+				// store keeps it, so the escalation names it.
+				h.db.mu.Lock()
+				h.db.workspaces["ws-remedy"] = wsm.Workspace{ID: "ws-remedy", Name: "remedy-the-reaper"}
+				h.db.mu.Unlock()
 				h.o.OnWorkspaceClosed(context.Background(), "ws-remedy")
-			}, wantSummary: "was closed before its fix landed", wantProblems: "states no separate findings"},
+			}, wantSummary: "the deploy remediation remedy-the-reaper was closed before its fix landed", wantProblems: "states no separate findings"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

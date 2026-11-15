@@ -1147,13 +1147,19 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 		f.onAdmit(id)
 	}
 	for i, entry := range f.queues[repo] {
-		if entry.Workspace == id {
-			f.queues[repo][i].State = wsm.MergeAdmitted
-			f.drainOwed[repo] = true
-			return nil
+		if entry.Workspace != id {
+			continue
 		}
+		// ONLY A WAITING ENTRY IS ADMITTED, as the durable queue refuses any
+		// other prior state (wsm.AdmitMerge).
+		if entry.State != wsm.MergeQueued {
+			return fmt.Errorf("admit %s while %s, not %s", id, entry.State, wsm.MergeQueued)
+		}
+		f.queues[repo][i].State = wsm.MergeAdmitted
+		f.drainOwed[repo] = true
+		return nil
 	}
-	return fmt.Errorf("no queue entry for %s", id)
+	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
 // StartMergePick stands for the durable pick start: the merge workspace's
@@ -1531,6 +1537,10 @@ type fakeGit struct {
 	// than inferred.
 	seq func() int
 	at  map[string]int
+
+	// standingErr fails RebaseInProgress; abortErr fails AbortRebase.
+	standingErr error
+	abortErr    error
 
 	defaultBranch string
 	commonDirs    map[string]string
@@ -2030,6 +2040,9 @@ func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.abortErr != nil {
+		return g.abortErr
+	}
 	g.leftStanding = false
 	g.rebaseCommands = append(g.rebaseCommands, "abort")
 	return nil
@@ -2069,7 +2082,7 @@ func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.standing || g.leftStanding, nil
+	return g.standing || g.leftStanding, g.standingErr
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
@@ -2195,6 +2208,8 @@ func (g *fakeGit) seen(call string) bool {
 // fakeNames stands for the async merge name check: a name in taken is
 // refused, every claim's release is counted, and err fails the check.
 type fakeNames struct {
+	// prefix is the workspace prefix names resolve under; unset is none.
+	prefix   string
 	mu       sync.Mutex
 	taken    map[string]bool
 	err      error
@@ -2202,10 +2217,19 @@ type fakeNames struct {
 	releases int
 }
 
+// MergeBranch resolves NAME as the workspace verbs do: a name that already
+// carries a prefix component stands as it is, any other takes the prefix.
+func (n *fakeNames) MergeBranch(name string) string {
+	if n.prefix == "" || strings.Contains(name, "/") {
+		return name
+	}
+	return n.prefix + "/" + name
+}
+
 func (n *fakeNames) ClaimMergeName(_ context.Context, _, name string) (string, func(), bool, error) {
+	branch := n.MergeBranch(name)
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	branch := "agent/" + name
 	if n.err != nil {
 		return "", nil, false, n.err
 	}
@@ -3457,6 +3481,12 @@ func (h *harness) deps() Deps {
 			if failed != nil {
 				return 0, failed
 			}
+			// A WAIT CUT BEFORE THE TURN ENDS ANSWERS THE CUT, as production's
+			// (sessionwatcher.watcher.AwaitTurnEnd) does: a fake that answered
+			// the turn completed let a run that never read its own cut pass.
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			if gate != nil {
 				select {
 				case <-gate:
@@ -3993,9 +4023,9 @@ func (g *fakeGit) AheadBehind(context.Context, string, string, string) (int, int
 	return 0, 0, errors.New("fakeGit: the merge never counts ahead/behind")
 }
 
-func (g *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
+func (g *fakeGit) RemoteURL(context.Context, string, string) (string, bool, error) {
 	g.record("remote_url")
-	return "", errors.New("fakeGit: the merge never reads a remote's url")
+	return "", false, errors.New("fakeGit: the merge never reads a remote's url")
 }
 
 // everyAttemptLeaves scripts every conflict resolution attempt the bound

@@ -13,14 +13,29 @@ import (
 func TestBindPullTarget(t *testing.T) {
 	gitRecord := wsm.Workspace{ID: "w1", Repo: "repo-1", Dir: "/work/repos/explanation-engine-feature"}
 	cases := []struct {
-		name   string
-		owners pullrefs.Owners
-		record wsm.Workspace
-		want   *pullrefs.Target
+		name      string
+		owners    pullrefs.Owners
+		origin    string
+		originErr error
+		record    wsm.Workspace
+		want      *pullrefs.Target
+		wantLog   string
 	}{
-		{name: "an owned account links into the repository under its owner",
-			owners: pullrefs.Owners{"/config": "ChessCom"}, record: gitRecord,
+		{name: "an owned account links into the repository its origin names",
+			owners: pullrefs.Owners{"/config": "ChessCom"}, origin: "git@github.com:ChessCom/explanation-engine.git", record: gitRecord,
 			want: &pullrefs.Target{Owner: "ChessCom", Repo: "explanation-engine"}},
+		{name: "the origin's name wins over the checkout directory's",
+			owners: pullrefs.Owners{"/config": "dwcoates"}, origin: "https://github.com/dwcoates/doom-emacs-config.git", record: gitRecord,
+			want: &pullrefs.Target{Owner: "dwcoates", Repo: "doom-emacs-config"}},
+		{name: "an origin off github.com links nowhere",
+			owners: pullrefs.Owners{"/config": "ChessCom"}, origin: "git@gitlab.com:x/y.git", record: gitRecord,
+			wantLog: "the repository's origin is not on github.com; its references link nowhere"},
+		{name: "a repository with no origin links nowhere",
+			owners: pullrefs.Owners{"/config": "ChessCom"}, origin: "", record: gitRecord,
+			wantLog: "the repository has no origin remote; its references link nowhere"},
+		{name: "an unreadable origin links nowhere",
+			owners: pullrefs.Owners{"/config": "ChessCom"}, originErr: errors.New("No such remote 'origin'"), record: gitRecord,
+			wantLog: "could not read the repository's origin remote; its references link nowhere"},
 		{name: "an account with no owner links nowhere", owners: pullrefs.Owners{}, record: gitRecord},
 		{name: "a thread links nowhere", owners: pullrefs.Owners{"/config": "ChessCom"},
 			record: wsm.Workspace{ID: "w1", Kind: wsm.WorkspaceKindThread, Dir: "/work/zettel/thread"}},
@@ -33,6 +48,8 @@ func TestBindPullTarget(t *testing.T) {
 				f.pullOwners[dir] = owner
 			}
 			f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: "/work/repos/explanation-engine"})
+			f.git.origins = map[string]string{"/work/repos/explanation-engine": tc.origin}
+			f.git.originErr = tc.originErr
 
 			// Act.
 			err := f.verbs.(*verbs).bindPullTarget(context.Background(), f.log.Global(), tc.record)
@@ -48,8 +65,22 @@ func TestBindPullTarget(t *testing.T) {
 			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
 				t.Fatalf("installed target = %v, want %v", got, tc.want)
 			}
+			if tc.wantLog != "" && !loggedPullTarget(f, tc.wantLog) {
+				t.Fatalf("no %s record %q; records = %+v", opPullTarget, tc.wantLog, f.log.logger.Records())
+			}
 		})
 	}
+}
+
+// loggedPullTarget reports whether the canonical log holds the bind's record
+// MESSAGE naming the workspace.
+func loggedPullTarget(f *fixture, message string) bool {
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opPullTarget && r.Message == message && r.Context["workspace"] == "w1" {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBindPullTargetFailsOnAnUnknownRepository(t *testing.T) {

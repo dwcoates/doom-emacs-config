@@ -1633,6 +1633,12 @@ func (d *fakeDB) AssignWorkspaceTask(_ context.Context, id ids.WorkspaceID, task
 type fakeGit struct {
 	gitclient.Git
 
+	// origins answers RemoteURL's `origin` per repository directory; a
+	// directory it does not name answers defaultOrigin. originErr fails it.
+	origins       map[string]string
+	defaultOrigin string
+	originErr     error
+
 	commonDir    string
 	mainWorktree string
 	// mainOf answers MainWorktree per directory, as git does: a worktree
@@ -1736,6 +1742,22 @@ func (g *fakeGit) ResolveRef(_ context.Context, dir, ref string) (string, error)
 		return head, nil
 	}
 	return "sha-of-" + ref, nil
+}
+
+// RemoteURL answers the arranged origin of DIR; an empty one is a
+// repository with no origin.
+func (g *fakeGit) RemoteURL(_ context.Context, dir, remote string) (string, bool, error) {
+	if remote != "origin" {
+		return "", false, fmt.Errorf("fakeGit: no remote %q", remote)
+	}
+	if g.originErr != nil {
+		return "", false, g.originErr
+	}
+	origin, ok := g.origins[dir]
+	if !ok {
+		origin = g.defaultOrigin
+	}
+	return origin, origin != "", nil
 }
 
 func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
@@ -3662,7 +3684,7 @@ func newFixture(t *testing.T) *fixture {
 		db:      newFakeDB(),
 		// The main worktree is a REAL worktree directory: every registration
 		// of a linked worktree registers it first.
-		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
+		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t), defaultOrigin: "git@github.com:ChessCom/fixture-repo.git"},
 		account:    &fakeAccounts{configDir: "/config"},
 		pullOwners: pullrefs.Owners{},
 		queue:      newFakeQueue(),

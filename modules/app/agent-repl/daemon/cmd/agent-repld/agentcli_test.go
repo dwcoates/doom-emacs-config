@@ -2584,6 +2584,70 @@ func TestPauseSendsToLandOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestPauseAndResumeRefuseAnUnsetRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "a hard stop", args: []string{"pause", "-hard"}},
+		{name: "an ordinary pause", args: []string{"pause"}},
+		{name: "a resume", args: []string{"resume"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d with %d requests, want a refusal that sends nothing", code, len(f.client.requests))
+			}
+			if !strings.Contains(f.errOut.String(), "-repository is required") {
+				t.Fatalf("stderr = %q, want the required flag named", f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestPauseAndResumeScopeAllToEveryRepository(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		scope func(*agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef
+	}{
+		{name: "a pause", args: []string{"pause", "-repository", "all"}, scope: func(r *agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef {
+			return r.GetPause().GetRepository()
+		}},
+		{name: "a resume", args: []string{"resume", "-repository", "all"}, scope: func(r *agentreplv1.UpdateMergeQueueRequest) *workspacev1.RepositoryRef {
+			return r.GetResume().GetRepository()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateMergeQueueRequest](t, f)
+			if req.GetPause() == nil && req.GetResume() == nil {
+				t.Fatalf("request = %v, want a pause or a resume", req)
+			}
+			if got := tt.scope(req); got != nil {
+				t.Fatalf("repository = %v, want unset (every repository)", got)
+			}
+		})
+	}
+}
+
 func TestResumeTakesNoHardFlag(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
