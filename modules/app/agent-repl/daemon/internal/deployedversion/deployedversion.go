@@ -12,9 +12,10 @@ import (
 	"errors"
 	"fmt"
 
-	"agent-repld/internal/causelog"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/semver"
+
+	"agentrepl/logging/causelog"
 )
 
 // Operation names every record the loop writes.

@@ -456,6 +456,12 @@ type TurnEdges interface {
 	TurnEndedUnobserved(ws ids.WorkspaceID)
 }
 
+// SubmissionTelemetry counts every submission the queue took, by its origin
+// (Deps.Submissions; runtimemetrics.Surface, agentrepl_prompts_submitted_total).
+type SubmissionTelemetry interface {
+	CountPromptSubmitted(origin conversationv1.PromptOrigin)
+}
+
 // LeaseWatcher is told each lease change of a workspace (Deps.Leases).
 type LeaseWatcher interface {
 	LeaseChanged(ws ids.WorkspaceID)
@@ -486,6 +492,9 @@ type Deps struct {
 	// reaches): a merge waiting for a workspace another holder held takes it
 	// from here (merge.Orchestrator.LeaseChanged). REQUIRED.
 	Leases LeaseWatcher
+	// Submissions counts every submission Submit took, delivered or held, by
+	// its origin; a refused one is not counted. REQUIRED.
+	Submissions SubmissionTelemetry
 	// Merges says which turn asked for a merge, so that turn's end raises no
 	// banner: the merge queue's own banners announce it. REQUIRED.
 	Merges MergeRequests

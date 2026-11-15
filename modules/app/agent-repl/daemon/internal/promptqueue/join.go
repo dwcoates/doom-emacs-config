@@ -494,8 +494,9 @@ func (state *wsState) takeFoldedLocked(turn ids.TurnID) []joiningPrompt {
 // folded, the prompts the vendor folded into a turn that then FAILED: they are
 // in the transcript, but the turn that took them never answered them. It runs
 // after the failed turn's end has released the delivery lock, so each goes
-// through Submit — delivered at once into a free session, or held, DEFERRED,
-// behind whatever the turn end delivered first.
+// through submit — delivered at once into a free session, or held, DEFERRED,
+// behind whatever the turn end delivered first — and is not counted again:
+// Submit counted it when it first arrived.
 func (q *queue) resubmitFolded(ws ids.WorkspaceID, failed ids.TurnID, folded []joiningPrompt, log dlog.Logger) {
 	for _, prompt := range folded {
 		again := wsm.NewTurnID()
@@ -511,7 +512,7 @@ func (q *queue) resubmitFolded(ws ids.WorkspaceID, failed ids.TurnID, folded []j
 			log.Error(opJoin, "could not record the move of a prompt folded into a turn that failed; it is not resubmitted and stays unanswered", fields)
 			continue
 		}
-		disposition, err := q.Submit(context.Background(), Submission{
+		disposition, err := q.submit(context.Background(), Submission{
 			WS: ws, Turn: again, Said: prompt.said, Origin: prompt.origin, SentBy: prompt.sentBy,
 			// DEFERRED: it runs as its own turn and never interrupts one the
 			// failed turn's end delivered ahead of it.

@@ -43,6 +43,7 @@ type Surface struct {
 	cache     cacheTelemetry
 	shimLife  shimLifeTelemetry
 	quiet     quietTelemetry
+	prompts   promptTelemetry
 	// processes is the registered process collector, whose latest scrape the
 	// rail's memory popups read (Latest); nil until RegisterProcesses.
 	processes atomic.Pointer[procmetrics.Collector]
@@ -68,10 +69,11 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	cache := newCacheTelemetry()
 	life := newShimLifeTelemetry()
 	quiet := newQuietTelemetry()
+	prompts := newPromptTelemetry()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
 	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, cache.lateness, cache.lapses, cache.coldIdle, life.starts, life.standDowns, life.gateAnswers,
-		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped)
+		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped, prompts.submitted)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
@@ -79,7 +81,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg, cache: cache, shimLife: life, quiet: quiet,
+	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg, cache: cache, shimLife: life, quiet: quiet, prompts: prompts,
 		emacs: procmetrics.NewEmacsProcess(log)}, nil
 }
 

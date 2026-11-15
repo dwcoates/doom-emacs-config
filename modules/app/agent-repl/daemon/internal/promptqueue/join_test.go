@@ -471,6 +471,23 @@ func TestAPromptFoldedIntoATurnThatFailedRunsAsItsOwnTurn(t *testing.T) {
 	}
 }
 
+// TestAResubmittedFoldedPromptIsCountedOnce pins that the queue's own
+// resubmission of a folded prompt is not counted as a second submission:
+// Submit counted the prompt when it arrived.
+func TestAResubmittedFoldedPromptIsCountedOnce(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	foldedThenEnded(t, h, wsm.CloseFailed)
+
+	// Assert
+	if turns := resubmitted(h); len(turns) != 1 {
+		t.Fatalf("resubmitted = %v, want the folded prompt run as its own turn", turns)
+	}
+	if got := h.submissions.counted(); len(got) != 1 {
+		t.Fatalf("counted = %v, want the one submission counted once", got)
+	}
+}
+
 func TestAPromptFoldedIntoATurnWhoseAgentDiedRunsAsItsOwnTurn(t *testing.T) {
 	// Arrange, Act
 	h := newHarness(t)
