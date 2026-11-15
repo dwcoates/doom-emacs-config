@@ -8,8 +8,8 @@ import (
 )
 
 // MergeQueuePause is one repository's standing pause
-// (frontend.v1.RosterMergeQueuePaused): when it began, who asked for it, and
-// whether it was a hard stop.
+// (frontend.v1.RosterMergeQueuePaused): when it began, who asked for it,
+// whether it was a hard stop, and whether it was made to land a change.
 type MergeQueuePause struct {
 	// At is when the queue was paused. Zero for a pause recorded before its
 	// record was kept (layout 83).
@@ -18,6 +18,12 @@ type MergeQueuePause struct {
 	By MergeQueuePauser
 	// Hard reports a hard stop (agentrepl.v1.UpdateMergeQueuePause.hard).
 	Hard bool
+	// ToLand reports a pause made to land a change
+	// (agentrepl.v1.UpdateMergeQueuePause.to_land): the only pause the queue
+	// bypass holder's end-of-turn let-through lifts. Any other pause -- one
+	// the owner asked for, one the host's fault made -- stands until it is
+	// resumed. False for a pause written before layout 136.
+	ToLand bool
 }
 
 // validate refuses a pause record a writer must never write: one with no
@@ -35,6 +41,14 @@ func (p MergeQueuePause) validate() error {
 			return errors.New("wsm: a merge queue pause by a workspace names no workspace")
 		}
 		return nil
+	case MergeQueuePauserHost:
+		if p.By.Cause == "" {
+			return errors.New("wsm: a merge queue pause for a fault of the host names no cause")
+		}
+		if p.ToLand {
+			return errors.New("wsm: a merge queue pause for a fault of the host is never made to land a change")
+		}
+		return nil
 	}
 	return fmt.Errorf("wsm: a merge queue pause names undeclared pauser kind %d", int(p.By.Kind))
 }
@@ -48,6 +62,9 @@ type MergeQueuePauser struct {
 	// Workspace is the pausing workspace's id; empty for any other kind, and
 	// for a pause written before layout 131.
 	Workspace WorkspaceID
+	// Cause is what the host could not do, for a host pause; empty for any
+	// other kind.
+	Cause string
 }
 
 // MergeQueuePauserKind is which kind of asker paused a queue.
@@ -62,6 +79,9 @@ const (
 	MergeQueuePauserUser
 	// MergeQueuePauserWorkspace is a workspace's agent.
 	MergeQueuePauserWorkspace
+	// MergeQueuePauserHost is the daemon itself, holding the queue on a fault
+	// of the host: a test gate whose runner could not be built or started.
+	MergeQueuePauserHost
 )
 
 // column is the kind's paused_by value.
@@ -71,6 +91,8 @@ func (k MergeQueuePauserKind) column() string {
 		return "user"
 	case MergeQueuePauserWorkspace:
 		return "workspace"
+	case MergeQueuePauserHost:
+		return "host"
 	}
 	panic(fmt.Sprintf("wsm: merge queue pauser kind %d has no column value", int(k)))
 }
@@ -86,6 +108,8 @@ func mergeQueuePauserKindOf(by sql.NullString) (MergeQueuePauserKind, error) {
 		return MergeQueuePauserUser, nil
 	case "workspace":
 		return MergeQueuePauserWorkspace, nil
+	case "host":
+		return MergeQueuePauserHost, nil
 	}
 	return 0, fmt.Errorf("undeclared pauser %q", by.String)
 }
@@ -109,4 +133,13 @@ ALTER TABLE merge_queue_repos ADD COLUMN paused_hard INTEGER NOT NULL DEFAULT 0;
 // is no workspace's own.
 const mergeQueuePauserWorkspaceDDL = `
 ALTER TABLE merge_queue_repos ADD COLUMN paused_by_workspace TEXT;
+`
+
+// mergeQueuePausePurposeDDL is the layout-136 addition: whether a pause was
+// made to land a change, and the cause of a pause the host's fault made. IT IS
+// ADDITIVE: the previous build's pause writes name neither column, so a pause
+// it writes reads back as not made to land, which only keeps it standing.
+const mergeQueuePausePurposeDDL = `
+ALTER TABLE merge_queue_repos ADD COLUMN paused_to_land INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE merge_queue_repos ADD COLUMN paused_cause TEXT;
 `

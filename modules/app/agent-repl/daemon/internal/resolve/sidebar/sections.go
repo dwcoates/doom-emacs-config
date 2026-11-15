@@ -270,6 +270,9 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 	case wsm.MergeQueuePauserWorkspace:
 		out.By = &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Workspace{
 			Workspace: &frontendv1.RosterMergeQueuePauserWorkspace{Name: pause.By.Name}}}
+	case wsm.MergeQueuePauserHost:
+		out.By = &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Host{
+			Host: &frontendv1.RosterMergeQueuePauserHost{Cause: pause.By.Cause}}}
 	}
 	return out
 }

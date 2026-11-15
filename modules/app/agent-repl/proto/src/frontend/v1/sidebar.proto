@@ -1200,10 +1200,21 @@ message RosterMergeQueuePauser {
     RosterMergeQueuePauserUser user = 1;
     // A workspace's agent, from `agent-repld`'s command line.
     RosterMergeQueuePauserWorkspace workspace = 2;
+    // The daemon itself, holding the queue on a fault of the HOST: a merge's
+    // test gate whose runner could not be built or started (2026-11-14:
+    // "too many open files in system"). Nothing of the branch is judged; the
+    // merge's gate runs again from its start once the queue is resumed.
+    // (Added 2026-11-15.)
+    RosterMergeQueuePauserHost host = 3;
   }
 }
 // The user paused the queue. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergeQueuePauserUser {}
+// The host's fault paused the queue.
+message RosterMergeQueuePauserHost {
+  // What the host could not do, drawn verbatim: the runner's own words.
+  string cause = 1;
+}
 // A workspace's agent paused the queue.
 message RosterMergeQueuePauserWorkspace {
   // The workspace's name as it stood when it paused the queue, drawn

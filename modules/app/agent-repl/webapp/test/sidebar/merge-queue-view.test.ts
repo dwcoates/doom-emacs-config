@@ -143,6 +143,11 @@ describe("pausedText", () => {
     { name: "the user's pause", pause: () => paused({ atMs: NOW - 90_000 }), want: `Paused ${formatAge(90_000)} ago by you. Double-click to resume.` },
     { name: "a workspace's hard stop", pause: () => paused({ atMs: NOW - 90_000, workspace: "doom", hard: true }), want: `Stopped ${formatAge(90_000)} ago by doom. Double-click to resume.` },
     { name: "a pause recorded before its record was kept", pause: () => create(RosterMergeQueuePausedSchema, {}), want: "Paused. Double-click to resume." },
+    {
+      name: "the host's pause for its fault",
+      pause: () => create(RosterMergeQueuePausedSchema, { by: { asker: { case: "host", value: { cause: "too many open files in system" } } } }),
+      want: "Paused by the host, which could not run a test gate: too many open files in system. Double-click to resume.",
+    },
   ])("says $name", ({ pause, want }) => {
     expect(pausedText(pause(), NOW, "paused")).toBe(want);
   });

@@ -121,7 +121,7 @@ func (s *server) UpdateMergeQueue(
 	if pause := req.Msg.GetPause(); pause != nil {
 		scope = scopeOf(pause.GetRepository())
 		by, asker := askerOf(req.Msg.GetRequester())
-		pauser := merge.Pauser{By: by, Asker: asker}
+		pauser := merge.Pauser{By: by, Asker: asker, ToLand: pause.GetToLand()}
 		if pause.GetHard() {
 			err = s.deps.Merge.HardStop(ctx, scope, pauser)
 		} else {

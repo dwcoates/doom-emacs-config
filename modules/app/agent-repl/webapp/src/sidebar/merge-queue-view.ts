@@ -147,6 +147,9 @@ export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: strin
       case "workspace":
         text += ` by ${asker.value.name}`;
         break;
+      case "host":
+        text += ` by the host, which could not run a test gate: ${asker.value.cause}`;
+        break;
       default: {
         const other: { case: string } = asker;
         return unreachableArm(`${path}.by.asker`, other.case);

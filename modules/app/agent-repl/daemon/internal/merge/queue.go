@@ -55,9 +55,14 @@ func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) erro
 }
 
 // ResumeOwnPause resumes the ONE queue SCOPE names when the pause standing on
-// it is workspace WS's own, and answers whether it resumed it. A queue that
-// runs, or stands paused by the user, by another workspace, or by a pause
-// written before its pauser's id was kept, is left as it stands.
+// it is workspace WS's own and was made to land a change, and answers whether
+// it resumed it. A queue that runs, or stands paused by the user, by the host,
+// by another workspace, by a pause written before its pauser's id was kept,
+// or by WS's own pause made for any other reason, is left as it stands.
+//
+// A PAUSE THE OWNER ASKED FOR SURVIVES THE TURN'S END (2026-11-14 20:47:10:
+// the owner told merge-queue-stall-triage to pause the queue to save power,
+// and the let-through resumed it the moment that turn ended).
 func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error) {
 	const op = "daemon.merge.resume_own_pause"
 	o.pauseWrites.Lock()
@@ -82,6 +87,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 		o.deps.Log.Global().Info(op, "the queue stands no pause of the workspace's own, so it is left as it stands", fields)
 		return false, nil
 	}
+	if !pause.ToLand {
+		o.deps.Log.Global().Info(op, "the workspace's own pause was not made to land a change, so it stands until it is resumed", dlog.Context{
+			"repo": string(repo), "workspace": string(ws), "hard": pause.Hard})
+		return false, nil
+	}
 	if err := o.setPaused(ctx, &scope, nil); err != nil {
 		return false, err
 	}
@@ -90,10 +100,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 }
 
 // pauseRecord is the record a pause BY writes now: who asked, by the asking
-// workspace's name as it stands, and whether it is a hard stop. A workspace
+// workspace's name as it stands, whether it is a hard stop, and whether it was
+// made to land a change. A workspace
 // the registry cannot read is refused, recorded under OP.
 func (o *orchestrator) pauseRecord(ctx context.Context, op string, by Pauser, hard bool) (*wsm.MergeQueuePause, error) {
-	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard}
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard, ToLand: by.ToLand}
 	if by.By == RequestedByUser {
 		return pause, nil
 	}

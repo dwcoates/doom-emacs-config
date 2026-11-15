@@ -162,7 +162,9 @@ describe("this repository's committed metaprompt", () => {
     const text = readLandingSection("bypassing_queue", home);
     // Assert — owner ruling 2026-11-14: the queue is paused for no longer
     // than a landing needs, and a moved main branch is rebased onto first.
-    expect(text).toContain("Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here`.");
+    expect(text).toContain("Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here -to-land`.");
+    // 2026-11-14: a pause the owner asked for outlives the turn's end.
+    expect(text).toContain("A pause the user asks for (to save power, to look at the queue) is made without `-to-land`, so it outlives this turn: `agent-repld merge-queue pause -repository here`.");
     expect(text).toContain("Resume the queue the moment the landing is done: `agent-repld merge-queue resume -repository here`.");
     expect(text).toContain("If the main branch moved since the work began, rebase onto it and resolve every conflict.");
     expect(text).not.toContain("Before the first change of every prompt");
