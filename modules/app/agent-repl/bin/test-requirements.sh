@@ -995,6 +995,9 @@ test_a_location_permission_for_an_app_not_built_is_missing() {
   new_case; manifest "[$LOCATION]"; helper_open authorized
   run check
   if [ "$RC" -eq 1 ] && has "Helper.app is not built"; then pass "a permission for an app not built is missing"; else fail "permission without app" "rc=$RC" "$OUT"; fi
+}
+
+# ---------------------------------------------------------------------------
 # sudo_grant.
 # ---------------------------------------------------------------------------
 
@@ -1183,7 +1186,7 @@ test_a_sudo_grant_file_sudo_would_skip_is_refused() {
 test_the_real_pmset_grant_covers_every_persistent_wifi_invocation() {
   local got want
   got="$(jq -r '.requirements[] | select(.kind == "sudo_grant" and .command == "/usr/bin/pmset") | .platforms, .invocations | join(",")' "$MODULE/daemon/requirements.json")"
-  want="$(printf '%s\n' darwin "-a disablesleep 1,-a disablesleep 0,-a networkoversleep 1,-a networkoversleep 0,-a womp 1,-a womp 0,-a powermode 1,-a powermode 2")"
+  want="$(printf '%s\n' darwin "-a disablesleep 1,-a disablesleep 0,-a networkoversleep 1,-a networkoversleep 0,-a womp 1,-a womp 0,-a powermode 0,-a powermode 1,-a powermode 2")"
   if [ "$got" = "$want" ]; then pass "the daemon's pmset grant is macOS-only and names every persistent-wifi invocation"
   else fail "real pmset grant" "$got"; fi
 }
