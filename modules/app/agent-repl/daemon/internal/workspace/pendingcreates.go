@@ -501,7 +501,7 @@ func (v *verbs) resumeOn(entry *pendingCreate, released <-chan struct{}, cause s
 		spec := entry.spec
 		spec.Progress = entryProgress{set: &v.pending, entry: entry}
 		created, err := v.attemptCreate(life, spec)
-		if err != nil && createHandedOver(err) {
+		if err != nil && HandedOver(err) {
 			// THE DAEMON IS ENDING: the create is the next daemon's, from its
 			// held row, so it is neither failed nor released here.
 			v.pending.mu.Lock()
