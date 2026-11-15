@@ -1533,6 +1533,26 @@ type fakeDeployer struct {
 	err    error
 	// edges are the web view host reconciles asked for, in order.
 	edges []string
+	// webapp is the installed webapp build a page attach states, and
+	// webappErr the failure of reading it.
+	webapp    string
+	webappErr error
+}
+
+// fakeInstalledWebapp is the installed webapp build a fake deployer states
+// unless a test sets another.
+const fakeInstalledWebapp = "webapp-installed"
+
+func (f *fakeDeployer) InstalledWebapp() (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.webappErr != nil {
+		return "", f.webappErr
+	}
+	if f.webapp == "" {
+		return fakeInstalledWebapp, nil
+	}
+	return f.webapp, nil
 }
 
 func (f *fakeDeployer) ReconcileWebhost(edge string) int {

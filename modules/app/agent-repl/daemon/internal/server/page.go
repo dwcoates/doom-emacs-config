@@ -207,11 +207,19 @@ func (s *server) WatchPage(
 		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeHostAttached)
 	}
 
+	// THE ATTACH STATES THE INSTALLED WEBAPP, so a page on another build
+	// subscribes nothing it could not decode until it is reloaded onto it. A
+	// daemon that cannot read its own webapp's build serves no page.
+	webapp, err := s.deps.Deploy.InstalledWebapp()
+	if err != nil {
+		s.log.Error(rpc, "could not read the installed webapp's build; the page is not attached", dlog.WithCause(dlog.Context{"page": page.id}, err))
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("%s: read the installed webapp's build: %w", rpc, err))
+	}
 	s.acceptStream(ctx, rpc)
 	s.log.Info(rpc, "attached a page's one standing stream",
-		dlog.Context{"page": page.id})
+		dlog.Context{"page": page.id, "webapp_build": webapp})
 	if err := out.Send(&agentreplv1.WatchPageResponse{
-		Frame: &agentreplv1.WatchPageResponse_Attached{Attached: &agentreplv1.PageAttached{}},
+		Frame: &agentreplv1.WatchPageResponse_Attached{Attached: &agentreplv1.PageAttached{WebappBuild: webapp}},
 	}); err != nil {
 		s.log.Debug(rpc, "the page went away before it was told it was attached",
 			dlog.Context{"page": page.id, "cause": err.Error()})

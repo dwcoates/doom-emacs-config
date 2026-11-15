@@ -24,9 +24,11 @@ import { fakePageSeen } from "../page-seen-fake.js";
  * page that is seen (page-seen-fake.ts).
  */
 export function testAppContext(
-  init: Omit<AppContextInit, "page" | "streams" | "seen"> & Partial<Pick<AppContextInit, "seen">>,
+  init: Omit<AppContextInit, "page" | "streams" | "seen" | "webappBuild"> &
+    Partial<Pick<AppContextInit, "seen" | "webappBuild">>,
 ): AppContext {
   return createAppContext({
+    webappBuild: "test-webapp-build",
     seen: fakePageSeen(),
     ...init,
     page: "test-page",

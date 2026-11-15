@@ -584,6 +584,7 @@ async function mountApp(
   // harnesses in one file cannot collide on the daemon's page registry.
   const workspace = workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR);
   const ctx = createAppContext({
+    webappBuild: "test-webapp-build",
     client,
     workspace,
     ticker,

@@ -148,6 +148,7 @@ export function startWebhostDocument(
   const reloadGeneration = readReloadGeneration(win.location.search);
   const ctx = createDaemonContext({
     client,
+    webappBuild,
     ticker: createTicker(DEFAULT_TICK_MS, pageQuiet(doc)),
     failures,
     page: connectionId,

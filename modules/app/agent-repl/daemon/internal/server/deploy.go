@@ -27,6 +27,9 @@ type Deployer interface {
 	// than the installed one, on EDGE: a host's page stream or an Emacs's
 	// daemon stream attaching (deploy/webhost.go).
 	ReconcileWebhost(edge string) int
+	// InstalledWebapp answers the installed webapp's build, which a page's
+	// attach states (agentrepl.v1.PageAttached.webapp_build).
+	InstalledWebapp() (string, error)
 }
 
 const opDeployRPC = "daemon.server.deploy"

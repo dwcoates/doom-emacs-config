@@ -41,6 +41,8 @@ import { startPageStreams, type PageStreams, type PageStreamContext, type Webhos
  * its workspace.
  */
 export interface DaemonContext {
+  /** The webapp build this page runs (DaemonContextInit.webappBuild). */
+  readonly webappBuild: string;
   /** The daemon client as of NOW; re-read it per call, never cache it. */
   readonly client: AgentReplClient;
   /**
@@ -147,6 +149,12 @@ export interface DaemonContextInit {
    */
   page: string;
   /**
+   * The webapp build this page runs (webapp-build.ts). A daemon that states
+   * another on the page's attach (PageAttached.webapp_build) is one this page
+   * subscribes nothing from until it is reloaded onto it (page-streams.ts).
+   */
+  webappBuild: string;
+  /**
    * What one of Emacs's own web views states of itself, set by their own
    * contexts alone: the webapp build it was loaded from and the host's
    * reload generation, which its page stream states (WatchPageRequest.webhost),
@@ -214,6 +222,7 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
   const pushListeners = createListeners();
   const restoredListeners = createListeners();
   const base = {
+    webappBuild: init.webappBuild,
     client: init.client,
     ticker: init.ticker,
     failures: init.failures,

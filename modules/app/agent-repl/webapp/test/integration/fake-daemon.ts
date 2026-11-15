@@ -1625,7 +1625,7 @@ export function createFakeDaemon(): FakeDaemon {
         // it has read this frame.
         state.outbound.push(
           create(WatchPageResponseSchema, {
-            frame: { case: "attached", value: create(PageAttachedSchema, {}) },
+            frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "test-webapp-build" }) },
           }),
         );
         try {
