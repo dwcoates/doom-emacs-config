@@ -20,6 +20,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitlayout"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
@@ -438,7 +439,7 @@ func (s *server) handCutWorktreeOf(ctx context.Context, own testWorktree, dir st
 		return handCutWorktree{}, fmt.Sprintf("the worktree %q is not an absolute directory", dir), nil
 	}
 	dir = filepath.Clean(dir)
-	if err := linkedWorktreeOf(dir, own.dir); err != nil {
+	if err := gitlayout.LinkedWorktreeOf(dir, own.dir); err != nil {
 		return handCutWorktree{}, err.Error(), nil
 	}
 	// The run is still the main workspace's: its bypass standing decides the
@@ -449,33 +450,6 @@ func (s *server) handCutWorktreeOf(ctx context.Context, own testWorktree, dir st
 		return handCutWorktree{err: &noTestScriptError{cause: err}}, "", nil
 	}
 	return handCutWorktree{worktree: cut}, "", nil
-}
-
-// linkedWorktreeOf answers nil when DIR is a linked git worktree of the
-// repository whose main worktree is REPODIR, and why not otherwise. It reads
-// what git itself wrote: a linked worktree's `.git` is a FILE naming its
-// administrative directory, `<repository>/.git/worktrees/<name>`.
-func linkedWorktreeOf(dir, repoDir string) error {
-	data, err := os.ReadFile(filepath.Join(dir, ".git"))
-	if err != nil {
-		return fmt.Errorf("%s is no linked git worktree: %v", dir, err)
-	}
-	gitdir, ok := strings.CutPrefix(strings.TrimSpace(string(data)), "gitdir: ")
-	if !ok {
-		return fmt.Errorf("%s is no linked git worktree: its .git file names no gitdir", dir)
-	}
-	admin, err := filepath.EvalSymlinks(filepath.Dir(gitdir))
-	if err != nil {
-		return fmt.Errorf("%s is no linked git worktree: its gitdir %s cannot be resolved: %v", dir, gitdir, err)
-	}
-	worktrees, err := filepath.EvalSymlinks(filepath.Join(repoDir, ".git", "worktrees"))
-	if err != nil {
-		return fmt.Errorf("the repository at %s holds no linked worktrees: %v", repoDir, err)
-	}
-	if admin != worktrees {
-		return fmt.Errorf("%s is a worktree of another repository (its gitdir is %s), not of %s", dir, gitdir, repoDir)
-	}
-	return nil
 }
 
 // testScriptOf is the test script the worktree's own deploy config names.
