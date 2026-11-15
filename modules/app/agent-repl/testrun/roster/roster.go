@@ -729,8 +729,8 @@ var AlwaysRunRegions = []string{
 	"/.githooks/", "/.claude/", "/bin/",
 }
 
-// ReadByNoSuite are the files and subtrees no suite reads: prose, and the
-// owner's own Doom configuration. Each entry is reviewed: none may be broad
+// ReadByNoSuite are the files and subtrees no suite reads: prose, the
+// owner's own Doom configuration, and the Wi-Fi helper app no suite builds. Each entry is reviewed: none may be broad
 // enough to take in code a suite should test.
 var ReadByNoSuite = []string{
 	// The module's prose.
@@ -743,6 +743,11 @@ var ReadByNoSuite = []string{
 	"test-coverage-input.md", "test-coverage-keybindings.md", "test-coverage-notifications.md",
 	"test-coverage-overlay.md", "test-coverage-panels.md", "test-coverage-sentinel.md", "test-coverage-session.md",
 	"test-coverage-status.md", "test-coverage-worktree.md",
+	// The Wi-Fi helper app's Swift source, plist and build script: no suite
+	// builds or runs the app (the requirements harness tests app_build
+	// against its own fixture helper), and the daemon names only the built
+	// app's path.
+	"wifi-helper/",
 	// The owner's own Doom configuration, which no agent-repl suite loads.
 	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
