@@ -537,7 +537,8 @@ Return the image\='s path."
                                 #'agent-repl--image-prompt-attach))
 
 (defun agent-repl-prompt-evil-paste-before ()
-  "Evil\='s `P' in a creation prompt: the clipboard\='s image, or `evil-paste-before'."
+  "Evil\='s `P' in a creation prompt.
+The clipboard\='s image, or else `evil-paste-before'."
   (interactive "*")
   (agent-repl--image-evil-paste #'evil-paste-before nil agent-repl--image-prompt-log-scope
                                 #'agent-repl--image-prompt-attach))

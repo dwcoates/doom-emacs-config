@@ -2436,8 +2436,15 @@ and the text answered carries each one as its image marker, which
       (agent-repl-verbs--read-string-persisted prompt-text nil history-file)
     (read-string prompt-text nil)))
 
+(defconst agent-repl-verbs--create-log-scope
+  '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
+  "The central log scope every creation command records under.
+A create runs before the workspace it makes exists, so it can own no
+workspace log of its own.")
+
 (defun agent-repl-verbs--read-image-prompt (prompt-text history-file)
-  "Read a creation prompt that takes pasted images; see `agent-repl-verbs--read-prompt'.
+  "Read a creation prompt that takes pasted images.
+See `agent-repl-verbs--read-prompt'.
 The minibuffer keeps the markers' properties
 \(`minibuffer-allow-text-properties'), so the answer reads back as words
 and images (`agent-repl--input-string-parts').  An answer of images
@@ -2461,7 +2468,7 @@ request is built."
     (agent-repl--image-prompt-text parts)))
 
 (defun agent-repl-verbs--install-image-prompt-maps ()
-  "Put the history map and `agent-repl-image-prompt-map' over the minibuffer\='s map.
+  "Put the history map and `agent-repl-image-prompt-map' over the minibuffer map.
 Run from `minibuffer-setup-hook' by `agent-repl-verbs--read-image-prompt',
 so only an image-taking prompt\='s own minibuffer pastes images."
   (agent-repl-verbs--install-prompt-history-map)
@@ -2495,12 +2502,6 @@ IMAGES are passed to `agent-repl-verbs--read-prompt'."
     (when (string-empty-p (string-trim text))
       (user-error "agent-repl: %s" refusal))
     text))
-
-(defconst agent-repl-verbs--create-log-scope
-  '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-  "The central log scope every creation command records under.
-A create runs before the workspace it makes exists, so it can own no
-workspace log of its own.")
 
 ;;;; ---- Persisted prompt history ------------------------------------------
 ;;
