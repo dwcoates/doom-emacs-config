@@ -132,6 +132,15 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	if err != nil {
 		return err
 	}
+	return o.pauseRepos(ctx, op, repos, pause, scope != nil)
+}
+
+// pauseRepos is setPaused's write over the queues of REPOS, resolved: PAUSE
+// pauses them with its record, nil resumes them, and a change that would
+// change none of them is refused. SCOPED is whether the asker named one
+// repository, for the record.
+func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.RepoKey, pause *wsm.MergeQueuePause, scoped bool) error {
+	paused := pause != nil
 	var changed []wsm.RepoKey
 	for _, repo := range repos {
 		was, err := o.deps.DB.MergeQueuePaused(ctx, repo)
@@ -154,7 +163,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
+	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
 	if paused {
 		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
@@ -164,6 +173,19 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.kick(repo)
 	}
 	return redrawn
+}
+
+// holdForHostFault pauses REPO's queue in the host's name, naming CAUSE: a
+// merge's test gate whose runner could not be built or started. The pause
+// suspends the merge whose gate it was, as any pause does, and stands until
+// it is resumed; the merge's gate then runs again from its start, with no
+// fixing attempt spent. A queue already paused is left as it stands: its
+// pause suspends the merge the same way.
+func (o *orchestrator) holdForHostFault(ctx context.Context, repo wsm.RepoKey, cause string) error {
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserHost, Cause: cause}}
+	return o.pauseRepos(ctx, "daemon.merge.pause", []wsm.RepoKey{repo}, pause, true)
 }
 
 // HardStop pauses the queues SCOPE names as Pause does, and stops the work

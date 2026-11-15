@@ -13,6 +13,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/resolve/footer"
 
 	"agentrepl/testrun/seatwait"
@@ -113,14 +114,17 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 	}
 	result, err := g.run(ctx, dir, argv, selection.Suites)
 	if err != nil {
-		// A GATE THE DAEMON'S OWN EXIT STOPPED FROM STARTING IS NOT BROKEN: a
-		// cancelled run or a draining daemon takes the ordinary error path,
-		// which records the exit rather than a fault in the gate.
+		// A GATE THE DAEMON'S OWN EXIT STOPPED FROM STARTING IS NOT THE HOST'S
+		// FAULT: a cancelled run or a draining daemon takes the ordinary error
+		// path, which records the exit rather than a fault.
 		var unstarted *gateUnstartedError
 		if errors.As(err, &unstarted) && ctx.Err() == nil && !r.o.isDraining() {
-			return g.brokenGate(ctx, GateResult{}, fmt.Sprintf("it could not be started (%v)", unstarted.err)), nil
+			return gateVerdict{}, g.hostFault(ctx, GateResult{}, fmt.Sprintf("the test runner could not be started: %v", unstarted.err))
 		}
 		return gateVerdict{}, g.unrun(ctx, err)
+	}
+	if result.ExitCode == gateRunnerUnavailable {
+		return gateVerdict{}, g.hostFault(ctx, result, runnerUnavailableCause(result.Tail))
 	}
 	if why, broken := gateDidNotRun(result.ExitCode); broken {
 		return g.brokenGate(ctx, result, fmt.Sprintf("%s; the whole run is archived at %s", why, result.ArchivePath)), nil
@@ -164,6 +168,74 @@ func (g *gateRun) unrun(ctx context.Context, err error) error {
 	const unrun = "the test gate could not run"
 	r.endRun(ctx, round, unrun, nil, g.link(), "failed")
 	return err
+}
+
+// gateRunnerUnavailable is the exit status of a test run whose runner could
+// not be built or started (bin/test-all.sh RUNNER_UNAVAILABLE): no suite ran,
+// so nothing of the branch was judged.
+const gateRunnerUnavailable = 75
+
+// runnerUnavailableCause names what the runner's build or start hit, from the
+// run's TAIL: its last error lines, which name the cause ("too many open
+// files in system"), and the script's own ERROR line. A tail with none of
+// them names the exit itself.
+func runnerUnavailableCause(tail string) string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(tail), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "ERROR") || strings.Contains(line, "too many open files") {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return fmt.Sprintf("the test runner could not be built or started (exit %d)", gateRunnerUnavailable)
+	}
+	const keep = 3
+	if len(lines) > keep {
+		lines = lines[len(lines)-keep:]
+	}
+	return strings.Join(lines, "; ")
+}
+
+// hostFault settles a gate whose runner could not be built or started: a
+// fault of the HOST, never a verdict on the branch. It is recorded at ERROR
+// naming CAUSE, spends no fixing attempt, and holds the merge's queue in the
+// host's name (holdForHostFault); the pause suspends this run, whose gate
+// runs again from its start once the queue is resumed. It answers the error
+// the run stops on: the pause's suspension, or the hold's own failure.
+//
+// 2026-11-14 20:47:31, resolved-vendor-notices-clear round 5: the runner's
+// build hit "too many open files in system" in 0.1s, and the queue sent the
+// merge to a fixing round with nothing to fix.
+func (g *gateRun) hostFault(ctx context.Context, result GateResult, cause string) error {
+	r := g.r
+	r.o.log(ctx, r.ws).Error("daemon.merge.tests", "the test gate's runner could not be built or started on this host; nothing of the branch was judged, no fixing attempt is spent, and the queue is held until it is resumed", dlog.Context{
+		"workspace": string(r.ws), "round": g.round.n, "cause": cause, "exit_code": result.ExitCode,
+		"archive": result.ArchivePath, "verdict": "host_fault", "total_seconds": g.since()})
+	held := make(chan error, 1)
+	inflight.Go(func() { held <- r.o.holdForHostFault(context.WithoutCancel(ctx), r.repo, cause) })
+	// THE HOLD'S PAUSE CUTS THIS RUN before it finishes: the pause suspends
+	// every running merge of the queue and waits for each to let go, so the
+	// cut is what returns here. A hold that failed, or found the queue
+	// already paused, answers first.
+	select {
+	case <-ctx.Done():
+		return g.unrun(ctx, context.Cause(ctx))
+	case err := <-held:
+		var refused *RefusalError
+		if errors.As(err, &refused) && refused.Arm == ArmAlreadyPaused {
+			// ANOTHER PAUSE STANDS, and it suspends this run as it suspends
+			// every running merge of its queue.
+			<-ctx.Done()
+			return g.unrun(ctx, context.Cause(ctx))
+		}
+		if err == nil {
+			panic(fmt.Sprintf("merge: the host's hold of %s's queue returned before suspending its gate's run", r.ws))
+		}
+		r.o.log(ctx, r.ws).Error("daemon.merge.tests", "could not hold the queue for the host's fault; the merge fails on it", dlog.Context{
+			"workspace": string(r.ws), "round": g.round.n, "cause": cause, "error": err.Error()})
+		return g.unrun(ctx, fmt.Errorf("merge: hold the queue for the host's fault (%s): %w", cause, err))
+	}
 }
 
 // gateDidNotRun reads the exit statuses that mean the gate's command never

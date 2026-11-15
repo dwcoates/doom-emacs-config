@@ -119,15 +119,24 @@ err() {
     printf '[agent-repl-tests] ERROR: %s\n' "$*" >&2
 }
 
+# RUNNER_UNAVAILABLE is the exit status of a run whose runner could not be
+# built or started: no suite ran, so nothing of the tree was judged. The merge
+# gate reads it as a fault of the HOST, never as a test failure
+# (daemon/internal/merge/gate.go gateRunnerUnavailable): it holds the queue
+# naming the cause, and spends no fixing attempt (2026-11-14 20:47:31: the
+# build hit "too many open files in system", and the queue sent the merge to
+# fix tests that never ran). 75 is sysexits' EX_TEMPFAIL.
+RUNNER_UNAVAILABLE=75
+
 command -v go >/dev/null 2>&1 || {
     err "go is not on PATH; the test runner (testrun) is a Go program"
-    exit 1
+    exit "$RUNNER_UNAVAILABLE"
 }
 
 TESTRUN="$RUN_TMP/testrun"
 if ! (cd "$MODULE_ROOT/testrun" && go build -o "$TESTRUN" .); then
     err "building the test runner in $MODULE_ROOT/testrun failed"
-    exit 1
+    exit "$RUNNER_UNAVAILABLE"
 fi
 
 if [ "${1:-}" = "--redundancy" ]; then
