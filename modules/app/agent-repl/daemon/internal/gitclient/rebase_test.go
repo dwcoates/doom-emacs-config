@@ -552,3 +552,77 @@ func TestAddWorktreeChecksTheExistingBranchOut(t *testing.T) {
 	// Assert.
 	fake.assertSubject(0, "worktree", "add", "/state/wt", "feature")
 }
+
+func TestAStartGitRefusedOverUncommittedChangesIsTheDirtyWorktreeRefusal(t *testing.T) {
+	// Arrange: git refuses the start, no rebase stands, and the worktree has
+	// changes.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "error: cannot rebase: You have unstaged changes.\n", "rebase"),
+		ok("", "diff"), rebaseDirFixture(t, false), ok(" M gen/ts/feed_pb.ts\n", "--no-optional-locks", "status", "--porcelain"))
+
+	// Act.
+	_, err := git.StartRebase(context.Background(), "/wt", "tip", []string{"aaa"})
+
+	// Assert.
+	if !errors.Is(err, ErrDirtyWorktree) {
+		t.Fatalf("StartRebase error = %v, want ErrDirtyWorktree", err)
+	}
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "unstaged changes") {
+		t.Fatalf("StartRebase error = %v, want git's own evidence wrapped", err)
+	}
+	if _, found := recordFor(surfaces.records(), "info", "daemon.gitclient.start_rebase"); !found {
+		t.Fatalf("the refusal was not recorded at INFO: %+v", surfaces.records())
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.start_rebase"); found {
+		t.Fatalf("the refusal was recorded at ERROR, want INFO for a condition the merge handles: %+v", surfaces.records())
+	}
+}
+
+func TestAStartThatFailedOtherwiseIsNoDirtyWorktreeRefusal(t *testing.T) {
+	tests := []struct {
+		name     string
+		fixtures func(t *testing.T) []gitFixture
+	}{
+		{name: "clean worktree, no rebase standing", fixtures: func(t *testing.T) []gitFixture {
+			return []gitFixture{rebaseDirFixture(t, false), ok("", "--no-optional-locks", "status", "--porcelain")}
+		}},
+		{name: "a rebase standing", fixtures: func(t *testing.T) []gitFixture {
+			return []gitFixture{rebaseDirFixture(t, true), ok("", "rerere", "status"), ok("", "ls-files", "-u"), ok("", "status")}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, append([]gitFixture{fails(1, "error: could not apply aaa\n", "rebase"), ok("", "diff")}, tt.fixtures(t)...)...)
+
+			// Act.
+			_, err := git.StartRebase(context.Background(), "/wt", "tip", []string{"aaa"})
+
+			// Assert.
+			if err == nil || errors.Is(err, ErrDirtyWorktree) {
+				t.Fatalf("StartRebase error = %v, want a failure that is not ErrDirtyWorktree", err)
+			}
+			if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.start_rebase"); !found {
+				t.Fatalf("the failure was not logged at ERROR: %+v", surfaces.records())
+			}
+		})
+	}
+}
+
+func TestAStartRefusalWhoseWorktreeCannotBeReadSurfacesTheRead(t *testing.T) {
+	// Arrange: the refusal's status read fails.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "error: cannot rebase\n", "rebase"), ok("", "diff"), rebaseDirFixture(t, false),
+		fails(128, "fatal: index file corrupt\n", "--no-optional-locks", "status"))
+
+	// Act.
+	_, err := git.StartRebase(context.Background(), "/wt", "tip", []string{"aaa"})
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "index file corrupt") || errors.Is(err, ErrDirtyWorktree) {
+		t.Fatalf("StartRebase error = %v, want the status read's own failure", err)
+	}
+}
