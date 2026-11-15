@@ -156,11 +156,16 @@ func (v *verbs) refOf(ctx context.Context, id ids.WorkspaceID, what string) (*wo
 
 // activityOf projects an open workspace's footer status onto what an agent
 // decides on. The standing cold gate card is the authority on the gate, since
-// it carries the gate's address.
+// it carries the gate's address. A merge in flight is reported as merging
+// whatever the strip draws: a turn the merge runs is drawn as the turn
+// (resolve/ladder), and the workspace is still held by its merge under it.
 func (v *verbs) activityOf(ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatusActivity, error) {
 	if gate, standing := v.deps.Cards.ColdGate(ws); standing {
 		return &agentreplv1.WorkspaceStatusActivity{Activity: &agentreplv1.WorkspaceStatusActivity_ColdGate{ColdGate: &agentreplv1.WorkspaceStatusActivityColdGate{
 			Gate: coldGateRowID(ws, gate.VendorSessionID)}}}, nil
+	}
+	if v.deps.Footer.MergeStartedAt(ws) != nil {
+		return mergingActivity(), nil
 	}
 	status := v.deps.Footer.Status(ws)
 	activity, ok := ActivityOf(status)

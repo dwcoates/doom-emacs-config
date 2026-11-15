@@ -390,7 +390,7 @@ func (r *resolver) publishLocked(ws ids.WorkspaceID, s *wsState) publication {
 	p.line, p.lineChanged, p.previousLine = s.observeLine(view)
 	p.clockChanged = s.observeClock(view)
 	s.published = view.GetStrip().GetStatus()
-	p.mergeStartChanged = s.observeMergeStart(mergeStartedAt(s.published, s.merge))
+	p.mergeStartChanged = s.observeMergeStart(mergeStartedAt(s.merge))
 	if !quiet {
 		r.topicLocked(ws).Publish(view)
 	}
@@ -434,12 +434,12 @@ func (r *resolver) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus {
 	return publishedOrResolved(r, ws, func(s *wsState) *frontendv1.FooterStatus { return s.published }, r.status)
 }
 
-// MergeStartedAt answers when the merge the workspace's strip shows started:
-// the one the last published view carried, resolved from what the footer
+// MergeStartedAt answers when the workspace's merge in flight started: the
+// instant the last publication carried, resolved from what the footer
 // holds when it has published nothing yet, exactly as Status is.
 func (r *resolver) MergeStartedAt(ws ids.WorkspaceID) *int64 {
 	return publishedOrResolved(r, ws, func(s *wsState) *mergeStart { return s.publishedMergeStart },
-		func(s *wsState, log dlog.Logger) *mergeStart { return mergeStartedAt(r.status(s, log), s.merge) }).ms
+		func(s *wsState, _ dlog.Logger) *mergeStart { return mergeStartedAt(s.merge) }).ms
 }
 
 // mergeStart is a view's merge start: ms is when its merge started, in epoch
@@ -450,12 +450,13 @@ type mergeStart struct {
 	ms *int64
 }
 
-// mergeStartedAt is THE ONE RULE for when a drawn merge started: under the
-// merging arm, the merge's QueuedAt in epoch ms, and no instant under any
-// other arm. The instant rides on the same status it is read beside, so a
-// merge is counted exactly while the strip draws one.
-func mergeStartedAt(status *frontendv1.FooterStatus, facts MergeFacts) *mergeStart {
-	if status.GetMerging() == nil {
+// mergeStartedAt is THE ONE RULE for when a merge in flight started: while
+// the merge stands on the ladder's merging rung, the merge's QueuedAt in epoch
+// ms, and no instant otherwise. It reads the merge's facts rather than the
+// drawn arm, because a turn the merge runs in the session is drawn as the turn
+// (merging), and the merge is still in flight under it.
+func mergeStartedAt(facts MergeFacts) *mergeStart {
+	if ladder.MergeClaim(facts.State) != ladder.Merging {
 		return &mergeStart{}
 	}
 	ms := facts.QueuedAt.UnixMilli()

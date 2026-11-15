@@ -287,6 +287,23 @@ func TestMergeStartedAtAnswersAMergeTheStripDraws(t *testing.T) {
 	}
 }
 
+func TestMergeStartedAtStandsWhileTheMergesTurnIsDrawnAsWorking(t *testing.T) {
+	// Arrange
+	queued := instant.Add(-time.Hour)
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", QueuedAt: queued, Step: StepFixing, Attempt: 1, MaxAttempts: 3})
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	got := h.r.MergeStartedAt(testWS)
+	if got == nil || *got != *millisOf(queued) {
+		t.Fatalf("MergeStartedAt = %v under the published %q, want the merge's start", got, h.status(t))
+	}
+}
+
 func TestMergeStartedAtResolvesAWorkspaceTheFooterNeverSawAsNoMerge(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -2544,6 +2544,9 @@ type fakeFooter struct {
 
 	// statuses is the status each workspace's strip answers.
 	statuses map[ids.WorkspaceID]*frontendv1.FooterStatus
+	// mergeStarts is when each workspace's merge in flight started, absent
+	// for a workspace with none.
+	mergeStarts map[ids.WorkspaceID]int64
 	// awaiting is the awaited name each workspace's strip was last told.
 	awaiting map[ids.WorkspaceID]string
 
@@ -3401,6 +3404,15 @@ func (f *fakeFooter) SetAwaiting(ws ids.WorkspaceID, name string) {
 
 // Status answers the status seeded for WS, nil when none was.
 func (f *fakeFooter) Status(ws ids.WorkspaceID) *frontendv1.FooterStatus { return f.statuses[ws] }
+
+// MergeStartedAt answers the merge start seeded for WS, nil when none was.
+func (f *fakeFooter) MergeStartedAt(ws ids.WorkspaceID) *int64 {
+	ms, ok := f.mergeStarts[ws]
+	if !ok {
+		return nil
+	}
+	return &ms
+}
 
 // EndColdGate records the remediated gate retired.
 func (c *fakeCards) EndColdGate(_ ids.WorkspaceID, vendorSessionID string) {

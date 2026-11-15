@@ -265,6 +265,26 @@ func TestStatusNamesAStandingColdGateByItsRow(t *testing.T) {
 	}
 }
 
+func TestStatusReportsAMergeInFlightAsMergingWhileItsTurnIsDrawnAsWorking(t *testing.T) {
+	// Arrange: the merge's turn is drawn as the turn (resolve/ladder), and
+	// the merge still holds the workspace under it.
+	f := newFixture(t)
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1"}
+	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": {Status: &frontendv1.FooterStatus_Working{Working: &frontendv1.FooterStatusWorking{}}}}
+	f.footer.mergeStarts = map[ids.WorkspaceID]int64{"ws-1": 1_000}
+
+	// Act
+	got, err := f.verbs.Status(context.Background(), "ws-1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.GetStanding().GetOpen().GetActivity().GetMerging() == nil {
+		t.Errorf("activity = %v, want merging", got.GetStanding().GetOpen().GetActivity())
+	}
+}
+
 func TestActivityOfProjectsEveryFooterArm(t *testing.T) {
 	tests := []struct {
 		name   string
