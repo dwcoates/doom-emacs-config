@@ -311,7 +311,7 @@ func TestAWakeDeliversAnOwedRunNoticeWithoutPolling(t *testing.T) {
 	r.gh.mu.Lock()
 	callsBefore := len(r.gh.calls)
 	r.gh.mu.Unlock()
-	run := Run{remote: remoteRun{Name: "release", Status: "completed", Conclusion: "success", HeadSHA: "abc", URL: "https://github.com/o/r/actions/runs/1"}}
+	run := Run{Name: "release", Status: "completed", Conclusion: "success", HeadSHA: "abc", URL: "https://github.com/o/r/actions/runs/1"}
 	if _, err := r.db.OweGithubWorkflowRunCompletion(ctx, RunCompletionOf(r.ws, runK, run, false)); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestAWakeOfADaemonThatDoesNotServeDeliversNothing(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	r.serves = false
-	run := Run{remote: remoteRun{Name: "release", Status: "completed", Conclusion: "success"}}
+	run := Run{Name: "release", Status: "completed", Conclusion: "success"}
 	if _, err := r.db.OweGithubWorkflowRunCompletion(context.Background(), RunCompletionOf(r.ws, runK, run, false)); err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestAWakeOfADaemonThatDoesNotServeDeliversNothing(t *testing.T) {
 
 func TestRunCompletionOfAnUnfinishedRunIsADefect(t *testing.T) {
 	// Arrange
-	run := Run{remote: remoteRun{Name: "release", Status: "in_progress"}}
+	run := Run{Name: "release", Status: "in_progress"}
 	defer func() {
 		// Assert
 		if recover() == nil {

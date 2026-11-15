@@ -162,6 +162,12 @@ type fakeDB struct {
 	// (githubmergequeues_test.go).
 	queueSubs         []wsm.GithubMergeQueueSubscription
 	queueSubscribeErr error
+	// runSubs are the workflow-run subscriptions recorded, runOwed every
+	// completion owed, and runErr answers both their writes
+	// (githubworkflowruns_test.go).
+	runSubs []wsm.GithubWorkflowRunSubscription
+	runOwed []wsm.GithubWorkflowRunCompletion
+	runErr  error
 	// mergeQueues are the merge queues AllMergeQueues answers.
 	mergeQueues map[wsm.RepoKey][]wsm.MergeQueueEntry
 	wsm.DB

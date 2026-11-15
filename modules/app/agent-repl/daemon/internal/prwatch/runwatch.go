@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -60,20 +61,22 @@ func runAPIPath(key wsm.GithubWorkflowRunKey) string {
 	return fmt.Sprintf("repos/%s/%s/actions/runs/%d", key.Owner, key.Repo, key.RunID)
 }
 
-// remoteRun is a run as GitHub answers it.
-type remoteRun struct {
+// Run is one read of a workflow run, as GitHub answered it.
+type Run struct {
 	Name       string
 	Status     string
 	Conclusion string
 	HeadSHA    string
 	URL        string
+	// ReadAt is when the daemon made the read, by its clock.
+	ReadAt time.Time
 }
 
-// completed reports whether GitHub reports the run finished.
-func (r remoteRun) completed() bool { return r.Status == "completed" }
+// Completed reports whether GitHub reported the run finished.
+func (r Run) Completed() bool { return r.Status == "completed" }
 
 // decodeRun reads GitHub's answer for one run.
-func decodeRun(body []byte) (remoteRun, error) {
+func decodeRun(body []byte) (Run, error) {
 	var shaped struct {
 		Name       string  `json:"name"`
 		Status     string  `json:"status"`
@@ -82,12 +85,12 @@ func decodeRun(body []byte) (remoteRun, error) {
 		HTMLURL    string  `json:"html_url"`
 	}
 	if err := json.Unmarshal(body, &shaped); err != nil {
-		return remoteRun{}, fmt.Errorf("prwatch: decode a workflow run: %w", err)
+		return Run{}, fmt.Errorf("prwatch: decode a workflow run: %w", err)
 	}
 	if shaped.Status == "" {
-		return remoteRun{}, fmt.Errorf("prwatch: GitHub's workflow run names no status")
+		return Run{}, fmt.Errorf("prwatch: GitHub's workflow run names no status")
 	}
-	r := remoteRun{Name: shaped.Name, Status: shaped.Status, HeadSHA: shaped.HeadSHA, URL: shaped.HTMLURL}
+	r := Run{Name: shaped.Name, Status: shaped.Status, HeadSHA: shaped.HeadSHA, URL: shaped.HTMLURL}
 	if shaped.Conclusion != nil {
 		r.Conclusion = *shaped.Conclusion
 	}
@@ -96,29 +99,24 @@ func decodeRun(body []byte) (remoteRun, error) {
 
 // readRun reads KEY's run conditionally. Any failure is the leaf's
 // *ghclient.Failure (recorded there) or a decode error.
-func (w *Watcher) readRun(ctx context.Context, key wsm.GithubWorkflowRunKey) (remoteRun, error) {
+func (w *Watcher) readRun(ctx context.Context, key wsm.GithubWorkflowRunKey) (Run, error) {
 	body, err := w.reader.get(ctx, runAPIPath(key))
 	if err != nil {
-		return remoteRun{}, err
+		return Run{}, err
 	}
-	return decodeRun(body)
+	r, err := decodeRun(body)
+	r.ReadAt = w.deps.Clock.Now()
+	return r, err
 }
 
-// Run is one read of a workflow run.
-type Run struct{ remote remoteRun }
-
 // Proto is the run as the contract spells it.
-func (r Run) Proto() *agentreplv1.GithubWorkflowRun { return runProto(r.remote) }
-
-// Completed reports whether the run had finished when it was read.
-func (r Run) Completed() bool { return r.remote.completed() }
+func (r Run) Proto() *agentreplv1.GithubWorkflowRun { return runProto(r) }
 
 // ReadRun reads KEY's run as it stands, for a subscribe to answer with. Any
 // failure is the leaf's *ghclient.Failure or a decode error, which
 // FailureProto spells.
 func (w *Watcher) ReadRun(ctx context.Context, key wsm.GithubWorkflowRunKey) (Run, error) {
-	r, err := w.readRun(ctx, key)
-	return Run{remote: r}, err
+	return w.readRun(ctx, key)
 }
 
 // RunCompletionOf is the notice SUBSCRIBER is owed for KEY's finished RUN.
@@ -130,7 +128,7 @@ func RunCompletionOf(subscriber ids.WorkspaceID, key wsm.GithubWorkflowRunKey, r
 		panic(fmt.Sprintf("prwatch: the completion of %s owed for a run that has not finished", key))
 	}
 	return wsm.GithubWorkflowRunCompletion{Subscriber: subscriber, Run: key, Held: held,
-		Sentences: []string{runCompletedSentence(run.remote)}, Status: runStatusWords(run.remote)}
+		Sentences: []string{runCompletedSentence(run)}, Status: runStatusWords(run)}
 }
 
 // Wake has the watcher deliver every owed notice now rather than at its next
@@ -192,25 +190,25 @@ func (w *Watcher) pollRun(ctx context.Context, key wsm.GithubWorkflowRunKey, sub
 		}
 		return
 	}
-	if !r.completed() {
+	if !r.Completed() {
 		// A RUN STILL GOING IS TOLD NOTHING (owner ruling, 2026-11-15): no
 		// queued, started, job or step notice. Only a recovery is recorded,
 		// so the stored health clears.
 		if !recovered {
 			return
 		}
-		if err := w.deps.Store.RecordGithubWorkflowRunRead(ctx, key, w.deps.Clock.Now()); err != nil {
+		if err := w.deps.Store.RecordGithubWorkflowRunRead(ctx, key, r.ReadAt); err != nil {
 			w.deps.Log.Error(opRunPoll, "could not record that the run's reads work again; the next poll records it", dlog.WithCause(fields, err))
 			return
 		}
 		w.deps.Log.Info(opRunPoll, "the run's reads work again and it has not finished; its subscribers are told nothing", dlog.Merge(fields, dlog.Context{"status": r.Status}))
 		return
 	}
-	run := Run{remote: r}
+
 	fields["conclusion"] = r.Conclusion
 	for _, sub := range subs {
 		subFields := dlog.Merge(fields, dlog.Context{"subscriber": string(sub.Subscriber)})
-		owed, err := w.deps.Store.OweGithubWorkflowRunCompletion(ctx, RunCompletionOf(sub.Subscriber, key, run, true))
+		owed, err := w.deps.Store.OweGithubWorkflowRunCompletion(ctx, RunCompletionOf(sub.Subscriber, key, r, true))
 		switch {
 		case err != nil:
 			w.deps.Log.Error(opRunPoll, "could not owe the finished run's notice; the next poll reads it again", dlog.WithCause(subFields, err))
@@ -264,9 +262,9 @@ func RunSubscriptionProto(sub wsm.GithubWorkflowRunSubscription) *agentreplv1.Gi
 }
 
 // runProto is R as the contract spells it.
-func runProto(r remoteRun) *agentreplv1.GithubWorkflowRun {
+func runProto(r Run) *agentreplv1.GithubWorkflowRun {
 	out := &agentreplv1.GithubWorkflowRun{WorkflowName: r.Name, HeadSha: r.HeadSHA, Url: r.URL}
-	if !r.completed() {
+	if !r.Completed() {
 		out.Progress = &agentreplv1.GithubWorkflowRun_Unfinished{Unfinished: &agentreplv1.GithubWorkflowRunUnfinished{Status: r.Status}}
 		return out
 	}
@@ -315,12 +313,12 @@ func runConclusionWords(word string) string {
 // runCompletedSentence is the one sentence a finished run is told in: the
 // workflow's name, quoted since a repository author wrote it, and how the run
 // ended.
-func runCompletedSentence(r remoteRun) string {
+func runCompletedSentence(r Run) string {
 	return fmt.Sprintf("The run of workflow %q finished: %s.", r.Name, runConclusionWords(r.Conclusion))
 }
 
 // runStatusWords is the line a run's notice ends with: its head commit and
 // its web address.
-func runStatusWords(r remoteRun) string {
+func runStatusWords(r Run) string {
 	return fmt.Sprintf("Head commit %s: %s", r.HeadSHA, r.URL)
 }

@@ -355,6 +355,7 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK,
 		// A NEW WORKSPACE'S INITIAL PROMPT waits at its cold gate (a fork of a

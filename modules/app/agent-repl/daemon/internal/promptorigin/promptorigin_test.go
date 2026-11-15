@@ -20,6 +20,7 @@ var unseenOrigins = map[conversationv1.PromptOrigin]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:  true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:       true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE: true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE: true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:      true,
 }
 
