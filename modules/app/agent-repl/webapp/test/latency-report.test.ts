@@ -1,7 +1,8 @@
+// @vitest-environment jsdom
 // The page's latencies, batched to the daemon until it acknowledges them. See
 // src/latency-report.ts.
 import { create } from "@bufbuild/protobuf";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ReportedLatencyKind,
@@ -10,8 +11,15 @@ import {
   type ReportLatenciesResponse,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
 import { WorkspaceRefSchema, type WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
-import { installLatencyReport, MAX_PENDING_LATENCIES, REPORT_DELAY_MS, type LatencyReporter } from "../src/latency-report.js";
-import { captureLogRecords, forwardedRecord } from "./log-capture.js";
+import {
+  installDaemonLatencyReport,
+  installLatencyReport,
+  MAX_PENDING_LATENCIES,
+  REPORT_DELAY_MS,
+  type LatencyReporter,
+} from "../src/latency-report.js";
+import type { DaemonContext } from "../src/rpc/context.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords } from "./log-capture.js";
 import { codeOf } from "./source-text.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/work/ws-1" });
@@ -34,6 +42,7 @@ class FakePage {
   readonly sent: ReportedLatency[][] = [];
   private timers: { ms: number; fn: () => void; live: boolean }[] = [];
   private attached = new Set<() => void>();
+  private quiet = new Set<() => void>();
   private answers: (() => Promise<ReportLatenciesResponse>)[] = [];
   private releases: (() => void)[] = [];
   reporter!: LatencyReporter;
@@ -57,6 +66,10 @@ class FakePage {
       onAttached: (fn) => {
         this.attached.add(fn);
         return () => this.attached.delete(fn);
+      },
+      onQuiesced: (fn) => {
+        this.quiet.add(fn);
+        return () => this.quiet.delete(fn);
       },
     });
     return this;
@@ -97,6 +110,22 @@ class FakePage {
   async attach(): Promise<void> {
     for (const fn of this.attached) fn();
     await settle();
+  }
+
+  /** The page goes quiet: a handover moved its workspace to a successor. */
+  async quiesce(): Promise<void> {
+    for (const fn of this.quiet) fn();
+    await settle();
+  }
+
+  /** The next send waits until the test fails it at the transport. */
+  holdFailNext(): void {
+    this.answers.push(
+      () =>
+        new Promise((_resolve, reject) => {
+          this.releases.push(() => reject(new Error("connection refused")));
+        }),
+    );
   }
 
   liveTimers(): number[] {
@@ -235,6 +264,115 @@ describe("installLatencyReport", () => {
   });
 });
 
+describe("a page that went quiet", () => {
+  it("cancels the send it had scheduled", async () => {
+    // Arrange
+    const page = new FakePage().install();
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+
+    // Act
+    await page.quiesce();
+    await page.elapse();
+
+    // Assert
+    expect(page.sent).toEqual([]);
+  });
+
+  it("sends nothing when its stream re-attaches", async () => {
+    // Arrange
+    const page = new FakePage().install();
+    page.failNext();
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+    await page.elapse();
+
+    // Act
+    await page.quiesce();
+    await page.attach();
+
+    // Assert
+    expect(page.sent).toHaveLength(1);
+  });
+
+  it("records the latencies it held unsent at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const page = new FakePage().install();
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+    page.reporter.record(ReportedLatencyKind.PAGE_BOOT, 0.4);
+
+    // Act
+    await page.quiesce();
+
+    // Assert
+    const record = await forwardedRecord(capture, "latency.report-ended");
+    expect(record.level.case).toBe("info");
+    expect(record.message).toMatch(/dropped 2 latencies held unsent/);
+  });
+
+  it("schedules nothing for a latency recorded after it", async () => {
+    // Arrange
+    const page = new FakePage().install();
+    await page.quiesce();
+
+    // Act
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+    await page.elapse();
+
+    // Assert
+    expect(page.liveTimers()).toEqual([]);
+    expect(page.sent).toEqual([]);
+  });
+
+  it("records a latency recorded after it at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const page = new FakePage().install();
+    await page.quiesce();
+
+    // Act
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+
+    // Assert
+    const record = await forwardedRecord(capture, "latency.report-ended");
+    expect(record.level.case).toBe("info");
+    expect(record.message).toMatch(/recorded after the end/);
+  });
+
+  it("drops a batch whose call fails after it, recording it at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const page = new FakePage().install();
+    page.holdFailNext();
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+    await page.elapse();
+    await page.quiesce();
+
+    // Act
+    page.release();
+    await settle();
+    await page.attach();
+
+    // Assert
+    expect(page.sent).toHaveLength(1);
+    const record = await forwardedRecord(capture, "latency.report-ended");
+    expect(record.message).toMatch(/whose report failed/);
+  });
+
+  it("stops watching for the quiet when disposed", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const page = new FakePage().install();
+    page.reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+    page.reporter.dispose();
+
+    // Act
+    await page.quiesce();
+
+    // Assert
+    expect((await forwardedRecords(capture)).some((r) => r.operation === "latency.report-ended")).toBe(false);
+  });
+});
+
 describe("a latency naming its own workspace", () => {
   const OTHER = create(WorkspaceRefSchema, { id: "ws-2", dir: "/work/ws-2" });
 
@@ -273,6 +411,41 @@ describe("a latency naming its own workspace", () => {
 });
 
 describe("installDaemonLatencyReport", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("never calls ReportLatencies from a page that went quiet", async () => {
+    // Arrange
+    vi.useFakeTimers();
+    const capture = captureLogRecords();
+    const reportLatencies = vi.fn();
+    const quiet = new Set<() => void>();
+    let quiesced = false;
+    const ctx = {
+      client: { reportLatencies },
+      failures: {},
+      isQuiesced: () => quiesced,
+      onQuiesced: (fn: () => void) => {
+        quiet.add(fn);
+        return () => quiet.delete(fn);
+      },
+      streams: { onAttached: () => () => undefined },
+    } as unknown as DaemonContext;
+    const reporter = installDaemonLatencyReport(ctx, WORKSPACE);
+    reporter.record(ReportedLatencyKind.SWITCH_REPEAT, 0.08);
+
+    // Act
+    quiesced = true;
+    for (const fn of quiet) fn();
+    await vi.advanceTimersByTimeAsync(REPORT_DELAY_MS);
+
+    // Assert
+    expect(reportLatencies).not.toHaveBeenCalled();
+    expect((await forwardedRecords(capture)).some((r) => r.operation === "rpc.unary-quiesced")).toBe(false);
+    reporter.dispose();
+  });
+
   it("is the one place a page installs its reporter", () => {
     // Arrange
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.

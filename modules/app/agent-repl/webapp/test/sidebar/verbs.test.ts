@@ -4,7 +4,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
+import { isHandoverArm } from "../../src/sidebar/handover.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal.js";
 import {
   CloseWorkspaceErrorSchema,
@@ -456,10 +457,10 @@ function verbNamed(rpc: string): VerbUnderTest {
 describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
   "%s's typed refusal",
   (_rpc, verb) => {
-    // An expected answer draws no refusal, and neither does a handover, which
-    // is a lifecycle state; both are pinned separately below.
+    // An expected answer draws no refusal, and neither does a handover, at
+    // either end, which is a lifecycle state; both are pinned separately below.
     const arms = oneofArms(verb.errorSchema, "cause").filter(
-      (arm) => verb.expected?.[arm] === undefined && arm !== "notYetAdopted",
+      (arm) => verb.expected?.[arm] === undefined && !isHandoverArm(arm),
     );
 
     it.each(arms)("labels the %s arm with its own case name", async (arm) => {
@@ -499,46 +500,52 @@ describe("an expected answer", () => {
   });
 });
 
+type HandoverCause =
+  | { case: "notYetAdopted"; value: { address?: string } }
+  | { case: "transferringAway"; value: { address: string } };
+
+const selectAnswer = (cause: HandoverCause | null) =>
+  create(SelectInEditorResponseSchema, {
+    result:
+      cause === null
+        ? { case: "success", value: { route: { case: "relayed", value: {} } } }
+        : { case: "error", value: { cause } },
+  });
+
+/** A row target whose daemon refuses with CAUSE, and whose host can dial INCUMBENT. */
+function handoverTargetOf(cause: HandoverCause, incumbent: () => ReturnType<typeof selectAnswer>) {
+  const dialed: string[] = [];
+  const refused = appContext({ selectInEditor: () => selectAnswer(cause) });
+  const served = appContext({ selectInEditor: incumbent });
+  const ctx = {
+    ...refused,
+    clientAt: (at: string) => {
+      dialed.push(at);
+      return served.client;
+    },
+  };
+  return { t: { sc: sidebarContext(ctx), workspace: TARGET_WS, name: "seven", kind: "workspace" as const }, dialed };
+}
+
+/** Click the row through TARGET and answer the drawn refusal, if any, and the control. */
+async function clickRow(t: ReturnType<typeof handoverTargetOf>["t"]) {
+  const host = document.createElement("div");
+  const control = createControl();
+  host.appendChild(control);
+  const done = await runVerb(control, {
+    sc: t.sc,
+    rpc: "SelectInEditor",
+    call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
+    schema: SelectInEditorResponseSchema,
+    expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
+  });
+  return { done, control, refusal: host.querySelector(".refusal") };
+}
+
 describe("a workspace a handover has not moved yet", () => {
-  const selectAnswer = (cause: { case: "notYetAdopted"; value: { address?: string } } | null) =>
-    create(SelectInEditorResponseSchema, {
-      result:
-        cause === null
-          ? { case: "success", value: { route: { case: "relayed", value: {} } } }
-          : { case: "error", value: { cause } },
-    });
-
   /** A row target whose daemon refuses with not_yet_adopted naming ADDRESS, and whose host can dial INCUMBENT. */
-  function handoverTarget(address: string | undefined, incumbent: () => ReturnType<typeof selectAnswer>) {
-    const dialed: string[] = [];
-    const refused = appContext({
-      selectInEditor: () => selectAnswer({ case: "notYetAdopted", value: address === undefined ? {} : { address } }),
-    });
-    const served = appContext({ selectInEditor: incumbent });
-    const ctx = {
-      ...refused,
-      clientAt: (at: string) => {
-        dialed.push(at);
-        return served.client;
-      },
-    };
-    return { t: { sc: sidebarContext(ctx), workspace: TARGET_WS, name: "seven", kind: "workspace" as const }, dialed };
-  }
-
-  /** Click the row through TARGET and answer the drawn refusal, if any, and the control. */
-  async function clickRow(t: ReturnType<typeof handoverTarget>["t"]) {
-    const host = document.createElement("div");
-    const control = createControl();
-    host.appendChild(control);
-    const done = await runVerb(control, {
-      sc: t.sc,
-      rpc: "SelectInEditor",
-      call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
-      schema: SelectInEditorResponseSchema,
-      expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
-    });
-    return { done, control, refusal: host.querySelector(".refusal") };
-  }
+  const handoverTarget = (address: string | undefined, incumbent: () => ReturnType<typeof selectAnswer>) =>
+    handoverTargetOf({ case: "notYetAdopted", value: address === undefined ? {} : { address } }, incumbent);
 
   it("asks the daemon the refusal names", async () => {
     const { t, dialed } = handoverTarget("127.0.0.1:6666", () => selectAnswer(null));
@@ -606,15 +613,130 @@ describe("a workspace a handover has not moved yet", () => {
   });
 });
 
+describe("a workspace a handover moved to a successor", () => {
+  const SUCCESSOR = "127.0.0.1:61176";
+  const movedAway = (address = SUCCESSOR): HandoverCause => ({ case: "transferringAway", value: { address } });
+
+  it("asks the successor the refusal names", async () => {
+    // Arrange
+    const { t, dialed } = handoverTargetOf(movedAway(), () => selectAnswer(null));
+
+    // Act
+    await clickRow(t);
+
+    // Assert
+    expect(dialed).toEqual([SUCCESSOR]);
+  });
+
+  it("answers the successor's success as the verb's", async () => {
+    // Arrange
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(null));
+
+    // Act, Assert
+    expect((await clickRow(t)).done).toBe(true);
+  });
+
+  it("records where the verb went, with its arm, at INFO", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(null));
+
+    // Act
+    await clickRow(t);
+
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.verbs.served-elsewhere");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ rpc: "SelectInEditor", arm: "transferringAway", address: SUCCESSOR });
+  });
+
+  it("raises no page-wide move and records no refusal", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(null));
+
+    // Act
+    await clickRow(t);
+
+    // Assert
+    const operations = (await forwardedRecords(capture)).map((record) => record.operation);
+    expect(operations).not.toContain("lifecycle.move-unhandled");
+    expect(operations).not.toContain("sidebar.verbs.refused");
+  });
+
+  it("draws nothing when the successor refuses the same way", async () => {
+    // Arrange
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(movedAway("127.0.0.1:7777")));
+
+    // Act, Assert
+    expect((await clickRow(t)).refusal).toBeNull();
+  });
+
+  it("asks the successor once when it refuses the same way", async () => {
+    // Arrange
+    const { t, dialed } = handoverTargetOf(movedAway(), () => selectAnswer(movedAway("127.0.0.1:7777")));
+
+    // Act
+    await clickRow(t);
+
+    // Assert
+    expect(dialed).toEqual([SUCCESSOR]);
+  });
+
+  it("records the handover wait, with its arm, at INFO when the successor refuses the same way", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(movedAway("127.0.0.1:7777")));
+
+    // Act
+    await clickRow(t);
+
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.verbs.handover");
+    expect(record.level.case).toBe("info");
+    expect(record.context).toMatchObject({ arm: "transferringAway", retried_at_incumbent: true });
+  });
+
+  it("re-enables the row when the successor refuses the same way", async () => {
+    // Arrange
+    const { t } = handoverTargetOf(movedAway(), () => selectAnswer(movedAway("127.0.0.1:7777")));
+
+    // Act, Assert
+    expect((await clickRow(t)).control.disabled).toBe(false);
+  });
+
+  it("draws nothing on a page that cannot dial another daemon", async () => {
+    // Arrange
+    const t = target({ selectInEditor: () => selectAnswer(movedAway()) });
+
+    // Act, Assert
+    expect((await clickRow(t)).refusal).toBeNull();
+  });
+
+  it("throws a malformed view for a transferring_away naming no successor", async () => {
+    // Arrange
+    const { t } = handoverTargetOf({ case: "transferringAway", value: { address: "" } }, () => selectAnswer(null));
+
+    // Act, Assert
+    await expect(clickRow(t)).rejects.toBeInstanceOf(MalformedView);
+  });
+
+  it("dials nothing for a transferring_away naming no successor", async () => {
+    // Arrange
+    const { t, dialed } = handoverTargetOf({ case: "transferringAway", value: { address: "" } }, () => selectAnswer(null));
+
+    // Act
+    await clickRow(t).catch(() => undefined);
+
+    // Assert
+    expect(dialed).toEqual([]);
+  });
+});
+
 describe("the cross-cutting causes, worded once", () => {
   it("names the registry's directory on a mismatch", async () => {
     const refusal = await refuseWith(verbNamed("OpenWorkspace"), "workspaceRefMismatch");
     expect(refusal?.textContent).toContain("/w/registry");
-  });
-
-  it("names the successor daemon on a transfer", async () => {
-    const refusal = await refuseWith(verbNamed("OpenWorkspace"), "transferringAway");
-    expect(refusal?.textContent).toContain("127.0.0.1:7777");
   });
 });
 
