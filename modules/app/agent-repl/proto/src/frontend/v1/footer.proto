@@ -3463,4 +3463,16 @@ message FooterStatusNetworkFaultSalient {
 message FooterStatusActivityNetworkOffline {
   // Drawn verbatim. Never empty.
   string text = 1;
+  // AGENT-REPL'S RETRY OF A FAILED TURN WAITS FOR THE NETWORK
+  // (conversation.v1.SessionVendorErrorRetryAwaitingNetwork): the line goes
+  // on to say the turn is retried when the network returns. UNSET when no
+  // retry waits. The feed draws no failure for a turn whose retry is pending,
+  // so this clause is where the failed turn is accounted for.
+  optional FooterStatusActivityNetworkOfflineRetry retry = 2;
+}
+
+// The offline line's "retrying when the network returns" clause.
+message FooterStatusActivityNetworkOfflineRetry {
+  // Which retry of the chain waits, 1 for the first after the failure.
+  uint32 attempt = 1;
 }

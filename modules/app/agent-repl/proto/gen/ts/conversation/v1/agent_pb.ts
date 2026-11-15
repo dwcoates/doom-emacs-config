@@ -34,7 +34,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/agent.proto.
  */
 export const file_conversation_v1_agent: GenFile = /*@__PURE__*/
-  fileDesc("Chtjb252ZXJzYXRpb24vdjEvYWdlbnQucHJvdG8SD2NvbnZlcnNhdGlvbi52MSKTAgoKQWdlbnRGcmFtZRIqCghhZ2VudF9pZBgEIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi4KBnVwZGF0ZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFVwZGF0ZUgAEjAKB3N1Y2Nlc3MYAiABKAsyHS5jb252ZXJzYXRpb24udjEuQWdlbnRTdWNjZXNzSAASMAoHZmFpbHVyZRgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudEZhaWx1cmVIABI7Cg1kZXRhY2hlZF93b3JrGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrSABCCAoGcmVzdWx0Ip4BCgpBZ2VudElucHV0EioKBHN0b3AYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRTdG9wSAASLgoGYW5zd2VyGAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50QW5zd2VySAASKwoGcHJvbXB0GAMgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkSABCBwoFaW5wdXQiCwoJQWdlbnRTdG9wIqEBCgtBZ2VudEFuc3dlchI/Cg9xdWVzdGlvbl9hbnN3ZXIYASABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkFuc3dlckgAEkcKE3Blcm1pc3Npb25fZGVjaXNpb24YAiABKAsyKC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uRGVjaXNpb25IAEIICgZhbnN3ZXIihgMKC0FnZW50VXBkYXRlEjIKCGFjdGl2aXR5GAEgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlIABIyCghxdWVzdGlvbhgDIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uSAASNgoKcGVybWlzc2lvbhgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25IABIyCgtjb250ZXh0X2N1dBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q3V0SAASNgoJYXBpX2Vycm9yGAYgASgLMiEuY29udmVyc2F0aW9uLnYxLkFwaVJlcXVlc3RGYWlsZWRIABJDChFyZXNwb25zZV9yZXZpc2lvbhgIIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BZ2VudFJlc3BvbnNlUmV2aXNpb25IAEIICgZ1cGRhdGVKBAgHEAhSFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcixQEKDEFnZW50U3VjY2VzcxI0Cgljb21wbGV0ZWQYASABKAsyHy5jb252ZXJzYXRpb24udjEuQWdlbnRDb21wbGV0ZWRIABI4CgtpbnRlcnJ1cHRlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEludGVycnVwdGVkSAASOgoMYmFja2dyb3VuZGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50QmFja2dyb3VuZGVkSABCCQoHb3V0Y29tZSITChFBZ2VudEJhY2tncm91bmRlZCJSCg5BZ2VudENvbXBsZXRlZBI1CgZhbnN3ZXIYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkSACIAQFCCQoHX2Fuc3dlciKhAQoQQWdlbnRJbnRlcnJ1cHRlZBI6CgdieV91c2VyGAEgASgLMicuY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeVVzZXJIABJICg1ob3N0X3NodXRkb3duGAIgASgLMi8uY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeUhvc3RTaHV0ZG93bkgAQgcKBWNhdXNlIrEBChZBZ2VudEludGVycnVwdGVkQnlVc2VyEj8KBmRpcmVjdBgBIAEoCzItLmNvbnZlcnNhdGlvbi52MS5BZ2VudEludGVycnVwdGVkQnlVc2VyRGlyZWN0SAASSwoMaW50ZXJqZWN0aW9uGAIgASgLMjMuY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeVVzZXJJbnRlcmplY3Rpb25IAEIJCgdjb21tYW5kIh4KHEFnZW50SW50ZXJydXB0ZWRCeVVzZXJEaXJlY3QiJAoiQWdlbnRJbnRlcnJ1cHRlZEJ5VXNlckludGVyamVjdGlvbiIgCh5BZ2VudEludGVycnVwdGVkQnlIb3N0U2h1dGRvd24iyQoKDEFnZW50RmFpbHVyZRIOCgZlcnJvcnMYHiADKAkSPwoSYXBpX3JlcXVlc3RfZmFpbGVkGAEgASgLMiEuY29udmVyc2F0aW9uLnYxLkFwaVJlcXVlc3RGYWlsZWRIABJGCg5ibG9ja2luZ19saW1pdBgCIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRBdEJsb2NraW5nTGltaXRIABJRChRyYXBpZF9yZWZpbGxfYnJlYWtlchgDIAEoCzIxLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRCeVJhcGlkUmVmaWxsQnJlYWtlckgAEj4KD3Byb21wdF90b29fbG9uZxgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdFRvb0xvbmdIABI6CgtpbWFnZV9lcnJvchgFIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudEltYWdlUmVqZWN0ZWRIABI3Cgttb2RlbF9lcnJvchgGIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsRXJyb3JIABJXChxtYWxmb3JtZWRfdG9vbF91c2VfZXhoYXVzdGVkGAcgASgLMi8uY29udmVyc2F0aW9uLnYxLkFnZW50TWFsZm9ybWVkVG9vbFVzZUV4aGF1c3RlZEgAEkYKE3N0b3BfaG9va19wcmV2ZW50ZWQYCCABKAsyJy5jb252ZXJzYXRpb24udjEuQWdlbnRTdG9wcGVkQnlTdG9wSG9va0gAEjsKDGhvb2tfc3RvcHBlZBgJIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRCeUhvb2tIABI7Cg10b29sX2RlZmVycmVkGAogASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50VG9vbERlZmVycmVkSAASUgoZdG9vbF9kZWZlcnJlZF91bmF2YWlsYWJsZRgLIAEoCzItLmNvbnZlcnNhdGlvbi52MS5BZ2VudFRvb2xEZWZlcnJlZFVuYXZhaWxhYmxlSAASOgoJbWF4X3R1cm5zGAwgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50TWF4VHVybnNSZWFjaGVkSAASQQoQYnVkZ2V0X2V4aGF1c3RlZBgNIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJ1ZGdldEV4aGF1c3RlZEgAEmMKIXN0cnVjdHVyZWRfb3V0cHV0X3JldHJ5X2V4aGF1c3RlZBgOIAEoCzI2LmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0cnVjdHVyZWRPdXRwdXRSZXRyaWVzRXhoYXVzdGVkSAASQgoRdHVybl9zZXR1cF9mYWlsZWQYDyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRUdXJuU2V0dXBGYWlsZWRIABI/Cg9leGVjdXRpb25fZXJyb3IYECABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRFeGVjdXRpb25FcnJvckgAEk0KFmNvbnRpbnVhdGlvbl9wcmV2ZW50ZWQYESABKAsyKy5jb252ZXJzYXRpb24udjEuQWdlbnRDb250aW51YXRpb25QcmV2ZW50ZWRIABItCgRsb3N0GBIgASgLMh0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkTG9zdEgAEjcKCnF1ZXJ5X2RpZWQYEyABKAsyIS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblF1ZXJ5RGllZEgAQgkKB2ZhaWx1cmUiHQobQWdlbnRTdG9wcGVkQXRCbG9ja2luZ0xpbWl0IiIKIEFnZW50U3RvcHBlZEJ5UmFwaWRSZWZpbGxCcmVha2VyIhQKEkFnZW50UHJvbXB0VG9vTG9uZyIUChJBZ2VudEltYWdlUmVqZWN0ZWQiEQoPQWdlbnRNb2RlbEVycm9yIiAKHkFnZW50TWFsZm9ybWVkVG9vbFVzZUV4aGF1c3RlZCIYChZBZ2VudFN0b3BwZWRCeVN0b3BIb29rIhQKEkFnZW50U3RvcHBlZEJ5SG9vayITChFBZ2VudFRvb2xEZWZlcnJlZCIeChxBZ2VudFRvb2xEZWZlcnJlZFVuYXZhaWxhYmxlIhYKFEFnZW50TWF4VHVybnNSZWFjaGVkIhYKFEFnZW50QnVkZ2V0RXhoYXVzdGVkIicKJUFnZW50U3RydWN0dXJlZE91dHB1dFJldHJpZXNFeGhhdXN0ZWQiFgoUQWdlbnRUdXJuU2V0dXBGYWlsZWQiFQoTQWdlbnRFeGVjdXRpb25FcnJvciIcChpBZ2VudENvbnRpbnVhdGlvblByZXZlbnRlZCL7AQoNQWdlbnRXb3JrZmxvdxI0CgVzdGFydBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3RhcnRIABI2CgZ1cGRhdGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1VwZGF0ZUgAEjgKB3N1Y2Nlc3MYAyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N1Y2Nlc3NIABI4CgdmYWlsdXJlGAQgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dGYWlsdXJlSABCCAoGcmVzdWx0IlQKE0FnZW50V29ya2Zsb3dVcGRhdGUSPQoNYWxsX3N1YmFnZW50cxgBIAMoCzImLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3ViYWdlbnQi1wEKFUFnZW50V29ya2Zsb3dTdWJhZ2VudBI4CgthZ2VudF9zdGFydBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50U3RhcnQSOgoEbGl2ZRgCIAEoCzIqLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3ViYWdlbnRMaXZlSAASPAoFZW5kZWQYAyABKAsyKy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N1YmFnZW50RW5kZWRIAEIKCghsaXZlbmVzcyIbChlBZ2VudFdvcmtmbG93U3ViYWdlbnRMaXZlIhwKGkFnZW50V29ya2Zsb3dTdWJhZ2VudEVuZGVkIqEBChRBZ2VudFdvcmtmbG93U3VjY2VzcxI8Cgljb21wbGV0ZWQYASABKAsyJy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd0NvbXBsZXRlZEgAEkAKC2ludGVycnVwdGVkGAIgASgLMikuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dJbnRlcnJ1cHRlZEgAQgkKB291dGNvbWUiYQoWQWdlbnRXb3JrZmxvd0NvbXBsZXRlZBI7CgdzdW1tYXJ5GAEgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dTdW1tYXJ5SACIAQFCCgoIX3N1bW1hcnkiGgoYQWdlbnRXb3JrZmxvd0ludGVycnVwdGVkIqUBChRBZ2VudFdvcmtmbG93RmFpbHVyZRJHCg9zY3JpcHRfcmVqZWN0ZWQYASABKAsyLC5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1NjcmlwdFJlamVjdGVkSAASOwoJcnVuX2VuZGVkGAIgASgLMiYuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dSdW5FbmRlZEgAQgcKBWNhdXNlIiwKG0FnZW50V29ya2Zsb3dTY3JpcHRSZWplY3RlZBINCgVlcnJvchgBIAEoCSIXChVBZ2VudFdvcmtmbG93UnVuRW5kZWRCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_question, file_conversation_v1_session, file_conversation_v1_slash_command, file_conversation_v1_user, file_conversation_v1_workflow]);
+  fileDesc("Chtjb252ZXJzYXRpb24vdjEvYWdlbnQucHJvdG8SD2NvbnZlcnNhdGlvbi52MSKTAgoKQWdlbnRGcmFtZRIqCghhZ2VudF9pZBgEIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEi4KBnVwZGF0ZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5BZ2VudFVwZGF0ZUgAEjAKB3N1Y2Nlc3MYAiABKAsyHS5jb252ZXJzYXRpb24udjEuQWdlbnRTdWNjZXNzSAASMAoHZmFpbHVyZRgDIAEoCzIdLmNvbnZlcnNhdGlvbi52MS5BZ2VudEZhaWx1cmVIABI7Cg1kZXRhY2hlZF93b3JrGAUgASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrSABCCAoGcmVzdWx0Ip4BCgpBZ2VudElucHV0EioKBHN0b3AYASABKAsyGi5jb252ZXJzYXRpb24udjEuQWdlbnRTdG9wSAASLgoGYW5zd2VyGAIgASgLMhwuY29udmVyc2F0aW9uLnYxLkFnZW50QW5zd2VySAASKwoGcHJvbXB0GAMgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkSABCBwoFaW5wdXQiCwoJQWdlbnRTdG9wIqEBCgtBZ2VudEFuc3dlchI/Cg9xdWVzdGlvbl9hbnN3ZXIYASABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkFuc3dlckgAEkcKE3Blcm1pc3Npb25fZGVjaXNpb24YAiABKAsyKC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uRGVjaXNpb25IAEIICgZhbnN3ZXIihgMKC0FnZW50VXBkYXRlEjIKCGFjdGl2aXR5GAEgASgLMh4uY29udmVyc2F0aW9uLnYxLkFnZW50QWN0aXZpdHlIABIyCghxdWVzdGlvbhgDIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uSAASNgoKcGVybWlzc2lvbhgEIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25IABIyCgtjb250ZXh0X2N1dBgFIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5Db250ZXh0Q3V0SAASNgoJYXBpX2Vycm9yGAYgASgLMiEuY29udmVyc2F0aW9uLnYxLkFwaVJlcXVlc3RGYWlsZWRIABJDChFyZXNwb25zZV9yZXZpc2lvbhgIIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BZ2VudFJlc3BvbnNlUmV2aXNpb25IAEIICgZ1cGRhdGVKBAgHEAhSFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcixQEKDEFnZW50U3VjY2VzcxI0Cgljb21wbGV0ZWQYASABKAsyHy5jb252ZXJzYXRpb24udjEuQWdlbnRDb21wbGV0ZWRIABI4CgtpbnRlcnJ1cHRlZBgCIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudEludGVycnVwdGVkSAASOgoMYmFja2dyb3VuZGVkGAMgASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50QmFja2dyb3VuZGVkSABCCQoHb3V0Y29tZSITChFBZ2VudEJhY2tncm91bmRlZCJSCg5BZ2VudENvbXBsZXRlZBI1CgZhbnN3ZXIYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkSACIAQFCCQoHX2Fuc3dlciKhAQoQQWdlbnRJbnRlcnJ1cHRlZBI6CgdieV91c2VyGAEgASgLMicuY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeVVzZXJIABJICg1ob3N0X3NodXRkb3duGAIgASgLMi8uY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeUhvc3RTaHV0ZG93bkgAQgcKBWNhdXNlIrEBChZBZ2VudEludGVycnVwdGVkQnlVc2VyEj8KBmRpcmVjdBgBIAEoCzItLmNvbnZlcnNhdGlvbi52MS5BZ2VudEludGVycnVwdGVkQnlVc2VyRGlyZWN0SAASSwoMaW50ZXJqZWN0aW9uGAIgASgLMjMuY29udmVyc2F0aW9uLnYxLkFnZW50SW50ZXJydXB0ZWRCeVVzZXJJbnRlcmplY3Rpb25IAEIJCgdjb21tYW5kIh4KHEFnZW50SW50ZXJydXB0ZWRCeVVzZXJEaXJlY3QiJAoiQWdlbnRJbnRlcnJ1cHRlZEJ5VXNlckludGVyamVjdGlvbiIgCh5BZ2VudEludGVycnVwdGVkQnlIb3N0U2h1dGRvd24ipQsKDEFnZW50RmFpbHVyZRIOCgZlcnJvcnMYHiADKAkSPwoSYXBpX3JlcXVlc3RfZmFpbGVkGAEgASgLMiEuY29udmVyc2F0aW9uLnYxLkFwaVJlcXVlc3RGYWlsZWRIABJGCg5ibG9ja2luZ19saW1pdBgCIAEoCzIsLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRBdEJsb2NraW5nTGltaXRIABJRChRyYXBpZF9yZWZpbGxfYnJlYWtlchgDIAEoCzIxLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRCeVJhcGlkUmVmaWxsQnJlYWtlckgAEj4KD3Byb21wdF90b29fbG9uZxgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFByb21wdFRvb0xvbmdIABI6CgtpbWFnZV9lcnJvchgFIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudEltYWdlUmVqZWN0ZWRIABI3Cgttb2RlbF9lcnJvchgGIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsRXJyb3JIABJXChxtYWxmb3JtZWRfdG9vbF91c2VfZXhoYXVzdGVkGAcgASgLMi8uY29udmVyc2F0aW9uLnYxLkFnZW50TWFsZm9ybWVkVG9vbFVzZUV4aGF1c3RlZEgAEkYKE3N0b3BfaG9va19wcmV2ZW50ZWQYCCABKAsyJy5jb252ZXJzYXRpb24udjEuQWdlbnRTdG9wcGVkQnlTdG9wSG9va0gAEjsKDGhvb2tfc3RvcHBlZBgJIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0b3BwZWRCeUhvb2tIABI7Cg10b29sX2RlZmVycmVkGAogASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50VG9vbERlZmVycmVkSAASUgoZdG9vbF9kZWZlcnJlZF91bmF2YWlsYWJsZRgLIAEoCzItLmNvbnZlcnNhdGlvbi52MS5BZ2VudFRvb2xEZWZlcnJlZFVuYXZhaWxhYmxlSAASOgoJbWF4X3R1cm5zGAwgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50TWF4VHVybnNSZWFjaGVkSAASQQoQYnVkZ2V0X2V4aGF1c3RlZBgNIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudEJ1ZGdldEV4aGF1c3RlZEgAEmMKIXN0cnVjdHVyZWRfb3V0cHV0X3JldHJ5X2V4aGF1c3RlZBgOIAEoCzI2LmNvbnZlcnNhdGlvbi52MS5BZ2VudFN0cnVjdHVyZWRPdXRwdXRSZXRyaWVzRXhoYXVzdGVkSAASQgoRdHVybl9zZXR1cF9mYWlsZWQYDyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRUdXJuU2V0dXBGYWlsZWRIABI/Cg9leGVjdXRpb25fZXJyb3IYECABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRFeGVjdXRpb25FcnJvckgAEk0KFmNvbnRpbnVhdGlvbl9wcmV2ZW50ZWQYESABKAsyKy5jb252ZXJzYXRpb24udjEuQWdlbnRDb250aW51YXRpb25QcmV2ZW50ZWRIABItCgRsb3N0GBIgASgLMh0uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkTG9zdEgAEjcKCnF1ZXJ5X2RpZWQYEyABKAsyIS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblF1ZXJ5RGllZEgAEkcKDnJldHJ5X3Byb21pc2VkGCAgASgLMiouY29udmVyc2F0aW9uLnYxLkFnZW50RmFpbHVyZVJldHJ5UHJvbWlzZWRIAYgBAUIJCgdmYWlsdXJlQhEKD19yZXRyeV9wcm9taXNlZCIsChlBZ2VudEZhaWx1cmVSZXRyeVByb21pc2VkEg8KB2F0dGVtcHQYASABKA0iHQobQWdlbnRTdG9wcGVkQXRCbG9ja2luZ0xpbWl0IiIKIEFnZW50U3RvcHBlZEJ5UmFwaWRSZWZpbGxCcmVha2VyIhQKEkFnZW50UHJvbXB0VG9vTG9uZyIUChJBZ2VudEltYWdlUmVqZWN0ZWQiEQoPQWdlbnRNb2RlbEVycm9yIiAKHkFnZW50TWFsZm9ybWVkVG9vbFVzZUV4aGF1c3RlZCIYChZBZ2VudFN0b3BwZWRCeVN0b3BIb29rIhQKEkFnZW50U3RvcHBlZEJ5SG9vayITChFBZ2VudFRvb2xEZWZlcnJlZCIeChxBZ2VudFRvb2xEZWZlcnJlZFVuYXZhaWxhYmxlIhYKFEFnZW50TWF4VHVybnNSZWFjaGVkIhYKFEFnZW50QnVkZ2V0RXhoYXVzdGVkIicKJUFnZW50U3RydWN0dXJlZE91dHB1dFJldHJpZXNFeGhhdXN0ZWQiFgoUQWdlbnRUdXJuU2V0dXBGYWlsZWQiFQoTQWdlbnRFeGVjdXRpb25FcnJvciIcChpBZ2VudENvbnRpbnVhdGlvblByZXZlbnRlZCL7AQoNQWdlbnRXb3JrZmxvdxI0CgVzdGFydBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3RhcnRIABI2CgZ1cGRhdGUYAiABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1VwZGF0ZUgAEjgKB3N1Y2Nlc3MYAyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N1Y2Nlc3NIABI4CgdmYWlsdXJlGAQgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dGYWlsdXJlSABCCAoGcmVzdWx0IlQKE0FnZW50V29ya2Zsb3dVcGRhdGUSPQoNYWxsX3N1YmFnZW50cxgBIAMoCzImLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3ViYWdlbnQi1wEKFUFnZW50V29ya2Zsb3dTdWJhZ2VudBI4CgthZ2VudF9zdGFydBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFN1YmFnZW50U3RhcnQSOgoEbGl2ZRgCIAEoCzIqLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3ViYWdlbnRMaXZlSAASPAoFZW5kZWQYAyABKAsyKy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N1YmFnZW50RW5kZWRIAEIKCghsaXZlbmVzcyIbChlBZ2VudFdvcmtmbG93U3ViYWdlbnRMaXZlIhwKGkFnZW50V29ya2Zsb3dTdWJhZ2VudEVuZGVkIqEBChRBZ2VudFdvcmtmbG93U3VjY2VzcxI8Cgljb21wbGV0ZWQYASABKAsyJy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd0NvbXBsZXRlZEgAEkAKC2ludGVycnVwdGVkGAIgASgLMikuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dJbnRlcnJ1cHRlZEgAQgkKB291dGNvbWUiYQoWQWdlbnRXb3JrZmxvd0NvbXBsZXRlZBI7CgdzdW1tYXJ5GAEgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dTdW1tYXJ5SACIAQFCCgoIX3N1bW1hcnkiGgoYQWdlbnRXb3JrZmxvd0ludGVycnVwdGVkIqUBChRBZ2VudFdvcmtmbG93RmFpbHVyZRJHCg9zY3JpcHRfcmVqZWN0ZWQYASABKAsyLC5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1NjcmlwdFJlamVjdGVkSAASOwoJcnVuX2VuZGVkGAIgASgLMiYuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dSdW5FbmRlZEgAQgcKBWNhdXNlIiwKG0FnZW50V29ya2Zsb3dTY3JpcHRSZWplY3RlZBINCgVlcnJvchgBIAEoCSIXChVBZ2VudFdvcmtmbG93UnVuRW5kZWRCMFouYWdlbnRyZXBsL3Byb3RvL2NvbnZlcnNhdGlvbi92MTtjb252ZXJzYXRpb252MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_question, file_conversation_v1_session, file_conversation_v1_slash_command, file_conversation_v1_user, file_conversation_v1_workflow]);
 
 /**
  * One frame of an agent's bounded stream. THE ARM IS WHAT THE STREAM IS
@@ -737,6 +737,30 @@ export type AgentFailure = Message<"conversation.v1.AgentFailure"> & {
     value: SessionQueryDied;
     case: "queryDied";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * AGENT-REPL RETRIES THIS FAILURE: the producer's own vendor-error retry
+   * (SessionVendorErrorRetry) decided, at this very terminal, that a retry
+   * follows it. UNSET when no retry follows: the failure is not one agent-repl
+   * retries, or its retry chain gave up here (its window ran out, or a usage
+   * wait ended), so this terminal is the failure that stands.
+   *
+   * STATED ON THE TERMINAL ITSELF, AND THAT IS THE POINT. The retry's schedule
+   * travels on the session stream, which has no ordering against the turn's
+   * own stream, and a replayed turn has only its terminal. A consumer that
+   * waited for the schedule to learn whether a failure is retried would draw
+   * the failure first and take it back after; the promise here is known the
+   * moment the terminal is. A consumer draws no failure for a terminal that
+   * carries it: the retry continues the work, and a retry that succeeds leaves
+   * nothing to report. Should the chain end later without its retry ever being
+   * made, the session states SessionVendorErrorRetryAbandoned naming this
+   * turn, and the failure is drawn then.
+   *
+   * Set only on a main agent's terminal: agent-repl retries no subagent.
+   *
+   * @generated from field: optional conversation.v1.AgentFailureRetryPromised retry_promised = 32;
+   */
+  retryPromised?: AgentFailureRetryPromised | undefined;
 };
 
 /**
@@ -745,6 +769,31 @@ export type AgentFailure = Message<"conversation.v1.AgentFailure"> & {
  */
 export const AgentFailureSchema: GenMessage<AgentFailure> = /*@__PURE__*/
   messageDesc(file_conversation_v1_agent, 13);
+
+/**
+ * The retry agent-repl promised a failed turn (AgentFailure.retry_promised).
+ * It names which retry follows rather than when: the instant, or the wait for
+ * the network, is the session's schedule (SessionVendorErrorRetry), which
+ * changes after the terminal is written.
+ *
+ * @generated from message conversation.v1.AgentFailureRetryPromised
+ */
+export type AgentFailureRetryPromised = Message<"conversation.v1.AgentFailureRetryPromised"> & {
+  /**
+   * Which retry of the chain follows this failure, 1 for the first after the
+   * chain's first failure.
+   *
+   * @generated from field: uint32 attempt = 1;
+   */
+  attempt: number;
+};
+
+/**
+ * Describes the message conversation.v1.AgentFailureRetryPromised.
+ * Use `create(AgentFailureRetryPromisedSchema)` to create a new message.
+ */
+export const AgentFailureRetryPromisedSchema: GenMessage<AgentFailureRetryPromised> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_agent, 14);
 
 /**
  * An account-level block stopped the run.
@@ -759,7 +808,7 @@ export type AgentStoppedAtBlockingLimit = Message<"conversation.v1.AgentStoppedA
  * Use `create(AgentStoppedAtBlockingLimitSchema)` to create a new message.
  */
 export const AgentStoppedAtBlockingLimitSchema: GenMessage<AgentStoppedAtBlockingLimit> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 14);
+  messageDesc(file_conversation_v1_agent, 15);
 
 /**
  * A refill-rate breaker tripped.
@@ -774,7 +823,7 @@ export type AgentStoppedByRapidRefillBreaker = Message<"conversation.v1.AgentSto
  * Use `create(AgentStoppedByRapidRefillBreakerSchema)` to create a new message.
  */
 export const AgentStoppedByRapidRefillBreakerSchema: GenMessage<AgentStoppedByRapidRefillBreaker> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 15);
+  messageDesc(file_conversation_v1_agent, 16);
 
 /**
  * The prompt was too long to send.
@@ -789,7 +838,7 @@ export type AgentPromptTooLong = Message<"conversation.v1.AgentPromptTooLong"> &
  * Use `create(AgentPromptTooLongSchema)` to create a new message.
  */
 export const AgentPromptTooLongSchema: GenMessage<AgentPromptTooLong> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 16);
+  messageDesc(file_conversation_v1_agent, 17);
 
 /**
  * An image in the request could not be processed.
@@ -804,7 +853,7 @@ export type AgentImageRejected = Message<"conversation.v1.AgentImageRejected"> &
  * Use `create(AgentImageRejectedSchema)` to create a new message.
  */
 export const AgentImageRejectedSchema: GenMessage<AgentImageRejected> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 17);
+  messageDesc(file_conversation_v1_agent, 18);
 
 /**
  * The model errored in a way the API did not classify.
@@ -819,7 +868,7 @@ export type AgentModelError = Message<"conversation.v1.AgentModelError"> & {
  * Use `create(AgentModelErrorSchema)` to create a new message.
  */
 export const AgentModelErrorSchema: GenMessage<AgentModelError> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 18);
+  messageDesc(file_conversation_v1_agent, 19);
 
 /**
  * The model's tool calls could not be parsed and the attempts ran out.
@@ -834,7 +883,7 @@ export type AgentMalformedToolUseExhausted = Message<"conversation.v1.AgentMalfo
  * Use `create(AgentMalformedToolUseExhaustedSchema)` to create a new message.
  */
 export const AgentMalformedToolUseExhaustedSchema: GenMessage<AgentMalformedToolUseExhausted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 19);
+  messageDesc(file_conversation_v1_agent, 20);
 
 /**
  * A Stop hook forbade continuation.
@@ -849,7 +898,7 @@ export type AgentStoppedByStopHook = Message<"conversation.v1.AgentStoppedByStop
  * Use `create(AgentStoppedByStopHookSchema)` to create a new message.
  */
 export const AgentStoppedByStopHookSchema: GenMessage<AgentStoppedByStopHook> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 20);
+  messageDesc(file_conversation_v1_agent, 21);
 
 /**
  * A hook ended the run.
@@ -864,7 +913,7 @@ export type AgentStoppedByHook = Message<"conversation.v1.AgentStoppedByHook"> &
  * Use `create(AgentStoppedByHookSchema)` to create a new message.
  */
 export const AgentStoppedByHookSchema: GenMessage<AgentStoppedByHook> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 21);
+  messageDesc(file_conversation_v1_agent, 22);
 
 /**
  * A tool call was deferred and the run ended waiting on it.
@@ -879,7 +928,7 @@ export type AgentToolDeferred = Message<"conversation.v1.AgentToolDeferred"> & {
  * Use `create(AgentToolDeferredSchema)` to create a new message.
  */
 export const AgentToolDeferredSchema: GenMessage<AgentToolDeferred> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 22);
+  messageDesc(file_conversation_v1_agent, 23);
 
 /**
  * A tool call was deferred to something unavailable.
@@ -894,7 +943,7 @@ export type AgentToolDeferredUnavailable = Message<"conversation.v1.AgentToolDef
  * Use `create(AgentToolDeferredUnavailableSchema)` to create a new message.
  */
 export const AgentToolDeferredUnavailableSchema: GenMessage<AgentToolDeferredUnavailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 23);
+  messageDesc(file_conversation_v1_agent, 24);
 
 /**
  * The ceiling on model round-trips was reached.
@@ -909,7 +958,7 @@ export type AgentMaxTurnsReached = Message<"conversation.v1.AgentMaxTurnsReached
  * Use `create(AgentMaxTurnsReachedSchema)` to create a new message.
  */
 export const AgentMaxTurnsReachedSchema: GenMessage<AgentMaxTurnsReached> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 24);
+  messageDesc(file_conversation_v1_agent, 25);
 
 /**
  * The spending ceiling was reached.
@@ -924,7 +973,7 @@ export type AgentBudgetExhausted = Message<"conversation.v1.AgentBudgetExhausted
  * Use `create(AgentBudgetExhaustedSchema)` to create a new message.
  */
 export const AgentBudgetExhaustedSchema: GenMessage<AgentBudgetExhausted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 25);
+  messageDesc(file_conversation_v1_agent, 26);
 
 /**
  * Structured-output retries ran out.
@@ -939,7 +988,7 @@ export type AgentStructuredOutputRetriesExhausted = Message<"conversation.v1.Age
  * Use `create(AgentStructuredOutputRetriesExhaustedSchema)` to create a new message.
  */
 export const AgentStructuredOutputRetriesExhaustedSchema: GenMessage<AgentStructuredOutputRetriesExhausted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 26);
+  messageDesc(file_conversation_v1_agent, 27);
 
 /**
  * The run could not be set up and never reached the model.
@@ -954,7 +1003,7 @@ export type AgentTurnSetupFailed = Message<"conversation.v1.AgentTurnSetupFailed
  * Use `create(AgentTurnSetupFailedSchema)` to create a new message.
  */
 export const AgentTurnSetupFailedSchema: GenMessage<AgentTurnSetupFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 27);
+  messageDesc(file_conversation_v1_agent, 28);
 
 /**
  * The run broke while executing, unclassified.
@@ -969,7 +1018,7 @@ export type AgentExecutionError = Message<"conversation.v1.AgentExecutionError">
  * Use `create(AgentExecutionErrorSchema)` to create a new message.
  */
 export const AgentExecutionErrorSchema: GenMessage<AgentExecutionError> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 28);
+  messageDesc(file_conversation_v1_agent, 29);
 
 /**
  * A producer notice ended the run.
@@ -984,7 +1033,7 @@ export type AgentContinuationPrevented = Message<"conversation.v1.AgentContinuat
  * Use `create(AgentContinuationPreventedSchema)` to create a new message.
  */
 export const AgentContinuationPreventedSchema: GenMessage<AgentContinuationPrevented> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 29);
+  messageDesc(file_conversation_v1_agent, 30);
 
 /**
  * ALWAYS DETACHED. The producer's launch answer reports only that a run started,
@@ -1048,7 +1097,7 @@ export type AgentWorkflow = Message<"conversation.v1.AgentWorkflow"> & {
  * Use `create(AgentWorkflowSchema)` to create a new message.
  */
 export const AgentWorkflowSchema: GenMessage<AgentWorkflow> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 30);
+  messageDesc(file_conversation_v1_agent, 31);
 
 /**
  * A STATELESS LEVEL, replace semantics: every frame carries ALL of the run's
@@ -1075,7 +1124,7 @@ export type AgentWorkflowUpdate = Message<"conversation.v1.AgentWorkflowUpdate">
  * Use `create(AgentWorkflowUpdateSchema)` to create a new message.
  */
 export const AgentWorkflowUpdateSchema: GenMessage<AgentWorkflowUpdate> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 31);
+  messageDesc(file_conversation_v1_agent, 32);
 
 /**
  * One of the run's agents: its spawn description, and whether it is live.
@@ -1116,7 +1165,7 @@ export type AgentWorkflowSubagent = Message<"conversation.v1.AgentWorkflowSubage
  * Use `create(AgentWorkflowSubagentSchema)` to create a new message.
  */
 export const AgentWorkflowSubagentSchema: GenMessage<AgentWorkflowSubagent> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 32);
+  messageDesc(file_conversation_v1_agent, 33);
 
 /**
  * The agent is running; its own stream is live.
@@ -1131,7 +1180,7 @@ export type AgentWorkflowSubagentLive = Message<"conversation.v1.AgentWorkflowSu
  * Use `create(AgentWorkflowSubagentLiveSchema)` to create a new message.
  */
 export const AgentWorkflowSubagentLiveSchema: GenMessage<AgentWorkflowSubagentLive> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 33);
+  messageDesc(file_conversation_v1_agent, 34);
 
 /**
  * The agent has ended; its own stream carried how.
@@ -1146,7 +1195,7 @@ export type AgentWorkflowSubagentEnded = Message<"conversation.v1.AgentWorkflowS
  * Use `create(AgentWorkflowSubagentEndedSchema)` to create a new message.
  */
 export const AgentWorkflowSubagentEndedSchema: GenMessage<AgentWorkflowSubagentEnded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 34);
+  messageDesc(file_conversation_v1_agent, 35);
 
 /**
  * The run ended on terms the consumer asked for. THE ARM IS HOW — both are
@@ -1184,7 +1233,7 @@ export type AgentWorkflowSuccess = Message<"conversation.v1.AgentWorkflowSuccess
  * Use `create(AgentWorkflowSuccessSchema)` to create a new message.
  */
 export const AgentWorkflowSuccessSchema: GenMessage<AgentWorkflowSuccess> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 35);
+  messageDesc(file_conversation_v1_agent, 36);
 
 /**
  * The run finished on its own.
@@ -1206,7 +1255,7 @@ export type AgentWorkflowCompleted = Message<"conversation.v1.AgentWorkflowCompl
  * Use `create(AgentWorkflowCompletedSchema)` to create a new message.
  */
 export const AgentWorkflowCompletedSchema: GenMessage<AgentWorkflowCompleted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 36);
+  messageDesc(file_conversation_v1_agent, 37);
 
 /**
  * The run was stopped at the user's command.
@@ -1221,7 +1270,7 @@ export type AgentWorkflowInterrupted = Message<"conversation.v1.AgentWorkflowInt
  * Use `create(AgentWorkflowInterruptedSchema)` to create a new message.
  */
 export const AgentWorkflowInterruptedSchema: GenMessage<AgentWorkflowInterrupted> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 37);
+  messageDesc(file_conversation_v1_agent, 38);
 
 /**
  * The run could not be launched, or ended without finishing.
@@ -1263,7 +1312,7 @@ export type AgentWorkflowFailure = Message<"conversation.v1.AgentWorkflowFailure
  * Use `create(AgentWorkflowFailureSchema)` to create a new message.
  */
 export const AgentWorkflowFailureSchema: GenMessage<AgentWorkflowFailure> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 38);
+  messageDesc(file_conversation_v1_agent, 39);
 
 /**
  * The script did not compile and the run never started.
@@ -1284,7 +1333,7 @@ export type AgentWorkflowScriptRejected = Message<"conversation.v1.AgentWorkflow
  * Use `create(AgentWorkflowScriptRejectedSchema)` to create a new message.
  */
 export const AgentWorkflowScriptRejectedSchema: GenMessage<AgentWorkflowScriptRejected> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 39);
+  messageDesc(file_conversation_v1_agent, 40);
 
 /**
  * The run started and ended without finishing. Arms are DERIVED from the
@@ -1300,5 +1349,5 @@ export type AgentWorkflowRunEnded = Message<"conversation.v1.AgentWorkflowRunEnd
  * Use `create(AgentWorkflowRunEndedSchema)` to create a new message.
  */
 export const AgentWorkflowRunEndedSchema: GenMessage<AgentWorkflowRunEnded> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_agent, 40);
+  messageDesc(file_conversation_v1_agent, 41);
 
