@@ -598,3 +598,33 @@ func TestMergeGroupsPanicsOnNamedSplitsOfASuiteThatCannotScopeThem(t *testing.T)
 	// Act
 	mergeGroups([]suites.Split{a, b})
 }
+
+func TestANarrowedChunkNamesItsTestsAndAWholeOneDoesNot(t *testing.T) {
+	// Arrange
+	r, err := Resolve(request(ertNamed("test-wire-verbs.el", "case-a"), ertAll("test-wire-common.el")), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	named, err := r.Narrow(suiteNamed(t, "ert"), batchedUnits("ert/wire", true, "test-wire-common.el", "test-wire-verbs.el"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Resolve(request(ertAll("test-wire-common.el")), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := r2.Narrow(suiteNamed(t, "ert"), batchedUnits("ert/wire", true, "test-wire-common.el", "test-wire-verbs.el"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if s := named.Splits[0].Chunk("ert/wire#00", named.Splits[0].Items); !s.NamesTests {
+		t.Fatalf("a chunk narrowed to named tests is not marked so")
+	}
+	if s := whole.Splits[0].Chunk("ert/wire#00", whole.Splits[0].Items); s.NamesTests {
+		t.Fatalf("a whole file's chunk is marked as naming tests")
+	}
+}

@@ -560,7 +560,11 @@ func withItems(sp suites.Split, group string, items, names []string) suites.Spli
 // namedChunk is a chunk builder running, of each chunk's items, the names
 // BYITEM holds for it, and every test of an item it holds none for.
 func namedChunk(named func(string, []string, map[string][]string) run.Spec, byItem map[string][]string) func(string, []string) run.Spec {
-	return func(id string, items []string) run.Spec { return named(id, items, byItem) }
+	return func(id string, items []string) run.Spec {
+		s := named(id, items, byItem)
+		s.NamesTests = true
+		return s
+	}
 }
 
 // mergeGroups folds narrowed splits that share a group into one, their items
