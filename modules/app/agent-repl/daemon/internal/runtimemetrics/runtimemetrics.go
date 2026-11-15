@@ -72,7 +72,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	prompts := newPromptTelemetry()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, cache.lateness, cache.lapses, cache.coldIdle, life.starts, life.standDowns, life.gateAnswers,
+	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, cache.lateness, cache.lapses, cache.coldIdle, life.starts, life.standDowns, life.gateAnswers,
 		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped, prompts.submitted)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)

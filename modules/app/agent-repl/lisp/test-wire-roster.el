@@ -2096,22 +2096,37 @@ workspace its requeue and discard controls name."
                    '("one" "evicted" "m1" "m1")))))
 
 (ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-decodes-its-standing ()
-  "The deploy mediation a queue waits on decodes whether it is checking
-the deploy."
+  "The deploy check a queue waits on decodes its standing and the workspace
+a click on its label selects."
   (should (equal (plist-get
                   (agent-repl-test-wire-roster--decode
                    #'agent-repl-wire-decode-roster-repo-merge-queue
-                   "{\"mediation\":{\"checking\":{}}}")
+                   "{\"mediation\":{\"checking\":{\"target\":{\"workspace\":{\"id\":\"intake\",\"dir\":\"/wt/intake\"}}}}}")
                   :mediation)
-                 '(:standing :checking))))
+                 '(:standing :checking :target (:id "intake" :dir "/wt/intake")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-fixing-deploy-mediation-selects-its-remediation ()
+  "A check whose fix is at work decodes `:fixing', selecting the remediation."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"fixing\":{\"target\":{\"workspace\":{\"id\":\"remedy\",\"dir\":\"/wt/remedy\"}}}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get (plist-get decoded :target) :id))
+                   '(:fixing "remedy")))))
 
 (ert-deftest agent-repl-test-wire-roster-a-waiting-deploy-mediation-decodes-waiting ()
-  "A mediation whose deploy still rolls out decodes `:waiting'."
-  (should (eq (plist-get (agent-repl-test-wire-roster--decode
-                          #'agent-repl-wire-decode-roster-merge-queue-mediation
-                          "{\"waiting\":{}}")
-                         :standing)
-              :waiting)))
+  "A check whose deploy still rolls out decodes `:waiting', with no target
+for a chain's first deploy."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"waiting\":{}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get decoded :target))
+                   '(:waiting nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-checking-deploy-mediation-without-a-target-is-a-breach ()
+  "A check being assessed always names the intake its label selects."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation "{\"checking\":{}}")
+                 '("RosterMergeQueueMediationChecking" target "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-deploy-mediation-without-a-standing-is-a-breach ()
   "A deploy mediation always says where it stands."

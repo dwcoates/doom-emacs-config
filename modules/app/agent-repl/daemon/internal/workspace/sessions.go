@@ -148,10 +148,6 @@ type FleetDeps struct {
 	// a directory (shimidentity.Book), read for a workspace with no recorded
 	// book; found false is a workspace with no conversation yet. REQUIRED.
 	PersistedBook func(workspaceDir string) (book string, found bool, err error)
-	// Mediates reports whether a workspace is its repository's deploy
-	// mediator (MediatesFrom), whose session lands as the mediator does.
-	// REQUIRED.
-	Mediates func(ctx context.Context, record wsm.Workspace) (bool, error)
 	// StartSlots caps the vendor starts in flight. It is the SAME pool the
 	// bounce registry takes a shim restart's slot from, so a restart's resume
 	// is answered from the slot its restart holds. Nil gives the fleet a pool
@@ -576,8 +572,6 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the store's read-only face")
 	case deps.PersistedBook == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the shim's persisted book")
-	case deps.Mediates == nil:
-		return nil, fmt.Errorf("workspace: the session fleet needs to know its repositories' deploy mediators")
 	case deps.Instance == "":
 		return nil, fmt.Errorf("workspace: the session fleet needs this daemon's instance id; every session it holds is claimed for it")
 	case deps.Accounts == nil:
@@ -2567,14 +2561,16 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 			log.Error(opBringUp, "the workspace's queue bypass standing could not be read; the session was not started", dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: read the queue bypass standing: %w", ws, err)
 		}
-		// THE DEPLOY MEDIATOR LANDS AS THE MEDIATOR (mediator.go).
-		mediates, err := f.deps.Mediates(ctx, record)
+		// A CHAIN'S DEPLOY INTAKE LANDS AS THE INTAKE, by the role its chain
+		// recorded before its first prompt brought this session up
+		// (deploychecks.go).
+		intake, err := isDeployIntake(ctx, f.deps.DB, ws)
 		if err != nil {
-			log.Error(opBringUp, "whether the workspace is its repository's deploy mediator could not be read; the session was not started", dlog.Context{"cause": err.Error()})
-			return nil, fmt.Errorf("start session for %q: read whether it mediates deploys: %w", ws, err)
+			log.Error(opBringUp, "whether the workspace is a deploy intake could not be read; the session was not started", dlog.Context{"cause": err.Error()})
+			return nil, fmt.Errorf("start session for %q: read whether it is a deploy intake: %w", ws, err)
 		}
-		if mediates {
-			return agentProfileLanding(standing, mediatingLanding()), nil
+		if intake {
+			return agentProfileLanding(standing, deployIntakeLanding()), nil
 		}
 		return agentProfile(standing, bypass.Holds), nil
 	}
@@ -2610,9 +2606,9 @@ func agentProfileLanding(standing *shimv1.SessionProfileAgentStanding, landing *
 	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing, Landing: landing}}}
 }
 
-// mediatingLanding is the deploy mediator's landing.
-func mediatingLanding() *shimv1.SessionProfileAgentLanding {
-	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_Mediating{Mediating: &shimv1.SessionProfileAgentLandingMediating{}}}
+// deployIntakeLanding is a chain's deploy intake's landing.
+func deployIntakeLanding() *shimv1.SessionProfileAgentLanding {
+	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_DeployIntake{DeployIntake: &shimv1.SessionProfileAgentLandingDeployIntake{}}}
 }
 
 // ParkedKeepalive answers the keep-alive request for WS's parked conversation

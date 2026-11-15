@@ -543,9 +543,10 @@ helper, so a hand-rolled divergent decoder fails here."
       (should-error (funcall (nth 1 verb) nil) :type 'agent-repl-wire-error))))
 
 (ert-deftest agent-repl-test-wire-verbs-simple-response-success ()
-  "Each simple verb's empty success decodes to the success arm."
+  "Each simple verb's empty success decodes to the success arm; FinishWorkspace's
+success says how the work lands (its own tests below)."
   (agent-repl-test-wire-verbs--with-common
-    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+    (dolist (verb agent-repl-test-wire-verbs--simple-request-verbs)
       (should (equal (funcall (nth 2 verb)
                               (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
                      '(:arm :success :value nil))))))
@@ -591,6 +592,24 @@ helper, so a hand-rolled divergent decoder fails here."
       (should-error (funcall (nth 2 verb)
                              (agent-repl-test-wire-verbs--parse "{\"queued\":{}}"))
                     :type 'agent-repl-wire-error))))
+
+
+(ert-deftest agent-repl-test-wire-verbs-finish-success-says-how-the-work-lands ()
+  "FinishWorkspaceSuccess decodes whether the work queued or lands directly."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (list (agent-repl-wire-decode-finish-workspace-response
+                          (agent-repl-test-wire-verbs--parse "{\"success\":{\"queued\":{}}}"))
+                         (agent-repl-wire-decode-finish-workspace-response
+                          (agent-repl-test-wire-verbs--parse "{\"success\":{\"landingDirectly\":{}}}")))
+                   '((:arm :success :value (:landing (:arm :queued :value nil)))
+                     (:arm :success :value (:landing (:arm :landing-directly :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-finish-success-without-a-landing-is-a-breach ()
+  "A FinishWorkspaceSuccess that says nothing of how the work lands is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-finish-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
 
 
 ;;;; ---- CloseWorkspace --------------------------------------------------
@@ -3385,6 +3404,20 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"noMediationOwed\":{}}"))
                    '(:cause (:arm :no-mediation-owed :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-remediation-to-restore-arm ()
+  "UpdateMergeQueueError's `no_remediation_to_restore' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"noRemediationToRestore\":{}}"))
+                   '(:cause (:arm :no-remediation-to-restore :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-remediation-bound-reached-arm ()
+  "UpdateMergeQueueError's `remediation_bound_reached' arm decodes its bound."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"remediationBoundReached\":{\"remediationsBeforeEscalation\":4}}"))
+                   '(:cause (:arm :remediation-bound-reached :value (:remediations-before-escalation 4)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-error-feed-not-in-workspace-arm ()
   "SubmitPromptError's `feed_not_in_workspace' arm decodes with everything it
 carries."
@@ -3650,7 +3683,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()

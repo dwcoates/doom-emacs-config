@@ -148,15 +148,21 @@ type LifecycleConfig struct {
 	// its output kept among the queue's logs. Empty when the repository runs
 	// nothing then.
 	QueueDrained []*HookScript `protobuf:"bytes,5,rep,name=queue_drained,json=queueDrained,proto3" json:"queue_drained,omitempty"`
-	// The repository's DEPLOY MEDIATOR: a hidden session of the daemon's that
-	// checks every deploy before the queue may advance past it -- the deploy
-	// window's errors, warnings and latency regressions -- and approves it,
-	// escalates it to the user, or remediates it itself and deploys again
-	// (docs/investigations/2026-11-13-deploy-mediator-plan.md). UNSET: the
-	// repository has no mediator, and a deploy holds nothing.
-	DeployMediator *DeployMediator `protobuf:"bytes,11,opt,name=deploy_mediator,json=deployMediator,proto3,oneof" json:"deploy_mediator,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The repository's DEPLOY CHECKS: every deploy holds the queue until it is
+	// checked. A CHAIN of deploys begins at a deploy no other check was owed
+	// beside and ends when the queue advances. Each chain has one hidden
+	// INTAKE workspace that states the problems THIS deploy caused, from facts
+	// the daemon sorts for it, and approves the deploy, escalates it to the
+	// user, or dispatches a fix (agentrepl.v1.UpdateMergeQueueMediation). A
+	// dispatched fix is done by a visible REMEDIATION workspace whose finish
+	// runs the full gate, lands directly on the main branch and deploys, which
+	// owes the chain's next check; only the intake's approval releases the
+	// queue. A defect the deploy did not cause never holds the queue
+	// (docs/investigations/2026-11-14-deploy-intake-plan.md). UNSET: the
+	// repository's deploys hold nothing.
+	DeployChecks  *DeployChecks `protobuf:"bytes,12,opt,name=deploy_checks,json=deployChecks,proto3,oneof" json:"deploy_checks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LifecycleConfig) Reset() {
@@ -238,37 +244,39 @@ func (x *LifecycleConfig) GetQueueDrained() []*HookScript {
 	return nil
 }
 
-func (x *LifecycleConfig) GetDeployMediator() *DeployMediator {
+func (x *LifecycleConfig) GetDeployChecks() *DeployChecks {
 	if x != nil {
-		return x.DeployMediator
+		return x.DeployChecks
 	}
 	return nil
 }
 
-// A repository's deploy mediator.
-type DeployMediator struct {
+// How a repository's deploys are checked.
+type DeployChecks struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. The mediator workspace's name, unique among the daemon's
-	// workspaces (agent-repl's: `deploy-mediator`).
-	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// REQUIRED, at least 1. The most remediations a chain deploys in a row:
+	// once the deploy of the last of them is still broken, the intake may
+	// only escalate to the user, never dispatch again, so a fix whose approach
+	// is wrong is not retried without end.
+	RemediationsBeforeEscalation uint32 `protobuf:"varint,1,opt,name=remediations_before_escalation,json=remediationsBeforeEscalation,proto3" json:"remediations_before_escalation,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
-func (x *DeployMediator) Reset() {
-	*x = DeployMediator{}
+func (x *DeployChecks) Reset() {
+	*x = DeployChecks{}
 	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeployMediator) String() string {
+func (x *DeployChecks) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeployMediator) ProtoMessage() {}
+func (*DeployChecks) ProtoMessage() {}
 
-func (x *DeployMediator) ProtoReflect() protoreflect.Message {
+func (x *DeployChecks) ProtoReflect() protoreflect.Message {
 	mi := &file_repoconfig_v1_lifecycle_config_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -280,16 +288,16 @@ func (x *DeployMediator) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeployMediator.ProtoReflect.Descriptor instead.
-func (*DeployMediator) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeployChecks.ProtoReflect.Descriptor instead.
+func (*DeployChecks) Descriptor() ([]byte, []int) {
 	return file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *DeployMediator) GetName() string {
+func (x *DeployChecks) GetRemediationsBeforeEscalation() uint32 {
 	if x != nil {
-		return x.Name
+		return x.RemediationsBeforeEscalation
 	}
-	return ""
+	return 0
 }
 
 // A workspace stage's hooks, one list per kind of workspace. Each kind runs
@@ -1438,7 +1446,7 @@ var File_repoconfig_v1_lifecycle_config_proto protoreflect.FileDescriptor
 
 const file_repoconfig_v1_lifecycle_config_proto_rawDesc = "" +
 	"\n" +
-	"$repoconfig/v1/lifecycle_config.proto\x12\rrepoconfig.v1\"\xa2\x05\n" +
+	"$repoconfig/v1/lifecycle_config.proto\x12\rrepoconfig.v1\"\xb1\x05\n" +
 	"\x0fLifecycleConfig\x12C\n" +
 	"\bcreation\x18\x06 \x01(\v2\".repoconfig.v1.LifecycleStageHooksH\x00R\bcreation\x88\x01\x01\x12?\n" +
 	"\x06finish\x18\a \x01(\v2\".repoconfig.v1.LifecycleStageHooksH\x01R\x06finish\x88\x01\x01\x12B\n" +
@@ -1451,16 +1459,16 @@ const file_repoconfig_v1_lifecycle_config_proto_rawDesc = "" +
 	"\n" +
 	"concurrent\x18\x04 \x01(\v2%.repoconfig.v1.DeployConcurrentStagesH\x04R\n" +
 	"concurrent\x88\x01\x01\x12>\n" +
-	"\rqueue_drained\x18\x05 \x03(\v2\x19.repoconfig.v1.HookScriptR\fqueueDrained\x12K\n" +
-	"\x0fdeploy_mediator\x18\v \x01(\v2\x1d.repoconfig.v1.DeployMediatorH\x05R\x0edeployMediator\x88\x01\x01B\v\n" +
+	"\rqueue_drained\x18\x05 \x03(\v2\x19.repoconfig.v1.HookScriptR\fqueueDrained\x12E\n" +
+	"\rdeploy_checks\x18\f \x01(\v2\x1b.repoconfig.v1.DeployChecksH\x05R\fdeployChecks\x88\x01\x01B\v\n" +
 	"\t_creationB\t\n" +
 	"\a_finishB\t\n" +
 	"\a_deployB\x0e\n" +
 	"\f_post_deployB\r\n" +
-	"\v_concurrentB\x12\n" +
-	"\x10_deploy_mediatorJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"$\n" +
-	"\x0eDeployMediator\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xd0\x01\n" +
+	"\v_concurrentB\x10\n" +
+	"\x0e_deploy_checksJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\v\x10\fR\x0fdeploy_mediator\"T\n" +
+	"\fDeployChecks\x12D\n" +
+	"\x1eremediations_before_escalation\x18\x01 \x01(\rR\x1cremediationsBeforeEscalation\"\xd0\x01\n" +
 	"\x13LifecycleStageHooks\x12B\n" +
 	"\temoji_ack\x18\x01 \x01(\v2 .repoconfig.v1.LifecycleHookListH\x00R\bemojiAck\x88\x01\x01\x12Q\n" +
 	"\x11user_or_workspace\x18\x02 \x01(\v2 .repoconfig.v1.LifecycleHookListH\x01R\x0fuserOrWorkspace\x88\x01\x01B\f\n" +
@@ -1541,7 +1549,7 @@ func file_repoconfig_v1_lifecycle_config_proto_rawDescGZIP() []byte {
 var file_repoconfig_v1_lifecycle_config_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_repoconfig_v1_lifecycle_config_proto_goTypes = []any{
 	(*LifecycleConfig)(nil),                  // 0: repoconfig.v1.LifecycleConfig
-	(*DeployMediator)(nil),                   // 1: repoconfig.v1.DeployMediator
+	(*DeployChecks)(nil),                     // 1: repoconfig.v1.DeployChecks
 	(*LifecycleStageHooks)(nil),              // 2: repoconfig.v1.LifecycleStageHooks
 	(*LifecycleHookList)(nil),                // 3: repoconfig.v1.LifecycleHookList
 	(*LifecycleDeployStage)(nil),             // 4: repoconfig.v1.LifecycleDeployStage
@@ -1570,7 +1578,7 @@ var file_repoconfig_v1_lifecycle_config_proto_depIdxs = []int32{
 	2,  // 4: repoconfig.v1.LifecycleConfig.post_deploy:type_name -> repoconfig.v1.LifecycleStageHooks
 	6,  // 5: repoconfig.v1.LifecycleConfig.concurrent:type_name -> repoconfig.v1.DeployConcurrentStages
 	15, // 6: repoconfig.v1.LifecycleConfig.queue_drained:type_name -> repoconfig.v1.HookScript
-	1,  // 7: repoconfig.v1.LifecycleConfig.deploy_mediator:type_name -> repoconfig.v1.DeployMediator
+	1,  // 7: repoconfig.v1.LifecycleConfig.deploy_checks:type_name -> repoconfig.v1.DeployChecks
 	3,  // 8: repoconfig.v1.LifecycleStageHooks.emoji_ack:type_name -> repoconfig.v1.LifecycleHookList
 	3,  // 9: repoconfig.v1.LifecycleStageHooks.user_or_workspace:type_name -> repoconfig.v1.LifecycleHookList
 	13, // 10: repoconfig.v1.LifecycleHookList.hooks:type_name -> repoconfig.v1.HookEntry

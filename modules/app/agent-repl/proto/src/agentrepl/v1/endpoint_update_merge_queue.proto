@@ -34,10 +34,9 @@ message UpdateMergeQueueRequest {
     // ahead of or behind another waiting merge on the same queue: the
     // sidebar's drag of a waiting merge. (Added 2026-10-27.)
     UpdateMergeQueueMoveTo move_to = 14;
-    // The deploy mediator's decision on the deploy its repository owes a
-    // mediation of (repoconfig.v1.LifecycleConfig.deploy_mediator): the
-    // queue advances either way. Only the mediator may decide, and only
-    // while a mediation is owed. (Added 2026-11-13.)
+    // The deploy intake's decision on the deploy its chain owes a check of
+    // (repoconfig.v1.LifecycleConfig.deploy_checks). Only the chain's intake
+    // may decide, and only while a check is owed. (Added 2026-11-13.)
     UpdateMergeQueueMediation mediation = 15;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
@@ -135,23 +134,80 @@ message UpdateMergeQueueMoveTo {
   }
 }
 
-// THE ARM IS THE OUTCOME.
-// A deploy mediator's decision.
+// A deploy intake's decision on the deploy its chain owes a check of. The
+// intake judges only what THIS deploy caused: a problem the deploy did not
+// cause never holds the queue, and the intake files it elsewhere (a one-shot
+// through the queue, or a todo row) before deciding on what remains.
 message UpdateMergeQueueMediation {
-  // REQUIRED. What it decided.
+  // REQUIRED. What it decided; the arm IS the decision.
   oneof decision {
-    // The deploy is sound.
+    // Nothing this deploy caused is wrong. The hold is released, the queue
+    // advances, and the chain ends.
     UpdateMergeQueueMediationApprove approve = 1;
-    // The deploy is put before the user: something is wrong that the
-    // mediator cannot fix confidently, or whose fix the user should choose.
+    // The deploy is put before the user: something is wrong that should be
+    // the user's to settle, or the chain reached its bound on remediations
+    // (repoconfig.v1.DeployChecks.remediations_before_escalation). The hold
+    // is released, the user is notified, and the chain ends.
     UpdateMergeQueueMediationEscalate escalate = 2;
+    // Problems this deploy caused, handed to a remediation workspace to fix.
+    // The hold stays, owned by that workspace until its fix's deploy is
+    // checked in turn.
+    UpdateMergeQueueMediationDispatch dispatch = 4;
   }
-  // REQUIRED, never blank. What it found, in a sentence or two: the
+  // REQUIRED, never blank. What it found, in a sentence or two: an
   // escalation's banner reads it, and every decision is recorded with it.
   string summary = 3;
 }
+// The approval. No fields: the summary says what was checked.
 message UpdateMergeQueueMediationApprove {}
-message UpdateMergeQueueMediationEscalate {}
+// The escalation. The intake never talks to the user itself (owner ruling,
+// 2026-11-15): the daemon makes a visible escalation workspace whose prompt
+// is the summary and these findings with their evidence, and a desktop
+// notification whose click opens it.
+message UpdateMergeQueueMediationEscalate {
+  // The problems the intake found, most serious first, each with its
+  // verbatim evidence. Empty for an escalation that rests on the summary
+  // alone (the chain's bound reached with nothing new to state).
+  repeated DeployProblem problems = 1;
+}
+// A dispatch: what to fix, and which remediation workspace fixes it. The
+// intake states problems and their evidence only; it never researches a
+// cause or prescribes a fix, which is the remediation workspace's work.
+message UpdateMergeQueueMediationDispatch {
+  // REQUIRED, at least one. Each problem this deploy caused, in the order
+  // the intake judged them most serious first.
+  repeated DeployProblem problems = 1;
+  // REQUIRED. Which remediation workspace takes the problems; the arm IS the
+  // choice.
+  oneof remediation {
+    // Reopen the chain's last remediation workspace, because the problems
+    // are in, or caused by, its own landed fix: it knows what it changed and
+    // what it ruled out. Refused when the chain has no remediation yet.
+    UpdateMergeQueueMediationDispatchRestore restore = 2;
+    // Create a new remediation workspace with a fresh context, because the
+    // problems are unrelated to any earlier fix of the chain.
+    UpdateMergeQueueMediationDispatchFresh fresh = 3;
+  }
+}
+// Restore the chain's last remediation workspace. No fields: the chain
+// records which workspace that is.
+message UpdateMergeQueueMediationDispatchRestore {}
+// Create a fresh remediation workspace. No fields: the daemon names and
+// places it.
+message UpdateMergeQueueMediationDispatchFresh {}
+
+// One problem a deploy caused, as the intake states it to the remediation
+// workspace.
+message DeployProblem {
+  // REQUIRED, never blank. What is wrong, in a sentence: the symptom as the
+  // evidence shows it, never a guess at its cause or its fix.
+  string statement = 1;
+  // REQUIRED, at least one. The records that show the problem, each quoted
+  // verbatim as the log, the doctor or the metrics store printed it, so the
+  // remediation workspace starts from the evidence rather than from the
+  // intake's reading of it.
+  repeated string evidence = 2;
+}
 
 message UpdateMergeQueueResponse {
   oneof result {
@@ -187,11 +243,17 @@ message UpdateMergeQueueError {
     // (pause/resume are per-repository when the ref is set). Empty: the
     // echoed ref is the only identity involved. (Landing 6, 2026-09-01.)
     UpdateMergeQueueUnknownRepository unknown_repository = 8;
-    // A mediation decision from a workspace that is no repository's deploy
-    // mediator.
+    // A mediation decision from a workspace that is not the intake of a
+    // chain of its repository's deploys.
     UpdateMergeQueueNotMediator not_mediator = 15;
-    // A mediation decision while the mediator's repository owes none.
+    // A mediation decision while the intake's repository owes no check.
     UpdateMergeQueueNoMediationOwed no_mediation_owed = 16;
+    // A dispatch that restores the chain's last remediation workspace, when
+    // the chain has none yet: dispatch it fresh instead.
+    UpdateMergeQueueNoRemediationToRestore no_remediation_to_restore = 17;
+    // A dispatch once the chain has deployed as many remediations in a row as
+    // its repository allows: only an escalation is accepted now.
+    UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -217,5 +279,15 @@ message UpdateMergeQueueNotPaused {}
 message UpdateMergeQueueNoSuchQueuedMerge {}
 // The unknown-repository refusal. Empty on purpose (see the arm).
 message UpdateMergeQueueUnknownRepository {}
+// The not-the-intake refusal. No fields: the caller knows who it is.
 message UpdateMergeQueueNotMediator {}
+// The no-check-owed refusal. No fields.
 message UpdateMergeQueueNoMediationOwed {}
+// The nothing-to-restore refusal. No fields: the chain has no remediation.
+message UpdateMergeQueueNoRemediationToRestore {}
+// The bound refusal.
+message UpdateMergeQueueRemediationBoundReached {
+  // The repository's bound, which the chain has reached
+  // (repoconfig.v1.DeployChecks.remediations_before_escalation).
+  uint32 remediations_before_escalation = 1;
+}

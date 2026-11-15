@@ -37,6 +37,7 @@ import type {
   RosterMergeQueueGithubPlace,
   RosterMergeQueueHead,
   RosterMergeQueueMediation,
+  RosterMergeQueueMediationTarget,
   RosterMergeQueuePaused,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
@@ -512,28 +513,56 @@ export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): 
   return line;
 }
 
-/** The class the deploy mediation's label beside the repository's name wears. */
+/** The class the deploy check's label beside the repository's name wears. */
 export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
 
 /**
- * The deploy mediation the queue waits on, as a purple label beside the
- * repository's name in its group header (owner ruling, 2026-11-14): `hot
- * reloading` while the landing's build rolls out, `assessing reload` once the
- * mediator was told of it and checks or remediates it. The mediator is never
- * drawn as a workspace, nor named.
+ * The deploy check the queue waits on, as a purple label beside the
+ * repository's name in its group header (owner rulings, 2026-11-14): `hot
+ * reloading` while the landing's build rolls out, `assessing reload` while
+ * the chain's intake checks it, `fixing reload` while a remediation
+ * workspace fixes what the intake found. A click on it selects the workspace
+ * at work (`frontend.v1.RosterMergeQueueMediationTarget`), showing the hidden
+ * intake for the visit as a click on any hidden workspace's link does; a
+ * chain's first rollout names none, and its label selects nothing.
  */
-export function drawQueueMediationLabel(u: RosterMergeQueueMediation, path: string): HTMLElement {
+export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: SidebarContext, path: string): HTMLElement {
   const standing = requireCase(u.standing, `${path}.standing`);
   switch (standing.case) {
-    case "checking":
-      return drawQueueLabel("assessing reload", MERGE_QUEUE_MEDIATION_CLASS, "the last landing's reload is being assessed; the queue waits for it");
     case "waiting":
-      return drawQueueLabel("hot reloading", MERGE_QUEUE_MEDIATION_CLASS, "the last landing is rolling out; it is assessed once it has, and the queue waits for it");
+      return mediationLabel(sc, "hot reloading", "the last landing is rolling out; it is assessed once it has, and the queue waits for it",
+        standing.value.target, `${path}.standing.waiting.target`);
+    case "checking":
+      return mediationLabel(sc, "assessing reload", "the last landing's reload is being assessed; the queue waits for it",
+        requireMessage(standing.value.target, `${path}.standing.checking.target`), `${path}.standing.checking.target`);
+    case "fixing":
+      return mediationLabel(sc, "fixing reload", "a remediation is fixing what the last landing's reload broke; the queue waits for its fix",
+        requireMessage(standing.value.target, `${path}.standing.fixing.target`), `${path}.standing.fixing.target`);
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);
     }
   }
+}
+
+/**
+ * One deploy check label reading WORDS, titled TITLE, whose click selects
+ * TARGET's workspace when it names one.
+ */
+function mediationLabel(sc: SidebarContext, words: string, title: string, target: RosterMergeQueueMediationTarget | undefined, path: string): HTMLElement {
+  const label = drawQueueLabel(words, MERGE_QUEUE_MEDIATION_CLASS, title);
+  if (target === undefined) return label;
+  const workspace = requireMessage(target.workspace, `${path}.workspace`);
+  label.setAttribute("data-select", "");
+  label.setAttribute("data-workspace", workspace.id);
+  label.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // THE SAME SELECT AS A ROW'S CLICK (`selectWorkspace`), as every queue
+    // line's: the editor makes the switch.
+    void guardMalformed(sc.ctx, "sidebar.merge-queue.mediation-select", selectWorkspace(label, sc, workspace));
+  });
+  return label;
 }
 
 /** The class every queue label wears: the repair a merge out of line makes or awaits, a GitHub place. */

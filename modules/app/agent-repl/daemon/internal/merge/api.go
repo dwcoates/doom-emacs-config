@@ -263,15 +263,24 @@ type Orchestrator interface {
 	// under those writes, and merged_at, closed and the lease release were
 	// lost to failed transactions.
 	Drain(ctx context.Context)
-	// OweMediations records that the deploy that started AT owes a
-	// mediation in every repository with a deploy mediator (mediation.go).
+	// OweMediations records that the deploy that started AT owes a check in
+	// every repository that checks its deploys (mediation.go).
 	OweMediations(ctx context.Context, at time.Time) error
-	// Mediate runs a mediation round for every mediation owed: a deploy
+	// Mediate runs an intake round for every check owed, and takes up every
+	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.
 	Mediate(ctx context.Context)
-	// DecideMediation is mediator WS's decision on the deploy its repository
-	// owes a mediation of.
-	DecideMediation(ctx context.Context, ws ids.WorkspaceID, decision MediationDecision, summary string) error
+	// DecideMediation is the chain's intake WS's decision on the deploy its
+	// chain owes a check of (mediation.go).
+	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
+	// IsDeployRemediation answers whether WS is the remediation workspace a
+	// fix is dispatched to now, whose finish lands directly
+	// (remediationfinish.go).
+	IsDeployRemediation(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// FinishRemediation runs remediation workspace WS's finish: the full
+	// gate, the direct landing and the deploy, each step recorded before it
+	// starts (remediationfinish.go).
+	FinishRemediation(ctx context.Context, ws ids.WorkspaceID, version *wsm.VersionIncrement) error
 	// FollowStanding holds every queue still while this daemon may not
 	// advance it (a handover in flight, or a successor not up yet), and
 	// takes the queues on again when it may, until ctx ends.
@@ -433,8 +442,8 @@ type Names interface {
 type Banners interface {
 	Queued(ws ids.WorkspaceID, label string)
 	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
-	// Mediated puts a deploy before the user for its mediator WS: one it
-	// escalated, or one it decided nothing about.
+	// Mediated posts the notification of an escalated deploy, whose click
+	// opens escalation workspace WS.
 	Mediated(ws ids.WorkspaceID, summary string)
 }
 
@@ -736,9 +745,12 @@ type Deps struct {
 	// Standing is whether this daemon may advance its queues across a
 	// handover, and which workspaces it serves (rollout.Controller).
 	Standing Standing
-	// CreateMediator makes the hidden deploy-mediator workspace NAME of the
-	// repository at REPODIR (workspace.Verbs.CreateMediator).
-	CreateMediator func(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// DeployChecks makes, reopens and closes the deploy checks' workspaces
+	// (workspace.Verbs). REQUIRED.
+	DeployChecks DeployCheckWorkspaces
+	// ReadLogs reads the warnings and errors every system logged in a span,
+	// for the intake's facts (intakefacts.go). REQUIRED.
+	ReadLogs LogReader
 	// Now is the clock. Injected so a ledger interval and a terminal stamp are
 	// assertable without a real one.
 	Now func() time.Time
@@ -747,6 +759,29 @@ type Deps struct {
 	Meter Meter
 	// Log is the orchestrator's logger.
 	Log dlog.Surfaces
+}
+
+// DeployCheckWorkspaces is what the deploy checks need of the workspaces
+// (workspace.Verbs, bound after the queue is built).
+type DeployCheckWorkspaces interface {
+	// CreateDeployIntake makes a chain's hidden intake, unprompted.
+	CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployRemediation makes a visible remediation workspace,
+	// unprompted.
+	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployEscalation makes a visible escalation workspace,
+	// unprompted, on the remediation's model.
+	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// SetDeployCheckEffort sets a made workspace to its role's effort, the
+	// intake's when INTAKE; it starts a sessionless workspace's shim, so the
+	// role is recorded before it.
+	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error
+	// Reopen opens a closed remediation workspace again, its worktree cut
+	// again on its branch at the main branch's tip.
+	Reopen(ctx context.Context, ws ids.WorkspaceID) error
+	// CloseSelf closes a deploy check workspace, at its running turn's end
+	// when one runs, answering whether it waits for that end.
+	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 }
 
 // Meter records the merge queue's metrics. Each call is an atomic add and
@@ -770,6 +805,14 @@ type Meter interface {
 	// were deployed in a row since the queue last advanced, 0 when none is
 	// owed.
 	SetRemediationsInARow(n int)
+	// ObserveRemediation records one remediation, from its dispatch to the
+	// check that ended it, by how it ended (RemediationLanded,
+	// RemediationEscalated, RemediationRedispatched).
+	ObserveRemediation(outcome string, took time.Duration)
+	// ObserveRemediationGateRounds records how many of a remediation
+	// finish's gates failed before it landed or was given up, by how it
+	// ended (RemediationGateLanded, RemediationGateGivenUp).
+	ObserveRemediationGateRounds(outcome string, n int)
 	// ObserveMergeRound records one round of a merge's tab (a rebase, a
 	// conflict resolution, a test gate, a fixing attempt) by its ledger
 	// outcome.

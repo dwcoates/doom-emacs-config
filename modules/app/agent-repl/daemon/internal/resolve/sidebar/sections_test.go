@@ -1904,33 +1904,80 @@ func TestAGithubStandingOfAWorkspaceNotInTheRegistryIsRecordedAndNotDrawn(t *tes
 	}
 }
 
-func TestTheMergeQueueDrawsTheDeployMediationItWaitsOn(t *testing.T) {
+func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.T) {
 	cases := []struct {
-		name         string
-		told         bool
-		wantChecking bool
+		name       string
+		mediation  sidebar.QueueMediation
+		wantLabel  string
+		wantTarget string
 	}{
-		{name: "a mediator not yet told waits", told: false},
-		{name: "a told mediator is checking", told: true, wantChecking: true},
+		{name: "a chain's first deploy rolling out selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting}, wantLabel: "waiting"},
+		{name: "a later deploy rolling out selects the chain's intake", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting, Intake: "w2"},
+			wantLabel: "waiting", wantTarget: "w2"},
+		{name: "an assessed deploy selects the intake", mediation: sidebar.QueueMediation{Stage: sidebar.MediationChecking, Intake: "w2"},
+			wantLabel: "checking", wantTarget: "w2"},
+		{name: "a fixed deploy selects the remediation", mediation: sidebar.QueueMediation{Stage: sidebar.MediationFixing, Intake: "w2", Remediation: "w3"},
+			wantLabel: "fixing", wantTarget: "w3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: nothing in line; the deploy owes the repository a
-			// mediation, and its mediator is no workspace the registry draws.
+			// Arrange: nothing in line; the deploy owes the repository a check.
 			r, _ := newResolver(t)
-			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Repo: repo.ID, Told: tc.told}})
+			m := tc.mediation
+			m.Repo = repo.ID
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &m})
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "intake"), workspace("w3", "remedy")))
+
+			// Assert.
+			groups := queuedGroups(latest(t, r))
+			if len(groups) != 1 {
+				t.Fatalf("queue groups = %d, want the repository's queue listed while its deploy is checked", len(groups))
+			}
+			got := groups[0].GetQueue().GetMediation()
+			label, target := "", ""
+			switch standing := got.GetStanding().(type) {
+			case *frontendv1.RosterMergeQueueMediation_Waiting:
+				label, target = "waiting", standing.Waiting.GetTarget().GetWorkspace().GetId()
+			case *frontendv1.RosterMergeQueueMediation_Checking:
+				label, target = "checking", standing.Checking.GetTarget().GetWorkspace().GetId()
+			case *frontendv1.RosterMergeQueueMediation_Fixing:
+				label, target = "fixing", standing.Fixing.GetTarget().GetWorkspace().GetId()
+			}
+			if label != tc.wantLabel || target != tc.wantTarget {
+				t.Fatalf("label = %s selecting %q, want %s selecting %q", label, target, tc.wantLabel, tc.wantTarget)
+			}
+		})
+	}
+}
+
+func TestADeployChecksWorkspaceTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
+	cases := []struct {
+		name      string
+		stage     sidebar.MediationStage
+		wantLabel bool
+	}{
+		{name: "rolling out, the label is drawn unclickable", stage: sidebar.MediationWaiting, wantLabel: true},
+		{name: "assessing, no label is drawn without its target", stage: sidebar.MediationChecking},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, logs := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Repo: repo.ID, Stage: tc.stage, Intake: "gone"}})
 
 			// Act.
 			r.SetRegistry(queueView(workspace("w1", "one")))
 
 			// Assert.
 			groups := queuedGroups(latest(t, r))
-			if len(groups) != 1 {
-				t.Fatalf("queue groups = %d, want the repository's queue listed while its deploy is mediated", len(groups))
+			if len(groups) != 1 || (groups[0].GetQueue().GetMediation() != nil) != tc.wantLabel {
+				t.Fatalf("groups = %v, want a label drawn %v", groups, tc.wantLabel)
 			}
-			m := groups[0].GetQueue().GetMediation()
-			if m == nil || (m.GetChecking() != nil) != tc.wantChecking || (m.GetWaiting() != nil) == tc.wantChecking {
-				t.Fatalf("mediation = %v, want checking %v", m, tc.wantChecking)
+			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+				Message: "the workspace at work on a deploy check is one the registry does not carry, so the label selects nothing"}); !ok {
+				t.Fatalf("records = %v, want the unregistered workspace at ERROR", logs.Records())
 			}
 		})
 	}

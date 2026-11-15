@@ -3582,3 +3582,75 @@ func TestSaidPartsSplitsWordsFromImages(t *testing.T) {
 		})
 	}
 }
+
+func TestFinishWorkspaceAnswersHowTheWorkLands(t *testing.T) {
+	tests := []struct {
+		name            string
+		remediation     bool
+		wantDirectly    bool
+		wantRemediation int
+		wantQueued      int
+	}{
+		{name: "an ordinary workspace's finish is queued", wantQueued: 1},
+		{name: "a deploy remediation's finish lands directly", remediation: true, wantDirectly: true, wantRemediation: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Merge.remediations = map[ids.WorkspaceID]bool{testWorkspaceID: tt.remediation}
+
+			// Act.
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("FinishWorkspace = (%v, %v), want success", resp, err)
+			}
+			success := resp.Msg.GetSuccess()
+			if (success.GetLandingDirectly() != nil) != tt.wantDirectly || (success.GetQueued() != nil) == tt.wantDirectly {
+				t.Fatalf("landing = %v, want directly %v", success, tt.wantDirectly)
+			}
+			if len(h.Merge.remediationFinishes) != tt.wantRemediation || len(h.Merge.requests) != tt.wantQueued {
+				t.Fatalf("remediation finishes %v, queued %v; want %d and %d", h.Merge.remediationFinishes, h.Merge.requests, tt.wantRemediation, tt.wantQueued)
+			}
+		})
+	}
+}
+
+func TestFinishWorkspaceMapsARemediationsRefusalOntoItsArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.remediations = map[ids.WorkspaceID]bool{testWorkspaceID: true}
+	h.Merge.remediationFinishErr = &merge.RefusalError{Arm: merge.ArmAlreadyMerging, Reason: "already running"}
+
+	// Act.
+	resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetAlreadyDeploying() == nil {
+		t.Fatalf("FinishWorkspace = (%v, %v), want the already_deploying arm", resp, err)
+	}
+}
+
+func TestFinishWorkspaceWhoseRoleCannotBeReadFinishesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	h.Merge.remediationErr = errors.New("store gone")
+
+	// Act.
+	_, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+
+	// Assert.
+	if got := connectCode(t, err); got != connect.CodeInternal {
+		t.Fatalf("code = %v, want Internal", got)
+	}
+	if len(h.Merge.requests) != 0 || len(h.Merge.remediationFinishes) != 0 {
+		t.Fatalf("queued %v, remediation finishes %v; want nothing finished", h.Merge.requests, h.Merge.remediationFinishes)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.server.finish_workspace"}); !ok {
+		t.Fatalf("records = %+v, want the unreadable role at ERROR", log.Records())
+	}
+}

@@ -89,9 +89,12 @@ type orchestrator struct {
 	// offQueueLanded is which merges off their queues have work on master
 	// already, judged off every lock (offqueuelanded.go).
 	offQueueLanded offQueueLanded
-	// mediating marks the repositories whose mediation round runs now
-	// (Mediate): one round per repository at a time. Guarded by mu.
-	mediating map[wsm.RepoKey]bool
+	// mediating marks the checks whose intake round runs now (Mediate): one
+	// round per check at a time. Guarded by mu.
+	mediating map[checkClaim]bool
+	// remediationRuns are the remediation finishes running here, by
+	// workspace: one run per finish at a time. Guarded by mu.
+	remediationRuns map[ids.WorkspaceID]bool
 	// mediationLife is the lifetime of the deploy mediation's pass and
 	// rounds, which the daemon's exit stops (mediationlife.go).
 	mediationLife mediationLife
@@ -353,7 +356,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		waitingPass:        map[wsm.RepoKey]bool{},
 		waitingAgain:       map[wsm.RepoKey]bool{},
 		repoLocks:          map[wsm.RepoKey]*repoLock{},
-		mediating:          map[wsm.RepoKey]bool{},
+		mediating:          map[checkClaim]bool{},
 		kicked:             map[wsm.RepoKey]bool{},
 		syncing:            map[wsm.RepoKey]bool{},
 		displaces:          map[ids.WorkspaceID]bool{},
@@ -453,7 +456,8 @@ func (d Deps) validate() error {
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.Standing != nil, "Standing")
-	check(d.CreateMediator != nil, "CreateMediator")
+	check(d.DeployChecks != nil, "DeployChecks")
+	check(d.ReadLogs != nil, "ReadLogs")
 	check(d.QueueEvents != nil, "QueueEvents")
 	check(d.Log != nil, "Log")
 	check(d.StateDir != "", "StateDir")

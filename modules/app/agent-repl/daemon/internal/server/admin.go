@@ -104,12 +104,8 @@ func (s *server) UpdateMergeQueue(
 	}
 
 	if m := req.Msg.GetMediation(); m != nil {
-		_, mediator := askerOf(req.Msg.GetRequester())
-		decision := merge.MediationApprove
-		if m.GetEscalate() != nil {
-			decision = merge.MediationEscalate
-		}
-		if err := s.deps.Merge.DecideMediation(ctx, mediator, decision, m.GetSummary()); err != nil {
+		_, intake := askerOf(req.Msg.GetRequester())
+		if err := s.deps.Merge.DecideMediation(ctx, intake, decisionOf(m)); err != nil {
 			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 		}
 		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{Success: &agentreplv1.UpdateMergeQueueSuccess{}}
@@ -419,4 +415,27 @@ func clientLevel(record *agentreplv1.ClientLogRecord) string {
 	default:
 		return dlog.LevelError
 	}
+}
+
+// decisionOf reads an intake's decision into the queue's (its validation
+// refused a malformed one before this).
+func decisionOf(m *agentreplv1.UpdateMergeQueueMediation) merge.Decision {
+	d := merge.Decision{Kind: merge.MediationApprove, Summary: m.GetSummary()}
+	switch m.GetDecision().(type) {
+	case *agentreplv1.UpdateMergeQueueMediation_Escalate:
+		d.Kind, d.Problems = merge.MediationEscalate, problemsOf(m.GetEscalate().GetProblems())
+	case *agentreplv1.UpdateMergeQueueMediation_Dispatch:
+		dispatch := m.GetDispatch()
+		d.Kind, d.Restore, d.Problems = merge.MediationDispatch, dispatch.GetRestore() != nil, problemsOf(dispatch.GetProblems())
+	}
+	return d
+}
+
+// problemsOf reads a decision's problems into the queue's.
+func problemsOf(problems []*agentreplv1.DeployProblem) []merge.DeployProblem {
+	var out []merge.DeployProblem
+	for _, p := range problems {
+		out = append(out, merge.DeployProblem{Statement: p.GetStatement(), Evidence: p.GetEvidence()})
+	}
+	return out
 }

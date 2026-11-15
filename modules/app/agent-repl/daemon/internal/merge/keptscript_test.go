@@ -55,6 +55,22 @@ func TestRunKeptScriptRunsTheScriptFromTheRepositoryBoundedByItsTimeout(t *testi
 	}
 }
 
+func TestRunKeptScriptHandsItsArgumentsToTheScript(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	script := lifecycleconfig.ScriptHook("bin/land.sh", 5).GetScript()
+
+	// Act
+	RunKeptScript(context.Background(), h.hooks, h.repoRoot, script, nil, filepath.Join(t.TempDir(), "x.log"), "/repo", "patch", "the line", "branch")
+
+	// Assert
+	runs := h.hooks.ran()
+	want := []string{"bash", filepath.Join(h.repoRoot, "bin/land.sh"), "/repo", "patch", "the line", "branch"}
+	if len(runs) != 1 || !slices.Equal(runs[0].argv, want) {
+		t.Fatalf("runs = %+v, want one running %v", runs, want)
+	}
+}
+
 func TestRunKeptScriptKeepsTheScriptsWholeOutput(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

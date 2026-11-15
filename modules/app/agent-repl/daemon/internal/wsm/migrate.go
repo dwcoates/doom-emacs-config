@@ -257,6 +257,10 @@ var migrations = []migration{
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
 	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
 	{To: 137, Name: "merge_queue_pause_purpose", Kind: MigrationAdditive, DDL: mergeQueuePausePurposeDDL},
+	// IT IS ADDITIVE: see mediationRolesDDL.
+	{To: 138, Name: "merge_queue_mediation_roles", Kind: MigrationAdditive, DDL: mediationRolesDDL},
+	// IT IS ADDITIVE: see remediationFinishesDDL.
+	{To: 139, Name: "deploy_remediation_finishes", Kind: MigrationAdditive, DDL: remediationFinishesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

@@ -1519,20 +1519,46 @@ mediation the queue waits on, nil while it waits on none
 
 (defun agent-repl-wire-decode-roster-merge-queue-mediation (value)
   "Decode VALUE as `RosterMergeQueueMediation'.
-A plist `(:standing STANDING)': where the deploy mediation the queue waits
-on stands, `:waiting' (the deploy still rolls out, or the mediator is not
-told yet) or `:checking'.  The standing is never unset; the mediator is
-never named."
+A plist `(:standing STANDING :target TARGET)': where the deploy check the
+queue waits on stands, `:waiting' (the deploy still rolls out),
+`:checking' (the chain's intake assesses it) or `:fixing' (a remediation
+workspace fixes it), and TARGET, the workspace ref a click on its label
+selects.  TARGET is nil only while a chain's first deploy rolls out, whose
+intake does not exist yet; the standing is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueMediation"
-     (list :standing (plist-get
-                      (agent-repl-wire--decode-oneof
-                       "RosterMergeQueueMediation" 'standing object
-                       `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueMediationWaiting" v)))
-                         (checking :checking ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueMediationChecking" v)))))
-                      :arm)))))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking fixing))
+    (let ((standing (agent-repl-wire--decode-oneof
+                     "RosterMergeQueueMediation" 'standing object
+                     `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                       "RosterMergeQueueMediationWaiting" v nil)))
+                       (checking :checking ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                         "RosterMergeQueueMediationChecking" v t)))
+                       (fixing :fixing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                     "RosterMergeQueueMediationFixing" v t)))))))
+      (agent-repl-wire--decoded
+       "RosterMergeQueueMediation"
+       (list :standing (plist-get standing :arm)
+             :target (plist-get standing :value))))))
+
+(defun agent-repl-wire--decode-roster-mediation-standing (message-name value required)
+  "Decode VALUE as the standing MESSAGE-NAME, answering its target's ref.
+The target is a `RosterMergeQueueMediationTarget'; REQUIRED says whether
+the standing must carry one."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(target))
+    (let ((target (if required
+                      (agent-repl-wire--decode-message message-name 'target object
+                                                       #'agent-repl-wire--decode-roster-mediation-target)
+                    (agent-repl-wire--decode-optional-message message-name 'target object
+                                                              #'agent-repl-wire--decode-roster-mediation-target))))
+      target)))
+
+(defun agent-repl-wire--decode-roster-mediation-target (value)
+  "Decode VALUE as `RosterMergeQueueMediationTarget', answering its workspace ref."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueMediationTarget" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediationTarget" object '(workspace))
+    (agent-repl-wire--decode-message "RosterMergeQueueMediationTarget" 'workspace object
+                                     #'agent-repl-wire-decode-workspace-ref)))
 
 (defun agent-repl-wire-decode-roster-merge-queue-off-queue (value)
   "Decode VALUE as `RosterMergeQueueOffQueue'.

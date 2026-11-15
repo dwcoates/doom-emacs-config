@@ -186,7 +186,7 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: moduleRoot + "metaprompt.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt-merge-queue.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchExact, Path: moduleRoot + "metaprompt-queue-bypass.md", Suites: []string{"shim", "sidecar", "e2e"}},
-	{Kind: matchExact, Path: moduleRoot + "metaprompt-deploy-mediator.md", Suites: []string{"shim", "sidecar", "e2e"}},
+	{Kind: matchExact, Path: moduleRoot + "metaprompt-deploy-intake.md", Suites: []string{"shim", "sidecar", "e2e"}},
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".md", Suites: []string{}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three

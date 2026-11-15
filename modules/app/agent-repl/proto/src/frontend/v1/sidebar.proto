@@ -1067,31 +1067,62 @@ message RosterRepoMergeQueue {
   // itself and one that discards it. A queue whose line is empty and that
   // holds only these is still listed, with no head.
   repeated RosterMergeQueueOffQueue off_queue = 11;
-  // The DEPLOY MEDIATION the queue waits on, pinned above its head: the
-  // repository's deploy mediator, checking a deploy before the queue may
-  // move past it (repoconfig.v1.LifecycleConfig.deploy_mediator). UNSET
+  // The DEPLOY CHECK the queue waits on, drawn as a label beside the
+  // repository's name (repoconfig.v1.LifecycleConfig.deploy_checks). UNSET
   // while no deploy owes one. A queue whose deploy owes one is listed even
   // with nothing in line. (Added 2026-11-13.)
   optional RosterMergeQueueMediation mediation = 12;
 }
 
-// A deploy mediation the queue waits on, drawn as a label beside the
-// repository's name (owner ruling, 2026-11-14). Tag 1 (`subject`, the mediator
-// workspace) is RETIRED: the mediator is never drawn as a workspace, nor
-// named.
+// A deploy check the queue waits on, drawn as one purple label beside the
+// repository's name in its group header (owner ruling, 2026-11-14):
+//
+//   ┌─ group header ─────────────────────────────────────┐
+//   │ doom   [RosterMergeQueueMediation label]   (37)    │
+//   └────────────────────────────────────────────────────┘
+//
+// The label's words are the standing's: `hot reloading`, `assessing reload`
+// or `fixing reload`. A click on it selects the workspace at work, when one
+// is. Tag 1 (`subject`) is RETIRED: no workspace is drawn as a queue row for
+// the check.
 message RosterMergeQueueMediation {
   reserved 1;
   reserved "subject";
-  // REQUIRED. Where the mediation stands.
+  // REQUIRED. Where the check stands; the arm IS the label's state.
   oneof standing {
-    // The deploy is still rolling out, or the mediator is not yet told.
+    // The deploy is still rolling out (`hot reloading`).
     RosterMergeQueueMediationWaiting waiting = 2;
-    // The mediator is checking the deploy, or remediating it.
+    // The chain's intake is checking the deploy (`assessing reload`).
     RosterMergeQueueMediationChecking checking = 3;
+    // A remediation workspace is fixing what the intake found
+    // (`fixing reload`).
+    RosterMergeQueueMediationFixing fixing = 4;
   }
 }
-message RosterMergeQueueMediationWaiting {}
-message RosterMergeQueueMediationChecking {}
+// Hot reloading.
+message RosterMergeQueueMediationWaiting {
+  // What a click on the label selects: the chain's intake, which checks the
+  // deploy once it has rolled out. UNSET for a chain's first deploy, whose
+  // intake does not exist yet; the label is then not clickable.
+  optional RosterMergeQueueMediationTarget target = 1;
+}
+// Assessing reload.
+message RosterMergeQueueMediationChecking {
+  // REQUIRED. What a click on the label selects: the chain's intake, a
+  // hidden workspace the selection shows.
+  RosterMergeQueueMediationTarget target = 1;
+}
+// Fixing reload.
+message RosterMergeQueueMediationFixing {
+  // REQUIRED. What a click on the label selects: the remediation workspace.
+  RosterMergeQueueMediationTarget target = 1;
+}
+// The workspace a click on the label selects, handed back unchanged in the
+// selection (agentrepl.v1.SelectWorkspaceRequest).
+message RosterMergeQueueMediationTarget {
+  // REQUIRED. The workspace at work on the check.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
 
 // ONE MERGE OFF ITS QUEUE, drawn as a row:
 //
