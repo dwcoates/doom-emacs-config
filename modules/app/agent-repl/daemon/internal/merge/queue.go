@@ -55,9 +55,14 @@ func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) erro
 }
 
 // ResumeOwnPause resumes the ONE queue SCOPE names when the pause standing on
-// it is workspace WS's own, and answers whether it resumed it. A queue that
-// runs, or stands paused by the user, by another workspace, or by a pause
-// written before its pauser's id was kept, is left as it stands.
+// it is workspace WS's own and was made to land a change, and answers whether
+// it resumed it. A queue that runs, or stands paused by the user, by the host,
+// by another workspace, by a pause written before its pauser's id was kept,
+// or by WS's own pause made for any other reason, is left as it stands.
+//
+// A PAUSE THE OWNER ASKED FOR SURVIVES THE TURN'S END (2026-11-14 20:47:10:
+// the owner told merge-queue-stall-triage to pause the queue to save power,
+// and the let-through resumed it the moment that turn ended).
 func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error) {
 	const op = "daemon.merge.resume_own_pause"
 	o.pauseWrites.Lock()
@@ -82,6 +87,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 		o.deps.Log.Global().Info(op, "the queue stands no pause of the workspace's own, so it is left as it stands", fields)
 		return false, nil
 	}
+	if !pause.ToLand {
+		o.deps.Log.Global().Info(op, "the workspace's own pause was not made to land a change, so it stands until it is resumed", dlog.Context{
+			"repo": string(repo), "workspace": string(ws), "hard": pause.Hard})
+		return false, nil
+	}
 	if err := o.setPaused(ctx, &scope, nil); err != nil {
 		return false, err
 	}
@@ -90,10 +100,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 }
 
 // pauseRecord is the record a pause BY writes now: who asked, by the asking
-// workspace's name as it stands, and whether it is a hard stop. A workspace
+// workspace's name as it stands, whether it is a hard stop, and whether it was
+// made to land a change. A workspace
 // the registry cannot read is refused, recorded under OP.
 func (o *orchestrator) pauseRecord(ctx context.Context, op string, by Pauser, hard bool) (*wsm.MergeQueuePause, error) {
-	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard}
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard, ToLand: by.ToLand}
 	if by.By == RequestedByUser {
 		return pause, nil
 	}
@@ -121,6 +132,15 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	if err != nil {
 		return err
 	}
+	return o.pauseRepos(ctx, op, repos, pause, scope != nil)
+}
+
+// pauseRepos is setPaused's write over the queues of REPOS, resolved: PAUSE
+// pauses them with its record, nil resumes them, and a change that would
+// change none of them is refused. SCOPED is whether the asker named one
+// repository, for the record.
+func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.RepoKey, pause *wsm.MergeQueuePause, scoped bool) error {
+	paused := pause != nil
 	var changed []wsm.RepoKey
 	for _, repo := range repos {
 		was, err := o.deps.DB.MergeQueuePaused(ctx, repo)
@@ -143,7 +163,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
+	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
 	if paused {
 		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
@@ -153,6 +173,19 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.kick(repo)
 	}
 	return redrawn
+}
+
+// holdForHostFault pauses REPO's queue in the host's name, naming CAUSE: a
+// merge's test gate whose runner could not be built or started. The pause
+// suspends the merge whose gate it was, as any pause does, and stands until
+// it is resumed; the merge's gate then runs again from its start, with no
+// fixing attempt spent. A queue already paused is left as it stands: its
+// pause suspends the merge the same way.
+func (o *orchestrator) holdForHostFault(ctx context.Context, repo wsm.RepoKey, cause string) error {
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserHost, Cause: cause}}
+	return o.pauseRepos(ctx, "daemon.merge.pause", []wsm.RepoKey{repo}, pause, true)
 }
 
 // HardStop pauses the queues SCOPE names as Pause does, and stops the work

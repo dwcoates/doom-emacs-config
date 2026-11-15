@@ -239,7 +239,15 @@ type UpdateMergeQueuePause struct {
 	// hard stop interrupted is prompted again without spending an attempt.
 	// A hard stop of a queue already paused is not refused as already_paused:
 	// it stops the work the earlier pause left running. (Added 2026-10-26.)
-	Hard          bool `protobuf:"varint,2,opt,name=hard,proto3" json:"hard,omitempty"`
+	Hard bool `protobuf:"varint,2,opt,name=hard,proto3" json:"hard,omitempty"`
+	// TRUE for a pause made TO LAND A CHANGE: the queue bypass holder pausing
+	// the queue while it lands directly. Only such a pause is let through by
+	// the holder's end-of-turn resume. A pause without it -- one the owner
+	// asked for, to save power or to look at the queue -- stands until it is
+	// resumed explicitly, whoever made it (2026-11-14: the let-through resumed
+	// a pause the owner had asked for, and the queue ran overnight). (Added
+	// 2026-11-15.)
+	ToLand        bool `protobuf:"varint,3,opt,name=to_land,json=toLand,proto3" json:"to_land,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -284,6 +292,13 @@ func (x *UpdateMergeQueuePause) GetRepository() *v1.RepositoryRef {
 func (x *UpdateMergeQueuePause) GetHard() bool {
 	if x != nil {
 		return x.Hard
+	}
+	return false
+}
+
+func (x *UpdateMergeQueuePause) GetToLand() bool {
+	if x != nil {
+		return x.ToLand
 	}
 	return false
 }
@@ -1580,12 +1595,13 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\trequester\x18\r \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequesterB\b\n" +
 	"\x06actionJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
-	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x05frontR\rhold_rolloutsR\x10release_rolloutsR\tsubscribeR\vunsubscribeR\x0edisable_racingR\renable_racing\"|\n" +
+	"\x10\vJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x05frontR\rhold_rolloutsR\x10release_rolloutsR\tsubscribeR\vunsubscribeR\x0edisable_racingR\renable_racing\"\x95\x01\n" +
 	"\x15UpdateMergeQueuePause\x12@\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
 	"repository\x88\x01\x01\x12\x12\n" +
-	"\x04hard\x18\x02 \x01(\bR\x04hardB\r\n" +
+	"\x04hard\x18\x02 \x01(\bR\x04hard\x12\x17\n" +
+	"\ato_land\x18\x03 \x01(\bR\x06toLandB\r\n" +
 	"\v_repository\"i\n" +
 	"\x16UpdateMergeQueueResume\x12@\n" +
 	"\n" +

@@ -211,6 +211,35 @@ func TestAnOrdinaryPauseIsNoHardStop(t *testing.T) {
 	}
 }
 
+func TestAPauseCarriesWhetherItWasMadeToLand(t *testing.T) {
+	tests := []struct {
+		name   string
+		toLand bool
+	}{
+		{name: "a pause to land a change", toLand: true},
+		{name: "a pause the owner asked for"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			if _, err := h.Client.UpdateMergeQueue(context.Background(),
+				connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+					Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{ToLand: tt.toLand}},
+				})); err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+
+			// Assert.
+			if h.Merge.pauser == nil || h.Merge.pauser.ToLand != tt.toLand {
+				t.Fatalf("pauser = %+v, want to_land %v", h.Merge.pauser, tt.toLand)
+			}
+		})
+	}
+}
+
 // TestUnknownRepositoryIsAnAnswer pins the landed arm: a pause naming no
 // registered repository answers UpdateMergeQueueError.unknown_repository.
 func TestUnknownRepositoryIsAnAnswer(t *testing.T) {

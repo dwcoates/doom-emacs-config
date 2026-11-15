@@ -2240,9 +2240,10 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
 		repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
-		hard := false
+		hard, toLand := false, false
 		if pause {
 			fs.BoolVar(&hard, "hard", false, "a hard stop: also interrupt the turns the queue's merges drive")
+			fs.BoolVar(&toLand, "to-land", false, "a pause made to land a change, which the queue bypass holder's turn end lets through; without it the pause stands until resumed")
 		}
 		if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
 			return exitFailure
@@ -2253,7 +2254,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		}
 		req := &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: scope}}}
 		if pause {
-			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope, Hard: hard}}
+			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope, Hard: hard, ToLand: toLand}}
 		}
 		return c.updateMergeQueue(req)
 	}

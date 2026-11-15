@@ -71,6 +71,8 @@ func TestMergeQueuePauseRoundTripsItsRecord(t *testing.T) {
 	}{
 		{name: "the user's pause", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserUser}}},
 		{name: "a workspace's hard stop", pause: MergeQueuePause{At: instant.Add(time.Minute), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom", Workspace: "w-doom"}, Hard: true}},
+		{name: "a workspace's pause to land a change", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom", Workspace: "w-doom"}, ToLand: true}},
+		{name: "the host's pause for its fault", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserHost, Cause: "too many open files in system"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,7 +91,7 @@ func TestMergeQueuePauseRoundTripsItsRecord(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MergeQueuePause: %v", err)
 			}
-			if got == nil || !got.At.Equal(tt.pause.At) || got.By != tt.pause.By || got.Hard != tt.pause.Hard {
+			if got == nil || !got.At.Equal(tt.pause.At) || got.By != tt.pause.By || got.Hard != tt.pause.Hard || got.ToLand != tt.pause.ToLand {
 				t.Fatalf("pause = %+v, want %+v", got, tt.pause)
 			}
 		})
@@ -157,8 +159,8 @@ func TestMergeQueuePauseReadsAPauseWrittenBeforeItsRecordAsUnrecorded(t *testing
 	if err != nil {
 		t.Fatalf("MergeQueuePause: %v", err)
 	}
-	if got == nil || !got.At.IsZero() || got.By.Kind != MergeQueuePauserUnrecorded || got.Hard {
-		t.Fatalf("pause = %+v, want an unrecorded pause", got)
+	if got == nil || !got.At.IsZero() || got.By.Kind != MergeQueuePauserUnrecorded || got.Hard || got.ToLand {
+		t.Fatalf("pause = %+v, want an unrecorded pause not made to land", got)
 	}
 }
 
@@ -191,6 +193,8 @@ func TestSetMergeQueuePausedRefusesAMalformedRecordAndWritesNothing(t *testing.T
 		{name: "no pauser", pause: MergeQueuePause{At: instant}},
 		{name: "a workspace with no name", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Workspace: "w-id"}}},
 		{name: "a workspace with no id", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom"}}},
+		{name: "the host with no cause", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserHost}}},
+		{name: "the host's pause made to land", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserHost, Cause: "no runner"}, ToLand: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

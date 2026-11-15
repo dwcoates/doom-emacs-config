@@ -2447,6 +2447,34 @@ func TestPauseSendsHardOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestPauseSendsToLandOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "a pause to land a change", args: []string{"pause", "-repository", "here", "-to-land"}, want: true},
+		{name: "a pause the owner asked for", args: []string{"pause", "-repository", "here"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetPause().GetToLand(); got != tt.want {
+				t.Fatalf("to_land = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResumeTakesNoHardFlag(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()

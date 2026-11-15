@@ -14,6 +14,7 @@ import (
 	"agentrepl/testrun/seatwait"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // streamingGate scripts one passing gate run that announces each suite.
@@ -689,5 +690,154 @@ func TestAGatesCommandNamesTheRequestingWorkspace(t *testing.T) {
 	defer h.mu.Unlock()
 	if len(h.gateWorkspaces) == 0 || h.gateWorkspaces[0] != "ws-one" {
 		t.Fatalf("the gate's commands named %v, want the requesting workspace ws-one", h.gateWorkspaces)
+	}
+}
+
+// runnerUnavailable scripts a gate whose runner could not be built
+// (bin/test-all.sh RUNNER_UNAVAILABLE), as the 2026-11-14 20:47:31 run of
+// resolved-vendor-notices-clear printed it.
+var runnerUnavailable = scriptedRun{Code: gateRunnerUnavailable, Output: "" +
+	"go/src/crypto/tls/handshake_client.go:14:2: open go/src/crypto/internal/fips140/tls13/cast.go: too many open files in system\n" +
+	"[agent-repl-tests] ERROR: building the test runner in /w/modules/app/agent-repl/testrun failed\n"}
+
+// hostFaulted runs the head's gate to a runner that could not be built, and
+// answers once the hold's pause has let the run go.
+func hostFaulted(t *testing.T) *chain {
+	t.Helper()
+	c := newChain(t)
+	c.runner.script(c.dirs[theWorkspace], runnerUnavailable)
+	enqueue(t, c.h)
+	if err := <-admitAsync(c.h, context.Background()); err != nil {
+		t.Fatalf("pumpOnce: %v", err)
+	}
+	return c
+}
+
+func TestAGateWhoseRunnerCannotBeBuiltHoldsTheQueueInTheHostsName(t *testing.T) {
+	// Arrange, Act.
+	c := hostFaulted(t)
+
+	// Assert.
+	c.h.db.mu.Lock()
+	pause := c.h.db.pauses[c.h.repoKey()]
+	c.h.db.mu.Unlock()
+	if pause == nil || pause.By.Kind != wsm.MergeQueuePauserHost || !strings.Contains(pause.By.Cause, "too many open files in system") || pause.ToLand {
+		t.Fatalf("pause = %+v, want the host's pause naming the cause", pause)
+	}
+}
+
+func TestAGateWhoseRunnerCannotBeBuiltSpendsNoFixingAttempt(t *testing.T) {
+	// Arrange, Act.
+	c := hostFaulted(t)
+
+	// Assert.
+	for _, f := range c.h.footer.all() {
+		if f.Step == "fixing" || f.State == StateFailed {
+			t.Fatalf("facts %+v: the host's fault was taken as the branch's", f)
+		}
+	}
+	queued, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+	if err != nil || len(queued) != 1 || queued[0].State != wsm.MergeAdmitted {
+		t.Fatalf("queue = (%v, %v), want the merge still admitted in line", queued, err)
+	}
+}
+
+func TestAGateWhoseRunnerCannotBeBuiltIsRecordedAtErrorNamingTheCause(t *testing.T) {
+	// Arrange, Act.
+	c := hostFaulted(t)
+
+	// Assert.
+	rec, ok := c.h.recordFor("error", "daemon.merge.tests")
+	if !ok || rec.Context["verdict"] != "host_fault" || !strings.Contains(rec.Context["cause"].(string), "too many open files in system") ||
+		!strings.Contains(rec.Context["cause"].(string), "building the test runner") {
+		t.Fatalf("ERROR record = %+v (%v), want the host's fault naming its cause", rec, ok)
+	}
+}
+
+func TestAGateTheHostHeldRunsAgainFromItsStartOnceTheQueueIsResumed(t *testing.T) {
+	// Arrange.
+	c := hostFaulted(t)
+
+	// Act.
+	if err := c.h.o.Unpause(context.Background(), nil); err != nil {
+		t.Fatalf("Unpause: %v", err)
+	}
+	c.promote(t)
+
+	// Assert.
+	if ran := c.runner.ran(c.dirs[theWorkspace]); ran != 2 {
+		t.Fatalf("gate ran %d times, want the faulted run and its rerun", ran)
+	}
+	if got := c.git.landedOwn(); len(got) != 1 {
+		t.Fatalf("landings %v, want the merge landed once", got)
+	}
+}
+
+func TestAGateWhoseRunnerCannotBeStartedHoldsTheQueueInTheHostsName(t *testing.T) {
+	// Arrange.
+	c := newChain(t)
+	c.runner.script(c.dirs[theWorkspace], scriptedRun{Err: errors.New("fork/exec bash: too many open files")})
+	enqueue(t, c.h)
+
+	// Act.
+	if err := <-admitAsync(c.h, context.Background()); err != nil {
+		t.Fatalf("pumpOnce: %v", err)
+	}
+
+	// Assert.
+	c.h.db.mu.Lock()
+	pause := c.h.db.pauses[c.h.repoKey()]
+	c.h.db.mu.Unlock()
+	if pause == nil || pause.By.Kind != wsm.MergeQueuePauserHost || !strings.Contains(pause.By.Cause, "could not be started") {
+		t.Fatalf("pause = %+v, want the host's pause naming the start's failure", pause)
+	}
+}
+
+func TestAHoldThatCannotBeWrittenFailsTheMergeLoudly(t *testing.T) {
+	// Arrange.
+	c := newChain(t)
+	c.runner.script(c.dirs[theWorkspace], runnerUnavailable)
+	c.h.db.mu.Lock()
+	c.h.db.pauseWriteErr = errors.New("db gone")
+	c.h.db.mu.Unlock()
+	enqueue(t, c.h)
+
+	// Act.
+	<-admitAsync(c.h, context.Background())
+
+	// Assert.
+	if !c.recorded("error", "daemon.merge.tests", "could not hold the queue for the host's fault") {
+		t.Fatal("the hold's failure was not recorded at ERROR")
+	}
+	c.h.db.mu.Lock()
+	defer c.h.db.mu.Unlock()
+	if c.h.db.paused[c.h.repoKey()] {
+		t.Fatal("a hold that could not be written left the queue paused")
+	}
+}
+
+func TestRunnerUnavailableCauseNamesWhatTheRunnerHit(t *testing.T) {
+	tests := []struct {
+		name string
+		tail string
+		want string
+	}{
+		{name: "the descriptor table full", tail: runnerUnavailable.Output,
+			want: "go/src/crypto/tls/handshake_client.go:14:2: open go/src/crypto/internal/fips140/tls13/cast.go: too many open files in system; [agent-repl-tests] ERROR: building the test runner in /w/modules/app/agent-repl/testrun failed"},
+		{name: "no go on PATH", tail: "[agent-repl-tests] ERROR: go is not on PATH; the test runner (testrun) is a Go program\n",
+			want: "[agent-repl-tests] ERROR: go is not on PATH; the test runner (testrun) is a Go program"},
+		{name: "a tail naming nothing", tail: "\n", want: "the test runner could not be built or started (exit 75)"},
+		{name: "only the last three lines", tail: "ERROR a\nERROR b\nERROR c\nERROR d\n", want: "ERROR b; ERROR c; ERROR d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := runnerUnavailableCause(tt.tail)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("cause = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -2056,6 +2056,14 @@ carrying it is an unknown field."
                             :by)
                  '(:arm :user :value t))))
 
+(ert-deftest agent-repl-test-wire-roster-the-hosts-pause-decodes-its-cause ()
+  "The host's pause decodes its pauser as the host arm carrying its cause."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-paused
+                             "{\"by\":{\"host\":{\"cause\":\"too many open files\"}}}")
+                            :by)
+                 '(:arm :host :value "too many open files"))))
+
 (ert-deftest agent-repl-test-wire-roster-a-pauser-with-no-arm-is-a-breach ()
   "A pauser names who paused the queue; an unset one is refused."
   (should (equal (agent-repl-test-wire-roster--breach

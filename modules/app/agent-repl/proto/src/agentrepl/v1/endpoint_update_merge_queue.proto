@@ -75,6 +75,14 @@ message UpdateMergeQueuePause {
   // A hard stop of a queue already paused is not refused as already_paused:
   // it stops the work the earlier pause left running. (Added 2026-10-26.)
   bool hard = 2;
+  // TRUE for a pause made TO LAND A CHANGE: the queue bypass holder pausing
+  // the queue while it lands directly. Only such a pause is let through by
+  // the holder's end-of-turn resume. A pause without it -- one the owner
+  // asked for, to save power or to look at the queue -- stands until it is
+  // resumed explicitly, whoever made it (2026-11-14: the let-through resumed
+  // a pause the owner had asked for, and the queue ran overnight). (Added
+  // 2026-11-15.)
+  bool to_land = 3;
 }
 message UpdateMergeQueueResume {
   // WHICH repository's queue. UNSET = every repository that has a queue

@@ -433,6 +433,9 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		})
 		return decision, nil
 	}
+	if q.heldBehindMergeLocked(ctx, d, existing, log) {
+		return decision, nil
+	}
 	decision.Now = true
 	decision.Forced = !free
 	if decision.Forced {
@@ -699,10 +702,49 @@ func (q *queue) checkRegistryLocked(d *delivery, edge freenessEdge, log dlog.Log
 		})
 		return false
 	}
+	if q.heldBehindMergeLocked(context.Background(), d, pending, log) {
+		return false
+	}
 	log.Info(opBounce, "the workspace's work ended; taking its registered bounce now", dlog.Context{
 		"reason": pending.reason(),
 	})
 	return q.startBounceLocked(d, log)
+}
+
+// heldBehindMergeLocked reports whether PENDING may not be taken now because
+// the stage it would run first is a replacement that waits behind a merge
+// (bounce.Request.WaitsBehindMerge) and a merge's lease holds the workspace.
+// Such a bounce stays registered, the workspace is never drained for it, and
+// the lease's release takes it (OnLeaseChanged's lease edge): what the merge
+// drives the session with -- its own turns, delivered past its holding lease
+// -- never waits on a bounce that waits on the merge.
+//
+// A lease that cannot be read takes nothing: the bounce stays registered, the
+// failure is recorded at ERROR, and the next edge judges it again. The caller
+// holds the delivery lock (d).
+func (q *queue) heldBehindMergeLocked(ctx context.Context, d *delivery, pending *pendingBounce, log dlog.Logger) bool {
+	q.mu.Lock()
+	stage := pending.replace
+	waits := stage != nil && !stage.started && stage.req.WaitsBehindMerge && !stage.req.Force
+	reason := pending.reason()
+	q.mu.Unlock()
+	if !waits {
+		return false
+	}
+	lease, held, err := q.deps.DB.Lease(ctx, d.ws)
+	if err != nil {
+		log.Error(opBounce, "could not read the occupancy lease before taking a bounce that waits behind a merge; it stays registered for the next edge", dlog.Context{
+			"reason": reason, "cause": err.Error(),
+		})
+		return true
+	}
+	if !held || lease.Holder != wsm.HolderMerge {
+		return false
+	}
+	log.Info(opBounce, "a merge's lease holds the workspace; the bounce stays registered, the workspace is not drained, and the lease's release takes it", dlog.Context{
+		"reason": reason, "lease": string(lease.ID),
+	})
+	return true
 }
 
 // decideBounceLocked takes a registered bounce whose decision a shim call
@@ -732,6 +774,8 @@ func (q *queue) decideBounceLocked(d *delivery, log dlog.Logger) bool {
 		log.Info(opBounce, "a dispatch-quiet move deferred behind a shim call: moving the workspace now; the work in flight runs on through the move", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
 		})
+	case free && q.heldBehindMergeLocked(context.Background(), d, pending, log):
+		return false
 	case free:
 		log.Info(opBounce, "a bounce deferred behind a shim call: the workspace is free; bouncing it now", dlog.Context{"reason": pending.reason()})
 	case force:
@@ -1159,27 +1203,34 @@ func (q *queue) resumeDispatchLocked(ctx context.Context, d *delivery, log dlog.
 
 // releaseDrainHoldsLocked un-stamps the build-refresh holds the drain put on
 // submissions that arrived while the bounce ran, so the resumed dispatch can
-// deliver them. A holding lease that still stands keeps them: it is that
-// lease's release that lets them go. It reports whether dispatch may resume.
+// deliver them. A holding lease that still stands keeps every one it does not
+// exempt: it is that lease's release that lets them go. It reports whether
+// dispatch may resume.
+//
+// DISPATCH RESUMES UNDER A HOLDING LEASE TOO. The pop decides from the lease
+// itself (nextDeliverable), so it delivers only what the lease exempts -- the
+// lease holder's own turns. A drain that ended under a merge's lease and
+// popped nothing left the merge's own held turn undelivered on an idle
+// workspace, and the merge waited on it for hours (2026-11-14, doom).
 func (q *queue) releaseDrainHoldsLocked(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) bool {
 	lease, held, err := q.deps.DB.Lease(ctx, ws)
 	if err != nil {
 		log.Error(opBounce, "could not read the occupancy lease before resuming dispatch", dlog.Context{"cause": err.Error()})
 		return false
 	}
-	if held && lease.Policy == wsm.PolicyHold {
-		log.Debug(opBounce, "a holding lease still stands; its release delivers what the drain held",
-			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
-		return false
-	}
+	holding := held && lease.Policy == wsm.PolicyHold
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		log.Error(opBounce, "could not read the holds the drain stamped", dlog.Context{"cause": err.Error()})
 		return false
 	}
-	released := 0
+	released, kept := 0, 0
 	for _, h := range standing {
 		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldBuildRefresh {
+			continue
+		}
+		if holding && !exemptFromLease(lease, submissionOf(h).Origin) {
+			kept++
 			continue
 		}
 		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, nil, ""); err != nil {
@@ -1194,6 +1245,10 @@ func (q *queue) releaseDrainHoldsLocked(ctx context.Context, ws ids.WorkspaceID,
 		if err := q.pushTray(ctx, ws, log); err != nil {
 			return false
 		}
+	}
+	if kept > 0 {
+		log.Debug(opBounce, "a holding lease still stands; its release delivers what the drain held that it does not exempt",
+			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder), "kept": kept})
 	}
 	return true
 }

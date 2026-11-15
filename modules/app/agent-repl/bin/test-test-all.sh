@@ -378,10 +378,10 @@ test_a_failed_build_fails_before_anything_runs() {
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     STUB_GO_FAIL=1 run_test_all "$tree" "$(stub_path "$tree")"
-    if [ "$RUN_RC" -eq 1 ] &&
+    if [ "$RUN_RC" -eq 75 ] &&
         grep -q 'ERROR: building the test runner in .*/testrun failed' "$tree/stdout" &&
         ! grep -qE '^(safe|testrun)' "$STUB_LOG"; then
-        pass "a runner that does not build fails the run before any suite"
+        pass "a runner that does not build fails the run before any suite, as the runner unavailable (75)"
     else
         fail "build failure (rc=$RUN_RC): $(cat "$tree/stdout") / $(cat "$STUB_LOG")"
     fi
@@ -393,8 +393,8 @@ test_no_go_toolchain_fails_loudly() {
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_tree "$tree"
     run_test_all "$tree" "/usr/bin:/bin"
-    if [ "$RUN_RC" -eq 1 ] && grep -q 'ERROR: go is not on PATH' "$tree/stdout" && [ ! -s "$STUB_LOG" ]; then
-        pass "a host without go fails loudly before anything runs"
+    if [ "$RUN_RC" -eq 75 ] && grep -q 'ERROR: go is not on PATH' "$tree/stdout" && [ ! -s "$STUB_LOG" ]; then
+        pass "a host without go fails loudly before anything runs, as the runner unavailable (75)"
     else
         fail "missing go (rc=$RUN_RC): $(cat "$tree/stdout")"
     fi
