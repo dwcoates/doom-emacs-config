@@ -1701,6 +1701,9 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 }
 #ws-sidebar .sb-deploys-more[hidden] { display: none; }
 
+/* A ROW'S CHILD COUNT (owner request, 2026-11-15) is a subsection header's
+   count: slightly smaller, in the muted grey, never shrunk away by a long name. */
+#ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--muted); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
    headers' ink while unviewed, the muted grey once viewed (below), and a cold

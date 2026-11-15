@@ -29,6 +29,7 @@ import { addRowMemory, showRowMemory } from "./memory.js";
 import { createControl } from "../control.js";
 import { renameOnDoubleClick } from "./rename.js";
 import { wireChildrenFold } from "./children-fold.js";
+import { drawChildCount } from "./child-count.js";
 import type {
   RosterRow,
   RosterRowAttention,
@@ -381,6 +382,9 @@ export function drawRosterRow(
   drawNameInk(label, name);
   if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
+  // A ROW WITH MANY CHILDREN SAYS HOW MANY, in grey after its name.
+  const childCount = place === "grouping" ? drawChildCount(kin) : undefined;
+  if (childCount !== undefined) line.appendChild(childCount);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at
   // all rather than an empty element holding its place.
