@@ -119,6 +119,14 @@ test_build_caches_are_skipped() {
     report "vite's caches and the typecheck's state are skipped" $c $ok
 }
 
+test_build_output_is_skipped() {
+    local c=build ok=0
+    file $c notifier/.build/debug/output-file-map.json "$FAKE_HOME"
+    act $c
+    [ "$RUN_RC" -eq 0 ] && ok=1
+    report "SwiftPM's .build output is skipped" $c $ok
+}
+
 test_lineage_root_line_is_skipped() {
     local c=lineage ok=0
     file $c skills/x/SKILL.md '---
@@ -151,6 +159,7 @@ test_names_are_opt_in
 test_docs_reports_are_skipped_but_the_user_guide_is_not
 test_build_caches_are_skipped
 test_lineage_root_line_is_skipped
+test_build_output_is_skipped
 test_real_module_is_clean
 
 harness_finish

@@ -19,9 +19,10 @@
  *
  * WHAT IS SKIPPED. docs/ except docs/USER-GUIDE.md (dated reports are a
  * historical record and are not rewritten), node_modules, dist, coverage,
- * .vite-cache, .typecheck-cache and .git directories, binary files, and a
- * skill's `lineage_root:` line (the GNS address a skill was first published
- * under, kept as published).
+ * .vite-cache, .typecheck-cache, .build (SwiftPM's build output, which
+ * records absolute paths) and .git directories, binary files, and a skill's
+ * `lineage_root:` line (the GNS address a skill was first published under,
+ * kept as published).
  *
  * Usage:
  *   bin/check-personal-values.mjs [ROOT]
@@ -41,7 +42,7 @@ import { envList, personalValuesFromHost } from "../agent-shim/claude/shim/scrip
 // Build output, never written by hand: vite's and vitest's caches
 // (webapp/vite-cache.ts) and the incremental typecheck's state
 // (testrun/internal/typecheck), which record the paths they were built at.
-const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".vite-cache", ".typecheck-cache"]);
+const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", "coverage", ".vite-cache", ".typecheck-cache", ".build"]);
 
 /** Every file under root the check reads, as paths relative to root. */
 function filesUnder(root, rel = "") {
