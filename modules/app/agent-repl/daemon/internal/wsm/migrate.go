@@ -61,10 +61,13 @@ type migration struct {
 // changed) would break the incumbent's statements mid-flight, so it needs
 // the incumbent gone first: the deploy restarts across it.
 //
-// A BREAKING CHANGE IS SHIPPED AS TWO DEPLOYS WHENEVER IT CAN BE: an additive
-// step that adds the new shape beside the old (the code writes both and reads
-// the new), then, once no running build reads the old shape, the breaking
-// step that drops it. Only the second is a restart.
+// A CHANGE THAT WOULD BREAK IS SHIPPED AS AN ADDITIVE STEP AND A CONTRACT
+// STEP: the additive step adds the new shape beside the old (the code writes
+// both and reads the new), and the contract step drops the old shape once no
+// running build reads it, which the successor does itself when its incumbent
+// exits (MigrationContract). Neither is a restart: every deploy is a handover,
+// and the two daemons serve side by side for as long as a busy turn holds the
+// old one.
 type MigrationKind int
 
 // The migration kinds. The zero value is no kind at all, which the guard test
@@ -73,9 +76,27 @@ const (
 	migrationUnmarked MigrationKind = iota
 	// MigrationAdditive is a step the previous build keeps working across.
 	MigrationAdditive
-	// MigrationBreaking is a step the previous build cannot survive.
+	// MigrationBreaking is a step the previous build cannot survive. NO NEW
+	// STEP IS BREAKING (owner ruling, 2026-11-15): a breaking step forced a
+	// stop-then-start deploy that waited on every busy turn, and the 0.443
+	// restart held every workspace for 8 minutes. A change that would break
+	// is an additive step now and a MigrationContract step for what it
+	// retires (TestNoStepPastTheLastBreakingOneBreaks).
 	MigrationBreaking
+	// MigrationContract is a step that only removes or rewrites a shape no
+	// build still running reads: a dropped column, a rekeyed table the code
+	// already stopped reading. It runs only on a handle no predecessor shares
+	// -- a fresh boot's, or a successor's once the incumbent has exited
+	// (DB.ApplyContracts) -- so a handover never waits on it. Contract steps
+	// come last in a build's run of new steps: an additive step after an
+	// unapplied contract could not run while the incumbent serves, and is
+	// refused (splitJoinable).
+	MigrationContract
 )
+
+// lastBreakingLayout is the To of the last breaking step this repository
+// ever shipped; every step past it is additive or a contract.
+const lastBreakingLayout = 141
 
 // String names the kind as the deploy's flag answer spells it.
 func (k MigrationKind) String() string {
@@ -84,6 +105,8 @@ func (k MigrationKind) String() string {
 		return "additive"
 	case MigrationBreaking:
 		return "breaking"
+	case MigrationContract:
+		return "contract"
 	default:
 		return "unmarked"
 	}
@@ -578,12 +601,51 @@ func ChainKind(from int) (MigrationKind, error) {
 
 // planKind is breaking when any step of plan is, additive otherwise.
 func planKind(plan []migration) MigrationKind {
+	if _, _, refusal := splitJoinable(plan); refusal != "" {
+		return MigrationBreaking
+	}
+	// A PLAN OF ADDITIVE STEPS AND TRAILING CONTRACTS IS ADDITIVE to the
+	// incumbent asking: its successor joins on the additive steps and runs
+	// the contracts once it serves alone. The incumbent may predate the
+	// contract kind, so it is never named to it.
+	return MigrationAdditive
+}
+
+// splitJoinable splits PLAN into the additive steps a joining successor
+// applies beside the incumbent and the trailing contract steps it applies
+// once the incumbent has exited, or answers why the plan cannot be joined: a
+// breaking step, or an additive step after a contract.
+func splitJoinable(plan []migration) (additive, contracts []migration, refusal string) {
 	for _, m := range plan {
-		if m.Kind != MigrationAdditive {
-			return MigrationBreaking
+		switch m.Kind {
+		case MigrationAdditive:
+			if len(contracts) > 0 {
+				return nil, nil, fmt.Sprintf("additive step %d (%s) follows a contract step, so it cannot run while the incumbent still reads what the contract removes", m.To, m.Name)
+			}
+			additive = append(additive, m)
+		case MigrationContract:
+			contracts = append(contracts, m)
+		default:
+			return nil, nil, fmt.Sprintf("step %d (%s) is breaking; it cannot run while the incumbent still writes the file", m.To, m.Name)
 		}
 	}
-	return MigrationAdditive
+	return additive, contracts, ""
+}
+
+// pendingContracts reports whether every step this build would apply to a
+// file at layout FROM is a contract step: the layout a successor that joined
+// and has not yet served alone stands at.
+func pendingContracts(from int) bool {
+	plan, ok := planMigrations(from)
+	if !ok {
+		return false
+	}
+	for _, m := range plan {
+		if m.Kind != MigrationContract {
+			return false
+		}
+	}
+	return true
 }
 
 // migrateForward carries an existing file from its stamped layout up to this
@@ -593,8 +655,14 @@ func planKind(plan []migration) MigrationKind {
 // step leaves both the original file (rolled back, untouched) and a copy of it
 // as it stood before any step ran. Every refusal here names that copy.
 func (s *store) migrateForward(ctx context.Context, from int) error {
-	const op = "daemon.wsm.open"
 	plan, ok := planMigrations(from)
+	return s.migrateSteps(ctx, from, plan, ok)
+}
+
+// migrateSteps applies PLAN, the steps from layout FROM (OK says a chain from
+// FROM exists at all), as migrateForward says.
+func (s *store) migrateSteps(ctx context.Context, from int, plan []migration, ok bool) error {
+	const op = "daemon.wsm.open"
 	if !ok {
 		refusal := &LayoutError{
 			Path:   s.path,

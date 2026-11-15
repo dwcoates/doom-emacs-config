@@ -1275,6 +1275,15 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// the proof the outgoing daemon has stopped writing (it released its boot
 	// claim by exiting), so this is the moment the one-writer invariant moves.
 	promoted := c.promoteAtTakeover(fields)
+	// THE CONTRACT STEPS THE JOIN LEFT run now: the outgoing daemon is gone,
+	// so no running build reads what they remove (wsm.MigrationContract). A
+	// step that fails leaves the file as it was, rolled back and recorded by
+	// the store; this daemon serves on the shapes it reads either way.
+	if promoted {
+		if err := c.deps.DB.ApplyContracts(c.lifetime(context.Background())); err != nil {
+			c.log.Error(opAdopt, "the contract steps the join left could not be applied; they are applied at the next boot", dlog.WithCause(fields, err))
+		}
+	}
 	c.adoptStragglers(fields)
 	if promoted {
 		c.recoverOrphans(fields)

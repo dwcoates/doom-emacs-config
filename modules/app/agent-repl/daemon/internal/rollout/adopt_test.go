@@ -2652,3 +2652,57 @@ func TestASettledTakeoverTellsServingSettledAfterItsLatch(t *testing.T) {
 		t.Fatalf("awaitTakeoverSettled: %v", err)
 	}
 }
+
+// contractsDB records each ApplyContracts the takeover asks, failing it with
+// err when set.
+type contractsDB struct {
+	wsm.DB
+	mu      sync.Mutex
+	applied int
+	err     error
+}
+
+func (d *contractsDB) ApplyContracts(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.applied++
+	return d.err
+}
+
+func TestTheTakeoverAppliesTheContractStepsTheJoinLeft(t *testing.T) {
+	// Arrange
+	var db *contractsDB
+	h := newHarness(t, func(d *Deps) {
+		db = &contractsDB{DB: d.DB}
+		d.DB = db
+	})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.applied != 1 {
+		t.Fatalf("ApplyContracts was asked %d times, want once at the takeover", db.applied)
+	}
+}
+
+func TestATakeoverWhoseContractStepsFailSaysSoAndGoesOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.DB = &contractsDB{DB: d.DB, err: errors.New("a contract step was rolled back")}
+	})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAdopt,
+		Message: "the contract steps the join left could not be applied; they are applied at the next boot"}); !found {
+		t.Fatalf("the failed contract steps were not recorded at ERROR: %+v", h.log.Records())
+	}
+	if calls := h.merges.called(); !slices.Contains(calls, "review") {
+		t.Fatalf("merge calls = %v, want the takeover to go on past the failed contracts", calls)
+	}
+}

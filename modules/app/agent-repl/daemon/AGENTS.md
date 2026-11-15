@@ -1816,18 +1816,29 @@ replaced by the restart verb that joined it, the restart ran on the outgoing
 daemon, the transfer's requester was told it had finished, and the daemon
 exited without ever pushing that workspace's transfer notice.
 
-## A breaking state layout change is rolled out stop-then-start; an additive one is handed over
+## Every state layout change is handed over: additive steps at the join, contract steps once the successor serves alone
 
 Every step in `internal/wsm/migrate.go` declares its `Kind`
-(`wsm.MigrationAdditive` or `wsm.MigrationBreaking`), and
-`TestEveryMigrationDeclaresItsKind` fails a step that does not. ADDITIVE means
-the build before the step keeps working against the migrated file: a new
-table, a new column with a default or NULL, a backfill of a value the old build
-never reads. BREAKING is anything else: a dropped or renamed column or table, a
-column whose meaning changed. A breaking change is shipped as two deploys
-whenever it can be: an additive step that adds the new shape beside the old
-(the code writes both and reads the new), then, once no running build reads the
-old shape, the breaking step that drops it. Only the second is a restart.
+(`wsm.MigrationAdditive`, `wsm.MigrationContract`, or the retired
+`wsm.MigrationBreaking`), and `TestEveryMigrationDeclaresItsKind` fails a step
+that does not. ADDITIVE means the build before the step keeps working against
+the migrated file: a new table, a new column with a default or NULL, a backfill
+of a value the old build never reads. CONTRACT means the step only removes or
+rewrites a shape no running build reads any more: a dropped column, a rekeyed
+table the code already stopped reading.
+
+NO NEW STEP IS BREAKING (owner ruling, 2026-11-15; `TestNoStepPastTheLastBreakingOneBreaks`).
+A breaking step forced a stop-then-start deploy that waited on every busy turn:
+the 0.443 restart held every workspace for 8 minutes. A change that would break
+is an additive step that adds the new shape beside the old (the code writes
+both and reads the new) and a contract step that drops the old. The joining
+successor applies the additive steps beside the incumbent and leaves the
+contract steps; its takeover applies them once the incumbent has exited
+(`wsm.DB.ApplyContracts`, `rollout` takeover), and a fresh boot applies them
+with the rest. Contract steps come last in a build's run of new steps: an
+additive step after an unapplied contract is refused at the join. So every
+deploy is a handover, and two daemons serve side by side for as long as a
+busy turn keeps a workspace on the old one.
 
 The deploy asks the STAGED daemon binary its layout (`agent-repld
 -layout-version`, `deploy.BinaryLayout`), and when it differs from the running
