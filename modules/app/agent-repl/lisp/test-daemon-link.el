@@ -2452,3 +2452,44 @@ announcement must still attach its own successor."
       ;; Assert
       (should-not (agent-repl-link-successor))
       (should (agent-repl-test-link--logged-p :log "elisp.link.successor-stream-cancelled")))))
+
+(ert-deftest agent-repl-test-link-closed-successor-does-not-block-the-announced-one ()
+  "A successor whose connection is closed is over: the announced one attaches."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (stale (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      (setf (agent-repl-connect-connection-alive-p stale) nil)
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9200")
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
+                     "127.0.0.1:9200"))
+      (should (agent-repl-test-link--logged-p :info "elisp.link.successor-dead-dropped"))
+      (should-not (agent-repl-test-link--logged-p :error "elisp.link.successor-address-changed")))))
+
+(ert-deftest agent-repl-test-link-primary-recorded-as-successor-does-not-block-the-announced-one ()
+  "A successor that is the primary itself is a breach: said at ERROR, dropped, and the announced one attaches."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (setq agent-repl-link--successor conn)
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9200")
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
+                     "127.0.0.1:9200"))
+      (should (agent-repl-test-link--logged-p :error "elisp.link.successor-was-primary-dropped"))
+      (should (eq (agent-repl-link-primary) conn)))))
+
+(ert-deftest agent-repl-test-link-successor-at-the-primarys-address-does-not-block-the-announced-one ()
+  "A second connection to the primary's daemon recorded as successor is dropped too."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (setq agent-repl-link--successor (agent-repl-connect-open "127.0.0.1:9001"))
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9200")
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
+                     "127.0.0.1:9200")))))

@@ -917,9 +917,28 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
      ((agent-repl-connect-connection-at-p live address)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address=%S announced=%S"
                         address (and announced t)))
+     ((and attached (not (agent-repl-connect-connection-alive-p attached)))
+      ;; A CLOSED SUCCESSOR BLOCKS NOTHING: its handover is over.
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-dead-dropped address=%S new=%S"
+                        (agent-repl-connect-connection-address attached) address)
+      (agent-repl-link--drop-standing-successor)
+      (agent-repl-link--attach-successor old address cause announced))
+     ((and attached live
+           (or (eq attached live)
+               (agent-repl-connect-connection-at-p
+                attached (agent-repl-connect-connection-address live))))
+      ;; THE PRIMARY RECORDED AS ITS OWN SUCCESSOR: the guard above makes it
+      ;; unrepresentable, so reaching here is a breach.  It is said at ERROR
+      ;; and dropped, because a handover no daemon will ever end must not
+      ;; refuse the real one.
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-was-primary-dropped address=%S new=%S"
+                         (agent-repl-connect-connection-address attached) address)
+      (agent-repl-link--drop-standing-successor)
+      (agent-repl-link--attach-successor old address cause announced))
      ((agent-repl-connect-connection-at-p attached address)
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-already-attached address=%S" address))
      ((and announced
+           attached
            (eq attached agent-repl-link--pending-successor)
            (eq old agent-repl-link--primary))
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-superseded old=%S new=%S"
@@ -931,6 +950,17 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
                          (agent-repl-connect-connection-address attached)
                          address))
      (t (agent-repl-link--dial-successor old address cause)))))
+
+(defun agent-repl-link--drop-standing-successor ()
+  "Forget the standing successor, accepted or pending, and close it.
+Its handover is over, so nothing may be guarded against it.  The close
+cancels its stream, which then matches no slot and is recorded stale."
+  (let ((conn (or agent-repl-link--successor agent-repl-link--pending-successor)))
+    (setq agent-repl-link--successor nil
+          agent-repl-link--successor-stream nil
+          agent-repl-link--pending-successor nil
+          agent-repl-link--pending-successor-stream nil)
+    (when conn (agent-repl-connect-close conn))))
 
 (defun agent-repl-link--drop-pending-successor ()
   "Close the unaccepted successor dial and forget it.
