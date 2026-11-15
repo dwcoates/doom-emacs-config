@@ -1351,7 +1351,7 @@ that follows must not care which of the two got there first."
       :sections (list (agent-repl-test-roster--section "repo" nil))))
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-roster-apply
          (agent-repl-test-roster--roster

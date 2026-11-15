@@ -1088,7 +1088,7 @@ test_install_never_runs_sudo_beyond_listing_a_sudo_grant() {
   new_case; manifest "[$GRANT]"
   fake_sudo_listing ""
   run install
-  if [ "$RC" -eq 1 ] && ! grep -v '^sudo -n -l$' "$CASE/transcript" | grep -q '^sudo' && has "needs-user  grant:"; then
+  if [ "$RC" -eq 1 ] && ! grep -q -e '^sudo' <<<"$(grep -v '^sudo -n -l$' "$CASE/transcript")" && has "needs-user  grant:"; then
     pass "install leaves a sudo grant to the user and runs sudo only to list"
   else fail "sudo grant install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }

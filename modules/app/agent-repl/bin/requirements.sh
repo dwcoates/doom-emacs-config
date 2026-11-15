@@ -620,7 +620,7 @@ sudo_grant_lines() {
 sudo_grant_fix() {
   local e="$1" line quoted=""
   while IFS= read -r line; do quoted="$quoted \"$line\""; done < <(sudo_grant_lines "$e")
-  printf '%s' "(f=\"\$(mktemp)\" && trap 'rm -f \"\$f\"' EXIT && u=\"\$(id -un)\" && for c in$quoted; do printf '%s ALL=(root) NOPASSWD: %s\\n' \"\$u\" \"\$c\"; done >\"\$f\" && sudo visudo -c -f \"\$f\" && sudo install -m 0440 -o root -g wheel \"\$f\" $SUDOERS_DIR/$(field "$e" .file))"
+  printf '%s' "(f=\"\$(mktemp \"\${TMPDIR:-/tmp}/agent-repl-sudoers.XXXXXX\")\" && trap 'rm -f \"\$f\"' EXIT && u=\"\$(id -un)\" && for c in$quoted; do printf '%s ALL=(root) NOPASSWD: %s\\n' \"\$u\" \"\$c\"; done >\"\$f\" && sudo visudo -c -f \"\$f\" && sudo install -m 0440 -o root -g wheel \"\$f\" $SUDOERS_DIR/$(field "$e" .file))"
 }
 
 check_sudo_grant() {
@@ -628,11 +628,11 @@ check_sudo_grant() {
   FIX="run this in a terminal; it asks for your password: $(sudo_grant_fix "$e")"
   if ! granted="$(sudo_nopasswd_commands)"; then
     STATUS=needs-user
-    DETAIL="sudo -n -l could not list your grants ($(printf '%s\n' "$granted" | head -n 1)), so none of $(sudo_grant_lines "$e" | paste -sd ',' - | sed 's/,/, /g') is granted"
+    DETAIL="sudo -n -l could not list your grants ($(sed -n 1p <<<"$granted")), so none of $(sudo_grant_lines "$e" | paste -sd ',' - | sed 's/,/, /g') is granted"
     return
   fi
   while IFS= read -r line; do
-    if ! printf '%s\n' "$granted" | grep -qxF -e "$line" -e "$(field "$e" .command)" -e ALL; then
+    if ! grep -qxF -e "$line" -e "$(field "$e" .command)" -e ALL <<<"$granted"; then
       missing="${missing:+$missing, }$line"
     fi
   done < <(sudo_grant_lines "$e")

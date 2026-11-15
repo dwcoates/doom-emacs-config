@@ -2006,7 +2006,9 @@ successor stream makes it, and the assertions read the walk\='s end."
                                 (agent-repl-itest-daemon-address successor)))
                (standing successor-conn)
                (conn-at-reload nil)
-               (agent-repl-connect-unary-timeout-seconds 0.3))
+               (agent-repl-connect-unary-timeout-seconds 0.3)
+               ;; The adopt runs under its own bound, so it is shrunk too.
+               (agent-repl-host-adopt-timeout-seconds 0.3))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () standing))

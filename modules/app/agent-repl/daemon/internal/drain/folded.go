@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"agent-repld/internal/bringup"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -78,22 +79,27 @@ func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 // withholds. It is the daemon's call once it owns every workspace it serves:
 // a fresh boot's settle and a successor's takeover (rollout.Deps.ServingSettled).
 // A read that fails is recorded at ERROR and resumes nothing; the next
-// collapse asks afresh.
+// collapse asks afresh. A read cut by this daemon's context ending (its exit
+// cancels the serving context under the settle) is recorded at INFO: nobody
+// is left to resume anything for.
 func (c *controller) ResumeFolded(ctx context.Context) {
 	log := c.log
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
-		log.Error(opFolded, "could not list the workspaces to resume the folds' stand-downs; none is resumed", dlog.WithCause(nil, err))
+		ctxend.Log(err, log.Info, log.Error, opFolded, "the workspaces' list for the folds' stand-downs ended with this daemon's context; none is resumed",
+			"could not list the workspaces to resume the folds' stand-downs; none is resumed", dlog.WithCause(nil, err))
 		return
 	}
 	folded, err := bringup.Folds(ctx, c.deps.DB, log)
 	if err != nil {
-		log.Error(opFolded, "could not read the folds to resume their stand-downs; none is resumed", dlog.WithCause(nil, err))
+		ctxend.Log(err, log.Info, log.Error, opFolded, "the folds' read for the folds' stand-downs ended with this daemon's context; none is resumed",
+			"could not read the folds to resume their stand-downs; none is resumed", dlog.WithCause(nil, err))
 		return
 	}
 	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
 	if err != nil {
-		log.Error(opFolded, "could not read the sessions to resume the folds' stand-downs; none is resumed", dlog.WithCause(nil, err))
+		ctxend.Log(err, log.Info, log.Error, opFolded, "the sessions' read for the folds' stand-downs ended with this daemon's context; none is resumed",
+			"could not read the sessions to resume the folds' stand-downs; none is resumed", dlog.WithCause(nil, err))
 		return
 	}
 	resumed, spared := []string{}, map[string]string{}

@@ -766,22 +766,11 @@ var ReadByNoSuite = []string{
 	"test-coverage-input.md", "test-coverage-keybindings.md", "test-coverage-notifications.md",
 	"test-coverage-overlay.md", "test-coverage-panels.md", "test-coverage-sentinel.md", "test-coverage-session.md",
 	"test-coverage-status.md", "test-coverage-worktree.md",
-	// The Wi-Fi helper app's Swift source, plist and build script: no suite
-	// builds or runs the app (the requirements harness tests app_build
-	// against its own fixture helper), and the daemon names only the built
-	// app's path.
-	"wifi-helper/",
 	// The owner's own Doom configuration, which no agent-repl suite loads.
 	"/config.el", "/init.el", "/packages.el", "/snippets/", "/modules/lang/", "/modules/config/", "/modules/app/chess/",
 	"/clean-emacs.sh", "/.claude-repl-history", "/.gitignore",
 	// The agents' sandbox's own state, which no suite reads.
 	"/.agents-sandbox/",
-	// The persistent-wifi helper app's sources: built by the installer and run
-	// only on the user's Mac (CoreWLAN under Location Services), which no
-	// suite can grant. The daemon's side of it is tested through a fake app
-	// (daemon/internal/persistentwifi); the helper itself is untested
-	// (org/todo.md).
-	"wifi-helper/",
 	// The repository's prose.
 	"/docs/", "/AGENTS.md", "/CLAUDE.md", "/README.md", "/SIDECAR-AUDIT-1.md", "/STORE-AUDIT-1.md",
 }

@@ -1945,9 +1945,9 @@ landing is never unset."
           (agent-repl-wire-verbs--decode-oneof
            message "landing" json
            (list (list 'queued :queued
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty "FinishWorkspaceSuccessQueued" v)))
+                       (agent-repl-wire-verbs--empty-arm "FinishWorkspaceSuccessQueued"))
                  (list 'landingDirectly :landing-directly
-                       (lambda (v) (agent-repl-wire-verbs--decode-empty "FinishWorkspaceSuccessLandingDirectly" v))))))))
+                       (agent-repl-wire-verbs--empty-arm "FinishWorkspaceSuccessLandingDirectly")))))))
 
 (defun agent-repl-wire-decode-finish-workspace-unknown-workspace (json)
   "Decode FinishWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id

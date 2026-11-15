@@ -2050,9 +2050,9 @@ Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
     (agent-repl--info ws "elisp.host.call-held ws=%s method=%s held=%d" ws method (length held))))
 
 (defun agent-repl-host--release-held (ws outcome &optional to)
-  "Send every call held for WS, in the order it was made: its adopt is OUTCOME.
-OUTCOME names how the hold ended (`adopted', `refused', `failed',
-`superseded', `withdrawn', `forgotten').  Each call goes to TO when given
+  "Send every call held for WS, in the order it was made.
+Its adopt is OUTCOME, which names how the hold ended (`adopted',
+`refused', `failed', `superseded', `withdrawn', `forgotten').  Each call goes to TO when given
 \(a retrying adopt names the daemon that still serves WS), and otherwise
 to the daemon WS stands on NOW (`agent-repl-host-conn-or-primary'): the
 successor once WS is adopted, the daemon it was put back on otherwise.  A call with no

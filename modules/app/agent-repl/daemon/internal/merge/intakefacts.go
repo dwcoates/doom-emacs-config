@@ -141,7 +141,7 @@ func RenderFindings(groups []FindingGroup) string {
 		if !g.New() {
 			standing = fmt.Sprintf("SEEN BEFORE (%d in the span before)", g.Before)
 		}
-		fmt.Fprintf(&b, "- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample)
+		b.WriteString(fmt.Sprintf("- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample))
 	}
 	return b.String()
 }
@@ -194,8 +194,8 @@ func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Med
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "the chain began at %s and has deployed %d remediations in a row; its last remediation workspace is %s.",
-		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys, last)
+	b.WriteString(fmt.Sprintf("the chain began at %s and has deployed %d remediations in a row; its last remediation workspace is %s.",
+		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys, last))
 	for _, f := range finishes {
 		if !sameQueue(f.Repo, q.key) || f.LandedHead == "" {
 			continue
@@ -204,7 +204,7 @@ func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Med
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&b, " %s landed %s, changing %s.", name, f.LandedHead, strings.Join(f.LandedPaths, ", "))
+		b.WriteString(fmt.Sprintf(" %s landed %s, changing %s.", name, f.LandedHead, strings.Join(f.LandedPaths, ", ")))
 	}
 	return b.String(), nil
 }

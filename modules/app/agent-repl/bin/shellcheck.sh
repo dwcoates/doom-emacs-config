@@ -50,7 +50,7 @@ is_script() {
         *.sh) return 0 ;;
     esac
     case "$1" in
-        */bin/* | */.githooks/*) head -n 1 "$1" | grep -Eq '^#!.*[/ ](ba)?sh( |$)' ;;
+        */bin/* | */.githooks/*) sed -n 1p "$1" | grep -E '^#!.*[/ ](ba)?sh( |$)' >/dev/null ;;
         *) return 1 ;;
     esac
 }

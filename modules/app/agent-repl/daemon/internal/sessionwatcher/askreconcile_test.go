@@ -96,7 +96,9 @@ func TestAttachRoutesTheAbandonedSettleDownTheLiveSettlesPath(t *testing.T) {
 		want []string
 	}{
 		{name: "a question", ask: openQuestion("q-1"), want: []string{"feed.OnQuestion", "footer.OnQuestion", "merge.OnQuestion", "asks.NeedsInput"}},
-		{name: "a consent ask", ask: openPermission("p-1"), want: []string{"feed.OnPermission", "footer.OnPermission", "sidebar.OnPermission", "merge.OnPermission", "asks.NeedsInput"}},
+		// The sidebar's edge is told after the watcher's lock is released
+		// (w.mu.later), so it comes after every edge told under the lock.
+		{name: "a consent ask", ask: openPermission("p-1"), want: []string{"feed.OnPermission", "footer.OnPermission", "merge.OnPermission", "asks.NeedsInput", "sidebar.OnPermission"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

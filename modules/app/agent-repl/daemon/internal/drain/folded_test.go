@@ -450,3 +450,37 @@ func TestResumeFoldedRecordsAFailedReadAndResumesNothing(t *testing.T) {
 		})
 	}
 }
+
+func TestResumeFoldedCutByTheDaemonsExitIsRecordedAtInfo(t *testing.T) {
+	cases := []struct {
+		name    string
+		db      func(wsm.DB) wsm.DB
+		message string
+	}{
+		{name: "the workspaces' list", db: func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, list: context.Canceled} },
+			message: "the workspaces' list for the folds' stand-downs ended with this daemon's context; none is resumed"},
+		{name: "the folds' read", db: func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, arrangement: context.Canceled} },
+			message: "the folds' read for the folds' stand-downs ended with this daemon's context; none is resumed"},
+		{name: "the sessions' read", db: func(db wsm.DB) wsm.DB { return resumeFailingDB{DB: db, sessions: context.Canceled} },
+			message: "the sessions' read for the folds' stand-downs ended with this daemon's context; none is resumed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a folded workspace with a running session, its daemon exiting.
+			f := newFoldedHarness(t)
+			f.collapsed(t)
+			f.c.deps.DB = tc.db(f.c.deps.DB)
+
+			// Act
+			f.c.ResumeFolded(context.Background())
+
+			// Assert
+			if _, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opFolded, Message: tc.message}); !ok {
+				t.Fatalf("no info record %q; records = %+v", tc.message, f.log.Records())
+			}
+			if rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: opFolded}); ok {
+				t.Fatalf("an exit's cut was recorded at ERROR: %+v", rec)
+			}
+		})
+	}
+}

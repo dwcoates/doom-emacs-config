@@ -65,6 +65,8 @@
 (declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
+(declare-function agent-repl--ws-tombstoned-p "workspace" (ws))
+(declare-function agent-repl--ws-forget "workspace" (ws))
 (declare-function agent-repl--ws-live-p "workspace" (ws))
 (declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-get "workspace" (ws key))

@@ -999,13 +999,13 @@ func TestOnActivityRendersOnlyWhenItChangesTheRowsFacts(t *testing.T) {
 			r := live(t, arrange(t))
 			r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
 			tt.before(r)
-			before := countOperation(r.surfaces.Records(), "daemon.sidebar.on_activity")
+			before := len(dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.on_activity"}))
 
 			// Act.
 			r.OnActivity(theWS, agent(tt.agent), tt.frame)
 
 			// Assert.
-			recorded := countOperation(r.surfaces.Records(), "daemon.sidebar.on_activity") > before
+			recorded := len(dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.on_activity"})) > before
 			if recorded != tt.wantRecord {
 				t.Fatalf("on_activity recorded = %v, want %v", recorded, tt.wantRecord)
 			}
@@ -1014,17 +1014,6 @@ func TestOnActivityRendersOnlyWhenItChangesTheRowsFacts(t *testing.T) {
 			}
 		})
 	}
-}
-
-// countOperation counts RECORDS whose operation is OP.
-func countOperation(records []dlog.Record, op string) int {
-	n := 0
-	for _, rec := range records {
-		if rec.Operation == op {
-			n++
-		}
-	}
-	return n
 }
 
 // TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary pins

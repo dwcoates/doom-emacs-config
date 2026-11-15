@@ -378,7 +378,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,e2e-kit,e2e" {
+	if strings.Join(got.Suites, ",") != "build-frontend-harness,ert,repo-scans,webapp,byte-compile,e2e-kit,e2e" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }

@@ -1071,6 +1071,12 @@ func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	}
 	d.closedFlags[id] = true
 	d.closures[id] = append(d.closures[id], closure)
+	// The record reads closed from here on, as the store's does, so a
+	// roster read after the close carries it closed.
+	if ws, ok := d.workspaces[id]; ok {
+		ws.Closed = true
+		d.workspaces[id] = ws
+	}
 	return nil
 }
 

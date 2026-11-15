@@ -175,9 +175,9 @@ func renderProblems(problems []DeployProblem) string {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "%d. %s\n", i+1, p.Statement)
+		b.WriteString(fmt.Sprintf("%d. %s\n", i+1, p.Statement))
 		for _, e := range p.Evidence {
-			fmt.Fprintf(&b, "   > %s\n", e)
+			b.WriteString(fmt.Sprintf("   > %s\n", e))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

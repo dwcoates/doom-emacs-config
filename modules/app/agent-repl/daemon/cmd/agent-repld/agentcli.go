@@ -712,8 +712,11 @@ func workspaceCreate(c *cliCall, args []string) int {
 		}
 		kind.Kind = &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}}
 	case "child":
+		if *parent == "" {
+			return c.usageFailed("a child names its -parent")
+		}
 		parentRef, ok := c.named(*parent)
-		if *parent == "" || !ok {
+		if !ok {
 			return c.usageFailed("a child names its -parent")
 		}
 		kind.Kind = &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parentRef}}

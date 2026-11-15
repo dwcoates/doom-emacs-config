@@ -3,9 +3,8 @@ package merge
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -2799,31 +2798,11 @@ func TestRetireLandedWorktreeTearsDownALandedWorkspace(t *testing.T) {
 // queue's merges and a remediation's direct landing share the one teardown:
 // a forced session stop appears nowhere in the package's sources but there.
 func TestEveryLandedTeardownGoesThroughRetireLandedWorktree(t *testing.T) {
-	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(src), "\n") {
-			if strings.Contains(line, ".StopSession(") && strings.Contains(line, ", true)") {
-				sites = append(sites, fmt.Sprintf("%s:%d", file, i+1))
-			}
-		}
-	}
+	sites := sourcescan.SitesMatching(t, regexp.MustCompile(`\.StopSession\([^\n]*, true\)`))
 
 	// Assert
-	if len(sites) != 1 || !strings.HasPrefix(sites[0], "terminal.go:") {
+	if !slices.Equal(sites, []string{"terminal.go"}) {
 		t.Fatalf("forced session stops at %v, want only retireLandedWorktree's", sites)
 	}
 }
