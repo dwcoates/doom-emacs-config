@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
   armedWheelAction,
+  bubbleNodeRevealed,
   collapseClicked,
   dragEdgeScroll,
   selectionRowScroll,
@@ -1610,6 +1611,17 @@ describe("revealGeometry", () => {
   });
 });
 
+describe("bubbleNodeRevealed", () => {
+  it("moves a bubble's box by the amount the node needs", () => {
+    // Arrange
+    const box = { scrollTop: 40 };
+    // Act
+    bubbleNodeRevealed(box, 70);
+    // Assert
+    expect(box.scrollTop).toBe(110);
+  });
+});
+
 describe("collapseClicked", () => {
   it("shows a collapsed section's preview from its top", () => {
     // Arrange — the reader left the expanded box scrolled.
@@ -1630,9 +1642,10 @@ describe("collapseClicked", () => {
  * shift -- and a hit fails here, so an implicit mover cannot come back quietly.
  * Inside scroll.ts, the writes are held to the named list: the tail owner's
  * two primitives, the reader's own wheel redirect, the reader's own
- * collapse click, the reader's own drag at the rail's edge, and the
- * reader's own switch to a workspace whose rail row is out of view. A bubble's
- * scroll box has no other writer.
+ * collapse click, a response node's reveal inside its capped bubble, the
+ * reader's own drag at the rail's edge, and the reader's own switch to a
+ * workspace whose rail row is out of view. A bubble's scroll box has no other
+ * writer.
  */
 describe("no scroll write outside scroll.ts", () => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
@@ -1695,6 +1708,7 @@ describe("no scroll write outside scroll.ts", () => {
       "if (delta !== 0) this.box.scrollTop = to;",
       "redirect.to.scrollTop += redirect.delta;",
       "section.scrollTop = 0;",
+      "box.scrollTop += delta;",
       "scroller.scrollTop += step;",
       "region.scrollTop += delta;",
       "region.scrollTop = top;",

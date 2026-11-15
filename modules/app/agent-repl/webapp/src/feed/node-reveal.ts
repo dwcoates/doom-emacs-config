@@ -13,7 +13,7 @@
  * selection's centering (feed-view.ts).
  */
 import { log } from "../log.js";
-import { nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
+import { bubbleNodeRevealed, nearestEdgeOffset, type VerticalSpan } from "../scroll.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
 
 /**
@@ -54,7 +54,7 @@ export function revealInBubbles(lines: readonly HTMLElement[], what: string): Ve
     const offset = nearestEdgeOffset({ top: view.top, bottom: view.bottom }, span);
     if (offset === 0) continue;
     const before = box.scrollTop;
-    box.scrollTop = before + offset;
+    bubbleNodeRevealed(box, offset);
     log.debug(`brought ${what} into view inside its bubble`, {
       operation: "feed.node-reveal.bubble-scrolled",
       context: { what, from: before, to: box.scrollTop },
