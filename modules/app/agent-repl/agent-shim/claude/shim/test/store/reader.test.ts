@@ -4259,3 +4259,20 @@ describe("a conclusion through a head the opening mark already covers", () => {
     expect(served).toEqual(["unit-c", "unit-b"]);
   });
 });
+
+describe("the one place a settled conclusion ends the tail", () => {
+  it("leaves no hand-rolled settle-and-abort block beside endIfSettled", () => {
+    // Arrange. A copy beside the helper could drift from it, ending a tail
+    // without stopping it or stopping it without cancelling the call.
+    const source = readFileSync(
+      fileURLToPath(new URL("../../src/store/reader.ts", import.meta.url)),
+      "utf8",
+    );
+
+    // Act.
+    const handRolled = source.match(/if \(settled\(\)\) \{\s*stopped = true;/g) ?? [];
+
+    // Assert.
+    expect(handRolled).toEqual([]);
+  });
+});

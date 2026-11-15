@@ -772,6 +772,17 @@ export function createReader(options: ReaderOptions): Reader {
     /** Whether the consumer has been handed everything the conclusion named. */
     const settled = (): boolean =>
       concluding && (concludeAt === undefined || served.has(concludeAt.value));
+    /**
+     * End the tail when the conclusion is settled, answering whether it did:
+     * the ONE place a settled conclusion stops the tail, whichever path served
+     * the last pointer it named.
+     */
+    const endIfSettled = (): boolean => {
+      if (!settled()) return false;
+      stopped = true;
+      abort.abort();
+      return true;
+    };
     // CANCELLING THE CALL IS HOW A STANDING TAIL ENDS. Connect's stream close
     // drains the body, which on a standing stream never completes — so
     // `close()` aborts the call rather than merely leaving the loop.
@@ -845,11 +856,7 @@ export function createReader(options: ReaderOptions): Reader {
               servedThrough = frame.value.at;
               yield frame;
               barrenEnds = 0;
-              if (settled()) {
-                stopped = true;
-                abort.abort();
-                return;
-              }
+              if (endIfSettled()) return;
             }
             if (stopped) return;
           } catch (error) {
@@ -986,11 +993,7 @@ export function createReader(options: ReaderOptions): Reader {
             if (entry.at !== undefined) served.set(entry.at.value, fingerprint);
             yield { case: "entry", value: entry };
             barrenEnds = 0;
-            if (settled()) {
-              stopped = true;
-              abort.abort();
-              return;
-            }
+            if (endIfSettled()) return;
           }
           // THE RE-OPEN'S NEWEST LINE IS THE CONSUMER'S NOW, as the open's
           // was -- counted only AFTER the fresh lines went out, because a
@@ -1002,11 +1005,7 @@ export function createReader(options: ReaderOptions): Reader {
               ? undefined
               : toHistoryPointer(reopened.newest),
           );
-          if (settled()) {
-            stopped = true;
-            abort.abort();
-            return;
-          }
+          if (endIfSettled()) return;
           token = reopened.watch;
           // A fresh controller per attempt: the aborted one stays aborted.
           abort = new AbortController();
@@ -1027,10 +1026,7 @@ export function createReader(options: ReaderOptions): Reader {
         // Nothing left to wait for: either no pointer was named, or the tail
         // has already served it. Ending now is the honest answer, and holding
         // the stream open for a row that will never come would wedge the exit.
-        if (settled()) {
-          stopped = true;
-          abort.abort();
-        }
+        endIfSettled();
       },
       close: () => {
         if (stopped) return;
