@@ -83,7 +83,7 @@ import { crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refu
 import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "../../../proto/gen/ts/agentrepl/v1/family_pb";
 import { hasOpenChildrenSentence, mergeHasOpenChildrenSentence, parentNotOpenSentence } from "../rpc/family-refusal.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS, type RefusalCause } from "../rpc/refusal.js";
-import { contextAt, handoverAddress, isHandoverArm } from "./handover.js";
+import { contextAt, handoverAddress, standsAsHandover } from "./handover.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
@@ -525,7 +525,7 @@ export async function runVerb<Res extends VerbResponse>(
     // no daemon named (none serves it meanwhile), or the named one not serving
     // it either, the handover's own affordances say what is happening and the
     // control is simply ready again.
-    if (isHandoverArm(cause.case)) {
+    if (standsAsHandover(cause.case, spec.sc.ctx)) {
       log.info(`${spec.rpc} waits on a handover: no daemon serves the workspace yet`, {
         operation: "sidebar.verbs.handover",
         context: { ...spec.context, rpc: spec.rpc, arm: cause.case, retried_at_incumbent: served !== null },

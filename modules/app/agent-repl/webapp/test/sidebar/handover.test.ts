@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { contextAt, handoverAddress, HANDOVER_ARMS, isHandoverArm } from "../../src/sidebar/handover.js";
+import { contextAt, handoverAddress, HANDOVER_ARMS, isHandoverArm, standsAsHandover } from "../../src/sidebar/handover.js";
 import { codeOf } from "../source-text.js";
 import { appContext } from "./harness.js";
 
@@ -55,6 +55,23 @@ describe("handoverAddress", () => {
 
     // Assert
     expect((thrown as MalformedView).path).toBe("SelectInEditorError.cause.transferringAway.address");
+  });
+});
+
+describe("standsAsHandover", () => {
+  const host = { ...appContext(), clientAt: () => appContext().client };
+  it.each([
+    ["not_yet_adopted on a workspace page", "notYetAdopted", false, true],
+    ["not_yet_adopted on the web view host", "notYetAdopted", true, true],
+    ["transferring_away on the web view host, which dials the successor", "transferringAway", true, true],
+    ["transferring_away on a workspace page, whose terminal move notice it is", "transferringAway", false, false],
+    ["any other arm", "unknownWorkspace", true, false],
+  ])("%s", (_name, arm, onHost, want) => {
+    // Act
+    const got = standsAsHandover(arm, onHost ? host : appContext());
+
+    // Assert
+    expect(got).toBe(want);
   });
 });
 

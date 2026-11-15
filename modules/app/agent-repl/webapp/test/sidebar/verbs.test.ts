@@ -705,12 +705,15 @@ describe("a workspace a handover moved to a successor", () => {
     expect((await clickRow(t)).control.disabled).toBe(false);
   });
 
-  it("draws nothing on a page that cannot dial another daemon", async () => {
+  // A WORKSPACE PAGE BELONGS TO THE ONE WORKSPACE: there the arm is the
+  // page's terminal move, drawn at the control as the integration suite's
+  // 'refused as transferring_away' cases pin, never a quiet state.
+  it("draws the move on a page that cannot dial another daemon", async () => {
     // Arrange
     const t = target({ selectInEditor: () => selectAnswer(movedAway()) });
 
     // Act, Assert
-    expect((await clickRow(t)).refusal).toBeNull();
+    expect((await clickRow(t)).refusal).not.toBeNull();
   });
 
   it("throws a malformed view for a transferring_away naming no successor", async () => {

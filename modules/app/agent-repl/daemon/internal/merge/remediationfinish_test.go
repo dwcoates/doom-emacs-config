@@ -285,7 +285,7 @@ func TestAFinishOfAWorkspaceNoFixIsDispatchedToFailsLoudly(t *testing.T) {
 		t.Fatal("FinishRemediation finished the intake")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
-		Message: "a remediation finish reached a workspace no fix is dispatched to"}); !ok {
+		Message: "a direct finish reached a workspace that lands through the queue"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }

@@ -99,9 +99,9 @@ type fakeDB struct {
 	// finish call goes to, so the harness keeps the store's own rules;
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
-	checks               wsm.DB
+	checks wsm.DB
 	// escalationRecordErr fails RecordDeployEscalation.
-	escalationRecordErr error
+	escalationRecordErr  error
 	mediationErr         error
 	dispatchErr          error
 	remediationFinishErr error

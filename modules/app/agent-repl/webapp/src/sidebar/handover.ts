@@ -35,6 +35,18 @@ export function isHandoverArm(arm: string): arm is HandoverArm {
 }
 
 /**
+ * Whether ARM stands as the handover state on CTX's document rather than as
+ * that document's own refusal: `not_yet_adopted` always does, and
+ * `transferring_away` does only on a document that can dial the successor
+ * (the web view host's, which has `clientAt`). A workspace page belongs to
+ * the one workspace, so there `transferring_away` is its terminal "this
+ * workspace moved" notice (rpc/moved.ts), never a quiet state.
+ */
+export function standsAsHandover(arm: string, ctx: DaemonContext): arm is HandoverArm {
+  return arm === "notYetAdopted" || (arm === "transferringAway" && ctx.clientAt !== undefined);
+}
+
+/**
  * The address of the daemon a handover arm names as serving the workspace,
  * or null when CAUSE is no handover arm or names none.
  *
