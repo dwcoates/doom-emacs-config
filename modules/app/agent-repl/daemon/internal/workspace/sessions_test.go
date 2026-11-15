@@ -5031,3 +5031,46 @@ func TestEveryOrderedRemovalGoesThroughRemoveStoodDownLocked(t *testing.T) {
 		t.Fatalf("sessions removed from the fleet's map by hand in %v; use removeStoodDownLocked", offenders)
 	}
 }
+
+// TestAStandDownClosesTheShimsOwnVerdict covers the cold gate's stand-down: a
+// network fault the shim reported stood until its next diagnostics push, and a
+// gate runs no shim to send one, so the row stayed blue until it was answered.
+func TestAStandDownClosesTheShimsOwnVerdict(t *testing.T) {
+	tests := []struct {
+		name      string
+		killErr   error
+		wantKinds []string
+	}{
+		{name: "a witnessed kill closes the shim's verdict and keeps the rest",
+			wantKinds: []string{health.KindResumeFailed}},
+		{name: "a failed kill closes nothing",
+			killErr:   errors.New("the exit decode did not land inside the caller's bound"),
+			wantKinds: []string{health.KindNetworkUnreachable, health.KindShimReported, health.KindResumeFailed}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := heldAtGate(t, f)
+			workspace := ws
+			for _, kind := range []string{health.KindNetworkUnreachable, health.KindShimReported, health.KindResumeFailed} {
+				if _, err := f.db.OpenFault(context.Background(), wsm.Fault{Workspace: &workspace, Kind: kind}); err != nil {
+					t.Fatalf("OpenFault: %v", err)
+				}
+			}
+			f.client.killErr = tt.killErr
+
+			// Act
+			f.fleet.standDownAtGate(context.Background(), ws)
+
+			// Assert
+			var got []string
+			for _, fault := range f.db.dbFaults {
+				got = append(got, fault.Kind)
+			}
+			if !slices.Equal(got, tt.wantKinds) {
+				t.Fatalf("standing faults = %v, want %v", got, tt.wantKinds)
+			}
+		})
+	}
+}

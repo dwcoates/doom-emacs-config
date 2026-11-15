@@ -265,3 +265,27 @@ func TestClosesOnAnswersNothingForAnUndeclaredKind(t *testing.T) {
 		t.Fatalf("ClosesOn(undeclared kind) = true, want false")
 	}
 }
+
+func TestAShimStoodDownClosesOnlyTheShimsOwnVerdict(t *testing.T) {
+	tests := []struct {
+		kind string
+		want bool
+	}{
+		{kind: KindNetworkUnreachable, want: true},
+		{kind: KindShimReported, want: true},
+		{kind: KindShimDied, want: false},
+		{kind: KindResumeFailed, want: false},
+		{kind: KindColdGateReopenFailed, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind, func(t *testing.T) {
+			// Arrange, Act
+			got := ClosesOn(tt.kind, EdgeShimStoodDown)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("ClosesOn(%q, shim_stood_down) = %v, want %v", tt.kind, got, tt.want)
+			}
+		})
+	}
+}

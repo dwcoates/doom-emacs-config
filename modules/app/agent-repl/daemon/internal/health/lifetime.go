@@ -64,6 +64,10 @@ const (
 	// EdgeShimDiagnostics is a diagnostics push from the shim: the push is the
 	// WHOLE verdict, so it replaces every shim-reported fault standing.
 	EdgeShimDiagnostics Edge = "shim_diagnostics"
+	// EdgeShimStoodDown is this daemon standing a workspace's shim down
+	// itself (a stop, a cold gate, a park) and witnessing the kill: no shim
+	// runs to send the next verdict, so the last one speaks for nothing.
+	EdgeShimStoodDown Edge = "shim_stood_down"
 	// EdgePromptsDirServed is a composed brief read and spliced from the
 	// prompts directory: that read is the health probe.
 	EdgePromptsDirServed Edge = "prompts_dir_served"
@@ -156,11 +160,14 @@ var faultLifetimes = map[string]Lifetime{
 	KindBounceDied: momentary,
 	// An ordinary reconciled bounce disposition is per-session accounting.
 	KindBounceDisposition: momentary,
-	// A shim-reported fault is replaced by the shim's next verdict.
-	KindShimReported: standing(EdgeShimDiagnostics),
+	// A shim-reported fault is replaced by the shim's next verdict, and ends
+	// with the shim when this daemon stands it down: a cold gate runs no shim
+	// until it is answered, so no next verdict would ever retire it.
+	KindShimReported: standing(EdgeShimDiagnostics, EdgeShimStoodDown),
 	// So is the network fault the shim reported: its next verdict says
-	// whether the network is still unreachable.
-	KindNetworkUnreachable: standing(EdgeShimDiagnostics),
+	// whether the network is still unreachable, and a shim stood down sends
+	// none.
+	KindNetworkUnreachable: standing(EdgeShimDiagnostics, EdgeShimStoodDown),
 	// A failed classifier run and an abandoned conversation are statements
 	// about the conversation as it stood; the next turn moves past them.
 	KindClassifierFailed:      standing(EdgeTurnStarted),
