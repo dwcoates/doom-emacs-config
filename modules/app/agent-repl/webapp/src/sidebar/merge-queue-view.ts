@@ -24,7 +24,6 @@
  * one drag gesture (`drag.ts`), placed as the feed's queue tab places it
  * (`merge-queue-move.ts`).
  */
-import { create } from "@bufbuild/protobuf";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   UpdateMergeQueueResponseSchema,
@@ -44,10 +43,6 @@ import type {
   RosterMergeQueueWaiting,
   RosterRepoMergeQueue,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import {
-  SelectWorkspaceRequestSchema,
-  SelectWorkspaceResponseSchema,
-} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { formatAge, formatElapsed } from "../duration.js";
 import { settledElapsedClock } from "../elapsed-clock.js";
 import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
@@ -64,7 +59,7 @@ import { pressToDrag, type DragSpec } from "../drag.js";
 import { labelledControl } from "../control.js";
 import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
-import { fireVerb, runSelectVerb } from "./verbs.js";
+import { fireVerb } from "./verbs.js";
 
 /**
  * The attribute a queue group carries while its queue is paused: `pause`, or
@@ -733,9 +728,8 @@ export function drawHeadClock(
 
 /**
  * A line wearing CLASSNAME whose click selects the workspace U is credited to
- * and, when U names one, opens its merge's bubble in that workspace's feed
- * (`SelectWorkspaceRequest.reveal`). Without a bubble it selects as a row's
- * click does. It is selectable as a row's line is (`data-select`), never a
+ * exactly as a row's click does, and, when U names one, opens its merge's
+ * bubble in that workspace's feed (`SelectInEditorRequest.reveal`). It is selectable as a row's line is (`data-select`), never a
  * button.
  */
 function drawSubjectControl(u: RosterMergeQueueSubject, sc: SidebarContext, className: string, path: string): HTMLElement {
@@ -746,25 +740,11 @@ function drawSubjectControl(u: RosterMergeQueueSubject, sc: SidebarContext, clas
   control.setAttribute("data-workspace", workspace.id);
   control.addEventListener("click", (event) => {
     event.preventDefault();
-    const reveal = u.reveal;
-    if (reveal === undefined) {
-      void guardMalformed(sc.ctx, "sidebar.merge-queue.select", selectWorkspace(control, sc, workspace));
-      return;
-    }
-    log.info("opening a merge's bubble from the sidebar's merge queue", {
-      operation: "sidebar.merge-queue.reveal",
-      context: { workspace: workspace.id, reveal: reveal.value },
-    });
-    void guardMalformed(
-      sc.ctx,
-      "sidebar.merge-queue.reveal",
-      runSelectVerb(control, {
-        sc,
-        rpc: "SelectWorkspace",
-        call: (client) => client.selectWorkspace(create(SelectWorkspaceRequestSchema, { workspace, reveal })),
-        schema: SelectWorkspaceResponseSchema,
-      }),
-    );
+    // THE SAME SELECT AS A ROW'S CLICK (`selectWorkspace`), so the editor
+    // makes the switch: the daemon's own select left the frame to follow the
+    // roster, which waits on an active minibuffer, and the rail drew the
+    // workspace selected while Emacs showed another (2026-11-11).
+    void guardMalformed(sc.ctx, "sidebar.merge-queue.select", selectWorkspace(control, sc, workspace, u.reveal));
   });
   return control;
 }

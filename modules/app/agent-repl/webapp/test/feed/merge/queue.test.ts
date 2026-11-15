@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
-  SelectWorkspaceErrorSchema,
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-  type SelectWorkspaceResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorErrorSchema,
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+  type SelectInEditorResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
   UpdateMergeQueueResponseSchema,
   type UpdateMergeQueueRequest,
@@ -57,18 +57,18 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-/** Every SelectWorkspace this scripted daemon received. */
+/** Every SelectInEditor this scripted daemon received. */
 interface Scripted {
   ctx: AppContext;
-  calls: SelectWorkspaceRequest[];
+  calls: SelectInEditorRequest[];
 }
 
-/** A context whose SelectWorkspace answers ANSWER. */
-function scripted(answer: SelectWorkspaceResponse): Scripted {
-  const calls: SelectWorkspaceRequest[] = [];
+/** A context whose SelectInEditor answers ANSWER. */
+function scripted(answer: SelectInEditorResponse): Scripted {
+  const calls: SelectInEditorRequest[] = [];
   const ctx = scriptedAppContext(
     {
-      selectWorkspace: (req) => {
+      selectInEditor: (req) => {
         calls.push(req);
         return answer;
       },
@@ -79,13 +79,13 @@ function scripted(answer: SelectWorkspaceResponse): Scripted {
 }
 
 /** A success answer. */
-const SELECTED = create(SelectWorkspaceResponseSchema, {
+const SELECTED = create(SelectInEditorResponseSchema, {
   result: { case: "success", value: {} },
 });
 
 /** A refusal answering CAUSE. */
-function refusedWith(cause: { case: string; value: unknown }): SelectWorkspaceResponse {
-  return create(SelectWorkspaceResponseSchema, {
+function refusedWith(cause: { case: string; value: unknown }): SelectInEditorResponse {
+  return create(SelectInEditorResponseSchema, {
     result: { case: "error", value: { cause } as never },
   });
 }
@@ -132,7 +132,7 @@ function snapshot(
 }
 
 /** Draw a snapshot against a scripted daemon. */
-function draw(answer: SelectWorkspaceResponse = SELECTED, queue: FeedMergeQueue = snapshot()): {
+function draw(answer: SelectInEditorResponse = SELECTED, queue: FeedMergeQueue = snapshot()): {
   el: HTMLElement;
   s: Scripted;
 } {
@@ -345,7 +345,7 @@ describe("drawFeedMergeQueue: a paused queue (owner request, 2026-10-23)", () =>
   });
 });
 
-describe("the entry click is SelectWorkspace and nothing else (R8)", () => {
+describe("the entry click is SelectInEditor and nothing else (R8)", () => {
   it("echoes the ref the queue served, verbatim", async () => {
     const { el, s } = draw();
     el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
@@ -374,8 +374,8 @@ describe("an async merge's entry opens its bubble in the requester (owner ruling
     return create(FeedMergeQueueSchema, { ahead: [front], current: entry("mine", { case: "waiting" }) });
   }
 
-  /** Click the async entry and answer what SelectWorkspace was asked. */
-  async function clickAsync(row: string | undefined): Promise<SelectWorkspaceRequest[]> {
+  /** Click the async entry and answer what SelectInEditor was asked. */
+  async function clickAsync(row: string | undefined): Promise<SelectInEditorRequest[]> {
     const { el, s } = draw(SELECTED, asyncSnapshot(row));
     el.querySelector<HTMLElement>('[data-queue-place="ahead"] [data-select]')?.click();
     await settle();
@@ -410,7 +410,7 @@ describe("an async merge's entry opens its bubble in the requester (owner ruling
   });
 });
 
-describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
+describe("every SelectInEditorError arm draws at the clicked entry", () => {
   const arms: { arm: string; value: unknown; says: RegExp }[] = [
     { arm: "unknownWorkspace", value: {}, says: /does not know this workspace/ },
     {
@@ -435,10 +435,10 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
     expect(refusal?.textContent ?? "").toMatch(says);
   });
 
-  it("holds to the schema: every cause arm of SelectWorkspaceError is covered", () => {
+  it("holds to the schema: every cause arm of SelectInEditorError is covered", () => {
     // A refusal arm is drawn above; an expected answer is pinned below.
     expect([...arms.map((a) => a.arm), ...Object.keys(SELECT_WORKSPACE_EXPECTED_ARMS)].sort()).toEqual(
-      [...oneofArms(SelectWorkspaceErrorSchema, "cause")].sort(),
+      [...oneofArms(SelectInEditorErrorSchema, "cause")].sort(),
     );
   });
 
@@ -460,7 +460,7 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
 
   it("refuses an error whose cause oneof is unset — a refusal must say why", async () => {
     const { el, s } = draw(
-      create(SelectWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+      create(SelectInEditorResponseSchema, { result: { case: "error", value: {} } }),
     );
     const row = el.querySelector<HTMLElement>('[data-queue-place="ahead"]');
     if (row === null) throw new Error("no ahead row");
@@ -507,18 +507,18 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
     );
   });
 
-  it("refuses a SelectWorkspace answer whose result is an arm a newer daemon set", async () => {
+  it("refuses a SelectInEditor answer whose result is an arm a newer daemon set", async () => {
     // The router transport re-encodes through the frozen schema, which would
     // drop an arm the descriptor has no field for; a fake client hands the
     // renderer the newer daemon's answer unaltered, which is the case under
     // test.
-    const answer = create(SelectWorkspaceResponseSchema, {
+    const answer = create(SelectInEditorResponseSchema, {
       result: { case: "success", value: {} },
     });
     (answer as { result: unknown }).result = { case: "deferred", value: {} };
     const ctx = testAppContext({
       client: {
-        selectWorkspace: () => Promise.resolve(answer),
+        selectInEditor: () => Promise.resolve(answer),
       } as unknown as ReturnType<typeof createAgentReplClient>,
       workspace: WORKSPACE,
       ticker: createTicker(1000),
@@ -531,7 +531,7 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
     const call = selectQueueEntryWorkspace(row, rowContext(ctx, mergeRow("m1")), ref);
     const landed = vi.advanceTimersByTimeAsync(0);
     await expect(call).rejects.toThrow(
-      "malformed view at SelectWorkspaceResponse.result: arm 'deferred' is not one this build can draw",
+      "malformed view at SelectInEditorResponse.result: arm 'deferred' is not one this build can draw",
     );
     await landed;
 
@@ -543,7 +543,7 @@ describe("a daemon that cannot be reached answers at the clicked row", () => {
   it("draws the transport refusal in the row, and does not raise a malformed view", async () => {
     const ctx = scriptedAppContext(
       {
-          selectWorkspace: () => {
+          selectInEditor: () => {
             throw new ConnectError("socket is gone", Code.Unavailable);
           },
       },
@@ -567,20 +567,20 @@ describe("a daemon that cannot be reached answers at the clicked row", () => {
 interface MoveScripted {
   ctx: AppContext;
   moves: UpdateMergeQueueRequest[];
-  selects: SelectWorkspaceRequest[];
+  selects: SelectInEditorRequest[];
 }
 
-/** A context whose UpdateMergeQueue runs ANSWER, and whose SelectWorkspace succeeds. */
+/** A context whose UpdateMergeQueue runs ANSWER, and whose SelectInEditor succeeds. */
 function moveScripted(answer: () => UpdateMergeQueueResponse): MoveScripted {
   const moves: UpdateMergeQueueRequest[] = [];
-  const selects: SelectWorkspaceRequest[] = [];
+  const selects: SelectInEditorRequest[] = [];
   const ctx = scriptedAppContext(
     {
       updateMergeQueue: (req) => {
         moves.push(req);
         return answer();
       },
-      selectWorkspace: (req) => {
+      selectInEditor: (req) => {
         selects.push(req);
         return SELECTED;
       },

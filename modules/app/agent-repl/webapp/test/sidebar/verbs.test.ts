@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createControl, type Control } from "../../src/control.js";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -44,6 +44,7 @@ import {
   SetWorkspacePriorityErrorSchema,
   SetWorkspacePriorityResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
+import { FeedIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { LockHolderFailureSchema } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -80,6 +81,7 @@ import {
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
 import { codeOf } from "../source-text.js";
+import { filesUnder } from "../files-under.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
@@ -100,6 +102,14 @@ async function click(control: Element): Promise<void> {
 describe("the requests each verb is", () => {
   it("addresses SelectInEditor with the row's echoed identity", () => {
     expect(buildSelectInEditorRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
+  });
+
+  it("asks SelectInEditor to reveal nothing when no row is named", () => {
+    expect(buildSelectInEditorRequest(TARGET_WS).reveal).toBeUndefined();
+  });
+
+  it("asks SelectInEditor to reveal the row named", () => {
+    expect(buildSelectInEditorRequest(TARGET_WS, create(FeedIdSchema, { value: "bubble-1" })).reveal?.value).toBe("bubble-1");
   });
 
   it("addresses OpenWorkspace with the row's echoed identity", () => {
@@ -1029,12 +1039,54 @@ describe("the in-flight lockout", () => {
     expect(spellers.filter((speller) => !speller.endsWith(":runSelectVerb"))).toEqual([]);
   });
 
-  it("finds a select in both the row and the merge queue", () => {
+  // THE MERGE QUEUE SELECTS THROUGH THE ROW'S SELECT (`selectWorkspace`), so
+  // the rail's one select is spelled once, in row.ts.
+  it("is spelled once in the sidebar, by the row", () => {
     const dir = join(__dirname, "..", "..", "src", "sidebar");
-    const found = ["row.ts", "merge-queue-view.ts"].map((name) =>
-      /rpc: "Select(?:InEditor|Workspace)"/.test(codeOf(readFileSync(join(dir, name), "utf8"))),
+    const spelled = readdirSync(dir)
+      .filter((file) => file.endsWith(".ts"))
+      .filter((name) => /rpc: "Select(?:InEditor|Workspace)"/.test(codeOf(readFileSync(join(dir, name), "utf8"))));
+    expect(spelled).toEqual(["row.ts"]);
+  });
+});
+
+/** Every webapp source file under DIR, recursively, as paths relative to DIR. */
+function sourcesUnder(dir: string): string[] {
+  return filesUnder(dir).map((file) => relative(dir, file));
+}
+
+// SELECTING IS ONE ACT (AGENTS.md "Selecting a workspace is one act"): every
+// selection a page makes is the editor's own switch, relayed by SelectInEditor.
+// A page that sent SelectWorkspace left the frame to follow the roster later,
+// and the rail drew the workspace selected while Emacs showed another
+// (a merge queue entry's click, 2026-11-11).
+describe("a page's selection", () => {
+  const src = join(__dirname, "..", "..", "src");
+
+  it("is never a SelectWorkspace", () => {
+    const senders = sourcesUnder(src).filter((name) => {
+      const code = codeOf(readFileSync(join(src, name), "utf8"));
+      return /\.selectWorkspace\(|"SelectWorkspace"/.test(code);
+    });
+    expect(senders).toEqual([]);
+  });
+
+  it("is built by the one SelectInEditor request builder", () => {
+    const builders = sourcesUnder(src).filter((name) =>
+      /SelectInEditorRequestSchema\b/.test(codeOf(readFileSync(join(src, name), "utf8"))),
     );
-    expect(found).toEqual([true, true]);
+    expect(builders).toEqual(["sidebar/verbs.ts"]);
+  });
+
+  it("is found by the scan in each place a page selects", () => {
+    const callers = sourcesUnder(src).filter((name) =>
+      /buildSelectInEditorRequest\(/.test(codeOf(readFileSync(join(src, name), "utf8"))),
+    );
+    expect(callers.filter((name) => name !== "sidebar/verbs.ts").sort()).toEqual([
+      "feed/merge/jump.ts",
+      "sidebar/row.ts",
+      "sidebar/threads.ts",
+    ]);
   });
 });
 

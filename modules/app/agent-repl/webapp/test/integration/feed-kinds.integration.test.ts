@@ -2260,7 +2260,7 @@ describe("a finding's scenario fold", () => {
 });
 
 // ---------------------------------------------------------------------------
-// R8: A CROSS-WORKSPACE CLICK CALLS SelectWorkspace AND NOTHING ELSE
+// R8: A CROSS-WORKSPACE CLICK CALLS SelectInEditor AND NOTHING ELSE
 // (audit 1, item 5)
 // ---------------------------------------------------------------------------
 
@@ -2268,14 +2268,14 @@ describe("a merge queue entry's jump", () => {
   /** The queue tab, whose entries name other workspaces. */
   const drawQueue = () => drawRow(mergeTabRow("queue", "live", { id: feedId("tab-q") }));
 
-  it("calls SelectWorkspace exactly once", async () => {
+  it("calls SelectInEditor exactly once", async () => {
     // Arrange
     await drawQueue();
     harness.fake.clearCalls();
     // Act
     await harness.click('[data-queue-place="ahead"] [data-select]');
     // Assert
-    expect(harness.fake.calls("selectWorkspace")).toHaveLength(1);
+    expect(harness.fake.calls("selectInEditor")).toHaveLength(1);
   });
 
   it("echoes that entry's own WorkspaceRef", async () => {
@@ -2284,7 +2284,7 @@ describe("a merge queue entry's jump", () => {
     // Act
     await harness.click('[data-queue-place="ahead"] [data-select]');
     // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectWorkspace");
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectInEditor");
     expect(request.workspace?.id).toBe("ws-ahead");
   });
 
@@ -2295,7 +2295,7 @@ describe("a merge queue entry's jump", () => {
     // Act
     await harness.click('[data-queue-place="behind"] [data-select]');
     // Assert
-    expect(harness.fake.log().map((c) => c.rpc)).toEqual(["selectWorkspace"]);
+    expect(harness.fake.log().map((c) => c.rpc)).toEqual(["selectInEditor"]);
   });
 
   it("echoes the behind entry's own ref rather than the current one", async () => {
@@ -2304,7 +2304,7 @@ describe("a merge queue entry's jump", () => {
     // Act
     await harness.click('[data-queue-place="behind"] [data-select]');
     // Assert
-    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectWorkspace");
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectInEditor");
     expect(request.workspace?.id).toBe("ws-behind");
   });
 });

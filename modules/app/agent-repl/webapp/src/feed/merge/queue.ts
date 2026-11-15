@@ -20,7 +20,7 @@
  * a new stage.
  *
  * EVERY ENTRY IS A CROSS-WORKSPACE JUMP, and a cross-workspace click is
- * `SelectWorkspace` and nothing else (R8): the editor switches, the roster
+ * `SelectInEditor` and nothing else (R8): the editor switches, the roster
  * stream reflects it, and this bubble draws nothing on success. The refusal is
  * this click's own answer, so it lands AT THE ROW that was clicked — with the
  * four cross-cutting causes worded by the shared `refusalSentence` so a
@@ -320,7 +320,7 @@ const QUEUE_JUMP: JumpSite = {
 };
 
 /**
- * The jump: `SelectWorkspace`, echoed verbatim, answered at the row
+ * The jump: `SelectInEditor`, echoed verbatim, answered at the row
  * (`jumpToWorkspace`).
  */
 export function selectQueueEntryWorkspace(

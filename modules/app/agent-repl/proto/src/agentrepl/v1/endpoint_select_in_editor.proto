@@ -1,6 +1,14 @@
 // endpoint_select_in_editor.proto — SelectInEditor: a HOST-RAISED switch. WEB
-// section. The rail's row click calls this rather than SelectWorkspace, so a
-// switch made in a page is the EDITOR'S OWN SWITCH, exactly as fast as a key.
+// section. EVERY SELECTION A PAGE MAKES calls this rather than SelectWorkspace
+// (a rail row, a merge queue entry, a thread, a feed's jump to a workspace), so
+// a switch made in a page is the EDITOR'S OWN SWITCH, exactly as fast as a key.
+//
+// A PAGE NEVER CALLS SelectWorkspace. A select the daemon makes moves the
+// frame only through the roster's follow, which waits while a minibuffer is
+// active or another switch Emacs asked for is unanswered; until then the rail
+// draws the workspace selected while the frame shows another, a partial
+// selection (a merge queue entry's click, 2026-11-11). Relayed, the click is
+// the editor's own switch, which moves the frame at once.
 //
 // WHY THE EDITOR MAKES IT. Emacs moves its frame the moment it requests a
 // switch (a tab chord, a picker, a banner click), and the roster's `current`
@@ -23,6 +31,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/endpoint_select_workspace.proto";
+import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -30,6 +39,14 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message SelectInEditorRequest {
   // The workspace the user clicked.
   workspace.v1.WorkspaceRef workspace = 1;
+  // A ROW OF THE CLICKED WORKSPACE'S ROOT FEED TO REVEAL, exactly as
+  // SelectWorkspaceRequest.reveal: its page brings the row on screen, opens
+  // it and marks it (WebWorkspaceRevealRow). Unset reveals nothing. On the
+  // relayed route the daemon asks the page for the reveal as it relays the
+  // click, and a page not yet listening takes it when it attaches; on the
+  // daemon's route it rides the select. A merge queue entry for an async merge
+  // sets it to the merge's bubble in its requester's feed.
+  optional frontend.v1.FeedId reveal = 2;
 }
 
 // THE ARM IS THE OUTCOME.

@@ -73,6 +73,7 @@ import {
   type SetWorkspacePriorityRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
 import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/workspace_priority_pb";
+import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { log } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -913,9 +914,17 @@ export function clearRefusal(control: HTMLElement): void {
   }
 }
 
-/** SelectInEditor: the row click, relayed for the editor to make the switch. */
-export function buildSelectInEditorRequest(workspace: WorkspaceRef): SelectInEditorRequest {
-  return create(SelectInEditorRequestSchema, { workspace });
+/**
+ * SelectInEditor: a page's selection, relayed for the editor to make the
+ * switch. THE ONE REQUEST EVERY SELECTION A PAGE MAKES SENDS (a rail row, a
+ * merge queue entry, a thread, a feed's jump), so the editor, the daemon, the
+ * rail and the page shown always move together. A page never sends
+ * SelectWorkspace, whose select the frame only follows later. REVEAL, when
+ * given, is a row of the workspace's root feed its page brings on screen and
+ * opens (`SelectInEditorRequest.reveal`).
+ */
+export function buildSelectInEditorRequest(workspace: WorkspaceRef, reveal?: FeedId): SelectInEditorRequest {
+  return create(SelectInEditorRequestSchema, reveal === undefined ? { workspace } : { workspace, reveal });
 }
 
 /** OpenWorkspace: bring a registered-but-closed workspace back up. */

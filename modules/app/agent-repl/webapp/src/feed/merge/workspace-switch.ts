@@ -8,7 +8,7 @@
  * the workspace to switch to, absent once the daemon removed it after 15
  * calendar days idle, when the button is drawn disabled.
  *
- * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectWorkspace`, through the
+ * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectInEditor`, through the
  * merge bubble's one jump (`jumpToWorkspace`), which revives a closed merge
  * workspace. It is a CONTROL, so a click on the head's button never folds the
  * bubble.

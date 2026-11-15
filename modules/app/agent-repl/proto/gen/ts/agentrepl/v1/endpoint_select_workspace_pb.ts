@@ -34,9 +34,10 @@ export type SelectWorkspaceRequest = Message<"agentrepl.v1.SelectWorkspaceReques
    * A ROW OF THE SELECTED WORKSPACE'S ROOT FEED TO REVEAL once it is
    * selected: its page brings the row on screen, opens it and marks it
    * (WebWorkspaceRevealRow). Unset selects and reveals nothing. A merge queue
-   * entry for an async merge sets it to the merge's bubble in its requester's
-   * feed (FeedMergeQueueBubble), so the click opens that bubble rather than
-   * the hidden merge workspace (owner ruling, 2026-10-17).
+   * entry for an async merge names the merge's bubble in its requester's feed
+   * (FeedMergeQueueBubble), so the click opens that bubble rather than the
+   * hidden merge workspace (owner ruling, 2026-10-17); a page's click carries
+   * it on SelectInEditorRequest.reveal, never here.
    *
    * @generated from field: optional frontend.v1.FeedId reveal = 2;
    */

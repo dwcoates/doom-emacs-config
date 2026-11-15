@@ -21,7 +21,7 @@
  * workspace opened after a response was written gains its links and a closed
  * one loses them. Re-linking first unwraps every mention, so it is idempotent.
  *
- * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectWorkspace`, through the
+ * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectInEditor`, through the
  * feed's one jump (feed/merge/jump.ts), delegated from the feed's scroll zone
  * so a mention drawn after the install is handled too. A mention is an anchor
  * with NO href, so neither the prose link router nor the navigation guard

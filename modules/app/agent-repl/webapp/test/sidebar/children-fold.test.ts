@@ -138,7 +138,7 @@ describe("a row's children fold", () => {
     const sc = sidebarContext(
       appContext({
         updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
-        selectWorkspace: (request) => {
+        selectInEditor: (request) => {
           selected.push(request.workspace?.id ?? "");
           throw new Error("a fold click selected a workspace");
         },

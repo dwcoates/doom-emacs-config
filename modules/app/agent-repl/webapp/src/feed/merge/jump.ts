@@ -1,10 +1,13 @@
 /**
- * jump — a merge bubble's cross-workspace jump: `SelectWorkspace`, echoed
- * verbatim, answered at the element that was clicked.
+ * jump — a feed's cross-workspace jump: `SelectInEditor`, echoed verbatim,
+ * answered at the element that was clicked.
  *
- * A cross-workspace click is `SelectWorkspace` and nothing else (R8): the
- * editor switches, the roster stream reflects it, and the bubble draws
- * nothing on success. The refusal is the click's own answer, so it lands AT
+ * A cross-workspace click is `SelectInEditor` and nothing else (R8), the same
+ * select a rail row's click makes (`buildSelectInEditorRequest`): the editor
+ * makes the switch, the roster stream reflects it, and the bubble draws
+ * nothing on success. A page never sends `SelectWorkspace`, whose select the
+ * frame only follows once no minibuffer is active, so the rail could draw the
+ * workspace selected while Emacs still showed another. The refusal is the click's own answer, so it lands AT
  * THE CLICKED ELEMENT, with the four cross-cutting causes worded by the shared
  * `crossCuttingSentence` so a transferring daemon reads the same here as it
  * does in the rail. A merge queue entry and a merge workspace's switch are the
@@ -31,16 +34,16 @@ import {
   type OpenWorkspaceResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
-  SelectWorkspaceRequestSchema,
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceResponse,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import type { WorkspaceRef } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { FeedId } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { AppContext } from "../../rpc/context.js";
 import { childrenMatching } from "../../dom.js";
-import { openWorkspaceRefusal } from "../../sidebar/verbs.js";
+import { noteSelectRoute } from "../../sidebar/row.js";
+import { buildSelectInEditorRequest, openWorkspaceRefusal } from "../../sidebar/verbs.js";
 
 /** Where one kind of jump is recorded and how its refusal is drawn. */
 export interface JumpSite {
@@ -55,7 +58,7 @@ export interface JumpSite {
 /**
  * Select WORKSPACE from HOST, drawing a refusal inside HOST. REVEAL, when
  * given, is a row of the workspace's root feed its page brings on screen and
- * opens once it is selected (`SelectWorkspaceRequest.reveal`).
+ * opens (`SelectInEditorRequest.reveal`).
  */
 export async function jumpToWorkspace(
   host: HTMLElement,
@@ -69,44 +72,42 @@ export async function jumpToWorkspace(
     operation: site.operation,
     context: { workspace: workspace.id, reveal: reveal?.value ?? "none" },
   });
-  let response: SelectWorkspaceResponse;
+  let response: SelectInEditorResponse;
   try {
     response = await callUnary(
       ctx,
-      "SelectWorkspace",
-      (client) =>
-        client.selectWorkspace(
-          create(SelectWorkspaceRequestSchema, reveal === undefined ? { workspace } : { workspace, reveal }),
-        ),
-      SelectWorkspaceResponseSchema,
+      "SelectInEditor",
+      (client) => client.selectInEditor(buildSelectInEditorRequest(workspace, reveal)),
+      SelectInEditorResponseSchema,
     );
   } catch (err) {
-    refuseTransport(host, site, "SelectWorkspace", workspace, err);
+    refuseTransport(host, site, "SelectInEditor", workspace, err);
     return;
   }
-  const result = requireCase(response.result, "SelectWorkspaceResponse.result");
+  const result = requireCase(response.result, "SelectInEditorResponse.result");
   switch (result.case) {
     case "success":
       // Nothing is drawn: the roster stream carries the new `current`.
+      noteSelectRoute(response, workspace);
       return;
     case "error": {
-      const cause = requireCase(result.value.cause, "SelectWorkspaceError.cause");
+      const cause = requireCase(result.value.cause, "SelectInEditorError.cause");
       const expected = SELECT_WORKSPACE_EXPECTED_ARMS[cause.case];
       if (expected !== undefined) {
         // An expected answer, not a refusal: nothing is drawn at the element.
-        log.info(`SelectWorkspace was answered ${cause.case}: ${expected}`, {
+        log.info(`SelectInEditor was answered ${cause.case}: ${expected}`, {
           operation: `${site.operation}-expected-answer`,
           context: { arm: cause.case, workspace: workspace.id },
         });
         return;
       }
       const sentence =
-        crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
-      refuse(host, site, "SelectWorkspace", workspace, cause.case, sentence);
+        crossCuttingSentence("SelectInEditor", cause) ?? "that workspace could not be selected";
+      refuse(host, site, "SelectInEditor", workspace, cause.case, sentence);
       return;
     }
     default:
-      return unreachableArm("SelectWorkspaceResponse.result", armName(result));
+      return unreachableArm("SelectInEditorResponse.result", armName(result));
   }
 }
 

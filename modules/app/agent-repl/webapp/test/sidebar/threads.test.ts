@@ -11,7 +11,7 @@ import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { RequestNewThreadResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_new_thread_pb";
-import { SelectWorkspaceResponseSchema, type SelectWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { SelectInEditorResponseSchema, type SelectInEditorRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { ShowSidebarAppResponseSchema, type ShowSidebarAppRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_sidebar_app_pb";
 import { ShowChatNodeResponseSchema, type ShowChatNodeRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
 import { CloseWorkspaceResponseSchema, type CloseWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
@@ -150,11 +150,11 @@ describe("the Chat app's body", () => {
 
   it("selects a thread its row is clicked for", async () => {
     // Arrange
-    const selected: SelectWorkspaceRequest[] = [];
+    const selected: SelectInEditorRequest[] = [];
     const host = mount([roster({ chat: [{ id: "t-1", name: "why" }] })], {
-      selectWorkspace: (request) => {
+      selectInEditor: (request) => {
         selected.push(request);
-        return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
+        return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
       },
     });
     await settle();
@@ -283,9 +283,9 @@ describe("a thread row's menu", () => {
     // Arrange
     let selects = 0;
     const host = mount([roster({ chat: [{ id: "t-1", name: "why" }] })], {
-      selectWorkspace: () => {
+      selectInEditor: () => {
         selects += 1;
-        return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
+        return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
       },
     });
     await settle();
