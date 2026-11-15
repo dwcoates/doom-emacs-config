@@ -1493,3 +1493,22 @@ func TestApplyContractsOnAReadOnlyHandleIsRefused(t *testing.T) {
 		t.Fatalf("ApplyContracts = %v, want the read-only handle refused", err)
 	}
 }
+
+func TestTheGithubWorkflowRunsStepIsAdditiveAndCreatesBothTables(t *testing.T) {
+	// Arrange
+	step := migrationTo(t, 184)
+	path := fixtureAt(t, 183)
+
+	// Act
+	execRaw(t, path, step.DDL)
+
+	// Assert
+	if step.Name != "github_workflow_runs" || step.Kind != MigrationAdditive {
+		t.Fatalf("migration 184 = %+v, want the GitHub workflow runs, additive", step)
+	}
+	for _, table := range []string{"github_workflow_run_subscriptions", "github_workflow_run_untold_notices"} {
+		if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table); got != 1 {
+			t.Fatalf("table %s exists %d times, want once", table, got)
+		}
+	}
+}

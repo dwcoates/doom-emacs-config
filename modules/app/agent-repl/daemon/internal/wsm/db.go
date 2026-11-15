@@ -1087,6 +1087,30 @@ type DB interface {
 	OwedGithubMergeQueueNotices(ctx context.Context) ([]GithubMergeQueueOwed, error)
 	// RecordGithubMergeQueueNoticeSubmitted records a submitted notice.
 	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, queue GithubMergeQueueKey, turn TurnID, sentences []string, took int) error
+	// SubscribeGithubWorkflowRun records a workflow-run subscription,
+	// answering whether one was already held (githubworkflowruns.go).
+	SubscribeGithubWorkflowRun(ctx context.Context, sub GithubWorkflowRunSubscription) (bool, error)
+	// UnsubscribeGithubWorkflowRun ends one, answering whether one stood.
+	UnsubscribeGithubWorkflowRun(ctx context.Context, subscriber WorkspaceID, run GithubWorkflowRunKey) (bool, error)
+	// LiveGithubWorkflowRunSubscriptions loads every one.
+	LiveGithubWorkflowRunSubscriptions(ctx context.Context) ([]GithubWorkflowRunSubscription, error)
+	// WorkspaceGithubWorkflowRunSubscriptions loads a workspace's.
+	WorkspaceGithubWorkflowRunSubscriptions(ctx context.Context, subscriber WorkspaceID) ([]GithubWorkflowRunSubscription, error)
+	// RecordGithubWorkflowRunRead records a successful read of an unfinished
+	// run.
+	RecordGithubWorkflowRunRead(ctx context.Context, run GithubWorkflowRunKey, readAt time.Time) error
+	// OweGithubWorkflowRunCompletion ends a subscription and owes its one
+	// notice, in one transaction.
+	OweGithubWorkflowRunCompletion(ctx context.Context, c GithubWorkflowRunCompletion) (bool, error)
+	// RecordGithubWorkflowRunReadFailure records a failed read of a run.
+	RecordGithubWorkflowRunReadFailure(ctx context.Context, run GithubWorkflowRunKey, f PullRequestFailure) ([]WorkspaceID, error)
+	// OweGithubWorkflowRunNotice appends sentences about a subscription
+	// itself.
+	OweGithubWorkflowRunNotice(ctx context.Context, subscriber WorkspaceID, run GithubWorkflowRunKey, sentences []string) error
+	// OwedGithubWorkflowRunNotices loads every notice with sentences pending.
+	OwedGithubWorkflowRunNotices(ctx context.Context) ([]GithubWorkflowRunOwed, error)
+	// RecordGithubWorkflowRunNoticeSubmitted records a submitted notice.
+	RecordGithubWorkflowRunNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, run GithubWorkflowRunKey, turn TurnID, sentences []string, took int) error
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

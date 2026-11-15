@@ -44,7 +44,7 @@ func TestEveryGithubKindsTablesFitTheSharedHelpers(t *testing.T) {
 		t.Run(kind.noun, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			wantSubs := append([]string{"subscriber", "told", "last_read", "failing_since", "failure_kind", "failure_detail", "failure_resets_at"}, kind.key...)
+			wantSubs := append([]string{"subscriber", "last_read", "failing_since", "failure_kind", "failure_detail", "failure_resets_at"}, kind.key...)
 			wantNotices := []string{"subscriber", kind.subject, "turn_id", "sentences", "pending", "status"}
 
 			// Act
