@@ -451,7 +451,7 @@ func TestResumeFoldedRecordsAFailedReadAndResumesNothing(t *testing.T) {
 	}
 }
 
-func TestResumeFoldedCutByTheDaemonsExitIsRecordedAtInfo(t *testing.T) {
+func TestResumeFoldedCutByTheDaemonsExitIsRecordedAtDebug(t *testing.T) {
 	cases := []struct {
 		name    string
 		db      func(wsm.DB) wsm.DB
@@ -475,8 +475,8 @@ func TestResumeFoldedCutByTheDaemonsExitIsRecordedAtInfo(t *testing.T) {
 			f.c.ResumeFolded(context.Background())
 
 			// Assert
-			if _, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opFolded, Message: tc.message}); !ok {
-				t.Fatalf("no info record %q; records = %+v", tc.message, f.log.Records())
+			if _, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "debug", Operation: opFolded, Message: tc.message}); !ok {
+				t.Fatalf("no debug record %q; records = %+v", tc.message, f.log.Records())
 			}
 			if rec, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "error", Operation: opFolded}); ok {
 				t.Fatalf("an exit's cut was recorded at ERROR: %+v", rec)
