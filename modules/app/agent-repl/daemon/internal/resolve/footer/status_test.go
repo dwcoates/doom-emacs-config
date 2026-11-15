@@ -1727,6 +1727,33 @@ func TestAMergeOnAStepOutranksWaiting(t *testing.T) {
 	}
 }
 
+func TestTurnRunningHoldsForAnOpenTurnOrAVendorCompaction(t *testing.T) {
+	tests := []struct {
+		name       string
+		turn       *TurnStarted
+		compacting bool
+		want       bool
+	}{
+		{"an open turn", &TurnStarted{At: instant}, false, true},
+		{"a vendor compaction before its turn opens", nil, true, true},
+		{"neither", nil, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := &wsState{turn: tt.turn, compacting: tt.compacting}
+
+			// Act
+			got := s.turnRunning()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("turnRunning = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 	tests := []struct {
 		name  string

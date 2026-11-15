@@ -762,6 +762,13 @@ func (s *wsState) detachedLive() bool {
 	return s.detachedCount() > 0
 }
 
+// turnRunning reports a turn in flight in the session: an opened turn, or a
+// vendor compaction whose turn-open edge has not landed yet (thinking). The
+// thinking rung draws exactly while it holds.
+func (s *wsState) turnRunning() bool {
+	return s.turn != nil || s.compacting
+}
+
 // detachedCount is how many detached items are running right now, read from
 // the same authority detachedLive reads: the watcher's set once it has stated
 // one, the footer's own rows until then. IT COUNTS EVERY OWNER'S WORK, a

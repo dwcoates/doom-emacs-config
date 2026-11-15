@@ -748,7 +748,7 @@ const interruptingLine = "stopping the current turn…"
 // draws `compacting` from that same fact the moment it does. Answering nil
 // there left the strip reading idle beside a rail reading compacting.
 func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	if s.turn == nil && !s.compacting {
+	if !s.turnRunning() {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusWorking{}

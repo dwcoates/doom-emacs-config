@@ -207,7 +207,7 @@ func ActivityOf(status *frontendv1.FooterStatus) (*agentreplv1.WorkspaceStatusAc
 		return needs(&agentreplv1.WorkspaceStatusActivityNeedsInput{Ask: &agentreplv1.WorkspaceStatusActivityNeedsInput_Question{
 			Question: &agentreplv1.WorkspaceStatusActivityNeedsInputQuestion{}}}), true
 	case *frontendv1.FooterStatus_Merging:
-		return &agentreplv1.WorkspaceStatusActivity{Activity: &agentreplv1.WorkspaceStatusActivity_Merging{Merging: &agentreplv1.WorkspaceStatusActivityMerging{}}}, true
+		return mergingActivity(), true
 	case *frontendv1.FooterStatus_Starting, *frontendv1.FooterStatus_Loading:
 		return starting, true
 	case *frontendv1.FooterStatus_VendorFault, *frontendv1.FooterStatus_AgentReplFault,
@@ -215,4 +215,9 @@ func ActivityOf(status *frontendv1.FooterStatus) (*agentreplv1.WorkspaceStatusAc
 		return fault, true
 	}
 	return nil, false
+}
+
+// mergingActivity is the activity of a workspace its merge in flight holds.
+func mergingActivity() *agentreplv1.WorkspaceStatusActivity {
+	return &agentreplv1.WorkspaceStatusActivity{Activity: &agentreplv1.WorkspaceStatusActivity_Merging{Merging: &agentreplv1.WorkspaceStatusActivityMerging{}}}
 }
