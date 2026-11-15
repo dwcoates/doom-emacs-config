@@ -2,10 +2,12 @@ package drain
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
@@ -98,11 +100,9 @@ func TestACycleStandDownSkips(t *testing.T) {
 		{name: "a hidden workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.hidden(t)
 		}},
-		{name: "a closed workspace, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+		{name: "a closed workspace with no merge queued, whose lapse is the cache keeper's", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			ws := h.workspace(t, instant)
-			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
-				t.Fatalf("MarkClosed: %v", err)
-			}
+			h.closedAt(t, ws)
 			return ws
 		}},
 		{name: "a session a real turn engaged since the beat", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
@@ -348,3 +348,56 @@ func (h *harness) remoteControlOn(t *testing.T) ids.WorkspaceID {
 	}
 	return ws
 }
+
+// closedAt marks ws closed by the user at instant.
+func (h *harness) closedAt(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+}
+
+// A CLOSED WORKSPACE WITH A MERGE QUEUED is parked as an open one is: the
+// cache keeper's lapse never stands a queued workspace down.
+func TestAClosedWorkspaceWithAMergeQueuedIsStoodDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.closedAt(t, ws)
+	queuedAt(t, h, ws, instant)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked {
+		t.Fatalf("terminal = %+v, want the queued closed workspace parked", term)
+	}
+}
+
+func TestAClosedWorkspaceWhoseQueuesCannotBeReadIsNotStoodDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.DB = sweepReadErrDB{DB: d.DB, read: "queues", err: errFake} })
+	ws := h.workspace(t, instant)
+	h.closedAt(t, ws)
+
+	// Act
+	h.c.CycleDown(ws, beatAfter)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none when the queues cannot be read", killed)
+	}
+	if h.cyclePending(ws) {
+		t.Fatal("a dropped stand-down stayed pending")
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opCycle,
+		Message: "could not read whether the closed workspace has a merge queued; its stand-down is dropped"})
+	if !ok {
+		t.Fatalf("records = %+v, want the queue read's failure at error", records(h.log, opCycle))
+	}
+	if rec.Context["workspace"] != string(ws) || !strings.Contains(fmt.Sprint(rec.Context["cause"]), errFake.Error()) {
+		t.Fatalf("record context = %v, want the workspace and the cause", rec.Context)
+	}
+}
+

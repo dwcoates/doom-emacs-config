@@ -28,7 +28,8 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // interrupts a turn or live detached work: a busy session stays PENDING and is
 // asked again on the daemon's own edges (RetryWithheld), never by a poll. And
 // it stands nothing down for the workspace the user is looking at, for a
-// hidden or closed one (the cache keeper's lapse owns those), for one whose
+// hidden or closed one with no merge queued (the cache keeper's lapse owns
+// those), for one whose
 // remote control is on (claude.ai reaches it only through its shim; owner
 // ruling, 2026-10-31), or once a real turn has run since the beat -- that turn
 // is engagement, and the next beat decides again.
@@ -171,9 +172,22 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
 		return withheldSettled
 	}
+	// A CLOSED WORKSPACE WITH A MERGE QUEUED IS STOOD DOWN AS AN OPEN ONE IS:
+	// the cache keeper's lapse keeps every queued workspace's session for as
+	// long as its entry stands (cachelapse.Keeper.lapse), so the lapse would
+	// never stand it down, and it stayed up between beats (2026-11-14, 27 of
+	// 87 live sessions had a merge waiting). The next prompt the merge sends
+	// revives it, as it revives any park.
 	if record.Closed {
-		log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
-		return withheldSettled
+		queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
+		if err != nil {
+			log.Error(op, "could not read whether the closed workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
+			return withheldSettled
+		}
+		if !queued {
+			log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
+			return withheldSettled
+		}
 	}
 	// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP (owner ruling,
 	// 2026-10-31): claude.ai reaches the session only through a shim that is
