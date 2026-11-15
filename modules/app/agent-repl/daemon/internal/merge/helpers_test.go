@@ -1160,7 +1160,7 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			return f.restampRepairsLocked(repo)
 		}
 	}
-	return fmt.Errorf("no queue entry for %s", id)
+	return fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, repo, wsm.ErrNotFound)
 }
 
 // keepOffQueueLocked stands for the store's one queue-exit transition

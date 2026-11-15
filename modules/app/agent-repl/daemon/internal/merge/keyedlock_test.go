@@ -52,6 +52,11 @@ func TestKeyedLockCallSitesShareTheOrchestratorsMaps(t *testing.T) {
 			answer: func(h *harness) *sync.Mutex { return h.o.handOffLock(theWorkspace) },
 			stored: func(h *harness) *sync.Mutex { return h.o.handOffLocks[theWorkspace] },
 		},
+		{
+			name:   "the drop lock",
+			answer: func(h *harness) *sync.Mutex { return h.o.dropLock(theWorkspace) },
+			stored: func(h *harness) *sync.Mutex { return h.o.dropLocks[theWorkspace] },
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
