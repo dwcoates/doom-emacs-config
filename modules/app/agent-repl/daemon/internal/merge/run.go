@@ -3,6 +3,7 @@ package merge
 import (
 	"agent-repld/internal/lifecycleconfig"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -641,8 +642,12 @@ func (o *orchestrator) entryOf(ctx context.Context, repo wsm.RepoKey, ws ids.Wor
 			return entry, nil
 		}
 	}
-	return wsm.MergeQueueEntry{}, fmt.Errorf("merge: no queue entry of %s stands in %s", ws, repo)
+	return wsm.MergeQueueEntry{}, fmt.Errorf("merge: no queue entry of %s stands in %s: %w", ws, repo, errNoQueueEntry)
 }
+
+// errNoQueueEntry is entryOf's answer for a workspace with no entry in the
+// queue it named.
+var errNoQueueEntry = errors.New("merge: no such queue entry")
 
 // admit is start's body once the run exists: every failure from here ends the
 // run through its one classification (end).

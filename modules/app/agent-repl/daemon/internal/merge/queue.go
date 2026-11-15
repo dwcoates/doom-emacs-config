@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"time"
 
@@ -777,28 +778,11 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 		return err
 	}
 	o.withdrawRequest(ws)
-	entry, err := o.entryOf(ctx, repo, ws)
+	entry, err := o.takeOffQueue(ctx, repo, ws, cause)
+	if gone := (*entryGone)(nil); errors.As(err, &gone) {
+		return o.leftFirst(ctx, ws, repo, cause, gone)
+	}
 	if err != nil {
-		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
-		return err
-	}
-	// AN ADMITTED MERGE WITH NO RUN AND NO RESUME HERE is not a waiting one:
-	// another daemon drives it, a handover is moving it, or its run is
-	// starting. Dropping only its entry would leave its lease over none, so
-	// it is refused, loudly.
-	if entry.State == wsm.MergeAdmitted {
-		err := fmt.Errorf("merge: the merge of %s is admitted with no run in this daemon; it is taken off where it runs", ws)
-		log.Error(op, "refused to drop an admitted merge as a waiting one", dlog.Context{
-			"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
-		return err
-	}
-	if ledger, ok := o.leaseOf(ws); ok {
-		if err := o.settleLeavingQueueTab(ctx, repo, ws, ledger, string(cause)); err != nil {
-			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
-		}
-	}
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
-		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
 	}
 	o.mu.Lock()
@@ -824,6 +808,113 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.kick(repo)
 	return nil
+}
+
+// takeOffQueue reads WS's entry in REPO and removes it for CAUSE, under WS's
+// drop lock (dropLocks), so a second drop of the same merge waits for the
+// first and then reads the entry gone. It answers the entry it removed, or,
+// when the entry had already left -- before the read, or between the read
+// and the removal through an exit that is no drop -- an *entryGone for
+// leftFirst to explain. Every other failure is recorded here.
+func (o *orchestrator) takeOffQueue(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, cause AbandonCause) (wsm.MergeQueueEntry, error) {
+	const op = "daemon.merge.drop_queued"
+	log := o.log(ctx, ws)
+	drop := o.dropLock(ws)
+	if o.onDropWait != nil {
+		o.onDropWait(ws)
+	}
+	drop.Lock()
+	defer drop.Unlock()
+	entry, err := o.entryOf(ctx, repo, ws)
+	if errors.Is(err, errNoQueueEntry) {
+		return wsm.MergeQueueEntry{}, &entryGone{found: err}
+	}
+	if err != nil {
+		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	// AN ADMITTED MERGE WITH NO RUN AND NO RESUME HERE is not a waiting one:
+	// another daemon drives it, a handover is moving it, or its run is
+	// starting. Dropping only its entry would leave its lease over none, so
+	// it is refused, loudly.
+	if entry.State == wsm.MergeAdmitted {
+		err := fmt.Errorf("merge: the merge of %s is admitted with no run in this daemon; it is taken off where it runs", ws)
+		log.Error(op, "refused to drop an admitted merge as a waiting one", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	if ledger, ok := o.leaseOf(ws); ok {
+		if err := o.settleLeavingQueueTab(ctx, repo, ws, ledger, string(cause)); err != nil {
+			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		}
+	}
+	err = o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause))
+	if errors.Is(err, wsm.ErrNotFound) {
+		return wsm.MergeQueueEntry{}, &entryGone{found: err}
+	}
+	if err != nil {
+		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	return entry, nil
+}
+
+// entryGone is takeOffQueue's answer for an entry that had already left its
+// queue: FOUND is the read or the removal that found it gone.
+type entryGone struct{ found error }
+
+func (e *entryGone) Error() string { return e.found.Error() }
+func (e *entryGone) Unwrap() error { return e.found }
+
+// dropLock answers the lock WS's drops are serialized by (dropLocks).
+func (o *orchestrator) dropLock(ws ids.WorkspaceID) *sync.Mutex {
+	return keyedLock(o, o.dropLocks, ws)
+}
+
+// leftFirst answers a drop of WS's merge for CAUSE that found its entry in
+// REPO already gone (GONE): the drop is idempotent when the store records
+// why the merge left -- its request standing off the queue (an earlier drop,
+// an eviction, a failure), its workspace's close, or its landing -- and that
+// is recorded at INFO, with the why. An entry gone with none of those is an
+// inconsistency between this daemon and its store, recorded at ERROR and
+// answered as an error. Either way this daemon's note of the queue it stood
+// in is forgotten: no entry of it stands there.
+func (o *orchestrator) leftFirst(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, cause AbandonCause, gone *entryGone) error {
+	const op = "daemon.merge.drop_queued"
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "found": gone.Error()}
+	o.mu.Lock()
+	if o.repoOf[ws] == repo {
+		delete(o.repoOf, ws)
+	}
+	o.mu.Unlock()
+	off, kept, err := o.deps.DB.OffQueueMergeOf(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read why a merge whose entry was gone when its drop came left its queue", withField(fields, "error", err.Error()))
+		return err
+	}
+	if kept {
+		fields["left_cause"], fields["left_at"] = off.Cause, off.LeftAt.UTC().Format(time.RFC3339Nano)
+		log.Info(op, "the merge had already left its queue when the drop came, its request standing off the queue; nothing is taken off", fields)
+		return nil
+	}
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read the workspace of a merge whose entry was gone when its drop came", withField(fields, "error", err.Error()))
+		return err
+	}
+	switch {
+	case record.MergedAt != nil:
+		fields["merged_at"] = record.MergedAt.UTC().Format(time.RFC3339Nano)
+		log.Info(op, "the merge had already landed when the drop came; nothing is taken off", fields)
+		return nil
+	case record.Closed:
+		log.Info(op, "the merge had already left its queue with its workspace's close when the drop came; nothing is taken off", fields)
+		return nil
+	}
+	err = fmt.Errorf("merge: the merge of %s has no entry in %s and the store records no leaving of it: %w", ws, repo, gone)
+	log.Error(op, "a merge this daemon knew as queued has no queue entry and no record of leaving it", withField(fields, "error", err.Error()))
+	return err
 }
 
 // queuedSentence is the abandoned terminal's sentence of a merge that left
