@@ -47,6 +47,7 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 	repos, orphans := openTree(reg, log)
 	current := r.selectedWorkspace()
 	tabs := tabsOf(repos)
+	filed := wsm.SectionRepos(r.state.reg.Workspaces)
 	out := &frontendv1.RosterRepositoryView{}
 	numbers := &tabNumberer{}
 	shown := &frontendv1.RosterOpenCount{}
@@ -81,7 +82,7 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 		}
 		addOpenCount(shown, count)
 		section.Header = openHeader(placed.repo.Name, count)
-		setRepoFold(section, placed.repo.Folded, holdsCurrent(tabs, current, wsm.RepositoryMembers(placed.repo.ID)))
+		setRepoFold(section, placed.repo.Folded, holdsCurrent(tabs, current, wsm.RepositoryMembers(filed, placed.repo.ID)))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)

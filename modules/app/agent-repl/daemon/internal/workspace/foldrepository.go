@@ -56,7 +56,7 @@ func (v *verbs) repositoryFold(ctx context.Context, log dlog.Logger, repo ids.Re
 			}
 			return refuse(log, "FoldRepository", ArmUnknownRepository, fmt.Sprintf("no repository %q is registered", repo), true)
 		},
-		members: func([]wsm.Workspace) wsm.FoldMembers { return wsm.RepositoryMembers(repo) },
+		members: func(all []wsm.Workspace) wsm.FoldMembers { return wsm.RepositoryMembers(wsm.SectionRepos(all), repo) },
 	}
 }
 
@@ -171,8 +171,7 @@ type foldTabsSpec struct {
 	// any other failure.
 	unknown func(error) error
 	// members are the workspaces whose tabs the fold hides, given every
-	// workspace as it stands (a repository's and a subsection's membership
-	// reads none of them).
+	// workspace as it stands (a subsection's membership reads none of them).
 	members func(all []wsm.Workspace) wsm.FoldMembers
 	// landsOff is set by the folds of a section (a repository's, a
 	// subsection's): a collapse holding the current workspace moves the

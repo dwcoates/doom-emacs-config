@@ -133,6 +133,48 @@ func TestCollapsingARepositoryLeavesAnotherRepositorysWorkspaces(t *testing.T) {
 	}
 }
 
+// TestCollapsingARepositoryFoldsItsWorkspacesCrossRepositoryChildren pins the
+// fold's membership to the tab bar's: a child of another repository is drawn
+// under its parent, in the parent's section, so that section's collapse folds
+// it and the child's own repository's does not.
+func TestCollapsingARepositoryFoldsItsWorkspacesCrossRepositoryChildren(t *testing.T) {
+	tests := []struct {
+		name string
+		repo ids.RepoID
+		want []ids.WorkspaceID
+	}{
+		{name: "the parent's repository folds the child with its parent", repo: "repo-1", want: []ids.WorkspaceID{"c1", "p1"}},
+		{name: "the child's own repository folds nothing", repo: "repo-2", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"}, wsm.Repository{ID: "repo-2"})
+			f.workspace("p1", t.TempDir())
+			inRepo(f, "p1", "repo-1", false)
+			f.workspace("c1", t.TempDir())
+			inRepo(f, "c1", "repo-2", false)
+			child := f.db.workspaces["c1"]
+			parent := ids.WorkspaceID("p1")
+			child.Parent = &parent
+			f.db.workspaces["c1"] = child
+
+			// Act
+			if err := f.verbs.FoldRepository(context.Background(), tt.repo, true, testRequester); err != nil {
+				t.Fatalf("FoldRepository: %v", err)
+			}
+
+			// Assert
+			got := slices.Clone(f.standDowns)
+			slices.Sort(got)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("stand-downs = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCollapsingARepositoryLeavesItsClosedWorkspaces(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -466,7 +508,9 @@ func TestACollapseIsWrittenUnderTheSelectionLock(t *testing.T) {
 					return nil
 				},
 				unknown: func(error) error { return nil },
-				members: func([]wsm.Workspace) wsm.FoldMembers { return wsm.RepositoryMembers("repo-1") },
+				members: func(all []wsm.Workspace) wsm.FoldMembers {
+					return wsm.RepositoryMembers(wsm.SectionRepos(all), "repo-1")
+				},
 			})
 
 			// Assert

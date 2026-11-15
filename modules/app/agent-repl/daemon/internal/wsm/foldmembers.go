@@ -9,10 +9,18 @@ package wsm
 // holds.
 type FoldMembers func(Workspace) bool
 
-// RepositoryMembers are the workspaces of REPO, in one of its subsections or
-// in none.
-func RepositoryMembers(repo RepoID) FoldMembers {
-	return func(ws Workspace) bool { return ws.Repo == repo }
+// RepositoryMembers are the workspaces REPO's section draws, in one of its
+// subsections or in none, given where SECTION (SectionRepos over every
+// workspace) files each one. A FAMILY IS FILED BY ITS ROOT: a child of another
+// repository than its parent's sits in its parent's section, so a collapse of
+// that section folds the child's tab and stands its session down, exactly as
+// the tab bar (resolve/sidebar's Tabs) draws it. A workspace SECTION does not
+// file is in no section.
+func RepositoryMembers(section map[WorkspaceID]RepoID, repo RepoID) FoldMembers {
+	return func(ws Workspace) bool {
+		filed, ok := section[ws.ID]
+		return ok && filed == repo
+	}
 }
 
 // SubsectionMembers are the workspaces sitting in SUB.
