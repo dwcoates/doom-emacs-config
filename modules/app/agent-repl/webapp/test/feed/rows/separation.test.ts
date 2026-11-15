@@ -6,9 +6,9 @@ import {
   type FeedSessionSeparation,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
-  SelectWorkspaceResponseSchema,
-  type SelectWorkspaceRequest,
-} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+  SelectInEditorResponseSchema,
+  type SelectInEditorRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { scriptedAppContext } from "../../rpc/app-context.js";
 import { RecordingSink, WORKSPACE } from "../harness.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -152,12 +152,12 @@ describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
     });
 
     it("selects the source workspace on a click", async () => {
-      const calls: SelectWorkspaceRequest[] = [];
+      const calls: SelectInEditorRequest[] = [];
       const ctx = scriptedAppContext(
         {
-          selectWorkspace: (req) => {
+          selectInEditor: (req) => {
             calls.push(req);
-            return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+            return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
           },
         },
         { workspace: WORKSPACE, failures: new RecordingSink() },
