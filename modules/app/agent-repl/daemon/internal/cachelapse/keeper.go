@@ -264,6 +264,10 @@ type Keeper struct {
 	// failed is asked again (parked.go); both owned by Run alone.
 	parkedFlying map[ids.WorkspaceID]bool
 	parkedRetry  map[ids.WorkspaceID]time.Time
+	// noBeat is why each workspace last owed no keep-alive, so the decision
+	// is recorded at INFO only when it changes (owesNone); owned by Run
+	// alone.
+	noBeat map[ids.WorkspaceID]string
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -314,6 +318,7 @@ func New(deps Deps) (*Keeper, error) {
 
 		parkedFlying: map[ids.WorkspaceID]bool{},
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
+		noBeat:       map[ids.WorkspaceID]string{},
 	}, nil
 }
 
