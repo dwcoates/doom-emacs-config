@@ -51,6 +51,10 @@ const (
 	PruneStorageReason_PRUNE_STORAGE_REASON_CLOSED_BACKUPS PruneStorageReason = 3
 	// A cache directory's entry older than thirty days.
 	PruneStorageReason_PRUNE_STORAGE_REASON_AGED PruneStorageReason = 4
+	// A size-bounded cache's least recently used entries, deleted until it is
+	// back under its bound: one removal for the whole cache, naming its
+	// directory and what was freed.
+	PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND PruneStorageReason = 5
 )
 
 // Enum value maps for PruneStorageReason.
@@ -61,6 +65,7 @@ var (
 		2: "PRUNE_STORAGE_REASON_LANDED",
 		3: "PRUNE_STORAGE_REASON_CLOSED_BACKUPS",
 		4: "PRUNE_STORAGE_REASON_AGED",
+		5: "PRUNE_STORAGE_REASON_OVER_BOUND",
 	}
 	PruneStorageReason_value = map[string]int32{
 		"PRUNE_STORAGE_REASON_UNSPECIFIED":    0,
@@ -68,6 +73,7 @@ var (
 		"PRUNE_STORAGE_REASON_LANDED":         2,
 		"PRUNE_STORAGE_REASON_CLOSED_BACKUPS": 3,
 		"PRUNE_STORAGE_REASON_AGED":           4,
+		"PRUNE_STORAGE_REASON_OVER_BOUND":     5,
 	}
 )
 
@@ -308,7 +314,10 @@ type PruneStorageSuccess struct {
 	// The entries left alone, one count per reason.
 	Kept []*PruneStorageKept `protobuf:"bytes,4,rep,name=kept,proto3" json:"kept,omitempty"`
 	// How many steps failed.
-	Failures      uint32 `protobuf:"varint,5,opt,name=failures,proto3" json:"failures,omitempty"`
+	Failures uint32 `protobuf:"varint,5,opt,name=failures,proto3" json:"failures,omitempty"`
+	// Every size-bounded cache the sweep measured (the host's Go build cache),
+	// with its size before the sweep and its bound.
+	Measured      []*PruneStorageMeasured `protobuf:"bytes,6,rep,name=measured,proto3" json:"measured,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -378,6 +387,86 @@ func (x *PruneStorageSuccess) GetFailures() uint32 {
 	return 0
 }
 
+func (x *PruneStorageSuccess) GetMeasured() []*PruneStorageMeasured {
+	if x != nil {
+		return x.Measured
+	}
+	return nil
+}
+
+// One size-bounded cache's size as the sweep found it.
+type PruneStorageMeasured struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The cache's name ("go-build").
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Its directory.
+	Dir string `protobuf:"bytes,2,opt,name=dir,proto3" json:"dir,omitempty"`
+	// What it held before the sweep, in bytes.
+	Bytes uint64 `protobuf:"varint,3,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	// The size past which its least recently used entries are deleted.
+	Bound         uint64 `protobuf:"varint,4,opt,name=bound,proto3" json:"bound,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PruneStorageMeasured) Reset() {
+	*x = PruneStorageMeasured{}
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PruneStorageMeasured) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PruneStorageMeasured) ProtoMessage() {}
+
+func (x *PruneStorageMeasured) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PruneStorageMeasured.ProtoReflect.Descriptor instead.
+func (*PruneStorageMeasured) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PruneStorageMeasured) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PruneStorageMeasured) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+func (x *PruneStorageMeasured) GetBytes() uint64 {
+	if x != nil {
+		return x.Bytes
+	}
+	return 0
+}
+
+func (x *PruneStorageMeasured) GetBound() uint64 {
+	if x != nil {
+		return x.Bound
+	}
+	return 0
+}
+
 // One deleted entry.
 type PruneStorageRemoval struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -393,7 +482,7 @@ type PruneStorageRemoval struct {
 
 func (x *PruneStorageRemoval) Reset() {
 	*x = PruneStorageRemoval{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -405,7 +494,7 @@ func (x *PruneStorageRemoval) String() string {
 func (*PruneStorageRemoval) ProtoMessage() {}
 
 func (x *PruneStorageRemoval) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -418,7 +507,7 @@ func (x *PruneStorageRemoval) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageRemoval.ProtoReflect.Descriptor instead.
 func (*PruneStorageRemoval) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PruneStorageRemoval) GetPath() string {
@@ -454,7 +543,7 @@ type PruneStorageKept struct {
 
 func (x *PruneStorageKept) Reset() {
 	*x = PruneStorageKept{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +555,7 @@ func (x *PruneStorageKept) String() string {
 func (*PruneStorageKept) ProtoMessage() {}
 
 func (x *PruneStorageKept) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +568,7 @@ func (x *PruneStorageKept) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageKept.ProtoReflect.Descriptor instead.
 func (*PruneStorageKept) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PruneStorageKept) GetReason() PruneStorageKeepReason {
@@ -510,7 +599,7 @@ type PruneStorageError struct {
 
 func (x *PruneStorageError) Reset() {
 	*x = PruneStorageError{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +611,7 @@ func (x *PruneStorageError) String() string {
 func (*PruneStorageError) ProtoMessage() {}
 
 func (x *PruneStorageError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +624,7 @@ func (x *PruneStorageError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageError.ProtoReflect.Descriptor instead.
 func (*PruneStorageError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PruneStorageError) GetCause() isPruneStorageError_Cause {
@@ -606,7 +695,7 @@ type PruneStorageAlreadyRunning struct {
 
 func (x *PruneStorageAlreadyRunning) Reset() {
 	*x = PruneStorageAlreadyRunning{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -618,7 +707,7 @@ func (x *PruneStorageAlreadyRunning) String() string {
 func (*PruneStorageAlreadyRunning) ProtoMessage() {}
 
 func (x *PruneStorageAlreadyRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -631,7 +720,7 @@ func (x *PruneStorageAlreadyRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageAlreadyRunning.ProtoReflect.Descriptor instead.
 func (*PruneStorageAlreadyRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{7}
 }
 
 // Empty: nothing more is known.
@@ -643,7 +732,7 @@ type PruneStorageHeldElsewhere struct {
 
 func (x *PruneStorageHeldElsewhere) Reset() {
 	*x = PruneStorageHeldElsewhere{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -655,7 +744,7 @@ func (x *PruneStorageHeldElsewhere) String() string {
 func (*PruneStorageHeldElsewhere) ProtoMessage() {}
 
 func (x *PruneStorageHeldElsewhere) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -668,7 +757,7 @@ func (x *PruneStorageHeldElsewhere) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageHeldElsewhere.ProtoReflect.Descriptor instead.
 func (*PruneStorageHeldElsewhere) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{8}
 }
 
 type PruneStorageFailed struct {
@@ -681,7 +770,7 @@ type PruneStorageFailed struct {
 
 func (x *PruneStorageFailed) Reset() {
 	*x = PruneStorageFailed{}
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +782,7 @@ func (x *PruneStorageFailed) String() string {
 func (*PruneStorageFailed) ProtoMessage() {}
 
 func (x *PruneStorageFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +795,7 @@ func (x *PruneStorageFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PruneStorageFailed.ProtoReflect.Descriptor instead.
 func (*PruneStorageFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PruneStorageFailed) GetDetail() string {
@@ -726,13 +815,19 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x14PruneStorageResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.PruneStorageSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.PruneStorageErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\xd1\x01\n" +
+	"\x06result\"\x91\x02\n" +
 	"\x13PruneStorageSuccess\x12\x17\n" +
 	"\adry_run\x18\x01 \x01(\bR\x06dryRun\x12;\n" +
 	"\aremoved\x18\x02 \x03(\v2!.agentrepl.v1.PruneStorageRemovalR\aremoved\x12\x14\n" +
 	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\x122\n" +
 	"\x04kept\x18\x04 \x03(\v2\x1e.agentrepl.v1.PruneStorageKeptR\x04kept\x12\x1a\n" +
-	"\bfailures\x18\x05 \x01(\rR\bfailures\"y\n" +
+	"\bfailures\x18\x05 \x01(\rR\bfailures\x12>\n" +
+	"\bmeasured\x18\x06 \x03(\v2\".agentrepl.v1.PruneStorageMeasuredR\bmeasured\"h\n" +
+	"\x14PruneStorageMeasured\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
+	"\x03dir\x18\x02 \x01(\tR\x03dir\x12\x14\n" +
+	"\x05bytes\x18\x03 \x01(\x04R\x05bytes\x12\x14\n" +
+	"\x05bound\x18\x04 \x01(\x04R\x05bound\"y\n" +
 	"\x13PruneStorageRemoval\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x128\n" +
 	"\x06reason\x18\x02 \x01(\x0e2 .agentrepl.v1.PruneStorageReasonR\x06reason\x12\x14\n" +
@@ -748,13 +843,14 @@ const file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc = "" +
 	"\x1aPruneStorageAlreadyRunning\"\x1b\n" +
 	"\x19PruneStorageHeldElsewhere\",\n" +
 	"\x12PruneStorageFailed\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail*\xca\x01\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail*\xef\x01\n" +
 	"\x12PruneStorageReason\x12$\n" +
 	" PRUNE_STORAGE_REASON_UNSPECIFIED\x10\x00\x12%\n" +
 	"!PRUNE_STORAGE_REASON_NO_WORKSPACE\x10\x01\x12\x1f\n" +
 	"\x1bPRUNE_STORAGE_REASON_LANDED\x10\x02\x12'\n" +
 	"#PRUNE_STORAGE_REASON_CLOSED_BACKUPS\x10\x03\x12\x1d\n" +
-	"\x19PRUNE_STORAGE_REASON_AGED\x10\x04*\xcf\x02\n" +
+	"\x19PRUNE_STORAGE_REASON_AGED\x10\x04\x12#\n" +
+	"\x1fPRUNE_STORAGE_REASON_OVER_BOUND\x10\x05*\xcf\x02\n" +
 	"\x16PruneStorageKeepReason\x12)\n" +
 	"%PRUNE_STORAGE_KEEP_REASON_UNSPECIFIED\x10\x00\x12,\n" +
 	"(PRUNE_STORAGE_KEEP_REASON_OPEN_WORKSPACE\x10\x01\x12-\n" +
@@ -777,35 +873,37 @@ func file_agentrepl_v1_endpoint_prune_storage_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_endpoint_prune_storage_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_prune_storage_proto_goTypes = []any{
 	(PruneStorageReason)(0),            // 0: agentrepl.v1.PruneStorageReason
 	(PruneStorageKeepReason)(0),        // 1: agentrepl.v1.PruneStorageKeepReason
 	(*PruneStorageRequest)(nil),        // 2: agentrepl.v1.PruneStorageRequest
 	(*PruneStorageResponse)(nil),       // 3: agentrepl.v1.PruneStorageResponse
 	(*PruneStorageSuccess)(nil),        // 4: agentrepl.v1.PruneStorageSuccess
-	(*PruneStorageRemoval)(nil),        // 5: agentrepl.v1.PruneStorageRemoval
-	(*PruneStorageKept)(nil),           // 6: agentrepl.v1.PruneStorageKept
-	(*PruneStorageError)(nil),          // 7: agentrepl.v1.PruneStorageError
-	(*PruneStorageAlreadyRunning)(nil), // 8: agentrepl.v1.PruneStorageAlreadyRunning
-	(*PruneStorageHeldElsewhere)(nil),  // 9: agentrepl.v1.PruneStorageHeldElsewhere
-	(*PruneStorageFailed)(nil),         // 10: agentrepl.v1.PruneStorageFailed
+	(*PruneStorageMeasured)(nil),       // 5: agentrepl.v1.PruneStorageMeasured
+	(*PruneStorageRemoval)(nil),        // 6: agentrepl.v1.PruneStorageRemoval
+	(*PruneStorageKept)(nil),           // 7: agentrepl.v1.PruneStorageKept
+	(*PruneStorageError)(nil),          // 8: agentrepl.v1.PruneStorageError
+	(*PruneStorageAlreadyRunning)(nil), // 9: agentrepl.v1.PruneStorageAlreadyRunning
+	(*PruneStorageHeldElsewhere)(nil),  // 10: agentrepl.v1.PruneStorageHeldElsewhere
+	(*PruneStorageFailed)(nil),         // 11: agentrepl.v1.PruneStorageFailed
 }
 var file_agentrepl_v1_endpoint_prune_storage_proto_depIdxs = []int32{
 	4,  // 0: agentrepl.v1.PruneStorageResponse.success:type_name -> agentrepl.v1.PruneStorageSuccess
-	7,  // 1: agentrepl.v1.PruneStorageResponse.error:type_name -> agentrepl.v1.PruneStorageError
-	5,  // 2: agentrepl.v1.PruneStorageSuccess.removed:type_name -> agentrepl.v1.PruneStorageRemoval
-	6,  // 3: agentrepl.v1.PruneStorageSuccess.kept:type_name -> agentrepl.v1.PruneStorageKept
-	0,  // 4: agentrepl.v1.PruneStorageRemoval.reason:type_name -> agentrepl.v1.PruneStorageReason
-	1,  // 5: agentrepl.v1.PruneStorageKept.reason:type_name -> agentrepl.v1.PruneStorageKeepReason
-	8,  // 6: agentrepl.v1.PruneStorageError.already_running:type_name -> agentrepl.v1.PruneStorageAlreadyRunning
-	9,  // 7: agentrepl.v1.PruneStorageError.held_elsewhere:type_name -> agentrepl.v1.PruneStorageHeldElsewhere
-	10, // 8: agentrepl.v1.PruneStorageError.failed:type_name -> agentrepl.v1.PruneStorageFailed
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	8,  // 1: agentrepl.v1.PruneStorageResponse.error:type_name -> agentrepl.v1.PruneStorageError
+	6,  // 2: agentrepl.v1.PruneStorageSuccess.removed:type_name -> agentrepl.v1.PruneStorageRemoval
+	7,  // 3: agentrepl.v1.PruneStorageSuccess.kept:type_name -> agentrepl.v1.PruneStorageKept
+	5,  // 4: agentrepl.v1.PruneStorageSuccess.measured:type_name -> agentrepl.v1.PruneStorageMeasured
+	0,  // 5: agentrepl.v1.PruneStorageRemoval.reason:type_name -> agentrepl.v1.PruneStorageReason
+	1,  // 6: agentrepl.v1.PruneStorageKept.reason:type_name -> agentrepl.v1.PruneStorageKeepReason
+	9,  // 7: agentrepl.v1.PruneStorageError.already_running:type_name -> agentrepl.v1.PruneStorageAlreadyRunning
+	10, // 8: agentrepl.v1.PruneStorageError.held_elsewhere:type_name -> agentrepl.v1.PruneStorageHeldElsewhere
+	11, // 9: agentrepl.v1.PruneStorageError.failed:type_name -> agentrepl.v1.PruneStorageFailed
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_prune_storage_proto_init() }
@@ -817,7 +915,7 @@ func file_agentrepl_v1_endpoint_prune_storage_proto_init() {
 		(*PruneStorageResponse_Success)(nil),
 		(*PruneStorageResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_prune_storage_proto_msgTypes[6].OneofWrappers = []any{
 		(*PruneStorageError_AlreadyRunning)(nil),
 		(*PruneStorageError_HeldElsewhere)(nil),
 		(*PruneStorageError_Failed)(nil),
@@ -828,7 +926,7 @@ func file_agentrepl_v1_endpoint_prune_storage_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc), len(file_agentrepl_v1_endpoint_prune_storage_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

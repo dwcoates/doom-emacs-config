@@ -278,7 +278,7 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 			break
 		}
 		switch {
-		case ev.GetEnded().GetPassed() != nil:
+		case ev.GetEnded().GetPassed() != nil, ev.GetEnded().GetPlanned() != nil:
 			outcome = runPassed
 		case ev.GetEnded() != nil:
 			outcome = runFailed

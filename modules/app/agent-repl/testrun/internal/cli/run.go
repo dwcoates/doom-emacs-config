@@ -316,6 +316,18 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		len(p.Specs), d.Slots, p.Makespan, strings.Join(chunkNote, " "))
 
 	ev.Planned(p.Specs, d.RunLog)
+	if a.PlanOnly {
+		// A PLAN-ONLY RUN ENDS AT ITS PLAN (testrun.v1.TestRunRequest.plan_only):
+		// no unit runs, so nothing is reused, recorded or timed, and a suite
+		// that could not be planned fails it as it fails a real run.
+		log.Infof("plan only: %d units planned, none run", len(p.Specs))
+		if len(unbuilt) > 0 {
+			ev.Ended(nil, len(unbuilt), nil)
+			return 1
+		}
+		ev.PlannedOnly(len(p.Specs))
+		return 0
+	}
 	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)

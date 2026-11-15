@@ -1,10 +1,14 @@
 package main
 
 import (
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"agent-repld/internal/storagesweep"
 )
 
 func TestOpenProfileSession(t *testing.T) {
@@ -83,3 +87,46 @@ func TestStorageAgedDirsDefaultUnderTheCache(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestStorageBoundedDirsFindTheGoBuildCache(t *testing.T) {
+	tests := []struct {
+		name     string
+		gocache  string
+		cacheErr error
+		wantDir  string
+		wantNone bool
+		wantErr  string
+	}{
+		{name: "GOCACHE names it", gocache: "/gc", wantDir: "/gc"},
+		{name: "go-build under the user cache directory by default", wantDir: "/uc/go-build"},
+		{name: "GOCACHE=off keeps no cache", gocache: "off", wantNone: true},
+		{name: "no user cache directory is an error", cacheErr: errors.New("no HOME"), wantErr: "no HOME"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			dirs, err := storageBoundedDirs(func(k string) string {
+				if k == "GOCACHE" {
+					return tt.gocache
+				}
+				return ""
+			}, func() (string, error) { return "/uc", tt.cacheErr })
+
+			// Assert.
+			switch {
+			case tt.wantErr != "":
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("storageBoundedDirs = (%+v, %v), want %q", dirs, err, tt.wantErr)
+				}
+			case tt.wantNone:
+				if err != nil || len(dirs) != 0 {
+					t.Fatalf("storageBoundedDirs = (%+v, %v), want none", dirs, err)
+				}
+			default:
+				if err != nil || len(dirs) != 1 || dirs[0] != (storagesweep.BoundedDir{Name: "go-build", Dir: tt.wantDir, Bound: storagesweep.DefaultGoBuildCacheBound}) {
+					t.Fatalf("storageBoundedDirs = (%+v, %v), want go-build at %s", dirs, err, tt.wantDir)
+				}
+			}
+		})
+	}
+}

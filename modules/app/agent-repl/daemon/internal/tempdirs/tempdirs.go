@@ -42,7 +42,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
@@ -205,7 +204,7 @@ func (g Guard) Check(dir string) error {
 	if !inside {
 		return nil
 	}
-	if g.testRoot != "" && within(canonical, g.testRoot) {
+	if g.testRoot != "" && dirpath.Within(canonical, g.testRoot) {
 		return nil
 	}
 	return &InsideError{Dir: canonical, Root: root, SeamMissing: g.testRun && g.testRoot == ""}
@@ -221,15 +220,9 @@ func (g Guard) Roots() []string { return append([]string(nil), g.roots...) }
 // rootOf answers the temporary root canonical lies inside, if any.
 func (g Guard) rootOf(canonical string) (string, bool) {
 	for _, root := range g.roots {
-		if within(canonical, root) {
+		if dirpath.Within(canonical, root) {
 			return root, true
 		}
 	}
 	return "", false
-}
-
-// within reports whether path equals root or lies beneath it by whole
-// components. Both are canonical.
-func within(path, root string) bool {
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }

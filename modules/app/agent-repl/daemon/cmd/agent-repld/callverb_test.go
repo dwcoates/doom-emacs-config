@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
@@ -148,7 +149,7 @@ func TestCallVerb(t *testing.T) {
 		{
 			name:     "-workspace naming no roster row is a failure",
 			args:     []string{"-workspace", "/tmp/ws", "RestartWorkspace"},
-			fake:     callFake{lookupErr: errors.New("the daemon's roster holds no workspace at /tmp/ws")},
+			fake:     callFake{lookupErr: errors.New("the daemon holds no workspace at /tmp/ws")},
 			wantCode: exitFailure,
 			wantErr:  "holds no workspace",
 		},
@@ -213,26 +214,47 @@ func TestInvokeUnaryOverSendsADynamicRequestAndDecodesTheAnswer(t *testing.T) {
 	}
 }
 
-func TestLookupWorkspaceRefReturnsFromAStandingRosterStream(t *testing.T) {
-	// Arrange.
-	dir := canonicalDir(t.TempDir())
-	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
-	ctx := t.Context()
-
-	// Act.
-	ref, err := lookupWorkspaceRef(ctx, address, dir)
-
-	// Assert.
-	if err != nil || ref.GetId() != "ws-1" {
-		t.Fatalf("lookupWorkspaceRef = %v, %v; want ws-1", ref, err)
+func TestLookupWorkspaceRefLocatesTheWorkspaceAtItsDirectory(t *testing.T) {
+	tests := []struct {
+		name    string
+		rows    []*frontendv1.RosterRow
+		wantID  string
+		wantErr string
+	}{
+		{name: "one workspace there", rows: []*frontendv1.RosterRow{rosterRow("DIR", "one")}, wantID: "ws-1"},
+		{name: "none there", wantErr: "the daemon holds no workspace at"},
+		{name: "two there", rows: []*frontendv1.RosterRow{rosterRow("DIR", "one"), rosterRow("DIR", "two")}, wantErr: "2 workspaces are at"},
 	}
-	assertStreamEnded(t, daemon)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := canonicalDir(t.TempDir())
+			for _, row := range tt.rows {
+				row.Workspace.Workspace.Dir = dir
+			}
+			_, address := serveStandingDaemon(t, roster(tt.rows...))
+
+			// Act.
+			ref, err := lookupWorkspaceRef(t.Context(), address, dir)
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("lookupWorkspaceRef = %v, %v; want %q", ref, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || ref.GetId() != tt.wantID {
+				t.Fatalf("lookupWorkspaceRef = %v, %v; want %s", ref, err, tt.wantID)
+			}
+		})
+	}
 }
 
-func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
+func TestCallVerbFillsTheWorkspaceTheDaemonLocates(t *testing.T) {
 	// Arrange.
 	dir := canonicalDir(t.TempDir())
-	daemon, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
+	_, address := serveStandingDaemon(t, roster(rosterRow(dir, "one")))
 	ctx := t.Context()
 	fake := &callFake{answer: `{}`}
 	deps := fake.deps()
@@ -247,5 +269,4 @@ func TestCallVerbFillsTheWorkspaceFromAStandingRosterStream(t *testing.T) {
 	if code != exitSuccess || !strings.Contains(fake.sentJSON, `"id":"ws-1"`) {
 		t.Fatalf("call -workspace = %d, sent %s, stderr %q; want the request sent with ws-1", code, fake.sentJSON, errOut.String())
 	}
-	assertStreamEnded(t, daemon)
 }

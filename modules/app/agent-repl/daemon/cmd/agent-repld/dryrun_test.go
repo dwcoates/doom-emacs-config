@@ -105,10 +105,11 @@ func TestADryRunStopsAStreamThatIsNoRead(t *testing.T) {
 func TestTheReadsTheCLIReliesOnAreMarkedReads(t *testing.T) {
 	// The roster read and the status reads resolve a dry run's arguments, so
 	// a dry run that stopped them could not resolve anything. `workspace
-	// place` resolves its subsection off the sidebar arrangement, and `workspace
-	// find` is itself a read.
+	// place` resolves its subsection off the sidebar arrangement, `workspace
+	// find` is itself a read, and every WORKSPACE argument and the calling
+	// workspace are located off the registry.
 	service := agentreplv1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
-	for _, name := range []protoreflect.Name{"WatchWorkspaceRoster", "GetWorkspaceStatus", "GetMergeQueueStatus", "DaemonHealth", "GetSidebarArrangement", "FindWorkspaces"} {
+	for _, name := range []protoreflect.Name{"WatchWorkspaceRoster", "GetWorkspaceStatus", "GetMergeQueueStatus", "DaemonHealth", "GetSidebarArrangement", "FindWorkspaces", "LocateWorkspace"} {
 		t.Run(string(name), func(t *testing.T) {
 			// Act
 			options := service.Methods().ByName(name).Options().(*descriptorpb.MethodOptions)

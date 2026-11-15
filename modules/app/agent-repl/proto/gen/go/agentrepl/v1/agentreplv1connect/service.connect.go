@@ -389,6 +389,9 @@ const (
 	// AgentReplFindWorkspacesProcedure is the fully-qualified name of the AgentRepl's FindWorkspaces
 	// RPC.
 	AgentReplFindWorkspacesProcedure = "/agentrepl.v1.AgentRepl/FindWorkspaces"
+	// AgentReplLocateWorkspaceProcedure is the fully-qualified name of the AgentRepl's LocateWorkspace
+	// RPC.
+	AgentReplLocateWorkspaceProcedure = "/agentrepl.v1.AgentRepl/LocateWorkspace"
 	// AgentReplSubscribeWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// SubscribeWorkspace RPC.
 	AgentReplSubscribeWorkspaceProcedure = "/agentrepl.v1.AgentRepl/SubscribeWorkspace"
@@ -579,6 +582,7 @@ var (
 	agentReplGetWorkspaceStatusMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceStatus")
 	agentReplGetMergeQueueStatusMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
 	agentReplFindWorkspacesMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
+	agentReplLocateWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("LocateWorkspace")
 	agentReplSubscribeWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
 	agentReplUnsubscribeWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
 	agentReplGatherWorkspacesMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("GatherWorkspaces")
@@ -1016,6 +1020,10 @@ type AgentReplClient interface {
 	// status. `workspace find` and `workspace list` both answer its records. See
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
+	// Which workspace a name, a directory, or a directory inside a worktree
+	// names, read off the registry so hidden merge workspaces are found. See
+	// endpoint_locate_workspace.proto.
+	LocateWorkspace(context.Context, *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with
 	// its status now. See endpoint_subscribe_workspace.proto.
 	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
@@ -1884,6 +1892,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		locateWorkspace: connect.NewClient[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplLocateWorkspaceProcedure,
+			connect.WithSchema(agentReplLocateWorkspaceMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		subscribeWorkspace: connect.NewClient[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplSubscribeWorkspaceProcedure,
@@ -2141,6 +2156,7 @@ type agentReplClient struct {
 	getWorkspaceStatus                *connect.Client[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse]
 	getMergeQueueStatus               *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
 	findWorkspaces                    *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
+	locateWorkspace                   *connect.Client[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse]
 	subscribeWorkspace                *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
 	unsubscribeWorkspace              *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
 	gatherWorkspaces                  *connect.Client[v1.GatherWorkspacesRequest, v1.GatherWorkspacesResponse]
@@ -2808,6 +2824,11 @@ func (c *agentReplClient) FindWorkspaces(ctx context.Context, req *connect.Reque
 	return c.findWorkspaces.CallUnary(ctx, req)
 }
 
+// LocateWorkspace calls agentrepl.v1.AgentRepl.LocateWorkspace.
+func (c *agentReplClient) LocateWorkspace(ctx context.Context, req *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error) {
+	return c.locateWorkspace.CallUnary(ctx, req)
+}
+
 // SubscribeWorkspace calls agentrepl.v1.AgentRepl.SubscribeWorkspace.
 func (c *agentReplClient) SubscribeWorkspace(ctx context.Context, req *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error) {
 	return c.subscribeWorkspace.CallUnary(ctx, req)
@@ -3323,6 +3344,10 @@ type AgentReplHandler interface {
 	// status. `workspace find` and `workspace list` both answer its records. See
 	// endpoint_find_workspaces.proto.
 	FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error)
+	// Which workspace a name, a directory, or a directory inside a worktree
+	// names, read off the registry so hidden merge workspaces are found. See
+	// endpoint_locate_workspace.proto.
+	LocateWorkspace(context.Context, *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error)
 	// Tell one workspace's agent when another workspace changes, answering with
 	// its status now. See endpoint_subscribe_workspace.proto.
 	SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error)
@@ -4187,6 +4212,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplLocateWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplLocateWorkspaceProcedure,
+		svc.LocateWorkspace,
+		connect.WithSchema(agentReplLocateWorkspaceMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSubscribeWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplSubscribeWorkspaceProcedure,
 		svc.SubscribeWorkspace,
@@ -4570,6 +4602,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplGetMergeQueueStatusHandler.ServeHTTP(w, r)
 		case AgentReplFindWorkspacesProcedure:
 			agentReplFindWorkspacesHandler.ServeHTTP(w, r)
+		case AgentReplLocateWorkspaceProcedure:
+			agentReplLocateWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSubscribeWorkspaceProcedure:
 			agentReplSubscribeWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeWorkspaceProcedure:
@@ -5133,6 +5167,10 @@ func (UnimplementedAgentReplHandler) GetMergeQueueStatus(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.FindWorkspaces is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) LocateWorkspace(context.Context, *connect.Request[v1.LocateWorkspaceRequest]) (*connect.Response[v1.LocateWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.LocateWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SubscribeWorkspace(context.Context, *connect.Request[v1.SubscribeWorkspaceRequest]) (*connect.Response[v1.SubscribeWorkspaceResponse], error) {

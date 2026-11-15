@@ -40,12 +40,18 @@ func buildStorageSweep(registry storagesweep.Registry, layout stateroot.Layout, 
 		log.Error(graphOperation, "the storage sweep's cache directories could not be resolved", dlog.Context{"cause": err.Error()})
 		return nil, err
 	}
+	bounded, err := storageBoundedDirs(getenv, os.UserCacheDir)
+	if err != nil {
+		log.Error(graphOperation, "the storage sweep's bounded caches could not be resolved", dlog.Context{"cause": err.Error()})
+		return nil, err
+	}
 	sweeper, err := storagesweep.New(storagesweep.Deps{
 		Registry:    registry,
 		Clock:       clock.System{},
 		LockPath:    filepath.Join(runDir, storageSweepLockName),
 		ShimDir:     layout.ShimDir(),
 		Aged:        aged,
+		Bounded:     bounded,
 		LandedAfter: storagesweep.DefaultLandedAfter,
 		ClosedAfter: storagesweep.DefaultClosedAfter,
 		StartDelay:  storagesweep.DefaultStartDelay,
@@ -72,6 +78,25 @@ func storageAgedDirs(getenv func(string) string) ([]storagesweep.AgedDir, error)
 		}},
 		{Name: "test-passes", Dir: firstNonEmpty(getenv(envTestPasses), filepath.Join(cache, "test-passes")), After: storagesweep.DefaultAgedAfter},
 	}, nil
+}
+
+// storageBoundedDirs are the caches the sweep keeps under a size: the host's
+// Go build cache, where `go env GOCACHE` puts it ($GOCACHE, else go-build
+// under the user cache directory), unless GOCACHE is "off", which keeps no
+// cache to bound.
+func storageBoundedDirs(getenv func(string) string, userCacheDir func() (string, error)) ([]storagesweep.BoundedDir, error) {
+	dir := getenv("GOCACHE")
+	switch dir {
+	case "off":
+		return nil, nil
+	case "":
+		base, err := userCacheDir()
+		if err != nil {
+			return nil, fmt.Errorf("resolve the user cache directory the Go build cache lives under: %w", err)
+		}
+		dir = filepath.Join(base, "go-build")
+	}
+	return []storagesweep.BoundedDir{{Name: "go-build", Dir: dir, Bound: storagesweep.DefaultGoBuildCacheBound}}, nil
 }
 
 // openProfileSession answers the profiling root's entries kept whatever their

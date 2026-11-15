@@ -346,3 +346,27 @@ func TestTheWifiHelperIsReadByNoSuite(t *testing.T) {
 		}
 	}
 }
+
+// TestTheERTSuitesFakeDaemonModuleIsASuite pins that the fake daemon the ert
+// suite builds from lisp/testsupport/fakedaemon has its Go tests run by a
+// suite of their own: the ert suite only builds the binary.
+func TestTheERTSuitesFakeDaemonModuleIsASuite(t *testing.T) {
+	// Arrange
+	ert, ok := Lookup("ert")
+	if !ok {
+		t.Fatal("the roster holds no ert suite")
+	}
+
+	// Act
+	var found []Suite
+	for _, s := range Suites {
+		if s.Path == ert.Path+"/testsupport/fakedaemon" {
+			found = append(found, s)
+		}
+	}
+
+	// Assert
+	if len(found) != 1 || found[0].Kind != GoModule {
+		t.Fatalf("suites at %s/testsupport/fakedaemon = %+v, want one Go module suite", ert.Path, found)
+	}
+}

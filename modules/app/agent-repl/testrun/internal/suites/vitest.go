@@ -135,7 +135,8 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 		return nil, fmt.Errorf("suites: create %s: %w", work, err)
 	}
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
-	named := func(id string, items []string, names []string) run.Spec {
+	named := func(id string, items []string, byItem map[string][]string) run.Spec {
+		names := FlatNames(items, byItem)
 		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
@@ -189,7 +190,8 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		return Units{}, fmt.Errorf("suites: %s has no batch of test files to run", s.Name)
 	}
 	allChunk := sched.ChunkID(VitestBatchGroup(s.Name, batches[0].Name), 0)
-	named := func(id string, items []string, names []string) run.Spec {
+	named := func(id string, items []string, byItem map[string][]string) run.Spec {
+		names := FlatNames(items, byItem)
 		tag := unitTag(id)
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{

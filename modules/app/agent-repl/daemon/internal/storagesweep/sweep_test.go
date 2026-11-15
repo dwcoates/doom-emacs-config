@@ -35,6 +35,8 @@ type world struct {
 	clock *clocktest.Scripted
 	log   *dlog.TestLogger
 	aged  []AgedDir
+	// bounded are the caches the sweep keeps under a size.
+	bounded []BoundedDir
 }
 
 func newWorld(t *testing.T) *world {
@@ -48,7 +50,7 @@ func (w *world) sweeper() *Sweeper {
 	w.t.Helper()
 	s, err := New(Deps{
 		Registry: w.reg, Clock: w.clock, LockPath: filepath.Join(w.root, "run", "sweep.lock"),
-		ShimDir: w.shimDir(), Aged: w.aged,
+		ShimDir: w.shimDir(), Aged: w.aged, Bounded: w.bounded,
 		LandedAfter: DefaultLandedAfter, ClosedAfter: DefaultClosedAfter,
 		StartDelay: DefaultStartDelay, Every: DefaultEvery, Log: w.log,
 	})
@@ -465,6 +467,9 @@ func TestNewRefusesAZeroValue(t *testing.T) {
 		{"a zero window", func(d *Deps) { d.ClosedAfter = 0 }},
 		{"an unnamed aged directory", func(d *Deps) { d.Aged = []AgedDir{{Dir: "/d", After: day}} }},
 		{"an aged directory with no age", func(d *Deps) { d.Aged = []AgedDir{{Name: "n", Dir: "/d"}} }},
+		{"an unnamed bounded cache", func(d *Deps) { d.Bounded = []BoundedDir{{Dir: "/d", Bound: 1}} }},
+		{"a bounded cache with no directory", func(d *Deps) { d.Bounded = []BoundedDir{{Name: "n", Bound: 1}} }},
+		{"a bounded cache with no bound", func(d *Deps) { d.Bounded = []BoundedDir{{Name: "n", Dir: "/d"}} }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

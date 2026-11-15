@@ -353,6 +353,11 @@ var Suites = []Suite{
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
+	// THE ERT SUITE'S FAKE DAEMON IS TESTED AS ITS OWN MODULE: the ert suite
+	// only builds the binary, so until 2026-11-15 its Go tests gated no
+	// landing and every change to them was run by hand. Its tests read only
+	// their own package's sources.
+	{Name: "fakedaemon", Kind: GoModule, Path: "lisp/testsupport/fakedaemon", Reuse: &Reuse{}},
 	// The tests that read the whole module rather than one system's tree:
 	// the merge gate's selection checked against every suite's real
 	// dependencies, the mock-rule source scan, and the scans pinning that
@@ -605,7 +610,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/commandcatalog/catalogtest": {"daemon/internal/"},
 	"internal/creategate":                 {"daemon/"},
 	"internal/ctxend":                     {"daemon/"},
-	"internal/dirpath":                    {"daemon/internal/"},
+	"internal/dirpath":                    {"daemon/"},
 	"internal/effortlevel":                {"daemon/internal/"},
 	"internal/envc":                       {"daemon/"},
 	"internal/freshinput":                 {"daemon/internal/"},

@@ -223,6 +223,19 @@ func Build(est Estimates, all []suites.Units, slots int, remeasure bool) (Planne
 // its own estimate if that is longer, or UnknownUnit on a host that has
 // measured nothing: the planner's own rule for what was never measured. Its
 // passing run records its peak, so its next run is held to its own.
+//
+// TWO FLOORS HOLD UNDER A MEASURED PEAK:
+//   - No unit is expected to finish before its suite's slowest measured
+//     process start (startFloor): a unit first measured on a quiet host at
+//     25ms (`daemon:internal/rostermirror`) was killed at five times that
+//     under governed load, where its test binary's start alone took longer
+//     (2026-11-13).
+//   - A program build is expected to take as long as the slowest program
+//     build the host has measured (programFloor): its own peak is of runs on
+//     a warm Go build cache, so the first build after its sources change is
+//     cold and could not fit (`program:git`, killed at three times its 202ms
+//     peak twice in a row, 2026-11-12), and a killed build never fills the
+//     cache, so every later run was cold too.
 func bound(est Estimates, s *run.Spec, peak float64, measured bool) {
 	expected := peak
 	if !measured {
@@ -232,8 +245,31 @@ func bound(est Estimates, s *run.Spec, peak float64, measured bool) {
 		}
 		expected = max(longest, s.Est)
 	}
+	expected = max(expected, startFloor(est, s.Suite), programFloor(est, s.ID))
 	s.Expected = time.Duration(expected * float64(time.Second))
 	s.Bound = time.Duration(run.BoundFactor * expected * float64(time.Second))
+}
+
+// startFloor is the slowest per-process start the host has measured for any
+// chunk group of SUITE (OverheadKey), 0 when none is measured.
+func startFloor(est Estimates, suite string) float64 {
+	floor := 0.0
+	for _, sep := range []string{":", "/"} {
+		if v, ok := est.Longest(OverheadKey(suite + sep)); ok {
+			floor = max(floor, v)
+		}
+	}
+	return floor
+}
+
+// programFloor is, for a program build unit ID, the slowest program build
+// the host has measured, and 0 for every other unit.
+func programFloor(est Estimates, id string) float64 {
+	if !strings.HasPrefix(id, suites.ProgramUnitID("")) {
+		return 0
+	}
+	v, _ := est.Longest(UnitKey(suites.ProgramUnitID("")))
+	return v
 }
 
 // chunkPeak is a chunk's measured peak: its group's overhead peak plus each of

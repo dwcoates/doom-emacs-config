@@ -186,8 +186,9 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 	// A NAMED CHUNK RUNS ONE TEST PATH: `-test.run` matches each level of a
 	// path separately, so two paths of different depths cannot share one
 	// pattern, and a selection gives each path its own chunk.
-	named := func(id string, items []string, names []string) run.Spec {
+	named := func(id string, items []string, byItem map[string][]string) run.Spec {
 		pattern := gotest.TopPattern(items)
+		names := FlatNames(items, byItem)
 		switch len(names) {
 		case 0:
 		case 1:

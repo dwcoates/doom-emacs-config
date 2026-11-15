@@ -43,6 +43,21 @@ message PruneStorageSuccess {
   repeated PruneStorageKept kept = 4;
   // How many steps failed.
   uint32 failures = 5;
+  // Every size-bounded cache the sweep measured (the host's Go build cache),
+  // with its size before the sweep and its bound.
+  repeated PruneStorageMeasured measured = 6;
+}
+
+// One size-bounded cache's size as the sweep found it.
+message PruneStorageMeasured {
+  // The cache's name ("go-build").
+  string name = 1;
+  // Its directory.
+  string dir = 2;
+  // What it held before the sweep, in bytes.
+  uint64 bytes = 3;
+  // The size past which its least recently used entries are deleted.
+  uint64 bound = 4;
 }
 
 // One deleted entry.
@@ -70,6 +85,10 @@ enum PruneStorageReason {
   PRUNE_STORAGE_REASON_CLOSED_BACKUPS = 3;
   // A cache directory's entry older than thirty days.
   PRUNE_STORAGE_REASON_AGED = 4;
+  // A size-bounded cache's least recently used entries, deleted until it is
+  // back under its bound: one removal for the whole cache, naming its
+  // directory and what was freed.
+  PRUNE_STORAGE_REASON_OVER_BOUND = 5;
 }
 
 // How many entries were left alone for one reason.

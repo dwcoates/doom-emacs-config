@@ -67,7 +67,14 @@ type TestRunRequest struct {
 	// costs with nothing skipped. A narrower selection than whole units never
 	// reuses anyway, so this matters for suites and whole files. The daemon
 	// passes it only at the user's request (agentrepl.v1.RunTestsUserOnlyRefused).
-	NoReuse       bool `protobuf:"varint,5,opt,name=no_reuse,json=noReuse,proto3" json:"no_reuse,omitempty"`
+	NoReuse bool `protobuf:"varint,5,opt,name=no_reuse,json=noReuse,proto3" json:"no_reuse,omitempty"`
+	// Build and plan the selection, then stop: no unit runs, nothing is reused
+	// or recorded, and the run ends `planned` (TestRunEnded.planned) after its
+	// `planned` event, or refused or failed as a real run would before its
+	// first unit. `agent-repld test run -dry-run` sends it, so a selection the
+	// planner refuses fails its dry run (2026-11-02: an atomic unit's refusal
+	// passed every dry run and failed only the real one).
+	PlanOnly      bool `protobuf:"varint,6,opt,name=plan_only,json=planOnly,proto3" json:"plan_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -133,6 +140,13 @@ func (x *TestRunRequest) GetRemeasure() bool {
 func (x *TestRunRequest) GetNoReuse() bool {
 	if x != nil {
 		return x.NoReuse
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetPlanOnly() bool {
+	if x != nil {
+		return x.PlanOnly
 	}
 	return false
 }
@@ -1334,7 +1348,7 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"\xb8\x01\n" +
+	"testrun.v1\"\xd5\x01\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
@@ -1342,7 +1356,8 @@ const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\bcoverage\x18\x02 \x01(\bR\bcoverage\x12\x16\n" +
 	"\x06record\x18\x03 \x01(\bR\x06record\x12\x1c\n" +
 	"\tremeasure\x18\x04 \x01(\bR\tremeasure\x12\x19\n" +
-	"\bno_reuse\x18\x05 \x01(\bR\anoReuse\"\xa3\x03\n" +
+	"\bno_reuse\x18\x05 \x01(\bR\anoReuse\x12\x1b\n" +
+	"\tplan_only\x18\x06 \x01(\bR\bplanOnly\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +

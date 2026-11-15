@@ -2,7 +2,9 @@ package reuse
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -196,5 +198,70 @@ func TestAddGoPackagesPlacesEveryEmbeddedFile(t *testing.T) {
 	}
 	if got, want := set.Files(), []string{"mod/go.mod", "mod/pkg/assets/t/y.txt", "mod/pkg/assets/x.txt", "mod/pkg/xt/z.txt"}; !slices.Equal(got, want) {
 		t.Errorf("Files = %v, want %v", got, want)
+	}
+}
+
+// seatLedger is a SeatHolder recording each hold and release, in order, with
+// the listings they bracket.
+type seatLedger struct {
+	events     []string
+	holdErr    error
+	releaseErr error
+}
+
+func (s *seatLedger) Hold(id string, width int, cores float64) (func() error, error) {
+	s.events = append(s.events, fmt.Sprintf("hold %s %d %.0f", id, width, cores))
+	if s.holdErr != nil {
+		return nil, s.holdErr
+	}
+	return func() error {
+		s.events = append(s.events, "release "+id)
+		return s.releaseErr
+	}, nil
+}
+
+func TestHeldGoListListsWhileHoldingOneCoreSeat(t *testing.T) {
+	tests := []struct {
+		name       string
+		seats      seatLedger
+		listErr    error
+		wantEvents []string
+		wantErr    string
+	}{
+		{name: "a listing holds a seat around it",
+			wantEvents: []string{"hold planning:go-list:/m 1 2", "list /m", "release planning:go-list:/m"}},
+		{name: "a failed listing still gives its seat back", listErr: errors.New("go list broke"),
+			wantEvents: []string{"hold planning:go-list:/m 1 2", "list /m", "release planning:go-list:/m"}, wantErr: "go list broke"},
+		{name: "a seat that cannot be held lists nothing", seats: seatLedger{holdErr: errors.New("ledger gone")},
+			wantEvents: []string{"hold planning:go-list:/m 1 2"}, wantErr: "hold a core seat to list /m: ledger gone"},
+		{name: "a seat that cannot be given back fails the listing", seats: seatLedger{releaseErr: errors.New("lock gone")},
+			wantEvents: []string{"hold planning:go-list:/m 1 2", "list /m", "release planning:go-list:/m"}, wantErr: "give back the core seat that listed /m: lock gone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			seats := tt.seats
+			list := func(dir, _ string, _ bool, _ ...string) ([]GoPackage, error) {
+				seats.events = append(seats.events, "list "+dir)
+				return []GoPackage{{ImportPath: "p"}}, tt.listErr
+			}
+
+			// Act
+			pkgs, err := HeldGoList(&seats, list)("/m", "", true, "./...")
+
+			// Assert
+			if !reflect.DeepEqual(seats.events, tt.wantEvents) {
+				t.Fatalf("events = %q, want %q", seats.events, tt.wantEvents)
+			}
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("HeldGoList = %v, %v; want %q", pkgs, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || len(pkgs) != 1 {
+				t.Fatalf("HeldGoList = %v, %v; want the listing's one package", pkgs, err)
+			}
+		})
 	}
 }

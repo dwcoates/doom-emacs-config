@@ -160,8 +160,8 @@ func chunkArgv(sp suites.Split) []string {
 func goUnits(suite, rel string) suites.Units {
 	build := run.Spec{Unit: sched.Unit{ID: suite + ":" + rel + ":build"}}
 	vet := run.Spec{Unit: sched.Unit{ID: suite + ":vet"}}
-	named := func(id string, items, names []string) run.Spec {
-		return run.Spec{Argv: append(append([]string{"run"}, items...), names...)}
+	named := func(id string, items []string, names map[string][]string) run.Spec {
+		return run.Spec{Argv: append(append([]string{"run"}, items...), suites.FlatNames(items, names)...)}
 	}
 	split := suites.Split{
 		Group: suite + ":" + rel, Suite: suite, Items: []string{"TestA", "TestB", "TestC"},
@@ -276,8 +276,8 @@ func TestNarrowRunsANamedVitestFileWithItsNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	named := func(id string, items, names []string) run.Spec {
-		return run.Spec{Argv: append(append([]string{"vitest"}, items...), names...)}
+	named := func(id string, items []string, names map[string][]string) run.Spec {
+		return run.Spec{Argv: append(append([]string{"vitest"}, items...), suites.FlatNames(items, names)...)}
 	}
 	u := suites.Units{
 		Atomic: []run.Spec{{Unit: sched.Unit{ID: "webapp:typecheck"}}},
@@ -415,15 +415,23 @@ func ertNamed(file string, names ...string) *testrunv1.TestSelection {
 // ertUnits is the ERT suite's units as suites.fileSplits makes them: one
 // split per file, grouped "ert/<file>", running its file and named tests.
 func ertUnits(files ...string) suites.Units {
-	named := func(id string, items, names []string) run.Spec {
-		return run.Spec{Argv: append(append([]string{"emacs"}, items...), names...)}
-	}
 	var u suites.Units
 	for _, f := range files {
-		u.Splits = append(u.Splits, suites.Split{Group: "ert/" + f, Suite: "ert", Items: []string{f}, Named: named,
-			Chunk: func(id string, items []string) run.Spec { return named(id, items, nil) }})
+		u.Splits = append(u.Splits, suites.Split{Group: "ert/" + f, Suite: "ert", Items: []string{f}, Named: ertNamedChunk, ScopesNamesPerItem: true,
+			Chunk: func(id string, items []string) run.Spec { return ertNamedChunk(id, items, nil) }})
 	}
 	return u
+}
+
+// ertNamedChunk is an ERT chunk's argv: each item followed by its own names,
+// as the driver's alist pairs them.
+func ertNamedChunk(id string, items []string, names map[string][]string) run.Spec {
+	argv := []string{"emacs"}
+	for _, item := range items {
+		argv = append(argv, item)
+		argv = append(argv, names[item]...)
+	}
+	return run.Spec{Argv: argv}
 }
 
 func TestNarrowRunsANamedERTFileUnderItsOwnGroup(t *testing.T) {
@@ -519,5 +527,104 @@ func TestDescribe(t *testing.T) {
 				t.Fatalf("Describe = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// batchedUnits is one split holding FILES as one batch, grouped BATCH, of a
+// suite that SCOPES its names per file or not.
+func batchedUnits(batch string, scopes bool, files ...string) suites.Units {
+	return suites.Units{Splits: []suites.Split{{Group: batch, Suite: "ert", Items: files, Named: ertNamedChunk, ScopesNamesPerItem: scopes,
+		Chunk: func(id string, items []string) run.Spec { return ertNamedChunk(id, items, nil) }}}}
+}
+
+func TestNarrowScopesEachFilesNamesWithinOneBatch(t *testing.T) {
+	cases := []struct {
+		name   string
+		sels   []*testrunv1.TestSelection
+		scopes bool
+		want   map[string][]string
+	}{
+		{name: "two named files of a scoping suite share the batch, each with its own names",
+			sels:   []*testrunv1.TestSelection{ertNamed("test-wire-verbs.el", "case-a"), ertNamed("test-wire-common.el", "case-b")},
+			scopes: true,
+			want:   map[string][]string{"ert/wire": {"emacs", "test-wire-verbs.el", "case-a", "test-wire-common.el", "case-b"}}},
+		{name: "a whole file beside a named one of a scoping suite runs whole",
+			sels:   []*testrunv1.TestSelection{ertNamed("test-wire-verbs.el", "case-a"), ertAll("test-wire-common.el")},
+			scopes: true,
+			want:   map[string][]string{"ert/wire": {"emacs", "test-wire-verbs.el", "case-a", "test-wire-common.el"}}},
+		{name: "two named files of a suite with one pattern each take a group of their own",
+			sels:   []*testrunv1.TestSelection{ertNamed("test-wire-verbs.el", "case-a"), ertNamed("test-wire-common.el", "case-b")},
+			scopes: false,
+			want: map[string][]string{"ert/wire/test-wire-verbs.el": {"emacs", "test-wire-verbs.el", "case-a"},
+				"ert/wire/test-wire-common.el": {"emacs", "test-wire-common.el", "case-b"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, err := Resolve(request(tc.sels...), layout)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got, err := r.Narrow(suiteNamed(t, "ert"), batchedUnits("ert/wire", tc.scopes, "test-wire-common.el", "test-wire-verbs.el"))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Narrow: %v", err)
+			}
+			argvs := map[string][]string{}
+			for _, sp := range got.Splits {
+				argvs[sp.Group] = chunkArgv(sp)
+			}
+			if !reflect.DeepEqual(argvs, tc.want) {
+				t.Fatalf("chunks = %v, want %v", argvs, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergeGroupsPanicsOnNamedSplitsOfASuiteThatCannotScopeThem(t *testing.T) {
+	// Arrange: two named splits forced into one group of a suite with one
+	// pattern, which narrowItems never builds.
+	a := withItems(batchedUnits("g", false, "a").Splits[0], "g", []string{"a"}, []string{"x"})
+	b := withItems(batchedUnits("g", false, "b").Splits[0], "g", []string{"b"}, []string{"y"})
+	defer func() {
+		if recover() == nil {
+			t.Fatal("mergeGroups folded two named splits whose suite cannot scope names per item")
+		}
+	}()
+
+	// Act
+	mergeGroups([]suites.Split{a, b})
+}
+
+func TestANarrowedChunkNamesItsTestsAndAWholeOneDoesNot(t *testing.T) {
+	// Arrange
+	r, err := Resolve(request(ertNamed("test-wire-verbs.el", "case-a"), ertAll("test-wire-common.el")), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	named, err := r.Narrow(suiteNamed(t, "ert"), batchedUnits("ert/wire", true, "test-wire-common.el", "test-wire-verbs.el"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, err := Resolve(request(ertAll("test-wire-common.el")), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := r2.Narrow(suiteNamed(t, "ert"), batchedUnits("ert/wire", true, "test-wire-common.el", "test-wire-verbs.el"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if s := named.Splits[0].Chunk("ert/wire#00", named.Splits[0].Items); !s.NamesTests {
+		t.Fatalf("a chunk narrowed to named tests is not marked so")
+	}
+	if s := whole.Splits[0].Chunk("ert/wire#00", whole.Splits[0].Items); s.NamesTests {
+		t.Fatalf("a whole file's chunk is marked as naming tests")
 	}
 }

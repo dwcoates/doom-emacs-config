@@ -74,8 +74,18 @@ type Split struct {
 	// for a run that asks for single tests (package selection); nil where a
 	// suite's items are its finest tests (a harness's groups). What a name is
 	// belongs to the suite: a Go test path (TestFoo/a_case, one per chunk), a
-	// vitest full-name prefix, an ERT test symbol. Chunk is Named with no names.
-	Named func(id string, items []string, names []string) run.Spec
+	// vitest full-name prefix, an ERT test symbol. NAMES are keyed by the item
+	// that defines them; an item with no entry runs whole. Chunk is Named with
+	// no names.
+	Named func(id string, items []string, names map[string][]string) run.Spec
+	// ScopesNamesPerItem says Named runs each item's names against that item
+	// alone, so one chunk may hold a named item beside another named or whole
+	// one (ERT's driver). Where it is false (vitest's one -t pattern, Go's one
+	// -test.run path) every named item is a split of its own.
+	ScopesNamesPerItem bool
+	// ItemNames are the names a selection narrowed each item to (Named's
+	// NAMES), nil when every item runs whole. Chunk already runs them.
+	ItemNames map[string][]string
 	// Slots is every chunk's width; zero is one slot.
 	Slots int
 	// Package and Tags are a Go package split's package, relative to its
@@ -194,4 +204,15 @@ func under(dir, path string) (string, error) {
 		return "", fmt.Errorf("suites: %s is not under %s", path, dir)
 	}
 	return rel, nil
+}
+
+// FlatNames is every name BYITEM holds for ITEMS, in ITEMS' order: the one
+// name list of a chunk whose suite runs a single pattern
+// (Split.ScopesNamesPerItem false).
+func FlatNames(items []string, byItem map[string][]string) []string {
+	var out []string
+	for _, item := range items {
+		out = append(out, byItem[item]...)
+	}
+	return out
 }

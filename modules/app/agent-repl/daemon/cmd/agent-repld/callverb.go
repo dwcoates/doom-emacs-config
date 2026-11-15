@@ -216,16 +216,20 @@ func invokeUnaryOver(ctx context.Context, client *http.Client, base string, meth
 	return resp.Msg, nil
 }
 
-// lookupWorkspaceRef reads the daemon's roster once and answers the row whose
-// canonical directory is DIR.
+// lookupWorkspaceRef asks the daemon which workspace is at DIR, off the
+// registry (agentrepl.v1.LocateWorkspace), so a hidden merge workspace is
+// found by its directory.
 func lookupWorkspaceRef(ctx context.Context, address, dir string) (*workspacev1.WorkspaceRef, error) {
-	roster, err := readRoster(ctx, newDaemonClient(address))
+	refs, err := locateWorkspaces(ctx, newDaemonClient(address), &agentreplv1.LocateWorkspaceRequest{
+		By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}})
 	if err != nil {
-		return nil, fmt.Errorf("read the daemon's roster: %w", err)
+		return nil, fmt.Errorf("locate the workspace at %s: %w", dir, err)
 	}
-	row := findRosterRow(roster, dir)
-	if row == nil {
-		return nil, fmt.Errorf("the daemon's roster holds no workspace at %s", dir)
+	switch len(refs) {
+	case 0:
+		return nil, fmt.Errorf("the daemon holds no workspace at %s", dir)
+	case 1:
+		return refs[0], nil
 	}
-	return row.GetWorkspace().GetWorkspace(), nil
+	return nil, fmt.Errorf("%d workspaces are at %s", len(refs), dir)
 }

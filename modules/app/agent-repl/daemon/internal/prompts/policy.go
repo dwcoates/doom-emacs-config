@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"agent-repld/internal/dirpath"
 )
 
 // A REPOSITORY DEFINES ITS OWN ONE-SHOT AND MERGE POLICY, in files in its own
@@ -87,12 +88,7 @@ func IsModuleRepository(repoRoot, checkoutRoot string) bool {
 	if repoRoot == "" || checkoutRoot == "" {
 		return false
 	}
-	repo := filepath.Clean(repoRoot)
-	checkout := filepath.Clean(checkoutRoot)
-	if repo == checkout {
-		return true
-	}
-	return strings.HasPrefix(checkout, repo+string(filepath.Separator))
+	return dirpath.Within(filepath.Clean(checkoutRoot), filepath.Clean(repoRoot))
 }
 
 // Files is the policy directory's filesystem probe: which of a set of briefs a
