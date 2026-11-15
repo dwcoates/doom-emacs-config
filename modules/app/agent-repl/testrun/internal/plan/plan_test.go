@@ -501,3 +501,43 @@ func TestBuildRemeasureBoundsAMeasuredUnitAsUnmeasured(t *testing.T) {
 		t.Fatalf("expected = %v, want the longest unit's 40s, not a's own peak", s.Expected)
 	}
 }
+
+func TestBuildHoldsAUnitsExpectedTimeAboveItsFloors(t *testing.T) {
+	// Arrange: a Go package unit measured at 25ms in a suite whose chunks
+	// start in up to 0.4s; program builds measured warm at 0.2s, the slowest
+	// at 3s; an ERT chunk group starting in 1.5s.
+	est := peaked{
+		estimates: estimates{},
+		peaks: map[string]float64{
+			UnitKey("daemon:internal/tiny"): 0.025, OverheadKey("daemon:internal/merge"): 0.4, OverheadKey("daemon-other:x"): 9,
+			UnitKey("program:git"): 0.2, UnitKey("program:zettel"): 3,
+			UnitKey("ert:solo"): 0.01, OverheadKey("ert/wire"): 1.5,
+			UnitKey("lone"): 0.05,
+		},
+	}
+	tests := []struct {
+		name         string
+		spec         run.Spec
+		wantExpected time.Duration
+	}{
+		{"a tiny unit is held to its suite's slowest Go start, not another suite's", atomic("daemon:internal/tiny", "daemon"), secs(0.4)},
+		{"a program build is held to the slowest program build", atomic("program:git", "e2e"), secs(3)},
+		{"the slowest program build is held to its own peak", atomic("program:zettel", "e2e"), secs(3)},
+		{"a unit is held to its suite's slowest start under a slash group", atomic("ert:solo", "ert"), secs(1.5)},
+		{"a unit of a suite with no measured start keeps its own peak", atomic("lone", "lone"), secs(0.05)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			p, err := Build(est, []suites.Units{{Atomic: []run.Spec{tt.spec}}}, 1, false)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s := specByID(p)[tt.spec.ID]; s.Expected != tt.wantExpected || s.Bound != run.BoundFactor*tt.wantExpected {
+				t.Fatalf("expected %v, bound %v; want %v", s.Expected, s.Bound, tt.wantExpected)
+			}
+		})
+	}
+}
