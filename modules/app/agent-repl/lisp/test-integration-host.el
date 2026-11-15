@@ -1192,6 +1192,8 @@ actually pins IT."
 (declare-function agent-repl-host-stream "host")
 (declare-function agent-repl-host-handle-refusal "host")
 (declare-function agent-repl-link-successor "daemon-link")
+(declare-function agent-repl-link-successor-pending-p "daemon-link")
+(declare-function agent-repl-host--recorded-conn "host" (ws))
 (declare-function agent-repl-link-dial-successor "daemon-link")
 (declare-function agent-repl-connect-connection-address "connect")
 (declare-function agent-repl--ws-get "workspace")
@@ -1988,18 +1990,26 @@ produce it (host.el, and the deadlock recorded there).  So a failed adopt
 can no longer be answered by the page never having moved; it is answered
 by the page being back on the daemon that still serves the workspace,
 which is the same guarantee stated about the END state.  The `:conn' and
-the standing stream assertions are unchanged."
+the standing stream assertions are unchanged.
+
+AMENDED 2026-11-15: a transport failure onto a STANDING, live successor
+is retried with the workspace and its page left on the successor, because
+restoring and reloading on every attempt was ~800k reloads in the 0.440.1
+handover.  The END state is owed when the retry stops, so the successor
+here stops standing after the first failure, as a promotion or a lost
+successor stream makes it, and the assertions read the walk\='s end."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
       (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor)))
-              (conn-at-reload nil)
-              (agent-repl-connect-unary-timeout-seconds 0.3))
+        (let* ((successor-conn (agent-repl-connect-open
+                                (agent-repl-itest-daemon-address successor)))
+               (standing successor-conn)
+               (conn-at-reload nil)
+               (agent-repl-connect-unary-timeout-seconds 0.3))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn))
+                         (lambda () standing))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
                          (lambda (ws) (push (agent-repl-host-conn ws) conn-at-reload))))
                 (agent-repl-itest--gate successor "AdoptHostWorkspace")
@@ -2008,8 +2018,14 @@ the standing stream assertions are unchanged."
                       ;; Act.
                       (agent-repl-itest--push primary "host" '((transferred . ()))
                                               (plist-get ref :id))
-                      ;; Assert.
                       (agent-repl-itest--await-log primary "elisp.host.adopt-failed" "error")
+                      (setq standing nil)
+                      ;; Assert.
+                      (agent-repl-itest--wait-until
+                       (lambda () (not (eq (agent-repl-host--recorded-conn
+                                            agent-repl-itest-host--ws)
+                                           successor-conn)))
+                       nil "the stopped retry to put the workspace back")
                       (should (equal 1 (length (agent-repl-itest--subscribers
                                                 primary "host" (plist-get ref :id)))))
                       (should-not (eq (agent-repl-host-conn agent-repl-itest-host--ws)
@@ -2645,6 +2661,55 @@ adopts onto a daemon that has not proven it is listening."
                successor "host" (plist-get ref :id)))
           (ignore-errors
             (agent-repl-itest--release-gate successor "WatchDaemon")))))))
+
+;;;; ---- A refusal naming the daemon that already serves Emacs ----
+;;
+;; Regression, 2026-11-15: the outgoing daemon answered a per-workspace rpc
+;; with `transferring_away' AFTER the handover completed, naming the daemon
+;; that had just become the primary.  The link dialed the primary's own
+;; daemon as a successor of itself, that successor was never ended, and the
+;; next deploy's announcement hit `elisp.link.successor-address-changed'.
+
+(defmacro agent-repl-itest-host--with-refusal-naming-the-primary (primary &rest body)
+  "Stand the link on PRIMARY, select through a refusal naming PRIMARY, then BODY.
+BODY runs once the link has answered the redial with the primary."
+  (declare (indent 1) (debug (symbolp body)))
+  `(agent-repl-itest-host--with-link-and-subscription ,primary ref
+     (ignore ref)
+     (agent-repl-itest--script
+      ,primary "SelectWorkspace"
+      `((error . ((transferringAway
+                   . ((address . ,(agent-repl-itest-daemon-address ,primary))))))))
+     (agent-repl-host-select agent-repl-itest-host--ws)
+     (agent-repl-itest--await-log ,primary "elisp.link.successor-at-primary" "info")
+     ,@body))
+
+(ert-deftest agent-repl-itest-host-refusal-naming-the-primary-dials-no-successor ()
+  "The primary's own address stands no second watch and adopts on the primary."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-refusal-naming-the-primary primary
+      ;; Assert.
+      (agent-repl-itest--await-call primary "AdoptHostWorkspace")
+      (should (= 1 (length (agent-repl-itest--subscribers primary "daemon"))))
+      (should-not (agent-repl-link-successor))
+      (should-not (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-itest-host-refusal-naming-the-primary-leaves-the-next-handover-free ()
+  "The next announcement still attaches its successor: no stale successor blocks it."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-refusal-naming-the-primary primary
+      (agent-repl-itest--with-second-daemon primary successor
+        ;; Act.
+        (agent-repl-itest-host--announce
+         primary (agent-repl-itest-daemon-address successor))
+        ;; Assert.
+        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
+                                      "the announced successor to be ACCEPTED")
+        (should (equal (agent-repl-itest-daemon-address successor)
+                       (agent-repl-connect-connection-address
+                        (agent-repl-link-successor))))
+        (should-not (agent-repl-itest--logged-p
+                     primary "elisp.link.successor-address-changed"))))))
 
 ;;;; ---- Registering an existing directory (`SPC TAB p') ----
 
