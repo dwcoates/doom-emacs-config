@@ -3546,3 +3546,39 @@ func TestCreateWorkspaceRefusesAPlacementOnAnAsyncMergeOnItsArm(t *testing.T) {
 		t.Fatalf("merge requests = %+v, want none enqueued", h.Merge.requests)
 	}
 }
+
+// TestSaidPartsSplitsWordsFromImages pins how a creation prompt reaches the
+// creation spec: every text block joined by a newline, and every image kept
+// in composed order, wherever it stood among the words.
+func TestSaidPartsSplitsWordsFromImages(t *testing.T) {
+	tests := []struct {
+		name       string
+		said       *conversationv1.UserSaid
+		wantText   string
+		wantImages []string
+	}{
+		{name: "no prompt", said: nil, wantText: ""},
+		{name: "words alone", said: saidBlocks(textBlock("fix it")), wantText: "fix it"},
+		{
+			name:       "images among the words",
+			said:       saidBlocks(textBlock("look at"), imageBlock("/a.png"), textBlock("and"), imageBlock("/b.png")),
+			wantText:   "look at\nand",
+			wantImages: []string{"/a.png", "/b.png"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			text, images := saidParts(tt.said)
+
+			// Assert
+			var paths []string
+			for _, image := range images {
+				paths = append(paths, image.GetPath().GetPath())
+			}
+			if text != tt.wantText || !slices.Equal(paths, tt.wantImages) {
+				t.Fatalf("saidParts = %q %v, want %q %v", text, paths, tt.wantText, tt.wantImages)
+			}
+		})
+	}
+}

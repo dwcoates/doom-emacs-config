@@ -5781,3 +5781,172 @@ and the create is sent once then."
         (while (search-forward "(agent-repl-verbs--create-stage-message stage)" nil t)
           (setq count (1+ count))))))
     (should (= count 1))))
+
+;;;; ---- Create: images pasted into a creation prompt ----
+
+(defun agent-repl-test-verbs--image-marker (path)
+  "Return a creation prompt's marker character for the PNG at PATH."
+  (agent-repl--image-prompt-marker path "image/png"))
+
+(defmacro agent-repl-test-verbs--capturing-read-prompt (args reply &rest body)
+  "Run BODY with `agent-repl-verbs--read-prompt' answering REPLY.
+Each call's argument list is pushed onto ARGS."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+              (lambda (&rest call) (push call ,args) ,reply)))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-oneshot-prompt-takes-pasted-images ()
+  "`SPC TAB o\\=' reads its commission as a prompt that takes pasted images."
+  (let (args)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref))))
+        (agent-repl-test-verbs--capturing-read-prompt args "commission"
+          ;; Act.
+          (agent-repl-create-oneshot nil))))
+    ;; Assert.
+    (should (eq (nth 2 (car args)) t))))
+
+(ert-deftest agent-repl-verbs-standard-prompt-takes-pasted-images ()
+  "`SPC TAB n\\=' reads its initial prompt as a prompt that takes pasted images."
+  (let (args)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref))))
+        (agent-repl-test-verbs--capturing-read-prompt args "start"
+          ;; Act.
+          (agent-repl-create-workspace))))
+    ;; Assert.
+    (should (eq (nth 2 (car args)) t))))
+
+(ert-deftest agent-repl-verbs-fork-prompt-takes-pasted-images ()
+  "A fork\\='s initial prompt takes pasted images."
+  (let (args)
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section))))
+        (agent-repl-test-verbs--capturing-read-prompt args "fork it"
+          ;; Act.
+          (agent-repl-fork-workspace))))
+    ;; Assert.
+    (should (eq (nth 2 (car args)) t))))
+
+(ert-deftest agent-repl-verbs-oneshot-sends-a-pasted-image-as-an-image-block ()
+  "A commission\\='s pasted image travels as an `ImageBlock' after its words."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-verbs--agent-repl-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (&rest _) (concat "look " (agent-repl-test-verbs--image-marker "/a.png")))))
+      ;; Act.
+      (agent-repl-create-oneshot nil)
+      ;; Assert.
+      (should (equal (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
+                                           :value)
+                                :prompt)
+                     (list :content
+                           (list :blocks
+                                 (list (list :arm :text :value (list :text "look "))
+                                       (list :arm :image
+                                             :value (list :location (list :arm :path :value (list :path "/a.png"))
+                                                          :media-type "image/png"))))))))))
+
+(ert-deftest agent-repl-verbs-read-prompt-without-images-pastes-no-images ()
+  "A prompt not asked to take images (a thread\\='s) installs no image paste keys."
+  (let ((bindings (agent-repl-test-verbs--prompt-bindings '("C-c C-i"))))
+    (should-not (eq (alist-get "C-c C-i" bindings nil nil #'equal)
+                    #'agent-repl-prompt-attach-clipboard-image))))
+
+(defun agent-repl-test-verbs--read-image-prompt (answer)
+  "Read an image-taking prompt whose minibuffer answers ANSWER.
+Return a plist of the `:text' read, the `:allowed' value of
+`minibuffer-allow-text-properties' during the read, the `:bindings' of
+`C-y' and `C-c C-i' in its minibuffer, and the `:infos' recorded."
+  (let (allowed bindings infos)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos))
+              ((symbol-function 'agent-repl--input-image-present-p)
+               (lambda (path) (not (equal path "/gone.png"))))
+              ((symbol-function 'read-string)
+               (lambda (&rest _)
+                 (setq allowed minibuffer-allow-text-properties)
+                 (with-temp-buffer
+                   (use-local-map (make-sparse-keymap))
+                   (run-hooks 'minibuffer-setup-hook)
+                   (setq bindings (list (key-binding (kbd "C-y"))
+                                        (lookup-key (current-local-map) (kbd "C-c C-i")))))
+                 answer)))
+      (let ((text (agent-repl-verbs--read-prompt "Commission: " nil t)))
+        (list :text text :allowed allowed :bindings bindings :infos infos)))))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-answers-its-images ()
+  "The answer keeps each pasted image as its marker, in place."
+  (let* ((read (agent-repl-test-verbs--read-image-prompt
+                (concat "look " (agent-repl-test-verbs--image-marker "/a.png"))))
+         (parts (agent-repl--input-string-parts (plist-get read :text))))
+    (should (equal parts '("look " (:path "/a.png" :media-type "image/png"))))))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-keeps-the-minibuffer-s-properties ()
+  "The minibuffer is read with its text properties, so the markers survive."
+  (should (eq (plist-get (agent-repl-test-verbs--read-image-prompt "words") :allowed) t)))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-pastes-images-in-its-minibuffer ()
+  "The minibuffer\\='s paste keys paste images, and `C-c C-i\\=' attaches one."
+  (should (equal (plist-get (agent-repl-test-verbs--read-image-prompt "words") :bindings)
+                 '(agent-repl-prompt-yank agent-repl-prompt-attach-clipboard-image))))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-records-its-images ()
+  "The read is recorded at info with how many images it carries."
+  (let ((read (agent-repl-test-verbs--read-image-prompt
+               (concat "look " (agent-repl-test-verbs--image-marker "/a.png")))))
+    (should (seq-some (lambda (line) (string-match-p "elisp.verbs.read-prompt images=1" line))
+                      (plist-get read :infos)))))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-refuses-images-without-words ()
+  "An answer of images alone is refused at info before any request is built."
+  (let (infos)
+    (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos))
+              ((symbol-function 'read-string)
+               (lambda (&rest _) (concat " " (agent-repl-test-verbs--image-marker "/a.png")))))
+      ;; Act.
+      (let ((err (should-error (agent-repl-verbs--read-prompt "Commission: " nil t) :type 'user-error)))
+        ;; Assert.
+        (should (string-match-p "rides the words of the prompt" (cadr err)))))
+    (should (seq-some (lambda (line) (string-match-p "cause=images-without-words images=1" line)) infos))))
+
+(ert-deftest agent-repl-verbs-read-image-prompt-refuses-a-missing-image ()
+  "A recalled draft whose image file is gone is refused naming it."
+  (cl-letf (((symbol-function 'agent-repl--info) #'ignore)
+            ((symbol-function 'agent-repl--input-image-present-p) (lambda (_path) nil))
+            ((symbol-function 'read-string)
+             (lambda (&rest _) (concat "look " (agent-repl-test-verbs--image-marker "/gone.png")))))
+    (let ((err (should-error (agent-repl-verbs--read-prompt "Commission: " nil t) :type 'user-error)))
+      (should (string-match-p "gone.png" (cadr err))))))
+
+(ert-deftest agent-repl-verbs-prompt-history-text-keeps-markers-and-nothing-else ()
+  "The persisted form keeps each image marker and drops every other property."
+  (let* ((text (concat (propertize "look " 'face 'bold 'fontified t)
+                       (agent-repl-test-verbs--image-marker "/a.png")))
+         (kept (agent-repl-verbs--prompt-history-text text)))
+    (should (equal-including-properties kept
+                                        (concat "look " (agent-repl-test-verbs--image-marker "/a.png"))))))
+
+(ert-deftest agent-repl-verbs-read-persisted-keeps-a-pasted-image-in-the-file ()
+  "A draft\\='s pasted image is saved with it, so recalling the draft recalls the image."
+  (agent-repl-test-verbs--with-history-file file
+    ;; Arrange.
+    (cl-letf (((symbol-function 'read-string)
+               (agent-repl-test-verbs--fake-minibuffer
+                (list "look " (agent-repl-test-verbs--image-marker "/a.png")))))
+      ;; Act.
+      (agent-repl-verbs--read-string-persisted "Q: " nil file))
+    ;; Assert.
+    (should (equal (agent-repl--input-string-parts (car (agent-repl--read-sexp-file file)))
+                   '("look " (:path "/a.png" :media-type "image/png"))))))
+
+(ert-deftest agent-repl-verbs-said-of-words-alone-is-one-text-block ()
+  "A creation prompt of words alone is one text block, as before images."
+  (should (equal (agent-repl-verbs--said "fix it")
+                 '(:content (:blocks ((:arm :text :value (:text "fix it"))))))))

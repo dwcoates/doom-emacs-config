@@ -3225,3 +3225,56 @@ func TestCreateWhoseUndoFailsSurfacesBothFailures(t *testing.T) {
 		t.Errorf("context = %v, want the undo's cause and the worktree left", record.Context)
 	}
 }
+
+// pastedImage is an image a creation prompt carries, by path.
+func pastedImage(path string) *conversationv1.ImageBlock {
+	return &conversationv1.ImageBlock{MediaType: "image/png", Location: &conversationv1.ImageBlock_Path{Path: &conversationv1.ImageBlockPath{Path: path}}}
+}
+
+// TestCreateSubmitsTheInitialPromptsImagesAfterItsWords pins that the images a
+// creation prompt carries reach the first message, in order, after its words.
+func TestCreateSubmitsTheInitialPromptsImagesAfterItsWords(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.InitialImages = []*conversationv1.ImageBlock{pastedImage("/a.png"), pastedImage("/b.png")}
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	blocks := f.queue.submissions[0].Said.GetContent().GetBlocks()
+	if len(blocks) != 3 || !strings.Contains(blocks[0].GetText().GetText(), "fix the login bug") ||
+		blocks[1].GetImage().GetPath().GetPath() != "/a.png" || blocks[2].GetImage().GetPath().GetPath() != "/b.png" {
+		t.Fatalf("submitted blocks = %v, want the words then /a.png and /b.png", blocks)
+	}
+}
+
+// TestCreateFailsHardOnImagesWithoutAPrompt pins that a spec carrying images
+// and no words is a caller's defect: logged at error and refused before any
+// worktree is made, never created with its images dropped.
+func TestCreateFailsHardOnImagesWithoutAPrompt(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.InitialPrompt = "  "
+	spec.InitialImages = []*conversationv1.ImageBlock{pastedImage("/a.png")}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "ride no initial prompt") {
+		t.Fatalf("Create = %v, want the images-without-a-prompt defect", err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate,
+		Message: "a create spec carries images without a prompt"})
+	if !ok || record.Context["images"] != 1 {
+		t.Fatalf("error record = %v (found %v), want one naming 1 image", record, ok)
+	}
+	if len(f.queue.submissions) != 0 {
+		t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+	}
+}

@@ -53,6 +53,11 @@ type CreateSpec struct {
 	// derived from it by the naming rule. Empty for a workspace created
 	// without one.
 	InitialPrompt string
+	// InitialImages are the images the initial prompt carries, in the order
+	// they were composed; they follow the prompt's (decorated) words in the
+	// first message. Nil for a prompt of words alone, and never set without
+	// an InitialPrompt: an image rides words.
+	InitialImages []*conversationv1.ImageBlock
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
 	// FromOrigin cuts a workspace landing on the primary branch from origin's

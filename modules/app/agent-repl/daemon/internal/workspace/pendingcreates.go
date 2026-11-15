@@ -706,8 +706,11 @@ func createKey(spec CreateSpec) string {
 		Name, Model, Priority, PermissionMode, Consent, Prompt string
 		SlackThread, Originator                                string
 		PreDeploy, PostDeploy                                  []string
-		Hidden                                                 bool
-		Placement                                              *heldPlacement
+		// Omitted when empty, so a create of words alone keys as it did
+		// before prompts carried images.
+		Images    []string `json:",omitempty"`
+		Hidden    bool
+		Placement *heldPlacement
 	}{
 		Hidden: spec.Hidden, Placement: heldPlacementOf(spec.Placement),
 		// THE KEY SPELLS THE KIND BY NUMBER, so a spec that names none still
@@ -722,6 +725,7 @@ func createKey(spec CreateSpec) string {
 		PermissionMode: spec.PermissionMode, Consent: spec.ConsentedUngatedMode,
 		Prompt:    strings.TrimSpace(spec.InitialPrompt),
 		PreDeploy: hookBytes(spec.DeployHooks.PreDeploy), PostDeploy: hookBytes(spec.DeployHooks.PostDeploy),
+		Images: protoHexes("an initial image", spec.InitialImages),
 	}
 	encoded, err := json.Marshal(key)
 	if err != nil {
@@ -733,26 +737,54 @@ func createKey(spec CreateSpec) string {
 
 // hookBytes is each hook's deterministic wire encoding, hex.
 func hookBytes(hooks []*repoconfigv1.Hook) []string {
-	out := make([]string, 0, len(hooks))
-	for _, h := range hooks {
-		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(h)
+	return protoHexes("a deploy hook", hooks)
+}
+
+// protoHexes is each message's deterministic wire encoding, hex; WHAT names
+// the messages in the panic a message that will not encode raises.
+func protoHexes[M proto.Message](what string, messages []M) []string {
+	out := make([]string, 0, len(messages))
+	for _, m := range messages {
+		b, err := proto.MarshalOptions{Deterministic: true}.Marshal(m)
 		if err != nil {
-			panic(fmt.Sprintf("workspace: a deploy hook will not encode: %v", err))
+			panic(fmt.Sprintf("workspace: %s will not encode: %v", what, err))
 		}
 		out = append(out, hex.EncodeToString(b))
 	}
 	return out
 }
 
+// decodeProtoHexes reads back what protoHexes encoded, each message made by
+// NEWMSG; WHAT names the messages in the error a malformed entry answers.
+func decodeProtoHexes[M proto.Message](what string, encoded []string, newMsg func() M) ([]M, error) {
+	var out []M
+	for _, e := range encoded {
+		raw, err := hex.DecodeString(e)
+		if err != nil {
+			return nil, fmt.Errorf("decode a held create's %s: %w", what, err)
+		}
+		m := newMsg()
+		if err := proto.Unmarshal(raw, m); err != nil {
+			return nil, fmt.Errorf("decode a held create's %s: %w", what, err)
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 // heldSpec is a held create's request as its durable row stores it. Every
 // field of CreateSpec a held create can carry is here; a merge workspace is
 // never held, so MergeOf and MergeName are not.
 type heldSpec struct {
-	RepoDir          string `json:"repo_dir"`
-	InitialPrompt    string `json:"initial_prompt,omitempty"`
-	OneShot          bool   `json:"one_shot,omitempty"`
-	FromOrigin       bool   `json:"from_origin,omitempty"`
-	ContextWorkspace string `json:"context_workspace,omitempty"`
+	RepoDir       string `json:"repo_dir"`
+	InitialPrompt string `json:"initial_prompt,omitempty"`
+	// InitialImages are the prompt's images, each its ImageBlock's
+	// deterministic wire encoding in hex; a row written before creation
+	// prompts carried images has none, which is what its create meant.
+	InitialImages    []string `json:"initial_images,omitempty"`
+	OneShot          bool     `json:"one_shot,omitempty"`
+	FromOrigin       bool     `json:"from_origin,omitempty"`
+	ContextWorkspace string   `json:"context_workspace,omitempty"`
 	// ContextSelection is the context workspace's selected bubble, absent
 	// when nothing was selected.
 	ContextSelection     *heldSelection `json:"context_selection,omitempty"`
@@ -861,6 +893,7 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 	}
 	held := heldSpec{
 		RepoDir: spec.RepoDir, InitialPrompt: spec.InitialPrompt, OneShot: spec.OneShot, FromOrigin: spec.FromOrigin,
+		InitialImages:    protoHexes("an initial image", spec.InitialImages),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ContextSelection: heldSelectionOf(spec.ContextSelection),
 		BaseRef: spec.BaseRef, Parent: ids.Optional(spec.Parent),
 		ForkFrom: ids.Optional(spec.ForkFrom), Requester: ids.Optional(spec.Requester),
@@ -897,6 +930,11 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	if err != nil {
 		return CreateSpec{}, err
 	}
+	images, err := decodeProtoHexes("initial image", held.InitialImages,
+		func() *conversationv1.ImageBlock { return &conversationv1.ImageBlock{} })
+	if err != nil {
+		return CreateSpec{}, err
+	}
 	originator := lifecycleconfig.OriginatorUserOrWorkspace
 	if held.Originator != "" {
 		if originator, err = lifecycleconfig.ParseOriginator(held.Originator); err != nil {
@@ -905,6 +943,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	}
 	spec := NewCreateSpec(originator)
 	spec.RepoDir, spec.InitialPrompt, spec.OneShot, spec.FromOrigin = held.RepoDir, held.InitialPrompt, held.OneShot, held.FromOrigin
+	spec.InitialImages = images
 	spec.ContextWorkspace, spec.ContextSelection = optionalID(held.ContextWorkspace), contextSelectionOf(held.ContextSelection)
 	spec.BaseRef, spec.Parent = held.BaseRef, optionalID(held.Parent)
 	spec.ForkFrom, spec.Requester = optionalID(held.ForkFrom), optionalID(held.Requester)
@@ -922,19 +961,7 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 }
 
 func decodeHooks(encoded []string) ([]*repoconfigv1.Hook, error) {
-	var out []*repoconfigv1.Hook
-	for _, e := range encoded {
-		raw, err := hex.DecodeString(e)
-		if err != nil {
-			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
-		}
-		hook := &repoconfigv1.Hook{}
-		if err := proto.Unmarshal(raw, hook); err != nil {
-			return nil, fmt.Errorf("decode a held create's deploy hook: %w", err)
-		}
-		out = append(out, hook)
-	}
-	return out, nil
+	return decodeProtoHexes("deploy hook", encoded, func() *repoconfigv1.Hook { return &repoconfigv1.Hook{} })
 }
 
 func optionalID(s string) *ids.WorkspaceID {

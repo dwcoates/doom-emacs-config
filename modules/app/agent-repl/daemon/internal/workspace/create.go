@@ -685,6 +685,15 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		})
 		return fmt.Errorf("create: a context selection belongs to a context workspace, and this create names none (row %s)", spec.ContextSelection.Row)
 	}
+	// AN IMAGE RIDES A PROMPT'S WORDS: the server refuses a creation prompt
+	// of images alone, so a spec carrying images without words is a defect
+	// in its caller, and the images would otherwise be dropped unsent.
+	if len(spec.InitialImages) > 0 && strings.TrimSpace(spec.InitialPrompt) == "" {
+		log.Error(opCreate, "a create spec carries images without a prompt", dlog.Context{
+			"images": len(spec.InitialImages),
+		})
+		return fmt.Errorf("create: %d image(s) ride no initial prompt", len(spec.InitialImages))
+	}
 	if err := validatePlacement(log, spec); err != nil {
 		return err
 	}
@@ -1152,7 +1161,7 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 	}
 
 	turn := wsm.NewTurnID()
-	said := SaidText(text)
+	said := feed.SaidTextWithImages(text, spec.InitialImages)
 	if err := v.deps.DB.PutTurn(ctx, wsm.Turn{
 		ID:        turn,
 		Workspace: record.ID,
@@ -1170,6 +1179,7 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 	}
 	log.Debug(opCreate, "submitted the initial prompt", dlog.Context{
 		"turn": string(turn), "delivered": disposition.Delivered, "refused_arm": disposition.RefusedArm,
+		"images": len(spec.InitialImages),
 	})
 	return nil
 }

@@ -524,6 +524,103 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
     (should-error (agent-repl-attach-clipboard-image) :type 'user-error)
     (should (null (agent-repl-test-image--images)))))
 
+;;;; ---- The shared paste decisions ----
+
+(ert-deftest agent-repl-image-ensure-dir-creates-the-directory ()
+  "The directory is made, parents included, and answered."
+  (agent-repl-test-image--with
+    (let ((dir (expand-file-name "a/b/" agent-repl-test-image--dir)))
+      (should (equal (agent-repl--image-ensure-dir "ws-one" dir) dir))
+      (should (file-directory-p dir)))))
+
+(ert-deftest agent-repl-image-capture-into-keeps-the-image-where-dir-fn-says ()
+  "The image is kept in the directory DIR-FN answers, under its digest."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((dir (file-name-as-directory (expand-file-name "elsewhere" agent-repl-test-image--dir))))
+      (make-directory dir)
+      (should (equal (agent-repl--image-capture-into
+                      "scope" (lambda () dir) (assq 'image/png agent-repl--image-clipboard-types))
+                     (cons (expand-file-name (agent-repl-test-image--kept-name "PNG" "png") dir)
+                           "image/png"))))))
+
+(ert-deftest agent-repl-image-capture-into-refuses-no-bytes-without-making-a-directory ()
+  "A clipboard with no bytes is refused at error, and DIR-FN is never called."
+  (agent-repl-test-image--with
+    (let ((asked nil))
+      (should-error (agent-repl--image-capture-into
+                     "scope" (lambda () (setq asked t)) (assq 'image/png agent-repl--image-clipboard-types))
+                    :type 'user-error)
+      (should-not asked)
+      (should (equal agent-repl-test-image--errors
+                     '("clipboard-image: clipboard answered no image bytes target=image/png"))))))
+
+(ert-deftest agent-repl-image-yank-runs-attach-on-an-image-only-clipboard ()
+  "The shared yank hands the clipboard's image entry to ATTACH."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (let ((attached nil))
+      (agent-repl--image-yank "scope" (lambda (entry) (setq attached entry)))
+      (should (equal (car attached) 'image/png)))))
+
+(ert-deftest agent-repl-image-yank-yanks-text-without-attaching ()
+  "With text on the clipboard the shared yank yanks, and ATTACH is not run."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((attached nil) (yanked nil))
+      (cl-letf (((symbol-function 'yank) (lambda (&optional _) (interactive) (setq yanked t))))
+        (agent-repl--image-yank "scope" (lambda (entry) (setq attached entry))))
+      (should yanked)
+      (should-not attached))))
+
+(ert-deftest agent-repl-image-attach-forced-runs-attach-beside-text ()
+  "The forced attach takes the image even with text beside it."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "icon.png" 'image/png "PNG")
+    (let ((attached nil))
+      (agent-repl--image-attach-forced "scope" (lambda (entry) (setq attached entry)))
+      (should (equal (car attached) 'image/png)))))
+
+(ert-deftest agent-repl-image-attach-forced-refuses-no-image ()
+  "The forced attach with no image is refused, and ATTACH is not run."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((attached nil))
+      (should-error (agent-repl--image-attach-forced "scope" (lambda (entry) (setq attached entry)))
+                    :type 'user-error)
+      (should-not attached))))
+
+(ert-deftest agent-repl-image-evil-paste-runs-attach-after-the-cursor ()
+  "The shared evil paste steps past the cursor's character, then runs ATTACH."
+  (agent-repl-test-image--with
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "ab")
+    (goto-char 1)
+    (let ((evil-this-register nil) (at nil))
+      (agent-repl--image-evil-paste #'ignore t "scope" (lambda (_entry) (setq at (point))))
+      (should (equal at 2)))))
+
+(ert-deftest agent-repl-image-composer-paste-commands-share-the-decisions ()
+  "Every composer paste command runs its shared decision with the composer's ATTACH."
+  (agent-repl-test-image--with
+    (let ((calls nil))
+      (cl-letf (((symbol-function 'agent-repl--image-composer-attach) (lambda () 'composer))
+                ((symbol-function 'agent-repl--image-yank)
+                 (lambda (scope attach) (push (list 'yank scope attach) calls)))
+                ((symbol-function 'agent-repl--image-attach-forced)
+                 (lambda (scope attach) (push (list 'forced scope attach) calls)))
+                ((symbol-function 'agent-repl--image-evil-paste)
+                 (lambda (command after scope attach) (push (list command after scope attach) calls))))
+        (agent-repl-input-yank)
+        (agent-repl-attach-clipboard-image)
+        (agent-repl-input-evil-paste-after)
+        (agent-repl-input-evil-paste-before))
+      (should (equal (nreverse calls)
+                     '((yank "ws-one" composer)
+                       (forced "ws-one" composer)
+                       (evil-paste-after t "ws-one" composer)
+                       (evil-paste-before nil "ws-one" composer)))))))
+
 (ert-deftest agent-repl-image-paste-commands-are-remapped-in-the-composer ()
   "Every paste command the composer has runs the image-aware paste."
   (should (equal (list (lookup-key agent-repl-input-mode-map [remap yank])
@@ -543,3 +640,97 @@ TARGETS is derived from the types, as a vector, the way Emacs answers it."
 (provide 'test-clipboard-image)
 
 ;;; test-clipboard-image.el ends here
+
+;;;; ---- Pasting into a creation prompt ----
+
+(defmacro agent-repl-test-image--with-prompt (&rest body)
+  "Run BODY in a stand-in creation-prompt minibuffer, state dir under the test's."
+  (declare (indent 0))
+  `(agent-repl-test-image--with
+     (cl-letf (((symbol-function 'agent-repl--global-state-file)
+                (lambda (relative) (expand-file-name relative agent-repl-test-image--dir))))
+       (with-temp-buffer ,@body))))
+
+(defun agent-repl-test-image--prompt-kept (data extension)
+  "Return where a creation prompt keeps image DATA with EXTENSION."
+  (expand-file-name (concat "prompt-images/" (agent-repl-test-image--kept-name data extension))
+                    agent-repl-test-image--dir))
+
+(ert-deftest agent-repl-image-prompt-marker-is-the-composer-marker-drawn-as-text ()
+  "The prompt marker carries the image record and is drawn as `[pasted image]'."
+  (let ((marker (agent-repl--image-prompt-marker "/a.png" "image/png")))
+    (should (equal (get-text-property 0 agent-repl--input-image-marker-property marker)
+                   '(:path "/a.png" :media-type "image/png")))
+    (should (equal (get-text-property 0 'display marker) "[pasted image]"))
+    (should (equal (substring-no-properties marker) agent-repl--image-marker-text))))
+
+(ert-deftest agent-repl-image-prompt-text-reads-back-as-its-parts ()
+  "Prompt text built from parts reads back as those parts."
+  (let ((parts '("look " (:path "/a.png" :media-type "image/png") " and")))
+    (should (equal (agent-repl--input-string-parts (agent-repl--image-prompt-text parts)) parts))))
+
+(ert-deftest agent-repl-image-prompt-yank-pastes-the-image-as-a-marker ()
+  "`yank' in a creation prompt inserts the image\\='s marker, kept in the prompt directory."
+  (agent-repl-test-image--with-prompt
+    (agent-repl-test-image--clip 'image/png "PNG")
+    (insert "see ")
+    (agent-repl-prompt-yank)
+    (should (equal (agent-repl--input-string-parts (buffer-string))
+                   (list "see " (list :path (agent-repl-test-image--prompt-kept "PNG" "png")
+                                      :media-type "image/png"))))
+    (should (equal (get-text-property 5 'display) "[pasted image]"))
+    (should (file-exists-p (agent-repl-test-image--prompt-kept "PNG" "png")))))
+
+(ert-deftest agent-repl-image-prompt-yank-with-text-yanks ()
+  "`yank' in a creation prompt with text on the clipboard is the ordinary yank."
+  (agent-repl-test-image--with-prompt
+    (agent-repl-test-image--clip 'STRING "words")
+    (let ((yanked nil))
+      (cl-letf (((symbol-function 'yank) (lambda (&optional _) (interactive) (setq yanked t))))
+        (agent-repl-prompt-yank))
+      (should yanked)
+      (should (equal (buffer-string) "")))))
+
+(ert-deftest agent-repl-image-prompt-paste-with-no-bytes-is-refused-and-logged ()
+  "A clipboard naming an image but answering no bytes is refused, recorded at error."
+  (agent-repl-test-image--with-prompt
+    (setq agent-repl-test-image--clipboard '((TARGETS . [TARGETS image/png])))
+    (should-error (agent-repl-prompt-yank) :type 'user-error)
+    (should (equal (buffer-string) ""))
+    (should (equal agent-repl-test-image--errors
+                   '("clipboard-image: clipboard answered no image bytes target=image/png")))))
+
+(ert-deftest agent-repl-image-prompt-paste-commands-share-the-decisions ()
+  "Every creation-prompt paste command runs its shared decision with the prompt\\='s ATTACH."
+  (let ((calls nil)
+        (scope agent-repl--image-prompt-log-scope)
+        (attach #'agent-repl--image-prompt-attach))
+    (cl-letf (((symbol-function 'agent-repl--image-yank)
+               (lambda (scope attach) (push (list 'yank scope attach) calls)))
+              ((symbol-function 'agent-repl--image-attach-forced)
+               (lambda (scope attach) (push (list 'forced scope attach) calls)))
+              ((symbol-function 'agent-repl--image-evil-paste)
+               (lambda (command after scope attach) (push (list command after scope attach) calls))))
+      (with-temp-buffer
+        (agent-repl-prompt-yank)
+        (agent-repl-prompt-attach-clipboard-image)
+        (agent-repl-prompt-evil-paste-after)
+        (agent-repl-prompt-evil-paste-before)))
+    (should (equal (nreverse calls)
+                   (list (list 'yank scope attach)
+                         (list 'forced scope attach)
+                         (list #'evil-paste-after t scope attach)
+                         (list #'evil-paste-before nil scope attach))))))
+
+(ert-deftest agent-repl-image-prompt-map-remaps-every-paste-command ()
+  "The creation prompt\\='s map remaps each paste command the composer\\='s does."
+  (should (equal (list (lookup-key agent-repl-image-prompt-map [remap yank])
+                       (lookup-key agent-repl-image-prompt-map [remap clipboard-yank])
+                       (lookup-key agent-repl-image-prompt-map [remap evil-paste-after])
+                       (lookup-key agent-repl-image-prompt-map [remap evil-paste-before])
+                       (lookup-key agent-repl-image-prompt-map (kbd "C-c C-i")))
+                 '(agent-repl-prompt-yank
+                   agent-repl-prompt-yank
+                   agent-repl-prompt-evil-paste-after
+                   agent-repl-prompt-evil-paste-before
+                   agent-repl-prompt-attach-clipboard-image))))

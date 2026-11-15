@@ -105,6 +105,13 @@
 (declare-function agent-repl-link-on-successor-accepted "agent-repl-daemon-link" (fn))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--input-rollback-offer "agent-repl-input" (ws offer))
+(declare-function agent-repl--input-string-parts "agent-repl-input" (text))
+(declare-function agent-repl--input-said "agent-repl-input" (parts))
+(declare-function agent-repl--input-parts-text "agent-repl-input" (parts))
+(declare-function agent-repl--input-parts-images "agent-repl-input" (parts))
+(declare-function agent-repl--input-refuse-missing-images "agent-repl-input" (ws parts))
+(declare-function agent-repl--image-prompt-text "clipboard-image" (parts))
+(defvar agent-repl-image-prompt-map)
 (declare-function agent-repl--input-rollback-done "agent-repl-input" (ws success))
 (declare-function agent-repl--input-rollback-refusal-text "agent-repl-input" (cause))
 (declare-function agent-repl-rpc-close-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -2223,8 +2230,11 @@ and the frame lands on it once the daemon accepts."
 ;;;; ---- Create -----------------------------------------------------------
 
 (defun agent-repl-verbs--said (text)
-  "Return the `UserSaid' carrying TEXT as its single text block."
-  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
+  "Return the `UserSaid' for creation-prompt TEXT, words and images in order.
+TEXT is what `agent-repl-verbs--read-prompt' answered: its image markers
+\=(pasted into the minibuffer) become `ImageBlock's in their places, read
+by the composer\='s own reader (`agent-repl--input-string-parts')."
+  (agent-repl--input-said (agent-repl--input-string-parts text)))
 
 (defun agent-repl-verbs--dynamic-repository (command)
   "Return the `RepositoryRef' a DYNAMIC create targets, refusing without one.
@@ -2397,7 +2407,7 @@ opened."
      :on-error
      (lambda (value) (agent-repl-verbs--register-repository-on-error path value)))))
 
-(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file)
+(defun agent-repl-verbs--read-prompt (prompt-text &optional history-file images)
   "Read the creation prompt, starting empty.
 The composer's draft belongs to the current workspace rather than to the
 workspace being created, so it is never read or offered.
@@ -2408,11 +2418,54 @@ being typed is saved there on every edit
 the ordinary minibuffer history.
 
 Either way `C-r' searches that history backward
-\(`agent-repl-verbs--prompt-history-map')."
-  (minibuffer-with-setup-hook #'agent-repl-verbs--install-prompt-history-map
-    (if history-file
-        (agent-repl-verbs--read-string-persisted prompt-text nil history-file)
-      (read-string prompt-text nil))))
+\(`agent-repl-verbs--prompt-history-map').
+
+With IMAGES, the prompt TAKES PASTED IMAGES: its paste keys paste the
+clipboard's image as `[pasted image]' (`agent-repl-image-prompt-map'),
+and the text answered carries each one as its image marker, which
+`agent-repl-verbs--said' sends as an `ImageBlock'
+\(`agent-repl-verbs--read-image-prompt')."
+  (if images
+      (agent-repl-verbs--read-image-prompt prompt-text history-file)
+    (minibuffer-with-setup-hook #'agent-repl-verbs--install-prompt-history-map
+      (agent-repl-verbs--read-prompt-string prompt-text history-file))))
+
+(defun agent-repl-verbs--read-prompt-string (prompt-text history-file)
+  "Read PROMPT-TEXT\='s answer, its history in HISTORY-FILE when given."
+  (if history-file
+      (agent-repl-verbs--read-string-persisted prompt-text nil history-file)
+    (read-string prompt-text nil)))
+
+(defun agent-repl-verbs--read-image-prompt (prompt-text history-file)
+  "Read a creation prompt that takes pasted images; see `agent-repl-verbs--read-prompt'.
+The minibuffer keeps the markers' properties
+\(`minibuffer-allow-text-properties'), so the answer reads back as words
+and images (`agent-repl--input-string-parts').  An answer of images
+without words is refused, because the daemon names the workspace from
+the words and an image rides them; one whose image file is gone (a
+recalled draft) is refused naming it.  Both are refused before any
+request is built."
+  (let* ((text (let ((minibuffer-allow-text-properties t))
+                 (minibuffer-with-setup-hook #'agent-repl-verbs--install-image-prompt-maps
+                   (agent-repl-verbs--read-prompt-string prompt-text history-file))))
+         (parts (agent-repl--input-string-parts text))
+         (images (agent-repl--input-parts-images parts)))
+    (when (and images (string-blank-p (agent-repl--input-parts-text parts)))
+      (agent-repl--info agent-repl-verbs--create-log-scope
+                        "elisp.verbs.read-prompt-refused cause=images-without-words images=%d"
+                        (length images))
+      (user-error "agent-repl: a pasted image rides the words of the prompt, and it has none"))
+    (agent-repl--input-refuse-missing-images agent-repl-verbs--create-log-scope parts)
+    (agent-repl--info agent-repl-verbs--create-log-scope
+                      "elisp.verbs.read-prompt images=%d" (length images))
+    (agent-repl--image-prompt-text parts)))
+
+(defun agent-repl-verbs--install-image-prompt-maps ()
+  "Put the history map and `agent-repl-image-prompt-map' over the minibuffer\='s map.
+Run from `minibuffer-setup-hook' by `agent-repl-verbs--read-image-prompt',
+so only an image-taking prompt\='s own minibuffer pastes images."
+  (agent-repl-verbs--install-prompt-history-map)
+  (use-local-map (make-composed-keymap agent-repl-image-prompt-map (current-local-map))))
 
 (defvar agent-repl-verbs--prompt-history-map (make-sparse-keymap)
   "Keys a creation prompt's minibuffer adds over its own local map.
@@ -2433,12 +2486,12 @@ only the creation prompt's own minibuffer carries it."
   (use-local-map (make-composed-keymap agent-repl-verbs--prompt-history-map
                                        (current-local-map))))
 
-(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file)
+(defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file images)
   "Read a creation prompt with PROMPT-TEXT that must not be blank.
 The text is returned as read.  A blank or whitespace-only answer is
-refused with REFUSAL, before any request is built.  HISTORY-FILE is
-passed to `agent-repl-verbs--read-prompt'."
-  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file)))
+refused with REFUSAL, before any request is built.  HISTORY-FILE and
+IMAGES are passed to `agent-repl-verbs--read-prompt'."
+  (let ((text (agent-repl-verbs--read-prompt prompt-text history-file images)))
     (when (string-empty-p (string-trim text))
       (user-error "agent-repl: %s" refusal))
     text))
@@ -2520,14 +2573,24 @@ believing the text is kept."
                   (lambda ()
                     (add-hook 'after-change-functions
                               (lambda (&rest _)
-                                (let ((live (minibuffer-contents-no-properties)))
+                                (let ((live (agent-repl-verbs--prompt-history-text
+                                             (minibuffer-contents))))
                                   (unless (or (string-empty-p (string-trim live))
                                               (member live base))
                                     (setq text live)
                                     (agent-repl-verbs--persisted-history-save file text base))))
                               nil t))
                 (read-string prompt-text initial 'agent-repl-verbs--persisted-history)))
-      (agent-repl-verbs--persisted-history-save file text base))))
+      (agent-repl-verbs--persisted-history-save
+       file (and text (agent-repl-verbs--prompt-history-text text)) base))))
+
+(defun agent-repl-verbs--prompt-history-text (text)
+  "Return TEXT as a prompt\='s persisted history keeps it.
+Its words, and each pasted image as its prompt marker
+\(`agent-repl--image-prompt-text'), with no other property of the
+minibuffer\='s: so a recalled draft carries its images, and the file
+holds nothing that will not read back."
+  (agent-repl--image-prompt-text (agent-repl--input-string-parts text)))
 
 (defun agent-repl-verbs--create-invoked (command)
   "Record that the creation COMMAND was invoked, before it asks anything.
@@ -2687,7 +2750,8 @@ recorded before the abandonment propagates."
                   command 'prompt
                   (lambda () (agent-repl-verbs--read-prompt
                                   (format "Initial prompt (%s): "
-                                          (agent-repl-verbs--repository-name repository)))))))
+                                          (agent-repl-verbs--repository-name repository))
+                                  nil t)))))
     (agent-repl--info agent-repl-verbs--create-log-scope
                       "elisp.verbs.create-standard command=%s model=%S" command model)
     (agent-repl-verb-create
@@ -2799,7 +2863,8 @@ recorded before the abandonment propagates."
                     command 'prompt
                     (lambda () (agent-repl-verbs--read-prompt
                                     (format "Initial prompt (%s): "
-                                            (agent-repl-verbs--repository-name repository)))))))
+                                            (agent-repl-verbs--repository-name repository))
+                                    nil t)))))
          (source (agent-repl-verbs--ref (agent-repl--ws-current-name))))
     (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s into-primary=%s"
                       mode (and into-primary t))
@@ -3098,7 +3163,8 @@ repository says so before the commission is typed."
                          (format "One-shot fix for %s (%s): " about repository-name)
                        (format "One-shot (%s): " repository-name))
                      "a one-shot IS its prompt"
-                     (agent-repl-verbs--oneshot-history-file)))))
+                     (agent-repl-verbs--oneshot-history-file)
+                     t))))
          (context (and about (agent-repl-verbs--ref about))))
     (agent-repl--info agent-repl-verbs--create-log-scope
                       "elisp.verbs.create-one-shot mode=dynamic model=%S context=%S"
