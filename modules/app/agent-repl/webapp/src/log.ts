@@ -23,8 +23,15 @@
  *
  * A SINK FAILURE MUST NOT RECURSE. Logging a failed log would produce another
  * failed log, so a rejected `ClientLog` is counted (`sinkFailureCount`, which
- * tests read) and announced exactly once through the documented logger-sink
- * emergency console path — never through this module's own API.
+ * tests read) and announced once per outage through the documented
+ * logger-sink emergency console path — never through this module's own API.
+ *
+ * A REJECTED RECORD IS HELD, NEVER DROPPED: a daemon out of reach (a restart,
+ * a handover) is exactly when the page has errors worth keeping. The record
+ * waits in a bounded hold (`CLIENT_LOG_HELD_BOUND`, the oldest dropped past
+ * it and counted), and the first `ClientLog` the daemon answers again resends
+ * every held record, oldest first, with a warn naming any the bound dropped.
+ * The sink answering IS the daemon being back, so nothing polls for it.
  */
 import { create, type JsonObject } from "@bufbuild/protobuf";
 import {
@@ -104,6 +111,12 @@ const LEVEL_ARM = {
   error: "error",
 } as const satisfies Record<ClientLogLevel, NonNullable<ClientLogRecord["level"]["case"]>>;
 
+/** The most records a rejected `ClientLog` holds for resending: the throttle's own buffer bound. */
+export const CLIENT_LOG_HELD_BOUND = 500;
+
+/** The operation of the warn naming held records the bound dropped. */
+export const HELD_DROPPED_OPERATION = "webapp.client-log-held-dropped";
+
 /** The operation of every level window record: a startup decision and a window that ended. */
 export const LEVEL_WINDOW_OPERATION = "webapp.log.level-window";
 
@@ -127,6 +140,10 @@ export class ForwardingLogger {
   // life of this logger, because the workspace it logs for is gone.
   private departed = false;
   private announcedSinkFailure = false;
+  /** The records a rejected `ClientLog` left, oldest first, resent once the daemon answers. */
+  private readonly held: ClientLogRecord[] = [];
+  /** Held records the bound dropped since the last resend. */
+  private heldDropped = 0;
 
   /**
    * SEND is the `ClientLog` call, built from the client by main.ts.
@@ -197,14 +214,20 @@ export class ForwardingLogger {
     return this.sinkFailures;
   }
 
+  /** Records held for resending once the daemon answers again. */
+  heldCount(): number {
+    return this.held.length;
+  }
+
   /**
    * Build the proto record and issue the call.
    *
    * Always returns true: the throttle's false means "the buffer was full and
    * the record is lost", which is a different fact from "the call is in
-   * flight". A rejection lands in the emergency path below, not back in the
-   * throttle, because re-queueing a record whose sink is down is how a broken
-   * sink turns into an unbounded queue.
+   * flight". A rejection lands in the bounded hold below (`noteSinkFailure`),
+   * not back in the throttle, and is resent only once the daemon answers a
+   * later call, so a broken sink never turns into an unbounded queue or a
+   * retry loop.
    */
   private forward(record: ClientLogRecord): boolean {
     if (this.departed) return true;
@@ -212,12 +235,44 @@ export class ForwardingLogger {
       ...record,
       context: restampRecordIdentity(record.context ?? {}) as JsonObject,
     });
-    void this.send(restamped)
+    this.deliver(restamped);
+    return true;
+  }
+
+  /** Issue the call for RECORD: an answer resends what is held, a rejection holds RECORD. */
+  private deliver(record: ClientLogRecord): void {
+    void this.send(record)
       .then((outcome) => {
         if (outcome === "workspace_departed") this.noteWorkspaceDeparted();
+        else this.resendHeld();
       })
-      .catch((err: unknown) => this.noteSinkFailure(err));
-    return true;
+      .catch((err: unknown) => this.noteSinkFailure(err, record));
+  }
+
+  /**
+   * The daemon answered a `ClientLog`, so it is in reach again: resend every
+   * held record, oldest first, after a warn naming any the bound dropped. A
+   * resend that is rejected again is held again.
+   */
+  private resendHeld(): void {
+    if (this.held.length === 0 && this.heldDropped === 0) return;
+    const resend = this.held.splice(0);
+    const dropped = this.heldDropped;
+    this.heldDropped = 0;
+    this.announcedSinkFailure = false;
+    if (dropped > 0) {
+      this.deliver(
+        buildClientLogRecord(
+          buildRecord(
+            "warn",
+            `client log forwarding dropped ${String(dropped)} record(s) held over its ${String(CLIENT_LOG_HELD_BOUND)}-record bound while the daemon was out of reach`,
+            { ...boundContext, operation: HELD_DROPPED_OPERATION, dropped, held_bound: CLIENT_LOG_HELD_BOUND },
+            "normal",
+          ),
+        ),
+      );
+    }
+    for (const record of resend) this.deliver(record);
   }
 
   /**
@@ -234,7 +289,8 @@ export class ForwardingLogger {
   private noteWorkspaceDeparted(): void {
     if (this.departed) return;
     this.departed = true;
-    const dropped = this.throttle.discard();
+    const dropped = this.throttle.discard() + this.held.splice(0).length;
+    this.heldDropped = 0;
     console.debug(
       `webapp ClientLog stopped: the daemon no longer knows this workspace; ` +
         `dropped ${String(dropped)} queued record(s), the console is now the only sink`,
@@ -246,15 +302,21 @@ export class ForwardingLogger {
     return this.departed;
   }
 
-  private noteSinkFailure(err: unknown): void {
+  private noteSinkFailure(err: unknown, record: ClientLogRecord): void {
     this.sinkFailures += 1;
+    if (this.departed) return;
+    if (this.held.length >= CLIENT_LOG_HELD_BOUND) {
+      this.held.shift();
+      this.heldDropped += 1;
+    }
+    this.held.push(record);
     if (this.announcedSinkFailure) return;
     this.announcedSinkFailure = true;
     // THE DOCUMENTED LOGGER-SINK EMERGENCY PATH. Routing this through `log`
-    // would log the failure of logging, which fails, which logs. Once, direct,
-    // and never again for the life of this logger.
+    // would log the failure of logging, which fails, which logs. Once per
+    // outage, direct: the next answer from the daemon ends the outage.
     console.error(
-      `webapp ClientLog forwarding failed and further failures are counted only: ${String(err)}`,
+      `webapp ClientLog forwarding failed; records are held and resent once the daemon answers again: ${String(err)}`,
     );
   }
 }

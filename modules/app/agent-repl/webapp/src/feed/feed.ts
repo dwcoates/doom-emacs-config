@@ -41,7 +41,7 @@ import {
 } from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
 import { installBranchHover } from "./branch-hover.js";
-import { installResponseHighlight } from "./response-highlight.js";
+import { applyResponseHighlight, installResponseHighlight } from "./response-highlight.js";
 import { applyResponseQuestion, installResponseQuestion } from "./response-question.js";
 import { installImageOpen } from "./feed-image.js";
 import type { ImageOverlayHandle } from "../image-overlay/image-overlay.js";
@@ -487,9 +487,10 @@ export function mountFeed(
       },
       onPush: (response) => {
         // A frame carries EXACTLY ONE of a row upsert, a response-selection
-        // push, a feed-text-scale push, a held change, an image-overlay push
-        // or a composer-entry push
-        // (endpoint_watch_feed.proto). The non-row frames carry no row, so they must be routed BEFORE
+        // push, a feed-text-scale push, a held change, an image-overlay push,
+        // a composer-entry push, a response-question push or a
+        // response-highlight push (endpoint_watch_feed.proto). The non-row
+        // frames carry no row, so they must be routed BEFORE
         // `requireMessage(response.row)`, which would otherwise reject a
         // well-formed push as a malformed row. A frame with none still fails
         // loudly there, as before.
@@ -515,6 +516,10 @@ export function mountFeed(
         }
         if (response.responseQuestion !== undefined) {
           applyResponseQuestion(host.ownerDocument, response.responseQuestion);
+          return;
+        }
+        if (response.responseHighlight !== undefined) {
+          applyResponseHighlight(host.ownerDocument, response.responseHighlight);
           return;
         }
         root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));

@@ -15,7 +15,8 @@ import {
   markComposerEntry,
 } from "../../src/feed/composer-entry.js";
 import { TailFollow } from "../../src/scroll.js";
-import { boxRect } from "../dom-rect.js";
+import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
+import { boxRect, settableScrollTop } from "../dom-rect.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -349,6 +350,25 @@ describe("composerBoxGeometry", () => {
     const got = composerBoxGeometry(document, box);
     // Assert
     expect(got).toEqual({ boxTop: 0, boxHeight: 300, nodeTop: 280, nodeHeight: 20 });
+  });
+
+  it("measures only what a capped bubble around the lines leaves visible, once it scrolled them into its view", () => {
+    // Arrange: the row hangs in a bubble box showing 0-290, and 1.1's subtree runs 280-325.
+    const row = drawnRow("r1", example);
+    const bubble = document.createElement("div");
+    bubble.className = BUBBLE_SCROLL_CLASS;
+    bubble.getBoundingClientRect = () => boxRect({ top: 0, height: 290 });
+    settableScrollTop(bubble);
+    document.body.replaceChildren(bubble);
+    bubble.append(row);
+    layOut(row, [["1.1", 280, 20], ["1.1.1", 300, 25]]);
+    highlight.apply(nodeEntry("r1", "1.1"));
+    const box = document.createElement("div");
+    box.getBoundingClientRect = () => boxRect({ top: 0, height: 300 });
+    // Act
+    const got = composerBoxGeometry(document, box);
+    // Assert: the bubble moved by 325 - 290, and the stubbed lines, which do not move, are clipped at 290.
+    expect([bubble.scrollTop, got]).toEqual([35, { boxTop: 0, boxHeight: 300, nodeTop: 280, nodeHeight: 10 }]);
   });
 
   it("is null when no boxed line is laid out", () => {

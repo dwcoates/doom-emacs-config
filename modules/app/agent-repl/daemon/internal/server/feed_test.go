@@ -278,12 +278,12 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 		t.Fatalf("WatchFeed: %v", err)
 	}
 	h.Feed.tail.pubs <- feed.Publication{Row: &frontendv1.FeedRow{Id: &frontendv1.FeedId{Value: "row-1"}}}
-	if !stream.Receive() {
-		t.Fatalf("receive the row: %v", stream.Err())
-	}
+	// A root watch opens on the response highlight's state, so the row is
+	// read past the pushes ahead of it (endpoint_watch_feed.proto).
+	row := receivePush(t, stream, "a row", (*agentreplv1.WatchFeedResponse).GetRow)
 
 	// Assert.
-	if got := stream.Msg().GetRow().GetId().GetValue(); got != "row-1" {
+	if got := row.GetId().GetValue(); got != "row-1" {
 		t.Fatalf("row = %q, want row-1", got)
 	}
 }

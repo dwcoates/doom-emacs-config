@@ -465,13 +465,14 @@ export function pushHeld(
 /** A page of ROWS. */
 export function page(
   rows: readonly FeedRow[],
-  opts: { hasMore?: boolean; crumbs?: readonly FeedBreadcrumb[] } = {},
+  opts: { hasMore?: boolean; crumbs?: readonly FeedBreadcrumb[]; removed?: readonly string[] } = {},
 ): FeedPage {
   return create(FeedPageSchema, {
     result: {
       case: "success",
       value: {
         rows: [...rows],
+        removed: (opts.removed ?? []).map(feedId),
         edge:
           opts.hasMore === true
             ? { case: "hasMore", value: {} }

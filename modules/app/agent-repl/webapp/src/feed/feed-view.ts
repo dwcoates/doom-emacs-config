@@ -62,6 +62,9 @@ import {
   stampSelection,
 } from "./bubble-selection.js";
 import { BUBBLE_SCROLL_CLASS } from "./bubble-scroll.js";
+import { revealInBubbles } from "./node-reveal.js";
+import { subtreeSpan } from "./subtree-box.js";
+import { TREE_CLASS } from "../metaprompt-tree.js";
 import { BUBBLE_CLASS } from "../bubble/draw.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -494,6 +497,11 @@ export function createFeedController(
           result.value.breadcrumbs,
           "FeedPageSuccess.breadcrumbs",
         ).crumbs;
+        // THE ROWS THE PAGE'S LOADS RETIRED GO BEFORE ITS ROWS ARE PLACED
+        // (FeedPageSuccess.removed): a turn's earlier-steps row whose steps
+        // this page loaded never stands over them, so its face never asks for
+        // another page. The tail's own removal of it then finds nothing.
+        for (const removed of result.value.removed) remove(removed.value);
         const above = placement === "prepend" ? sampleFirstRow() : null;
         if (placement === "replace") {
           // OWNER RULING (2026-09-18): A REDRAW NEVER UN-TOGGLES, WHATEVER ITS
@@ -1162,7 +1170,7 @@ export function createFeedController(
             revealEntry(row, viewport.value.entryLabel);
             return;
           case "revealNode":
-            centerOnRow(row);
+            centerOnNode(row, viewport.value.label);
             return;
           case "hold":
             return;
@@ -1251,6 +1259,38 @@ export function createFeedController(
       return;
     }
     flashEntryOncePainted(node, label);
+  }
+
+  /**
+   * Center the subtree of ROW's node LABEL, the node a prompt's entry
+   * revealed, once a capped bubble it is drawn in has brought it into its own
+   * view (node-reveal.ts). A node not laid out (its row not drawn, its tree
+   * not yet painted) centers its row, as every other selection does.
+   */
+  function centerOnNode(row: FeedId, label: string): void {
+    if (opts.scroll === undefined) return;
+    const node = findRowElement(row);
+    const lines =
+      node === null
+        ? []
+        : queryAll<HTMLElement>(node, `.${TREE_CLASS}`).flatMap((tree) => subtreeSpan(tree, label)?.lines ?? []);
+    const span = revealInBubbles(lines, `the node ${label}`);
+    if (span === null) {
+      log.debug("the revealed node is not laid out; its row is centered", {
+        operation: "feed.selection-node-absent",
+        context: { feed: feedName(), row: row.value, label },
+      });
+      centerOnRow(row);
+      return;
+    }
+    const box = opts.scroll.box;
+    opts.scroll.tail.selectionMoved({
+      nodeOffsetTop: span.top - box.getBoundingClientRect().top + box.scrollTop,
+      nodeHeight: span.bottom - span.top,
+      clientHeight: box.clientHeight,
+      scrollHeight: box.scrollHeight,
+      scrollTop: box.scrollTop,
+    });
   }
 
   function centerOnRow(center: FeedId): void {
@@ -1801,7 +1841,8 @@ export function createFeedController(
    * Ask for the page above the oldest row this feed holds; a feed holding no
    * row (its opening was served none) asks for the newest page instead. A
    * refusal is drawn beside AT, the face that asked, and every face rests,
-   * whatever the answer was (an unreadable one included).
+   * whatever the answer was (an unreadable one included). Only a page that
+   * placed rows rearms the walk's faces.
    */
   async function loadOlder(at: Control): Promise<void> {
     const oldest = oldestHeld();
@@ -1828,6 +1869,18 @@ export function createFeedController(
     }
     if (page === null) return;
     applyPage(page, "prepend");
+    // AN ANSWER THAT PLACED NO ROW IS NOT REARMED, as a refusal is not: a
+    // daemon with no source up serves nothing older and keeps the walk open,
+    // and a face still in view would ask it again at once, in a loop. The
+    // walk waits for the reader's click, or for a face to come into view anew.
+    const result = page.result;
+    if (result.case === "success" && result.value.rows.length === 0) {
+      log.info("an older page served no row; the walk waits for the reader rather than asking again", {
+        operation: "feed.load-older-empty",
+        context: { feed: feedName(), edge: walkEdge ?? "none" },
+      });
+      return;
+    }
     walkFaces.rearm();
   }
 

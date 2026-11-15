@@ -114,7 +114,6 @@ import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
 import { revisedWindow, type RevealWindow } from "../../bubble/text-reveal.js";
 import { clearSelectionIn } from "../../selection.js";
-import { responseHighlightTaken } from "../response-highlight.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -333,18 +332,14 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     });
   }
   const slot = content[0] as HTMLElement;
-  // A REVISION ON ITS WAY ENDS THE HIGHLIGHT that asked for it: the daemon
-  // took the words with the prompt, and the purple would otherwise stay up
-  // over words nothing now acts on. Both go: the reader's selection, and the
-  // held words' paint (response-highlight.ts).
-  if (revision.pending) {
-    if (clearSelectionIn(bubble)) {
-      log.debug("a revision is on its way; the highlight that asked for it was cleared", {
-        operation: "feed.cards.response.revising",
-        context: { row: rc.row.id?.value ?? "unset" },
-      });
-    }
-    responseHighlightTaken(bubble.ownerDocument, rowId);
+  // A REVISION ON ITS WAY ENDS THE READER'S SELECTION that asked for it.
+  // The held words' paint goes when the daemon says the prompt took them
+  // (response-highlight.ts), which it says even when the revision is refused.
+  if (revision.pending && clearSelectionIn(bubble)) {
+    log.debug("a revision is on its way; the selection that asked for it was cleared", {
+      operation: "feed.cards.response.revising",
+      context: { row: rc.row.id?.value ?? "unset" },
+    });
   }
   if (pace !== undefined && settledBefore !== undefined) {
     revealSlot(body, slot, resumed);

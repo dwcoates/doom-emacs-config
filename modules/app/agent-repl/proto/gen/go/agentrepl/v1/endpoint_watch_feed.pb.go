@@ -91,8 +91,9 @@ func (x *WatchFeedRequest) GetWatch() *FeedWatchToken {
 // A frame carries EXACTLY ONE of a row upsert (`row`), a response-selection
 // push (`selection`), a feed-text-scale push (`feed_text_scale`), a
 // held-section change (`held`), an image-overlay push (`image_overlay`), a
-// composer-entry push (`composer_entry`), or a response-question push
-// (`response_question`), never more than one. The selection push is the daemon's per-workspace
+// composer-entry push (`composer_entry`), a response-question push
+// (`response_question`), or a response-highlight push (`response_highlight`),
+// never more than one. The selection push is the daemon's per-workspace
 // reply-to-a-past-response state (reply-to-a-past-response mode), pushed on
 // the ROOT feed's watch so the webapp recolors the selected final-response
 // bubble, center-scrolls it, and suppresses tail-follow while a selection is
@@ -132,8 +133,13 @@ type WatchFeedResponse struct {
 	// watch only, and the current state is sent the moment a root watch is
 	// accepted, so a page that opens while a question stands draws it.
 	ResponseQuestion *v1.FeedResponseQuestion `protobuf:"bytes,7,opt,name=response_question,json=responseQuestion,proto3,oneof" json:"response_question,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The workspace's response highlight as the daemon holds it, whole. Set on
+	// a response-highlight frame; unset otherwise. Carried on the ROOT feed's
+	// watch only, and the current state is sent the moment a root watch is
+	// accepted, so a page whose daemon restarted learns it holds nothing.
+	ResponseHighlight *v1.FeedResponseHighlight `protobuf:"bytes,8,opt,name=response_highlight,json=responseHighlight,proto3,oneof" json:"response_highlight,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *WatchFeedResponse) Reset() {
@@ -211,6 +217,13 @@ func (x *WatchFeedResponse) GetComposerEntry() *v1.FeedComposerEntry {
 func (x *WatchFeedResponse) GetResponseQuestion() *v1.FeedResponseQuestion {
 	if x != nil {
 		return x.ResponseQuestion
+	}
+	return nil
+}
+
+func (x *WatchFeedResponse) GetResponseHighlight() *v1.FeedResponseHighlight {
+	if x != nil {
+		return x.ResponseHighlight
 	}
 	return nil
 }
@@ -364,7 +377,7 @@ const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\n" +
 	"&agentrepl/v1/endpoint_watch_feed.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1bfrontend/v1/feed_held.proto\x1a$frontend/v1/feed_image_overlay.proto\x1a\x1dagentrepl/v1/feed_token.proto\"F\n" +
 	"\x10WatchFeedRequest\x122\n" +
-	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xcf\x04\n" +
+	"\x05watch\x18\x01 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xbe\x05\n" +
 	"\x11WatchFeedResponse\x12&\n" +
 	"\x03row\x18\x01 \x01(\v2\x14.frontend.v1.FeedRowR\x03row\x12=\n" +
 	"\tselection\x18\x02 \x01(\v2\x1a.frontend.v1.FeedSelectionH\x00R\tselection\x88\x01\x01\x12G\n" +
@@ -372,14 +385,16 @@ const file_agentrepl_v1_endpoint_watch_feed_proto_rawDesc = "" +
 	"\x04held\x18\x04 \x01(\v2!.agentrepl.v1.WatchFeedHeldChangeH\x02R\x04held\x88\x01\x01\x12G\n" +
 	"\rimage_overlay\x18\x05 \x01(\v2\x1d.frontend.v1.FeedImageOverlayH\x03R\fimageOverlay\x88\x01\x01\x12J\n" +
 	"\x0ecomposer_entry\x18\x06 \x01(\v2\x1e.frontend.v1.FeedComposerEntryH\x04R\rcomposerEntry\x88\x01\x01\x12S\n" +
-	"\x11response_question\x18\a \x01(\v2!.frontend.v1.FeedResponseQuestionH\x05R\x10responseQuestion\x88\x01\x01B\f\n" +
+	"\x11response_question\x18\a \x01(\v2!.frontend.v1.FeedResponseQuestionH\x05R\x10responseQuestion\x88\x01\x01\x12V\n" +
+	"\x12response_highlight\x18\b \x01(\v2\".frontend.v1.FeedResponseHighlightH\x06R\x11responseHighlight\x88\x01\x01B\f\n" +
 	"\n" +
 	"_selectionB\x12\n" +
 	"\x10_feed_text_scaleB\a\n" +
 	"\x05_heldB\x10\n" +
 	"\x0e_image_overlayB\x11\n" +
 	"\x0f_composer_entryB\x14\n" +
-	"\x12_response_question\"\xa1\x01\n" +
+	"\x12_response_questionB\x15\n" +
+	"\x13_response_highlight\"\xa1\x01\n" +
 	"\x13WatchFeedHeldChange\x12)\n" +
 	"\x04held\x18\x01 \x01(\v2\x15.frontend.v1.FeedHeldR\x04held\x12(\n" +
 	"\x04rows\x18\x02 \x03(\v2\x14.frontend.v1.FeedRowR\x04rows\x125\n" +
@@ -402,19 +417,20 @@ func file_agentrepl_v1_endpoint_watch_feed_proto_rawDescGZIP() []byte {
 
 var file_agentrepl_v1_endpoint_watch_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_agentrepl_v1_endpoint_watch_feed_proto_goTypes = []any{
-	(*WatchFeedRequest)(nil),        // 0: agentrepl.v1.WatchFeedRequest
-	(*WatchFeedResponse)(nil),       // 1: agentrepl.v1.WatchFeedResponse
-	(*WatchFeedHeldChange)(nil),     // 2: agentrepl.v1.WatchFeedHeldChange
-	(*WatchFeedHeldFold)(nil),       // 3: agentrepl.v1.WatchFeedHeldFold
-	(*FeedWatchToken)(nil),          // 4: agentrepl.v1.FeedWatchToken
-	(*v1.FeedRow)(nil),              // 5: frontend.v1.FeedRow
-	(*v1.FeedSelection)(nil),        // 6: frontend.v1.FeedSelection
-	(*v1.FeedTextScale)(nil),        // 7: frontend.v1.FeedTextScale
-	(*v1.FeedImageOverlay)(nil),     // 8: frontend.v1.FeedImageOverlay
-	(*v1.FeedComposerEntry)(nil),    // 9: frontend.v1.FeedComposerEntry
-	(*v1.FeedResponseQuestion)(nil), // 10: frontend.v1.FeedResponseQuestion
-	(*v1.FeedHeld)(nil),             // 11: frontend.v1.FeedHeld
-	(*v1.FeedId)(nil),               // 12: frontend.v1.FeedId
+	(*WatchFeedRequest)(nil),         // 0: agentrepl.v1.WatchFeedRequest
+	(*WatchFeedResponse)(nil),        // 1: agentrepl.v1.WatchFeedResponse
+	(*WatchFeedHeldChange)(nil),      // 2: agentrepl.v1.WatchFeedHeldChange
+	(*WatchFeedHeldFold)(nil),        // 3: agentrepl.v1.WatchFeedHeldFold
+	(*FeedWatchToken)(nil),           // 4: agentrepl.v1.FeedWatchToken
+	(*v1.FeedRow)(nil),               // 5: frontend.v1.FeedRow
+	(*v1.FeedSelection)(nil),         // 6: frontend.v1.FeedSelection
+	(*v1.FeedTextScale)(nil),         // 7: frontend.v1.FeedTextScale
+	(*v1.FeedImageOverlay)(nil),      // 8: frontend.v1.FeedImageOverlay
+	(*v1.FeedComposerEntry)(nil),     // 9: frontend.v1.FeedComposerEntry
+	(*v1.FeedResponseQuestion)(nil),  // 10: frontend.v1.FeedResponseQuestion
+	(*v1.FeedResponseHighlight)(nil), // 11: frontend.v1.FeedResponseHighlight
+	(*v1.FeedHeld)(nil),              // 12: frontend.v1.FeedHeld
+	(*v1.FeedId)(nil),                // 13: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	4,  // 0: agentrepl.v1.WatchFeedRequest.watch:type_name -> agentrepl.v1.FeedWatchToken
@@ -425,16 +441,17 @@ var file_agentrepl_v1_endpoint_watch_feed_proto_depIdxs = []int32{
 	8,  // 5: agentrepl.v1.WatchFeedResponse.image_overlay:type_name -> frontend.v1.FeedImageOverlay
 	9,  // 6: agentrepl.v1.WatchFeedResponse.composer_entry:type_name -> frontend.v1.FeedComposerEntry
 	10, // 7: agentrepl.v1.WatchFeedResponse.response_question:type_name -> frontend.v1.FeedResponseQuestion
-	11, // 8: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
-	5,  // 9: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
-	3,  // 10: agentrepl.v1.WatchFeedHeldChange.folds:type_name -> agentrepl.v1.WatchFeedHeldFold
-	12, // 11: agentrepl.v1.WatchFeedHeldFold.folded:type_name -> frontend.v1.FeedId
-	12, // 12: agentrepl.v1.WatchFeedHeldFold.into:type_name -> frontend.v1.FeedId
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 8: agentrepl.v1.WatchFeedResponse.response_highlight:type_name -> frontend.v1.FeedResponseHighlight
+	12, // 9: agentrepl.v1.WatchFeedHeldChange.held:type_name -> frontend.v1.FeedHeld
+	5,  // 10: agentrepl.v1.WatchFeedHeldChange.rows:type_name -> frontend.v1.FeedRow
+	3,  // 11: agentrepl.v1.WatchFeedHeldChange.folds:type_name -> agentrepl.v1.WatchFeedHeldFold
+	13, // 12: agentrepl.v1.WatchFeedHeldFold.folded:type_name -> frontend.v1.FeedId
+	13, // 13: agentrepl.v1.WatchFeedHeldFold.into:type_name -> frontend.v1.FeedId
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_feed_proto_init() }

@@ -159,7 +159,7 @@ func (s *server) watchFeed(
 
 	// Every frame counts as work in flight until it is written (internal/inflight).
 	pubs, ackPub := tail.Publications(streamCtx)
-	ackSelection, ackScale, ackOverlay, ackComposerEntry, ackQuestion := func() {}, func() {}, func() {}, func() {}, func() {}
+	ackSelection, ackScale, ackOverlay, ackComposerEntry, ackQuestion, ackHighlight := func() {}, func() {}, func() {}, func() {}, func() {}, func() {}
 
 	// THE RESPONSE-SELECTION PUSH RIDES THE ROOT FEED'S WATCH ONLY. The
 	// FeedSelection frame names rows of THIS feed (the selected/centered
@@ -201,6 +201,14 @@ func (s *server) watchFeed(
 	var questions <-chan *frontendv1.FeedResponseQuestion
 	if target.Feed.Root {
 		questions, ackQuestion = s.responseQuestionTopic(target.WS).SubscribeStream(streamCtx)
+	}
+
+	// THE RESPONSE HIGHLIGHT RIDES THE ROOT FEED'S WATCH ONLY: it names a row
+	// of the root feed. The topic is seeded with none, so every root watch is
+	// told the state the daemon holds, a just-restarted daemon's included.
+	var highlights <-chan *frontendv1.FeedResponseHighlight
+	if target.Feed.Root {
+		highlights, ackHighlight = s.watchResponseHighlight(streamCtx, target.WS)
 	}
 
 	s.acceptStream(ctx, rpc)
@@ -310,6 +318,23 @@ func (s *server) watchFeed(
 				continue
 			}
 			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseQuestion: question}); err != nil {
+				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		case highlight, ok := <-highlights:
+			if !ok {
+				// Closes only on streamCtx cancellation, which the Done case
+				// handles.
+				highlights = nil
+				continue
+			}
+			ack = ackHighlight
+			if highlight == nil {
+				log.Error(rpc, "the response-highlight topic raised an empty highlight; it was not sent", nil)
+				ack()
+				continue
+			}
+			if err := out.Send(&agentreplv1.WatchFeedResponse{ResponseHighlight: highlight}); err != nil {
 				log.Debug(rpc, "the feed tail's client went away", dlog.Context{"cause": err.Error()})
 				return nil
 			}

@@ -56,7 +56,9 @@ func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, oldestHe
 			return nil, err
 		}
 		if plan != nil {
-			if _, err := r.load(ctx, *plan); err != nil {
+			got, err := r.load(ctx, *plan)
+			step.retired = append(step.retired, got.retired...)
+			if err != nil {
 				if !errors.Is(err, ErrNoHistorySource) {
 					return nil, err
 				}
@@ -79,6 +81,7 @@ func (r *resolver) LoadThrough(ctx context.Context, ws ids.WorkspaceID, oldestHe
 				dlog.Context{"target": target.GetValue(), "pages": pages})
 			return nil, fmt.Errorf("%w: %w", ErrHistoryUnavailable, ErrNoHistorySource)
 		}
+		carryRetired(page, &step)
 		if err := emit(page); err != nil {
 			return nil, fmt.Errorf("feed: a page of the walk to %q could not be handed over: %w", target.GetValue(), err)
 		}

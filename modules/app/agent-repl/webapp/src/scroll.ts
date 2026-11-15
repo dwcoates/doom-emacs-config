@@ -1941,10 +1941,23 @@ export function installIntentScroll(
  * it". Collapsing clips the box and would otherwise keep whatever position the
  * expanded view was left at. This runs ONLY from the reader's own collapse
  * click (`installClickExpand`, expand.ts), so it is user input and not an
- * implicit move: a bubble's scroll box has no other writer.
+ * implicit move: a bubble's scroll box has no other writer but the node
+ * reveal below (`bubbleNodeRevealed`).
  */
 export function collapseClicked(section: { scrollTop: number }): void {
   section.scrollTop = 0;
+}
+
+/**
+ * A NODE OF A RESPONSE'S TREE IS REVEALED INSIDE THE CAPPED BUBBLE IT IS
+ * DRAWN IN: scroll the bubble's own box by DELTA pixels, only as far as the
+ * node needs (feed/node-reveal.ts). It carries an act that asks for the node
+ * to be seen, the composer's entry moving to it or the click on a prompt's
+ * entry that reveals it, to the box that hides it, before the feed's own
+ * reveal (`composerEntryRevealed`, `selectionMoved`) moves the feed.
+ */
+export function bubbleNodeRevealed(box: { scrollTop: number }, delta: number): void {
+  box.scrollTop += delta;
 }
 
 /**

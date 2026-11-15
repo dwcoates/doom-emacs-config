@@ -291,10 +291,13 @@ type SelectFeedRowRequest_Branch struct {
 	// The reader clicked a node of a response's tree (owner request,
 	// 2026-10-24): tell Emacs to open an entry answering the node
 	// (HostWorkspaceComposeEntry), so the reader answers a point straight from
-	// the feed. A click in the NEWEST final response selects the ENTRY, never
-	// the bubble (owner ruling, 2026-10-25): the selection stands as it was,
-	// and the success names it (`selected`, or `none` with nothing selected).
-	// A click in any OLDER response also selects that response, unless it is
+	// the feed. THE ENTRY ANSWERS THE CLICKED RESPONSE: the click leaves the
+	// selection where the composer's target rule binds the entry to it. A
+	// click in the NEWEST final response selects the ENTRY, never the bubble
+	// (owner ruling, 2026-10-25): any other selection ends (held under the
+	// click), and the success names what stands (`selected`, or `none`). A
+	// click in any OLDER response, or in the newest final response whose
+	// label a later response reuses, also selects that response, unless it is
 	// already selected (owner request, 2026-10-30), so the next prompt replies
 	// to it without a separate click on the bubble: the selection holds the
 	// feed still under the click (frontend.v1.FeedSelectionRowViewportHold),

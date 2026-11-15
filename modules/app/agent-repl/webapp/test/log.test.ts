@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { LevelWindow, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import {
+  CLIENT_LOG_HELD_BOUND,
   ForwardingLogger,
+  HELD_DROPPED_OPERATION,
   bindLogContext,
   buildClientLogRecord,
   clearLogDedup,
@@ -385,6 +387,138 @@ describe("a sink failure never recurses", () => {
     log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.logger.sinkFailureCount()).toBe(0);
+  });
+});
+
+/** A sink the test takes down and brings back: it records each record it accepts, and rejects while down. */
+function outage(): { sink: ClientLogSink; accepted: ClientLogRecord[]; down: (isDown: boolean) => void } {
+  const accepted: ClientLogRecord[] = [];
+  let isDown = true;
+  return {
+    accepted,
+    down: (value) => {
+      isDown = value;
+    },
+    sink: async (record) => {
+      if (isDown) throw new Error("unavailable");
+      accepted.push(record);
+      return "accepted";
+    },
+  };
+}
+
+describe("a record the daemon could not take is held, then resent", () => {
+  it("holds a rejected record", async () => {
+    // ARRANGE
+    const daemon = outage();
+    const h = install(daemon.sink);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // ACT
+    log.info("while down", { operation: "test.held" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.logger.heldCount()).toBe(1);
+  });
+
+  it("resends every held record, oldest first, once the daemon answers again", async () => {
+    // ARRANGE
+    const daemon = outage();
+    const h = install(daemon.sink);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    log.info("first", { operation: "test.first" });
+    log.info("second", { operation: "test.second" });
+    await flushAndSettle(h);
+    daemon.down(false);
+    // ACT
+    log.info("back", { operation: "test.back" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect([daemon.accepted.map((r) => r.operation), h.logger.heldCount()]).toEqual([
+      ["test.back", "test.first", "test.second"],
+      0,
+    ]);
+  });
+
+  it("holds a resent record again when the daemon rejects it again", async () => {
+    // ARRANGE: the daemon answers one call, then goes again.
+    const daemon = outage();
+    let answers = 0;
+    const h = install(async (record) => {
+      if (record.operation === "test.back" && answers === 0) {
+        answers += 1;
+        return "accepted";
+      }
+      return daemon.sink(record);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    log.info("while down", { operation: "test.held" });
+    await flushAndSettle(h);
+    // ACT
+    log.info("back", { operation: "test.back" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(h.logger.heldCount()).toBe(1);
+  });
+
+  it("drops the oldest held record past the bound, and names the count in a warn once the daemon answers", async () => {
+    // ARRANGE
+    const daemon = outage();
+    const h = install(daemon.sink);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (let i = 0; i <= CLIENT_LOG_HELD_BOUND; i += 1) {
+      log.error(`while down ${String(i)}`, { operation: `test.held-${String(i)}` });
+      await flushAndSettle(h);
+    }
+    daemon.down(false);
+    // ACT
+    log.error("back", { operation: "test.back" });
+    await flushAndSettle(h);
+    // ASSERT
+    const warn = daemon.accepted.find((r) => r.operation === HELD_DROPPED_OPERATION);
+    expect([
+      warn?.level.case,
+      warn?.context?.dropped,
+      daemon.accepted.some((r) => r.operation === "test.held-0"),
+      daemon.accepted.some((r) => r.operation === "test.held-1"),
+    ]).toEqual(["warn", 1, false, true]);
+  });
+
+  it("announces each outage once on the console", async () => {
+    // ARRANGE
+    const daemon = outage();
+    const h = install(daemon.sink);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    log.info("first outage", { operation: "test.op" });
+    await flushAndSettle(h);
+    daemon.down(false);
+    log.info("back", { operation: "test.op" });
+    await flushAndSettle(h);
+    daemon.down(true);
+    // ACT
+    log.info("second outage", { operation: "test.op" });
+    log.info("still down", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops what is held once the daemon no longer knows the workspace", async () => {
+    // ARRANGE
+    let down = true;
+    const h = install(async () => {
+      if (down) throw new Error("unavailable");
+      return "workspace_departed";
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    log.info("while down", { operation: "test.held" });
+    await flushAndSettle(h);
+    down = false;
+    // ACT
+    log.info("departed", { operation: "test.op" });
+    await flushAndSettle(h);
+    // ASSERT
+    expect([h.logger.heldCount(), h.logger.workspaceDeparted()]).toEqual([0, true]);
   });
 });
 

@@ -11,6 +11,7 @@ import {
   type SelectResponseTextRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_text_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { FeedResponseHighlightSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { RESPONSE_PROSE_CLASS } from "../../src/feed/cards/response.js";
 import {
@@ -18,8 +19,8 @@ import {
   cssHighlightPaint,
   installResponseHighlight,
   onResponseHighlightWords,
+  applyResponseHighlight,
   responseHighlightIn,
-  responseHighlightTaken,
   type HighlightPaint,
 } from "../../src/feed/response-highlight.js";
 import { createWebhostPresses, type WebhostPressSource } from "../../src/webhost-pressed.js";
@@ -76,6 +77,27 @@ function settled(): void {
 /** Let the RPCs the reports sent answer. */
 async function answered(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** The daemon states, on the root feed's watch, that a prompt took WORDS of ROW. */
+function taken(row: string, words: string): void {
+  applyResponseHighlight(
+    document,
+    create(FeedResponseHighlightSchema, { state: { case: "taken", value: { row: { value: row }, words } } }),
+  );
+}
+
+/** The daemon states, on the root feed's watch, that it holds no highlight. */
+function daemonHoldsNone(): void {
+  applyResponseHighlight(document, create(FeedResponseHighlightSchema, { state: { case: "none", value: {} } }));
+}
+
+/** The daemon states, on the root feed's watch, that it holds WORDS of ROW. */
+function daemonHolds(row: string, words: string): void {
+  applyResponseHighlight(
+    document,
+    create(FeedResponseHighlightSchema, { state: { case: "held", value: { row: { value: row }, words } } }),
+  );
 }
 
 /** A press that comes up: the browser's pointer gesture around a selection. */
@@ -352,16 +374,16 @@ describe("installResponseHighlight", () => {
     expect([page.calls, page.painted]).toEqual([[], []]);
   });
 
-  it("drops the paint without telling the daemon when the sent prompt takes the held row", async () => {
+  it("drops the paint without telling the daemon when the daemon says a prompt took the held words", async () => {
     // Arrange
     const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
     const page = scripted();
     page.install(host);
     select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
     settled();
-    // Act: as the revising bubble does, the selection goes, then the row is taken.
+    // Act: as the revising bubble does, the selection goes, then the daemon says the words were taken.
     document.getSelection()?.removeAllRanges();
-    responseHighlightTaken(document, "r1");
+    taken("r1", "entropy");
     await answered();
     // Assert
     expect([sent(page.calls), page.painted]).toEqual([["r1:entropy"], ["entropy", null]]);
@@ -374,7 +396,7 @@ describe("installResponseHighlight", () => {
     page.install(host);
     select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
     settled();
-    responseHighlightTaken(document, "r1");
+    taken("r1", "entropy");
     // Act
     settled();
     await answered();
@@ -382,7 +404,7 @@ describe("installResponseHighlight", () => {
     expect(sent(page.calls)).toEqual(["r1:entropy", "r1:entropy"]);
   });
 
-  it("keeps the highlight when the sent prompt took another row", async () => {
+  it("keeps the highlight when the daemon says a prompt took another row", async () => {
     // Arrange
     const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
     const page = scripted();
@@ -390,10 +412,95 @@ describe("installResponseHighlight", () => {
     select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
     settled();
     // Act
-    responseHighlightTaken(document, "r9");
+    taken("r9", "entropy");
     await answered();
     // Assert
     expect(page.painted).toEqual(["entropy"]);
+  });
+
+  it("keeps the highlight when the daemon says a prompt took other words of its row", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    // Act
+    taken("r1", "the entropy");
+    await answered();
+    // Assert
+    expect(page.painted).toEqual(["entropy"]);
+  });
+
+  it("restates the held words when the daemon says it holds none", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    // Act: the daemon restarted, and its root watch says it holds nothing.
+    daemonHoldsNone();
+    await answered();
+    // Assert
+    expect([sent(page.calls), page.painted]).toEqual([["r1:entropy", "r1:entropy"], ["entropy"]]);
+  });
+
+  it("logs the restatement when the daemon says it holds none", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    const records = captureLogRecords("debug");
+    // Act
+    daemonHoldsNone();
+    // Assert
+    const record = await forwardedRecord(records, "feed.response-highlight.restated");
+    expect(record.context?.row).toBe("r1");
+  });
+
+  it("sends nothing when the daemon says it holds none and the page holds nothing", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    // Act
+    daemonHoldsNone();
+    await answered();
+    // Assert
+    expect([page.calls, page.painted]).toEqual([[], []]);
+  });
+
+  it("sends nothing when the daemon says it holds the page's words", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    // Act
+    daemonHolds("r1", "entropy");
+    await answered();
+    // Assert
+    expect([sent(page.calls), page.painted]).toEqual([["r1:entropy"], ["entropy"]]);
+  });
+
+  it("fails loudly on a daemon state with no arm set", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    const records = captureLogRecords();
+    // Act
+    const apply = (): void => applyResponseHighlight(document, create(FeedResponseHighlightSchema, {}));
+    // Assert
+    expect(apply).toThrow(/no state arm/);
+    const record = await forwardedRecord(records, "feed.response-highlight.stateless");
+    expect(record.context?.row).toBe("r1");
   });
 
   it("tells the page's listeners the words it holds, then none once they end", async () => {
@@ -413,7 +520,7 @@ describe("installResponseHighlight", () => {
     expect(told).toEqual(["entropy", null]);
   });
 
-  it("tells the page's listeners none once the sent prompt took the words", () => {
+  it("tells the page's listeners none once the daemon says a prompt took the words", () => {
     // Arrange
     const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
     const page = scripted();
@@ -423,7 +530,7 @@ describe("installResponseHighlight", () => {
     const told: (string | null)[] = [];
     const stop = onResponseHighlightWords(document, (words) => told.push(words));
     // Act
-    responseHighlightTaken(document, "r1");
+    taken("r1", "entropy");
     // Assert
     stop();
     expect(told).toEqual([null]);

@@ -5,6 +5,7 @@ import { pagePresence } from "../../src/presence.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { onResponseHighlightStates } from "../../src/feed/response-highlight.js";
 import { create } from "@bufbuild/protobuf";
 import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
 import {
@@ -201,6 +202,25 @@ describe("mountFeed: opening the root feed", () => {
     channel.push(create(WatchFeedResponseSchema, { composerEntry: { at: { case: "node", value: { row: { value: "r1" }, label: "3.1" } } } }));
     await settle();
     expect(row.querySelector(`.${COMPOSER_ENTRY_CLASS}`)).not.toBeNull();
+  });
+
+  it("routes a response-highlight frame to the page's highlight rather than reading it as a row", async () => {
+    // Arrange — a live tail, and a listener standing for the page's highlight.
+    const { h, channel } = liveRootHarness();
+    mount(h);
+    await settle();
+    const told: string[] = [];
+    const stop = onResponseHighlightStates(document, (state) => told.push(state.state.case ?? "unset"));
+    // Act — a response-highlight frame (no row of its own).
+    channel.push(
+      create(WatchFeedResponseSchema, {
+        responseHighlight: { state: { case: "taken", value: { row: { value: "r1" }, words: "entropy" } } },
+      }),
+    );
+    await settle();
+    // Assert
+    stop();
+    expect(told).toEqual(["taken"]);
   });
 
   it("routes a selection frame to the feed rather than reading it as a row", async () => {

@@ -16,8 +16,10 @@
  * every paint of the response's prose (`markComposerEntry`, subtree-box.ts).
  *
  * THE FEED BRINGS THE BOX INTO VIEW when a push moves it to another node and
- * the box is not wholly in view (owner request, 2026-10-26): the feed moves
- * only as far as the box needs (`TailFollow.composerEntryRevealed`), and a box
+ * the box is not wholly in view (owner request, 2026-10-26): a capped bubble
+ * the box is drawn in first scrolls it into its own view (node-reveal.ts),
+ * then the feed moves only as far as the box needs
+ * (`TailFollow.composerEntryRevealed`), and a box
  * already in view moves nothing. A push restating the node already boxed moves
  * nothing either: only a change moves the feed.
  */
@@ -27,6 +29,7 @@ import { log } from "../log.js";
 import type { RevealGeometry, TailFollow } from "../scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
+import { revealInBubbles } from "./node-reveal.js";
 import { FEED_ROW_SELECTOR } from "./row-id.js";
 import { boxSubtree, unboxAll, standingBox, type BoxedNode, type SubtreeBox } from "./subtree-box.js";
 
@@ -130,19 +133,17 @@ function sameNode(a: BoxedNode | undefined, b: BoxedNode | undefined): boolean {
 }
 
 /**
- * The reveal geometry of the composer's box drawn in DOC against BOX: the
- * span from its first laid-out line's top to its last's bottom, or null when
- * no line of it is laid out (its row not drawn, or drawn folded away).
+ * The reveal geometry of the composer's box drawn in DOC against BOX, once its
+ * lines are brought into view inside the bubble they are drawn in
+ * (`revealInBubbles`): the span from its first laid-out line's top to its
+ * last's bottom that the bubble leaves visible, or null when no line of it is
+ * laid out (its row not drawn, or drawn folded away).
  */
 export function composerBoxGeometry(doc: Document, box: HTMLElement): RevealGeometry | null {
-  const lines = queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`)
-    .map((line) => line.getBoundingClientRect())
-    .filter((rect) => rect.height > 0);
-  if (lines.length === 0) return null;
-  const top = Math.min(...lines.map((rect) => rect.top));
-  const bottom = Math.max(...lines.map((rect) => rect.bottom));
+  const span = revealInBubbles(queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`), "the subtree the composer answers");
+  if (span === null) return null;
   const view = box.getBoundingClientRect();
-  return { boxTop: view.top, boxHeight: view.height, nodeTop: top, nodeHeight: bottom - top };
+  return { boxTop: view.top, boxHeight: view.height, nodeTop: span.top, nodeHeight: span.bottom - span.top };
 }
 
 /**

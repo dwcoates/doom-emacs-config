@@ -1551,17 +1551,19 @@ func branchMove(row, label string) *agentreplv1.SelectFeedRowRequest {
 }
 
 // TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection pins
-// a click on a node of the NEWEST final response, or of a response already
-// selected: the host is asked to open an entry answering the node, and the
-// selection stands exactly as it was.
+// a click on a node of the NEWEST final response with nothing selected, or of
+// a response already selected: the host is asked to open an entry answering
+// the node, and the selection stands exactly as it was.
 func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *testing.T) {
 	tests := []struct {
 		name     string
 		set      func(*harness)
 		selected string
 	}{
-		{name: "a final response, nothing selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }},
-		{name: "another response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-0", "resp-1") }, selected: "resp-0"},
+		{name: "a final response, nothing selected", set: func(h *harness) {
+			h.Feed.finals = feedIDs("resp-1")
+			h.Feed.targets = map[string]string{"3.1": "resp-1"}
+		}},
 		{name: "the clicked response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }, selected: "resp-1"},
 		{name: "the clicked older response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1", "resp-2") }, selected: "resp-1"},
 	}
@@ -1600,6 +1602,43 @@ func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *tes
 	}
 }
 
+// TestSelectFeedRowBranchInTheNewestResponseEndsAnotherSelection pins a
+// click on a node of the NEWEST final response while another response is
+// selected: that selection ends, held under the click, so the entry the host
+// is asked to open binds to the clicked response rather than the selected one.
+func TestSelectFeedRowBranchInTheNewestResponseEndsAnotherSelection(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.finals = feedIDs("resp-0", "resp-1")
+	h.Feed.targets = map[string]string{"3.1": "resp-1"}
+	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+	sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: "resp-0"}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	resp := sendMove(t, h, branchMove("resp-1", "3.1"))
+	event := receiveHostEventPastSelection(t, stream)
+
+	// Assert.
+	if got := event.GetComposeEntry().GetLabel(); got != "3.1" {
+		t.Fatalf("event = %v, want compose_entry naming 3.1", event)
+	}
+	if _, _, held := h.Server.(*server).currentSelection(testWorkspaceID); held {
+		t.Fatal("resp-0 is still selected, so the entry would bind to it rather than the clicked resp-1")
+	}
+	if resp.Msg.GetSuccess().GetNone() == nil {
+		t.Fatalf("result = %v, want none", resp.Msg.GetResult())
+	}
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opSelectFeedRow && rec.Context["because"] == "branch_click" && rec.Context["row"] == "resp-0" {
+			return
+		}
+	}
+	t.Fatalf("INFO records = %v, want the ended selection of resp-0 naming the branch click", log.at("INFO"))
+}
+
 // TestSelectFeedRowBranchInAnOlderResponseSelectsIt pins a click on a node of
 // any response but the newest final one (owner request, 2026-10-30): the
 // clicked response is selected as the arm a bubble click gives it, held under
@@ -1620,6 +1659,12 @@ func TestSelectFeedRowBranchInAnOlderResponseSelectsIt(t *testing.T) {
 			want: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
 				return rowViewport(s.GetResponse())
 			}},
+		{name: "the newest final response, its label reused by a later response", set: func(h *harness) {
+			h.Feed.finals = feedIDs("resp-1")
+			h.Feed.targets = map[string]string{"3.1": "resp-9"}
+		}, want: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+			return rowViewport(s.GetResponse())
+		}},
 		{name: "a response that is not final", set: func(h *harness) {
 			h.Feed.finals = feedIDs("resp-2")
 			h.Feed.markdown = map[string]string{"resp-1": "interim"}
@@ -1691,37 +1736,36 @@ func TestSelectFeedRowBranchSelectionIsRecordedAtInfo(t *testing.T) {
 	t.Fatalf("INFO records = %v, want one naming the response resp-1 and its node 3.1", log.at("INFO"))
 }
 
-// TestBranchClickSelects pins which responses a branch click selects: any but
-// the newest final response, and never the one already selected.
-func TestBranchClickSelects(t *testing.T) {
+// TestUnselectedEntryAnswers pins when an entry in a prompt with nothing
+// selected binds to the clicked response: only the newest final response, and
+// only when the target rule finds no later response holding the label.
+func TestUnselectedEntryAnswers(t *testing.T) {
 	tests := []struct {
-		name     string
-		finals   []*frontendv1.FeedId
-		selected string
-		row      string
-		want     bool
+		name    string
+		finals  []*frontendv1.FeedId
+		targets map[string]string
+		row     string
+		want    bool
 	}{
-		{name: "the newest final response", finals: feedIDs("resp-1", "resp-2"), row: "resp-2", want: false},
-		{name: "an older final response", finals: feedIDs("resp-1", "resp-2"), row: "resp-1", want: true},
-		{name: "an older final response already selected", finals: feedIDs("resp-1", "resp-2"), selected: "resp-1", row: "resp-1", want: false},
-		{name: "an older final response, another selected", finals: feedIDs("resp-1", "resp-2"), selected: "resp-2", row: "resp-1", want: true},
-		{name: "a response with no final response yet", row: "resp-1", want: true},
+		{name: "the newest final response holding the label", finals: feedIDs("resp-1", "resp-2"), targets: map[string]string{"3.1": "resp-2"}, row: "resp-2", want: true},
+		{name: "the newest final response, a later response holding the label", finals: feedIDs("resp-1", "resp-2"), targets: map[string]string{"3.1": "resp-3"}, row: "resp-2", want: false},
+		{name: "the newest final response, no response holding the label", finals: feedIDs("resp-1", "resp-2"), row: "resp-2", want: false},
+		{name: "an older final response holding the label", finals: feedIDs("resp-1", "resp-2"), targets: map[string]string{"3.1": "resp-1"}, row: "resp-1", want: false},
+		{name: "a response with no final response yet", targets: map[string]string{"3.1": "resp-1"}, row: "resp-1", want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			h.Feed.finals = tc.finals
-			if tc.selected != "" {
-				sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: tc.selected}))
-			}
+			h.Feed.targets = tc.targets
 
 			// Act.
-			got := h.Server.(*server).branchClickSelects(testWorkspaceID, &frontendv1.FeedId{Value: tc.row})
+			got := h.Server.(*server).unselectedEntryAnswers(testWorkspaceID, &frontendv1.FeedId{Value: tc.row}, "3.1")
 
 			// Assert.
 			if got != tc.want {
-				t.Fatalf("branchClickSelects(%q) = %v, want %v", tc.row, got, tc.want)
+				t.Fatalf("unselectedEntryAnswers(%q) = %v, want %v", tc.row, got, tc.want)
 			}
 		})
 	}
@@ -1803,12 +1847,14 @@ func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(
 	}
 }
 
-// TestSelectFeedRowBranchClickIsRecordedAtInfo pins that the click enters the
-// workspace log, naming the row, the label and the selection it left alone.
+// TestSelectFeedRowBranchClickIsRecordedAtInfo pins that a click in the
+// newest final response enters the workspace log, naming the row, the label
+// and the selection it ended so the entry binds to the clicked response.
 func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h, log := newLoggedHarness(t)
 	h.Feed.finals = feedIDs("resp-0", "resp-1")
+	h.Feed.targets = map[string]string{"3.1": "resp-1"}
 	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
 	sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: "resp-0"}))
 
@@ -1817,11 +1863,11 @@ func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
-		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["selected"] == "resp-0" {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["ended"] == "resp-0" {
 			return
 		}
 	}
-	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the selection resp-0", log.at("INFO"))
+	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the ended selection resp-0", log.at("INFO"))
 }
 
 // TestSelectClickedSetsTheSelectionAndRunsThenUnderTheLock pins the one way a
