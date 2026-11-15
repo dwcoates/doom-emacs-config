@@ -944,7 +944,7 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
            (eq old agent-repl-link--primary))
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-superseded old=%S new=%S"
                         (agent-repl-connect-connection-address attached) address)
-      (agent-repl-link--drop-pending-successor)
+      (agent-repl-link--drop-standing-successor)
       (agent-repl-link--dial-successor old address cause))
      (attached
       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-address-changed old=%S new=%S"
@@ -962,14 +962,6 @@ cancels its stream, which then matches no slot and is recorded stale."
           agent-repl-link--pending-successor nil
           agent-repl-link--pending-successor-stream nil)
     (when conn (agent-repl-connect-close conn))))
-
-(defun agent-repl-link--drop-pending-successor ()
-  "Close the unaccepted successor dial and forget it.
-Nothing was adopted onto it, by construction, so nothing else is owed."
-  (let ((pending agent-repl-link--pending-successor))
-    (setq agent-repl-link--pending-successor nil
-          agent-repl-link--pending-successor-stream nil)
-    (agent-repl-connect-close pending)))
 
 (defun agent-repl-link--dial-successor (old address cause)
   "Stand an unaccepted successor dial at ADDRESS, announced on OLD with CAUSE."

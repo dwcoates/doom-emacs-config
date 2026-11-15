@@ -2536,3 +2536,38 @@ announcement must still attach its own successor."
       (agent-repl-test-link--close pending '(:cancelled))
       ;; Assert
       (should (agent-repl-test-link--logged-p :info "elisp.link.pending-stream-cancelled")))))
+
+(ert-deftest agent-repl-test-link-drop-standing-successor-clears-an-accepted-successor ()
+  "Dropping the standing successor forgets an accepted one and closes it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-link--drop-standing-successor)
+      ;; Assert
+      (should-not agent-repl-link--successor)
+      (should-not agent-repl-link--successor-stream)
+      (should-not (agent-repl-connect-connection-alive-p successor)))))
+
+(ert-deftest agent-repl-test-link-drop-standing-successor-clears-a-pending-successor ()
+  "Dropping the standing successor forgets an unaccepted dial and closes it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    (let ((pending agent-repl-link--pending-successor))
+      ;; Act
+      (agent-repl-link--drop-standing-successor)
+      ;; Assert
+      (should-not agent-repl-link--pending-successor)
+      (should-not agent-repl-link--pending-successor-stream)
+      (should-not (agent-repl-connect-connection-alive-p pending)))))
+
+(ert-deftest agent-repl-test-link-attach-successor-drops-through-the-one-helper ()
+  "Every successor attach-successor drops goes through the one helper, never a hand-rolled clear."
+  (let ((body (format "%S" (agent-repl-test-link--defun-form
+                            "daemon-link.el" 'agent-repl-link--attach-successor))))
+    (should (string-search "agent-repl-link--drop-standing-successor" body))
+    (should-not (string-search "(setq agent-repl-link--pending-successor" body))
+    (should-not (string-search "(setq agent-repl-link--successor" body))))
