@@ -13,6 +13,8 @@ import (
 
 // TestEveryDaemonProcFileIsParsedByProcstat holds the daemon's sources to
 // procstat.HandParsed: every /proc read goes through agentrepl/logging/procstat.
+// The logging module's own tests run in a sandbox that may read only their
+// package, so that module, and testrun, are not yet held to it (org/todo.md).
 func TestEveryDaemonProcFileIsParsedByProcstat(t *testing.T) {
 	// Arrange
 	root := sourcescan.DaemonRoot(t)

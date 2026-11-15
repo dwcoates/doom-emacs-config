@@ -1,8 +1,6 @@
 package procstat
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -120,53 +118,5 @@ func TestHandParsed(t *testing.T) {
 				t.Fatalf("HandParsed(%q) = %v, want %v", tc.src, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestEveryProcFileIsParsedByProcstat pins that no other Go source of this
-// module reads a /proc file by hand (HandParsed). The daemon's sources are
-// held to the same in internal/procgroup.
-func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
-	// Arrange: the module's root, the nearest go.mod above this package, by
-	// its absolute path (as the daemon's scans find theirs).
-	root, err := filepath.Abs(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			break
-		}
-		if filepath.Dir(root) == root {
-			t.Fatal("no go.mod above the package under test")
-		}
-		root = filepath.Dir(root)
-	}
-	var offenders []string
-
-	// Act
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "procstat" {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if HandParsed(string(src)) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walk the logging module: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("%v parse a /proc file by hand instead of through procstat", offenders)
 	}
 }
