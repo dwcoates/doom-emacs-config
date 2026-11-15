@@ -641,6 +641,10 @@ type DB interface {
 	// left for, through the one transition (leaveQueueInTx): a landing ends
 	// its request, any other cause keeps it off the queue.
 	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// RequeuePausedMerge puts an admitted merge a handover paused back in
+	// line at its own place and drops its merge lease and progress, in one
+	// write.
+	RequeuePausedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, ledger LeaseID) error
 	// DropAdmittedMerge drops an admitted merge with no run: its entry
 	// (through the one transition), its merge lease and that lease's progress
 	// record, in one transaction.

@@ -299,15 +299,8 @@ func placeBehind(ctx context.Context, tx *sql.Tx, key RepoKey, ahead WorkspaceID
 }
 
 // moveAhead moves one row up to the place target, moving every row from target
-// up to the row's own old place back one. Rows behind the moved row keep their
-// places.
-//
-// THE SHIFT GOES THROUGH NEGATIVE SEQUENCES, so the unique (repo_key, seq)
-// index never sees two rows on one place mid-statement: the moved row parks on
-// -1 (no shifted row can land there, since every sequence is at least 1), every
-// row in the shifted range moves to -(seq+1), and the shifted rows then come
-// back positive, one place later. The last of them lands on the moved row's
-// vacated place.
+// up to the row's own old place back one place in the order. Rows behind the
+// moved row keep their places.
 func moveAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, target int64) error {
 	var own int64
 	if err := tx.QueryRowContext(ctx, `SELECT seq FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, id).Scan(&own); err != nil {
@@ -316,21 +309,49 @@ func moveAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, tar
 	if target >= own {
 		return fmt.Errorf("wsm: moving workspace %s in repo %q ahead to place %d, but it already holds place %d", id, key, target, own)
 	}
-	steps := []struct {
-		query string
-		args  []any
-	}{
-		{`UPDATE merge_queue SET seq = -1 WHERE repo_key = ? AND workspace_id = ?`, []any{key, id}},
-		{`UPDATE merge_queue SET seq = -(seq + 1) WHERE repo_key = ? AND seq >= ? AND seq < ?`, []any{key, target, own}},
-		{`UPDATE merge_queue SET seq = -seq WHERE repo_key = ? AND seq < -1`, []any{key}},
-		{`UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND workspace_id = ?`, []any{target, key, id}},
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, seq FROM merge_queue WHERE repo_key = ? AND seq >= ? AND seq <= ? ORDER BY seq`, key, target, own)
+	if err != nil {
+		return err
 	}
-	for _, step := range steps {
-		if _, err := tx.ExecContext(ctx, step.query, step.args...); err != nil {
+	var places []int64
+	order := []WorkspaceID{id}
+	for rows.Next() {
+		var ws WorkspaceID
+		var seq int64
+		if err := rows.Scan(&ws, &seq); err != nil {
+			rows.Close()
 			return err
 		}
+		places = append(places, seq)
+		if ws != id {
+			order = append(order, ws)
+		}
 	}
-	return nil
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	return assignQueuePlaces(ctx, tx, key, places, order)
+}
+
+// admittedAhead moves ID, a merge just admitted, ahead of every merge still
+// waiting in line before it (moveAhead): the admission passed them over
+// because another daemon still serves their workspaces (owner ruling,
+// 2026-11-15). The line's order is the order merges run in, so the roster's
+// head is the merge running and every place the line reads stays true. The
+// merges passed over keep their order, directly behind it.
+func admittedAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) error {
+	seq, _, err := entryPlace(ctx, tx, key, id)
+	if err != nil {
+		return err
+	}
+	var first sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND seq < ?`, key, int(MergeQueued), seq).Scan(&first); err != nil {
+		return err
+	}
+	if !first.Valid {
+		return nil
+	}
+	return moveAhead(ctx, tx, key, id, first.Int64)
 }
 
 // MoveMerge moves a merge WAITING in line one place up or down its queue,
@@ -443,20 +464,12 @@ func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, a
 		if !moved {
 			return nil
 		}
-		// THE PLACES GO THROUGH NEGATIVE SEQUENCES, so the unique (repo_key,
-		// seq) index never sees two rows on one place mid-transaction: each
-		// row that changes place parks on the negative of its new place, and
-		// every parked row then comes back positive.
-		for i, row := range order {
-			if row.workspace == waiting[i].workspace {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND workspace_id = ?`,
-				-waiting[i].seq, key, row.workspace); err != nil {
-				return err
-			}
+		places := make([]int64, len(waiting))
+		workspaces := make([]WorkspaceID, len(order))
+		for i := range waiting {
+			places[i], workspaces[i] = waiting[i].seq, order[i].workspace
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = -seq WHERE repo_key = ? AND seq < 0`, key); err != nil {
+		if err := assignQueuePlaces(ctx, tx, key, places, workspaces); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, anchorFront, key, id)
@@ -466,6 +479,29 @@ func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, a
 		return false, err
 	}
 	return moved, nil
+}
+
+// assignQueuePlaces puts ORDER[i] on PLACES[i] in KEY's queue, for every i: the
+// places are the ones those merges already hold between them, so the move
+// is a reordering among them and no other merge's place changes. It is the
+// one place a queue reorders its merges.
+//
+// THE PLACES GO THROUGH NEGATIVE SEQUENCES, so the unique (repo_key, seq)
+// index never sees two rows on one place mid-transaction: each row that
+// changes place parks on the negative of its new place, and every parked row
+// then comes back positive.
+func assignQueuePlaces(ctx context.Context, tx *sql.Tx, key RepoKey, places []int64, order []WorkspaceID) error {
+	if len(places) != len(order) {
+		panic(fmt.Sprintf("wsm: %d merges put on %d places", len(order), len(places)))
+	}
+	for i, ws := range order {
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND workspace_id = ? AND seq != ?`,
+			-places[i], key, ws, places[i]); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = -seq WHERE repo_key = ? AND seq < 0`, key)
+	return err
 }
 
 // waitingRow is one merge waiting in line: its workspace, its place and its
@@ -597,24 +633,17 @@ func entryPlace(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (i
 }
 
 // swapPlaces trades the places of the row for ID (at own) and the row at
-// other, giving ID's row FRONT as its front mark. The moved row parks on -1
-// first, so the unique (repo_key, seq) index never sees two rows on one place
-// (every sequence is at least 1).
+// other, giving ID's row FRONT as its front mark.
 func swapPlaces(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, own, other int64, front bool) error {
-	steps := []struct {
-		query string
-		args  []any
-	}{
-		{`UPDATE merge_queue SET seq = -1 WHERE repo_key = ? AND workspace_id = ?`, []any{key, id}},
-		{`UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND seq = ?`, []any{own, key, other}},
-		{`UPDATE merge_queue SET seq = ?, source_front = ? WHERE repo_key = ? AND workspace_id = ?`, []any{other, front, key, id}},
+	var neighbor WorkspaceID
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM merge_queue WHERE repo_key = ? AND seq = ?`, key, other).Scan(&neighbor); err != nil {
+		return err
 	}
-	for _, step := range steps {
-		if _, err := tx.ExecContext(ctx, step.query, step.args...); err != nil {
-			return err
-		}
+	if err := assignQueuePlaces(ctx, tx, key, []int64{own, other}, []WorkspaceID{neighbor, id}); err != nil {
+		return err
 	}
-	return nil
+	_, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, front, key, id)
+	return err
 }
 
 // nextSeq answers the sequence number one past a queue's last.
@@ -686,6 +715,12 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(state), key, id); err != nil {
 			return err
+		}
+		// AN ADMITTED MERGE STANDS AHEAD OF EVERY MERGE WAITING (admittedAhead).
+		if state == MergeAdmitted {
+			if err := admittedAhead(ctx, tx, key, id); err != nil {
+				return err
+			}
 		}
 		return also(ctx, tx, key)
 	})
@@ -825,7 +860,8 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 	})
 }
 
-// AdmitMerge marks the entry the orchestrator is running now, and marks its
+// AdmitMerge marks the entry the orchestrator is running now, moves it ahead
+// of every merge it was admitted past (admittedAhead), and marks its
 // repository as owing its queue_drained scripts IN THE SAME WRITE, so no
 // admitted merge leaves the repository without the debt. Only a waiting
 // (queued) entry is admitted; any other state is a refusal, as StepAsideMerge
@@ -979,6 +1015,45 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 	}
 	s.disown(lease)
 	s.logLeftQueue(op, fields, settled, kept)
+	return nil
+}
+
+// RequeuePausedMerge puts the ADMITTED merge of workspace ID back in line at
+// its own place, waiting under LEDGER, and drops LEASE, its merge lease, with
+// that lease's progress record, in one write: the merge a handover paused on
+// a daemon that keeps its workspace until the workspace's work ends starts
+// again from the queue once the workspace is served by the daemon that
+// serves the queue, and holds nobody behind it meanwhile. An entry that is
+// not admitted, or a lease that is not ID's merge lease, is refused and
+// changes nothing.
+func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, ledger LeaseID) error {
+	const op = "daemon.wsm.requeue_paused_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "ledger": string(ledger)}
+	if ledger == "" {
+		err := errors.New("wsm: a paused merge is put back in line with its bubble's ledger identity")
+		s.log.Error(op, "refused to put a paused merge back in line with no ledger identity", withError(fields, err))
+		return err
+	}
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: admitted merge of workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		return dropMergeLease(ctx, tx, id, lease)
+	})
+	if err != nil {
+		return err
+	}
+	s.disown(lease)
 	return nil
 }
 

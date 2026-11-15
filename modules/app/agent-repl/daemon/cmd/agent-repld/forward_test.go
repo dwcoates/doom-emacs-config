@@ -333,6 +333,11 @@ func (m *recordingMover) ReviewQueues(context.Context) error {
 	return nil
 }
 
+func (m *recordingMover) ReturnPausedMerges(_ context.Context, ws ids.WorkspaceID) error {
+	m.calls = append(m.calls, "return_paused "+string(ws))
+	return nil
+}
+
 func (m *recordingMover) Drain(context.Context) {
 	m.calls = append(m.calls, "drain")
 }
@@ -891,5 +896,35 @@ func TestVerbsForwarderAnswerColdGateBeforeTheVerbsIsAnError(t *testing.T) {
 	// Assert.
 	if err == nil || err.Error() != "agent-repld: a cold gate was answered for a prompt typed on claude.ai before the workspace verbs existed" {
 		t.Fatalf("err = %v, want the wiring defect named", err)
+	}
+}
+
+func TestTheMergeForwarderCarriesAPausedMergesReturn(t *testing.T) {
+	cases := []struct {
+		name    string
+		bound   bool
+		want    []string
+		wantErr error
+	}{
+		{name: "a bound forwarder carries the return", bound: true, want: []string{"return_paused ws-1"}},
+		{name: "an unbound forwarder refuses it", wantErr: errMergeMoverUnbound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &mergeForwarder{}
+			target := &recordingMover{}
+			if tc.bound {
+				f.bind(target)
+			}
+
+			// Act.
+			err := f.ReturnPausedMerges(context.Background(), "ws-1")
+
+			// Assert.
+			if !errors.Is(err, tc.wantErr) || !reflect.DeepEqual(target.calls, tc.want) {
+				t.Fatalf("ReturnPausedMerges = %v, calls %v; want %v and %v", err, target.calls, tc.wantErr, tc.want)
+			}
+		})
 	}
 }

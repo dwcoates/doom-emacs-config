@@ -592,3 +592,53 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 	}
 	return o.offerOwedDrains(ctx, op, offered)
 }
+
+// ReturnPausedMerges puts every merge of WS that a handover paused back in
+// line at its own place (wsm.RequeuePausedMerge), dropping its merge lease
+// and progress: WS stays on this daemon until its work ends, however long
+// that takes (owner ruling, 2026-11-15), and its paused merge must not hold
+// the queue the successor serves meanwhile. The merge starts again from the
+// queue, under the same bubble, once WS is served there. A merge admitted
+// with no merge lease standing is a broken store: refused at ERROR, nothing
+// moved.
+func (o *orchestrator) ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error {
+	const op = "daemon.merge.return_paused"
+	unlock := o.lockMove(ws)
+	defer unlock()
+	fields := dlog.Context{"workspace": string(ws)}
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the merge queues to put the workspace's paused merge back in line; it holds its queue until the workspace moves", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: return the paused merges of %q: %w", ws, err)
+	}
+	for repo, entries := range queues {
+		for _, entry := range entries {
+			if entry.Workspace != ws || entry.State != wsm.MergeAdmitted {
+				continue
+			}
+			repoFields := withField(fields, "repo", string(repo))
+			lease, held, err := o.deps.DB.Lease(ctx, ws)
+			if err == nil && (!held || lease.Holder != wsm.HolderMerge) {
+				err = fmt.Errorf("merge: the admitted merge of %q holds no merge lease (held %v, holder %v)", ws, held, lease.Holder)
+				repoFields["invariant_violation"] = "an admitted merge holds its merge lease"
+			}
+			if err != nil {
+				o.deps.Log.Global().Error(op, "the paused merge's lease could not be read; it holds its queue until the workspace moves", withField(repoFields, "error", err.Error()))
+				return err
+			}
+			ledger := o.mintLedger(ws)
+			if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
+				o.deps.Log.Global().Error(op, "the paused merge could not be put back in line; it holds its queue until the workspace moves", withField(repoFields, "error", err.Error()))
+				return err
+			}
+			o.mu.Lock()
+			delete(o.resumes, ws)
+			o.mu.Unlock()
+			o.deps.Log.Global().Info(op, "the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves", withField(repoFields, "ledger", string(ledger)))
+			if err := o.republishQueue(ctx, repo); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

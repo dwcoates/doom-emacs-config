@@ -650,6 +650,14 @@ func (f *mergeForwarder) ReviewQueues(ctx context.Context) error {
 	return m.ReviewQueues(ctx)
 }
 
+func (f *mergeForwarder) ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error {
+	m, err := f.mover()
+	if err != nil {
+		return err
+	}
+	return m.ReturnPausedMerges(ctx, ws)
+}
+
 func (f *mergeForwarder) Drain(ctx context.Context) {
 	m, err := f.mover()
 	if err != nil {

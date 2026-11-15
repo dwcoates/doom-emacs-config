@@ -341,6 +341,14 @@ func (d queueEventsDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 	return place, err
 }
 
+// RequeuePausedMerge puts a merge a handover paused back in line at its
+// place and reports it requeued.
+func (d queueEventsDB) RequeuePausedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, ledger wsm.LeaseID) error {
+	return d.reported(ctx, repo, false, func() (queueWrite, error) {
+		return queueWrite{report: true, kind: QueueChangeRequeued, subject: id}, d.DB.RequeuePausedMerge(ctx, repo, id, lease, ledger)
+	})
+}
+
 // ReturnAdmittedMerge puts an admitted merge with no run back in line at its
 // place and reports it requeued.
 func (d queueEventsDB) ReturnAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, ledger wsm.LeaseID) error {

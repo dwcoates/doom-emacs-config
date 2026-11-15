@@ -1704,6 +1704,7 @@ type fakeMerges struct {
 	suspendErr error
 	adoptErr   error
 	reviewErr  error
+	returnErr  error
 	// adopting, when set, is told each AdoptWorkspace as it starts, and the
 	// call then waits for release: a test holds an adoption's tail here.
 	adopting chan ids.WorkspaceID
@@ -1728,6 +1729,14 @@ func (f *fakeMerges) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) error
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "adopt "+string(ws))
 	return f.adoptErr
+}
+
+func (f *fakeMerges) ReturnPausedMerges(_ context.Context, ws ids.WorkspaceID) error {
+	f.order.record("return_paused_merges")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "return_paused "+string(ws))
+	return f.returnErr
 }
 
 func (f *fakeMerges) ReviewQueues(context.Context) error {

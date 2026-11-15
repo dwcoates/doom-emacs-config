@@ -480,6 +480,10 @@ type MergeMover interface {
 	// it once the outgoing daemon is gone: a queue change that daemon made
 	// while both served (a resume) reached only its own pump.
 	ReviewQueues(ctx context.Context) error
+	// ReturnPausedMerges puts the workspace's merge a handover paused back
+	// at its place in line: the workspace waits on this daemon for its work
+	// to end, and its merge must not hold the queue the successor serves.
+	ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // QueuedCreateRecovery takes up the creates a previous daemon held for the
