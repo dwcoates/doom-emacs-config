@@ -716,6 +716,12 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ? WHERE repo_key = ? AND workspace_id = ?`, int(state), key, id); err != nil {
 			return err
 		}
+		// AN ADMITTED MERGE STANDS AHEAD OF EVERY MERGE WAITING (admittedAhead).
+		if state == MergeAdmitted {
+			if err := admittedAhead(ctx, tx, key, id); err != nil {
+				return err
+			}
+		}
 		return also(ctx, tx, key)
 	})
 }
@@ -861,12 +867,7 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 // (queued) entry is admitted; any other state is a refusal, as StepAsideMerge
 // and ReturnRemediatedMerge refuse a wrong prior state.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
-	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeQueued, MergeAdmitted, dlog.Context{}, func(ctx context.Context, tx *sql.Tx, key RepoKey) error {
-		if err := admittedAhead(ctx, tx, key, id); err != nil {
-			return err
-		}
-		return oweQueueDrain(ctx, tx, key)
-	})
+	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeQueued, MergeAdmitted, dlog.Context{}, oweQueueDrain)
 }
 
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
@@ -1014,6 +1015,45 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 	}
 	s.disown(lease)
 	s.logLeftQueue(op, fields, settled, kept)
+	return nil
+}
+
+// RequeuePausedMerge puts the ADMITTED merge of workspace ID back in line at
+// its own place, waiting under LEDGER, and drops LEASE, its merge lease, with
+// that lease's progress record, in one write: the merge a handover paused on
+// a daemon that keeps its workspace until the workspace's work ends starts
+// again from the queue once the workspace is served by the daemon that
+// serves the queue, and holds nobody behind it meanwhile. An entry that is
+// not admitted, or a lease that is not ID's merge lease, is refused and
+// changes nothing.
+func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, ledger LeaseID) error {
+	const op = "daemon.wsm.requeue_paused_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "ledger": string(ledger)}
+	if ledger == "" {
+		err := errors.New("wsm: a paused merge is put back in line with its bubble's ledger identity")
+		s.log.Error(op, "refused to put a paused merge back in line with no ledger identity", withError(fields, err))
+		return err
+	}
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
+		if err != nil {
+			return err
+		}
+		if err := requireOneRow(res, fmt.Sprintf("wsm: admitted merge of workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		return dropMergeLease(ctx, tx, id, lease)
+	})
+	if err != nil {
+		return err
+	}
+	s.disown(lease)
 	return nil
 }
 

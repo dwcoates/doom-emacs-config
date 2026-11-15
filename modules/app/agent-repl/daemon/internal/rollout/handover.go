@@ -966,6 +966,12 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 		handedAcross(move)
 		return false
 	case adoptionRefused:
+		// THE WORKSPACE WAITS HERE FOR ITS WORK TO END, however long that
+		// takes (owner ruling, 2026-11-15), so the merge the handover paused
+		// goes back in line rather than hold the successor's queue.
+		if err := c.deps.Merges.ReturnPausedMerges(ctx, ws.ID); err != nil {
+			c.log.Error(opTransfer, "the paused merge of a workspace that waits here for its work could not be put back in line; it holds the successor's queue until the workspace moves", dlog.WithCause(fields, err))
+		}
 		return c.offerAgain(ctx, ws, plan, windows, bounce.GateFreeness, fields)
 	case adoptionRefusedLate:
 		return c.reoffer(ctx, ws, plan, windows, reofferAfterLateFacts, fields)

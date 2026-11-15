@@ -841,3 +841,46 @@ func TestTheMoveLockIsHeldPerWorkspaceUntilReleased(t *testing.T) {
 	}
 	lock.Unlock()
 }
+
+func TestAPausedMergeOfAWorkspaceThatStaysGoesBackToItsPlaceInLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		lease     bool
+		wantState wsm.MergeQueueState
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a paused merge holding its lease goes back in line", lease: true, wantState: wsm.MergeQueued,
+			wantLevel: "info", wantMsg: "the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves"},
+		{name: "an admitted merge holding no lease is a broken store and moves nothing", wantState: wsm.MergeAdmitted,
+			wantLevel: "error", wantMsg: "the paused merge's lease could not be read; it holds its queue until the workspace moves"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the workspace's merge was admitted, then paused.
+			h := newHarness(t)
+			enqueue(t, h)
+			h.db.mu.Lock()
+			h.db.queues[h.repoKey()][0].State = wsm.MergeAdmitted
+			if tt.lease {
+				h.db.leases[theWorkspace] = wsm.Lease{ID: "lease-paused", Workspace: theWorkspace, Holder: wsm.HolderMerge}
+			}
+			h.db.mu.Unlock()
+
+			// Act
+			err := h.o.ReturnPausedMerges(context.Background(), theWorkspace)
+
+			// Assert
+			h.db.mu.Lock()
+			state := h.db.queues[h.repoKey()][0].State
+			_, held := h.db.leases[theWorkspace]
+			h.db.mu.Unlock()
+			if state != tt.wantState || held || (err == nil) != tt.lease {
+				t.Fatalf("ReturnPausedMerges = %v; state %v, lease held %v; want %v and no lease", err, state, held, tt.wantState)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.return_paused", Message: tt.wantMsg}); !ok {
+				t.Fatalf("records = %+v, want the %s record", h.logs.Records(), tt.wantLevel)
+			}
+		})
+	}
+}

@@ -1803,11 +1803,12 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
 
 	// Assert: the helper's own query, and one call per reordering (move,
-	// move to a place, prioritize, a merge stepping aside and a remediated
-	// merge returning) and per state write guarded on its prior state
-	// (setMergeQueueState, an admission).
-	if reads != 1 || calls != 6 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 6", reads, calls)
+	// move to a place, prioritize, a merge stepping aside, a remediated
+	// merge returning, and an admitted merge moving ahead of the merges it
+	// passed over) and per state write guarded on its prior state
+	// (setMergeQueueState).
+	if reads != 1 || calls != 7 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 7", reads, calls)
 	}
 }
 
@@ -2862,5 +2863,51 @@ func TestAnAdmissionPastWaitingMergesPutsTheAdmittedMergeAheadOfThem(t *testing.
 				t.Fatalf("front = %+v, want the admitted merge", entries[0])
 			}
 		})
+	}
+}
+
+func TestRequeuePausedMergePutsItBackInLineAndDropsItsLeaseAndProgress(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	lease := admittedWithLease(t, s, repo, ws.ID)
+
+	// Act
+	err := s.RequeuePausedMerge(context.Background(), repo, ws.ID, lease.ID, "ledger-1")
+
+	// Assert
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	_, held, _ := s.Lease(context.Background(), ws.ID)
+	_, progress, _ := s.MergeProgressOf(context.Background(), ws.ID)
+	if err != nil || len(entries) != 1 || entries[0].State != MergeQueued || entries[0].Ledger != "ledger-1" || held || progress {
+		t.Fatalf("RequeuePausedMerge = %v; entries %+v, lease held %v, progress %v; want it waiting under its ledger with no lease or progress", err, entries, held, progress)
+	}
+}
+
+func TestRequeuePausedMergeRefusesAMergeNotAdmittedAndChangesNothing(t *testing.T) {
+	// Arrange
+	s, logs := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	queuedWith(t, s, repo, ws.ID, ownBranch)
+	lease, err := s.AcquireLease(context.Background(), ws.ID, HolderMerge, PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	err = s.RequeuePausedMerge(context.Background(), repo, ws.ID, lease.ID, "ledger-1")
+
+	// Assert
+	entries, _ := s.MergeQueue(context.Background(), repo)
+	_, held, _ := s.Lease(context.Background(), ws.ID)
+	if !errors.Is(err, ErrNotFound) || len(entries) != 1 || entries[0].State != MergeQueued || !held {
+		t.Fatalf("RequeuePausedMerge = %v; entries %+v, lease held %v; want a refusal that leaves both", err, entries, held)
+	}
+	// The store's write path records a write naming no such record; its
+	// caller owns the error's account.
+	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Operation: "daemon.wsm.requeue_paused_merge", Message: "the write named no such record"}); !ok {
+		t.Fatalf("no daemon.wsm.requeue_paused_merge record of the refusal: %+v", logs.Records())
 	}
 }

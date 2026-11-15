@@ -911,6 +911,43 @@ func TestARefusedMidWorkAdoptionIsAskedAgainAtFreeness(t *testing.T) {
 	}
 }
 
+func TestARefusedMidWorkAdoptionPutsTheWorkspacesPausedMergeBackInLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		returnErr error
+		wantError bool
+	}{
+		{name: "the paused merge goes back in line before the wait at freeness"},
+		{name: "a merge that cannot go back is recorded and the wait still begins", returnErr: errors.New("disk gone"), wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.freeness.SetFree(ws, false)
+			h.merges.returnErr = tt.returnErr
+			handOverUntilWindow(t, h)
+
+			// Act
+			refusedBySuccessor(t, h, ws)
+			h.registry.awaitRequest(t, isFreenessTransfer)
+
+			// Assert
+			h.merges.mu.Lock()
+			calls := slices.Clone(h.merges.calls)
+			h.merges.mu.Unlock()
+			if !slices.Contains(calls, "return_paused "+string(ws)) {
+				t.Fatalf("merge calls = %v, want the workspace's paused merge put back in line", calls)
+			}
+			got := hasRecord(h, opTransfer, "error", "the paused merge of a workspace that waits here for its work could not be put back in line; it holds the successor's queue until the workspace moves")
+			if got != tt.wantError {
+				t.Fatalf("error recorded = %v, want %v", got, tt.wantError)
+			}
+		})
+	}
+}
+
 // isDispatchQuietTransfer matches a re-offer's transfer request.
 func isDispatchQuietTransfer(c registryCall) bool {
 	return c.Req.Reason == string(ReasonHandoverTransfer) && c.Req.WaitFor == bounce.GateDispatchQuiet

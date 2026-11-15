@@ -1362,6 +1362,29 @@ func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids
 
 // DropAdmittedMerge stands for the store's one transaction: the admitted
 // entry, the merge lease and its progress record go together, or nothing does.
+func (f *fakeDB) RequeuePausedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, ledger wsm.LeaseID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace != id || entry.State != wsm.MergeAdmitted {
+			continue
+		}
+		if held, ok := f.leases[id]; !ok || held.ID != lease || held.Holder != wsm.HolderMerge {
+			return fmt.Errorf("requeue paused merge of %s: %w", id, wsm.ErrNotFound)
+		}
+		f.queues[repo][i].State, f.queues[repo][i].Ledger = wsm.MergeQueued, ledger
+		delete(f.leases, id)
+		f.releasedLeases = append(f.releasedLeases, lease)
+		for ws, p := range f.progress {
+			if p.Lease == lease {
+				delete(f.progress, ws)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("requeue paused merge of %s: %w", id, wsm.ErrNotFound)
+}
+
 func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
