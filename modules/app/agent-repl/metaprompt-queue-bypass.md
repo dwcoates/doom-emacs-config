@@ -54,8 +54,10 @@
   - This workspace never marks itself a one-shot: the daemon refuses the mark with `requester_bypassing_queue`.
 - This workspace does the work itself: it creates no child workspace and runs no subagent unless the user explicitly asks for that particular thing to be done in a workspace or a subagent.
   - Every rule that would dispatch work (a handed failure's fix, a noticed deficiency's fix) is carried out here, by this workspace itself.
-  - A child the user asked for never finishes into the queue: it commits its work on its branch, runs the full suite, and tells this workspace its branch, which this workspace lands directly as it lands its own.
+  - A child the user asked for never finishes into the queue: it commits its work on its branch, runs only the tests its changes add or change, and tells this workspace its branch, which this workspace lands directly as it lands its own.
   - Several such branches are merged into one branch and land at once: one full suite, one landing, one deploy.
+- The full suite runs only as the gate of a landing: the merge queue's, or this workspace's own before it lands directly (Tests, below).
+  - No child or subagent of this workspace ever runs it: the one run on the combined branch covers every branch in it.
 - Only this workspace pauses or resumes the merge queue (owner ruling, 2026-11-14).
   - The workspaces and subagents it runs never pause, resume, evict or move anything on the queue, and their briefs say so.
 

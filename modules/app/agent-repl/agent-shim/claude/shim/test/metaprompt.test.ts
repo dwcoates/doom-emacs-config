@@ -152,6 +152,8 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("nothing this workspace lands or dispatches ever goes through it");
     expect(text).toContain("it creates no child workspace and runs no subagent unless the user explicitly asks");
     expect(text).toContain("Several such branches are merged into one branch and land at once");
+    expect(text).toContain("runs only the tests its changes add or change");
+    expect(text).toContain("No child or subagent of this workspace ever runs it");
     expect(text).toContain("Only this workspace pauses or resumes the merge queue");
     expect(text).not.toContain("creates child workspaces, one-shots and async merges as any workspace does");
   });
