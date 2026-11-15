@@ -231,6 +231,19 @@ refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowMergePaused" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-merge-turn (value)
+  "Decode VALUE as `RosterRowMergeTurn' and return t.
+The MERGE-TURN marker: the workspace\='s own merge is in flight and its
+session runs a turn, which the row\='s status arm draws.  EMPTY, and
+PRESENCE IS THE FACT, as for the markers above.
+
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker keeps the merge
+glyph on the webapp sidebar\='s row, and the tab wears the turn\='s color
+(owner request, 2026-11-15).  It is decoded because the codec refuses
+unknown fields, and refusing this one would drop every roster push."
+  (agent-repl-wire--decode-empty "RosterRowMergeTurn" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-row-opening (value)
   "Decode VALUE as `RosterRowOpening' and return t.
 The OPENING marker: the editor is opening this workspace, whose status
@@ -785,7 +798,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -794,7 +807,7 @@ unknown field by the row's key check."
 Returns `(:workspace W :attention A :priority P :viewed V
 :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:merge-paused MP :last-selected L :last-turn-ended LT
+:merge-paused MP :merge-turn MT :last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
 :availability AV
@@ -840,6 +853,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :merge-paused (agent-repl-wire--decode-optional-message
                           "RosterRow" 'mergePaused object
                           #'agent-repl-wire-decode-roster-row-merge-paused)
+           :merge-turn (agent-repl-wire--decode-optional-message
+                        "RosterRow" 'mergeTurn object
+                        #'agent-repl-wire-decode-roster-row-merge-turn)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
