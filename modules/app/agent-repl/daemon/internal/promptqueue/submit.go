@@ -20,10 +20,24 @@ import (
 // ArmMerging is the refusal arm a submission under a merge lease answers with.
 const ArmMerging = "merging"
 
-// Submit runs one submission through the ONE delivery path: the lease policy,
+// Submit takes one submission from outside the queue and counts it, by its
+// origin, once the delivery path has taken it: delivered or held. A refused
+// submission (an error) is not counted. The queue's own resubmissions
+// (resubmitFolded) go through submit, so a prompt is counted once however
+// often the queue moves it.
+func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error) {
+	disposition, err := q.submit(ctx, sub)
+	if err != nil {
+		return disposition, err
+	}
+	q.deps.Submissions.CountPromptSubmitted(sub.Origin)
+	return disposition, nil
+}
+
+// submit runs one submission through the ONE delivery path: the lease policy,
 // then the shim, then — when a turn is already running — the classifier and a
 // hold. A hold is an answer here, never a failure.
-func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error) {
+func (q *queue) submit(ctx context.Context, sub Submission) (Disposition, error) {
 	log, err := q.logger(ctx, sub.WS)
 	if err != nil {
 		return Disposition{}, err
@@ -33,6 +47,13 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 	if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
 		log.Error(opSubmit, "a submission reached the queue with no origin", nil)
 		return Disposition{}, fmt.Errorf("submit to %q: the prompt origin is required", sub.WS)
+	}
+	// AN ORIGIN THE CONTRACT DOES NOT DECLARE is refused like a missing one:
+	// every taken submission is counted under its origin's spelling, a bounded
+	// label only the declared values keep bounded.
+	if _, declared := conversationv1.PromptOrigin_name[int32(sub.Origin)]; !declared {
+		log.Error(opSubmit, "a submission reached the queue with an origin conversation.v1.PromptOrigin does not declare", nil)
+		return Disposition{}, fmt.Errorf("submit to %q: prompt origin %d is not declared", sub.WS, int32(sub.Origin))
 	}
 	if err := promptorigin.CheckSender(sub.Origin, sub.SentBy != nil); err != nil {
 		log.Error(opSubmit, "a submission reached the queue with a sender that disagrees with its origin", dlog.Context{"sender_named": sub.SentBy != nil})
