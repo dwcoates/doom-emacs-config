@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1188,8 +1190,8 @@ func TestABranchAlreadyOnTheTipReplaysNothing(t *testing.T) {
 	}
 }
 
-func TestAWorktreeWithUncommittedChangesFailsTheMergeBeforeTheRebase(t *testing.T) {
-	// Arrange.
+func TestAWorktreeThatStaysDirtyIsNeverRebased(t *testing.T) {
+	// Arrange: no prompt to commit cleans the worktree.
 	h := newHarness(t)
 	landing(h, 1)
 	h.git.clean = false
@@ -1201,8 +1203,8 @@ func TestAWorktreeWithUncommittedChangesFailsTheMergeBeforeTheRebase(t *testing.
 	if h.git.seen("start_rebase") {
 		t.Fatal("a dirty worktree was rebased")
 	}
-	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" {
-		t.Fatalf("facts = %+v, want merge failed in other", got)
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "conflicts" {
+		t.Fatalf("facts = %+v, want the merge failed in conflicts once its prompts to commit were spent", got)
 	}
 }
 
@@ -2582,5 +2584,237 @@ func TestAResumedFixingTurnThatLeftItsFixUncommittedIsPromptedToCommitAndTheMerg
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.abort"}); ok {
 		t.Fatalf("the resumed merge aborted: %+v", h.logs.Records())
+	}
+}
+
+// submittedText is the text a submission says.
+func submittedText(sub promptqueue.Submission) string {
+	return sub.Said.GetContent().GetBlocks()[0].GetText().GetText()
+}
+
+// rebaseCommitTurnsLeave scripts what each of the merge's rebase commit
+// turns (BriefRebaseCommit, a MERGE_CONFLICT_REPAIR submission) leaves in the
+// worktree: clean when states[n-1] is true, dirty when it is false.
+func rebaseCommitTurnsLeave(h *harness, states ...bool) {
+	n := 0
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR || !strings.HasPrefix(submittedText(sub), BriefRebaseCommit) {
+			return
+		}
+		n++
+		if n > len(states) {
+			return
+		}
+		h.git.mu.Lock()
+		h.git.clean = states[n-1]
+		h.git.mu.Unlock()
+	}
+}
+
+func TestARebaseThatMeetsUncommittedChangesPromptsACommitAndLands(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "found by the clean check", arrange: func(h *harness) {
+			h.git.clean = false
+			rebaseCommitTurnsLeave(h, true)
+		}},
+		{name: "refused by git at the start", arrange: func(h *harness) {
+			// A writer dirtied the tree after the clean check read it clean.
+			h.git.cleanSeq = []bool{true, false}
+			h.git.startsRefusedDirty = 1
+			rebaseCommitTurnsLeave(h, true)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			landing(h, 1)
+			tt.arrange(h)
+
+			// Act.
+			admitted(t, h)
+
+			// Assert.
+			if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+				t.Fatalf("facts = %+v, want the merge landed in its place, not failed", facts)
+			}
+			briefs := commitBriefs(h)
+			if len(briefs) != 1 || briefs[0]["prompt"] != "1" || briefs[0]["worktree_dir"] != h.sourceD {
+				t.Fatalf("commit briefs = %v, want prompt 1 naming the worktree %s", briefs, h.sourceD)
+			}
+			if !loggedLike(h, logLike{level: "info", op: "daemon.merge.rebase", text: "the rebase met uncommitted changes in the worktree"}) {
+				t.Fatal("the dirty worktree the rebase met was not recorded")
+			}
+			if loggedLike(h, logLike{level: "error", op: "daemon.merge.fault"}) {
+				t.Fatal("the merge faulted on the dirty worktree")
+			}
+		})
+	}
+}
+
+func TestARebaseRefusedOverChangesStartsAgainOnceThemCommitted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.cleanSeq = []bool{true, false}
+	h.git.startsRefusedDirty = 1
+	rebaseCommitTurnsLeave(h, true)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	h.git.mu.Lock()
+	commands := append([]string(nil), h.git.rebaseCommands...)
+	h.git.mu.Unlock()
+	starts := 0
+	for _, c := range commands {
+		if strings.HasPrefix(c, "start ") {
+			starts++
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("rebase commands = %v, want the refused start and one start after the commit", commands)
+	}
+}
+
+func TestAWorktreeStillDirtyAfterTheLastRebaseCommitPromptFailsTheMergeInConflicts(t *testing.T) {
+	// Arrange: no commit turn cleans the tree.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.clean = false
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	got := h.footer.last()
+	if got.State != StateFailed || got.FailedArea != "conflicts" {
+		t.Fatalf("facts = %+v, want the merge failed in conflicts", got)
+	}
+	if n := len(commitBriefs(h)); n != MaxCommitPrompts {
+		t.Fatalf("commit briefs = %d, want %d", n, MaxCommitPrompts)
+	}
+	want := fmt.Sprintf("the worktree %s still has uncommitted changes after %d prompts to commit them", h.sourceD, MaxCommitPrompts)
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.rebase",
+		Message: "the worktree stayed dirty after the last prompt to commit; the merge fails"})
+	if !ok || !strings.HasPrefix(fmt.Sprint(record.Context["why"]), want) {
+		t.Fatalf("give-up record = %+v (found %v), want why %q", record.Context, ok, want)
+	}
+}
+
+func TestARebaseCommitPromptWhoseWorktreeCannotBeReadSurfacesTheError(t *testing.T) {
+	// Arrange: the clean check fails once the commit turn ends.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.clean = false
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if !strings.HasPrefix(submittedText(sub), BriefRebaseCommit) {
+			return
+		}
+		h.git.mu.Lock()
+		h.git.cleanErr = errors.New("git status: index locked")
+		h.git.cleanByDir = nil
+		h.git.mu.Unlock()
+	}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	fault, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.fault"})
+	if !ok || !strings.Contains(fmt.Sprint(fault.Context["summary"]), "before its rebase starts again") {
+		t.Fatalf("fault record = %+v (found %v), want the failed clean read named", fault.Context, ok)
+	}
+	if got := h.footer.last(); got.State != StateFailed {
+		t.Fatalf("facts = %+v, want the merge failed", got)
+	}
+}
+
+func TestEveryCommitPromptIsRecordedInTheOneShape(t *testing.T) {
+	// Arrange: the fixing turn's commit prompt and the rebase's commit
+	// prompt, in two merges.
+	fix := fixingMerge(t)
+	fixTurnsLeave(fix, false, true)
+	rebase := newHarness(t)
+	landing(rebase, 1)
+	rebase.git.clean = false
+	rebaseCommitTurnsLeave(rebase, true)
+
+	// Act.
+	admitted(t, fix)
+	admitted(t, rebase)
+
+	// Assert: both records come from promptUntilCommitted, so they carry
+	// the same fields beyond the step's own.
+	keys := func(h *harness, op, message string) []string {
+		r, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: op, Message: message})
+		if !ok {
+			t.Fatalf("no %s record %q", op, message)
+		}
+		var out []string
+		for k := range r.Context {
+			if k != "attempt" && k != "workspace_dir_hash" {
+				out = append(out, k)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	gotFix := keys(fix, "daemon.merge.fixes", "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place")
+	gotRebase := keys(rebase, "daemon.merge.rebase", "the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them")
+	if !reflect.DeepEqual(gotFix, gotRebase) {
+		t.Fatalf("commit prompt fields: fix %v, rebase %v, want one shape", gotFix, gotRebase)
+	}
+}
+
+func TestPromptUntilCommittedPromptsOnlyWhileDirtyAndWithinTheBudget(t *testing.T) {
+	tests := []struct {
+		name        string
+		clean       bool
+		used        int
+		turnCleans  bool
+		wantClean   bool
+		wantPrompts int
+	}{
+		{name: "clean at the first read", clean: true, wantClean: true},
+		{name: "dirty, then committed", turnCleans: true, wantClean: true, wantPrompts: 1},
+		{name: "dirty with the budget spent", used: MaxCommitPrompts, wantClean: false},
+		{name: "dirty after every prompt", wantClean: false, wantPrompts: MaxCommitPrompts},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.git.clean = tt.clean
+			if tt.turnCleans {
+				rebaseCommitTurnsLeave(h, true)
+			}
+			r := liveRun(t, h, theWorkspace)
+			r.subject = subject{dir: h.sourceD, branch: "feature"}
+			used := tt.used
+
+			// Act.
+			clean, err := r.promptUntilCommitted(context.Background(), commitAsk{
+				op: "daemon.merge.rebase", brief: BriefRebaseCommit, reading: "before its rebase starts again",
+				origin:   conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+				vars:     map[string]string{"source_branch": "feature", "worktree_dir": h.sourceD, "target_branch": "master"},
+				prompted: "prompted", committed: "committed",
+			}, &used)
+
+			// Assert.
+			if err != nil || clean != tt.wantClean {
+				t.Fatalf("promptUntilCommitted = %v, %v, want %v", clean, err, tt.wantClean)
+			}
+			if got := len(commitBriefs(h)); got != tt.wantPrompts {
+				t.Fatalf("prompts = %d, want %d", got, tt.wantPrompts)
+			}
+			if used != tt.used+tt.wantPrompts {
+				t.Fatalf("budget used = %d, want %d", used, tt.used+tt.wantPrompts)
+			}
+		})
 	}
 }

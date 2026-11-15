@@ -61,6 +61,9 @@ type chainGit struct {
 	// one ignores its caller's cancellation, as a git command mid-flight does.
 	rebaseHolds holdSet
 	stubborn    map[string]bool
+	// refusedDirty is how many of the next rebases started in a worktree
+	// git refuses over uncommitted changes (gitclient.ErrDirtyWorktree).
+	refusedDirty map[string]int
 	// cleanHolds parks the next cleanliness read in a worktree, ignoring its
 	// caller's cancellation as a git command mid-flight does.
 	cleanHolds holdSet
@@ -70,7 +73,7 @@ func newChainGit(inner *fakeGit) *chainGit {
 	g := &chainGit{
 		fakeGit: inner, commits: map[string]*chainCommit{}, refs: map[string]string{},
 		rebases: map[string]*chainRebase{}, conflicts: map[[2]string][]string{}, recorded: map[[2]string]bool{},
-		trees: map[string]string{}, stubborn: map[string]bool{},
+		trees: map[string]string{}, stubborn: map[string]bool{}, refusedDirty: map[string]int{},
 	}
 	root := g.mintLocked(nil, "base")
 	g.refs["master"] = root
@@ -118,6 +121,14 @@ func (g *chainGit) conflict(patch, onto string, files ...string) {
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
 	g.conflicts[[2]string{patch, onto}] = files
+}
+
+// refuseDirty has git refuse the next N rebases started in dir over
+// uncommitted changes.
+func (g *chainGit) refuseDirty(dir string, n int) {
+	g.cmu.Lock()
+	defer g.cmu.Unlock()
+	g.refusedDirty[dir] = n
 }
 
 func (g *chainGit) dirBranch(dir string) string {
@@ -300,6 +311,10 @@ func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []
 	}
 	g.cmu.Lock()
 	defer g.cmu.Unlock()
+	if g.refusedDirty[dir] > 0 {
+		g.refusedDirty[dir]--
+		return gitclient.RebaseStep{}, dirtyStartRefusal()
+	}
 	base, err := g.resolveLocked(dir, onto)
 	if err != nil {
 		return gitclient.RebaseStep{}, err

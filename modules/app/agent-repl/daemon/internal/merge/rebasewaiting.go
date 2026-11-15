@@ -213,6 +213,13 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	if errors.As(err, &conflicted) {
 		return backgroundEnd{conflict: conflicted}
 	}
+	// UNCOMMITTED CHANGES MET BY A GIT-ONLY REBASE are the requester's own,
+	// as backgroundSkip's are: the member keeps its base this round.
+	var dirty *worktreeDirty
+	if errors.As(err, &dirty) {
+		log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", dirty.Error()))
+		return backgroundEnd{}
+	}
 	if err == nil && gaveUp == nil {
 		log.Info(op, "the waiting merge stands on the target's new tip", fields)
 	}

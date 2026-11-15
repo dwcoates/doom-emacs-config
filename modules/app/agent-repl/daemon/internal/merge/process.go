@@ -253,6 +253,79 @@ type replay struct {
 // up, and an error when a rebase command failed outright; in both cases the
 // rebase is left exactly where git left it.
 func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, error) {
+	return r.untilCommitted(ctx, tip, targetBranch, func() (*outcome, error) { return r.rebaseOnce(ctx, tip, targetBranch) })
+}
+
+// worktreeDirty is how one rebase attempt ends when the worktree it would
+// rebase has uncommitted changes: found by the clean check before it, or by
+// git refusing to start over them (gitclient.ErrDirtyWorktree). Nothing was
+// replayed and no rebase stands.
+type worktreeDirty struct {
+	dir string
+	// refused is git's own refusal, nil when the clean check found the
+	// changes first.
+	refused error
+}
+
+func (d *worktreeDirty) Error() string {
+	if d.refused != nil {
+		return fmt.Sprintf("merge: git refused to rebase over the uncommitted changes in %s: %v", d.dir, d.refused)
+	}
+	return fmt.Sprintf("merge: the worktree %s has uncommitted changes, so it cannot be rebased", d.dir)
+}
+
+// untilCommitted runs the rebase FIRST attempts, and once more after each time
+// it met uncommitted changes and the workspace's session was prompted to
+// commit them (BriefRebaseCommit), while the merge keeps its place: the
+// changes are the requester's, and a rebase never goes over work it would
+// lose. A retry is a fresh rebaseOnce, so it replays exactly what the
+// commits made the branch. A git-only background rebase prompts nothing: its
+// dirt is answered (worktreeDirty) and the member keeps its base. The
+// prompts are MaxCommitPrompts for the whole rebase; a worktree still dirty
+// after the last fails the merge in its conflicts.
+func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, first func() (*outcome, error)) (*outcome, error) {
+	const op = "daemon.merge.rebase"
+	attempt, used := first, 0
+	for {
+		out, err := attempt()
+		var dirty *worktreeDirty
+		if !errors.As(err, &dirty) {
+			return out, err
+		}
+		if r.background && !r.resolving {
+			return nil, err
+		}
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dirty.dir, "refused_by_git": dirty.refused != nil}
+		r.o.log(ctx, r.ws).Info(op, "the rebase met uncommitted changes in the worktree; the workspace is prompted to commit them and the merge keeps its place", fields)
+		clean, err := r.promptUntilCommitted(ctx, commitAsk{
+			op:      op,
+			brief:   BriefRebaseCommit,
+			reading: "before its rebase starts again",
+			origin:  conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+			vars: map[string]string{
+				"source_branch": r.subject.branch,
+				"worktree_dir":  r.subject.dir,
+				"target_branch": r.briefTarget(targetBranch),
+			},
+			prompted:  "the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them",
+			committed: "the worktree's changes are committed; the rebase starts again",
+		}, &used)
+		if err != nil {
+			return nil, err
+		}
+		if !clean {
+			why := fmt.Sprintf("the worktree %s still has uncommitted changes after %d prompts to commit them, so %s cannot be rebased", r.subject.dir, MaxCommitPrompts, r.subject.branch)
+			r.o.log(ctx, r.ws).Info(op, "the worktree stayed dirty after the last prompt to commit; the merge fails", withField(fields, "why", why))
+			out := failedIn(footer.FailedConflicts, why)
+			return &out, nil
+		}
+		attempt = func() (*outcome, error) { return r.rebaseOnce(ctx, tip, targetBranch) }
+	}
+}
+
+// rebaseOnce is one attempt at the rebase: the worktree checked, then the
+// branch's own commits replayed.
+func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.rebase"
 	dir, branch := r.subject.dir, r.subject.branch
 	clean, err := r.git.IsClean(ctx, dir)
@@ -260,7 +333,7 @@ func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, e
 		return nil, fmt.Errorf("merge: reading whether %s is clean: %w", dir, err)
 	}
 	if !clean {
-		return nil, fmt.Errorf("merge: the worktree %s has uncommitted changes, so %s cannot be rebased", dir, branch)
+		return nil, &worktreeDirty{dir: dir}
 	}
 	checkedOut, err := r.git.CurrentBranch(ctx, dir)
 	if err != nil {
@@ -360,6 +433,10 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 		if err != nil {
 			if errors.Is(err, errMergeStopping) {
 				return nil, err
+			}
+			if errors.Is(err, gitclient.ErrDirtyWorktree) {
+				r.settleRebasing(ctx, p, "the worktree had uncommitted changes; nothing was replayed")
+				return nil, &worktreeDirty{dir: dir, refused: err}
 			}
 			r.rebaseFailed(ctx, p, err)
 			return nil, fmt.Errorf("merge: rebasing %s onto %s: %w", branch, short(tip), err)
@@ -477,10 +554,12 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 	if head == branchHead && p.done == 0 {
 		r.o.log(ctx, r.ws).Info(op, "the rebase had not begun before the restart; it begins now", dlog.Context{
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
-		r.resumeReplay(p)
-		r.publishReplay()
-		step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
-		return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+		return r.untilCommitted(ctx, tip, targetBranch, func() (*outcome, error) {
+			r.resumeReplay(p)
+			r.publishReplay()
+			step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
+			return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+		})
 	}
 	return r.contradiction(ctx, fmt.Sprintf("no rebase stands in %s, and %s is at %s: neither on %s's tip %s nor at %s, where it stood before the recorded rebase",
 		dir, branch, short(head), targetBranch, short(tip), short(branchHead))), nil

@@ -434,3 +434,28 @@ func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
 		t.Fatal("C's lease outlived the exit")
 	}
 }
+
+func TestAWaitingRebaseGitRefusesOverChangesKeepsItsBaseAndPromptsNothing(t *testing.T) {
+	// Arrange: git refuses C's rebase over changes its clean check missed.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.refuseDirty(w.dirs["ws-c"], 1)
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	if got := w.git.tree("b-ws-c"); got != "base+w1" {
+		t.Fatalf("C holds %s, want its base kept (base+w1)", got)
+	}
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("C's session got %d prompts, want none from a git-only rebase", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "a waiting merge's worktree is not ready to rebase") {
+		t.Fatal("the kept base was not recorded")
+	}
+	if got := w.entryOf(t, "ws-c"); got.State != wsm.MergeQueued {
+		t.Fatalf("C = %+v, want it still waiting in its place", got)
+	}
+	w.finish(t)
+}

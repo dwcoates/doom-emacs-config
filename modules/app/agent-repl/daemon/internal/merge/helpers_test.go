@@ -1460,6 +1460,9 @@ type fakeGit struct {
 	mu      sync.Mutex
 	// standing answers RebaseInProgress: a rebase stands in the worktree.
 	standing bool
+	// cleanSeq answers IsClean in order ahead of every other answer: a
+	// worktree a writer dirtied between two reads.
+	cleanSeq []bool
 	// onTip answers CommitsBetween(_, _, "HEAD"): what a standing rebase has
 	// replayed onto its tip.
 	onTip []gitclient.Commit
@@ -1564,10 +1567,13 @@ type fakeGit struct {
 	rebaseResolved map[int][]string
 	// rebaseStuck names the replays (1-based) whose rerere-resolved stop
 	// every command answers again: a continue git refuses, moving nothing.
-	rebaseStuck    map[int][]string
-	rebaseMet      map[int]bool
-	rebaseErr      error
-	rebaseCommands []string
+	rebaseStuck map[int][]string
+	rebaseMet   map[int]bool
+	rebaseErr   error
+	// startsRefusedDirty is how many of the next StartRebase calls git
+	// refuses over uncommitted changes (gitclient.ErrDirtyWorktree).
+	startsRefusedDirty int
+	rebaseCommands     []string
 	// deletedBranches records DeleteBranchAt as BRANCH@HEAD; deleteBranchErr
 	// fails it.
 	deletedBranches []string
@@ -1880,6 +1886,11 @@ func (g *fakeGit) IsClean(_ context.Context, dir string) (bool, error) {
 	g.record("is_clean")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if len(g.cleanSeq) > 0 {
+		clean := g.cleanSeq[0]
+		g.cleanSeq = g.cleanSeq[1:]
+		return clean, nil
+	}
 	if clean, ok := g.cleanByDir[dir]; ok {
 		return clean, nil
 	}
@@ -1941,10 +1952,21 @@ func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []strin
 	g.record("start_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
+	if g.startsRefusedDirty > 0 {
+		g.startsRefusedDirty--
+		return gitclient.RebaseStep{}, dirtyStartRefusal()
+	}
 	g.rebaseTotal = len(commits)
 	g.rebaseReplayed = 0
-	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
 	return g.replayLocked()
+}
+
+// dirtyStartRefusal is git refusing to start a rebase over uncommitted
+// changes, as gitclient answers it: every fake that scripts the refusal
+// answers this one error.
+func dirtyStartRefusal() error {
+	return fmt.Errorf("%w: git rebase exited 1: error: cannot rebase: You have unstaged changes", gitclient.ErrDirtyWorktree)
 }
 
 func (g *fakeGit) AbortRebase(context.Context, string) error {
@@ -3228,6 +3250,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
+	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")

@@ -59,6 +59,10 @@ const (
 	// BriefFixCommit asks a fixing turn that ended with uncommitted changes
 	// to commit them before the merge goes on.
 	BriefFixCommit = "merge-fix-commit"
+	// BriefRebaseCommit asks the session of a merge whose rebase met
+	// uncommitted changes in its worktree to commit them before the rebase
+	// starts again.
+	BriefRebaseCommit = "merge-rebase-commit"
 )
 
 // MaxCommitPrompts bounds how many times a fixing turn that ended with
