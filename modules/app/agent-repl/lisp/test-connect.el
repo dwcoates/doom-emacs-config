@@ -1640,6 +1640,60 @@ deletion re-runs whatever sentinel is installed at that moment."
       ;; Assert
       (should (= runs 1)))))
 
+;;;; ---- Dial failure records ----
+
+(defconst agent-repl-test-connect--dial-error
+  (list 'file-error "make client process failed" "Connection refused"
+        :name "agent-repl-connect-AdoptHostWorkspace"
+        :host "127.0.0.1" :service 64995
+        :filter (lambda (_proc _chunk) 'the-filter-closure-body))
+  "The error `make-network-process' signals for a refused dial: its data
+carries the call's whole argument plist, the filter closure included.")
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-names-host-port-and-message ()
+  "A refused dial is recorded at ERROR with its host, port and message."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-dial-failed
+     "ws" "agent-repl-connect-AdoptHostWorkspace" "127.0.0.1" 64995
+     agent-repl-test-connect--dial-error)
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching
+             'error "dial-failed .*host=\"127.0.0.1\" port=64995 error=\".*Connection refused\""))))
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-carries-no-closure ()
+  "The record never prints the filter or sentinel the error data carries."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-dial-failed
+     "ws" "agent-repl-connect-AdoptHostWorkspace" "127.0.0.1" 64995
+     agent-repl-test-connect--dial-error)
+    ;; Assert
+    (should-not (agent-repl-test-connect--logs-matching 'error "the-filter-closure-body\\|:filter"))))
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-answers-the-message ()
+  "The sentinel's event is the error's message."
+  (agent-repl-test-connect--with-transport
+    ;; Act / Assert
+    (should (equal (agent-repl-connect--record-dial-failed
+                    "ws" "n" "127.0.0.1" 64995 agent-repl-test-connect--dial-error)
+                   "make client process failed: Connection refused"))))
+
+(ert-deftest agent-repl-test-connect-error-text-names-the-error-with-no-strings ()
+  "An error with no message strings is named by its symbol."
+  ;; Act / Assert
+  (should (equal (agent-repl-connect--error-text (list 'quit)) "quit")))
+
+(ert-deftest agent-repl-test-connect-send-failed-record-carries-no-closure ()
+  "A request write that signals is recorded by its message alone."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-send-failed
+     "ws" "n" (list 'error "Process not running" :filter (lambda () 'the-filter-closure-body)))
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching 'error "request-send-failed .*Process not running"))
+    (should-not (agent-repl-test-connect--logs-matching 'error "the-filter-closure-body"))))
+
 ;;;; ---- A connection at an address ----
 
 (ert-deftest agent-repl-test-connect-connection-at-p-answers-the-connections-own-address ()

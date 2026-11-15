@@ -522,6 +522,45 @@ into a generic silence."
   (when (process-live-p process)
     (delete-process process)))
 
+(defun agent-repl-connect--error-text (err)
+  "Return the human text of socket error ERR: its leading strings, joined.
+`make-network-process' signals with data like (\"make client process
+failed\" \"Connection refused\" :name ... :filter CLOSURE ...), and
+`error-message-string' prints all of it, closures included.  The leading
+strings are the whole message; the error\='s symbol stands in when there
+are none."
+  (let ((strings (let (acc)
+                   (catch 'done
+                     (dolist (part (cdr-safe err))
+                       (if (stringp part) (push part acc) (throw 'done nil))))
+                   (nreverse acc))))
+    (if strings
+        (mapconcat #'identity strings ": ")
+      (format "%s" (car-safe err)))))
+
+(defun agent-repl-connect--record-dial-failed (log-scope name host port err)
+  "Record at ERROR that dialing HOST:PORT for exchange NAME signalled ERR.
+Answers ERR\='s message, which the exchange\='s sentinel is handed as its
+event.  THE RECORD CARRIES THE MESSAGE ONLY, NEVER ERR ITSELF:
+`make-network-process' signals with its whole argument plist as data, the
+connection\='s filter and sentinel closures included, so printing ERR
+wrote ~7KB of byte-code into every record (2026-11-15: a dial loop filled
+a 5x64MB rotation in ten minutes).  LOG-SCOPE is the exchange\='s own."
+  (let ((message (agent-repl-connect--error-text err)))
+    (agent-repl--error log-scope "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
+                       name host port message)
+    message))
+
+(defun agent-repl-connect--record-send-failed (log-scope name err)
+  "Record at ERROR that writing exchange NAME\='s request signalled ERR.
+Answers ERR\='s message; the record carries it alone, for the reason
+`agent-repl-connect--record-dial-failed' gives.  LOG-SCOPE is the
+exchange\='s own."
+  (let ((message (agent-repl-connect--error-text err)))
+    (agent-repl--error log-scope "elisp.connect.request-send-failed name=%S error=%S"
+                       name message)
+    message))
+
 (defun agent-repl-connect--open-socket (name host port request filter sentinel log-scope)
   "Open a socket to HOST:PORT as process NAME and send REQUEST on it.
 FILTER receives raw response bytes and SENTINEL every status change.
@@ -575,16 +614,12 @@ from."
                :filter filter
                :sentinel #'ignore))
       (error
-       (setq refusal (error-message-string err))
-       (agent-repl--error log-scope "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
-                          name host port err)))
+       (setq refusal (agent-repl-connect--record-dial-failed log-scope name host port err))))
     (when process
       (condition-case err
           (process-send-string process request)
         (error
-         (setq refusal (error-message-string err))
-         (agent-repl--error log-scope "elisp.connect.request-send-failed name=%S error=%S"
-                            name err)
+         (setq refusal (agent-repl-connect--record-send-failed log-scope name err))
          (agent-repl-connect--close-socket process))))
     (if (process-live-p process)
         (set-process-sentinel process sentinel)
