@@ -110,9 +110,11 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 	if len(h.runner.argv) != 1 || len(h.hooks.runs) != 1 || h.hooks.runs[0].argv[2] != "patch" || h.hooks.runs[0].argv[3] != "fix the reaper" {
 		t.Fatalf("gate runs %v, landing runs %+v; want one full gate and one direct landing of a patch", h.runner.argv, h.hooks.runs)
 	}
-	record := h.db.workspaces["ws-remedy"]
-	if !record.Closed || record.MergedAt == nil {
-		t.Fatalf("workspace %+v, want it closed as a landed merge", record)
+	h.db.mu.Lock()
+	closed, closure, merged := h.db.closed["ws-remedy"], h.db.closures["ws-remedy"], !h.db.mergedAt["ws-remedy"].IsZero()
+	h.db.mu.Unlock()
+	if !closed || closure.By != wsm.CloseByMerge || !merged {
+		t.Fatalf("closed %v by %q, merged %v; want it closed as a landed merge", closed, closure.By, merged)
 	}
 	if h.rollout.fired != 1 {
 		t.Fatalf("rollout fired %d, want once", h.rollout.fired)
@@ -180,6 +182,7 @@ func TestARemediationFinishSendsTheWorkspaceBackToWork(t *testing.T) {
 			// THE NEXT FINISH GATES AGAIN.
 			h.git.mu.Lock()
 			h.git.ancestry[tipBefore+">HEAD"] = true
+			h.git.ancestry[tipAfter+">HEAD"] = true
 			h.git.mu.Unlock()
 			h.hooks.exits["feature"] = 0
 			if err := h.o.FinishRemediation(context.Background(), "ws-remedy", aRemediationPatch); err != nil {
