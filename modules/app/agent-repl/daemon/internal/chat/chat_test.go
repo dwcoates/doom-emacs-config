@@ -723,6 +723,26 @@ func TestAnAnsweredTurnThatAskedNoQuestionRecordsNothing(t *testing.T) {
 	}
 }
 
+func TestAnAnsweredTurnWithNoRecordRecordsNothingAndIsNoFault(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.turns.turnErr = fmt.Errorf("wsm: turn adopted-x of workspace agent-ws: %w", wsm.ErrNotFound)
+
+	// Act
+	f.svc.TurnAnswered("agent-ws", "adopted-x", "an adopted turn's answer")
+
+	// Assert
+	if len(f.zettel.nodes) != 0 {
+		t.Fatalf("nodes = %v, want none", f.zettel.nodes)
+	}
+	if f.records("error", "daemon.chat.record_failed") != 0 {
+		t.Fatalf("records = %+v, want no record_failed for an unrecorded turn", f.log.Records())
+	}
+	if f.records("info", "daemon.chat.turn_unrecorded") != 1 {
+		t.Fatalf("records = %+v, want one turn_unrecorded", f.log.Records())
+	}
+}
+
 func TestAFailedRecordIsLoggedAndNoLongerDrawn(t *testing.T) {
 	cases := []struct {
 		name    string
