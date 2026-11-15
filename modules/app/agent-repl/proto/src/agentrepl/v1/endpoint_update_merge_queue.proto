@@ -152,8 +152,16 @@ message UpdateMergeQueueMediation {
 }
 // The approval. No fields: the summary says what was checked.
 message UpdateMergeQueueMediationApprove {}
-// The escalation. No fields: the summary is what the user reads.
-message UpdateMergeQueueMediationEscalate {}
+// The escalation. The intake never talks to the user itself (owner ruling,
+// 2026-11-15): the daemon makes a visible escalation workspace whose prompt
+// is the summary and these findings with their evidence, and a desktop
+// notification whose click opens it.
+message UpdateMergeQueueMediationEscalate {
+  // The problems the intake found, most serious first, each with its
+  // verbatim evidence. Empty for an escalation that rests on the summary
+  // alone (the chain's bound reached with nothing new to state).
+  repeated DeployProblem problems = 1;
+}
 // A dispatch: what to fix, and which remediation workspace fixes it. The
 // intake states problems and their evidence only; it never researches a
 // cause or prescribes a fix, which is the remediation workspace's work.

@@ -815,9 +815,16 @@ func (*UpdateMergeQueueMediationApprove) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{10}
 }
 
-// The escalation. No fields: the summary is what the user reads.
+// The escalation. The intake never talks to the user itself (owner ruling,
+// 2026-11-15): the daemon makes a visible escalation workspace whose prompt
+// is the summary and these findings with their evidence, and a desktop
+// notification whose click opens it.
 type UpdateMergeQueueMediationEscalate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The problems the intake found, most serious first, each with its
+	// verbatim evidence. Empty for an escalation that rests on the summary
+	// alone (the chain's bound reached with nothing new to state).
+	Problems      []*DeployProblem `protobuf:"bytes,1,rep,name=problems,proto3" json:"problems,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -850,6 +857,13 @@ func (x *UpdateMergeQueueMediationEscalate) ProtoReflect() protoreflect.Message 
 // Deprecated: Use UpdateMergeQueueMediationEscalate.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueMediationEscalate) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *UpdateMergeQueueMediationEscalate) GetProblems() []*DeployProblem {
+	if x != nil {
+		return x.Problems
+	}
+	return nil
 }
 
 // A dispatch: what to fix, and which remediation workspace fixes it. The
@@ -1998,8 +2012,9 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\asummary\x18\x03 \x01(\tR\asummaryB\n" +
 	"\n" +
 	"\bdecision\"\"\n" +
-	" UpdateMergeQueueMediationApprove\"#\n" +
-	"!UpdateMergeQueueMediationEscalate\"\x8d\x02\n" +
+	" UpdateMergeQueueMediationApprove\"\\\n" +
+	"!UpdateMergeQueueMediationEscalate\x127\n" +
+	"\bproblems\x18\x01 \x03(\v2\x1b.agentrepl.v1.DeployProblemR\bproblems\"\x8d\x02\n" +
 	"!UpdateMergeQueueMediationDispatch\x127\n" +
 	"\bproblems\x18\x01 \x03(\v2\x1b.agentrepl.v1.DeployProblemR\bproblems\x12R\n" +
 	"\arestore\x18\x02 \x01(\v26.agentrepl.v1.UpdateMergeQueueMediationDispatchRestoreH\x00R\arestore\x12L\n" +
@@ -2121,28 +2136,29 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	10, // 16: agentrepl.v1.UpdateMergeQueueMediation.approve:type_name -> agentrepl.v1.UpdateMergeQueueMediationApprove
 	11, // 17: agentrepl.v1.UpdateMergeQueueMediation.escalate:type_name -> agentrepl.v1.UpdateMergeQueueMediationEscalate
 	12, // 18: agentrepl.v1.UpdateMergeQueueMediation.dispatch:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatch
-	15, // 19: agentrepl.v1.UpdateMergeQueueMediationDispatch.problems:type_name -> agentrepl.v1.DeployProblem
-	13, // 20: agentrepl.v1.UpdateMergeQueueMediationDispatch.restore:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatchRestore
-	14, // 21: agentrepl.v1.UpdateMergeQueueMediationDispatch.fresh:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatchFresh
-	17, // 22: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
-	18, // 23: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
-	19, // 24: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	20, // 25: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	21, // 26: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
-	22, // 27: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	23, // 28: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	24, // 29: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
-	25, // 30: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	26, // 31: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
-	27, // 32: agentrepl.v1.UpdateMergeQueueError.not_mediator:type_name -> agentrepl.v1.UpdateMergeQueueNotMediator
-	28, // 33: agentrepl.v1.UpdateMergeQueueError.no_mediation_owed:type_name -> agentrepl.v1.UpdateMergeQueueNoMediationOwed
-	29, // 34: agentrepl.v1.UpdateMergeQueueError.no_remediation_to_restore:type_name -> agentrepl.v1.UpdateMergeQueueNoRemediationToRestore
-	30, // 35: agentrepl.v1.UpdateMergeQueueError.remediation_bound_reached:type_name -> agentrepl.v1.UpdateMergeQueueRemediationBoundReached
-	36, // [36:36] is the sub-list for method output_type
-	36, // [36:36] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	15, // 19: agentrepl.v1.UpdateMergeQueueMediationEscalate.problems:type_name -> agentrepl.v1.DeployProblem
+	15, // 20: agentrepl.v1.UpdateMergeQueueMediationDispatch.problems:type_name -> agentrepl.v1.DeployProblem
+	13, // 21: agentrepl.v1.UpdateMergeQueueMediationDispatch.restore:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatchRestore
+	14, // 22: agentrepl.v1.UpdateMergeQueueMediationDispatch.fresh:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatchFresh
+	17, // 23: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
+	18, // 24: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
+	19, // 25: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	20, // 26: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	21, // 27: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
+	22, // 28: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	23, // 29: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	24, // 30: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
+	25, // 31: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	26, // 32: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
+	27, // 33: agentrepl.v1.UpdateMergeQueueError.not_mediator:type_name -> agentrepl.v1.UpdateMergeQueueNotMediator
+	28, // 34: agentrepl.v1.UpdateMergeQueueError.no_mediation_owed:type_name -> agentrepl.v1.UpdateMergeQueueNoMediationOwed
+	29, // 35: agentrepl.v1.UpdateMergeQueueError.no_remediation_to_restore:type_name -> agentrepl.v1.UpdateMergeQueueNoRemediationToRestore
+	30, // 36: agentrepl.v1.UpdateMergeQueueError.remediation_bound_reached:type_name -> agentrepl.v1.UpdateMergeQueueRemediationBoundReached
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }

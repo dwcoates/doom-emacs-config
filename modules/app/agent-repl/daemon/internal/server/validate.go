@@ -1353,6 +1353,9 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 				return err
 			}
 		}
+		if err := validateProblems("mediation.escalate.problems", m.GetEscalate().GetProblems()); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1366,16 +1369,22 @@ func validateDispatch(d *agentreplv1.UpdateMergeQueueMediationDispatch) *connect
 	if len(d.GetProblems()) == 0 {
 		return invalid("mediation.dispatch.problems", "a dispatch states at least one problem")
 	}
-	for _, p := range d.GetProblems() {
+	return validateProblems("mediation.dispatch.problems", d.GetProblems())
+}
+
+// validateProblems refuses, under FIELD, a problem with no statement, no
+// evidence, or a blank evidence record.
+func validateProblems(field string, problems []*agentreplv1.DeployProblem) *connect.Error {
+	for _, p := range problems {
 		if strings.TrimSpace(p.GetStatement()) == "" {
-			return invalid("mediation.dispatch.problems.statement", "each problem says what is wrong")
+			return invalid(field+".statement", "each problem says what is wrong")
 		}
 		if len(p.GetEvidence()) == 0 {
-			return invalid("mediation.dispatch.problems.evidence", "each problem quotes the records that show it")
+			return invalid(field+".evidence", "each problem quotes the records that show it")
 		}
 		for _, e := range p.GetEvidence() {
 			if strings.TrimSpace(e) == "" {
-				return invalid("mediation.dispatch.problems.evidence", "an evidence record is never blank")
+				return invalid(field+".evidence", "an evidence record is never blank")
 			}
 		}
 	}

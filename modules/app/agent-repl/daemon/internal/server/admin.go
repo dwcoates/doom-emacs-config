@@ -423,13 +423,19 @@ func decisionOf(m *agentreplv1.UpdateMergeQueueMediation) merge.Decision {
 	d := merge.Decision{Kind: merge.MediationApprove, Summary: m.GetSummary()}
 	switch m.GetDecision().(type) {
 	case *agentreplv1.UpdateMergeQueueMediation_Escalate:
-		d.Kind = merge.MediationEscalate
+		d.Kind, d.Problems = merge.MediationEscalate, problemsOf(m.GetEscalate().GetProblems())
 	case *agentreplv1.UpdateMergeQueueMediation_Dispatch:
 		dispatch := m.GetDispatch()
-		d.Kind, d.Restore = merge.MediationDispatch, dispatch.GetRestore() != nil
-		for _, p := range dispatch.GetProblems() {
-			d.Problems = append(d.Problems, merge.DeployProblem{Statement: p.GetStatement(), Evidence: p.GetEvidence()})
-		}
+		d.Kind, d.Restore, d.Problems = merge.MediationDispatch, dispatch.GetRestore() != nil, problemsOf(dispatch.GetProblems())
 	}
 	return d
+}
+
+// problemsOf reads a decision's problems into the queue's.
+func problemsOf(problems []*agentreplv1.DeployProblem) []merge.DeployProblem {
+	var out []merge.DeployProblem
+	for _, p := range problems {
+		out = append(out, merge.DeployProblem{Statement: p.GetStatement(), Evidence: p.GetEvidence()})
+	}
+	return out
 }

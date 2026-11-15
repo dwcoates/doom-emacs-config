@@ -1037,6 +1037,10 @@ func TestUpdateMergeQueueHandsTheIntakesDecisionOn(t *testing.T) {
 		{name: "an escalation", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}},
 			want: merge.Decision{Kind: merge.MediationEscalate, Summary: "clean"}},
+		{name: "an escalation with its findings", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{
+				Problems: []*agentreplv1.DeployProblem{{Statement: "the reaper errors", Evidence: []string{"{record}"}}}}}},
+			want: merge.Decision{Kind: merge.MediationEscalate, Summary: "clean", Problems: problems}},
 		{name: "a fresh dispatch", decision: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{
 			Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}),
 			want: merge.Decision{Kind: merge.MediationDispatch, Summary: "clean", Problems: problems}},
@@ -1122,6 +1126,9 @@ func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
 				Problems:    []*agentreplv1.DeployProblem{{Statement: "s"}},
 				Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}}}},
+		{name: "an escalation's problem with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{
+				Problems: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
 		{name: "a blank evidence record", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
 				Problems:    []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{" "}}},

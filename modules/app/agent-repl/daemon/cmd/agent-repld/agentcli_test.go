@@ -3383,6 +3383,37 @@ func TestMediationDispatchesTheProblemsReadFromStandardInput(t *testing.T) {
 	}
 }
 
+func TestMediationEscalatesWithItsFindingsWhenAsked(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		stdin        string
+		wantProblems int
+	}{
+		{name: "an escalation on its summary alone", args: []string{"mediation", "escalate", "-summary", "over to you"}},
+		{name: "an escalation with its findings", args: []string{"mediation", "escalate", "-problems", "-summary", "over to you"}, stdin: aProblemJSON, wantProblems: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.stdin = tt.stdin
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			e := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation().GetEscalate()
+			if e == nil || len(e.GetProblems()) != tt.wantProblems {
+				t.Fatalf("escalate = %v, want %d problems", e, tt.wantProblems)
+			}
+		})
+	}
+}
+
 func TestMediationRefusesAMalformedCall(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -3399,6 +3430,8 @@ func TestMediationRefusesAMalformedCall(t *testing.T) {
 		{name: "a dispatch whose problems are not JSON", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
 		{name: "a dispatch with an unknown field", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: `[{"statement":"s","evidence":["e"],"cause":"c"}]`, want: "as a JSON list"},
 		{name: "a dispatch of no problem", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "[]", want: "at least one problem"},
+		{name: "a dispatch reading -problems", args: []string{"mediation", "dispatch", "-fresh", "-problems", "-summary", "x"}, stdin: aProblemJSON, want: "a dispatch always reads its problems"},
+		{name: "an escalation whose problems are not JSON", args: []string{"mediation", "escalate", "-problems", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
