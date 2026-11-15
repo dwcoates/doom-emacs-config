@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,11 +10,12 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -63,11 +63,11 @@ const (
 // module root.
 const landDirectScript = "bin/land-direct.sh"
 
-// landDirectBound bounds one direct landing: a --no-ff merge, a changelog
-// commit and a tag in the main worktree, measured at under 2s on the owner's
-// machine (2026-11-14, bin/land-direct.sh landing deploy-mediator); 5s is
-// that with headroom for a cold disk.
-const landDirectBound = 5 * time.Second
+// landDirectBoundSeconds bounds one direct landing: a --no-ff merge, a
+// changelog commit and a tag in the main worktree, measured at under 2s on the
+// owner's machine (2026-11-14, bin/land-direct.sh landing deploy-mediator); 5s
+// is that with headroom for a cold disk.
+const landDirectBoundSeconds = 5
 
 // IsDeployRemediation implements Orchestrator: WS is the remediation
 // workspace of an owed check a fix is dispatched for.
@@ -263,23 +263,14 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 // runRemediationGate runs ARGV in DIR, writing every line to ARCHIVE, and
 // answers the run.
 func (o *orchestrator) runRemediationGate(ctx context.Context, dir string, argv []string, archive string) (GateResult, error) {
-	file, err := createLog(archive)
+	measured, err := o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(string) {})
 	if err != nil {
-		return GateResult{}, err
+		return GateResult{}, fmt.Errorf("merge: run the remediation's gate: %w", err)
 	}
-	writer := bufio.NewWriter(file)
-	var writeErr error
-	measured, runErr := o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(line string) {
-		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
-			writeErr = err
-		}
-	})
-	writeErr = errors.Join(writeErr, writer.Flush(), file.Close())
-	if runErr != nil {
-		return GateResult{}, fmt.Errorf("merge: run the remediation's gate: %w", runErr)
-	}
-	if writeErr != nil {
-		return GateResult{}, fmt.Errorf("merge: write the remediation's gate log %s: %w", archive, writeErr)
+	// THE ARCHIVE IS THE ONLY ACCOUNT OF A FAILURE THAT SURVIVES THE RUN, so
+	// a gate whose log failed is an unrunnable gate rather than a lost log.
+	if err := writeLog(archive, measured.Output); err != nil {
+		return GateResult{}, fmt.Errorf("merge: write the remediation's gate log %s: %w", archive, err)
 	}
 	return GateResult{Passed: measured.ExitCode == 0, Tail: measured.Output, ArchivePath: archive, ExitCode: measured.ExitCode}, nil
 }
@@ -391,14 +382,19 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 		if f.Version != nil {
 			part, line = f.Version.Part.String(), f.Version.ChangelogLine
 		}
-		argv := []string{filepath.Join(filepath.Dir(o.deps.PromptsDir), landDirectScript), target.repoRoot, part, line, record.Branch}
-		run, err := o.deps.HookRunner.RunLinesWith(ctx, target.repoRoot, argv, scriptrunner.Options{Timeout: landDirectBound}, func(string) {})
-		if err != nil {
-			return fmt.Errorf("merge: run the remediation's direct landing: %w", err)
+		script := &repoconfigv1.HookScript{Path: filepath.Join(filepath.Dir(o.deps.PromptsDir), landDirectScript), TimeoutSeconds: landDirectBoundSeconds}
+		logPath := LifecycleLogPath(o.deps.StateDir, lifecycleconfig.StageFinish, o.deps.Now(), 0)
+		kept := RunKeptScript(ctx, o.deps.HookRunner, target.repoRoot, script, nil, logPath, target.repoRoot, part, line, record.Branch)
+		if kept.Err != nil {
+			return fmt.Errorf("merge: run the remediation's direct landing: %w", kept.Err)
 		}
+		if kept.LogErr != nil {
+			o.deps.Log.Global().Error(opRemediationFinish, "the remediation's direct landing ran but its log could not be kept", withField(withField(fields, "log", logPath), "error", kept.LogErr.Error()))
+		}
+		run := kept.Run
 		switch {
 		case run.TimedOut:
-			return fmt.Errorf("merge: the remediation's direct landing outlived its bound of %s (measured under 2s): %s", landDirectBound, strings.TrimSpace(run.Output))
+			return fmt.Errorf("merge: the remediation's direct landing outlived its bound of %ds (measured under 2s): %s", landDirectBoundSeconds, strings.TrimSpace(run.Output))
 		case run.ExitCode == 1:
 			return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": strings.TrimSpace(run.Output)}, fields)
 		case run.ExitCode != 0:

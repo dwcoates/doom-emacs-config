@@ -107,7 +107,7 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 	if f == nil || f.Step != wsm.RemediationDeploying || f.LandedHead != tipAfter {
 		t.Fatalf("finish %+v, want it deploying having landed %s", f, tipAfter)
 	}
-	if len(h.runner.argv) != 1 || len(h.hooks.runs) != 1 || h.hooks.runs[0].argv[2] != "patch" || h.hooks.runs[0].argv[3] != "fix the reaper" {
+	if len(h.runner.argv) != 1 || len(h.hooks.runs) != 1 || h.hooks.runs[0].argv[3] != "patch" || h.hooks.runs[0].argv[4] != "fix the reaper" {
 		t.Fatalf("gate runs %v, landing runs %+v; want one full gate and one direct landing of a patch", h.runner.argv, h.hooks.runs)
 	}
 	h.db.mu.Lock()
