@@ -10,5 +10,8 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
-swift build --build-tests
-swift test --skip-build
+# --disable-sandbox: the test runner already runs every unit under a sandbox
+# profile of its own, and macOS refuses SwiftPM's nested sandbox-exec for the
+# manifest and its plugins ("sandbox_apply: Operation not permitted").
+swift build --disable-sandbox --build-tests
+swift test --disable-sandbox --skip-build
