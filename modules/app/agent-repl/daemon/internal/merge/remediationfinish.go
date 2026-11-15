@@ -247,6 +247,13 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		why := fmt.Sprintf("your branch does not hold %s's tip %s", mainBranch, shortSHA(tip))
 		return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": why}, withField(fields, "main_tip", tip))
 	}
+	// THE COMMIT THE GATE TESTS is read before it runs and again after it
+	// passes: what landed must be what passed, so the landing does not run
+	// the suite a second time (bin/land-direct.sh --gated-at).
+	gated, err := o.deps.Git.ResolveRef(ctx, target.repoRoot, record.Branch)
+	if err != nil {
+		return err
+	}
 	argv := o.deps.TestCommand(record.Dir, target.testScript(), record.Name)
 	if len(argv) == 0 {
 		return fmt.Errorf("merge: no test command is configured for the remediation's gate")
@@ -266,12 +273,20 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate failed", withField(withField(fields, "archive", archive), "exit_code", result.ExitCode))
 		return o.resumeRemediation(ctx, f, BriefRemediationGateFailed, map[string]string{"archive_path": archive, "failing_tests": failing}, fields)
 	}
-	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate passed; it lands", withField(fields, "archive", archive))
-	moved, err := o.deps.DB.AdvanceRemediationFinish(ctx, f.Workspace, wsm.RemediationGating, wsm.RemediationLanding, o.deps.Now())
+	after, err := o.deps.Git.ResolveRef(ctx, target.repoRoot, record.Branch)
+	if err != nil {
+		return err
+	}
+	if after != gated {
+		why := fmt.Sprintf("your branch moved from %s to %s while its gate ran, so what passed is not what would land", shortSHA(gated), shortSHA(after))
+		return o.resumeRemediation(ctx, f, BriefRemediationBehind, map[string]string{"main_branch": mainBranch, "why": why}, withField(fields, "gated", gated))
+	}
+	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate passed; it lands", withField(withField(fields, "archive", archive), "gated", gated))
+	moved, err := o.deps.DB.PassRemediationGate(ctx, f.Workspace, gated, o.deps.Now())
 	if err != nil || !moved {
 		return finishMoved(err, moved, f, wsm.RemediationLanding)
 	}
-	f.Step = wsm.RemediationLanding
+	f.Step, f.GatedHead = wsm.RemediationLanding, gated
 	return o.remediationLand(ctx, f, withField(fields, "step", string(f.Step)))
 }
 
@@ -412,7 +427,12 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 		}
 		script := &repoconfigv1.HookScript{Path: filepath.Join(filepath.Dir(o.deps.PromptsDir), landDirectScript), TimeoutSeconds: landDirectBoundSeconds}
 		logPath := LifecycleLogPath(o.deps.StateDir, lifecycleconfig.StageFinish, o.deps.Now(), 0)
-		kept := RunKeptScript(ctx, o.deps.HookRunner, target.repoRoot, script, nil, logPath, target.repoRoot, part, line, record.Branch)
+		// A LANDING IS OF THE COMMIT ITS GATE PASSED ON (GatedHead), which a
+		// finish that reached this step always recorded.
+		if f.GatedHead == "" {
+			return fmt.Errorf("merge: the remediation %s reached its landing with no gated commit recorded", f.Workspace)
+		}
+		kept := RunKeptScript(ctx, o.deps.HookRunner, target.repoRoot, script, nil, logPath, "--gated-at", f.GatedHead, target.repoRoot, part, line, record.Branch)
 		if kept.Err != nil {
 			return fmt.Errorf("merge: run the remediation's direct landing: %w", kept.Err)
 		}

@@ -408,6 +408,10 @@ func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationF
 	return f.checks.BeginRemediationFinish(ctx, rf)
 }
 
+func (f *fakeDB) PassRemediationGate(ctx context.Context, ws ids.WorkspaceID, head string, at time.Time) (bool, error) {
+	return f.checks.PassRemediationGate(ctx, ws, head, at)
+}
+
 func (f *fakeDB) AdvanceRemediationFinish(ctx context.Context, ws ids.WorkspaceID, from, to wsm.RemediationStep, at time.Time) (bool, error) {
 	return f.checks.AdvanceRemediationFinish(ctx, ws, from, to, at)
 }

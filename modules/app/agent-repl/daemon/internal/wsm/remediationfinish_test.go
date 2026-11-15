@@ -343,3 +343,32 @@ func TestARecordOfADeployEscalationNamingNothingIsRefused(t *testing.T) {
 		t.Fatalf("RecordDeployEscalation = %v, want a refusal recorded at ERROR: %v", err, log.Records())
 	}
 }
+
+func TestAPassedRemediationGateRecordsTheCommitItPassedOn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	beginFinish(t, s, RepoKey(t.TempDir()), instant, nil)
+
+	// Act
+	moved, err := s.PassRemediationGate(context.Background(), "remedy", "abc", instant)
+	f, _ := s.RemediationFinishOf(context.Background(), "remedy")
+
+	// Assert
+	if err != nil || !moved || f.Step != RemediationLanding || f.GatedHead != "abc" {
+		t.Fatalf("PassRemediationGate = (%v, %v), finish %+v; want it landing at abc", moved, err, f)
+	}
+}
+
+func TestAPassedRemediationGateNamingNoCommitIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	beginFinish(t, s, RepoKey(t.TempDir()), instant, nil)
+
+	// Act
+	_, err := s.PassRemediationGate(context.Background(), "remedy", "", instant)
+
+	// Assert
+	if err == nil || !loggedOperation(log, "daemon.wsm.pass_remediation_gate", "error") {
+		t.Fatalf("PassRemediationGate = %v, want a refusal recorded at ERROR", err)
+	}
+}

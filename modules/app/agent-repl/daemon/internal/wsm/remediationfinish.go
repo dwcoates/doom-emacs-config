@@ -91,7 +91,11 @@ type RemediationFinish struct {
 	StartedAt time.Time
 	// LandedHead is the main branch's head the last landing made, empty
 	// before one; LandedPaths every path the workspace's landings changed.
-	LandedHead  string
+	LandedHead string
+	// GatedHead is the commit the finish's full gate passed on, which its
+	// landing lands without running the suite again (bin/land-direct.sh
+	// --gated-at); empty until a gate passes.
+	GatedHead   string
 	LandedPaths []string
 }
 
@@ -256,6 +260,38 @@ func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int
 	return n, err
 }
 
+// remediationGatedHeadDDL is the layout-148 addition: the commit a finish's
+// gate passed on, so its landing does not run the full suite a second time
+// (it outlived the landing's bound, 2026-11-15 20:30).
+const remediationGatedHeadDDL = `
+ALTER TABLE deploy_remediation_finishes ADD COLUMN gated_head TEXT NOT NULL DEFAULT '';
+`
+
+// PassRemediationGate moves WS's finish from its gate to its landing,
+// recording HEAD as the commit the gate passed on, answering whether it was
+// at its gate.
+func (s *store) PassRemediationGate(ctx context.Context, ws WorkspaceID, head string, at time.Time) (bool, error) {
+	const op = "daemon.wsm.pass_remediation_gate"
+	fields := dlog.Context{"workspace": string(ws), "head": head}
+	if head == "" {
+		err := errors.New("wsm: a passed gate names the commit it passed on")
+		s.log.Error(op, "refused a passed remediation gate that names no commit", withError(fields, err))
+		return false, err
+	}
+	changed := false
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE deploy_remediation_finishes SET step = ?, step_at = ?, gated_head = ? WHERE workspace_id = ? AND step = ?`,
+			string(RemediationLanding), nanos(at), head, string(ws), string(RemediationGating))
+		if err != nil {
+			return err
+		}
+		changed, err = touchedRow(res)
+		return err
+	})
+	return changed, err
+}
+
 // RemediationFinishOf answers WS's finish, nil when it has none.
 func (s *store) RemediationFinishOf(ctx context.Context, ws WorkspaceID) (*RemediationFinish, error) {
 	const op = "daemon.wsm.remediation_finish_of"
@@ -298,7 +334,7 @@ func (s *store) EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool,
 }
 
 // remediationFinishQuery reads the finish columns; callers add the WHERE.
-const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths FROM deploy_remediation_finishes`
+const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths, gated_head FROM deploy_remediation_finishes`
 
 // scanRemediationFinish decodes ROW, nil when there is none.
 func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
@@ -315,14 +351,14 @@ func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
 // scanRemediationFinishRow is the one decoding of a finish row. A step or a
 // version part the daemon never writes is a DecodeError.
 func scanRemediationFinishRow(row interface{ Scan(...any) error }) (RemediationFinish, error) {
-	var ws, repo, step, part, line, head, paths string
+	var ws, repo, step, part, line, head, paths, gated string
 	var stepAt, started int64
 	var rounds int
-	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths); err != nil {
+	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths, &gated); err != nil {
 		return RemediationFinish{}, err
 	}
 	f := RemediationFinish{Workspace: WorkspaceID(ws), Repo: RepoKey(repo), Step: RemediationStep(step), StepAt: fromNanos(stepAt),
-		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head}
+		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head, GatedHead: gated}
 	if paths != "" {
 		f.LandedPaths = strings.Split(paths, "\n")
 	}

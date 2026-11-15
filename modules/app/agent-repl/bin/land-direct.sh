@@ -5,7 +5,10 @@
 # workspace's agent has paused the queue before landing
 # (metaprompt-queue-bypass.md); this script gates and lands.
 #
-# Usage: land-direct.sh REPO PART LINE BRANCH
+# Usage: land-direct.sh [--gated-at COMMIT] REPO PART LINE BRANCH
+#   --gated-at COMMIT: the caller's own full suite already passed on BRANCH at
+#   COMMIT (the daemon's gate of a deploy remediation or escalation), so the
+#   gate checks the tip is exactly COMMIT and does not run the suite again.
 #   Gate BRANCH (lib-land-gate.sh: checked out and clean in a worktree,
 #   rebased onto REPO's main branch, the full suite passing on it), then merge
 #   it into REPO's main branch in its main worktree (one --no-ff merge
@@ -32,6 +35,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib-land-gate.sh"
 die() { echo "land-direct: $*" >&2; exit 2; }
 log() { echo "[land-direct] $*" >&2; }
 
+gated=""
+if [[ "${1:-}" == --gated-at ]]; then
+  gated="${2:-}"
+  [[ "$gated" =~ ^[0-9a-f]{40}$ ]] || die "--gated-at names the full commit the caller's suite passed on, not '$gated'"
+  shift 2
+fi
 repo="${1:-}"; part="${2:-}"; line="${3:-}"
 [[ -n "$repo" && -d "$repo" ]] || die "usage: land-direct.sh REPO PART LINE BRANCH"
 git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git repository"
@@ -54,7 +63,7 @@ target=$(git -C "$main" rev-parse --abbrev-ref HEAD) || die "could not read the 
 [[ "$target" != HEAD ]] || die "the main worktree $main has no branch checked out"
 git -C "$main" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null || die "no such branch: $branch"
 gate=0
-refusal=$(land_gate "$main" "$branch") || gate=$?
+refusal=$(land_gate "$main" "$branch" "$gated") || gate=$?
 case "$gate" in
   0) ;;
   "$LAND_GATE_REFUSED") echo "$refusal"; exit 4 ;;

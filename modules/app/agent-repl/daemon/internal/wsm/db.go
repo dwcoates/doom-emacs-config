@@ -725,6 +725,9 @@ type DB interface {
 	EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool, error)
 	// RecordRemediationLanded records what a remediation's landing made and
 	// moves its finish to deploying.
+	// PassRemediationGate moves WS's finish to its landing, recording the
+	// commit its gate passed on.
+	PassRemediationGate(ctx context.Context, ws WorkspaceID, head string, at time.Time) (bool, error)
 	RecordRemediationLanded(ctx context.Context, ws WorkspaceID, head string, paths []string, at time.Time) (bool, error)
 	// EndRemediationFinishesOf removes every remediation finish of a queue
 	// whose chain ended.
