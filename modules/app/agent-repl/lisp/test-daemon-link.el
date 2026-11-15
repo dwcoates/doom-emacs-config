@@ -2451,7 +2451,7 @@ announcement must still attach its own successor."
       (agent-repl-test-link--close (agent-repl-link-successor) '(:cancelled))
       ;; Assert
       (should-not (agent-repl-link-successor))
-      (should (agent-repl-test-link--logged-p :log "elisp.link.successor-stream-cancelled")))))
+      (should (agent-repl-test-link--logged-p :info "elisp.link.successor-stream-cancelled")))))
 
 (ert-deftest agent-repl-test-link-closed-successor-does-not-block-the-announced-one ()
   "A successor whose connection is closed is over: the announced one attaches."
@@ -2493,3 +2493,46 @@ announcement must still attach its own successor."
       ;; Assert
       (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
                      "127.0.0.1:9200")))))
+
+(ert-deftest agent-repl-test-link-primary-stream-cancel-leaves-a-record ()
+  "The primary's stream ending by Emacs's own close is recorded at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close conn '(:cancelled))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :info "elisp.link.primary-stream-cancelled")))))
+
+(ert-deftest agent-repl-test-link-stale-stream-close-leaves-a-record-naming-its-address ()
+  "A stream that matches no slot still says where it ended, at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((old (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--hand-over-to old "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--close old '(:ended))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.stale-stream-close address=\"127.0.0.1:9001\"")))))
+
+(ert-deftest agent-repl-test-link-pending-successor-cancel-leaves-a-record ()
+  "An unaccepted successor dial closed by Emacs is recorded at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Act
+    (agent-repl-test-link--close agent-repl-link--pending-successor '(:cancelled))
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :info "elisp.link.pending-successor-cancelled"))))
+
+(ert-deftest agent-repl-test-link-pending-stream-cancel-leaves-a-record ()
+  "An unaccepted primary dial closed by Emacs is recorded at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((pending (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--close pending '(:cancelled))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p :info "elisp.link.pending-stream-cancelled")))))

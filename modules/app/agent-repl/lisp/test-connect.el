@@ -890,6 +890,52 @@ flattened into a generic silence."
       (should (eq (plist-get failure :kind) :transport))
       (should (string-match-p "failed with code 61" (plist-get failure :message))))))
 
+(defun agent-repl-test-connect--refuse-dial (record)
+  "Deliver RECORD's death as a dial the kernel refused: no process ever stood."
+  (let ((process (plist-get record :process)))
+    (when (process-live-p process) (delete-process process))
+    (funcall (plist-get record :sentinel)
+             nil "make client process failed: Connection refused")))
+
+(ert-deftest agent-repl-test-connect-unary-refused-dial-is-unreached ()
+  "A dial the kernel refused says no daemon listens there."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((failure nil))
+      (agent-repl-connect-unary (agent-repl-test-connect--conn) "DaemonHealth" "{}"
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (agent-repl-test-connect--refuse-dial (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (agent-repl-connect-failure-unreached-p failure))
+      (should (eq (plist-get failure :kind) :transport)))))
+
+(ert-deftest agent-repl-test-connect-unary-dropped-socket-is-not-unreached ()
+  "A socket that connected and then ended unanswered reached a daemon."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((failure nil))
+      (agent-repl-connect-unary (agent-repl-test-connect--conn) "DaemonHealth" "{}"
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should-not (agent-repl-connect-failure-unreached-p failure))
+      (should-not (plist-member failure :unreached)))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-dial-is-unreached ()
+  "A stream whose dial the kernel refused closes as unreached."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((outcome nil))
+      (agent-repl-connect-stream (agent-repl-test-connect--conn) "WatchDaemon" "{}"
+                                 #'ignore (lambda (o) (setq outcome o)))
+      ;; Act
+      (agent-repl-test-connect--refuse-dial (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (eq (car outcome) :error))
+      (should (agent-repl-connect-failure-unreached-p (cadr outcome))))))
+
 (ert-deftest agent-repl-test-connect-unary-reports-a-drop-mid-body ()
   "A peer that hangs up inside a declared body fails as a DROP, not as JSON.
 Parsing what arrived would turn a severed connection into an unrelated

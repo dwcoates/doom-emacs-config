@@ -710,7 +710,7 @@ the stream\='s last frame was the planned ending
             agent-repl-link--pending-stream nil
             agent-repl-link--pending-reconnect-p nil)
       (if (eq kind :cancelled)
-          (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-stream-cancelled")
+          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-stream-cancelled")
         (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open-refused address=%S outcome=%S"
                           (agent-repl-connect-connection-address conn) outcome)
         (agent-repl-connect-close conn)
@@ -722,7 +722,7 @@ the stream\='s last frame was the planned ending
       (setq agent-repl-link--pending-successor nil
             agent-repl-link--pending-successor-stream nil)
       (if (eq kind :cancelled)
-          (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-successor-cancelled")
+          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.pending-successor-cancelled")
         (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-open-refused address=%S outcome=%S"
                            (agent-repl-connect-connection-address conn) outcome)
         (agent-repl-connect-close conn))
@@ -745,13 +745,14 @@ the stream\='s last frame was the planned ending
         (setq agent-repl-link--successor nil
               agent-repl-link--successor-stream nil)
         (if (eq kind :cancelled)
-            (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-cancelled")
+            (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-cancelled")
           (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-lost outcome=%S" outcome)
           (agent-repl-connect-close successor))))
      ((not (eq conn agent-repl-link--primary))
-      (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.stale-stream-close outcome=%S" outcome))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.stale-stream-close address=%S outcome=%S"
+                      (agent-repl-connect-connection-address conn) outcome))
      ((eq kind :cancelled)
-      (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-stream-cancelled"))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.primary-stream-cancelled"))
      (agent-repl-link--successor
       ;; The old daemon finished and dropped its stream after a handover.
       (agent-repl-link--complete-handover outcome))

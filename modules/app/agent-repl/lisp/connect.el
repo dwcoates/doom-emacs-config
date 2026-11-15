@@ -198,6 +198,25 @@ the human-facing text.  CODE is the Connect error code string when the
 daemon supplied one; STATUS is the HTTP status when one was read."
   (list :kind kind :code code :status status :message message))
 
+(defun agent-repl-connect--undelivered-failure (method address proc event)
+  "Return the `:transport' failure of METHOD at ADDRESS that got no HTTP answer.
+PROC is the socket's process and EVENT its sentinel event.  A nil PROC is
+a dial that never connected: the kernel refused it, so NO DAEMON LISTENS
+at ADDRESS, and the failure says so with `:unreached t'
+\=(`agent-repl-connect-failure-unreached-p').  A socket that connected and
+then ended unanswered carries no such mark: a daemon was there.  THE ONE
+SPELLING for both the unary and the streaming sentinel."
+  (let ((detail (agent-repl-connect--failure
+                 :transport
+                 (agent-repl-connect--transport-message method address event))))
+    (if proc detail (append detail (list :unreached t)))))
+
+(defun agent-repl-connect-failure-unreached-p (detail)
+  "Return non-nil when failure plist DETAIL is a dial no daemon answered.
+The kernel refused the connect, so nothing listens at the address: a
+caller retrying onto that daemon has nobody left to retry onto."
+  (and (plist-get detail :unreached) t))
+
 (defun agent-repl-connect-failure-message (detail)
   "Return the human-facing text of failure plist DETAIL."
   (plist-get detail :message))
@@ -784,9 +803,8 @@ the call is idempotent.  Returns the socket process."
                               :status status)))
                     ((null status)
                      (settle :failure
-                             (agent-repl-connect--failure
-                              :transport
-                              (agent-repl-connect--transport-message method address event))))
+                             (agent-repl-connect--undelivered-failure
+                              method address proc event)))
                     ;; A DECLARED LENGTH THE PEER DID NOT DELIVER IS A DROP,
                     ;; not a body.  Parsing what arrived would turn a severed
                     ;; connection into an unrelated `malformed' complaint
@@ -1110,9 +1128,8 @@ nothing.  Returns the stream object."
                            :status status)))
                    ((null status)
                     (list :error
-                          (agent-repl-connect--failure
-                           :transport
-                           (agent-repl-connect--transport-message method address event))))
+                          (agent-repl-connect--undelivered-failure
+                           method address proc event)))
                    ((/= status 200)
                     (list :error
                           (agent-repl-connect--connect-error-detail status error-body)))

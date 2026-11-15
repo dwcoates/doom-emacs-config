@@ -2972,7 +2972,102 @@ far too late."
     (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
     ;; Assert
     (should (eq (nth 1 (car agent-repl-test-host--timers))
-                #'agent-repl-host--adopt-onto))))
+                #'agent-repl-host--adopt-call))))
+
+(defmacro agent-repl-test-host--with-failing-adopt (detail &rest body)
+  "Run BODY after `ws-1''s adopt onto a standing successor failed with DETAIL.
+`successor' and `old' are bound to the successor and the daemon WS came from."
+  (declare (indent 1))
+  `(progn
+     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+           agent-repl-test-host--adopt-answer (list :failure ,detail))
+     (agent-repl-test-host--subscribe "ws-1")
+     (let ((successor agent-repl-test-host--successor)
+           (old (agent-repl-host--recorded-conn "ws-1")))
+       (ignore successor old)
+       (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+       ,@body)))
+
+(defun agent-repl-test-host--run-retry ()
+  "Run the newest scheduled timer, as its delay elapsing would."
+  (let ((retry (pop agent-repl-test-host--timers)))
+    (apply (nth 1 retry) (nthcdr 2 retry))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-reloads-nothing ()
+  "A retried adopt re-issues the call alone: the page already stands on the successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-failing-adopt (list :kind :timeout :message "no answer")
+      ;; Arrange
+      (setq agent-repl-test-host--walk nil)
+      ;; Act
+      (agent-repl-test-host--run-retry)
+      ;; Assert
+      (should (equal agent-repl-test-host--walk '(:adopt))))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-keeps-the-workspace-on-the-successor ()
+  "Between attempts the workspace and its page stay on the successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-failing-adopt (list :kind :timeout :message "no answer")
+      ;; Assert
+      (should (eq (agent-repl-host--recorded-conn "ws-1") successor))
+      (should-not (agent-repl-test-host--logged-p :info "elisp.host.webview-restored")))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-stops-on-an-unreached-successor ()
+  "A dial no daemon answered ends the retry: nobody listens to adopt onto."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-failing-adopt
+        (list :kind :transport :message "Connection refused" :unreached t)
+      ;; Assert
+      (should (null agent-repl-test-host--timers))
+      (should (eq (agent-repl-host--recorded-conn "ws-1") old))
+      (should (agent-repl-test-host--logged-p
+               :error "elisp.host.adopt-failed ws=ws-1 detail=(:kind :transport :message \"Connection refused\" :unreached t) retrying=nil stopped=unreached")))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-stops-on-a-closed-successor ()
+  "A successor whose connection is closed ends the retry."
+  (agent-repl-test-host--with-harness
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :failure (list :kind :timeout :message "no answer")))
+    (agent-repl-test-host--subscribe "ws-1")
+    (cl-letf (((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+               (lambda (conn _request &rest keys)
+                 (setf (agent-repl-connect-connection-alive-p conn) nil)
+                 (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
+                                               (plist-get keys :on-response)
+                                               (plist-get keys :on-failure)))))
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Assert
+      (should (null agent-repl-test-host--timers))
+      (should (agent-repl-test-host--logged-p :error "retrying=nil stopped=closed")))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-ending-restores-the-page-once ()
+  "Across a retried attempt and the stop, the page moves out once and back once."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-failing-adopt (list :kind :timeout :message "no answer")
+      ;; Arrange
+      (setq agent-repl-test-host--adopt-answer
+            (list :failure (list :kind :transport :message "refused" :unreached t)))
+      ;; Act
+      (agent-repl-test-host--run-retry)
+      ;; Assert
+      (should (= 2 (cl-count :reload agent-repl-test-host--walk)))
+      (should (eq (agent-repl-host--recorded-conn "ws-1") old)))))
+
+(ert-deftest agent-repl-test-host-adopt-call-runs-in-the-workspaces-log-context ()
+  "The adopt's transport records land in the adopting workspace's own log."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((context :unset))
+      (cl-letf (((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+                 (lambda (&rest _) (setq context agent-repl--log-context-workspace))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (equal context "ws-1"))))))
 
 (ert-deftest agent-repl-test-host-adopt-transport-failure-does-not-retry-a-gone-successor ()
   "A successor that is no longer standing has nothing left to adopt onto.
@@ -4337,13 +4432,20 @@ about the END state instead of about the absence of an act."
       (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) old)))))
 
 (ert-deftest agent-repl-test-host-failed-adopt-puts-the-page-back-on-the-old-daemon ()
-  "A TRANSPORT failure restores the page too — not only a refusal arm."
+  "A TRANSPORT failure that ends the walk restores the page too — not only a refusal arm.
+
+AMENDED 2026-11-15: a transport failure that is RETRIED keeps the page on
+the successor, because restoring it and reloading it again on every
+attempt was ~800k reloads in the 0.440.1 handover
+\(`agent-repl-test-host-adopt-retry-reloads-nothing').  The restore is
+now owed when the retry stops, here on a dial no daemon answered."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (let ((old (agent-repl-connect-open "127.0.0.1:9001")))
       (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
             agent-repl-test-host--adopt-answer
-            (list :failure (list :kind :timeout :message "AdoptHostWorkspace timed out")))
+            (list :failure (list :kind :transport :message "AdoptHostWorkspace: no HTTP response"
+                                 :unreached t)))
       (agent-repl-test-host--subscribe "ws-1" old)
       ;; Act
       (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
