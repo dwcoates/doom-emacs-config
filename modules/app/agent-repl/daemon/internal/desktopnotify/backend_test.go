@@ -299,7 +299,7 @@ func TestBannerAndChimeResolveThroughOneHelper(t *testing.T) {
 	_, chimeErr := NewChime(mustChimePlatform(t, "darwin"), "", noLookPath, &fakeRunner{})
 
 	// Assert
-	if bannerErr == nil || bannerErr.Error() != `the banner program "terminal-notifier" is not installed: not on PATH` {
+	if bannerErr == nil || bannerErr.Error() != `the banner program "notify-send" is not installed: not on PATH` {
 		t.Fatalf("banner err = %v", bannerErr)
 	}
 	if chimeErr == nil || chimeErr.Error() != `the chime program "afplay" is not installed: not on PATH` {
