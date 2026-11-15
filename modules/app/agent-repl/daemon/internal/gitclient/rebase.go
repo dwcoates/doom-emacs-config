@@ -2,6 +2,7 @@ package gitclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -110,13 +111,19 @@ func (c *client) StartRebase(ctx context.Context, dir, onto string, commits []st
 	// `<editor> <todo-path>`, so `cp '<ours>'` makes the list the daemon wrote
 	// the list git replays, with its breaks.
 	env := append([]string{"GIT_SEQUENCE_EDITOR=cp " + shellword.Quote(todo)}, rebaseEnv...)
-	return c.rebaseCommand(ctx, operation, dir, env, "rebase", "-i", "--empty=drop", onto)
+	return c.rebaseCommand(ctx, operation, dir, env, true, "rebase", "-i", "--empty=drop", onto)
 }
+
+// ErrDirtyWorktree is what StartRebase answers, wrapped with git's own
+// refusal, when git refused to begin the rebase because the worktree has
+// uncommitted changes: nothing was replayed and no rebase stands, so the
+// caller may have the changes committed and start again.
+var ErrDirtyWorktree = errors.New("gitclient: the worktree has uncommitted changes, so git refused to start the rebase")
 
 // ContinueRebase replays the next commit of the rebase standing in dir: after
 // a break, or after a conflict whose resolution is staged.
 func (c *client) ContinueRebase(ctx context.Context, dir string) (RebaseStep, error) {
-	return c.rebaseCommand(ctx, "daemon.gitclient.continue_rebase", dir, rebaseEnv, "rebase", "--continue")
+	return c.rebaseCommand(ctx, "daemon.gitclient.continue_rebase", dir, rebaseEnv, false, "rebase", "--continue")
 }
 
 // AbortRebase ends the rebase standing in dir: git puts the branch and the
@@ -132,7 +139,11 @@ func (c *client) AbortRebase(ctx context.Context, dir string) error {
 // progress any more, and stopped at a break otherwise. A nonzero exit is a
 // conflict only when git left conflicted paths; anything else is a real
 // failure carrying git's own words, and the rebase is left as git left it.
-func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env []string, args ...string) (RebaseStep, error) {
+//
+// A START GIT REFUSED OVER UNCOMMITTED CHANGES is told apart (ErrDirtyWorktree)
+// by what git left, never by its words: no rebase stands and the worktree is
+// not clean. START says the command is the one that begins the rebase.
+func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env []string, start bool, args ...string) (RebaseStep, error) {
 	in, err := c.runRawWithEnv(ctx, operation, dir, env, args...)
 	if err != nil {
 		return RebaseStep{}, err
@@ -147,6 +158,16 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 	conflicted, err := c.ConflictedFiles(ctx, dir)
 	if err != nil {
 		return RebaseStep{}, err
+	}
+	if len(conflicted) == 0 && start {
+		refused, err := c.refusedOverChanges(ctx, dir)
+		if err != nil {
+			return RebaseStep{}, err
+		}
+		if refused {
+			c.log.Global().Info(operation, "git refused to start the rebase over the worktree's uncommitted changes; nothing was replayed", in.logContext())
+			return RebaseStep{}, fmt.Errorf("%w: %w", ErrDirtyWorktree, in.fail())
+		}
 	}
 	if len(conflicted) == 0 {
 		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", c.stopEvidence(ctx, dir, in.logContext()))
@@ -177,6 +198,21 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 	fields["conflicted"] = remaining
 	c.log.Global().Info(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", fields)
 	return RebaseStep{Conflicted: remaining, Resolved: resolved}, nil
+}
+
+// refusedOverChanges reports whether a start that failed without conflicts
+// left what git's refusal over uncommitted changes leaves: no rebase standing,
+// and a worktree that is not clean.
+func (c *client) refusedOverChanges(ctx context.Context, dir string) (bool, error) {
+	standing, err := c.RebaseInProgress(ctx, dir)
+	if err != nil || standing {
+		return false, err
+	}
+	clean, err := c.statusEmpty(ctx, "daemon.gitclient.start_rebase_refusal", dir)
+	if err != nil {
+		return false, err
+	}
+	return !clean, nil
 }
 
 // rerereRemaining answers the conflicted paths rerere did not resolve from a
