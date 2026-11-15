@@ -3,7 +3,9 @@
 package integration
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -44,11 +46,7 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	// concurrent suite run its host tools outran the remainder (2026-10-20).
 	bootCtx, cancelBoot := d.WaitCtx()
 	defer cancelBoot()
-	// THE STANDING ONCE THE LID IS HEARD: the boot read precedes the lid's
-	// subscription, so the first push a stream gets may or may not carry it.
-	first := harness.AwaitView(t, bootCtx, stream, "the standing with the lid heard", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi().GetLidOpen() != nil
-	}).GetPersistentWifi()
+	first := harness.AwaitBootWifiStanding(t, bootCtx, stream)
 	if first.GetOff() == nil || first.GetJoined().GetNetworkName() != harness.FakeHostNetwork {
 		t.Fatalf("boot standing = %v, want off and joined to %q", first, harness.FakeHostNetwork)
 	}
@@ -89,9 +87,7 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
 	openCtx, cancelOpen := d.WaitCtx()
 	defer cancelOpen()
-	harness.AwaitView(t, openCtx, stream, "the lid heard open", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi().GetLidOpen() != nil
-	})
+	harness.AwaitBootWifiStanding(t, openCtx, stream)
 	onCtx, cancelOn := d.WaitCtx()
 	defer cancelOn()
 	if _, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
@@ -175,5 +171,31 @@ func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	}
 	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
 		t.Fatalf("display = %s, want awake", got)
+	}
+}
+
+// TestNoTestHandRollsTheBootWifiStanding pins that every wait for the settled
+// boot standing goes through harness.AwaitBootWifiStanding: a hand-rolled
+// predicate drifts (one took the first standing, its lid unheard, and failed
+// on the lid's later push, 2026-11-14).
+func TestNoTestHandRollsTheBootWifiStanding(t *testing.T) {
+	// Arrange: the predicate's body, assembled so this file does not hold it.
+	predicate := "GetPersistentWifi()" + ".GetLidOpen() != nil"
+	files, err := filepath.Glob("*_test.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("list the package's test files = %v, %v, want them", files, err)
+	}
+
+	for _, file := range files {
+		// Act
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+
+		// Assert
+		if strings.Contains(string(src), predicate) {
+			t.Errorf("%s hand-rolls %q, want harness.AwaitBootWifiStanding", file, predicate)
+		}
 	}
 }
