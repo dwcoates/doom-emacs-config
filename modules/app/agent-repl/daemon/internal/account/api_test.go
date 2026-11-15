@@ -33,6 +33,39 @@ func TestNewRejectsMissingRoots(t *testing.T) {
 	}
 }
 
+func TestRootsValidate(t *testing.T) {
+	tests := []struct {
+		name  string
+		roots account.Roots
+		want  string
+	}{
+		{name: "both roots named", roots: account.Roots{Default: "/d", MultiRepo: "/m"}},
+		{name: "both roots and a multi-repo prefix", roots: account.Roots{Default: "/d", MultiRepo: "/m", MultiRepoRoot: "/w"}},
+		{name: "no default root", roots: account.Roots{MultiRepo: "/m"}, want: "Roots.Default is required"},
+		{name: "no multi-repo root", roots: account.Roots{Default: "/d"}, want: "Roots.MultiRepo is required"},
+		{name: "neither root names the default first", roots: account.Roots{}, want: "Roots.Default is required"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the case's roots.
+
+			// Act.
+			err := tc.roots.Validate()
+
+			// Assert.
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate() = %v, want an error naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewRejectsMissingLogger(t *testing.T) {
 	// Arrange.
 	roots := account.Roots{Default: "/d", MultiRepo: "/m"}

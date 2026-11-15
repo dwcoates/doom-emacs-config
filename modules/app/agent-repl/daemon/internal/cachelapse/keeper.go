@@ -168,8 +168,12 @@ type Deps struct {
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
 	Restore func(ws ids.WorkspaceID, done func(error))
-	Clock   clock.Clock
-	Log     dlog.Surfaces
+	// HandedOver answers whether a restore's error is a HANDOVER rather than a
+	// failure (workspace.HandedOver): the workspace belongs to another daemon
+	// now, or this one is exiting.
+	HandedOver func(error) bool
+	Clock      clock.Clock
+	Log        dlog.Surfaces
 	// Telemetry receives every beat, lapse and cold gate (telemetry.go).
 	Telemetry Telemetry
 	// Parked answers the keep-alive request for WS's parked conversation, nil
@@ -291,6 +295,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the cold cache's stand-down")
 	case deps.Restore == nil:
 		return nil, errors.New("cachelapse: the keeper needs the parked sessions' restore")
+	case deps.HandedOver == nil:
+		return nil, errors.New("cachelapse: the keeper needs the handover classifier")
 	case deps.Clock == nil:
 		return nil, errors.New("cachelapse: the keeper needs a clock")
 	case deps.Log == nil:

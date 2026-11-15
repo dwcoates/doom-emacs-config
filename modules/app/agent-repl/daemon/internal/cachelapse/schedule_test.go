@@ -593,6 +593,56 @@ func TestAFailedRestoreIsAskedAgainShortly(t *testing.T) {
 	}
 }
 
+// errHandedOver is the error the harness's HandedOver classifier names a
+// handover by.
+var errHandedOver = errors.New("workspace is served by the successor daemon")
+
+func TestARestoreRefusedByAHandoverIsAskedAgainAtInfo(t *testing.T) {
+	cases := []struct {
+		name   string
+		assert func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "it is asked again shortly", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if got := h.keeper.restores[ws]; !got.Equal(h.clock.Now().Add(BeatRetry)) {
+				t.Fatalf("restore = %v, want a retry in %s", got, BeatRetry)
+			}
+		}},
+		{name: "its keep-alive stays armed", assert: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if _, armed := h.keeper.beats[ws]; !armed {
+				t.Fatal("beat retired, want it kept for a withdrawn handover")
+			}
+		}},
+		{name: "it is recorded at INFO with its cause", assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opRestore,
+				Message: "the parked session is served by another daemon now, so this one does not restore it; it is asked again shortly"})
+			if !ok {
+				t.Fatalf("records = %+v, want the handover at INFO", h.log.Records())
+			}
+			if r.Context["cause"] != "start: "+errHandedOver.Error() || r.Context["retry_in"] != BeatRetry.String() {
+				t.Fatalf("context = %+v, want the cause and the retry", r.Context)
+			}
+		}},
+		{name: "it writes no error", assert: func(t *testing.T, h *harness, _ ids.WorkspaceID) {
+			if h.found(dlog.RecordQuery{Level: "error", Operation: opRestore}) {
+				t.Fatalf("records = %+v, want no ERROR", h.log.Records())
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, fleet := parkedFleet(t, 1)
+			h.keeper.restoresDue(context.Background())
+
+			// Act
+			h.keeper.apply(context.Background(), edge{ws: fleet[0], kind: edgeRestored, err: fmt.Errorf("start: %w", errHandedOver), why: "test"})
+
+			// Assert
+			tc.assert(t, h, fleet[0])
+		})
+	}
+}
+
 func TestARestoreWhoseWorktreeIsGoneRetiresTheKeepalive(t *testing.T) {
 	cases := []struct {
 		name   string

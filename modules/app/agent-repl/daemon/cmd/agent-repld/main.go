@@ -18,11 +18,13 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/envc"
@@ -163,6 +165,27 @@ type options struct {
 	inherited []string
 }
 
+// commandNames are the first arguments main answers as a command rather than
+// booting the daemon, sorted.
+func commandNames() []string {
+	names := []string{thawGuardVerb, deployVerb, callVerb}
+	for noun := range cliNouns {
+		names = append(names, noun)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// accountRoots are the account resolver's roots as this daemon was launched
+// with them: both config-root flags, and the multi-repo root from GETENV.
+func accountRoots(opts options, getenv func(string) string) account.Roots {
+	return account.Roots{
+		Default:       opts.defaultConfigDir,
+		MultiRepo:     opts.multiRepoConfigDir,
+		MultiRepoRoot: getenv(envMultiRepoRoot),
+	}
+}
+
 // envStoreSocket is the store socket's environment contract, which the
 // -store-socket flag overrides.
 const envStoreSocket = "AGENT_REPL_STORE_SOCKET"
@@ -243,6 +266,15 @@ func main() {
 			os.Exit(exitFailure)
 		}
 	}
+	if err := accountRoots(opts, os.Getenv).Validate(); err != nil {
+		// A DAEMON WITHOUT ITS ACCOUNT ROOTS NEVER REACHES THE BOOT CLAIM.
+		// Refused only at the graph, a misconfigured launch waited out the
+		// serving daemon's claim and took it the moment a deploy's handover
+		// freed it, then exited (2026-11-15 20:07, a stray `agent-repld queue
+		// -h` booted as a daemon at 19:57).
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(exitFailure)
+	}
 	startedIn, err := enterStableDir(opts, os.Getwd, os.Chdir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -320,6 +352,12 @@ func parseFlags(program string, args []string) (options, error) {
 	}
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
+	}
+	if fs.NArg() > 0 {
+		// AN ARGUMENT THAT IS NOT A FLAG IS NEVER IGNORED: the flag package
+		// stops at it and leaves it unparsed, so a mistyped or unknown command
+		// (`agent-repld queue -h`, 2026-11-15) would otherwise boot a daemon.
+		return options{}, fmt.Errorf("%s: %q is not a command (the commands are %s), and the daemon takes only flags", program, fs.Arg(0), strings.Join(commandNames(), ", "))
 	}
 	opts.inherited = []string{}
 	fs.Visit(func(f *flag.Flag) {

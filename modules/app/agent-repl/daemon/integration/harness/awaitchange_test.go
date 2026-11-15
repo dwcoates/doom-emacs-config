@@ -115,6 +115,58 @@ func TestAWaitOnADanglingLinkSeesItsTargetWritten(t *testing.T) {
 	}
 }
 
+// A LINK RENAMED INTO PLACE WHILE THE ROUND'S WATCH WAS TAKEN: its watch on
+// the link found nothing, the directory's watch was taken after the link
+// appeared, and the target's first write went unreported (2026-11-15 20:19).
+// The first round's paths stand for that watch: the directory alone, with the
+// link made before the watch is.
+func TestAWaitSeesATargetLinkedWhileItsWatchWasTaken(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	link := filepath.Join(root, "emacs", "webapp.log")
+	target := filepath.Join(root, "logs", "webapp-1.log")
+	mkdir(t, filepath.Dir(link), filepath.Dir(target))
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	follow := followFiles(link)
+	linked := false
+	paths := func() []string {
+		if linked {
+			return follow()
+		}
+		linked = true
+		if err := os.Symlink(target, link); err != nil {
+			t.Error(err)
+		}
+		return []string{filepath.Dir(link)}
+	}
+	wait, cancel := context.WithTimeout(context.Background(), awaitChangeBound)
+	defer cancel()
+	looked := make(chan struct{}, 1)
+	check := func() bool {
+		info, err := os.Stat(link)
+		select {
+		case looked <- struct{}{}:
+		default:
+		}
+		return err == nil && info.Size() > 0
+	}
+	done := make(chan bool, 1)
+
+	// Act
+	go func() { done <- awaitChange(t, wait, check, paths) }()
+	<-looked
+	if err := os.WriteFile(target, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if !<-done {
+		t.Fatal("the wait never saw the target written after its link appeared mid-round")
+	}
+}
+
 func mkdir(t *testing.T, dirs ...string) {
 	t.Helper()
 	for _, d := range dirs {
