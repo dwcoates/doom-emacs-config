@@ -106,8 +106,12 @@ describe("drawTopbarView", () => {
     const { tc } = topbarContext();
     const row = drawTopbarView(
       view({
-        queueBypass: { mode: { case: "on", value: {} }, tooltip: { text: "queue bypass on" } },
-        remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
+        queueBypass: create(TopbarViewSchema, {
+          queueBypass: { mode: { case: "on", value: {} }, tooltip: { text: "queue bypass on" } },
+        }).queueBypass,
+        remoteControl: create(TopbarViewSchema, {
+          remoteControl: { mode: { case: "on", value: {} }, tooltip: { text: "remote control on" } },
+        }).remoteControl,
       }),
       tc,
     );
