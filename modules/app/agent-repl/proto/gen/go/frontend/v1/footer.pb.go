@@ -708,6 +708,9 @@ type FooterStatus_Idle struct {
 
 type FooterStatus_Working struct {
 	// A turn is in flight. Its step names what the main agent is doing now.
+	// A turn a merge in flight runs in this session (its configured prompts,
+	// conflict resolution, fixing) is drawn here too, never as `merging`
+	// (owner request, 2026-11-15).
 	Working *FooterStatusWorking `protobuf:"bytes,2,opt,name=working,proto3,oneof"`
 }
 
@@ -727,7 +730,11 @@ type FooterStatus_Merging struct {
 	// A daemon-orchestrated merge is IN FLIGHT for this workspace: being
 	// enqueued, queued, or running one of its phases. A merge that has
 	// STOPPED — on a conflict, parked, failed or landed — is never this arm;
-	// each of those is its own arm below (owner ruling, 2026-09-28).
+	// each of those is its own arm below (owner ruling, 2026-09-28). While
+	// the merge's session runs a turn, the turn is drawn as `working`, and
+	// this arm returns when the turn ends; an ask the merge's own turn opens
+	// stays this arm's `waiting_on_user`, and a merge awaiting the turn it
+	// waits on stays `awaiting_free`.
 	Merging *FooterStatusMerging `protobuf:"bytes,5,opt,name=merging,proto3,oneof"`
 }
 

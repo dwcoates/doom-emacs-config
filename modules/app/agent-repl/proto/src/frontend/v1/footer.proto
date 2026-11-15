@@ -295,6 +295,9 @@ message FooterStatus {
     // Nothing in flight; the session serves on demand.
     FooterStatusIdle idle = 1;
     // A turn is in flight. Its step names what the main agent is doing now.
+    // A turn a merge in flight runs in this session (its configured prompts,
+    // conflict resolution, fixing) is drawn here too, never as `merging`
+    // (owner request, 2026-11-15).
     FooterStatusWorking working = 2;
     // The session is parked on something other than a gate's card — a cold
     // gate's choice, an interrupt landing, or a self-scheduled wakeup. A
@@ -305,7 +308,11 @@ message FooterStatus {
     // A daemon-orchestrated merge is IN FLIGHT for this workspace: being
     // enqueued, queued, or running one of its phases. A merge that has
     // STOPPED — on a conflict, parked, failed or landed — is never this arm;
-    // each of those is its own arm below (owner ruling, 2026-09-28).
+    // each of those is its own arm below (owner ruling, 2026-09-28). While
+    // the merge's session runs a turn, the turn is drawn as `working`, and
+    // this arm returns when the turn ends; an ask the merge's own turn opens
+    // stays this arm's `waiting_on_user`, and a merge awaiting the turn it
+    // waits on stays `awaiting_free`.
     FooterStatusMerging merging = 5;
     // Detached work runs while the main thread is free.
     FooterStatusBackground background = 6;
