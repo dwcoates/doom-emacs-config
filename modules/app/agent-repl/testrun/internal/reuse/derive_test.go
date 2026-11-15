@@ -3,6 +3,7 @@ package reuse
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -552,5 +553,88 @@ func TestCheckDeclaredUnitsTakesAFileInsideABatchForAUnitOfTheSuite(t *testing.T
 				t.Fatalf("checkDeclaredUnits = %v, want an error %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestRunnerPackagesLeaveOutTheRoster(t *testing.T) {
+	tests := []struct {
+		name    string
+		listed  []GoPackage
+		listErr error
+		want    []string
+		wantErr string
+	}{
+		{name: "the roster is left out and the rest kept",
+			listed: []GoPackage{{ImportPath: "agentrepl/testrun"}, {ImportPath: rosterPackage}, {ImportPath: "agentrepl/testrun/internal/plan"}},
+			want:   []string{"agentrepl/testrun", "agentrepl/testrun/internal/plan"}},
+		{name: "a failed listing fails", listErr: errors.New("go list broke"), wantErr: "go list broke"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.d.GoList = func(string, string, bool, ...string) ([]GoPackage, error) { return tt.listed, tt.listErr }
+
+			// Act
+			pkgs, err := runnerPackages(f.d)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("runnerPackages = %v, %v; want %q", pkgs, err, tt.wantErr)
+				}
+				return
+			}
+			var got []string
+			for _, p := range pkgs {
+				got = append(got, p.ImportPath)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("runnerPackages = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAUnitsDescriptionHoldsItsOwnSuitesWholeEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*roster.Suite)
+	}{
+		{name: "its width", edit: func(s *roster.Suite) { s.Slots = 4 }},
+		{name: "a unit it never reuses", edit: func(s *roster.Suite) { s.Reuse.Never = map[string]string{".": "reads the clock"} }},
+		{name: "its scripts", edit: func(s *roster.Suite) { s.Reuse.Scripts = []string{"bin"} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			before := lockSuite
+			after := lockSuite
+			reuse := *lockSuite.Reuse
+			after.Reuse = &reuse
+			tt.edit(&after)
+
+			// Act
+			was, now := unitDesc(before, "."), unitDesc(after, ".")
+
+			// Assert
+			if was == now {
+				t.Fatalf("unitDesc = %q both before and after the edit; want the entry's change to move it", now)
+			}
+		})
+	}
+}
+
+func TestAUnitsDescriptionIsTheSameForTheSameEntry(t *testing.T) {
+	// Arrange: an equal entry built separately, its maps filled in another order.
+	a := roster.Suite{Name: "s", Reuse: &roster.Reuse{Units: map[string][]string{"x": {"a"}, "y": {"b"}}}}
+	b := roster.Suite{Name: "s", Reuse: &roster.Reuse{Units: map[string][]string{"y": {"b"}, "x": {"a"}}}}
+
+	// Act
+	da, db := unitDesc(a, "x"), unitDesc(b, "x")
+
+	// Assert
+	if da != db {
+		t.Fatalf("unitDesc = %q and %q for one entry; want them equal, with no pointer in either", da, db)
 	}
 }

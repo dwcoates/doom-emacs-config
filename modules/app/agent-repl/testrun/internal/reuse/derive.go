@@ -145,9 +145,22 @@ func (b *unitBuilder) list() []Unit {
 func unitDesc(s roster.Suite, name string, extra ...string) string {
 	r := s.Reuse
 	return strings.Join(append([]string{
-		fmt.Sprintf("suite=%q kind=%d path=%q unit=%q inputs=%q generated=%q own=%q",
-			s.Name, s.Kind, s.Path, name, r.Inputs, r.Generated, r.Units[name]),
+		fmt.Sprintf("suite=%q kind=%d path=%q unit=%q inputs=%q generated=%q own=%q entry=%s",
+			s.Name, s.Kind, s.Path, name, r.Inputs, r.Generated, r.Units[name], suiteFacts(s)),
 	}, extra...), " ")
+}
+
+// suiteFacts is S's whole roster entry, its maps in key order: every fact of
+// its own suite a unit's key holds, since the roster package is no part of
+// the runner graph (runnerPackages).
+func suiteFacts(s roster.Suite) string {
+	r := s.Reuse
+	s.Reuse = nil
+	facts := fmt.Sprintf("%#v", s)
+	if r != nil {
+		facts += fmt.Sprintf(" reuse=%#v", *r)
+	}
+	return facts
 }
 
 // batchDesc is unitDesc for a batched unit, with its members and what the
@@ -187,9 +200,27 @@ func batchSet(d Deps, s roster.Suite, name string, members []string, runner []Go
 	return set, nil
 }
 
-// runnerPackages is the runner's own build graph.
+// rosterPackage is the roster's import path, which runnerPackages leaves out.
+const rosterPackage = "agentrepl/testrun/roster"
+
+// runnerPackages is the runner's own build graph, but for the roster.
+//
+// THE ROSTER KEYS A UNIT ONLY THROUGH ITS OWN SUITE'S ENTRY (suiteFacts in
+// unitDesc). Until 2026-11-15 the roster package was part of every unit's
+// key, so editing one suite's Reuse declaration moved all 968 units' keys and
+// the next run reran everything.
 func runnerPackages(d Deps) ([]GoPackage, error) {
-	return d.GoList(roster.Resolve(d.Repo, d.Module, "testrun"), "", false, ".")
+	pkgs, err := d.GoList(roster.Resolve(d.Repo, d.Module, "testrun"), "", false, ".")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GoPackage, 0, len(pkgs))
+	for _, p := range pkgs {
+		if p.ImportPath != rosterPackage {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // GO MODULES. A package's unit is its split and its checks (the compiled

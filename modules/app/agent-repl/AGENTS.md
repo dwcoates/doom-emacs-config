@@ -313,9 +313,11 @@ unit".
   with its config's and the config's setup files' (`tsimports.go`), and the
   package's manifests; an ERT file, the helpers and the modules `config.el`
   loads, and what the file loads (`ertloads.go`); a script suite's script.
-  Every unit adds the runner's own code and what its suite's `Reuse`
-  declares (`Inputs` for every unit, `Units["<unit>"]` for one). Its roster
-  facts, toolchain (go, node, npm) and environment complete it. No checkout
+  Every unit adds the runner's own code, but for `testrun/roster`, and what
+  its suite's `Reuse` declares (`Inputs` for every unit, `Units["<unit>"]`
+  for one). Its roster facts are its own suite's whole entry
+  (`reuse.suiteFacts`), so editing one suite's entry reruns only that
+  suite's units. Its toolchain (go, node, npm) and environment complete it. No checkout
   path, branch, commit or workspace enters a key: the same bytes key the same
   in any worktree, on any branch, in any queue order, so a unit one workspace
   passed is reused by every other on the host.
