@@ -4288,6 +4288,8 @@ type fakeDeployChecks struct {
 	// made names every workspace made, in order; createErr fails a make.
 	made      []string
 	createErr error
+	// escalationErr fails the make of an escalation workspace only.
+	escalationErr error
 	// reopened and closed are the workspaces reopened and closed; reopenErr
 	// and closeErr fail them.
 	reopened, closed    []ids.WorkspaceID
@@ -4333,6 +4335,16 @@ func (f *fakeDeployChecks) CreateDeployIntake(_ context.Context, _, name string)
 
 func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name string) (wsm.Workspace, error) {
 	return f.make("ws-remedy", name)
+}
+
+func (f *fakeDeployChecks) CreateDeployEscalation(_ context.Context, _, name string) (wsm.Workspace, error) {
+	f.mu.Lock()
+	err := f.escalationErr
+	f.mu.Unlock()
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return f.make("ws-escalate", name)
 }
 
 func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {

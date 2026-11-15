@@ -54,6 +54,13 @@ func (v *verbs) CreateDeployRemediation(ctx context.Context, repoDir, name strin
 	return v.createDeployCheck(ctx, "remediation", deployCheckSpec(repoDir, name, remediationModel, false))
 }
 
+// CreateDeployEscalation implements Verbs: makes a visible escalation
+// workspace, unprompted, where the user settles an escalated deploy (owner
+// ruling, 2026-11-15).
+func (v *verbs) CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	return v.createDeployCheck(ctx, "escalation", deployCheckSpec(repoDir, name, remediationModel, false))
+}
+
 // createDeployCheck makes SPEC, a ROLE workspace. A make that fails is
 // recorded.
 func (v *verbs) createDeployCheck(ctx context.Context, role string, spec CreateSpec) (wsm.Workspace, error) {

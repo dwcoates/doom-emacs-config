@@ -33,7 +33,8 @@ func checked(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
-	h.briefs[BriefDeployIntake] = []string{"deploy_started", "repo_dir", "version", "chain", "bound", "facts"}
+	h.briefs[BriefDeployIntake] = []string{"deploy_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
+	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems"}
 	h.briefs[BriefDeployRemediation] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
@@ -99,6 +100,29 @@ func decideInTurn(t *testing.T, h *harness, d Decision) {
 	}
 }
 
+// intakeSubmissions is every prompt the harness submitted to the intake.
+func intakeSubmissions(h *harness) []promptqueue.Submission {
+	var out []promptqueue.Submission
+	for _, sub := range h.queue.submissions {
+		if sub.WS == "ws-intake" {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// checkWorkspacesMade is every intake and remediation workspace made, the
+// escalations an undecided round ends in left out.
+func checkWorkspacesMade(h *harness) []string {
+	var out []string
+	for _, name := range h.checks.made {
+		if !strings.HasPrefix(name, "deploy-escalation-") {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // aProblem is a dispatch's one problem.
 var aProblem = []DeployProblem{{Statement: "the reaper errors on every pass", Evidence: []string{`{"level":"error","operation":"daemon.worktreereap.pass","message":"boom"}`}}}
 
@@ -137,12 +161,12 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	// Act
 	h.o.Mediate(context.Background())
 
-	// Assert
-	if len(h.checks.made) != 1 || !strings.HasPrefix(h.checks.made[0], "deploy-intake-") {
+	// Assert: the round ended undecided, so an escalation was made after.
+	if made := checkWorkspacesMade(h); len(made) != 1 || !strings.HasPrefix(made[0], "deploy-intake-") {
 		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
 	}
 	var origins []conversationv1.PromptOrigin
-	for _, sub := range h.queue.submissions {
+	for _, sub := range intakeSubmissions(h) {
 		if sub.WS != "ws-intake" {
 			t.Fatalf("submitted to %s, want the intake", sub.WS)
 		}
@@ -173,7 +197,7 @@ func TestEachDeployOfTheChainIsToldToTheSameIntake(t *testing.T) {
 			intakeBriefs++
 		}
 	}
-	if intakeBriefs != 2 || slices.Index(h.checks.made, "deploy-intake-"+deployStarted.Format("20060102-150405")) < 0 || len(h.checks.made) != 2 {
+	if made := checkWorkspacesMade(h); intakeBriefs != 2 || slices.Index(made, "deploy-intake-"+deployStarted.Format("20060102-150405")) < 0 || len(made) != 2 {
 		t.Fatalf("intake told %d times, made %v; want one intake told of both deploys, and one remediation made", intakeBriefs, h.checks.made)
 	}
 }
@@ -337,8 +361,8 @@ func TestACheckAlreadyToldIsReattachedToItsTurn(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if len(h.queue.submissions) != tt.wantSubmitted || len(h.checks.made) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
-				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(h.queue.submissions), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
+			if len(intakeSubmissions(h)) != tt.wantSubmitted || len(checkWorkspacesMade(h)) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
+				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(intakeSubmissions(h)), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
 			}
 		})
 	}
@@ -768,7 +792,7 @@ func TestARoundForAReplacedCheckNeverBlocksTheNewerChecksRound(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: the newer check's round ran, and told the intake.
-	if len(h.queue.submissions) != 1 || h.queue.submissions[0].WS != "ws-intake" {
+	if subs := intakeSubmissions(h); len(subs) != 1 {
 		t.Fatalf("submitted %+v, want the newer check told to the intake", h.queue.submissions)
 	}
 }
@@ -803,7 +827,7 @@ func TestTheIntakesRoleIsRecordedBeforeItsEffortStartsItsSession(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if !slices.Equal(h.checks.efforts, []string{"intake:ws-intake:recorded=true"}) {
+	if len(h.checks.efforts) == 0 || h.checks.efforts[0] != "intake:ws-intake:recorded=true" {
 		t.Fatalf("efforts %v, want the intake's set once its role was recorded", h.checks.efforts)
 	}
 }

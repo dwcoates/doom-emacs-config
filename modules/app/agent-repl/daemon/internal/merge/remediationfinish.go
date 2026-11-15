@@ -340,7 +340,16 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.endChain(ctx, repo, *m, MediationEscalated)
 	}
 	o.deps.Log.Global().Error(opRemediationFinish, "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances", withField(withField(fields, "summary", summary), "released", released))
-	o.deps.Banners.Mediated(ws, summary)
+	q, ok, err := o.checkedQueueOf(ctx, repo)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
+		return nil
+	}
+	// The failure is recorded by the escalation itself.
+	_, _ = o.escalate(ctx, q.repository.Dir, *m, summary, nil, fields)
 	o.republishMediation(ctx, repo)
 	o.kick(repo)
 	return nil

@@ -437,8 +437,8 @@ type Names interface {
 type Banners interface {
 	Queued(ws ids.WorkspaceID, label string)
 	Resolved(ws ids.WorkspaceID, end desktopnotify.MergeEnd, summary string)
-	// Mediated puts a deploy before the user for its intake WS: one it
-	// escalated, or one it decided nothing about.
+	// Mediated posts the notification of an escalated deploy, whose click
+	// opens escalation workspace WS.
 	Mediated(ws ids.WorkspaceID, summary string)
 }
 
@@ -760,6 +760,9 @@ type DeployCheckWorkspaces interface {
 	// CreateDeployRemediation makes a visible remediation workspace,
 	// unprompted.
 	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployEscalation makes a visible escalation workspace,
+	// unprompted, on the remediation's model.
+	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// SetDeployCheckEffort sets a made workspace to its role's effort, the
 	// intake's when INTAKE; it starts a sessionless workspace's shim, so the
 	// role is recorded before it.

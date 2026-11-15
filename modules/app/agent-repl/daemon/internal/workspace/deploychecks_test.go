@@ -42,6 +42,10 @@ func TestADeployCheckWorkspaceIsMadeUnpromptedWithNoSession(t *testing.T) {
 			_, err := v.CreateDeployRemediation(context.Background(), repoDir, "deploy-remediation-20261114-120000")
 			return err
 		}},
+		{name: "the escalation", create: func(v *verbs, repoDir string) error {
+			_, err := v.CreateDeployEscalation(context.Background(), repoDir, "deploy-escalation-20261114-120000")
+			return err
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

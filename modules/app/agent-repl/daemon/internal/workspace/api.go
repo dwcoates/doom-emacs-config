@@ -415,6 +415,10 @@ type Verbs interface {
 	// the repository at REPODIR, unprompted, on the remediation's model
 	// (deploychecks.go).
 	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// CreateDeployEscalation makes the visible escalation workspace NAME of
+	// the repository at REPODIR, unprompted, on the remediation's model
+	// (deploychecks.go).
+	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// SetDeployCheckEffort sets a deploy check workspace to its role's
 	// effort, once its role is recorded (deploychecks.go).
 	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error

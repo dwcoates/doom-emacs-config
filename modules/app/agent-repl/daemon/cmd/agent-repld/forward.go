@@ -355,6 +355,14 @@ func (d deployChecks) CreateDeployRemediation(ctx context.Context, repoDir, name
 	return verbs.CreateDeployRemediation(ctx, repoDir, name)
 }
 
+func (d deployChecks) CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a deploy escalation")
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	return verbs.CreateDeployEscalation(ctx, repoDir, name)
+}
+
 func (d deployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error {
 	verbs, err := d.f.bound("the merge queue set a deploy check workspace's effort")
 	if err != nil {
