@@ -446,6 +446,7 @@ type AnswerPermissionError struct {
 	//	*AnswerPermissionError_TransferringAway
 	//	*AnswerPermissionError_NotYetAdopted
 	//	*AnswerPermissionError_AskNotStanding
+	//	*AnswerPermissionError_AskSessionEnded
 	//	*AnswerPermissionError_NoStandingOffer
 	//	*AnswerPermissionError_NoSession
 	Cause         isAnswerPermissionError_Cause `protobuf_oneof:"cause"`
@@ -535,6 +536,15 @@ func (x *AnswerPermissionError) GetAskNotStanding() *AnswerPermissionAskNotStand
 	return nil
 }
 
+func (x *AnswerPermissionError) GetAskSessionEnded() *AnswerPermissionAskSessionEnded {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_AskSessionEnded); ok {
+			return x.AskSessionEnded
+		}
+	}
+	return nil
+}
+
 func (x *AnswerPermissionError) GetNoStandingOffer() *AnswerPermissionNoStandingOffer {
 	if x != nil {
 		if x, ok := x.Cause.(*AnswerPermissionError_NoStandingOffer); ok {
@@ -582,6 +592,14 @@ type AnswerPermissionError_AskNotStanding struct {
 	AskNotStanding *AnswerPermissionAskNotStanding `protobuf:"bytes,5,opt,name=ask_not_standing,json=askNotStanding,proto3,oneof"`
 }
 
+type AnswerPermissionError_AskSessionEnded struct {
+	// The card was standing, and the session that posed the consent ask no longer
+	// holds it: the session ended before anyone answered, so nothing was sent
+	// and the card is settled abandoned. A client tells the user the ask's
+	// session ended, never that it was already answered.
+	AskSessionEnded *AnswerPermissionAskSessionEnded `protobuf:"bytes,8,opt,name=ask_session_ended,json=askSessionEnded,proto3,oneof"`
+}
+
 type AnswerPermissionError_NoStandingOffer struct {
 	// A standing allow was picked where none was offered.
 	NoStandingOffer *AnswerPermissionNoStandingOffer `protobuf:"bytes,6,opt,name=no_standing_offer,json=noStandingOffer,proto3,oneof"`
@@ -601,6 +619,8 @@ func (*AnswerPermissionError_TransferringAway) isAnswerPermissionError_Cause() {
 func (*AnswerPermissionError_NotYetAdopted) isAnswerPermissionError_Cause() {}
 
 func (*AnswerPermissionError_AskNotStanding) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_AskSessionEnded) isAnswerPermissionError_Cause() {}
 
 func (*AnswerPermissionError_NoStandingOffer) isAnswerPermissionError_Cause() {}
 
@@ -818,6 +838,43 @@ func (*AnswerPermissionAskNotStanding) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{12}
 }
 
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+type AnswerPermissionAskSessionEnded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionAskSessionEnded) Reset() {
+	*x = AnswerPermissionAskSessionEnded{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionAskSessionEnded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionAskSessionEnded) ProtoMessage() {}
+
+func (x *AnswerPermissionAskSessionEnded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionAskSessionEnded.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionAskSessionEnded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{13}
+}
+
 type AnswerPermissionNoStandingOffer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -826,7 +883,7 @@ type AnswerPermissionNoStandingOffer struct {
 
 func (x *AnswerPermissionNoStandingOffer) Reset() {
 	*x = AnswerPermissionNoStandingOffer{}
-	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +895,7 @@ func (x *AnswerPermissionNoStandingOffer) String() string {
 func (*AnswerPermissionNoStandingOffer) ProtoMessage() {}
 
 func (x *AnswerPermissionNoStandingOffer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +908,7 @@ func (x *AnswerPermissionNoStandingOffer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerPermissionNoStandingOffer.ProtoReflect.Descriptor instead.
 func (*AnswerPermissionNoStandingOffer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{14}
 }
 
 type AnswerPermissionNoSession struct {
@@ -862,7 +919,7 @@ type AnswerPermissionNoSession struct {
 
 func (x *AnswerPermissionNoSession) Reset() {
 	*x = AnswerPermissionNoSession{}
-	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -874,7 +931,7 @@ func (x *AnswerPermissionNoSession) String() string {
 func (*AnswerPermissionNoSession) ProtoMessage() {}
 
 func (x *AnswerPermissionNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -887,7 +944,7 @@ func (x *AnswerPermissionNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerPermissionNoSession.ProtoReflect.Descriptor instead.
 func (*AnswerPermissionNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{15}
 }
 
 var File_agentrepl_v1_endpoint_answer_permission_proto protoreflect.FileDescriptor
@@ -916,13 +973,14 @@ const file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.AnswerPermissionSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.AnswerPermissionErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17AnswerPermissionSuccess\"\xa2\x05\n" +
+	"\x17AnswerPermissionSuccess\"\xff\x05\n" +
 	"\x15AnswerPermissionError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.AnswerPermissionUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.AnswerPermissionWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.AnswerPermissionTransferringAwayH\x00R\x10transferringAway\x12U\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.AnswerPermissionNotYetAdoptedH\x00R\rnotYetAdopted\x12X\n" +
 	"\x10ask_not_standing\x18\x05 \x01(\v2,.agentrepl.v1.AnswerPermissionAskNotStandingH\x00R\x0easkNotStanding\x12[\n" +
+	"\x11ask_session_ended\x18\b \x01(\v2-.agentrepl.v1.AnswerPermissionAskSessionEndedH\x00R\x0faskSessionEnded\x12[\n" +
 	"\x11no_standing_offer\x18\x06 \x01(\v2-.agentrepl.v1.AnswerPermissionNoStandingOfferH\x00R\x0fnoStandingOffer\x12H\n" +
 	"\n" +
 	"no_session\x18\a \x01(\v2'.agentrepl.v1.AnswerPermissionNoSessionH\x00R\tnoSessionB\a\n" +
@@ -937,6 +995,7 @@ const file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc = "" +
 	"\n" +
 	"\b_address\" \n" +
 	"\x1eAnswerPermissionAskNotStanding\"!\n" +
+	"\x1fAnswerPermissionAskSessionEnded\"!\n" +
 	"\x1fAnswerPermissionNoStandingOffer\"\x1b\n" +
 	"\x19AnswerPermissionNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -952,7 +1011,7 @@ func file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_endpoint_answer_permission_proto_goTypes = []any{
 	(*AnswerPermissionRequest)(nil),              // 0: agentrepl.v1.AnswerPermissionRequest
 	(*AnswerPermissionAllowOnce)(nil),            // 1: agentrepl.v1.AnswerPermissionAllowOnce
@@ -967,14 +1026,15 @@ var file_agentrepl_v1_endpoint_answer_permission_proto_goTypes = []any{
 	(*AnswerPermissionTransferringAway)(nil),     // 10: agentrepl.v1.AnswerPermissionTransferringAway
 	(*AnswerPermissionNotYetAdopted)(nil),        // 11: agentrepl.v1.AnswerPermissionNotYetAdopted
 	(*AnswerPermissionAskNotStanding)(nil),       // 12: agentrepl.v1.AnswerPermissionAskNotStanding
-	(*AnswerPermissionNoStandingOffer)(nil),      // 13: agentrepl.v1.AnswerPermissionNoStandingOffer
-	(*AnswerPermissionNoSession)(nil),            // 14: agentrepl.v1.AnswerPermissionNoSession
-	(*v1.WorkspaceRef)(nil),                      // 15: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                           // 16: frontend.v1.FeedId
+	(*AnswerPermissionAskSessionEnded)(nil),      // 13: agentrepl.v1.AnswerPermissionAskSessionEnded
+	(*AnswerPermissionNoStandingOffer)(nil),      // 14: agentrepl.v1.AnswerPermissionNoStandingOffer
+	(*AnswerPermissionNoSession)(nil),            // 15: agentrepl.v1.AnswerPermissionNoSession
+	(*v1.WorkspaceRef)(nil),                      // 16: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                           // 17: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_answer_permission_proto_depIdxs = []int32{
-	15, // 0: agentrepl.v1.AnswerPermissionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	16, // 1: agentrepl.v1.AnswerPermissionRequest.permission:type_name -> frontend.v1.FeedId
+	16, // 0: agentrepl.v1.AnswerPermissionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 1: agentrepl.v1.AnswerPermissionRequest.permission:type_name -> frontend.v1.FeedId
 	1,  // 2: agentrepl.v1.AnswerPermissionRequest.allow_once:type_name -> agentrepl.v1.AnswerPermissionAllowOnce
 	2,  // 3: agentrepl.v1.AnswerPermissionRequest.allow_standing:type_name -> agentrepl.v1.AnswerPermissionAllowStanding
 	3,  // 4: agentrepl.v1.AnswerPermissionRequest.deny:type_name -> agentrepl.v1.AnswerPermissionDeny
@@ -986,13 +1046,14 @@ var file_agentrepl_v1_endpoint_answer_permission_proto_depIdxs = []int32{
 	10, // 10: agentrepl.v1.AnswerPermissionError.transferring_away:type_name -> agentrepl.v1.AnswerPermissionTransferringAway
 	11, // 11: agentrepl.v1.AnswerPermissionError.not_yet_adopted:type_name -> agentrepl.v1.AnswerPermissionNotYetAdopted
 	12, // 12: agentrepl.v1.AnswerPermissionError.ask_not_standing:type_name -> agentrepl.v1.AnswerPermissionAskNotStanding
-	13, // 13: agentrepl.v1.AnswerPermissionError.no_standing_offer:type_name -> agentrepl.v1.AnswerPermissionNoStandingOffer
-	14, // 14: agentrepl.v1.AnswerPermissionError.no_session:type_name -> agentrepl.v1.AnswerPermissionNoSession
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	13, // 13: agentrepl.v1.AnswerPermissionError.ask_session_ended:type_name -> agentrepl.v1.AnswerPermissionAskSessionEnded
+	14, // 14: agentrepl.v1.AnswerPermissionError.no_standing_offer:type_name -> agentrepl.v1.AnswerPermissionNoStandingOffer
+	15, // 15: agentrepl.v1.AnswerPermissionError.no_session:type_name -> agentrepl.v1.AnswerPermissionNoSession
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_permission_proto_init() }
@@ -1016,6 +1077,7 @@ func file_agentrepl_v1_endpoint_answer_permission_proto_init() {
 		(*AnswerPermissionError_TransferringAway)(nil),
 		(*AnswerPermissionError_NotYetAdopted)(nil),
 		(*AnswerPermissionError_AskNotStanding)(nil),
+		(*AnswerPermissionError_AskSessionEnded)(nil),
 		(*AnswerPermissionError_NoStandingOffer)(nil),
 		(*AnswerPermissionError_NoSession)(nil),
 	}
@@ -1026,7 +1088,7 @@ func file_agentrepl_v1_endpoint_answer_permission_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

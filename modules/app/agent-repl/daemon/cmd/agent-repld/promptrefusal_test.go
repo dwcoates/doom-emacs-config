@@ -54,6 +54,8 @@ var promptRefusalCases = []promptRefusalCase{
 		want: "the vendor refused peer's model change, so nothing was sent (denied)"},
 	{name: "ask_not_standing", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_AskNotStanding{AskNotStanding: &agentreplv1.SubmitPromptAskNotStanding{}}},
 		want: "the question this answer was for in peer was already settled, so nothing was sent"},
+	{name: "ask_session_ended", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_AskSessionEnded{AskSessionEnded: &agentreplv1.SubmitPromptAskSessionEnded{}}},
+		want: "the session in peer that asked the question this answer was for has ended, so nothing was sent"},
 	{name: "slash_command_from_agent", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_SlashCommandFromAgent{SlashCommandFromAgent: &agentreplv1.SubmitPromptSlashCommandFromAgent{Command: "/clear"}}},
 		want: "an agent may not send peer a slash command (/clear); only the user runs those"},
 	{name: "unknown_sender", err: &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_UnknownSender{UnknownSender: &agentreplv1.SubmitPromptUnknownSender{SentBy: &workspacev1.WorkspaceRef{Id: "ws-x"}}}},

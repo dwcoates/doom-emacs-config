@@ -276,6 +276,9 @@ message AgentPermissionSuccess {
     // arm states only WHERE it was decided; the gated call's own outcome (it
     // runs, or its result is the denial) says which way.
     AgentPermissionAnsweredRemotely answered_remotely = 5;
+    // NOBODY DECIDED: the session that held the ask ended before anyone
+    // answered it, and the gated call never ran. See AgentPermissionAbandoned.
+    AgentPermissionAbandoned abandoned = 6;
   }
   // When the gate was decided, with the instant the ask was posed restated
   // (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -288,6 +291,22 @@ message AgentPermissionSuccess {
 
 // The ask was answered on claude.ai, not here.
 message AgentPermissionAnsweredRemotely {}
+
+// THE SESSION THAT HELD THE ASK ENDED BEFORE ANYONE DECIDED IT. The vendor
+// process that asked is gone, so no decision can ever be delivered and the
+// gated call never runs: a consumer draws the card closed and refuses any
+// decision on it, telling the user the ask's session ended rather than that it
+// was already decided.
+//
+// NOT A DENIAL: nobody refused, and drawing it as one accuses the user or a
+// policy of a refusal that never happened.
+//
+// Two producers state it: the shim tearing a session down with the ask still
+// pending in its permission gate, and the shim starting a session whose record
+// holds the ask open with no gate left to answer it (a predecessor that died
+// without a teardown). A daemon that finds a view standing an ask the session's
+// facts no longer name open settles its views with this same arm.
+message AgentPermissionAbandoned {}
 
 // Consent was given. The set arm is its scope.
 message AgentPermissionAllowed {

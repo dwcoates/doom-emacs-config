@@ -43,6 +43,7 @@ import (
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/turnlatch"
 	"agent-repld/internal/wsm"
@@ -3246,6 +3247,19 @@ type fakeCards struct {
 	standing    feed.StandingAsk
 	hasStanding bool
 	targets     []*feedid.Ref
+	// stillStanding is every "kind:id" AbandonRefusedAsk finds standing;
+	// abandoned is every one it settled, in order.
+	stillStanding map[string]bool
+	abandoned     []string
+}
+
+func (c *fakeCards) AbandonRefusedAsk(_ ids.WorkspaceID, kind sessionwatcher.AskKind, id string) bool {
+	key := string(kind) + ":" + id
+	if !c.stillStanding[key] {
+		return false
+	}
+	c.abandoned = append(c.abandoned, key)
+	return true
 }
 
 // fakeDraftEdit is one EditQuestionDraft call.

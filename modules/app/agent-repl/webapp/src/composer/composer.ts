@@ -501,6 +501,8 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return modelRefusalSentence("the vendor refused that model", reason.value.detail);
     case "askNotStanding":
       return "the ask was already answered before your answer reached it — your text is kept";
+    case "askSessionEnded":
+      return "the question's session ended before it was answered; nothing was sent — your text is kept";
     case "threadAwaitingFirstAnswer":
       return "the thread's first answer is still coming — send this once it lands; your text is kept";
     default: {

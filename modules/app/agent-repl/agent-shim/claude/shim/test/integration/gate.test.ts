@@ -1005,7 +1005,7 @@ describe("pending-callback liveness", () => {
     const exit = await shim.exited;
 
     if (settled.result.case === "success") {
-      expect(settled.result.value.decision.case).toBe("denied");
+      expect(settled.result.value.decision.case).toBe("abandoned");
     } else {
       throw new Error("the abandoned ask did not settle");
     }
@@ -1132,7 +1132,7 @@ describe("pending-callback liveness", () => {
     if (settled.result.case !== "success") {
       throw new Error("the ask abandoned by a dead query did not settle");
     }
-    expect(settled.result.value.decision.case).toBe("denied");
+    expect(settled.result.value.decision.case).toBe("abandoned");
     stream.close();
   });
 

@@ -960,3 +960,13 @@ describe("submitPromptRefusal: a chat thread's first answer", () => {
     expect(said).toBe("the thread's first answer is still coming — send this once it lands; your text is kept");
   });
 });
+
+describe("submitPromptRefusal: an ask whose session ended", () => {
+  it("says the question's session ended and nothing was sent, never that it was answered", () => {
+    // Act
+    const said = submitPromptRefusal({ case: "askSessionEnded", value: {} } as never);
+
+    // Assert
+    expect(said).toBe("the question's session ended before it was answered; nothing was sent — your text is kept");
+  });
+});

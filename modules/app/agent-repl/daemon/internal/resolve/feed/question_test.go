@@ -456,3 +456,43 @@ func TestAnOpenAsksClockRunsFromItsStart(t *testing.T) {
 		t.Fatalf("clock = %+v, want running from 1000", clock)
 	}
 }
+
+func TestAnAbandonedAskExpiresBecauseItsSessionIsGone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{Batch: batch})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:   batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_Abandoned{Abandoned: &conversationv1.AgentQuestionAbandoned{}},
+	})
+
+	// Assert.
+	if h.questionCard().GetExpired() == nil {
+		t.Fatalf("state = %T, want expired", h.questionCard().GetState())
+	}
+}
+
+func TestAnAbandonedSettleNeverOverridesAQuestionAlreadySettled(t *testing.T) {
+	// Arrange: the ask was answered.
+	h := newHarness(t)
+	batch := twoQuestionBatch()
+	h.pose("ask-1", &conversationv1.AgentQuestionStart{Batch: batch})
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:   batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_Answered{Answered: &conversationv1.AgentQuestionAnswers{}},
+	})
+
+	// Act.
+	h.pose("ask-1", &conversationv1.AgentQuestionSuccess{
+		Batch:   batch,
+		Outcome: &conversationv1.AgentQuestionSuccess_Abandoned{Abandoned: &conversationv1.AgentQuestionAbandoned{}},
+	})
+
+	// Assert.
+	if h.questionCard().GetAnswered() == nil {
+		t.Fatalf("state = %T, want the answered card to stand", h.questionCard().GetState())
+	}
+}

@@ -696,3 +696,34 @@ func TestRegisterWorkspacesMintsEachDirAsRegisterWorkspaceWould(t *testing.T) {
 		t.Fatalf("batch minted %q, want the single registration's %q", got, want)
 	}
 }
+
+func TestTheGatherVerbsAreServedAsUnaries(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(agentreplv1connectClient) error
+	}{
+		{"GatherWorkspaces", func(c agentreplv1connectClient) error {
+			_, err := c.GatherWorkspaces(context.Background(), connect.NewRequest(&agentreplv1.GatherWorkspacesRequest{}))
+			return err
+		}},
+		{"GetGatherStatus", func(c agentreplv1connectClient) error {
+			_, err := c.GetGatherStatus(context.Background(), connect.NewRequest(&agentreplv1.GetGatherStatusRequest{}))
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			_, baseURL := newTestServer(t)
+			client := newTestClient(t, baseURL)
+
+			// Act.
+			err := tt.call(client)
+
+			// Assert: answered, never refused as a method the fake lacks.
+			if err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+		})
+	}
+}

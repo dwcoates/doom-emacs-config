@@ -41,12 +41,24 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { detachableKind, detachedWorkKind } from "../convert/detached.js";
-import { agentActivity } from "../convert/entries.js";
+import { agentActivity, settledAt } from "../convert/entries.js";
+import {
+  abandonedPermissionDecision,
+  abandonedQuestionOutcome,
+  permissionSettle,
+  questionSettle,
+} from "../convert/ask-settles.js";
 import { subagentId } from "../convert/ids.js";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
-import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
+import {
+  activityUpsertKey,
+  bashTerminalUpsertKey,
+  permissionUpsertKey,
+  questionUpsertKey,
+  terminalUpsertKey,
+} from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { updateEntry } from "./update-entry.js";
 import { readFailure, transportFailure } from "./reader.js";
@@ -317,6 +329,96 @@ export function stoppedBashTerminal(
     turn: undefined,
     item: { kind: "bash_run", run, frame },
   };
+}
+
+/**
+ * The row that settles an ask the record holds open, as ABANDONED.
+ *
+ * A STARTING SESSION'S GATE HOLDS NOTHING FROM BEFORE: the vendor process that
+ * asked is gone, and with it the callback an answer would have resolved. A shim
+ * that died without a teardown (2026-11-11: overnight, with a question pending)
+ * left the ask open in the record, and every later reader drew a card nobody
+ * could answer, so the record is told the truth: the ask's session ended before
+ * anyone answered it.
+ *
+ * THE SETTLE RESTATES THE START: a settled question restates its batch, and a
+ * settled consent ask names the call it gated, because a reader serves the
+ * settle with no start beside it. The upsert key is the ask's own, so this
+ * replaces the start's row rather than adding one.
+ */
+export function closingAbandonedAsk(ask: conversationv1.SessionOpenAsk, nowMs: number): PersistEntry {
+  const agent = ask.agent;
+  if (agent === undefined || agent.value === "") {
+    throw new Error("an open ask from GetLiveWork names no agent; the store files every ask under its book");
+  }
+  switch (ask.ask.case) {
+    case "question": {
+      const question = ask.ask.value;
+      const id = question.id;
+      if (id === undefined || question.result.case !== "start") {
+        throw new Error("an open question from GetLiveWork is not an identified start");
+      }
+      const start = question.result.value;
+      LOGGER.debug({ agent: agent.value, question_id: id.value }, "settling a question the record holds open as abandoned");
+      return updateEntry({
+        agentId: agent,
+        upsertKey: questionUpsertKey(id),
+        source: { vendorUuid: reconciledCoordinate(id.value), discriminator: "agent_frame.update.question.success.abandoned" },
+        keepalive: false,
+        // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+        turn: undefined,
+        update: questionSettle(id, start.batch, settledAt(nowMs, startedAtMsOf(start.startedAt)), abandonedQuestionOutcome()),
+      });
+    }
+    case "permission": {
+      const permission = ask.ask.value;
+      const id = permission.id;
+      if (id === undefined || permission.result.case !== "start") {
+        throw new Error("an open consent ask from GetLiveWork is not an identified start");
+      }
+      LOGGER.debug({ agent: agent.value, permission_id: id.value }, "settling a consent ask the record holds open as abandoned");
+      return updateEntry({
+        agentId: agent,
+        upsertKey: permissionUpsertKey(id),
+        source: { vendorUuid: reconciledCoordinate(id.value), discriminator: "agent_frame.update.permission.success.abandoned" },
+        keepalive: false,
+        // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
+        turn: undefined,
+        update: permissionSettle(
+          id,
+          permission.gatedCall,
+          settledAt(nowMs, startedAtMsOf(permission.result.value.startedAt)),
+          abandonedPermissionDecision(),
+        ),
+      });
+    }
+    default:
+      throw new Error("an open ask from GetLiveWork carries neither a question nor a consent ask");
+  }
+}
+
+/**
+ * The tool_use_id an open ask is keyed by in the gate: a question's id and a
+ * consent ask's id are both minted from it (convert/ids.ts).
+ */
+export function openAskId(ask: conversationv1.SessionOpenAsk): string {
+  let id: string | undefined;
+  switch (ask.ask.case) {
+    case "question":
+    case "permission":
+      id = ask.ask.value.id?.value;
+      break;
+    default:
+      throw new Error("an open ask from GetLiveWork carries neither a question nor a consent ask");
+  }
+  if (id === undefined || id === "") throw new Error("an open ask from GetLiveWork carries no identity");
+  return id;
+}
+
+/** The instant a recorded start says the ask was posed, or undefined when it states none. */
+function startedAtMsOf(started: conversationv1.AgentActivityStartedAt | undefined): number | undefined {
+  if (started === undefined || started.atMs <= 0n) return undefined;
+  return Number(started.atMs);
 }
 
 /**

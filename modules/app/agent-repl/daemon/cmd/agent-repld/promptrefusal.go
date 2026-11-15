@@ -52,6 +52,8 @@ func describePromptRefusal(ws string, e *agentreplv1.SubmitPromptError) (string,
 		return fmt.Sprintf("the vendor refused %s's model change, so nothing was sent (%s)", ws, r.ModelRefused.GetDetail()), nil
 	case *agentreplv1.SubmitPromptError_AskNotStanding:
 		return fmt.Sprintf("the question this answer was for in %s was already settled, so nothing was sent", ws), nil
+	case *agentreplv1.SubmitPromptError_AskSessionEnded:
+		return fmt.Sprintf("the session in %s that asked the question this answer was for has ended, so nothing was sent", ws), nil
 	case *agentreplv1.SubmitPromptError_SlashCommandFromAgent:
 		return fmt.Sprintf("an agent may not send %s a slash command (%s); only the user runs those", ws, r.SlashCommandFromAgent.GetCommand()), nil
 	case *agentreplv1.SubmitPromptError_UnknownSender:

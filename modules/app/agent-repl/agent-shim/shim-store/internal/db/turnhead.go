@@ -78,10 +78,6 @@ const (
 	// stamped prompt line.
 	turnPromptDeleteSQL = `DELETE FROM turn_prompt WHERE position = ?`
 
-	// turnPromptBackfillSQL binds (the page-line kind): every page line stored
-	// before the table existed. Read once, in the create's own transaction.
-	turnPromptBackfillSQL = `SELECT position, book_agent_id, frame FROM entry WHERE kind = ? AND book_agent_id IS NOT NULL`
-
 	// turnLineUpsertSQL binds (position, book, turn, at_ms, ordinal). The place
 	// moves only when a row that had no stated place gains its first one
 	// (placeRow), and this re-states it in the same write.
@@ -161,43 +157,17 @@ func (d *DB) writeTurnPrompt(ctx context.Context, tx *sql.Tx, position int64, bo
 // path: the open fails (never nukes) rather than leaving a turn's prompt out of
 // the index, which would serve its pages without their head.
 func backfillTurnPrompts(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, turnPromptBackfillSQL, kindPageLine)
+	lines, err := storedPageLines(ctx, tx, "their prompts")
 	if err != nil {
-		return storagef(err, "reading the page lines to index their prompts")
+		return err
 	}
-	type prompt struct {
-		position int64
-		book     string
-		turn     string
-	}
-	var prompts []prompt
-	for rows.Next() {
-		var position int64
-		var book string
-		var frame []byte
-		if err := rows.Scan(&position, &book, &frame); err != nil {
-			rows.Close() //nolint:errcheck // the scan already failed
-			return storagef(err, "scanning a page line to index its prompt")
+	for _, l := range lines {
+		turn := promptTurn(l.entry)
+		if turn == "" {
+			continue
 		}
-		entry := &storev1.StoreEntry{}
-		if err := proto.Unmarshal(frame, entry); err != nil {
-			rows.Close() //nolint:errcheck // the decode already failed
-			return storagef(err, "stored frame at position %d cannot be decoded", position)
-		}
-		if turn := promptTurn(entry); turn != "" {
-			prompts = append(prompts, prompt{position: position, book: book, turn: turn})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close() //nolint:errcheck // the iteration already failed
-		return storagef(err, "iterating the page lines to index their prompts")
-	}
-	if err := rows.Close(); err != nil {
-		return storagef(err, "closing the page-line listing")
-	}
-	for _, p := range prompts {
-		if _, err := tx.ExecContext(ctx, turnPromptUpsertSQL, p.position, p.book, p.turn); err != nil {
-			return storagef(err, "indexing the prompt line at position %d of turn %q", p.position, p.turn)
+		if _, err := tx.ExecContext(ctx, turnPromptUpsertSQL, l.position, l.book, turn); err != nil {
+			return storagef(err, "indexing the prompt line at position %d of turn %q", l.position, turn)
 		}
 	}
 	return nil

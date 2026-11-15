@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/question.proto.
  */
 export const file_conversation_v1_question: GenFile = /*@__PURE__*/
-  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcXVlc3Rpb24ucHJvdG8SD2NvbnZlcnNhdGlvbi52MSLxAQoNQWdlbnRRdWVzdGlvbhIsCgJpZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uSWQSNAoFc3RhcnQYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblN0YXJ0SAASOAoHc3VjY2VzcxgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uU3VjY2Vzc0gAEjgKB2ZhaWx1cmUYAyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkZhaWx1cmVIAEIICgZyZXN1bHQihQEKEkFnZW50UXVlc3Rpb25TdGFydBIyCgViYXRjaBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uQmF0Y2gSOwoKc3RhcnRlZF9hdBgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5U3RhcnRlZEF0IkwKEkFnZW50UXVlc3Rpb25CYXRjaBI2CglxdWVzdGlvbnMYASADKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkFza2VkIu0BChJBZ2VudFF1ZXN0aW9uQXNrZWQSNAoIcXVlc3Rpb24YASABKAsyIi5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblRleHQSDgoGaGVhZGVyGAIgASgJEkMKDXNpbmdsZV9zZWxlY3QYAyABKAsyKi5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblNpbmdsZVNlbGVjdEgAEkEKDG11bHRpX3NlbGVjdBgEIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uTXVsdGlTZWxlY3RIAEIJCgdjaG9pY2VzIiEKEUFnZW50UXVlc3Rpb25UZXh0EgwKBHRleHQYASABKAkiUgoZQWdlbnRRdWVzdGlvblNpbmdsZVNlbGVjdBI1CgdvcHRpb25zGAEgAygLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25PcHRpb24iUQoYQWdlbnRRdWVzdGlvbk11bHRpU2VsZWN0EjUKB29wdGlvbnMYASADKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbk9wdGlvbiKGAQoTQWdlbnRRdWVzdGlvbk9wdGlvbhI4CgVsYWJlbBgBIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uT3B0aW9uTGFiZWwSEwoLZGVzY3JpcHRpb24YAiABKAkSFAoHcHJldmlldxgDIAEoCUgAiAEBQgoKCF9wcmV2aWV3IikKGEFnZW50UXVlc3Rpb25PcHRpb25MYWJlbBINCgVsYWJlbBgBIAEoCSKhAgoUQWdlbnRRdWVzdGlvblN1Y2Nlc3MSMgoFYmF0Y2gYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkJhdGNoEjkKCGFuc3dlcmVkGAIgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25BbnN3ZXJzSAASPgoKdW5hbnN3ZXJlZBgDIAEoCzIoLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uVW5hbnN3ZXJlZEgAEkAKCnNldHRsZWRfYXQYBCABKAsyJy5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eVNldHRsZWRBdEgBiAEBQgkKB291dGNvbWVCDQoLX3NldHRsZWRfYXQiUAoUQWdlbnRRdWVzdGlvbkFuc3dlcnMSOAoHYW5zd2VycxgBIAMoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uU2VsZWN0aW9uItIBChZBZ2VudFF1ZXN0aW9uU2VsZWN0aW9uEjQKCHF1ZXN0aW9uGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25UZXh0EjQKBmNob3NlbhgCIAMoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uQ2hvaWNlEj4KCWZyZWVfdGV4dBgDIAEoCzImLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uRnJlZVRleHRIAIgBAUIMCgpfZnJlZV90ZXh0Ik8KE0FnZW50UXVlc3Rpb25DaG9pY2USOAoFbGFiZWwYASABKAsyKS5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbk9wdGlvbkxhYmVsIiUKFUFnZW50UXVlc3Rpb25GcmVlVGV4dBIMCgR0ZXh0GAEgASgJIhkKF0FnZW50UXVlc3Rpb25VbmFuc3dlcmVkIlcKFEFnZW50UXVlc3Rpb25GYWlsdXJlEjUKBWVycm9yGAEgASgLMiEuY29udmVyc2F0aW9uLnYxLkFnZW50VG9vbEZhaWx1cmVIAIgBAUIICgZfZXJyb3IiIAoPQWdlbnRRdWVzdGlvbklkEg0KBXZhbHVlGAEgASgJInwKE0FnZW50UXVlc3Rpb25BbnN3ZXISLQoDYXNrGAEgASgLMiAuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25JZBI2CgdhbnN3ZXJzGAIgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25BbnN3ZXJzQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
+  fileDesc("Ch5jb252ZXJzYXRpb24vdjEvcXVlc3Rpb24ucHJvdG8SD2NvbnZlcnNhdGlvbi52MSLxAQoNQWdlbnRRdWVzdGlvbhIsCgJpZBgFIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uSWQSNAoFc3RhcnQYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblN0YXJ0SAASOAoHc3VjY2VzcxgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uU3VjY2Vzc0gAEjgKB2ZhaWx1cmUYAyABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkZhaWx1cmVIAEIICgZyZXN1bHQihQEKEkFnZW50UXVlc3Rpb25TdGFydBIyCgViYXRjaBgBIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uQmF0Y2gSOwoKc3RhcnRlZF9hdBgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5U3RhcnRlZEF0IkwKEkFnZW50UXVlc3Rpb25CYXRjaBI2CglxdWVzdGlvbnMYASADKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkFza2VkIu0BChJBZ2VudFF1ZXN0aW9uQXNrZWQSNAoIcXVlc3Rpb24YASABKAsyIi5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblRleHQSDgoGaGVhZGVyGAIgASgJEkMKDXNpbmdsZV9zZWxlY3QYAyABKAsyKi5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblNpbmdsZVNlbGVjdEgAEkEKDG11bHRpX3NlbGVjdBgEIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uTXVsdGlTZWxlY3RIAEIJCgdjaG9pY2VzIiEKEUFnZW50UXVlc3Rpb25UZXh0EgwKBHRleHQYASABKAkiUgoZQWdlbnRRdWVzdGlvblNpbmdsZVNlbGVjdBI1CgdvcHRpb25zGAEgAygLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25PcHRpb24iUQoYQWdlbnRRdWVzdGlvbk11bHRpU2VsZWN0EjUKB29wdGlvbnMYASADKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbk9wdGlvbiKGAQoTQWdlbnRRdWVzdGlvbk9wdGlvbhI4CgVsYWJlbBgBIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uT3B0aW9uTGFiZWwSEwoLZGVzY3JpcHRpb24YAiABKAkSFAoHcHJldmlldxgDIAEoCUgAiAEBQgoKCF9wcmV2aWV3IikKGEFnZW50UXVlc3Rpb25PcHRpb25MYWJlbBINCgVsYWJlbBgBIAEoCSLfAgoUQWdlbnRRdWVzdGlvblN1Y2Nlc3MSMgoFYmF0Y2gYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvbkJhdGNoEjkKCGFuc3dlcmVkGAIgASgLMiUuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25BbnN3ZXJzSAASPgoKdW5hbnN3ZXJlZBgDIAEoCzIoLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uVW5hbnN3ZXJlZEgAEjwKCWFiYW5kb25lZBgFIAEoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uQWJhbmRvbmVkSAASQAoKc2V0dGxlZF9hdBgEIAEoCzInLmNvbnZlcnNhdGlvbi52MS5BZ2VudEFjdGl2aXR5U2V0dGxlZEF0SAGIAQFCCQoHb3V0Y29tZUINCgtfc2V0dGxlZF9hdCJQChRBZ2VudFF1ZXN0aW9uQW5zd2VycxI4CgdhbnN3ZXJzGAEgAygLMicuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25TZWxlY3Rpb24i0gEKFkFnZW50UXVlc3Rpb25TZWxlY3Rpb24SNAoIcXVlc3Rpb24YASABKAsyIi5jb252ZXJzYXRpb24udjEuQWdlbnRRdWVzdGlvblRleHQSNAoGY2hvc2VuGAIgAygLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25DaG9pY2USPgoJZnJlZV90ZXh0GAMgASgLMiYuY29udmVyc2F0aW9uLnYxLkFnZW50UXVlc3Rpb25GcmVlVGV4dEgAiAEBQgwKCl9mcmVlX3RleHQiTwoTQWdlbnRRdWVzdGlvbkNob2ljZRI4CgVsYWJlbBgBIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uT3B0aW9uTGFiZWwiJQoVQWdlbnRRdWVzdGlvbkZyZWVUZXh0EgwKBHRleHQYASABKAkiGQoXQWdlbnRRdWVzdGlvblVuYW5zd2VyZWQiGAoWQWdlbnRRdWVzdGlvbkFiYW5kb25lZCJXChRBZ2VudFF1ZXN0aW9uRmFpbHVyZRI1CgVlcnJvchgBIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5BZ2VudFRvb2xGYWlsdXJlSACIAQFCCAoGX2Vycm9yIiAKD0FnZW50UXVlc3Rpb25JZBINCgV2YWx1ZRgBIAEoCSJ8ChNBZ2VudFF1ZXN0aW9uQW5zd2VyEi0KA2FzaxgBIAEoCzIgLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uSWQSNgoHYW5zd2VycxgCIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudFF1ZXN0aW9uQW5zd2Vyc0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
 
 /**
  * The agent asking the user to choose, and waiting for the answer.
@@ -380,6 +380,15 @@ export type AgentQuestionSuccess = Message<"conversation.v1.AgentQuestionSuccess
      */
     value: AgentQuestionUnanswered;
     case: "unanswered";
+  } | {
+    /**
+     * The session that held the ask ended before anyone answered it. See
+     * AgentQuestionAbandoned.
+     *
+     * @generated from field: conversation.v1.AgentQuestionAbandoned abandoned = 5;
+     */
+    value: AgentQuestionAbandoned;
+    case: "abandoned";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -527,6 +536,33 @@ export const AgentQuestionUnansweredSchema: GenMessage<AgentQuestionUnanswered> 
   messageDesc(file_conversation_v1_question, 14);
 
 /**
+ * THE SESSION THAT HELD THE ASK ENDED BEFORE ANYONE ANSWERED IT. The vendor
+ * process that asked is gone, so no answer can ever be delivered: a consumer
+ * draws the card as expired and refuses any answer to it, telling the user the
+ * question's session ended rather than that it was already answered.
+ *
+ * DISTINCT FROM `unanswered`: there the agent stopped waiting and went on
+ * without a choice, while here nothing went on at all.
+ *
+ * Two producers state it: the shim tearing a session down with the ask still
+ * pending in its permission gate, and the shim starting a session whose record
+ * holds the ask open with no gate left to answer it (a predecessor that died
+ * without a teardown). A daemon that finds a view standing an ask the session's
+ * facts no longer name open settles its views with this same arm.
+ *
+ * @generated from message conversation.v1.AgentQuestionAbandoned
+ */
+export type AgentQuestionAbandoned = Message<"conversation.v1.AgentQuestionAbandoned"> & {
+};
+
+/**
+ * Describes the message conversation.v1.AgentQuestionAbandoned.
+ * Use `create(AgentQuestionAbandonedSchema)` to create a new message.
+ */
+export const AgentQuestionAbandonedSchema: GenMessage<AgentQuestionAbandoned> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_question, 15);
+
+/**
  * The question could not be put to the user.
  *
  * @generated from message conversation.v1.AgentQuestionFailure
@@ -545,7 +581,7 @@ export type AgentQuestionFailure = Message<"conversation.v1.AgentQuestionFailure
  * Use `create(AgentQuestionFailureSchema)` to create a new message.
  */
 export const AgentQuestionFailureSchema: GenMessage<AgentQuestionFailure> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_question, 15);
+  messageDesc(file_conversation_v1_question, 16);
 
 /**
  * The identity of one ask. Opaque; equality is the only question asked of it.
@@ -567,7 +603,7 @@ export type AgentQuestionId = Message<"conversation.v1.AgentQuestionId"> & {
  * Use `create(AgentQuestionIdSchema)` to create a new message.
  */
 export const AgentQuestionIdSchema: GenMessage<AgentQuestionId> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_question, 16);
+  messageDesc(file_conversation_v1_question, 17);
 
 /**
  * The user's answer to one open ask — what a consumer WRITES BACK. Carries the
@@ -598,5 +634,5 @@ export type AgentQuestionAnswer = Message<"conversation.v1.AgentQuestionAnswer">
  * Use `create(AgentQuestionAnswerSchema)` to create a new message.
  */
 export const AgentQuestionAnswerSchema: GenMessage<AgentQuestionAnswer> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_question, 17);
+  messageDesc(file_conversation_v1_question, 18);
 

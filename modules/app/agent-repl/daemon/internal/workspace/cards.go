@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/sessionwatcher"
 )
 
 // THE SERVED-CARD RECORD.
@@ -66,6 +67,12 @@ func (c *cards) ReleaseQuestionDelivery(ws ids.WorkspaceID, ask string) {
 // StandingAsk answers the oldest ask standing on the addressed feed.
 func (c *cards) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (feed.StandingAsk, bool) {
 	return c.feed.StandingAsk(ws, target)
+}
+
+// AbandonRefusedAsk settles a refused answer's card where its views are fed,
+// in the workspace's session watcher (Fleet.AbandonRefusedAsk).
+func (c *cards) AbandonRefusedAsk(ws ids.WorkspaceID, kind sessionwatcher.AskKind, id string) bool {
+	return c.fleet.AbandonRefusedAsk(ws, kind, id)
 }
 
 // ColdGate answers the menu a standing cold gate served. The FLEET raised it,

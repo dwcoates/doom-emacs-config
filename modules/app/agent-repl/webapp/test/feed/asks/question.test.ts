@@ -552,6 +552,11 @@ describe("a refused edit", () => {
       text: "this question is no longer standing",
     },
     {
+      arm: "askSessionEnded",
+      cause: { case: "askSessionEnded", value: {} },
+      text: "the question's session ended before it was answered; nothing was sent",
+    },
+    {
       arm: "unservedValue",
       cause: { case: "unservedValue", value: { text: "SAML" } },
       text: 'the question never served "SAML"',

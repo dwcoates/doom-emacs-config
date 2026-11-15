@@ -72,7 +72,9 @@ import {
   groupRunsByOwner,
   ownedRunsOf,
   type OwnedRun,
+  closingAbandonedAsk,
   closingAgentTerminal,
+  openAskId,
   closingMonitorTerminal,
   findMonitorCall,
   closingSubagentTerminal,
@@ -4173,7 +4175,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // otherwise run while the verb sat out the rest of its bound.
     settleStartOnQueryEnd(detail);
     peerAdmissions.abandonAll(detail);
-    gate.standDown(`the vendor query died: ${detail}`);
+    gate.standDown(`the vendor query died: ${detail}`, "abandoned");
     letRemotePromptsGo(`the vendor query died: ${detail}`);
     // NOTHING THE DEAD QUERY ANNOUNCED CAN SETTLE, so the fold lets go of it.
     deps.fold.endQuery(`the vendor query died: ${detail}`);
@@ -5171,7 +5173,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     deps.fold.endQuery("the query was replaced");
     // AN ASK IT WITHDREW CAN NO LONGER BE TOLD APART (Remote Control): the
     // query whose next word would have said how it ended is gone.
-    gate.settleWithdrawn("the vendor query was replaced");
+    gate.settleWithdrawn("the vendor query was replaced", "abandoned");
     letRemotePromptsGo("the vendor query was replaced");
     return startQuery(options.binding, options);
   }
@@ -6881,6 +6883,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       announcedAgents.add(agent.value);
       closing.push(closingAgentTerminal(subagentId(agent.value)));
     }
+    // EVERY ASK THE RECORD HOLDS OPEN THAT THIS GATE DOES NOT is settled
+    // abandoned: only the gate of the process that asked could ever answer it,
+    // and that process is gone. A shim that died without a teardown left such
+    // an ask standing on every reader's feed, unanswerable (2026-11-11).
+    for (const ask of open.openAsks) {
+      const askId = openAskId(ask);
+      if (gate.pendingAsk(askId) !== undefined) continue;
+      LOGGER.info(
+        { ask_id: askId, ask_kind: ask.ask.case ?? "", agent_id: ask.agent?.value ?? "" },
+        "settled an ask the record holds open as abandoned: the session that asked it is gone",
+      );
+      closing.push(closingAbandonedAsk(ask, deps.nowMs()));
+    }
     if (open.liveWorkflows.length > 0) {
       // warn: a decision because live workflow records cannot be adopted while workflow support is disabled.
       LOGGER.warn(
@@ -8099,7 +8114,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function teardown(reason: string): Promise<void> {
     if (standingDown) return;
     standingDown = true;
-    gate.standDown(reason);
+    gate.standDown(reason, "abandoned");
     deps.fold.reportDroppedHooks(`the session stood down: ${reason}`);
     // A CALL WAITING ON A TURN BOUNDARY THAT WILL NEVER COME still gets an
     // answer: leaving the daemon holding a promise nothing can settle is worse

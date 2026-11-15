@@ -84,6 +84,21 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		card.Clock = runningClock(state.startedAtMs)
 	case *conversationv1.AgentPermission_Success:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawPermission", "branch": "case *conversationv1.AgentPermission_Success"})
+		if _, abandoned := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Abandoned); abandoned {
+			// AN ABANDONED SETTLE NEVER OVERRIDES ONE ALREADY DRAWN: it says
+			// only that the session holding the ask is gone.
+			if card.GetState() != nil && card.GetOpen() == nil {
+				log.Debug("daemon.feed.permission_abandoned_after_settled",
+					"an abandoned settle arrived for an ask already settled; the settled card stands",
+					dlog.Context{"ask": askID, "row": state.row.GetValue()})
+				return
+			}
+			// NOBODY DECIDED and the call never ran: the card went away
+			// unanswered.
+			card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{}}
+			card.Clock = settledClock(state.startedAtMs, frame.Success.GetSettledAt())
+			break
+		}
 		answered := &frontendv1.FeedPermissionAnswered{}
 		card.Clock = settledClock(state.startedAtMs, frame.Success.GetSettledAt())
 		decisionArm(frame.Success)(answered)

@@ -1010,6 +1010,42 @@ func (w *watcher) closingReplayedLocked(a *agentWatch, frame *conversationv1.Age
 	return true
 }
 
+// routeQuestionLocked hands one question frame, a start or a settle, to every
+// view a question reaches. It is THE ONE PATH a question takes: a frame off the
+// stream, and the abandoned settle the watcher writes itself for an ask no
+// gate holds (askreconcile.go), so no view can be told one and not the other.
+func (w *watcher) routeQuestionLocked(agent *conversationv1.AgentId, question *conversationv1.AgentQuestion, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
+	w.log.Debug("daemon.sessionwatcher.question", "the agent is blocked on a choice", dlog.Context{
+		"agent_id": agent.GetValue(), "question_id": question.GetId().GetValue(),
+	})
+	w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, place)
+	w.sinks.Footer.OnQuestion(w.ws, agent, question)
+	if w.sinks.Merge != nil {
+		w.sinks.Merge.OnQuestion(w.ws, agent, question)
+	}
+	w.notifyQuestionLocked(question)
+	if w.sinks.Asks != nil {
+		w.sinks.Asks.NeedsInput(w.ws)
+	}
+}
+
+// routePermissionLocked is routeQuestionLocked for a consent ask.
+func (w *watcher) routePermissionLocked(agent *conversationv1.AgentId, permission *conversationv1.AgentPermission, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
+	w.log.Debug("daemon.sessionwatcher.permission", "the agent is blocked on consent", dlog.Context{
+		"agent_id": agent.GetValue(), "permission_id": permission.GetId().GetValue(),
+	})
+	w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place)
+	w.sinks.Footer.OnPermission(w.ws, agent, permission)
+	w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+	if w.sinks.Merge != nil {
+		w.sinks.Merge.OnPermission(w.ws, agent, permission)
+	}
+	w.notifyPermissionLocked(permission)
+	if w.sinks.Asks != nil {
+		w.sinks.Asks.NeedsInput(w.ws)
+	}
+}
+
 // closingKind names a closing row's kind for a log record.
 func closingKind(frame *conversationv1.AgentFrame) string {
 	if isTerminalFrame(frame) {
@@ -1026,35 +1062,10 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.routeActivityLocked(agent, update.GetActivity(), turn, place)
 
 	case update.GetQuestion() != nil:
-		question := update.GetQuestion()
-		w.log.Debug("daemon.sessionwatcher.question", "the agent is blocked on a choice", dlog.Context{
-			"agent_id": agent.GetValue(), "question_id": question.GetId().GetValue(),
-		})
-		w.sinks.Feed.OnQuestion(w.ws, agent, question, turn, place)
-		w.sinks.Footer.OnQuestion(w.ws, agent, question)
-		if w.sinks.Merge != nil {
-			w.sinks.Merge.OnQuestion(w.ws, agent, question)
-		}
-		w.notifyQuestionLocked(question)
-		if w.sinks.Asks != nil {
-			w.sinks.Asks.NeedsInput(w.ws)
-		}
+		w.routeQuestionLocked(agent, update.GetQuestion(), turn, place)
 
 	case update.GetPermission() != nil:
-		permission := update.GetPermission()
-		w.log.Debug("daemon.sessionwatcher.permission", "the agent is blocked on consent", dlog.Context{
-			"agent_id": agent.GetValue(), "permission_id": permission.GetId().GetValue(),
-		})
-		w.sinks.Feed.OnPermission(w.ws, agent, permission, turn, place)
-		w.sinks.Footer.OnPermission(w.ws, agent, permission)
-		w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
-		if w.sinks.Merge != nil {
-			w.sinks.Merge.OnPermission(w.ws, agent, permission)
-		}
-		w.notifyPermissionLocked(permission)
-		if w.sinks.Asks != nil {
-			w.sinks.Asks.NeedsInput(w.ws)
-		}
+		w.routePermissionLocked(agent, update.GetPermission(), turn, place)
 
 	case update.GetContextCut() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetContextCut() != nil"})

@@ -160,6 +160,9 @@ message AgentQuestionSuccess {
     // a choice, so a consumer draws the ask as expired rather than as pending
     // forever.
     AgentQuestionUnanswered unanswered = 3;
+    // The session that held the ask ended before anyone answered it. See
+    // AgentQuestionAbandoned.
+    AgentQuestionAbandoned abandoned = 5;
   }
   // When the ask concluded, with the instant it was posed restated
   // (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -219,6 +222,21 @@ message AgentQuestionFreeText {
 
 // The ask went unanswered and stopped waiting.
 message AgentQuestionUnanswered {}
+
+// THE SESSION THAT HELD THE ASK ENDED BEFORE ANYONE ANSWERED IT. The vendor
+// process that asked is gone, so no answer can ever be delivered: a consumer
+// draws the card as expired and refuses any answer to it, telling the user the
+// question's session ended rather than that it was already answered.
+//
+// DISTINCT FROM `unanswered`: there the agent stopped waiting and went on
+// without a choice, while here nothing went on at all.
+//
+// Two producers state it: the shim tearing a session down with the ask still
+// pending in its permission gate, and the shim starting a session whose record
+// holds the ask open with no gate left to answer it (a predecessor that died
+// without a teardown). A daemon that finds a view standing an ask the session's
+// facts no longer name open settles its views with this same arm.
+message AgentQuestionAbandoned {}
 
 // The question could not be put to the user.
 message AgentQuestionFailure {

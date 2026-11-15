@@ -336,6 +336,7 @@ type AnswerQuestionError struct {
 	//	*AnswerQuestionError_TransferringAway
 	//	*AnswerQuestionError_NotYetAdopted
 	//	*AnswerQuestionError_AskNotStanding
+	//	*AnswerQuestionError_AskSessionEnded
 	//	*AnswerQuestionError_UnservedValue
 	//	*AnswerQuestionError_MultiPickOnSingleSelect
 	//	*AnswerQuestionError_NoSession
@@ -426,6 +427,15 @@ func (x *AnswerQuestionError) GetAskNotStanding() *AnswerQuestionAskNotStanding 
 	return nil
 }
 
+func (x *AnswerQuestionError) GetAskSessionEnded() *AnswerQuestionAskSessionEnded {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_AskSessionEnded); ok {
+			return x.AskSessionEnded
+		}
+	}
+	return nil
+}
+
 func (x *AnswerQuestionError) GetUnservedValue() *AnswerQuestionUnservedValue {
 	if x != nil {
 		if x, ok := x.Cause.(*AnswerQuestionError_UnservedValue); ok {
@@ -482,6 +492,14 @@ type AnswerQuestionError_AskNotStanding struct {
 	AskNotStanding *AnswerQuestionAskNotStanding `protobuf:"bytes,5,opt,name=ask_not_standing,json=askNotStanding,proto3,oneof"`
 }
 
+type AnswerQuestionError_AskSessionEnded struct {
+	// The card was standing, and the session that posed the question batch no longer
+	// holds it: the session ended before anyone answered, so nothing was sent
+	// and the card is settled abandoned. A client tells the user the ask's
+	// session ended, never that it was already answered.
+	AskSessionEnded *AnswerQuestionAskSessionEnded `protobuf:"bytes,9,opt,name=ask_session_ended,json=askSessionEnded,proto3,oneof"`
+}
+
 type AnswerQuestionError_UnservedValue struct {
 	// A question text or option label the batch never served.
 	UnservedValue *AnswerQuestionUnservedValue `protobuf:"bytes,6,opt,name=unserved_value,json=unservedValue,proto3,oneof"`
@@ -506,6 +524,8 @@ func (*AnswerQuestionError_TransferringAway) isAnswerQuestionError_Cause() {}
 func (*AnswerQuestionError_NotYetAdopted) isAnswerQuestionError_Cause() {}
 
 func (*AnswerQuestionError_AskNotStanding) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_AskSessionEnded) isAnswerQuestionError_Cause() {}
 
 func (*AnswerQuestionError_UnservedValue) isAnswerQuestionError_Cause() {}
 
@@ -725,6 +745,43 @@ func (*AnswerQuestionAskNotStanding) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{10}
 }
 
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+type AnswerQuestionAskSessionEnded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionAskSessionEnded) Reset() {
+	*x = AnswerQuestionAskSessionEnded{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionAskSessionEnded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionAskSessionEnded) ProtoMessage() {}
+
+func (x *AnswerQuestionAskSessionEnded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionAskSessionEnded.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionAskSessionEnded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{11}
+}
+
 type AnswerQuestionUnservedValue struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The unserved text, as echoed.
@@ -735,7 +792,7 @@ type AnswerQuestionUnservedValue struct {
 
 func (x *AnswerQuestionUnservedValue) Reset() {
 	*x = AnswerQuestionUnservedValue{}
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -747,7 +804,7 @@ func (x *AnswerQuestionUnservedValue) String() string {
 func (*AnswerQuestionUnservedValue) ProtoMessage() {}
 
 func (x *AnswerQuestionUnservedValue) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -760,7 +817,7 @@ func (x *AnswerQuestionUnservedValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionUnservedValue.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionUnservedValue) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AnswerQuestionUnservedValue) GetText() string {
@@ -778,7 +835,7 @@ type AnswerQuestionMultiPickOnSingleSelect struct {
 
 func (x *AnswerQuestionMultiPickOnSingleSelect) Reset() {
 	*x = AnswerQuestionMultiPickOnSingleSelect{}
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -790,7 +847,7 @@ func (x *AnswerQuestionMultiPickOnSingleSelect) String() string {
 func (*AnswerQuestionMultiPickOnSingleSelect) ProtoMessage() {}
 
 func (x *AnswerQuestionMultiPickOnSingleSelect) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -803,7 +860,7 @@ func (x *AnswerQuestionMultiPickOnSingleSelect) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use AnswerQuestionMultiPickOnSingleSelect.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionMultiPickOnSingleSelect) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{13}
 }
 
 type AnswerQuestionNoSession struct {
@@ -814,7 +871,7 @@ type AnswerQuestionNoSession struct {
 
 func (x *AnswerQuestionNoSession) Reset() {
 	*x = AnswerQuestionNoSession{}
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -826,7 +883,7 @@ func (x *AnswerQuestionNoSession) String() string {
 func (*AnswerQuestionNoSession) ProtoMessage() {}
 
 func (x *AnswerQuestionNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -839,7 +896,7 @@ func (x *AnswerQuestionNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerQuestionNoSession.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{14}
 }
 
 var File_agentrepl_v1_endpoint_answer_question_proto protoreflect.FileDescriptor
@@ -863,13 +920,14 @@ const file_agentrepl_v1_endpoint_answer_question_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.AnswerQuestionSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.AnswerQuestionErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15AnswerQuestionSuccess\"\x80\x06\n" +
+	"\x15AnswerQuestionSuccess\"\xdb\x06\n" +
 	"\x13AnswerQuestionError\x12[\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.AnswerQuestionUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.AnswerQuestionWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
 	"\x11transferring_away\x18\x03 \x01(\v2,.agentrepl.v1.AnswerQuestionTransferringAwayH\x00R\x10transferringAway\x12S\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.AnswerQuestionNotYetAdoptedH\x00R\rnotYetAdopted\x12V\n" +
-	"\x10ask_not_standing\x18\x05 \x01(\v2*.agentrepl.v1.AnswerQuestionAskNotStandingH\x00R\x0easkNotStanding\x12R\n" +
+	"\x10ask_not_standing\x18\x05 \x01(\v2*.agentrepl.v1.AnswerQuestionAskNotStandingH\x00R\x0easkNotStanding\x12Y\n" +
+	"\x11ask_session_ended\x18\t \x01(\v2+.agentrepl.v1.AnswerQuestionAskSessionEndedH\x00R\x0faskSessionEnded\x12R\n" +
 	"\x0eunserved_value\x18\x06 \x01(\v2).agentrepl.v1.AnswerQuestionUnservedValueH\x00R\runservedValue\x12s\n" +
 	"\x1bmulti_pick_on_single_select\x18\a \x01(\v23.agentrepl.v1.AnswerQuestionMultiPickOnSingleSelectH\x00R\x17multiPickOnSingleSelect\x12F\n" +
 	"\n" +
@@ -884,7 +942,8 @@ const file_agentrepl_v1_endpoint_answer_question_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
 	"\n" +
 	"\b_address\"\x1e\n" +
-	"\x1cAnswerQuestionAskNotStanding\"1\n" +
+	"\x1cAnswerQuestionAskNotStanding\"\x1f\n" +
+	"\x1dAnswerQuestionAskSessionEnded\"1\n" +
 	"\x1bAnswerQuestionUnservedValue\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
 	"%AnswerQuestionMultiPickOnSingleSelect\"\x19\n" +
@@ -902,7 +961,7 @@ func file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_question_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_answer_question_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_answer_question_proto_goTypes = []any{
 	(*AnswerQuestionRequest)(nil),                 // 0: agentrepl.v1.AnswerQuestionRequest
 	(*AnswerQuestionAnswer)(nil),                  // 1: agentrepl.v1.AnswerQuestionAnswer
@@ -915,15 +974,16 @@ var file_agentrepl_v1_endpoint_answer_question_proto_goTypes = []any{
 	(*AnswerQuestionTransferringAway)(nil),        // 8: agentrepl.v1.AnswerQuestionTransferringAway
 	(*AnswerQuestionNotYetAdopted)(nil),           // 9: agentrepl.v1.AnswerQuestionNotYetAdopted
 	(*AnswerQuestionAskNotStanding)(nil),          // 10: agentrepl.v1.AnswerQuestionAskNotStanding
-	(*AnswerQuestionUnservedValue)(nil),           // 11: agentrepl.v1.AnswerQuestionUnservedValue
-	(*AnswerQuestionMultiPickOnSingleSelect)(nil), // 12: agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
-	(*AnswerQuestionNoSession)(nil),               // 13: agentrepl.v1.AnswerQuestionNoSession
-	(*v1.WorkspaceRef)(nil),                       // 14: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                            // 15: frontend.v1.FeedId
+	(*AnswerQuestionAskSessionEnded)(nil),         // 11: agentrepl.v1.AnswerQuestionAskSessionEnded
+	(*AnswerQuestionUnservedValue)(nil),           // 12: agentrepl.v1.AnswerQuestionUnservedValue
+	(*AnswerQuestionMultiPickOnSingleSelect)(nil), // 13: agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
+	(*AnswerQuestionNoSession)(nil),               // 14: agentrepl.v1.AnswerQuestionNoSession
+	(*v1.WorkspaceRef)(nil),                       // 15: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                            // 16: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_answer_question_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.AnswerQuestionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.AnswerQuestionRequest.question:type_name -> frontend.v1.FeedId
+	15, // 0: agentrepl.v1.AnswerQuestionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.AnswerQuestionRequest.question:type_name -> frontend.v1.FeedId
 	1,  // 2: agentrepl.v1.AnswerQuestionRequest.answers:type_name -> agentrepl.v1.AnswerQuestionAnswer
 	2,  // 3: agentrepl.v1.AnswerQuestionAnswer.other_text:type_name -> agentrepl.v1.AnswerQuestionOtherText
 	4,  // 4: agentrepl.v1.AnswerQuestionResponse.success:type_name -> agentrepl.v1.AnswerQuestionSuccess
@@ -933,14 +993,15 @@ var file_agentrepl_v1_endpoint_answer_question_proto_depIdxs = []int32{
 	8,  // 8: agentrepl.v1.AnswerQuestionError.transferring_away:type_name -> agentrepl.v1.AnswerQuestionTransferringAway
 	9,  // 9: agentrepl.v1.AnswerQuestionError.not_yet_adopted:type_name -> agentrepl.v1.AnswerQuestionNotYetAdopted
 	10, // 10: agentrepl.v1.AnswerQuestionError.ask_not_standing:type_name -> agentrepl.v1.AnswerQuestionAskNotStanding
-	11, // 11: agentrepl.v1.AnswerQuestionError.unserved_value:type_name -> agentrepl.v1.AnswerQuestionUnservedValue
-	12, // 12: agentrepl.v1.AnswerQuestionError.multi_pick_on_single_select:type_name -> agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
-	13, // 13: agentrepl.v1.AnswerQuestionError.no_session:type_name -> agentrepl.v1.AnswerQuestionNoSession
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	11, // 11: agentrepl.v1.AnswerQuestionError.ask_session_ended:type_name -> agentrepl.v1.AnswerQuestionAskSessionEnded
+	12, // 12: agentrepl.v1.AnswerQuestionError.unserved_value:type_name -> agentrepl.v1.AnswerQuestionUnservedValue
+	13, // 13: agentrepl.v1.AnswerQuestionError.multi_pick_on_single_select:type_name -> agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
+	14, // 14: agentrepl.v1.AnswerQuestionError.no_session:type_name -> agentrepl.v1.AnswerQuestionNoSession
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_question_proto_init() }
@@ -959,6 +1020,7 @@ func file_agentrepl_v1_endpoint_answer_question_proto_init() {
 		(*AnswerQuestionError_TransferringAway)(nil),
 		(*AnswerQuestionError_NotYetAdopted)(nil),
 		(*AnswerQuestionError_AskNotStanding)(nil),
+		(*AnswerQuestionError_AskSessionEnded)(nil),
 		(*AnswerQuestionError_UnservedValue)(nil),
 		(*AnswerQuestionError_MultiPickOnSingleSelect)(nil),
 		(*AnswerQuestionError_NoSession)(nil),
@@ -970,7 +1032,7 @@ func file_agentrepl_v1_endpoint_answer_question_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_question_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_question_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/topbar"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
 
@@ -69,7 +70,7 @@ func (v *verbs) AnswerPermission(ctx context.Context, ws ids.WorkspaceID, answer
 			// has no route to that agent) is a different answer from
 			// `no_open_ask` (the card is stale), and the user acts differently
 			// on each. Neither is hidden.
-			return refuse(log, "AnswerPermission", refusal.Arm, refusal.Detail, false)
+			return v.shimRefusedAnswer(log, "AnswerPermission", ws, sessionwatcher.AskKindPermission, ask.GetValue(), refusal)
 		}
 		log.Error(opAnswerPerm, "the permission answer was not accepted", dlog.Context{
 			"ask": ask.GetValue(), "cause": err.Error(),
@@ -121,7 +122,7 @@ func (v *verbs) AnswerQuestion(ctx context.Context, ws ids.WorkspaceID, answer *
 	}
 	if err := shim.Answer(ctx, served.Agent, answer); err != nil {
 		if refusal, ok := AsShimRefusal(err); ok {
-			return refuse(log, "AnswerQuestion", refusal.Arm, refusal.Detail, false)
+			return v.shimRefusedAnswer(log, "AnswerQuestion", ws, sessionwatcher.AskKindQuestion, ask.GetValue(), refusal)
 		}
 		log.Error(opAnswerQuestion, "the question answer was not accepted", dlog.Context{
 			"ask": ask.GetValue(), "cause": err.Error(),
@@ -132,6 +133,24 @@ func (v *verbs) AnswerQuestion(ctx context.Context, ws ids.WorkspaceID, answer *
 		"ask": ask.GetValue(), "agent": served.Agent.GetValue(), "answers": len(given.GetAnswers().GetAnswers()),
 	})
 	return nil
+}
+
+// shimRefusedAnswer is the refusal an answer the shim refused earns. Every
+// answer verb reaches the shim through it, so no verb can answer a dead ask
+// differently from another.
+//
+// `no_open_ask` FOR A CARD THE VIEWS STAND IS A CONTRADICTION FOUND LATE: the
+// card was served and is still drawn, and no gate holds its ask, so the
+// session that posed it is gone. The card is settled abandoned down the live
+// settle's own path (sessionwatcher.Watcher.AbandonRefusedAsk) and the caller
+// is told the ask's session ended (ArmAskSessionEnded), never that it was
+// already answered. Any other shim arm reaches the caller as the shim said it.
+func (v *verbs) shimRefusedAnswer(log dlog.Logger, rpc string, ws ids.WorkspaceID, kind sessionwatcher.AskKind, ask string, refusal *ShimRefusal) error {
+	if refusal.Arm == ArmShimNoOpenAsk && v.deps.Cards.AbandonRefusedAsk(ws, kind, ask) {
+		return refuse(log, rpc, ArmAskSessionEnded,
+			fmt.Sprintf("the session that posed %s %q no longer holds it, so the card was settled abandoned and nothing was sent (%s)", kind, ask, refusal.Detail), false)
+	}
+	return refuse(log, rpc, refusal.Arm, refusal.Detail, false)
 }
 
 // validateQuestionEcho checks each selection against the served batch.

@@ -2184,7 +2184,7 @@ refuse only an agent\='s prompt and so never answer the editor\='s."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
-                 '("askNotStanding" "bubbleRefused" "coldGate" "duplicateSubmission"
+                 '("askNotStanding" "askSessionEnded" "bubbleRefused" "coldGate" "duplicateSubmission"
                    "fanOutRefused" "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
                    "notYetAdopted" "slashCommandFromAgent" "threadAwaitingFirstAnswer" "transferringAway"
@@ -3356,6 +3356,13 @@ response's row."
                     (agent-repl-test-wire-verbs--parse "{\"askNotStanding\":{}}"))
                    '(:reason (:arm :ask-not-standing :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-error-ask-session-ended-arm ()
+  "SubmitPromptError's `ask_session_ended' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"askSessionEnded\":{}}"))
+                   '(:reason (:arm :ask-session-ended :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-repository-arm ()
   "UpdateMergeQueueError's `unknown_repository' arm decodes with everything it
 carries."
@@ -3533,7 +3540,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender" "threadAwaitingFirstAnswer" "fanOutRefused")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "askSessionEnded" "slashCommandFromAgent" "unknownSender" "threadAwaitingFirstAnswer" "fanOutRefused")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
@@ -6500,13 +6507,20 @@ instead diverges from it unseen."
                     (agent-repl-test-wire-verbs--parse "{\"error\":{\"noSession\":{}}}"))
                    '(:arm :error :value (:cause (:arm :no-session :value nil)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-update-question-draft-ask-session-ended-decodes ()
+  "The `ask_session_ended' refusal decodes as its arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-question-draft-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"askSessionEnded\":{}}}"))
+                   '(:arm :error :value (:cause (:arm :ask-session-ended :value nil)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-update-question-draft-error-arms-pinned ()
   "The error's cause oneof is exactly what the schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_question_draft.pb.go"
                         "UpdateQuestionDraftError")
                        #'string<)
-                 '("askNotStanding" "noSession" "notYetAdopted" "transferringAway"
+                 '("askNotStanding" "askSessionEnded" "noSession" "notYetAdopted" "transferringAway"
                    "unknownWorkspace" "unservedValue" "workspaceRefMismatch"))))
 
 ;;;; ---- AnswerPermission ----
@@ -6549,6 +6563,7 @@ instead diverges from it unseen."
                     (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
                    '(:arm :success :value nil)))
     (dolist (case '(("askNotStanding" . :ask-not-standing)
+                    ("askSessionEnded" . :ask-session-ended)
                     ("noStandingOffer" . :no-standing-offer)
                     ("noSession" . :no-session)))
       (should (equal (agent-repl-wire-decode-answer-permission-response
@@ -6562,7 +6577,7 @@ instead diverges from it unseen."
                         "agentrepl/v1/endpoint_answer_permission.pb.go"
                         "AnswerPermissionError")
                        #'string<)
-                 '("askNotStanding" "noSession" "noStandingOffer" "notYetAdopted"
+                 '("askNotStanding" "askSessionEnded" "noSession" "noStandingOffer" "notYetAdopted"
                    "transferringAway" "unknownWorkspace" "workspaceRefMismatch"))))
 
 ;;;; ---- The family refusals (agentrepl.v1 family.proto) ----

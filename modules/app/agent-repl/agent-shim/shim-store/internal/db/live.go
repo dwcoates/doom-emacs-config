@@ -150,10 +150,19 @@ func (d *DB) LiveWork(ctx context.Context, session string) (*storev1.GetLiveWork
 		})
 	}
 
-	d.observeQuery(StatementLiveWork, "agent", base, started, int64(len(agents)+len(detached)))
-	d.traceStatement(ctx, StatementLiveWork, "agent", base, int64(len(agents)+len(detached)))
-	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d",
-		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetachedRuns))
+	// EVERY ASK LEFT OPEN in the lineage, the main agent's included: an ask
+	// is the asking shim's to settle, and a fresh session's gate holds none.
+	asks, err := d.liveAsks(ctx, session)
+	if err != nil {
+		return nil, d.refuse(base, err)
+	}
+	success.OpenAsks = asks
+
+	rowsRead := int64(len(agents) + len(detached) + len(asks))
+	d.observeQuery(StatementLiveWork, "agent", base, started, rowsRead)
+	d.traceStatement(ctx, StatementLiveWork, "agent", base, rowsRead)
+	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d asks=%d",
+		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetachedRuns), len(success.OpenAsks))
 	return success, nil
 }
 

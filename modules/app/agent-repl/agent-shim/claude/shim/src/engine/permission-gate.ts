@@ -54,6 +54,12 @@ import { create, equals } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { settledAt } from "../convert/entries.js";
+import {
+  abandonedPermissionDecision,
+  abandonedQuestionOutcome,
+  permissionSettle,
+  questionSettle,
+} from "../convert/ask-settles.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
 import { permissionUpsertKey, questionUpsertKey } from "../store/keys.js";
 import { isUserStop } from "../convert/terminals.js";
@@ -514,6 +520,23 @@ const INTERRUPTED_ASK = "the turn was interrupted before the ask was answered";
  * watching (2026-10-25: a test-repair turn asked whether it might restore one
  * line, and nothing landed for an hour and a half).
  */
+/** How a stand-down settles the asks it resolves (see {@link PermissionGate.standDown}). */
+export type StandDownHow = "denied" | "abandoned";
+
+/** The settle a question takes when the session that asked it is ending. */
+const ABANDONED_QUESTION = Symbol("abandoned");
+
+/** A question settle's outcome: the answers, nobody answering, or abandoned. */
+function questionOutcome(
+  answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION,
+): conversationv1.AgentQuestionSuccess["outcome"] {
+  if (answers === ABANDONED_QUESTION) return abandonedQuestionOutcome();
+  if (answers === undefined) {
+    return { case: "unanswered", value: create(conversationv1.AgentQuestionUnansweredSchema, {}) };
+  }
+  return { case: "answered", value: answers };
+}
+
 export const UNATTENDED_DENIAL =
   "No one is available to answer: this turn is a merge queue remediation or deploy hook and runs unattended while the queue waits on it. Decide on your own judgement, or give up the attempt and say why.";
 
@@ -571,6 +594,8 @@ export class PermissionGate {
   private standDowns = 0;
   /** The reason the most recent stand-down gave. */
   private lastStandDownReason = "";
+  /** How the last stand-down settled its asks, for an ask that opens late into it. */
+  private lastStandDownHow: StandDownHow = "denied";
 
   constructor(private readonly deps: PermissionGateDeps) {}
 
@@ -622,9 +647,9 @@ export class PermissionGate {
         const pending = this.pendingByToolUse.get(toolUseId);
         if (pending !== undefined) {
           this.release(toolUseId);
-          this.standDownOne(pending, this.lastStandDownReason);
+          this.standDownOne(pending, this.lastStandDownReason, this.lastStandDownHow);
           LOGGER.info(
-            { tool_use_id: toolUseId, reason: this.lastStandDownReason },
+            { tool_use_id: toolUseId, reason: this.lastStandDownReason, settled_as: this.lastStandDownHow },
             "an ask whose book was still being resolved when the gate stood down is resolved as denied",
           );
         }
@@ -883,29 +908,19 @@ export class PermissionGate {
 
   private settleQuestion(
     pending: PendingQuestion,
-    answers: conversationv1.AgentQuestionAnswers | undefined,
+    answers: conversationv1.AgentQuestionAnswers | undefined | typeof ABANDONED_QUESTION,
   ): void {
     const id = questionId(pending.toolUseId);
     this.deps.persist([
-      this.entry(pending.agentId, questionUpsertKey(id), pending.toolUseId, "agent_frame.update.question.success", {
-        case: "question",
-        value: create(conversationv1.AgentQuestionSchema, {
-          id,
-          result: {
-            case: "success",
-            value: create(conversationv1.AgentQuestionSuccessSchema, {
-              batch: pending.batch,
-              // The settle restates the ask's start, so the settled frame
-              // alone states how long the user was asked.
-              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
-              outcome:
-                answers === undefined
-                  ? { case: "unanswered", value: create(conversationv1.AgentQuestionUnansweredSchema, {}) }
-                  : { case: "answered", value: answers },
-            }),
-          },
-        }),
-      }),
+      this.entry(
+        pending.agentId,
+        questionUpsertKey(id),
+        pending.toolUseId,
+        "agent_frame.update.question.success",
+        // The settle restates the ask's start, so the settled frame alone
+        // states how long the user was asked.
+        questionSettle(id, pending.batch, settledAt(this.deps.nowMs(), pending.startedAtMs), questionOutcome(answers)),
+      ),
     ]);
   }
 
@@ -1107,22 +1122,15 @@ export class PermissionGate {
     if (decision.case === "denied") this.noteDenied(pending.toolUseId);
     const id = permissionId(pending.toolUseId);
     this.deps.persist([
-      this.entry(pending.agentId, permissionUpsertKey(id), pending.toolUseId, "agent_frame.update.permission.success", {
-        case: "permission",
-        value: create(conversationv1.AgentPermissionSchema, {
-          id,
-          gatedCall: toolCallActivityId(pending.toolUseId),
-          result: {
-            case: "success",
-            value: create(conversationv1.AgentPermissionSuccessSchema, {
-              decision,
-              // The settle restates the ask's start, so the settled frame
-              // alone states how long the user was asked.
-              settledAt: settledAt(this.deps.nowMs(), pending.startedAtMs),
-            }),
-          },
-        }),
-      }),
+      this.entry(
+        pending.agentId,
+        permissionUpsertKey(id),
+        pending.toolUseId,
+        "agent_frame.update.permission.success",
+        // The settle restates the ask's start, so the settled frame alone
+        // states how long the user was asked.
+        permissionSettle(id, toolCallActivityId(pending.toolUseId), settledAt(this.deps.nowMs(), pending.startedAtMs), decision),
+      ),
     ]);
   }
 
@@ -1134,28 +1142,60 @@ export class PermissionGate {
    * The first act of every teardown path. An unresolved `canUseTool` promise
    * wedges the vendor process, so this runs before the interrupt, before the
    * query is closed, and before the process exits — never after.
+   *
+   * HOW THE RECORD SAYS EACH ASK ENDED is the caller's `how`, because only the
+   * caller knows whether anything is left to answer:
+   *   - `denied`: a stop or a kill of the turn. The session goes on and the
+   *     model reads the refusal, so the ask settles as the stand-down's denial.
+   *   - `abandoned`: the session or its query is ending. Nothing that asked is
+   *     left to hear an answer, so the ask settles abandoned
+   *     (`AgentQuestionSuccess.abandoned`, `AgentPermissionSuccess.abandoned`),
+   *     and no reader is left standing a card nobody can answer.
    */
-  standDown(reason: string): number {
+  standDown(reason: string, how: StandDownHow): number {
     this.standDowns += 1;
     this.lastStandDownReason = reason;
+    this.lastStandDownHow = how;
     const pending = [...this.pendingByToolUse.values()];
     for (const ask of pending) this.release(ask.toolUseId);
-    for (const ask of pending) this.standDownOne(ask, reason);
+    for (const ask of pending) this.standDownOne(ask, reason, how);
     // A WITHDRAWN ASK'S CALLBACK IS ALREADY RELEASED; only its record is owed.
-    this.settleWithdrawn(reason);
+    this.settleWithdrawn(reason, how);
     if (pending.length > 0) {
       LOGGER.info(
-        { reason, resolved: pending.length },
+        { reason, resolved: pending.length, settled_as: how, ask_ids: pending.map((ask) => ask.toolUseId) },
         "resolved every pending permission callback as denied before teardown",
       );
     }
     return pending.length;
   }
 
-  /** Settle one ask as the stand-down's denial, and release the vendor. */
-  private standDownOne(ask: Pending, reason: string): void {
-    this.settleDenied(ask, reason);
+  /** Settle one ask as the stand-down's `how`, and release the vendor. */
+  private standDownOne(ask: Pending, reason: string, how: StandDownHow): void {
+    this.settleStoodDown(ask, reason, how);
     ask.resolve({ behavior: "deny", message: reason });
+  }
+
+  /** Record one stood-down ask as `how` says it ended. */
+  private settleStoodDown(ask: Pending, reason: string, how: StandDownHow): void {
+    if (how === "abandoned") {
+      this.settleAbandoned(ask);
+      return;
+    }
+    this.settleDenied(ask, reason);
+  }
+
+  /**
+   * Record one ask as ABANDONED: the session or query that asked is ending, so
+   * no answer can ever reach it. The one writer of the abandoned arms for an
+   * ask this gate held.
+   */
+  private settleAbandoned(ask: Pending): void {
+    if (ask.kind === "question") {
+      this.settleQuestion(ask, ABANDONED_QUESTION);
+      return;
+    }
+    this.settlePermission(ask, abandonedPermissionDecision());
   }
 
   /** Record one ask as denied for `reason`: the stand-down's settlement, without the release. */
@@ -1180,14 +1220,14 @@ export class PermissionGate {
    * next word would have said how it ended is gone: a stand-down, or the query
    * replaced by a new one (a keep-alive rewind, a rollback's restart).
    */
-  settleWithdrawn(reason: string): number {
+  settleWithdrawn(reason: string, how: StandDownHow): number {
     const withdrawn = [...this.withdrawnAsks.values()];
     this.withdrawnAsks.clear();
-    for (const ask of withdrawn) this.settleDenied(ask, reason);
+    for (const ask of withdrawn) this.settleStoodDown(ask, reason, how);
     if (withdrawn.length > 0) {
       LOGGER.info(
-        { reason, settled: withdrawn.length },
-        "settled every withdrawn ask as denied: the query that would have said how it ended is gone",
+        { reason, settled: withdrawn.length, settled_as: how },
+        "settled every withdrawn ask: the query that would have said how it ended is gone",
       );
     }
     return withdrawn.length;

@@ -1043,6 +1043,15 @@ CREATE INDEX IF NOT EXISTS entry_place_book_order ON entry_place(book_agent_id, 
 	// ITS BACKFILL DECODES THE STORED FRAMES, as turn_prompt's does: the
 	// delivery id lives only inside them.
 	{peerDeliveryTable, peerDeliveryDDL, "", backfillPeerDeliveries},
+	// THE ASK INDEX (openask.go): every page line recording an ask, and
+	// whether the ask is still open. One row per such line. writeAskLine is
+	// its one writer, in the write's own transaction.
+	//
+	// WHY IN PLACE AND NOT A VERSION BUMP: as for entry_place.
+	//
+	// ITS BACKFILL DECODES THE STORED FRAMES, as peer_delivery's does, so an
+	// ask a shim left open before the table existed is answered too.
+	{askLineTable, askLineDDL, "", backfillAskLines},
 }
 
 // indexMigrationError is a failure to build a missing lineage index or
@@ -1059,7 +1068,7 @@ func (e *indexMigrationError) Unwrap() error { return e.err }
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "peer_delivery", "residue_shapes", "schema_meta", "shell_run_claim", "turn_line", "turn_prompt", "vendor_task", "workflow", "write_ledger"}
+var schemaTables = []string{"agent", "ask_line", "cursor", "cursor_conversion", "detached_work", "entry", "entry_place", "peer_delivery", "residue_shapes", "schema_meta", "shell_run_claim", "turn_line", "turn_prompt", "vendor_task", "workflow", "write_ledger"}
 
 // shapeTables is a table set with the in-place tables taken out: the part of a
 // database's shape that must match EXACTLY, because the in-place tables are the

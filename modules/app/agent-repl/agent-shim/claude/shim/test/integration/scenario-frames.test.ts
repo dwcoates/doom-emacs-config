@@ -290,10 +290,10 @@ function permissionArms(frames: readonly conversationv1.AgentFrame[]): string[] 
 }
 
 describe("a query that dies with a permission ask open", () => {
-  test("opens the ask, then settles it denied by the user before the turn ends", async () => {
+  test("opens the ask, then settles it abandoned before the turn ends", async () => {
     const { frames } = await driveTurn("!query-eof-mid-ask");
 
-    expect(permissionArms(frames)).toEqual(["start", "denied.user"]);
+    expect(permissionArms(frames)).toEqual(["start", "success.abandoned"]);
   });
 
   test("ends the turn on the query_died failure arm carrying unexpected_eof", async () => {

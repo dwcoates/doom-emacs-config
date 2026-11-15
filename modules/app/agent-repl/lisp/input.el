@@ -51,6 +51,9 @@
 ;;                             a turn: logged, input cleared
 ;;   error `ask_not_standing'  the ask settled before the typed answer
 ;;                             reached it: refused, the text is KEPT
+;;   error `ask_session_ended' the session that posed the ask is gone, so
+;;                             the daemon settled it abandoned: refused,
+;;                             the text is KEPT
 ;;   error `merging'           refused: the text is KEPT so the user can
 ;;                             resubmit once the merge resolves
 ;;   transport failure         the daemon never answered: the prompt is
@@ -2245,6 +2248,14 @@ the answer is given rather than reporting a broken session.")
 The send was a standing ask's typed answer and the ask settled before it
 arrived, so it reached nobody and the text stays in the composer.")
 
+(defconst agent-repl--input-ask-session-ended-flash
+  "the question's session ended before it was answered; nothing was sent"
+  "The composer flash for `SubmitPromptError''s `ask_session_ended' arm.
+The send was a standing ask's typed answer, and the session that posed the
+ask no longer holds it: the daemon settled the card abandoned, so the
+answer reached nobody and the text stays in the composer.  The next send
+is an ordinary prompt.")
+
 (defconst agent-repl--input-thread-awaiting-first-answer-flash
   "the thread's first answer is still coming; send this once it lands"
   "The composer flash for `SubmitPromptError''s `thread_awaiting_first_answer'.
@@ -2362,6 +2373,13 @@ arms in `agent-repl--input-deferred-held-arms' rather than refused by them."
          ;; text stays so the user decides what to do with it.
          (agent-repl--info ws "elisp.input.refused-ask-not-standing ws=%s origin=%S arm=%S" ws origin arm)
          (agent-repl--input-say-refusal ws agent-repl--input-ask-not-standing-flash))
+        (:ask-session-ended
+         ;; The send was routed as a standing ask's TYPED ANSWER and the
+         ;; session that posed the ask is gone: the daemon settled the card
+         ;; abandoned.  An answer about a dead ask, recorded at INFO and not
+         ;; queued; the text stays, and the next send is an ordinary prompt.
+         (agent-repl--info ws "elisp.input.refused-ask-session-ended ws=%s origin=%S arm=%S" ws origin arm)
+         (agent-repl--input-say-refusal ws agent-repl--input-ask-session-ended-flash))
         (:thread-awaiting-first-answer
          ;; A CHAT THREAD'S FIRST QUESTION IS STILL BEING ANSWERED: there is
          ;; no answer yet for this one to be asked of.  An ordinary answer,
@@ -2767,6 +2785,7 @@ composer: with text in it `C-RET' sends the latest held prompt now."
   "Return the composer flash for a numbered answer's refusal CAUSE."
   (pcase (plist-get cause :arm)
     (:ask-not-standing "the card was already answered")
+    (:ask-session-ended agent-repl--input-ask-session-ended-flash)
     (:unserved-value "the card no longer offers that choice")
     (:no-standing-offer "the card offers no always allow")
     (:no-session "the workspace has no session")

@@ -1745,6 +1745,7 @@ type AgentPermissionSuccess struct {
 	//	*AgentPermissionSuccess_Allowed
 	//	*AgentPermissionSuccess_Denied
 	//	*AgentPermissionSuccess_AnsweredRemotely
+	//	*AgentPermissionSuccess_Abandoned
 	Decision isAgentPermissionSuccess_Decision `protobuf_oneof:"decision"`
 	// When the gate was decided, with the instant the ask was posed restated
 	// (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -1821,6 +1822,15 @@ func (x *AgentPermissionSuccess) GetAnsweredRemotely() *AgentPermissionAnsweredR
 	return nil
 }
 
+func (x *AgentPermissionSuccess) GetAbandoned() *AgentPermissionAbandoned {
+	if x != nil {
+		if x, ok := x.Decision.(*AgentPermissionSuccess_Abandoned); ok {
+			return x.Abandoned
+		}
+	}
+	return nil
+}
+
 func (x *AgentPermissionSuccess) GetSettledAt() *AgentActivitySettledAt {
 	if x != nil {
 		return x.SettledAt
@@ -1853,11 +1863,19 @@ type AgentPermissionSuccess_AnsweredRemotely struct {
 	AnsweredRemotely *AgentPermissionAnsweredRemotely `protobuf:"bytes,5,opt,name=answered_remotely,json=answeredRemotely,proto3,oneof"`
 }
 
+type AgentPermissionSuccess_Abandoned struct {
+	// NOBODY DECIDED: the session that held the ask ended before anyone
+	// answered it, and the gated call never ran. See AgentPermissionAbandoned.
+	Abandoned *AgentPermissionAbandoned `protobuf:"bytes,6,opt,name=abandoned,proto3,oneof"`
+}
+
 func (*AgentPermissionSuccess_Allowed) isAgentPermissionSuccess_Decision() {}
 
 func (*AgentPermissionSuccess_Denied) isAgentPermissionSuccess_Decision() {}
 
 func (*AgentPermissionSuccess_AnsweredRemotely) isAgentPermissionSuccess_Decision() {}
+
+func (*AgentPermissionSuccess_Abandoned) isAgentPermissionSuccess_Decision() {}
 
 // The ask was answered on claude.ai, not here.
 type AgentPermissionAnsweredRemotely struct {
@@ -1896,6 +1914,56 @@ func (*AgentPermissionAnsweredRemotely) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{26}
 }
 
+// THE SESSION THAT HELD THE ASK ENDED BEFORE ANYONE DECIDED IT. The vendor
+// process that asked is gone, so no decision can ever be delivered and the
+// gated call never runs: a consumer draws the card closed and refuses any
+// decision on it, telling the user the ask's session ended rather than that it
+// was already decided.
+//
+// NOT A DENIAL: nobody refused, and drawing it as one accuses the user or a
+// policy of a refusal that never happened.
+//
+// Two producers state it: the shim tearing a session down with the ask still
+// pending in its permission gate, and the shim starting a session whose record
+// holds the ask open with no gate left to answer it (a predecessor that died
+// without a teardown). A daemon that finds a view standing an ask the session's
+// facts no longer name open settles its views with this same arm.
+type AgentPermissionAbandoned struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentPermissionAbandoned) Reset() {
+	*x = AgentPermissionAbandoned{}
+	mi := &file_conversation_v1_permission_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentPermissionAbandoned) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentPermissionAbandoned) ProtoMessage() {}
+
+func (x *AgentPermissionAbandoned) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_permission_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentPermissionAbandoned.ProtoReflect.Descriptor instead.
+func (*AgentPermissionAbandoned) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{27}
+}
+
 // Consent was given. The set arm is its scope.
 type AgentPermissionAllowed struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1910,7 +1978,7 @@ type AgentPermissionAllowed struct {
 
 func (x *AgentPermissionAllowed) Reset() {
 	*x = AgentPermissionAllowed{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[27]
+	mi := &file_conversation_v1_permission_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1922,7 +1990,7 @@ func (x *AgentPermissionAllowed) String() string {
 func (*AgentPermissionAllowed) ProtoMessage() {}
 
 func (x *AgentPermissionAllowed) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[27]
+	mi := &file_conversation_v1_permission_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1935,7 +2003,7 @@ func (x *AgentPermissionAllowed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionAllowed.ProtoReflect.Descriptor instead.
 func (*AgentPermissionAllowed) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{27}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AgentPermissionAllowed) GetScope() isAgentPermissionAllowed_Scope {
@@ -1990,7 +2058,7 @@ type AgentPermissionAllowedOnce struct {
 
 func (x *AgentPermissionAllowedOnce) Reset() {
 	*x = AgentPermissionAllowedOnce{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[28]
+	mi := &file_conversation_v1_permission_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2002,7 +2070,7 @@ func (x *AgentPermissionAllowedOnce) String() string {
 func (*AgentPermissionAllowedOnce) ProtoMessage() {}
 
 func (x *AgentPermissionAllowedOnce) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[28]
+	mi := &file_conversation_v1_permission_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2015,7 +2083,7 @@ func (x *AgentPermissionAllowedOnce) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionAllowedOnce.ProtoReflect.Descriptor instead.
 func (*AgentPermissionAllowedOnce) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{28}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{29}
 }
 
 // Consent for this call and for what the standing describes from now on.
@@ -2029,7 +2097,7 @@ type AgentPermissionAllowedStanding struct {
 
 func (x *AgentPermissionAllowedStanding) Reset() {
 	*x = AgentPermissionAllowedStanding{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[29]
+	mi := &file_conversation_v1_permission_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2041,7 +2109,7 @@ func (x *AgentPermissionAllowedStanding) String() string {
 func (*AgentPermissionAllowedStanding) ProtoMessage() {}
 
 func (x *AgentPermissionAllowedStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[29]
+	mi := &file_conversation_v1_permission_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2054,7 +2122,7 @@ func (x *AgentPermissionAllowedStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionAllowedStanding.ProtoReflect.Descriptor instead.
 func (*AgentPermissionAllowedStanding) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{29}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AgentPermissionAllowedStanding) GetStanding() *AgentPermissionStanding {
@@ -2079,7 +2147,7 @@ type AgentPermissionDenied struct {
 
 func (x *AgentPermissionDenied) Reset() {
 	*x = AgentPermissionDenied{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[30]
+	mi := &file_conversation_v1_permission_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2091,7 +2159,7 @@ func (x *AgentPermissionDenied) String() string {
 func (*AgentPermissionDenied) ProtoMessage() {}
 
 func (x *AgentPermissionDenied) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[30]
+	mi := &file_conversation_v1_permission_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2104,7 +2172,7 @@ func (x *AgentPermissionDenied) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionDenied.ProtoReflect.Descriptor instead.
 func (*AgentPermissionDenied) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{30}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AgentPermissionDenied) GetBy() isAgentPermissionDenied_By {
@@ -2187,7 +2255,7 @@ type AgentPermissionDeniedForWantOfDecider struct {
 
 func (x *AgentPermissionDeniedForWantOfDecider) Reset() {
 	*x = AgentPermissionDeniedForWantOfDecider{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[31]
+	mi := &file_conversation_v1_permission_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2199,7 +2267,7 @@ func (x *AgentPermissionDeniedForWantOfDecider) String() string {
 func (*AgentPermissionDeniedForWantOfDecider) ProtoMessage() {}
 
 func (x *AgentPermissionDeniedForWantOfDecider) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[31]
+	mi := &file_conversation_v1_permission_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2212,7 +2280,7 @@ func (x *AgentPermissionDeniedForWantOfDecider) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use AgentPermissionDeniedForWantOfDecider.ProtoReflect.Descriptor instead.
 func (*AgentPermissionDeniedForWantOfDecider) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{31}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AgentPermissionDeniedForWantOfDecider) GetDetail() string {
@@ -2233,7 +2301,7 @@ type AgentPermissionDeniedByUser struct {
 
 func (x *AgentPermissionDeniedByUser) Reset() {
 	*x = AgentPermissionDeniedByUser{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[32]
+	mi := &file_conversation_v1_permission_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2245,7 +2313,7 @@ func (x *AgentPermissionDeniedByUser) String() string {
 func (*AgentPermissionDeniedByUser) ProtoMessage() {}
 
 func (x *AgentPermissionDeniedByUser) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[32]
+	mi := &file_conversation_v1_permission_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2258,7 +2326,7 @@ func (x *AgentPermissionDeniedByUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionDeniedByUser.ProtoReflect.Descriptor instead.
 func (*AgentPermissionDeniedByUser) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{32}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *AgentPermissionDeniedByUser) GetMessage() string {
@@ -2285,7 +2353,7 @@ type AgentPermissionDeniedByPolicy struct {
 
 func (x *AgentPermissionDeniedByPolicy) Reset() {
 	*x = AgentPermissionDeniedByPolicy{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[33]
+	mi := &file_conversation_v1_permission_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2297,7 +2365,7 @@ func (x *AgentPermissionDeniedByPolicy) String() string {
 func (*AgentPermissionDeniedByPolicy) ProtoMessage() {}
 
 func (x *AgentPermissionDeniedByPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[33]
+	mi := &file_conversation_v1_permission_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2310,7 +2378,7 @@ func (x *AgentPermissionDeniedByPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionDeniedByPolicy.ProtoReflect.Descriptor instead.
 func (*AgentPermissionDeniedByPolicy) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{33}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *AgentPermissionDeniedByPolicy) GetDecider() string {
@@ -2345,7 +2413,7 @@ type AgentPermissionFailure struct {
 
 func (x *AgentPermissionFailure) Reset() {
 	*x = AgentPermissionFailure{}
-	mi := &file_conversation_v1_permission_proto_msgTypes[34]
+	mi := &file_conversation_v1_permission_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2357,7 +2425,7 @@ func (x *AgentPermissionFailure) String() string {
 func (*AgentPermissionFailure) ProtoMessage() {}
 
 func (x *AgentPermissionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_permission_proto_msgTypes[34]
+	mi := &file_conversation_v1_permission_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2370,7 +2438,7 @@ func (x *AgentPermissionFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentPermissionFailure.ProtoReflect.Descriptor instead.
 func (*AgentPermissionFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{34}
+	return file_conversation_v1_permission_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AgentPermissionFailure) GetError() *AgentToolFailure {
@@ -2474,17 +2542,19 @@ const file_conversation_v1_permission_proto_rawDesc = "" +
 	"\x19AgentPermissionModeBypass\"\x19\n" +
 	"\x17AgentPermissionModePlan\"\x1c\n" +
 	"\x1aAgentPermissionModeDontAsk\"\x19\n" +
-	"\x17AgentPermissionModeAuto\"\xee\x02\n" +
+	"\x17AgentPermissionModeAuto\"\xb9\x03\n" +
 	"\x16AgentPermissionSuccess\x12C\n" +
 	"\aallowed\x18\x01 \x01(\v2'.conversation.v1.AgentPermissionAllowedH\x00R\aallowed\x12@\n" +
 	"\x06denied\x18\x02 \x01(\v2&.conversation.v1.AgentPermissionDeniedH\x00R\x06denied\x12_\n" +
-	"\x11answered_remotely\x18\x05 \x01(\v20.conversation.v1.AgentPermissionAnsweredRemotelyH\x00R\x10answeredRemotely\x12K\n" +
+	"\x11answered_remotely\x18\x05 \x01(\v20.conversation.v1.AgentPermissionAnsweredRemotelyH\x00R\x10answeredRemotely\x12I\n" +
+	"\tabandoned\x18\x06 \x01(\v2).conversation.v1.AgentPermissionAbandonedH\x00R\tabandoned\x12K\n" +
 	"\n" +
 	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01B\n" +
 	"\n" +
 	"\bdecisionB\r\n" +
 	"\v_settled_atJ\x04\b\x03\x10\x04\"!\n" +
-	"\x1fAgentPermissionAnsweredRemotely\"\xb3\x01\n" +
+	"\x1fAgentPermissionAnsweredRemotely\"\x1a\n" +
+	"\x18AgentPermissionAbandoned\"\xb3\x01\n" +
 	"\x16AgentPermissionAllowed\x12A\n" +
 	"\x04once\x18\x01 \x01(\v2+.conversation.v1.AgentPermissionAllowedOnceH\x00R\x04once\x12M\n" +
 	"\bstanding\x18\x02 \x01(\v2/.conversation.v1.AgentPermissionAllowedStandingH\x00R\bstandingB\a\n" +
@@ -2538,7 +2608,7 @@ func file_conversation_v1_permission_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_permission_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_conversation_v1_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_conversation_v1_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_conversation_v1_permission_proto_goTypes = []any{
 	(AgentPermissionDestination)(0),               // 0: conversation.v1.AgentPermissionDestination
 	(AgentPermissionBehavior)(0),                  // 1: conversation.v1.AgentPermissionBehavior
@@ -2569,32 +2639,33 @@ var file_conversation_v1_permission_proto_goTypes = []any{
 	(*AgentPermissionModeAuto)(nil),               // 26: conversation.v1.AgentPermissionModeAuto
 	(*AgentPermissionSuccess)(nil),                // 27: conversation.v1.AgentPermissionSuccess
 	(*AgentPermissionAnsweredRemotely)(nil),       // 28: conversation.v1.AgentPermissionAnsweredRemotely
-	(*AgentPermissionAllowed)(nil),                // 29: conversation.v1.AgentPermissionAllowed
-	(*AgentPermissionAllowedOnce)(nil),            // 30: conversation.v1.AgentPermissionAllowedOnce
-	(*AgentPermissionAllowedStanding)(nil),        // 31: conversation.v1.AgentPermissionAllowedStanding
-	(*AgentPermissionDenied)(nil),                 // 32: conversation.v1.AgentPermissionDenied
-	(*AgentPermissionDeniedForWantOfDecider)(nil), // 33: conversation.v1.AgentPermissionDeniedForWantOfDecider
-	(*AgentPermissionDeniedByUser)(nil),           // 34: conversation.v1.AgentPermissionDeniedByUser
-	(*AgentPermissionDeniedByPolicy)(nil),         // 35: conversation.v1.AgentPermissionDeniedByPolicy
-	(*AgentPermissionFailure)(nil),                // 36: conversation.v1.AgentPermissionFailure
-	(*AgentActivityId)(nil),                       // 37: conversation.v1.AgentActivityId
-	(*AgentActivityStartedAt)(nil),                // 38: conversation.v1.AgentActivityStartedAt
-	(*AgentActivitySettledAt)(nil),                // 39: conversation.v1.AgentActivitySettledAt
-	(*AgentToolFailure)(nil),                      // 40: conversation.v1.AgentToolFailure
+	(*AgentPermissionAbandoned)(nil),              // 29: conversation.v1.AgentPermissionAbandoned
+	(*AgentPermissionAllowed)(nil),                // 30: conversation.v1.AgentPermissionAllowed
+	(*AgentPermissionAllowedOnce)(nil),            // 31: conversation.v1.AgentPermissionAllowedOnce
+	(*AgentPermissionAllowedStanding)(nil),        // 32: conversation.v1.AgentPermissionAllowedStanding
+	(*AgentPermissionDenied)(nil),                 // 33: conversation.v1.AgentPermissionDenied
+	(*AgentPermissionDeniedForWantOfDecider)(nil), // 34: conversation.v1.AgentPermissionDeniedForWantOfDecider
+	(*AgentPermissionDeniedByUser)(nil),           // 35: conversation.v1.AgentPermissionDeniedByUser
+	(*AgentPermissionDeniedByPolicy)(nil),         // 36: conversation.v1.AgentPermissionDeniedByPolicy
+	(*AgentPermissionFailure)(nil),                // 37: conversation.v1.AgentPermissionFailure
+	(*AgentActivityId)(nil),                       // 38: conversation.v1.AgentActivityId
+	(*AgentActivityStartedAt)(nil),                // 39: conversation.v1.AgentActivityStartedAt
+	(*AgentActivitySettledAt)(nil),                // 40: conversation.v1.AgentActivitySettledAt
+	(*AgentToolFailure)(nil),                      // 41: conversation.v1.AgentToolFailure
 }
 var file_conversation_v1_permission_proto_depIdxs = []int32{
 	3,  // 0: conversation.v1.AgentPermission.id:type_name -> conversation.v1.AgentPermissionId
-	37, // 1: conversation.v1.AgentPermission.gated_call:type_name -> conversation.v1.AgentActivityId
+	38, // 1: conversation.v1.AgentPermission.gated_call:type_name -> conversation.v1.AgentActivityId
 	5,  // 2: conversation.v1.AgentPermission.start:type_name -> conversation.v1.AgentPermissionStart
 	27, // 3: conversation.v1.AgentPermission.success:type_name -> conversation.v1.AgentPermissionSuccess
-	36, // 4: conversation.v1.AgentPermission.failure:type_name -> conversation.v1.AgentPermissionFailure
+	37, // 4: conversation.v1.AgentPermission.failure:type_name -> conversation.v1.AgentPermissionFailure
 	3,  // 5: conversation.v1.AgentPermissionDecision.ask:type_name -> conversation.v1.AgentPermissionId
-	29, // 6: conversation.v1.AgentPermissionDecision.allowed:type_name -> conversation.v1.AgentPermissionAllowed
-	34, // 7: conversation.v1.AgentPermissionDecision.denied:type_name -> conversation.v1.AgentPermissionDeniedByUser
+	30, // 6: conversation.v1.AgentPermissionDecision.allowed:type_name -> conversation.v1.AgentPermissionAllowed
+	35, // 7: conversation.v1.AgentPermissionDecision.denied:type_name -> conversation.v1.AgentPermissionDeniedByUser
 	6,  // 8: conversation.v1.AgentPermissionStart.prompt:type_name -> conversation.v1.AgentPermissionPrompt
 	7,  // 9: conversation.v1.AgentPermissionStart.trigger:type_name -> conversation.v1.AgentPermissionTrigger
 	11, // 10: conversation.v1.AgentPermissionStart.offered_standing:type_name -> conversation.v1.AgentPermissionStanding
-	38, // 11: conversation.v1.AgentPermissionStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	39, // 11: conversation.v1.AgentPermissionStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	8,  // 12: conversation.v1.AgentPermissionTrigger.blocked_path:type_name -> conversation.v1.AgentPermissionBlockedPath
 	9,  // 13: conversation.v1.AgentPermissionTrigger.ask_rule:type_name -> conversation.v1.AgentPermissionAskRule
 	10, // 14: conversation.v1.AgentPermissionTrigger.note:type_name -> conversation.v1.AgentPermissionTriggerNote
@@ -2619,22 +2690,23 @@ var file_conversation_v1_permission_proto_depIdxs = []int32{
 	24, // 33: conversation.v1.AgentPermissionMode.plan:type_name -> conversation.v1.AgentPermissionModePlan
 	25, // 34: conversation.v1.AgentPermissionMode.dont_ask:type_name -> conversation.v1.AgentPermissionModeDontAsk
 	26, // 35: conversation.v1.AgentPermissionMode.auto:type_name -> conversation.v1.AgentPermissionModeAuto
-	29, // 36: conversation.v1.AgentPermissionSuccess.allowed:type_name -> conversation.v1.AgentPermissionAllowed
-	32, // 37: conversation.v1.AgentPermissionSuccess.denied:type_name -> conversation.v1.AgentPermissionDenied
+	30, // 36: conversation.v1.AgentPermissionSuccess.allowed:type_name -> conversation.v1.AgentPermissionAllowed
+	33, // 37: conversation.v1.AgentPermissionSuccess.denied:type_name -> conversation.v1.AgentPermissionDenied
 	28, // 38: conversation.v1.AgentPermissionSuccess.answered_remotely:type_name -> conversation.v1.AgentPermissionAnsweredRemotely
-	39, // 39: conversation.v1.AgentPermissionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	30, // 40: conversation.v1.AgentPermissionAllowed.once:type_name -> conversation.v1.AgentPermissionAllowedOnce
-	31, // 41: conversation.v1.AgentPermissionAllowed.standing:type_name -> conversation.v1.AgentPermissionAllowedStanding
-	11, // 42: conversation.v1.AgentPermissionAllowedStanding.standing:type_name -> conversation.v1.AgentPermissionStanding
-	34, // 43: conversation.v1.AgentPermissionDenied.user:type_name -> conversation.v1.AgentPermissionDeniedByUser
-	35, // 44: conversation.v1.AgentPermissionDenied.policy:type_name -> conversation.v1.AgentPermissionDeniedByPolicy
-	33, // 45: conversation.v1.AgentPermissionDenied.undecidable:type_name -> conversation.v1.AgentPermissionDeniedForWantOfDecider
-	40, // 46: conversation.v1.AgentPermissionFailure.error:type_name -> conversation.v1.AgentToolFailure
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	29, // 39: conversation.v1.AgentPermissionSuccess.abandoned:type_name -> conversation.v1.AgentPermissionAbandoned
+	40, // 40: conversation.v1.AgentPermissionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	31, // 41: conversation.v1.AgentPermissionAllowed.once:type_name -> conversation.v1.AgentPermissionAllowedOnce
+	32, // 42: conversation.v1.AgentPermissionAllowed.standing:type_name -> conversation.v1.AgentPermissionAllowedStanding
+	11, // 43: conversation.v1.AgentPermissionAllowedStanding.standing:type_name -> conversation.v1.AgentPermissionStanding
+	35, // 44: conversation.v1.AgentPermissionDenied.user:type_name -> conversation.v1.AgentPermissionDeniedByUser
+	36, // 45: conversation.v1.AgentPermissionDenied.policy:type_name -> conversation.v1.AgentPermissionDeniedByPolicy
+	34, // 46: conversation.v1.AgentPermissionDenied.undecidable:type_name -> conversation.v1.AgentPermissionDeniedForWantOfDecider
+	41, // 47: conversation.v1.AgentPermissionFailure.error:type_name -> conversation.v1.AgentToolFailure
+	48, // [48:48] is the sub-list for method output_type
+	48, // [48:48] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_permission_proto_init() }
@@ -2677,26 +2749,27 @@ func file_conversation_v1_permission_proto_init() {
 		(*AgentPermissionSuccess_Allowed)(nil),
 		(*AgentPermissionSuccess_Denied)(nil),
 		(*AgentPermissionSuccess_AnsweredRemotely)(nil),
+		(*AgentPermissionSuccess_Abandoned)(nil),
 	}
-	file_conversation_v1_permission_proto_msgTypes[27].OneofWrappers = []any{
+	file_conversation_v1_permission_proto_msgTypes[28].OneofWrappers = []any{
 		(*AgentPermissionAllowed_Once)(nil),
 		(*AgentPermissionAllowed_Standing)(nil),
 	}
-	file_conversation_v1_permission_proto_msgTypes[30].OneofWrappers = []any{
+	file_conversation_v1_permission_proto_msgTypes[31].OneofWrappers = []any{
 		(*AgentPermissionDenied_User)(nil),
 		(*AgentPermissionDenied_Policy)(nil),
 		(*AgentPermissionDenied_Undecidable)(nil),
 	}
-	file_conversation_v1_permission_proto_msgTypes[31].OneofWrappers = []any{}
-	file_conversation_v1_permission_proto_msgTypes[33].OneofWrappers = []any{}
+	file_conversation_v1_permission_proto_msgTypes[32].OneofWrappers = []any{}
 	file_conversation_v1_permission_proto_msgTypes[34].OneofWrappers = []any{}
+	file_conversation_v1_permission_proto_msgTypes[35].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_permission_proto_rawDesc), len(file_conversation_v1_permission_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   35,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -62,6 +62,11 @@ message AnswerQuestionError {
     AnswerQuestionNotYetAdopted not_yet_adopted = 4;
     // The question card is no longer standing.
     AnswerQuestionAskNotStanding ask_not_standing = 5;
+    // The card was standing, and the session that posed the question batch no longer
+    // holds it: the session ended before anyone answered, so nothing was sent
+    // and the card is settled abandoned. A client tells the user the ask's
+    // session ended, never that it was already answered.
+    AnswerQuestionAskSessionEnded ask_session_ended = 9;
     // A question text or option label the batch never served.
     AnswerQuestionUnservedValue unserved_value = 6;
     // Several options were picked on a single-select question.
@@ -89,6 +94,9 @@ message AnswerQuestionNotYetAdopted {
   optional string address = 1;
 }
 message AnswerQuestionAskNotStanding {}
+
+// The abandoned-ask refusal. Empty: the arm is the whole fact.
+message AnswerQuestionAskSessionEnded {}
 message AnswerQuestionUnservedValue {
   // The unserved text, as echoed.
   string text = 1;

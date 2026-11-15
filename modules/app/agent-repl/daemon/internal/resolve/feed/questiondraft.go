@@ -228,25 +228,12 @@ func (r *resolver) StandingAsk(ws ids.WorkspaceID, target *feedid.Ref) (Standing
 // user's answer goes to, read by the typed-answer routing (StandingAsk) and
 // the host view's numbered answer (hostask.go) alike.
 func (r *resolver) oldestStandingAsk(s *wsState, addressed string) (StandingAsk, bool) {
-	var best StandingAsk
-	var bestOpened uint64
-	found := false
-	consider := func(kind AskKind, id string, opened uint64) {
-		if !found || opened < bestOpened {
-			best, bestOpened, found = StandingAsk{Kind: kind, ID: id}, opened, true
+	for _, a := range openAsks(s) {
+		if a.answerable && r.feedKey(s.id, a.at.feed) == addressed {
+			return StandingAsk{Kind: a.kind, ID: a.id}, true
 		}
 	}
-	for id, p := range s.permissionRows {
-		if p.card.GetOpen() != nil && r.feedKey(s.id, p.feed.feed) == addressed {
-			consider(AskPermission, id, p.opened)
-		}
-	}
-	for id, q := range s.questionAsks {
-		if q.open && !q.delivering && q.row != nil && r.feedKey(s.id, q.at.feed) == addressed {
-			consider(AskQuestion, id, q.opened)
-		}
-	}
-	return best, found
+	return StandingAsk{}, false
 }
 
 // addressedFeedKey answers the key of the feed a submission addresses: the

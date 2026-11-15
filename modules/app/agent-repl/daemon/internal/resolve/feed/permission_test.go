@@ -714,3 +714,44 @@ func TestAnAskAnsweredOnClaudeAiMarksNoCallDenied(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAbandonedConsentAskIsDrawnAbandoned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Abandoned{Abandoned: &conversationv1.AgentPermissionAbandoned{}},
+	})
+
+	// Assert: nobody decided, so it is neither an answer nor a denial.
+	if h.permissionCard().GetAbandoned() == nil {
+		t.Fatalf("state = %T, want abandoned", h.permissionCard().GetState())
+	}
+}
+
+func TestAnAbandonedSettleNeverOverridesAConsentAskAlreadyDecided(t *testing.T) {
+	// Arrange: the ask was allowed.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt: &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+	})
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Allowed{Allowed: &conversationv1.AgentPermissionAllowed{
+			Scope: &conversationv1.AgentPermissionAllowed_Once{Once: &conversationv1.AgentPermissionAllowedOnce{}},
+		}},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Abandoned{Abandoned: &conversationv1.AgentPermissionAbandoned{}},
+	})
+
+	// Assert.
+	if h.permissionCard().GetAnswered().GetAllowedOnce() == nil {
+		t.Fatalf("state = %T, want the allowed card to stand", h.permissionCard().GetState())
+	}
+}

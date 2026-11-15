@@ -658,6 +658,7 @@ type AgentQuestionSuccess struct {
 	//
 	//	*AgentQuestionSuccess_Answered
 	//	*AgentQuestionSuccess_Unanswered
+	//	*AgentQuestionSuccess_Abandoned
 	Outcome isAgentQuestionSuccess_Outcome `protobuf_oneof:"outcome"`
 	// When the ask concluded, with the instant it was posed restated
 	// (AgentActivitySettledAt.started_at), so the settled frame alone states how
@@ -732,6 +733,15 @@ func (x *AgentQuestionSuccess) GetUnanswered() *AgentQuestionUnanswered {
 	return nil
 }
 
+func (x *AgentQuestionSuccess) GetAbandoned() *AgentQuestionAbandoned {
+	if x != nil {
+		if x, ok := x.Outcome.(*AgentQuestionSuccess_Abandoned); ok {
+			return x.Abandoned
+		}
+	}
+	return nil
+}
+
 func (x *AgentQuestionSuccess) GetSettledAt() *AgentActivitySettledAt {
 	if x != nil {
 		return x.SettledAt
@@ -755,9 +765,17 @@ type AgentQuestionSuccess_Unanswered struct {
 	Unanswered *AgentQuestionUnanswered `protobuf:"bytes,3,opt,name=unanswered,proto3,oneof"`
 }
 
+type AgentQuestionSuccess_Abandoned struct {
+	// The session that held the ask ended before anyone answered it. See
+	// AgentQuestionAbandoned.
+	Abandoned *AgentQuestionAbandoned `protobuf:"bytes,5,opt,name=abandoned,proto3,oneof"`
+}
+
 func (*AgentQuestionSuccess_Answered) isAgentQuestionSuccess_Outcome() {}
 
 func (*AgentQuestionSuccess_Unanswered) isAgentQuestionSuccess_Outcome() {}
+
+func (*AgentQuestionSuccess_Abandoned) isAgentQuestionSuccess_Outcome() {}
 
 // The user's answers to one ask, one per question.
 type AgentQuestionAnswers struct {
@@ -1009,6 +1027,55 @@ func (*AgentQuestionUnanswered) Descriptor() ([]byte, []int) {
 	return file_conversation_v1_question_proto_rawDescGZIP(), []int{14}
 }
 
+// THE SESSION THAT HELD THE ASK ENDED BEFORE ANYONE ANSWERED IT. The vendor
+// process that asked is gone, so no answer can ever be delivered: a consumer
+// draws the card as expired and refuses any answer to it, telling the user the
+// question's session ended rather than that it was already answered.
+//
+// DISTINCT FROM `unanswered`: there the agent stopped waiting and went on
+// without a choice, while here nothing went on at all.
+//
+// Two producers state it: the shim tearing a session down with the ask still
+// pending in its permission gate, and the shim starting a session whose record
+// holds the ask open with no gate left to answer it (a predecessor that died
+// without a teardown). A daemon that finds a view standing an ask the session's
+// facts no longer name open settles its views with this same arm.
+type AgentQuestionAbandoned struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentQuestionAbandoned) Reset() {
+	*x = AgentQuestionAbandoned{}
+	mi := &file_conversation_v1_question_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentQuestionAbandoned) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentQuestionAbandoned) ProtoMessage() {}
+
+func (x *AgentQuestionAbandoned) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_question_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentQuestionAbandoned.ProtoReflect.Descriptor instead.
+func (*AgentQuestionAbandoned) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_question_proto_rawDescGZIP(), []int{15}
+}
+
 // The question could not be put to the user.
 type AgentQuestionFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1020,7 +1087,7 @@ type AgentQuestionFailure struct {
 
 func (x *AgentQuestionFailure) Reset() {
 	*x = AgentQuestionFailure{}
-	mi := &file_conversation_v1_question_proto_msgTypes[15]
+	mi := &file_conversation_v1_question_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1032,7 +1099,7 @@ func (x *AgentQuestionFailure) String() string {
 func (*AgentQuestionFailure) ProtoMessage() {}
 
 func (x *AgentQuestionFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_question_proto_msgTypes[15]
+	mi := &file_conversation_v1_question_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1045,7 +1112,7 @@ func (x *AgentQuestionFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentQuestionFailure.ProtoReflect.Descriptor instead.
 func (*AgentQuestionFailure) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_question_proto_rawDescGZIP(), []int{15}
+	return file_conversation_v1_question_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *AgentQuestionFailure) GetError() *AgentToolFailure {
@@ -1067,7 +1134,7 @@ type AgentQuestionId struct {
 
 func (x *AgentQuestionId) Reset() {
 	*x = AgentQuestionId{}
-	mi := &file_conversation_v1_question_proto_msgTypes[16]
+	mi := &file_conversation_v1_question_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1079,7 +1146,7 @@ func (x *AgentQuestionId) String() string {
 func (*AgentQuestionId) ProtoMessage() {}
 
 func (x *AgentQuestionId) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_question_proto_msgTypes[16]
+	mi := &file_conversation_v1_question_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1092,7 +1159,7 @@ func (x *AgentQuestionId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentQuestionId.ProtoReflect.Descriptor instead.
 func (*AgentQuestionId) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_question_proto_rawDescGZIP(), []int{16}
+	return file_conversation_v1_question_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AgentQuestionId) GetValue() string {
@@ -1118,7 +1185,7 @@ type AgentQuestionAnswer struct {
 
 func (x *AgentQuestionAnswer) Reset() {
 	*x = AgentQuestionAnswer{}
-	mi := &file_conversation_v1_question_proto_msgTypes[17]
+	mi := &file_conversation_v1_question_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1197,7 @@ func (x *AgentQuestionAnswer) String() string {
 func (*AgentQuestionAnswer) ProtoMessage() {}
 
 func (x *AgentQuestionAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_question_proto_msgTypes[17]
+	mi := &file_conversation_v1_question_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1210,7 @@ func (x *AgentQuestionAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentQuestionAnswer.ProtoReflect.Descriptor instead.
 func (*AgentQuestionAnswer) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_question_proto_rawDescGZIP(), []int{17}
+	return file_conversation_v1_question_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AgentQuestionAnswer) GetAsk() *AgentQuestionId {
@@ -1196,13 +1263,14 @@ const file_conversation_v1_question_proto_rawDesc = "" +
 	"\n" +
 	"\b_preview\"0\n" +
 	"\x18AgentQuestionOptionLabel\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\"\xc9\x02\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\"\x92\x03\n" +
 	"\x14AgentQuestionSuccess\x129\n" +
 	"\x05batch\x18\x01 \x01(\v2#.conversation.v1.AgentQuestionBatchR\x05batch\x12C\n" +
 	"\banswered\x18\x02 \x01(\v2%.conversation.v1.AgentQuestionAnswersH\x00R\banswered\x12J\n" +
 	"\n" +
 	"unanswered\x18\x03 \x01(\v2(.conversation.v1.AgentQuestionUnansweredH\x00R\n" +
-	"unanswered\x12K\n" +
+	"unanswered\x12G\n" +
+	"\tabandoned\x18\x05 \x01(\v2'.conversation.v1.AgentQuestionAbandonedH\x00R\tabandoned\x12K\n" +
 	"\n" +
 	"settled_at\x18\x04 \x01(\v2'.conversation.v1.AgentActivitySettledAtH\x01R\tsettledAt\x88\x01\x01B\t\n" +
 	"\aoutcomeB\r\n" +
@@ -1219,7 +1287,8 @@ const file_conversation_v1_question_proto_rawDesc = "" +
 	"\x05label\x18\x01 \x01(\v2).conversation.v1.AgentQuestionOptionLabelR\x05label\"+\n" +
 	"\x15AgentQuestionFreeText\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"\x19\n" +
-	"\x17AgentQuestionUnanswered\"^\n" +
+	"\x17AgentQuestionUnanswered\"\x18\n" +
+	"\x16AgentQuestionAbandoned\"^\n" +
 	"\x14AgentQuestionFailure\x12<\n" +
 	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
 	"\x06_error\"'\n" +
@@ -1241,7 +1310,7 @@ func file_conversation_v1_question_proto_rawDescGZIP() []byte {
 	return file_conversation_v1_question_proto_rawDescData
 }
 
-var file_conversation_v1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_conversation_v1_question_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_conversation_v1_question_proto_goTypes = []any{
 	(*AgentQuestion)(nil),             // 0: conversation.v1.AgentQuestion
 	(*AgentQuestionStart)(nil),        // 1: conversation.v1.AgentQuestionStart
@@ -1258,20 +1327,21 @@ var file_conversation_v1_question_proto_goTypes = []any{
 	(*AgentQuestionChoice)(nil),       // 12: conversation.v1.AgentQuestionChoice
 	(*AgentQuestionFreeText)(nil),     // 13: conversation.v1.AgentQuestionFreeText
 	(*AgentQuestionUnanswered)(nil),   // 14: conversation.v1.AgentQuestionUnanswered
-	(*AgentQuestionFailure)(nil),      // 15: conversation.v1.AgentQuestionFailure
-	(*AgentQuestionId)(nil),           // 16: conversation.v1.AgentQuestionId
-	(*AgentQuestionAnswer)(nil),       // 17: conversation.v1.AgentQuestionAnswer
-	(*AgentActivityStartedAt)(nil),    // 18: conversation.v1.AgentActivityStartedAt
-	(*AgentActivitySettledAt)(nil),    // 19: conversation.v1.AgentActivitySettledAt
-	(*AgentToolFailure)(nil),          // 20: conversation.v1.AgentToolFailure
+	(*AgentQuestionAbandoned)(nil),    // 15: conversation.v1.AgentQuestionAbandoned
+	(*AgentQuestionFailure)(nil),      // 16: conversation.v1.AgentQuestionFailure
+	(*AgentQuestionId)(nil),           // 17: conversation.v1.AgentQuestionId
+	(*AgentQuestionAnswer)(nil),       // 18: conversation.v1.AgentQuestionAnswer
+	(*AgentActivityStartedAt)(nil),    // 19: conversation.v1.AgentActivityStartedAt
+	(*AgentActivitySettledAt)(nil),    // 20: conversation.v1.AgentActivitySettledAt
+	(*AgentToolFailure)(nil),          // 21: conversation.v1.AgentToolFailure
 }
 var file_conversation_v1_question_proto_depIdxs = []int32{
-	16, // 0: conversation.v1.AgentQuestion.id:type_name -> conversation.v1.AgentQuestionId
+	17, // 0: conversation.v1.AgentQuestion.id:type_name -> conversation.v1.AgentQuestionId
 	1,  // 1: conversation.v1.AgentQuestion.start:type_name -> conversation.v1.AgentQuestionStart
 	9,  // 2: conversation.v1.AgentQuestion.success:type_name -> conversation.v1.AgentQuestionSuccess
-	15, // 3: conversation.v1.AgentQuestion.failure:type_name -> conversation.v1.AgentQuestionFailure
+	16, // 3: conversation.v1.AgentQuestion.failure:type_name -> conversation.v1.AgentQuestionFailure
 	2,  // 4: conversation.v1.AgentQuestionStart.batch:type_name -> conversation.v1.AgentQuestionBatch
-	18, // 5: conversation.v1.AgentQuestionStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
+	19, // 5: conversation.v1.AgentQuestionStart.started_at:type_name -> conversation.v1.AgentActivityStartedAt
 	3,  // 6: conversation.v1.AgentQuestionBatch.questions:type_name -> conversation.v1.AgentQuestionAsked
 	4,  // 7: conversation.v1.AgentQuestionAsked.question:type_name -> conversation.v1.AgentQuestionText
 	5,  // 8: conversation.v1.AgentQuestionAsked.single_select:type_name -> conversation.v1.AgentQuestionSingleSelect
@@ -1282,20 +1352,21 @@ var file_conversation_v1_question_proto_depIdxs = []int32{
 	2,  // 13: conversation.v1.AgentQuestionSuccess.batch:type_name -> conversation.v1.AgentQuestionBatch
 	10, // 14: conversation.v1.AgentQuestionSuccess.answered:type_name -> conversation.v1.AgentQuestionAnswers
 	14, // 15: conversation.v1.AgentQuestionSuccess.unanswered:type_name -> conversation.v1.AgentQuestionUnanswered
-	19, // 16: conversation.v1.AgentQuestionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
-	11, // 17: conversation.v1.AgentQuestionAnswers.answers:type_name -> conversation.v1.AgentQuestionSelection
-	4,  // 18: conversation.v1.AgentQuestionSelection.question:type_name -> conversation.v1.AgentQuestionText
-	12, // 19: conversation.v1.AgentQuestionSelection.chosen:type_name -> conversation.v1.AgentQuestionChoice
-	13, // 20: conversation.v1.AgentQuestionSelection.free_text:type_name -> conversation.v1.AgentQuestionFreeText
-	8,  // 21: conversation.v1.AgentQuestionChoice.label:type_name -> conversation.v1.AgentQuestionOptionLabel
-	20, // 22: conversation.v1.AgentQuestionFailure.error:type_name -> conversation.v1.AgentToolFailure
-	16, // 23: conversation.v1.AgentQuestionAnswer.ask:type_name -> conversation.v1.AgentQuestionId
-	10, // 24: conversation.v1.AgentQuestionAnswer.answers:type_name -> conversation.v1.AgentQuestionAnswers
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	15, // 16: conversation.v1.AgentQuestionSuccess.abandoned:type_name -> conversation.v1.AgentQuestionAbandoned
+	20, // 17: conversation.v1.AgentQuestionSuccess.settled_at:type_name -> conversation.v1.AgentActivitySettledAt
+	11, // 18: conversation.v1.AgentQuestionAnswers.answers:type_name -> conversation.v1.AgentQuestionSelection
+	4,  // 19: conversation.v1.AgentQuestionSelection.question:type_name -> conversation.v1.AgentQuestionText
+	12, // 20: conversation.v1.AgentQuestionSelection.chosen:type_name -> conversation.v1.AgentQuestionChoice
+	13, // 21: conversation.v1.AgentQuestionSelection.free_text:type_name -> conversation.v1.AgentQuestionFreeText
+	8,  // 22: conversation.v1.AgentQuestionChoice.label:type_name -> conversation.v1.AgentQuestionOptionLabel
+	21, // 23: conversation.v1.AgentQuestionFailure.error:type_name -> conversation.v1.AgentToolFailure
+	17, // 24: conversation.v1.AgentQuestionAnswer.ask:type_name -> conversation.v1.AgentQuestionId
+	10, // 25: conversation.v1.AgentQuestionAnswer.answers:type_name -> conversation.v1.AgentQuestionAnswers
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_question_proto_init() }
@@ -1317,16 +1388,17 @@ func file_conversation_v1_question_proto_init() {
 	file_conversation_v1_question_proto_msgTypes[9].OneofWrappers = []any{
 		(*AgentQuestionSuccess_Answered)(nil),
 		(*AgentQuestionSuccess_Unanswered)(nil),
+		(*AgentQuestionSuccess_Abandoned)(nil),
 	}
 	file_conversation_v1_question_proto_msgTypes[11].OneofWrappers = []any{}
-	file_conversation_v1_question_proto_msgTypes[15].OneofWrappers = []any{}
+	file_conversation_v1_question_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_question_proto_rawDesc), len(file_conversation_v1_question_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

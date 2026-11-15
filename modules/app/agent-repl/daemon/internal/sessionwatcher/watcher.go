@@ -192,6 +192,10 @@ type watcher struct {
 	// openAtAttach is Session.OpenAtAttach, held until the session facts
 	// arrive and then consumed ONCE: see reconcileOpenAtAttachLocked.
 	openAtAttach []OpenTurn
+	// asksBeforeAttach are the asks the feed stood when this watcher started,
+	// held until the session facts arrive and then consumed ONCE: see
+	// retireAsksAbsentFromFactsLocked.
+	asksBeforeAttach []*conversationv1.SessionOpenAsk
 	// pendingUnobserved are the turns the facts showed ended unobserved, not
 	// yet handed to the lifecycle sink; flushTurnEnds hands them over with
 	// the turn ends.
@@ -485,9 +489,12 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		unseenAsks:   map[string]struct{}{},
 
 		openAtAttach: session.OpenAtAttach,
-		factsIn:      make(chan struct{}),
-		mainWatching: make(chan struct{}),
-		openedAt:     sinks.Clock.Now(),
+		// BEFORE ANY WATCH OPENS, and before the facts: see
+		// retireAsksAbsentFromFactsLocked.
+		asksBeforeAttach: sinks.Feed.AsksStanding(ws),
+		factsIn:          make(chan struct{}),
+		mainWatching:     make(chan struct{}),
+		openedAt:         sinks.Clock.Now(),
 		// A PURE ATTACH STARTS NOT FREE (freeLocked), so its facts arriving
 		// with nothing in flight is a true-to-false edge the bounce registry
 		// hears.
@@ -2288,6 +2295,9 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	// A TERMINAL HELD FOR THE NAME is routed now the turn the facts name is
 	// stood (adoptMainAgentLocked leaves the release to its caller).
 	w.releaseHeldTerminalLocked()
+	if first {
+		w.retireAsksAbsentFromFactsLocked(started.GetOpenAsks())
+	}
 }
 
 // standOpenAsksLocked restates every ask the session's facts name open to the
