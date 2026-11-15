@@ -2,12 +2,15 @@
 // background sweep that deletes agent-repl's own on-disk data once nothing
 // will read it again, run once a day and on demand (agentrepl.v1.PruneStorage).
 //
-// It owns two kinds of data:
+// It owns three kinds of data:
 //
 //   - each workspace's shim state directory (<state root>/shim/<key>, see
 //     shim.go), judged by the workspace's close record in the registry;
 //   - directories of dated entries no record points at (AgedDir): the
-//     profiling sessions and the test runner's reuse records, judged by age.
+//     profiling sessions and the test runner's reuse records, judged by age;
+//   - caches kept under a size (BoundedDir): the host's Go build cache, which
+//     test runs fill, measured on every sweep and trimmed of its least
+//     recently used entries past its bound.
 //
 // Worktrees are the landed-worktree reaper's (internal/worktreereap) and logs
 // are their writers' own retention's; neither is touched here.
@@ -88,6 +91,8 @@ type Deps struct {
 	ShimDir string
 	// Aged are the directories swept by age.
 	Aged []AgedDir
+	// Bounded are the caches kept under a size.
+	Bounded []BoundedDir
 	// LandedAfter, ClosedAfter, StartDelay and Every are the windows; see the
 	// defaults.
 	LandedAfter time.Duration
@@ -126,6 +131,11 @@ func New(deps Deps) (*Sweeper, error) {
 			return nil, fmt.Errorf("storagesweep: an aged directory needs a name, a directory and a positive age (%+v)", a)
 		}
 	}
+	for _, b := range deps.Bounded {
+		if b.Name == "" || b.Dir == "" || b.Bound <= 0 {
+			return nil, fmt.Errorf("storagesweep: a bounded cache needs a name, a directory and a positive bound (%+v)", b)
+		}
+	}
 	return &Sweeper{deps: deps, guard: sweepguard.New("storagesweep", deps.LockPath, opSweep)}, nil
 }
 
@@ -149,6 +159,8 @@ type Report struct {
 	Kept map[KeepReason]int
 	// Failures counts every step that failed and was recorded at ERROR.
 	Failures int
+	// Measured are the bounded caches' sizes before the sweep.
+	Measured []Measured
 }
 
 // Bytes is what every removal held together.
@@ -189,6 +201,12 @@ func (s *Sweeper) sweep(ctx context.Context, report *Report) error {
 			break
 		}
 		s.sweepAged(a, now, report)
+	}
+	for _, b := range s.deps.Bounded {
+		if ctx.Err() != nil {
+			break
+		}
+		s.sweepBounded(b, report)
 	}
 	if ctx.Err() != nil {
 		s.deps.Log.Info(opSweep, "the sweep stopped with the daemon", summary(*report))

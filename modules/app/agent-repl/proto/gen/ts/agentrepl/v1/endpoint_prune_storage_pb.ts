@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_prune_storage.proto.
  */
 export const file_agentrepl_v1_endpoint_prune_storage: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQiqQEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNImQKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEIlcKEFBydW5lU3RvcmFnZUtlcHQSNAoGcmVhc29uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUtlZXBSZWFzb24SDQoFY291bnQYAiABKA0i2AEKEVBydW5lU3RvcmFnZUVycm9yEkMKD2FscmVhZHlfcnVubmluZxgBIAEoCzIoLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZ0gAEkEKDmhlbGRfZWxzZXdoZXJlGAIgASgLMicuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUhlbGRFbHNld2hlcmVIABIyCgZmYWlsZWQYAyABKAsyIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRmFpbGVkSABCBwoFY2F1c2UiHAoaUHJ1bmVTdG9yYWdlQWxyZWFkeVJ1bm5pbmciGwoZUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZSIkChJQcnVuZVN0b3JhZ2VGYWlsZWQSDgoGZGV0YWlsGAEgASgJKsoBChJQcnVuZVN0b3JhZ2VSZWFzb24SJAogUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQUlVORV9TVE9SQUdFX1JFQVNPTl9OT19XT1JLU1BBQ0UQARIfChtQUlVORV9TVE9SQUdFX1JFQVNPTl9MQU5ERUQQAhInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9DTE9TRURfQkFDS1VQUxADEh0KGVBSVU5FX1NUT1JBR0VfUkVBU09OX0FHRUQQBCrPAgoWUHJ1bmVTdG9yYWdlS2VlcFJlYXNvbhIpCiVQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1VOU1BFQ0lGSUVEEAASLAooUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9PUEVOX1dPUktTUEFDRRABEi0KKVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fUkVDRU5UTFlfQ0xPU0VEEAISLQopUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9OT1RfQV9ESVJFQ1RPUlkQAxIoCiRQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX05PX0JBQ0tVUFMQBBIjCh9QUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1lPVU5HEAUSLworUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9LRVBUX0JZX0RJUkVDVE9SWRAGQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcHJ1bmVfc3RvcmFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIiYKE1BydW5lU3RvcmFnZVJlcXVlc3QSDwoHZHJ5X3J1bhgBIAEoCCKIAQoUUHJ1bmVTdG9yYWdlUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VTdWNjZXNzSAASMAoFZXJyb3IYAiABKAsyHy5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRXJyb3JIAEIICgZyZXN1bHQi3wEKE1BydW5lU3RvcmFnZVN1Y2Nlc3MSDwoHZHJ5X3J1bhgBIAEoCBIyCgdyZW1vdmVkGAIgAygLMiEuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZVJlbW92YWwSDQoFYnl0ZXMYAyABKAQSLAoEa2VwdBgEIAMoCzIeLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VLZXB0EhAKCGZhaWx1cmVzGAUgASgNEjQKCG1lYXN1cmVkGAYgAygLMiIuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZU1lYXN1cmVkIk8KFFBydW5lU3RvcmFnZU1lYXN1cmVkEgwKBG5hbWUYASABKAkSCwoDZGlyGAIgASgJEg0KBWJ5dGVzGAMgASgEEg0KBWJvdW5kGAQgASgEImQKE1BydW5lU3RvcmFnZVJlbW92YWwSDAoEcGF0aBgBIAEoCRIwCgZyZWFzb24YAiABKA4yIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlUmVhc29uEg0KBWJ5dGVzGAMgASgEIlcKEFBydW5lU3RvcmFnZUtlcHQSNAoGcmVhc29uGAEgASgOMiQuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUtlZXBSZWFzb24SDQoFY291bnQYAiABKA0i2AEKEVBydW5lU3RvcmFnZUVycm9yEkMKD2FscmVhZHlfcnVubmluZxgBIAEoCzIoLmFnZW50cmVwbC52MS5QcnVuZVN0b3JhZ2VBbHJlYWR5UnVubmluZ0gAEkEKDmhlbGRfZWxzZXdoZXJlGAIgASgLMicuYWdlbnRyZXBsLnYxLlBydW5lU3RvcmFnZUhlbGRFbHNld2hlcmVIABIyCgZmYWlsZWQYAyABKAsyIC5hZ2VudHJlcGwudjEuUHJ1bmVTdG9yYWdlRmFpbGVkSABCBwoFY2F1c2UiHAoaUHJ1bmVTdG9yYWdlQWxyZWFkeVJ1bm5pbmciGwoZUHJ1bmVTdG9yYWdlSGVsZEVsc2V3aGVyZSIkChJQcnVuZVN0b3JhZ2VGYWlsZWQSDgoGZGV0YWlsGAEgASgJKu8BChJQcnVuZVN0b3JhZ2VSZWFzb24SJAogUFJVTkVfU1RPUkFHRV9SRUFTT05fVU5TUEVDSUZJRUQQABIlCiFQUlVORV9TVE9SQUdFX1JFQVNPTl9OT19XT1JLU1BBQ0UQARIfChtQUlVORV9TVE9SQUdFX1JFQVNPTl9MQU5ERUQQAhInCiNQUlVORV9TVE9SQUdFX1JFQVNPTl9DTE9TRURfQkFDS1VQUxADEh0KGVBSVU5FX1NUT1JBR0VfUkVBU09OX0FHRUQQBBIjCh9QUlVORV9TVE9SQUdFX1JFQVNPTl9PVkVSX0JPVU5EEAUqzwIKFlBydW5lU3RvcmFnZUtlZXBSZWFzb24SKQolUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9VTlNQRUNJRklFRBAAEiwKKFBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fT1BFTl9XT1JLU1BBQ0UQARItCilQUlVORV9TVE9SQUdFX0tFRVBfUkVBU09OX1JFQ0VOVExZX0NMT1NFRBACEi0KKVBSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fTk9UX0FfRElSRUNUT1JZEAMSKAokUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9OT19CQUNLVVBTEAQSIwofUFJVTkVfU1RPUkFHRV9LRUVQX1JFQVNPTl9ZT1VORxAFEi8KK1BSVU5FX1NUT1JBR0VfS0VFUF9SRUFTT05fS0VQVF9CWV9ESVJFQ1RPUlkQBkIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
 
 /**
  * @generated from message agentrepl.v1.PruneStorageRequest
@@ -116,6 +116,14 @@ export type PruneStorageSuccess = Message<"agentrepl.v1.PruneStorageSuccess"> & 
    * @generated from field: uint32 failures = 5;
    */
   failures: number;
+
+  /**
+   * Every size-bounded cache the sweep measured (the host's Go build cache),
+   * with its size before the sweep and its bound.
+   *
+   * @generated from field: repeated agentrepl.v1.PruneStorageMeasured measured = 6;
+   */
+  measured: PruneStorageMeasured[];
 };
 
 /**
@@ -124,6 +132,48 @@ export type PruneStorageSuccess = Message<"agentrepl.v1.PruneStorageSuccess"> & 
  */
 export const PruneStorageSuccessSchema: GenMessage<PruneStorageSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_prune_storage, 2);
+
+/**
+ * One size-bounded cache's size as the sweep found it.
+ *
+ * @generated from message agentrepl.v1.PruneStorageMeasured
+ */
+export type PruneStorageMeasured = Message<"agentrepl.v1.PruneStorageMeasured"> & {
+  /**
+   * The cache's name ("go-build").
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Its directory.
+   *
+   * @generated from field: string dir = 2;
+   */
+  dir: string;
+
+  /**
+   * What it held before the sweep, in bytes.
+   *
+   * @generated from field: uint64 bytes = 3;
+   */
+  bytes: bigint;
+
+  /**
+   * The size past which its least recently used entries are deleted.
+   *
+   * @generated from field: uint64 bound = 4;
+   */
+  bound: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.PruneStorageMeasured.
+ * Use `create(PruneStorageMeasuredSchema)` to create a new message.
+ */
+export const PruneStorageMeasuredSchema: GenMessage<PruneStorageMeasured> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 3);
 
 /**
  * One deleted entry.
@@ -158,7 +208,7 @@ export type PruneStorageRemoval = Message<"agentrepl.v1.PruneStorageRemoval"> & 
  * Use `create(PruneStorageRemovalSchema)` to create a new message.
  */
 export const PruneStorageRemovalSchema: GenMessage<PruneStorageRemoval> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 3);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 4);
 
 /**
  * How many entries were left alone for one reason.
@@ -184,7 +234,7 @@ export type PruneStorageKept = Message<"agentrepl.v1.PruneStorageKept"> & {
  * Use `create(PruneStorageKeptSchema)` to create a new message.
  */
 export const PruneStorageKeptSchema: GenMessage<PruneStorageKept> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 4);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 5);
 
 /**
  * @generated from message agentrepl.v1.PruneStorageError
@@ -225,7 +275,7 @@ export type PruneStorageError = Message<"agentrepl.v1.PruneStorageError"> & {
  * Use `create(PruneStorageErrorSchema)` to create a new message.
  */
 export const PruneStorageErrorSchema: GenMessage<PruneStorageError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 5);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 6);
 
 /**
  * Empty: nothing more is known.
@@ -240,7 +290,7 @@ export type PruneStorageAlreadyRunning = Message<"agentrepl.v1.PruneStorageAlrea
  * Use `create(PruneStorageAlreadyRunningSchema)` to create a new message.
  */
 export const PruneStorageAlreadyRunningSchema: GenMessage<PruneStorageAlreadyRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 6);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 7);
 
 /**
  * Empty: nothing more is known.
@@ -255,7 +305,7 @@ export type PruneStorageHeldElsewhere = Message<"agentrepl.v1.PruneStorageHeldEl
  * Use `create(PruneStorageHeldElsewhereSchema)` to create a new message.
  */
 export const PruneStorageHeldElsewhereSchema: GenMessage<PruneStorageHeldElsewhere> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 7);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 8);
 
 /**
  * @generated from message agentrepl.v1.PruneStorageFailed
@@ -274,7 +324,7 @@ export type PruneStorageFailed = Message<"agentrepl.v1.PruneStorageFailed"> & {
  * Use `create(PruneStorageFailedSchema)` to create a new message.
  */
 export const PruneStorageFailedSchema: GenMessage<PruneStorageFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 8);
+  messageDesc(file_agentrepl_v1_endpoint_prune_storage, 9);
 
 /**
  * Why an entry was deleted.
@@ -318,6 +368,15 @@ export enum PruneStorageReason {
    * @generated from enum value: PRUNE_STORAGE_REASON_AGED = 4;
    */
   AGED = 4,
+
+  /**
+   * A size-bounded cache's least recently used entries, deleted until it is
+   * back under its bound: one removal for the whole cache, naming its
+   * directory and what was freed.
+   *
+   * @generated from enum value: PRUNE_STORAGE_REASON_OVER_BOUND = 5;
+   */
+  OVER_BOUND = 5,
 }
 
 /**
