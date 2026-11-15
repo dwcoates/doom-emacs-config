@@ -511,7 +511,7 @@ check_group() {
   local e="$1" name
   name="$(field "$e" .name)"
   FIX="sudo usermod -aG $name \"\$USER\", then log out and back in"
-  if id -nG | tr ' ' '\n' | grep -qx "$name"; then
+  if grep -qx "$name" <<<"$(id -nG | tr ' ' '\n')"; then
     STATUS=ok; DETAIL="this user is in the $name group"
   else
     STATUS=needs-user; DETAIL="this user is not in the $name group"

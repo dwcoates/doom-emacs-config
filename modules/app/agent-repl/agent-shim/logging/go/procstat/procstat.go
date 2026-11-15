@@ -56,3 +56,23 @@ func ParseCmdline(raw []byte) []string {
 	}
 	return strings.Split(trimmed, "\x00")
 }
+
+// HandParsed reports whether the Go source src reads a /proc file by hand
+// rather than through this package: it splits a stat line at its command name
+// itself, reads a cmdline without ParseCmdline, or joins a pid onto "/proc/"
+// (Tree.Path does). Each module's pin runs it over its own sources, since a
+// module's tests may read only their own tree.
+func HandParsed(src string) bool {
+	// A /proc path's cmdline, not pprof's endpoint of the same name.
+	readsCmdline := strings.Contains(src, `"/cmdline"`) || strings.Contains(src, `, "cmdline")`)
+	if readsCmdline && !strings.Contains(src, "procstat.ParseCmdline(") {
+		return true
+	}
+	for line := range strings.SplitSeq(src, "\n") {
+		if strings.Contains(line, "LastIndexByte(") && strings.Contains(line, "')'") ||
+			strings.Contains(line, `"/proc/" +`) {
+			return true
+		}
+	}
+	return false
+}

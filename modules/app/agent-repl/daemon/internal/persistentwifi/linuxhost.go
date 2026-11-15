@@ -1,10 +1,12 @@
 package persistentwifi
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -397,37 +399,49 @@ const heldMark = "held"
 // systemd-inhibit's own words. ctx bounds the wait. While this daemon lives it
 // reaps the process when it ends, so it is never left a zombie.
 func spawnDetached(ctx context.Context, argv []string) error {
+	// THE CHILD'S OUTPUT IS ONE PIPE IT HOLDS ITSELF, both streams on its
+	// write end: the granted mark arrives on it, and a refusal's words, and
+	// the parent keeps no copy of the write end, so its read ends when the
+	// child closes the pipe and Wait never waits on a copying goroutine.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("make the inhibitor's output pipe: %w", err)
+	}
+	defer r.Close()
 	cmd := childproc.Command(childproc.Stable, argv[0], argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
+	cmd.Stdout, cmd.Stderr = w, w
+	startErr := cmd.Start()
+	_ = w.Close()
+	if startErr != nil {
+		return startErr
 	}
 	answered := make(chan string, 1)
 	// inflight: joined: the function that starts it waits for it.
 	go func() {
-		line := make([]byte, len(heldMark))
-		n, _ := io.ReadFull(stdout, line)
-		answered <- string(line[:n])
+		out := bufio.NewReader(r)
+		first, _ := out.ReadString('\n')
+		if strings.TrimSpace(first) == heldMark {
+			answered <- heldMark
+			return
+		}
+		rest, _ := io.ReadAll(out)
+		answered <- first + string(rest)
 	}()
 	select {
-	case mark := <-answered:
-		if mark == heldMark {
+	case said := <-answered:
+		if said == heldMark {
 			// The inhibitor runs until it is ended (SetSleepDisabled off), so
 			// its reap stands as long as it does.
 			inflight.Standing(func() { _ = cmd.Wait() })
 			return nil
 		}
 		werr := cmd.Wait()
-		return fmt.Errorf("logind did not grant the inhibitor (%v): %s", werr, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("logind did not grant the inhibitor (%v): %s", werr, strings.TrimSpace(said))
 	case <-ctx.Done():
 		_ = cmd.Process.Kill()
+		_ = r.Close()
 		<-answered
 		_ = cmd.Wait()
 		return fmt.Errorf("logind did not answer the inhibitor before the request ended: %w", ctx.Err())

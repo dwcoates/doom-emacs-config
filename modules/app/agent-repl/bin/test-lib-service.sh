@@ -62,10 +62,10 @@ test_held_asks_launchd_or_systemd() {
   local bad=""
   reset darwin; service_held com.x.svc && bad="$bad darwin-unheld"
   STUB_HELD=1 service_held com.x.svc || bad="$bad darwin-held"
-  [ "$(transcript | head -1)" = "launchctl print gui/$uid/com.x.svc" ] || bad="$bad darwin-call"
+  [ "$(sed -n 1p "$TMP/transcript")" = "launchctl print gui/$uid/com.x.svc" ] || bad="$bad darwin-call"
   reset linux; service_held com.x.svc && bad="$bad linux-unheld"
   STUB_HELD=1 service_held com.x.svc || bad="$bad linux-held"
-  [ "$(transcript | head -1)" = "systemctl --user is-active --quiet com.x.svc.service" ] || bad="$bad linux-call"
+  [ "$(sed -n 1p "$TMP/transcript")" = "systemctl --user is-active --quiet com.x.svc.service" ] || bad="$bad linux-call"
   if [ -z "$bad" ]; then pass "service_held asks launchd's domain on macOS and systemd's activity on Linux"; else fail "service_held:$bad" "$(transcript)"; fi
 }
 
@@ -154,7 +154,7 @@ test_no_script_drives_the_service_manager_itself() {
   while IFS= read -r f; do
     rel="${f#"$MODULE_DIR"/}"
     case "$rel" in bin/lib-service.sh|*/test-*.sh) continue ;; esac
-    if grep -vE '^[[:space:]]*#' "$f" | grep -qE '(^[[:space:]]*|\$\([[:space:]]*|(;|&&|\|\||\||then|do|else)[[:space:]]+)"?\$?\{?(launchctl|systemctl|LAUNCHCTL|SYSTEMCTL)\}?"?[[:space:]]'; then
+    if grep -qE '(^[[:space:]]*|\$\([[:space:]]*|(;|&&|\|\||\||then|do|else)[[:space:]]+)"?\$?\{?(launchctl|systemctl|LAUNCHCTL|SYSTEMCTL)\}?"?[[:space:]]' <<<"$(grep -vE '^[[:space:]]*#' "$f")"; then
       real="$real $rel"
     fi
   done < <(find "$MODULE_DIR/bin" "$MODULE_DIR/scripts" -name '*.sh' -type f)

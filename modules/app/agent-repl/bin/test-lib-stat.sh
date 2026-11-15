@@ -72,7 +72,7 @@ test_no_script_spells_stat_itself() {
   while IFS= read -r f; do
     rel="${f#"$MODULE_DIR"/}"
     case "$rel" in bin/lib-stat.sh|*/test-*.sh) continue ;; esac
-    if grep -vE '^[[:space:]]*#' "$f" | grep -qE '(^|[^[:alnum:]_-])stat -[fc] '; then real="$real $rel"; fi
+    if grep -qE '(^|[^[:alnum:]_-])stat -[fc] ' <<<"$(grep -vE '^[[:space:]]*#' "$f")"; then real="$real $rel"; fi
   done < <(find "$MODULE_DIR/bin" "$MODULE_DIR/scripts" -name '*.sh' -type f)
   if [ -z "$real" ]; then pass "no script spells stat -f or stat -c outside lib-stat.sh"; else fail "these scripts spell stat themselves; source lib-stat.sh instead:$real"; fi
 }

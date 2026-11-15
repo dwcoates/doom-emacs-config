@@ -97,23 +97,44 @@ func TestParseCmdline(t *testing.T) {
 	}
 }
 
-// TestEveryProcFileIsParsedByProcstat pins that no other Go source of
-// agent-repl splits a /proc stat line at its command name by hand, and that
-// every source reading a cmdline decodes it here, and that none joins a pid
-// onto "/proc/" itself (Tree.Path does): every program reads them through
-// this package.
+func TestHandParsed(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{name: "a stat line split at its command by hand", src: "i := strings.LastIndexByte(stat, ')')", want: true},
+		{name: "a cmdline read without ParseCmdline", src: `os.ReadFile(dir + "/cmdline")`, want: true},
+		{name: "a cmdline read decoded by ParseCmdline", src: "raw, _ := tree.Read(pid, \"cmdline\")\nprocstat.ParseCmdline(raw)", want: false},
+		{name: "a pid joined onto /proc/ by hand", src: `os.ReadFile("/proc/" + pid + "/stat")`, want: true},
+		{name: "pprof's cmdline endpoint is no /proc read", src: `mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)`, want: false},
+		{name: "source that reads no /proc file", src: "package x\nfunc f() {}", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := HandParsed(tc.src)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("HandParsed(%q) = %v, want %v", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryProcFileIsParsedByProcstat pins that no other Go source of this
+// module reads a /proc file by hand (HandParsed). The daemon's sources are
+// held to the same in internal/procgroup.
 func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
-	// Arrange: this package sits at agent-shim/logging/go/procstat.
-	root := filepath.Join("..", "..", "..", "..")
+	// Arrange: this package sits at the module root's procstat/.
+	root := ".."
 	var offenders []string
 
 	// Act
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
-		}
-		if d.IsDir() && d.Name() == "node_modules" {
-			return filepath.SkipDir
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(filepath.Dir(path)) == "procstat" {
 			return nil
@@ -122,26 +143,15 @@ func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		text := string(src)
-		// A /proc path's cmdline, not pprof's endpoint of the same name.
-		readsCmdline := strings.Contains(text, `"/cmdline"`) || strings.Contains(text, `, "cmdline")`)
-		if readsCmdline && !strings.Contains(text, "procstat.ParseCmdline(") {
+		if HandParsed(string(src)) {
 			offenders = append(offenders, path)
-			return nil
-		}
-		for line := range strings.SplitSeq(text, "\n") {
-			if strings.Contains(line, "LastIndexByte(") && strings.Contains(line, "')'") ||
-				strings.Contains(line, `"/proc/" +`) {
-				offenders = append(offenders, path)
-				break
-			}
 		}
 		return nil
 	})
 
 	// Assert
 	if err != nil {
-		t.Fatalf("walk agent-repl: %v", err)
+		t.Fatalf("walk the logging module: %v", err)
 	}
 	if len(offenders) > 0 {
 		t.Fatalf("%v parse a /proc file by hand instead of through procstat", offenders)

@@ -127,7 +127,7 @@ the title bar is unavailable and why."
         (add-hook 'after-make-frame-functions #'agent-repl-titlebar-sync)
         (add-hook 'enable-theme-functions #'agent-repl--titlebar-on-theme)
         (agent-repl-titlebar-sync))
-    (agent-repl--info nil "elisp.titlebar.unavailable system-type=%s: the unfocused orange title bar is macOS's alone; this window manager draws the title bar, so it keeps the window manager's color"
+    (agent-repl--info '(:agent-repl-central "the title bar belongs to Emacs's frames, not a workspace") "elisp.titlebar.unavailable system-type=%s: the unfocused orange title bar is macOS's alone; this window manager draws the title bar, so it keeps the window manager's color"
                       system)))
 
 (agent-repl--titlebar-install system-type)

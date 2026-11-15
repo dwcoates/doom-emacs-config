@@ -110,7 +110,7 @@ func watchLidEvents(ctx context.Context, events io.ReadCloser, initial Lid, hear
 			if ctx.Err() != nil {
 				return nil
 			}
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if errors.Is(err, io.EOF) {
 				return errors.New("the lid switch's event device ended")
 			}
 			return fmt.Errorf("read the lid switch's events: %w", err)
