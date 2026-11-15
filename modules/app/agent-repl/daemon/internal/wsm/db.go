@@ -688,7 +688,7 @@ type DB interface {
 	// OweMediation records that one repository owes a mediation of the
 	// deploy that started at AT, answering the mediation it replaced
 	// (mediation.go).
-	OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*Mediation, error)
+	OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*ReplacedMediation, error)
 	// MediationOf answers the mediation one repository owes, nil for none.
 	MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error)
 	// MarkMediationPrompted records that the mediator was told of the

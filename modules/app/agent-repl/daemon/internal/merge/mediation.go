@@ -170,10 +170,10 @@ func (o *orchestrator) observeMediationEnd(m wsm.Mediation, outcome string, at t
 }
 
 // replacedOutcome is how a check a newer deploy replaced ended: dispatched
-// when a fix was dispatched for it (the newer deploy is that fix's),
-// superseded when not.
-func replacedOutcome(m wsm.Mediation) string {
-	if m.Dispatched {
+// when the newer deploy is the fix dispatched for it, superseded when not,
+// including a dispatch the newer deploy carries on (wsm.OweMediation).
+func replacedOutcome(m wsm.ReplacedMediation) string {
+	if m.Dispatched && !m.DispatchCarried {
 		return MediationDispatched
 	}
 	return MediationSuperseded
@@ -264,10 +264,10 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 		}
 		if replaced != nil {
 			outcome := replacedOutcome(*replaced)
-			o.observeMediationEnd(*replaced, outcome, at)
+			o.observeMediationEnd(replaced.Mediation, outcome, at)
 			o.deps.Log.Global().Info(opMediation, "a newer deploy replaced the check owed; its chain carries on", dlog.Context{
 				"repo": string(q.key), "outcome": outcome, "intake": string(replaced.Intake), "remediation": string(replaced.Remediation),
-				"replaced_deploy_started": replaced.OwedAt.UTC().Format(time.RFC3339Nano)})
+				"dispatch_carried": replaced.DispatchCarried, "replaced_deploy_started": replaced.OwedAt.UTC().Format(time.RFC3339Nano)})
 		}
 		o.deps.Log.Global().Info(opMediation, "the deploy owes a check; the queue's head lands nothing until the chain's intake decides", dlog.Context{
 			"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)})

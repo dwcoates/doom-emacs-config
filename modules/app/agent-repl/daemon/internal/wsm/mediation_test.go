@@ -176,9 +176,15 @@ func TestTheMediationChainCountsRemediationsInARow(t *testing.T) {
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
 				dispatchAt(t, s, repo, instant)
-				oweAt(t, s, repo, second)
+				fixDeploysAt(t, s, repo, second)
 				dispatchAt(t, s, repo, second)
-				oweAt(t, s, repo, third)
+				fixDeploysAt(t, s, repo, third)
+			}},
+		{name: "a deploy that is not the dispatched fix's counts none", wantStart: instant,
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				dispatchAt(t, s, repo, instant)
+				oweAt(t, s, repo, second)
 			}},
 		{name: "a deploy replacing a told mediation nothing was dispatched for counts none", wantStart: instant,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
@@ -285,6 +291,27 @@ func dispatchAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 	}
 }
 
+// fixDeploysAt makes the deploy at AT the fix's: remedy's finish lands just
+// before it, so its deploy replaces the dispatched mediation.
+func fixDeploysAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	landed := at.Add(-time.Second)
+	if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "remedy", Repo: repo, StartedAt: landed}); err != nil {
+		t.Fatalf("BeginRemediationFinish: %v", err)
+	}
+	if _, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationGating, RemediationLanding, landed); err != nil {
+		t.Fatalf("AdvanceRemediationFinish: %v", err)
+	}
+	if _, err := s.RecordRemediationLanded(ctx, "remedy", "abc123", nil, landed); err != nil {
+		t.Fatalf("RecordRemediationLanded: %v", err)
+	}
+	oweAt(t, s, repo, at)
+	if _, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationDeploying, RemediationDeployed, at); err != nil {
+		t.Fatalf("AdvanceRemediationFinish: %v", err)
+	}
+}
+
 // TestTheChainsRolesPassAlongItAndEndWithIt covers the chain's intake and
 // remediation workspaces: recorded once, carried to each newer deploy of the
 // chain, the dispatch owed afresh for each deploy, and all cleared by the
@@ -304,7 +331,17 @@ func TestTheChainsRolesPassAlongItAndEndWithIt(t *testing.T) {
 				dispatchAt(t, s, repo, instant)
 			},
 			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: true}},
-		{name: "a newer deploy carries the roles and owes its own dispatch",
+		{name: "the fix's deploy carries the roles and owes its own dispatch",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				oweAt(t, s, repo, instant)
+				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
+					t.Fatal(err)
+				}
+				dispatchAt(t, s, repo, instant)
+				fixDeploysAt(t, s, repo, instant.Add(time.Minute))
+			},
+			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: false}},
+		{name: "a deploy that is not the fix's carries the roles and the dispatch",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
 				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
@@ -313,7 +350,7 @@ func TestTheChainsRolesPassAlongItAndEndWithIt(t *testing.T) {
 				dispatchAt(t, s, repo, instant)
 				oweAt(t, s, repo, instant.Add(time.Minute))
 			},
-			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: false}},
+			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: true}},
 		{name: "the release clears the roles", want: nil,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
@@ -510,5 +547,44 @@ func TestTheChainsLastDispatchInstantPassesAlongItAndEndsWithIt(t *testing.T) {
 	}
 	if freshErr != nil || fresh.LastDispatchedAt != nil {
 		t.Fatalf("the next chain's check = (%+v, %v), want no dispatch instant", fresh, freshErr)
+	}
+}
+
+func TestAReplacedDispatchedMediationSaysWhetherItsDispatchCarriesOn(t *testing.T) {
+	tests := []struct {
+		name        string
+		fixDeploys  bool
+		wantCarried bool
+	}{
+		{name: "the fix's deploy ends the dispatch", fixDeploys: true},
+		{name: "another deploy carries the dispatch on", wantCarried: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			oweAt(t, s, repo, instant)
+			dispatchAt(t, s, repo, instant)
+			if tt.fixDeploys {
+				landed := instant.Add(30 * time.Second)
+				beginFinish(t, s, repo, landed, nil)
+				if _, err := s.AdvanceRemediationFinish(ctx, "remedy", RemediationGating, RemediationLanding, landed); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.RecordRemediationLanded(ctx, "remedy", "abc123", nil, landed); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			replaced, err := s.OweMediation(ctx, repo, instant.Add(time.Minute), "")
+
+			// Assert
+			if err != nil || replaced == nil || !replaced.Dispatched || replaced.DispatchCarried != tt.wantCarried {
+				t.Fatalf("OweMediation = (%+v, %v), want the dispatched mediation replaced, carried %v", replaced, err, tt.wantCarried)
+			}
+		})
 	}
 }
