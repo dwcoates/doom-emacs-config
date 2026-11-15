@@ -11,11 +11,13 @@ import (
 )
 
 // logsReadBound bounds one read of every system's warnings and errors over a
-// deploy's window: bin/logs.sh --all over the current files and their five
-// rotations, measured at 4s on the owner's machine with its compiled reader
-// cached (2026-11-14, a 40-minute window); 10s is that with headroom for a
-// cold reader build.
-const logsReadBound = 10 * time.Second
+// deploy's window: bin/logs.sh --all over the current files and their
+// rotations. Measured 2026-11-15 16:55 over 8.5 GB of logs (446 files written
+// in the window, 132 orphan generations), with the reader passing over
+// records and generations from before the window: 5s and 7s for a 20-minute
+// window. 18s is about two and a half times the worse. (Before that skip the
+// same read took 50-70s and refused 0.444.1's intake brief.)
+const logsReadBound = 18 * time.Second
 
 // lineRunner runs a script and answers its output (scriptrunner.Runner).
 type lineRunner interface {
@@ -36,7 +38,7 @@ func logsReader(runner lineRunner, moduleRoot string) merge.LogReader {
 			return nil, fmt.Errorf("agent-repld: run %s: %w", script, err)
 		}
 		if run.TimedOut {
-			return nil, fmt.Errorf("agent-repld: %s outlived its bound of %s (measured at 4s)", script, logsReadBound)
+			return nil, fmt.Errorf("agent-repld: %s outlived its bound of %s (measured at 7s)", script, logsReadBound)
 		}
 		if run.ExitCode != 0 {
 			return nil, fmt.Errorf("agent-repld: %s exited %d: %s", script, run.ExitCode, run.Output)
