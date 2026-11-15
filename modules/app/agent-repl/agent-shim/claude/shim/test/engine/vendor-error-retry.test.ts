@@ -18,6 +18,7 @@ import {
   exhaustedWindow,
   isRetryableApiFailure,
   retryVendorErrorNowResponse,
+  stampRetryPromise,
   vendorErrorRetryUpdate,
   type StatedRetry,
   type RateLimitReading,
@@ -1019,7 +1020,8 @@ describe("the stated schedule", () => {
     await failedTurnEnds(h, "retry-1");
 
     // Assert
-    expect(h.states.at(-1)?.attempt).toBe(2);
+    const last = h.states.at(-1);
+    expect(last !== undefined && "attempt" in last ? last.attempt : undefined).toBe(2);
   });
 
   it("states that none is due when a submitted prompt ends the chain", async () => {
@@ -1695,5 +1697,285 @@ describe("retryVendorErrorNowResponse", () => {
 
     // Assert
     expect(response.outcome.value).toEqual(create(shimv1.RetryVendorErrorNowBusySchema, { detail: "a turn is in flight" }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The retry a failed terminal promises
+// ---------------------------------------------------------------------------
+
+describe("the retry a failed terminal promises", () => {
+  it.each([
+    ["an overloaded API", OVERLOADED, { attempt: 1 }],
+    ["an unreachable API", UNREACHABLE, { attempt: 1 }],
+    ["an API refusal of the request itself", INVALID_REQUEST, undefined],
+    ["a failure that is not an API failure", MODEL_ERROR, undefined],
+    ["a completed turn", COMPLETED, undefined],
+  ])("for %s is %o", (_name, terminal, promised) => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const promise = h.retry.turnEnded("turn-1", terminal);
+
+    // Assert
+    expect(promise).toEqual(promised);
+  });
+
+  it("names the next attempt when a retried turn fails again", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    const promise = h.retry.turnEnded("retry-1", OVERLOADED);
+
+    // Assert
+    expect(promise).toEqual({ attempt: 2 });
+  });
+
+  it("is none for the failure the chain gives up at", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+    h.clock.now = START + VENDOR_ERROR_RETRY_WINDOW_MS;
+
+    // Act
+    const promise = h.retry.turnEnded("retry-1", OVERLOADED);
+
+    // Assert
+    expect(promise).toBeUndefined();
+  });
+
+  it("is none for a turn that answered none of the shim's", () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const promise = h.retry.turnEnded(undefined, OVERLOADED);
+
+    // Assert
+    expect(promise).toBeUndefined();
+  });
+
+  it("is none for another turn's failure while the chain waits", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    const promise = h.retry.turnEnded("turn-2", OVERLOADED);
+
+    // Assert
+    expect(promise).toBeUndefined();
+  });
+
+  it("is none after stand-down", () => {
+    // Arrange
+    const h = harness();
+    h.retry.stop("the session stood down");
+
+    // Act
+    const promise = h.retry.turnEnded("turn-1", OVERLOADED);
+
+    // Assert
+    expect(promise).toBeUndefined();
+  });
+
+  it("is recorded with its turn and attempt", () => {
+    // Arrange
+    const h = harness();
+    const before = logSinkMark();
+
+    // Act
+    h.retry.turnEnded("turn-1", OVERLOADED);
+
+    // Assert
+    const records = recordsSaying(
+      logRecordsSince(before),
+      "the failed turn's terminal promises agent-repl's retry; the feed draws no failure for it",
+    );
+    expect(records.map((record) => ({ level: record.level, turn: record.context["turn_id"], attempt: record.context["attempt"] }))).toEqual([
+      { level: "info", turn: "turn-1", attempt: 1 },
+    ]);
+  });
+});
+
+describe("stampRetryPromise", () => {
+  it("states the promised attempt on a failed terminal", () => {
+    // Arrange
+    const terminal = apiFailed({ case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) });
+
+    // Act
+    stampRetryPromise(terminal, { attempt: 3 });
+
+    // Assert
+    expect(terminal.result.case === "failure" ? terminal.result.value.retryPromised : undefined).toEqual(
+      create(conversationv1.AgentFailureRetryPromisedSchema, { attempt: 3 }),
+    );
+  });
+
+  it("throws for a terminal that is no failure", () => {
+    // Arrange
+    const terminal = frame({
+      case: "success",
+      value: create(conversationv1.AgentSuccessSchema, {
+        outcome: { case: "completed", value: create(conversationv1.AgentCompletedSchema, {}) },
+      }),
+    });
+
+    // Act
+    const stamp = (): void => stampRetryPromise(terminal, { attempt: 1 });
+
+    // Assert
+    expect(stamp).toThrow("a retry was promised to a terminal that is no failure (success)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A promised retry abandoned
+// ---------------------------------------------------------------------------
+
+describe("a promised retry abandoned", () => {
+  it("is stated, naming the failed turn, when the vendor refuses the prompt", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = new Error("the prompt queue is closed");
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.states.at(-1)).toEqual({ abandoned: true, failedTurn: "turn-1", cause: "the prompt queue is closed" });
+  });
+
+  it("is stated when the session can never take the prompt", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = { kind: "unavailable", detail: "no vendor query is accepting prompts" };
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect(h.states.at(-1)).toEqual({ abandoned: true, failedTurn: "turn-1", cause: "no vendor query is accepting prompts" });
+  });
+
+  it("is stated at stand-down while the retry waits", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1", UNREACHABLE);
+
+    // Act
+    h.retry.stop("the session stood down");
+
+    // Assert
+    expect(h.states.at(-1)).toEqual({ abandoned: true, failedTurn: "turn-1", cause: "the session stood down" });
+  });
+
+  it("names the chain's latest failed turn", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+    await failedTurnEnds(h, "retry-1");
+
+    // Act
+    h.retry.stop("the session stood down");
+
+    // Assert
+    expect(h.states.at(-1)).toMatchObject({ abandoned: true, failedTurn: "retry-1" });
+  });
+
+  it("is not stated at stand-down while the delivered retry runs", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+
+    // Act
+    h.retry.stop("the session stood down");
+
+    // Assert
+    expect(h.states.some((stated) => stated !== undefined && "abandoned" in stated)).toBe(false);
+  });
+
+  it("is not stated when a submitted prompt ends the chain", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    h.retry.promptSubmitted("turn-2");
+
+    // Assert
+    expect(h.states.at(-1)).toBeUndefined();
+  });
+
+  it("ends the chain", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = new Error("the prompt queue is closed");
+
+    // Act
+    await fire(h);
+
+    // Assert
+    expect({ standing: h.retry.standing(), standings: h.standings }).toEqual({ standing: false, standings: [true, false] });
+  });
+
+  it("records the refused prompt at ERROR with the abandoned turn", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.delivery = new Error("the prompt queue is closed");
+    const before = logSinkMark();
+
+    // Act
+    await fire(h);
+
+    // Assert
+    const records = recordsSaying(
+      logRecordsSince(before),
+      "the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure",
+    );
+    expect(records.map((record) => ({ level: record.level, turn: record.context["failed_turn"], abandoned: record.context["abandoned"] }))).toEqual([
+      { level: "error", turn: "turn-1", abandoned: true },
+    ]);
+  });
+
+  it("records a stand-down at INFO with the abandoned turn", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    const before = logSinkMark();
+
+    // Act
+    h.retry.stop("the session stood down");
+
+    // Assert
+    const records = recordsSaying(logRecordsSince(before), "the shim is standing down; the failed turn keeps its failure");
+    expect(records.map((record) => ({ level: record.level, turn: record.context["failed_turn"] }))).toEqual([
+      { level: "info", turn: "turn-1" },
+    ]);
+  });
+
+  it("is built as the session stream's abandoned arm", () => {
+    // Act
+    const update = vendorErrorRetryUpdate({ abandoned: true, failedTurn: "turn-1", cause: "the prompt queue is closed" });
+
+    // Assert
+    expect(update.update.case === "vendorErrorRetry" ? update.update.value.stated : undefined).toEqual({
+      case: "abandoned",
+      value: create(conversationv1.SessionVendorErrorRetryAbandonedSchema, {
+        failedTurn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        cause: "the prompt queue is closed",
+      }),
+    });
   });
 });

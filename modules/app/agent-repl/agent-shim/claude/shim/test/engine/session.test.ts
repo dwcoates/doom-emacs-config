@@ -17887,6 +17887,63 @@ describe("the vendor-error retry", () => {
     expect(await unforcedKill(h)).toEqual({ cause: "live", activity: "busy" });
   });
 
+  /**
+   * The failed terminal's retry promise, read at the moment each terminal is
+   * WRITTEN: the fold's terminal frame rides its entries, as the real fold's
+   * does, and each write is read before anything after it can stamp the frame.
+   */
+  function promisesAtWrite(h: Harness): (number | undefined)[] {
+    const promises: (number | undefined)[] = [];
+    const fold = h.fold.onSdkMessage.bind(h.fold);
+    h.fold.onSdkMessage = (message, context) => {
+      const output = fold(message, context);
+      if (output.turnEnded === undefined) return output;
+      return { entries: [...output.entries, foldEntry({ kind: "frame", frame: output.turnEnded.frame }, `terminal-${message.uuid}`)], turnEnded: output.turnEnded };
+    };
+    const write = h.persistence.write.bind(h.persistence);
+    h.persistence.write = (entries) => {
+      for (const entry of entries) {
+        if (entry.item.kind === "frame" && entry.item.frame.result.case === "failure") {
+          promises.push(entry.item.frame.result.value.retryPromised?.attempt);
+        }
+      }
+      write(entries);
+    };
+    return promises;
+  }
+
+  it("writes a retried failure's terminal already carrying the retry it promises", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const promises = promisesAtWrite(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], OVERLOADED);
+
+    // Assert
+    expect(promises).toEqual([1]);
+  });
+
+  it("writes a failure nothing retries with no promise", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const promises = promisesAtWrite(h);
+
+    // Act
+    await failedTurn(h, "turn-1", [], failure({
+      case: "apiRequestFailed",
+      value: create(conversationv1.ApiRequestFailedSchema, {
+        message: "API Error: invalid request",
+        kind: { case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) },
+      }),
+    }));
+
+    // Assert
+    expect(promises).toEqual([undefined]);
+  });
+
   it("schedules a retry after a turn that failed on a retryable API failure", async () => {
     // Arrange
     const h = harness();

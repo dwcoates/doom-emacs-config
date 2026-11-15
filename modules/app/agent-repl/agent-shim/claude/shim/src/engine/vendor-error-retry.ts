@@ -146,8 +146,32 @@ export interface AwaitingNetworkRetry {
   readonly status: string;
 }
 
-/** The retry as the session stream states it: scheduled, waiting for the network, or being made. */
-export type StatedRetry = ScheduledRetry | AwaitingNetworkRetry | AttemptingRetry;
+/**
+ * A chain that ended before it made the retry its failed turn's terminal
+ * promised (conversation.v1.SessionVendorErrorRetryAbandoned): the failure
+ * stands, and the feed draws it.
+ */
+export interface AbandonedRetry {
+  readonly abandoned: true;
+  /** The failed turn whose terminal promised the retry. */
+  readonly failedTurn: string;
+  /** Why the retry was never made. */
+  readonly cause: string;
+}
+
+/**
+ * The retry as the session stream states it: scheduled, waiting for the
+ * network, being made, or abandoned.
+ */
+export type StatedRetry = ScheduledRetry | AwaitingNetworkRetry | AttemptingRetry | AbandonedRetry;
+
+/**
+ * The retry a failed terminal promises (conversation.v1.AgentFailure
+ * `retry_promised`): which retry of the chain follows it.
+ */
+export interface RetryPromise {
+  readonly attempt: number;
+}
 
 /** What asking for the retry now came to (shim.v1.RetryVendorErrorNow). */
 export type RetryNowOutcome =
@@ -241,6 +265,23 @@ interface Chain {
   status: string;
   /** The shim turn the latest delivered retry opened, while it runs. */
   awaiting?: string;
+  /**
+   * The latest failed turn whose terminal promised a retry: the one an
+   * abandonment names. Unset until a failure with a shim turn is promised.
+   */
+  promisedTurn?: string;
+}
+
+/** How a chain that may have promised a retry ends without making it. */
+interface ChainAbandonment {
+  /** The record's message. */
+  readonly why: string;
+  /** Why the retry was never made, stated on the abandonment. */
+  readonly cause: string;
+  /** The record's level. */
+  readonly level: "info" | "error";
+  /** The record's further fields. */
+  readonly fields: Record<string, unknown>;
 }
 
 /** What one failed turn's terminal says to the retry. */
@@ -288,13 +329,40 @@ export class VendorErrorRetry {
    * A non-keep-alive vendor turn ended. TURN_ID is the shim turn its result
    * answered (`undefined` for one that answered none of ours); FRAME is its
    * terminal.
+   *
+   * Answers the retry the terminal PROMISES, decided here before the terminal
+   * is written, so the terminal itself states it (AgentFailure
+   * `retry_promised`): set when a chain stands after the decision and the
+   * failed turn is one of ours, so an abandonment can name it. Absent when
+   * nothing retries the failure, the chain gave up at it, or the turn
+   * answered none of ours.
    */
-  turnEnded(turnId: string | undefined, frame: conversationv1.AgentFrame): void {
-    if (this.stopped) return;
+  turnEnded(turnId: string | undefined, frame: conversationv1.AgentFrame): RetryPromise | undefined {
+    const decided = this.decide(turnId, frame);
+    const chain = this.chain;
+    // ONLY A RETRY BRANCH PROMISES, and only while its chain still stands: a
+    // branch that gave up at this failure ended the chain.
+    if (decided !== "retried" || chain === undefined || turnId === undefined) return undefined;
+    chain.promisedTurn = turnId;
+    const promise = { attempt: chain.retries + 1 };
+    LOGGER.info(
+      { chain: chain.id, turn_id: turnId, attempt: promise.attempt, decided },
+      "the failed turn's terminal promises agent-repl's retry; the feed draws no failure for it",
+    );
+    return promise;
+  }
+
+  /**
+   * The retry rule for one ended turn. Answers `retried` when a retry branch
+   * took the failure (which may still have given up at it), and otherwise
+   * why no branch did.
+   */
+  private decide(turnId: string | undefined, frame: conversationv1.AgentFrame): string {
+    if (this.stopped) return "stopped";
     const chain = this.chain;
     // ANOTHER TURN'S END says nothing about a standing chain: the retry it is
     // waiting to deliver, or the one it delivered, is still its own.
-    if (chain !== undefined && (chain.awaiting === undefined || chain.awaiting !== turnId)) return;
+    if (chain !== undefined && (chain.awaiting === undefined || chain.awaiting !== turnId)) return "another_turn";
     const failure: Failure = {
       turnId,
       retryable: isRetryableApiFailure(frame),
@@ -303,19 +371,19 @@ export class VendorErrorRetry {
       status: failureStatus(frame),
     };
     if (!failure.retryable && !failure.usageLimit) {
-      if (chain === undefined) return;
+      if (chain === undefined) return "not_retried";
       this.end(chain, "the retried turn ended without a failure agent-repl retries", {
         turn_id: turnId,
         outcome: frame.result.case === "failure" ? `failure.${String(frame.result.value.failure.case)}` : "success",
       });
-      return;
+      return "chain_ended";
     }
     const retrying = chain ?? this.open(failure);
     retrying.awaiting = undefined;
     retrying.status = failure.status;
     if (failure.usageLimit) {
       this.readAllowance(retrying, failure);
-      return;
+      return "retried";
     }
     // A FAILURE THE NETWORK CAUSED waits for the network: the turn's own
     // `unreachable` kind, or a standing fault. The fault is read here, after
@@ -325,9 +393,10 @@ export class VendorErrorRetry {
     const faultStands = this.deps.network.faultStands();
     if (failure.unreachable || faultStands) {
       this.awaitNetwork(retrying, failure, faultStands);
-      return;
+      return "retried";
     }
     this.retryVendorError(retrying, failure);
+    return "retried";
   }
 
   /** Someone else submitted a prompt: the session is theirs again. */
@@ -342,7 +411,9 @@ export class VendorErrorRetry {
     if (this.stopped) return;
     this.stopped = true;
     const chain = this.chain;
-    if (chain !== undefined) this.end(chain, "the shim is standing down; the failed turn keeps its failure", { reason });
+    if (chain === undefined) return;
+    const why = "the shim is standing down; the failed turn keeps its failure";
+    this.abandon(chain, { why, cause: reason, level: "info", fields: { reason } }, () => this.end(chain, why, { reason }));
   }
 
   /**
@@ -585,12 +656,8 @@ export class VendorErrorRetry {
     } catch (err) {
       const cause = err instanceof Error ? err.message : String(err);
       if (this.chain !== chain) return { kind: "ended", detail: cause };
-      this.giveUp(
-        chain,
-        "the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure",
-        cause,
-        { attempt },
-      );
+      const why = "the vendor refused the retry prompt; agent-repl stopped retrying and the turn keeps its failure";
+      this.abandon(chain, { why, cause, level: "error", fields: { attempt } }, () => this.giveUp(chain, why, cause, { attempt }));
       return { kind: "ended", detail: cause };
     }
     // A CHAIN ENDED WHILE THE DELIVERY WAS AWAITED (a prompt was submitted, the
@@ -614,10 +681,12 @@ export class VendorErrorRetry {
         this.arm(chain, VENDOR_ERROR_RETRY_BUSY_MS);
         return { kind: "busy", detail: delivery.detail };
       case "unavailable":
-        this.end(chain, "the session cannot take the retry prompt; the failed turn keeps its failure", {
-          attempt,
-          detail: delivery.detail,
-        });
+        {
+          const why = "the session cannot take the retry prompt; the failed turn keeps its failure";
+          this.abandon(chain, { why, cause: delivery.detail, level: "error", fields: { attempt, detail: delivery.detail } }, () =>
+            this.end(chain, why, { attempt, detail: delivery.detail }),
+          );
+        }
         return { kind: "ended", detail: delivery.detail };
     }
   }
@@ -630,6 +699,34 @@ export class VendorErrorRetry {
     this.chain = undefined;
     this.deps.standing(false);
     LOGGER.error({ chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, ...fields }, why);
+  }
+
+  /**
+   * The chain ends before making the retry its failed turn's terminal
+   * promised: ERROR, because the turn's work is left undone. The abandonment
+   * is STATED, naming that turn, so the feed draws the failure it withheld.
+   * A chain whose latest retry already ran made its promise good, and one
+   * that promised nothing has nothing to take back: each ends as UNPROMISED
+   * says. A stand-down records at INFO, as its end always did: standing down
+   * is the shim's own act, and the failure it leaves is drawn.
+   */
+  private abandon(chain: Chain, ending: ChainAbandonment, unpromised: () => void): void {
+    const { why, cause, level, fields } = ending;
+    const promised = chain.awaiting === undefined ? chain.promisedTurn : undefined;
+    if (promised === undefined) {
+      unpromised();
+      return;
+    }
+    this.cancelTimer();
+    this.latched = false;
+    this.chain = undefined;
+    this.pending = { abandoned: true, failedTurn: promised, cause };
+    this.deps.state(this.pending);
+    this.deps.standing(false);
+    LOGGER[level](
+      { chain: chain.id, retries: chain.retries, mode: chain.mode?.kind ?? "", cause, failed_turn: promised, abandoned: true, ...fields },
+      why,
+    );
   }
 
   private end(chain: Chain, why: string, fields: Record<string, unknown>): void {
@@ -731,7 +828,19 @@ function isUsageLimit(frame: conversationv1.AgentFrame): boolean {
   }
 }
 
-/** The schedule as the session stream states it: the next retry, the one waiting for the network, the one being made, or none. */
+/**
+ * Stamps PROMISE onto a failed terminal (AgentFailure.retry_promised). A
+ * promise for a terminal that is no failure is a defect of the caller, and
+ * throws.
+ */
+export function stampRetryPromise(frame: conversationv1.AgentFrame, promise: RetryPromise): void {
+  if (frame.result.case !== "failure") {
+    throw new Error(`a retry was promised to a terminal that is no failure (${String(frame.result.case)})`);
+  }
+  frame.result.value.retryPromised = create(conversationv1.AgentFailureRetryPromisedSchema, { attempt: promise.attempt });
+}
+
+/** The schedule as the session stream states it: the next retry, the one waiting for the network, the one being made, an abandoned one, or none. */
 export function vendorErrorRetryUpdate(stated: StatedRetry | undefined): conversationv1.SessionUpdate {
   return create(conversationv1.SessionUpdateSchema, {
     update: {
@@ -744,6 +853,15 @@ export function vendorErrorRetryUpdate(stated: StatedRetry | undefined): convers
 /** The `SessionVendorErrorRetry.stated` arm for STATED; unset when none is pending. */
 function statedArm(stated: StatedRetry | undefined): conversationv1.SessionVendorErrorRetry["stated"] {
   if (stated === undefined) return { case: undefined };
+  if ("abandoned" in stated) {
+    return {
+      case: "abandoned",
+      value: create(conversationv1.SessionVendorErrorRetryAbandonedSchema, {
+        failedTurn: create(conversationv1.TurnIdSchema, { value: stated.failedTurn }),
+        cause: stated.cause,
+      }),
+    };
+  }
   if ("attempting" in stated) {
     return {
       case: "attempting",
