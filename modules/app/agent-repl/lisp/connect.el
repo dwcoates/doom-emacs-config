@@ -625,6 +625,12 @@ work after teardown."
   (streams nil :type list)
   (alive-p t))
 
+(defun agent-repl-connect-connection-at-p (conn address)
+  "Return non-nil when CONN is a connection to the daemon at ADDRESS.
+A nil CONN is at no address.  THE ONE SPELLING of \"does this connection
+stand at that address\", so no caller hand-rolls the nil guard."
+  (and conn (equal address (agent-repl-connect-connection-address conn)) t))
+
 (defun agent-repl-connect-open (address)
   "Return a connection object for the daemon listening at ADDRESS.
 ADDRESS is the `HOST:PORT' string read from `daemon.addr'.  Opens no

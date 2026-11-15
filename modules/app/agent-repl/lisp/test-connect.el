@@ -1640,6 +1640,42 @@ deletion re-runs whatever sentinel is installed at that moment."
       ;; Assert
       (should (= runs 1)))))
 
+;;;; ---- A connection at an address ----
+
+(ert-deftest agent-repl-test-connect-connection-at-p-answers-the-connections-own-address ()
+  "A connection stands at the address it was opened on."
+  ;; Arrange
+  (let ((conn (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
+    ;; Act / Assert
+    (should (eq (agent-repl-connect-connection-at-p conn "127.0.0.1:9001") t))))
+
+(ert-deftest agent-repl-test-connect-connection-at-p-refuses-another-address ()
+  "A connection does not stand at any other address."
+  ;; Arrange
+  (let ((conn (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
+    ;; Act / Assert
+    (should-not (agent-repl-connect-connection-at-p conn "127.0.0.1:9100"))))
+
+(ert-deftest agent-repl-test-connect-connection-at-p-answers-nil-for-no-connection ()
+  "No connection stands at any address."
+  ;; Act / Assert
+  (should-not (agent-repl-connect-connection-at-p nil "127.0.0.1:9001")))
+
+(defconst agent-repl-test-connect--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The `lisp/' directory these tests were loaded from.")
+
+(ert-deftest agent-repl-test-connect-connection-at-p-is-the-one-spelling ()
+  "No source compares a connection\='s address to ADDRESS by hand."
+  (let ((dir agent-repl-test-connect--lisp-dir))
+    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (equal (file-name-nondirectory file) "connect.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (should-not (re-search-forward
+                       "(equal address (agent-repl-connect-connection-address" nil t)))))))
+
 (provide 'test-connect)
 
 ;;; test-connect.el ends here

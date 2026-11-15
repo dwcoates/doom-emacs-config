@@ -73,6 +73,7 @@
 (declare-function agent-repl-evaluate-text "evaluate" (text))
 (declare-function agent-repl-link-dial-successor "daemon-link" (address))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl-connect-connection-at-p "connect" (conn address))
 (declare-function agent-repl-rpc-watch-host-workspace "rpc"
                   (conn ref on-push on-close &optional on-open))
 
@@ -618,8 +619,8 @@ the successor through the adopt walk.  TRIGGER is recorded.  Answers
 non-nil when a walk was started, nil when WS already stands there."
   (let ((conn (agent-repl-link-serving-conn address))
         (current (agent-repl-host-conn ws)))
-    (if (and current (agent-repl-connect-connection-alive-p current)
-             (equal address (agent-repl-connect-connection-address current)))
+    (if (and (agent-repl-connect-connection-at-p current address)
+             (agent-repl-connect-connection-alive-p current))
         (progn
           (agent-repl--info ws "elisp.host.served-here-already ws=%s address=%S trigger=%s"
                             ws address trigger)
@@ -2326,8 +2327,7 @@ adopt is sent to an address the link never attached.
 Answers nil while the dial has not been ACCEPTED yet — the caller must
 then wait for acceptance rather than adopt onto an unproven daemon."
   (let ((standing (agent-repl-link-successor)))
-    (unless (and standing
-                 (equal address (agent-repl-connect-connection-address standing)))
+    (unless (agent-repl-connect-connection-at-p standing address)
       (agent-repl--info ws "elisp.host.redial ws=%s address=%S standing=%S"
                         ws address
                         (and standing

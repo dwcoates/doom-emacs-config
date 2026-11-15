@@ -72,6 +72,7 @@
 (declare-function agent-repl-connect-open "connect" (address))
 (declare-function agent-repl-connect-close "connect" (conn))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl-connect-connection-at-p "connect" (conn address))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 (declare-function agent-repl-connect-connection-streams "connect" (conn))
 (declare-function agent-repl-connect-failure-message "connect" (detail))
@@ -331,12 +332,11 @@ rather than sending anything to an unproven daemon."
      ;; outgoing daemon answered after the handover completed names the
      ;; daemon that is the primary now, and the primary is what the caller
      ;; acts on -- never a second connection recorded as its own successor.
-     ((and live (equal address (agent-repl-connect-connection-address live)))
+     ((agent-repl-connect-connection-at-p live address)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
                         "elisp.link.successor-at-primary address=%S" address)
       live)
-     ((and standing
-           (equal address (agent-repl-connect-connection-address standing)))
+     ((agent-repl-connect-connection-at-p standing address)
       standing)
      (t (agent-repl-link-dial-successor address)))))
 
@@ -397,10 +397,10 @@ exited, its workspaces re-homed) is dropped here rather than reused."
   (let ((primary (agent-repl-link-live))
         (successor (agent-repl-link-successor)))
     (cond
-     ((and primary (equal address (agent-repl-connect-connection-address primary)))
+     ((agent-repl-connect-connection-at-p primary address)
       primary)
-     ((and successor (agent-repl-connect-connection-alive-p successor)
-           (equal address (agent-repl-connect-connection-address successor)))
+     ((and (agent-repl-connect-connection-at-p successor address)
+           (agent-repl-connect-connection-alive-p successor))
       successor)
      (t
       (maphash (lambda (kept conn)
@@ -914,11 +914,10 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
   (let ((attached (or agent-repl-link--successor agent-repl-link--pending-successor))
         (live (agent-repl-link-live)))
     (cond
-     ((and live (equal address (agent-repl-connect-connection-address live)))
+     ((agent-repl-connect-connection-at-p live address)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address=%S announced=%S"
                         address (and announced t)))
-     ((and attached
-           (equal address (agent-repl-connect-connection-address attached)))
+     ((agent-repl-connect-connection-at-p attached address)
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-already-attached address=%S" address))
      ((and announced
            (eq attached agent-repl-link--pending-successor)
