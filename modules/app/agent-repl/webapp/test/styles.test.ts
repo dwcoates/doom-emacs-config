@@ -4135,6 +4135,79 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   });
 });
 
+describe("a known command in a prompt bubble (owner request, 2026-11-10)", () => {
+  it("is the canonical purple, the purple status --blocked", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect(root).toMatch(/--known-command:\s*var\(--blocked\)/);
+  });
+
+  it("is not overridden by the dark theme", () => {
+    // Arrange / Act
+    const block = darkThemeBlock();
+    // Assert
+    expect(block).not.toMatch(/--known-command:/);
+  });
+});
+
+/** The hue (degrees) and saturation of a literal color, or undefined for a form this scan does not read. */
+function hueOfLiteral(literal: string): { hue: number; saturation: number } | undefined {
+  const hsl = /^hsla?\(\s*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)%/.exec(literal);
+  if (hsl) return { hue: Number(hsl[1]), saturation: Number(hsl[2]) / 100 };
+  let channels: number[];
+  const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(literal);
+  if (rgb) channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  else {
+    const hex = literal.slice(1);
+    const full = hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex.slice(0, 6);
+    channels = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+  }
+  const [r, g, b] = channels.map((c) => c / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max === min) return { hue: 0, saturation: 0 };
+  const d = max - min;
+  const hue = max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { hue: hue * 60, saturation: max === 0 ? 0 : d / max };
+}
+
+describe("every purple in the feed's styles is the canonical purple (owner ruling, 2026-11-15)", () => {
+  // The footer's rainbow status cycle is a deliberate walk through every hue, not a purple element.
+  const withoutRainbow = (css: string): string =>
+    css.replace(/@keyframes pfooter-status-color[\s\S]*?\n\}/, "");
+  const purpleLiterals = (css: string): string[] =>
+    (withoutRainbow(withoutBlockComments(css)).match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|(?:rgba?|hsla?)\([^)]*\)/g) ?? []).filter((literal) => {
+      const read = hueOfLiteral(literal);
+      return read !== undefined && read.saturation > 0.12 && read.hue >= 250 && read.hue <= 325;
+    });
+
+  it.each([
+    ["styles.css", stylesheet],
+    ["sidebar-page.css", sidebarPageStylesheet],
+  ])("spells no purple literal in %s", (_name, css) => {
+    // Arrange / Act
+    const found = purpleLiterals(css);
+    // Assert
+    expect(found).toEqual([]);
+  });
+
+  it.each(["--tool-title", "--retry", "--info-agents", "--hl-keyword"])("%s is the token", (name) => {
+    // Arrange / Act
+    const root = withoutBlockComments(stylesheet);
+    // Assert
+    expect(root).toMatch(new RegExp(`${name}:\\s*var\\(--blocked\\);`));
+  });
+
+  it("the scan finds a purple spelled out", () => {
+    // Arrange / Act / Assert
+    expect(purpleLiterals(".a { color: #8b5cf6; } .b { color: hsl(280 55% 62%); } .c { color: #15803d; }")).toEqual([
+      "#8b5cf6",
+      "hsl(280 55% 62%)",
+    ]);
+  });
+});
+
 describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
   it("is the known command's purple", () => {
     // Arrange / Act
