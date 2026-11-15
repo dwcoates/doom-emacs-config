@@ -55,7 +55,9 @@
  *   yet ({@link VendorErrorRetryDeps.network}), and a standing fault is
  *   probed until it resolves (engine/network-resume.ts). The wait counts
  *   against no window: the fault has none, and the vendor-error window
- *   restarts at the next failure that reached the API.
+ *   restarts at the next failure that reached the API. A retry already
+ *   waiting out its interval when the fault opens moves onto the latch too
+ *   ({@link VendorErrorRetry.networkFaultOpened}).
  * - A PROMPT SUBMITTED DURING THE WAIT TAKES THE SESSION (as below), and is
  *   sent at once: the daemon holds no prompt behind a retry agent-repl owns
  *   (daemon resolve/footer/vendorblock.go). It fails the same way while the
@@ -71,7 +73,11 @@
  * - THE CHAIN ENDS on the first retry turn that ends any other way (answered,
  *   interrupted, a failure neither rule retries), on a prompt someone else
  *   submits (the session is theirs again; a prompt of theirs that fails the
- *   same way opens a fresh chain), and at stand-down.
+ *   same way opens a fresh chain), and at stand-down. A chain the shim's
+ *   stand-down or death cuts is not lost: the daemon reads the schedule this
+ *   shim stated, and a departure it did not leave to the user owes the
+ *   workspace the failed turn's resumption, which the next session pays
+ *   (daemon promptqueue `oweRetry`).
  * - ONE TIMER, and it exists only while a retry is due at an instant.
  */
 import { create } from "@bufbuild/protobuf";
@@ -381,6 +387,33 @@ export class VendorErrorRetry {
   }
 
   /**
+   * The session's network fault OPENED. A vendor-error retry waiting out its
+   * interval moves onto the latch: its timer would fire one retry into the
+   * outage, which could only fail unreachable and then wait on the latch
+   * anyway, and while it ran the workspace read as a running turn instead of
+   * its network fault. The retry is made when the fault resolves. A
+   * usage-limit retry keeps its instant, since what it waits for is the
+   * allowance's reset, and a retry already running as a turn, or one already
+   * on the latch, has no timer to move.
+   */
+  networkFaultOpened(): void {
+    const chain = this.chain;
+    if (this.stopped || chain === undefined || this.handle === undefined) return;
+    if (chain.mode?.kind !== "vendor_error") {
+      LOGGER.debug(
+        { chain: chain.id, mode: chain.mode?.kind ?? "" },
+        "the network fault opened; a retry not on the vendor-error cadence keeps its instant",
+      );
+      return;
+    }
+    this.latch(chain);
+    LOGGER.info(
+      { chain: chain.id, attempt: chain.retries + 1 },
+      "the network fault opened while a retry waited out its interval; agent-repl makes it when the fault resolves, on no timer",
+    );
+  }
+
+  /**
    * THE LATCH: the session's network fault resolved because a request
    * reached the vendor. Only a retry waiting for the network is made; a
    * vendor-error retry on its interval keeps it, since a request getting
@@ -431,13 +464,23 @@ export class VendorErrorRetry {
       );
       this.deps.network.standFault(failure.status);
     }
-    this.cancelTimer();
-    chain.mode = { kind: "network" };
-    this.latched = true;
+    this.latch(chain);
     LOGGER.info(
       { chain: chain.id, turn_id: failure.turnId ?? "", retries: chain.retries, unreachable: failure.unreachable, fault_stood: faultStands },
       "the turn failed because the API could not be reached; agent-repl retries it when the network fault resolves, on no timer",
     );
+  }
+
+  /**
+   * Put CHAIN's next retry on the network latch: no timer, the network mode,
+   * and the schedule stated as waiting for the network. The one way a retry
+   * comes to wait for the network, whether its turn failed unreachable or the
+   * fault opened while it waited out its interval.
+   */
+  private latch(chain: Chain): void {
+    this.cancelTimer();
+    chain.mode = { kind: "network" };
+    this.latched = true;
     this.pending = { awaitingNetwork: true, attempt: chain.retries + 1, status: chain.status };
     this.deps.state(this.pending);
   }

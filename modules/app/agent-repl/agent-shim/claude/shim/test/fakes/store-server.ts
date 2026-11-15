@@ -304,13 +304,15 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   /** Detached work ids that were announced, mapped to the run they detached from. */
   const detachedAnnounced = new Map<string, string | undefined>();
   /**
-   * The store's LINEAGE COLUMNS: which agent announced each detached work
+   * The store's LINEAGE COLUMNS: which agent owns each detached work
    * (`detached_work.owner_agent`) and which agent spawned each created agent
    * (`agent.spawned_by_agent`), in first-sight order. `GetLiveWork` answers
    * one session's lineage from these and from nothing else, exactly as
    * `sessionLineageCTE` does in the real store.
    */
   const detachedOwner = new Map<string, string>();
+  /** The detached work ids whose announcement has a `detached` origin, so a unit row can claim them. */
+  const detachedOrigin = new Set<string>();
   const spawnedBy = new Map<string, string>();
   /** The commission each spawned agent's recorded start states, by agent: the `agent` row's columns. */
   const commissions = new Map<string, conversationv1.AgentSubagentPrompt>();
@@ -515,6 +517,14 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
     fanOut(bookId, row);
   };
 
+  /** The book holding the row stored under UPSERTKEY, if any. */
+  const bookHolding = (upsertKey: string): string | undefined => {
+    for (const [bookId, rows] of books) {
+      if (rows.some((row) => row.upsertKey === upsertKey)) return bookId;
+    }
+    return undefined;
+  };
+
   /** Remember what an entry says about live work, for GetLiveWork. */
   const recordLiveness = (line: storev1.StorePageLine): void => {
     const item = line.agentItem?.item;
@@ -523,6 +533,14 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
     if (frame.result.case === "update" && frame.result.value.update.case === "activity") {
       const activity = frame.result.value.update.value;
       const unit = activity.activityId?.value;
+      // THE UNIT'S BOOK CLAIMS EVERY RUN THAT LEFT IT, as the real store's
+      // `claimDetachedWorkForUnitBook` does.
+      const book = frame.agentId?.value;
+      if (unit !== undefined && unit !== "" && book !== undefined && book !== "") {
+        for (const [workId, runId] of detachedAnnounced) {
+          if (runId === unit && detachedOrigin.has(workId)) detachedOwner.set(workId, book);
+        }
+      }
       const arm = (activity.item.value as { result?: { case?: string } } | undefined)?.result?.case;
       if (unit !== undefined && unit !== "" && arm !== undefined && TERMINAL_ACTIVITY_ARMS.has(arm)) {
         for (const [workId, runId] of detachedAnnounced) {
@@ -549,8 +567,17 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
           ? created.value.createdAgentId?.value
           : undefined;
     detachedAnnounced.set(workId, runId);
+    if (detached.origin.case === "detached") detachedOrigin.add(workId);
     if (runId !== undefined && runId !== "") recordDetachedKind(runId, created === undefined ? "unstated" : "subagent");
-    const owner = frame.agentId?.value;
+    // THE OWNER, as the real store's `upsertDetachedWork` resolves it: the book
+    // holding the spawning call's unit row, else the declared owner, else the
+    // announcer.
+    const unitBook =
+      detached.origin.case === "detached" && runId !== undefined && runId !== ""
+        ? bookHolding(`activity:${runId}`)
+        : undefined;
+    const declared = detached.owner?.value;
+    const owner = unitBook ?? (declared !== undefined && declared !== "" ? declared : frame.agentId?.value);
     if (owner !== undefined && owner !== "") detachedOwner.set(workId, owner);
   };
 

@@ -208,10 +208,16 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// THE SCHEDULE OF AGENT-REPL'S RETRY OF A FAILED TURN is the footer's
 		// to draw (its countdown) and to read (a scheduled retry holds no
 		// prompt, footer.Resolver.VendorBlock); no other rule reads it.
+		// The watcher keeps one fact of it: whether a retry is still to be
+		// made, which a departure that cuts the shim owes the workspace
+		// (promptqueue's owed retry).
+		w.retryOwed = u.VendorErrorRetry.GetScheduled() != nil || u.VendorErrorRetry.GetAwaitingNetwork() != nil
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
-			"arm":        sessionArm(update),
-			"scheduled":  u.VendorErrorRetry.GetScheduled() != nil,
-			"attempting": u.VendorErrorRetry.GetAttempting() != nil,
+			"arm":              sessionArm(update),
+			"scheduled":        u.VendorErrorRetry.GetScheduled() != nil,
+			"attempting":       u.VendorErrorRetry.GetAttempting() != nil,
+			"awaiting_network": u.VendorErrorRetry.GetAwaitingNetwork() != nil,
+			"retry_owed":       w.retryOwed,
 		})
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 

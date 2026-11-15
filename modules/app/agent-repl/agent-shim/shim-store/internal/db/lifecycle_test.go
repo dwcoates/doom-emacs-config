@@ -3,9 +3,11 @@ package db
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -362,5 +364,125 @@ func TestAnUnknownRecordedIsolationIsAStorageFailure(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrStorage) || !errors.Is(err, errUnknownIsolation) {
 		t.Fatalf("err = %v, want a storage failure naming the unknown isolation", err)
+	}
+}
+
+// subagentShellAnnouncedByMain is the incident's announcement: a shell the
+// subagent `sub-1` ran, announced in the MAIN agent's book (the vendor's task
+// stream is session-wide), detached from the unit `act-shell`.
+func subagentShellAnnouncedByMain(declaredOwner string) *storev1.StoreEntry {
+	work := detachedWork("act-shell", "act-shell", causeRequestedArm())
+	if declaredOwner != "" {
+		work.Owner = &conversationv1.AgentId{Value: declaredOwner}
+	}
+	return pageEntry("w-announce", "detached:act-shell", "agent-main", frameItem(detachedFrame("agent-main", work)))
+}
+
+// shellUnitIn is the shell call's own unit row, in BOOK.
+func shellUnitIn(book string) *storev1.StoreEntry {
+	return pageEntry("w-unit-"+book, activityUpsertKeyPrefix+"act-shell", book, frameItem(activityFrame(book, "act-shell", bashStart())))
+}
+
+func TestADetachedRunIsOwnedByTheBookThatHoldsItsCallsRow(t *testing.T) {
+	tests := []struct {
+		name     string
+		writes   []*storev1.StoreEntry
+		declared string
+		want     string
+	}{
+		{
+			name:   "the call's unit row landed first, so its book owns the run whoever announced it",
+			writes: []*storev1.StoreEntry{shellUnitIn("sub-1"), subagentShellAnnouncedByMain("")},
+			want:   "sub-1",
+		},
+		{
+			name:   "the call's unit row outranks a declared owner",
+			writes: []*storev1.StoreEntry{shellUnitIn("sub-1"), subagentShellAnnouncedByMain("sub-other")},
+			want:   "sub-1",
+		},
+		{
+			name:   "with no unit row, the declared owner owns the run rather than the announcer",
+			writes: []*storev1.StoreEntry{subagentShellAnnouncedByMain("sub-1")},
+			want:   "sub-1",
+		},
+		{
+			name:   "with no unit row and no declared owner, the announcer owns the run",
+			writes: []*storev1.StoreEntry{subagentShellAnnouncedByMain("")},
+			want:   "agent-main",
+		},
+		{
+			name:   "a unit row landing after the announcement claims the run for its book",
+			writes: []*storev1.StoreEntry{subagentShellAnnouncedByMain(""), shellUnitIn("sub-1")},
+			want:   "sub-1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			d, _ := newStore(t)
+
+			// Act
+			for _, entry := range test.writes {
+				writeOK(t, d, entry)
+			}
+
+			// Assert
+			if got := scalar[string](t, d, `SELECT owner_agent FROM detached_work WHERE work_id = 'act-shell'`); got != test.want {
+				t.Fatalf("owner_agent = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestAUnitRowClaimingAnAnnouncedRunLogsTheNewOwner(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	writeOK(t, d, subagentShellAnnouncedByMain(""))
+
+	// Act
+	writeOK(t, d, shellUnitIn("sub-1"))
+
+	// Assert
+	s.assertLogged(t, "info", `is now owned by "sub-1"`)
+}
+
+func TestAUnitRowOfAnAlreadyRightlyOwnedRunLogsNoClaim(t *testing.T) {
+	// Arrange
+	d, s := newStore(t)
+	writeOK(t, d, shellUnitIn("sub-1"), subagentShellAnnouncedByMain(""))
+
+	// Act: a later write of the same unit.
+	writeOK(t, d, pageEntry("w-unit-again", activityUpsertKeyPrefix+"act-shell", "sub-1", frameItem(activityFrame("sub-1", "act-shell", bashFailure()))))
+
+	// Assert
+	for _, message := range recordsAtLevel(t, s, "info") {
+		if strings.Contains(message, "is now owned by") {
+			t.Fatalf("info record %q, want no claim for a run its unit's book already owns", message)
+		}
+	}
+}
+
+func TestAUnitRowWhoseClaimFailsIsRefusedAndLogged(t *testing.T) {
+	// Arrange: the claim is the one statement that updates owner_agent.
+	d, s := newStore(t)
+	writeOK(t, d, subagentShellAnnouncedByMain(""))
+	if _, err := d.sql.ExecContext(ctx(), `CREATE TRIGGER refuse_owner BEFORE UPDATE OF owner_agent ON detached_work
+	  BEGIN SELECT RAISE(ABORT, 'owner updates refused'); END`); err != nil {
+		t.Fatalf("install the trigger: %v", err)
+	}
+
+	// Act
+	_, err := d.WriteBatch(ctx(), "test-producer", WriteInteractive, batch(shellUnitIn("sub-1")), nil)
+
+	// Assert
+	if !errors.Is(err, ErrStorage) || !strings.Contains(err.Error(), `filing the detached work of unit "act-shell"`) {
+		t.Fatalf("err = %v, want a storage failure naming the unit whose claim failed", err)
+	}
+	s.assertLogged(t, "error", "refused")
+	if got := scalar[string](t, d, `SELECT owner_agent FROM detached_work WHERE work_id = 'act-shell'`); got != "agent-main" {
+		t.Fatalf("owner_agent = %q, want the refused batch to leave the announcer in place", got)
+	}
+	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = ?`, activityUpsertKeyPrefix+"act-shell"); got != 0 {
+		t.Fatalf("unit rows = %d, want the refused batch to store nothing", got)
 	}
 }

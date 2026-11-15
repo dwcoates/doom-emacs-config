@@ -6017,6 +6017,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (reach.kind === "unreachable") {
       pushes.fault(sessionFault({ kind: "networkUnreachable" }, NETWORK_COMPONENT, reach.detail));
       networkResume.faultOpened();
+      // A RETRY WAITING OUT ITS INTERVAL moves onto the latch, so no timer
+      // fires a retry into the outage.
+      vendorErrorRetry.networkFaultOpened();
       return;
     }
     networkResume.faultResolved();

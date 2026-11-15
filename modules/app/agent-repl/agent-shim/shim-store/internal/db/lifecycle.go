@@ -84,6 +84,9 @@ func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, agentID strin
 		return nil
 	}
 	act := activity.Activity
+	if err := d.claimDetachedWorkForUnitBook(ctx, tx, agentID, act.GetActivityId().GetValue()); err != nil {
+		return err
+	}
 	if subagent, ok := act.GetItem().(*conversationv1.AgentActivity_Subagent); ok {
 		switch result := subagent.Subagent.GetResult().(type) {
 		case *conversationv1.AgentSubagent_Start:
@@ -284,13 +287,87 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string,
 	if err != nil {
 		return err
 	}
+	declared := declaredOwner(work, owner)
 	return d.upsertDetachedWork(ctx, tx, detachedRow{
 		workID:     workID,
 		kind:       kind,
 		originUnit: originUnit,
-		ownerAgent: sql.NullString{String: owner, Valid: owner != ""},
+		ownerAgent: sql.NullString{String: declared, Valid: declared != ""},
+		ownerUnit:  spawningUnitKey(work, originUnit),
 		now:        now,
 	})
+}
+
+// activityUpsertKeyPrefix is the producers' key for a unit's own page line
+// (`activity:<activity id>`), the one row of a call in the book of the agent
+// that made it.
+const activityUpsertKeyPrefix = "activity:"
+
+// WHOSE DETACHED WORK AN ANNOUNCEMENT NAMES: the agent whose book holds the
+// spawning call's own unit row (upsertDetachedWork reads it in the same
+// statement, through spawningUnitKey), else the owner the announcement
+// declares, else the agent that announced it (declaredOwner).
+//
+// THE OWNER IS NOT THE ANNOUNCER (conversation.v1.AgentDetachedWork.owner).
+// The vendor's task stream is session-wide, so the shim announces a
+// subagent's shell in the MAIN agent's book; recording the announcer as the
+// owner sent every reader of the run to a book that holds no row of it, and
+// each new watch's re-announcement logged the run undescribable at ERROR
+// (2026-11-13, merge-queue-stall-triage). The call's own unit row is the
+// record's statement of who made the call, so it outranks a producer's
+// declaration; a unit row that lands after the announcement corrects the
+// owner then (claimDetachedWorkForUnitBook).
+//
+// THE ANNOUNCER STAYS THE LAST ANSWER, as it was, for an announcement whose
+// call the record does not hold and whose producer declared no owner.
+func declaredOwner(work *conversationv1.AgentDetachedWork, announcer string) string {
+	if declared := work.GetOwner().GetValue(); declared != "" {
+		return declared
+	}
+	return announcer
+}
+
+// spawningUnitKey is the upsert key of the unit a `detached` announcement left,
+// whose row's book is the run's owner. Only the detached arm names a call: a
+// created arm's origin is the work's own identity, not a call.
+func spawningUnitKey(work *conversationv1.AgentDetachedWork, originUnit sql.NullString) sql.NullString {
+	if _, detached := work.GetOrigin().(*conversationv1.AgentDetachedWork_Detached); !detached || !originUnit.Valid || originUnit.String == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: activityUpsertKeyPrefix + originUnit.String, Valid: true}
+}
+
+// claimDetachedWorkForUnitBook makes the agent whose book holds a unit's own
+// row the owner of every detached run that left that unit.
+//
+// THE UNIT ROW MAY LAND AFTER THE ANNOUNCEMENT: a backgrounded subagent's call
+// reaches the store through the file plane, while its run's announcement
+// rides the stream plane, so an announcement written first could name only
+// its declared owner or its announcer. The unit's own row is the answer
+// whenever it lands, so the owner is corrected here, in the same transaction
+// that stores the row, and no order of the two writes leaves the run filed
+// under a book that does not hold its call.
+func (d *DB) claimDetachedWorkForUnitBook(ctx context.Context, tx *sql.Tx, book, activityID string) error {
+	if book == "" || activityID == "" {
+		return nil
+	}
+	const claimSQL = `UPDATE detached_work SET owner_agent = ?
+	  WHERE origin_unit = ? AND (owner_agent IS NULL OR owner_agent != ?)`
+	res, err := tx.ExecContext(ctx, claimSQL, book, activityID, book)
+	if err != nil {
+		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{ActivityID: activityID, AgentID: book},
+			storagef(err, "filing the detached work of unit %q under the book %q that holds the unit", activityID, book))
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{ActivityID: activityID, AgentID: book},
+			storagef(err, "counting the detached work of unit %q filed under the book %q", activityID, book))
+	}
+	if n > 0 {
+		d.log.Log(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", ActivityID: activityID, AgentID: book, Level: "info"},
+			"detached work of unit %q is now owned by %q, the agent whose book holds the unit's row (%d run(s))", activityID, book, n)
+	}
+	return nil
 }
 
 // applyBashLifecycle records a detached shell run's frame against the run's own
@@ -364,7 +441,10 @@ type detachedRow struct {
 	kind       string
 	originUnit sql.NullString
 	ownerAgent sql.NullString
-	now        int64
+	// ownerUnit is the upsert key of the spawning call's own unit row; when
+	// the record holds that row, its book is the owner and outranks ownerAgent.
+	ownerUnit sql.NullString
+	now       int64
 }
 
 // upsertDetachedWork writes one detached run's join row.
@@ -401,13 +481,13 @@ func (d *DB) upsertDetachedWork(ctx context.Context, tx *sql.Tx, row detachedRow
 	}
 	const upsertSQL = `INSERT INTO detached_work (
 	    work_id, kind, origin_unit, owner_agent, announced_at_ms)
-	  VALUES (?,?,?,?,?)
+	  VALUES (?,?,?,COALESCE((SELECT book_agent_id FROM entry WHERE upsert_key = ?), ?),?)
 	  ON CONFLICT(work_id) DO UPDATE SET
 	    kind = CASE WHEN detached_work.kind = ? THEN excluded.kind ELSE detached_work.kind END,
 	    origin_unit = COALESCE(excluded.origin_unit, detached_work.origin_unit),
 	    owner_agent = COALESCE(excluded.owner_agent, detached_work.owner_agent)`
 	_, err := tx.ExecContext(ctx, upsertSQL,
-		row.workID, row.kind, row.originUnit, row.ownerAgent, row.now, detachedKindDetached)
+		row.workID, row.kind, row.originUnit, row.ownerUnit, row.ownerAgent, row.now, detachedKindDetached)
 	if err != nil {
 		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{TaskID: row.workID}, storagef(err, "recording detached work %q", row.workID))
 	}

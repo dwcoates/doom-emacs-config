@@ -1107,6 +1107,124 @@ describe("networkRecovered", () => {
   });
 });
 
+describe("the network latch", () => {
+  it("leaves an unreachable failure and a fault opened over an interval in the same latched state", async () => {
+    // Arrange: one chain latched by its unreachable failure, one moved onto
+    // the latch when the fault opened over its interval.
+    const unreachable = harness();
+    unreachable.faultStanding = true;
+    const moved = harness();
+    await failedTurnEnds(moved, "turn-1");
+
+    // Act
+    await failedTurnEnds(unreachable, "turn-1", UNREACHABLE);
+    moved.retry.networkFaultOpened();
+
+    // Assert
+    const latched = (h: Harness): unknown[] => [h.scheduler.pendingTimeout(), h.retry.awaitingNetwork(), h.states.at(-1)];
+    expect(latched(moved)).toEqual(latched(unreachable));
+  });
+});
+
+describe("networkFaultOpened", () => {
+  it("cancels the timer of a vendor-error retry waiting out its interval", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect([h.scheduler.pendingTimeout(), h.retry.awaitingNetwork()]).toEqual([undefined, true]);
+  });
+
+  it("states the moved retry as waiting for the network", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect(h.states.at(-1)).toEqual({ awaitingNetwork: true, attempt: 1, status: "API Error" });
+  });
+
+  it("makes the moved retry when the network fault resolves", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.retry.networkFaultOpened();
+
+    // Act
+    h.retry.networkFaultResolved();
+    await settle();
+
+    // Assert
+    expect(h.prompts).toHaveLength(1);
+  });
+
+  it("logs the move at info", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    const before = logSinkMark();
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect(
+      recordsSaying(
+        logRecordsSince(before),
+        "the network fault opened while a retry waited out its interval; agent-repl makes it when the fault resolves, on no timer",
+      ).map((record) => record.level),
+    ).toEqual(["info"]);
+  });
+
+  it("leaves a usage-limit retry at its window's reset", async () => {
+    // Arrange
+    const h = harness();
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
+    h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
+    await settle();
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect([h.scheduler.pendingTimeout()?.delayMs, h.retry.awaitingNetwork()]).toEqual([76 * MINUTE, false]);
+  });
+
+  it("does nothing while the latest retry runs as a turn", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    await fire(h);
+    const stated = h.states.length;
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect([h.retry.awaitingNetwork(), h.states.length]).toEqual([false, stated]);
+  });
+
+  it("does nothing after stand-down", async () => {
+    // Arrange
+    const h = harness();
+    await failedTurnEnds(h, "turn-1");
+    h.retry.stop("test");
+
+    // Act
+    h.retry.networkFaultOpened();
+
+    // Assert
+    expect(h.retry.awaitingNetwork()).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The retry that waits for the network (the latch)
 // ---------------------------------------------------------------------------

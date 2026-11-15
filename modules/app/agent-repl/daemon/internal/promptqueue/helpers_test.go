@@ -60,6 +60,11 @@ type fakeDB struct {
 	engagements      int
 	engagementCtxErr error
 
+	// owedCalls is every debt OweResumption was asked to record, claimed or
+	// not, and oweErr is what it answers.
+	owedCalls []ids.TurnID
+	oweErr    error
+
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
 	held       map[ids.TurnID]*wsm.HeldPrompt
@@ -480,6 +485,10 @@ func (d *fakeDB) Turn(_ context.Context, id ids.WorkspaceID, turn ids.TurnID) (w
 func (d *fakeDB) OweResumption(_ context.Context, ws ids.WorkspaceID, turn ids.TurnID, _ time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.owedCalls = append(d.owedCalls, turn)
+	if d.oweErr != nil {
+		return d.oweErr
+	}
 	if d.owed == nil {
 		d.owed = map[ids.WorkspaceID]map[ids.TurnID]bool{}
 	}
@@ -533,6 +542,13 @@ func (d *fakeDB) OwedTurns(_ context.Context, ws ids.WorkspaceID) ([]ids.TurnID,
 }
 
 // owedCount answers how many resumptions ws is owed.
+// oweCalls answers how many debts OweResumption was asked to record.
+func (d *fakeDB) oweCalls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.owedCalls)
+}
+
 func (d *fakeDB) owedCount(ws ids.WorkspaceID) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -910,6 +926,9 @@ type fakeWatcher struct {
 	refuseJoins bool
 	// departure is the watched shim's departure, nil while it runs.
 	departure *sessionwatcher.Departure
+	// retryOwed is the shim's latest vendor-error retry statement naming a
+	// retry still to be made (RetryOwed).
+	retryOwed bool
 	// reaped reports the shim's client reaped while its departure has not
 	// been recorded yet.
 	reaped bool
@@ -972,6 +991,13 @@ func (w *fakeWatcher) Free() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return !w.factsPending && w.inFlight == nil && len(w.live.Agents)+len(w.live.Shells)+len(w.live.Monitors) == 0
+}
+
+// RetryOwed answers the fixture's retry statement.
+func (w *fakeWatcher) RetryOwed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.retryOwed
 }
 
 func (w *fakeWatcher) Departed() (sessionwatcher.Departure, bool) {

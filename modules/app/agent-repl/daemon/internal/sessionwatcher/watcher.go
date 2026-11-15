@@ -126,6 +126,9 @@ type watcher struct {
 	// departure is set once the watched shim is GONE (see Departed), and it
 	// is set ONCE: the lifecycle sink hears one departure per watcher.
 	departure *Departure
+	// retryOwed is whether the shim's latest vendor-error retry statement is
+	// a retry still to be made (RetryOwed).
+	retryOwed bool
 	// sessionEnded records that the session itself is over — the vendor query
 	// died, or the daemon is deliberately ending it (SessionEnding) — which is
 	// the one way a stream may legally end without a terminal.
@@ -1140,6 +1143,13 @@ func (w *watcher) endCutTurnLocked() {
 		w.sinks.Feed.OnTurnOpened(w.ws, turn)
 		w.turnEndedLocked(turn, wsm.CloseAgentDied)
 	}
+}
+
+// RetryOwed implements Watcher.
+func (w *watcher) RetryOwed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.retryOwed
 }
 
 // Departed implements Watcher.
