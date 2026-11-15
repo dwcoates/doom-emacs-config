@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
 // TestAcceptFlushesTheStreamingContentType pins the acceptance mechanism: the
@@ -172,5 +174,41 @@ func TestUnwrapReachesTheRealWriter(t *testing.T) {
 	// Assert.
 	if unwrapped != http.ResponseWriter(recorder) {
 		t.Fatal("Unwrap did not answer the real ResponseWriter")
+	}
+}
+
+// TestAcceptStreamLogsUnderTheContractedOperation pins that every branch of a
+// stream's acceptance is recorded as daemon.server.stream_accept with the rpc
+// as context, never under the bare rpc name.
+func TestAcceptStreamLogsUnderTheContractedOperation(t *testing.T) {
+	cases := []struct {
+		name    string
+		ctx     func() context.Context
+		message string
+	}{
+		{name: "a muxed subscription", message: "a muxed subscription was accepted on its page's stream",
+			ctx: func() context.Context { return withAcceptNotifier(context.Background(), func() {}) }},
+		{name: "no accept writer", message: "no accept writer is installed for this request",
+			ctx: context.Background},
+		{name: "a dedicated stream", message: "flushed the response headers on stream acceptance",
+			ctx: func() context.Context {
+				return context.WithValue(context.Background(), acceptWriterKey{}, &acceptWriter{ResponseWriter: httptest.NewRecorder()})
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			s := &server{log: log}
+
+			// Act.
+			s.acceptStream(tc.ctx(), "WatchExample")
+
+			// Assert.
+			r, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Message: tc.message})
+			if !ok || r.Operation != "daemon.server.stream_accept" || r.Context["rpc"] != "WatchExample" {
+				t.Fatalf("records = %+v, want %q under daemon.server.stream_accept naming the rpc", log.Records(), tc.message)
+			}
+		})
 	}
 }

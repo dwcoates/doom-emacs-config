@@ -723,6 +723,29 @@ func TestEndStandingStreamSendsOnlyWhenTheLifetimeEnded(t *testing.T) {
 	}
 }
 
+// TestEndStandingStreamLogsUnderTheContractedOperation pins that a planned
+// ending is recorded as daemon.server.stream_ending with the rpc as context,
+// never under the bare rpc name.
+func TestEndStandingStreamLogsUnderTheContractedOperation(t *testing.T) {
+	// Arrange.
+	life, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &server{life: life}
+	log := &recordingLogger{}
+
+	// Act.
+	endStandingStream(s, "WatchDaemon", log, streamSink[agentreplv1.WatchDaemonResponse](&endingSink{}),
+		&agentreplv1.WatchDaemonResponse{
+			Push: &agentreplv1.WatchDaemonResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+		})
+
+	// Assert.
+	if len(log.records) != 1 || log.records[0].Operation != "daemon.server.stream_ending" ||
+		log.records[0].Context["rpc"] != "WatchDaemon" {
+		t.Fatalf("records = %+v, want one daemon.server.stream_ending record naming the rpc", log.records)
+	}
+}
+
 // TestServeThenEndFollowsACleanBodyWithTheEnding pins the one shape every
 // ending-carrying stream serves through: a body that fails answers its error
 // with no ending, and a clean body is followed by the ending only when the

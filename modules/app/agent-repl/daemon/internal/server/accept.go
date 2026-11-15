@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"net/http"
+
+	"agent-repld/internal/dlog"
 )
 
 // THE STANDING-STREAM ACCEPTANCE RULE (ARCHITECTURE.md "Standing-stream
@@ -173,20 +175,26 @@ func acceptNotifierFrom(ctx context.Context) func() {
 // acceptStream flushes the response headers for a stream this handler has just
 // accepted. It is called AFTER the subscription is registered and AFTER every
 // refusal has been answered, so a refused open stays a refusal.
+// Every record names the stream's rpc as context under opStreamAccept, the
+// one operation of this edge (logging contract: daemon.<package>.<verb>).
 func (s *server) acceptStream(ctx context.Context, rpc string) {
 	if hook := acceptHookFrom(ctx); hook != nil {
 		hook()
 	}
+	fields := dlog.Context{"rpc": rpc}
 	if notify := acceptNotifierFrom(ctx); notify != nil {
 		notify()
-		s.log.Debug(rpc, "a muxed subscription was accepted on its page's stream", nil)
+		s.log.Debug(opStreamAccept, "a muxed subscription was accepted on its page's stream", fields)
 		return
 	}
 	writer := acceptWriterFrom(ctx)
 	if writer == nil {
-		s.log.Debug(rpc, "no accept writer is installed for this request", nil)
+		s.log.Debug(opStreamAccept, "no accept writer is installed for this request", fields)
 		return
 	}
 	writer.accept(streamContentTypeFrom(ctx))
-	s.log.Debug(rpc, "flushed the response headers on stream acceptance", nil)
+	s.log.Debug(opStreamAccept, "flushed the response headers on stream acceptance", fields)
 }
+
+// opStreamAccept is the operation of a stream's acceptance edge.
+const opStreamAccept = "daemon.server.stream_accept"
