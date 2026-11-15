@@ -5,6 +5,7 @@ import (
 	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"testing"
@@ -472,5 +473,34 @@ func TestADeployedEscalationsFinishIsEnded(t *testing.T) {
 	f, readErr := h.db.RemediationFinishOf(ctx, "ws-escalation")
 	if err != nil || readErr != nil || f != nil {
 		t.Fatalf("remediationDeployed = %v; finish %+v (%v), want the escalation's finish ended at its deploy", err, f, readErr)
+	}
+}
+
+// TestTheRemediationsResumeBriefsTakeTheValuesTheResumeSupplies composes each
+// brief a remediation is resumed with from the checked-in prompts, with
+// exactly the values resumeRemediation passes: the behind brief once lacked
+// the attempt placeholders the resume adds, and stranded the finish
+// (2026-11-15 18:56, deploy-escalation-20261115-174608).
+func TestTheRemediationsResumeBriefsTakeTheValuesTheResumeSupplies(t *testing.T) {
+	tests := []struct {
+		brief  string
+		values map[string]string
+	}{
+		{brief: BriefRemediationGateFailed, values: map[string]string{"archive_path": "/a", "failing_tests": "TestX"}},
+		{brief: BriefRemediationBehind, values: map[string]string{"main_branch": "master", "why": "behind"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.brief, func(t *testing.T) {
+			// Arrange: the values resumeRemediation adds to every brief.
+			tt.values["attempt"], tt.values["max_attempts"] = "1", fmt.Sprint(MaxFixAttempts)
+
+			// Act
+			_, err := BriefsFrom("../../../prompts")(tt.brief, tt.values)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("compose %s: %v", tt.brief, err)
+			}
+		})
 	}
 }
