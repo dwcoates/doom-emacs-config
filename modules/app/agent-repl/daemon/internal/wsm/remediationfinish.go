@@ -267,6 +267,15 @@ const remediationGatedHeadDDL = `
 ALTER TABLE deploy_remediation_finishes ADD COLUMN gated_head TEXT NOT NULL DEFAULT '';
 `
 
+// remediationUngatedLandingsDDL is the layout-149 addition: a finish that
+// reached its landing before layout 148 recorded no commit its gate passed
+// on, so its landing cannot name one; it goes back to its gate, which runs
+// again and records it (2026-11-15 20:58: the 20:07 remediation stood at its
+// landing with none). A previous build reads the gating step as it always has.
+const remediationUngatedLandingsDDL = `
+UPDATE deploy_remediation_finishes SET step = 'gating' WHERE step = 'landing' AND gated_head = '';
+`
+
 // PassRemediationGate moves WS's finish from its gate to its landing,
 // recording HEAD as the commit the gate passed on, answering whether it was
 // at its gate.

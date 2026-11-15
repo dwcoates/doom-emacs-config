@@ -372,3 +372,37 @@ func TestAPassedRemediationGateNamingNoCommitIsRefused(t *testing.T) {
 		t.Fatalf("PassRemediationGate = %v, want a refusal recorded at ERROR", err)
 	}
 }
+
+func TestALandingFinishWithNoGatedCommitGoesBackToItsGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		step      RemediationStep
+		gatedHead string
+		want      RemediationStep
+	}{
+		{name: "a landing recorded before the gated commit was goes back to its gate", step: RemediationLanding, want: RemediationGating},
+		{name: "a landing naming its gated commit stays", step: RemediationLanding, gatedHead: "abc", want: RemediationLanding},
+		{name: "a finish past its landing stays", step: RemediationDeploying, want: RemediationDeploying},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			beginFinish(t, s, RepoKey(t.TempDir()), instant, nil)
+			if _, err := s.db().Exec(`UPDATE deploy_remediation_finishes SET step = ?, gated_head = ?`, string(tt.step), tt.gatedHead); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			if _, err := s.db().Exec(remediationUngatedLandingsDDL); err != nil {
+				t.Fatalf("the layout-149 step: %v", err)
+			}
+
+			// Assert
+			f, err := s.RemediationFinishOf(context.Background(), "remedy")
+			if err != nil || f.Step != tt.want {
+				t.Fatalf("finish = %+v (%v), want step %s", f, err, tt.want)
+			}
+		})
+	}
+}
