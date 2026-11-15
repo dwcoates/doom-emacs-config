@@ -1682,6 +1682,7 @@ export const FOOTER_STATUS_SUBSTATUSES: Record<string, readonly string[]> = {
   question: [],
   interrupted: ["byUser", "hostShutdown"],
   merging: [
+    "finishing",
     "enqueued",
     "preDeploy",
     "rebasing",
@@ -1754,6 +1755,7 @@ export const MERGE_SUBSTATUS_WORDS: Record<string, Record<string, string>> = {
     committing: "committing",
     deploying: "deploying",
     postDeploy: "post-deploy",
+    finishing: "finishing",
     waitingOnUser: "waiting on user",
   },
   mergeFailed: { conflicts: "merge conflicts", tests: "tests failed", other: "merge failed", hook: "hook failed" },
@@ -1776,6 +1778,7 @@ export const MERGE_STEP_LINES: Record<string, { value: object; words: string }> 
   committing: { value: { subject: "Merge branch 'ws-1' into master" }, words: "Merge branch 'ws-1' into master" },
   deploying: { value: { hook: { case: "script", value: { path: "bin/deploy-landing.sh" } } }, words: "bin/deploy-landing.sh" },
   postDeploy: { value: { hook: { case: "prompt", value: { text: "deploy it" } } }, words: "deploy it" },
+  finishing: { value: { hook: { case: "script", value: { path: "bin/open-pr.sh" } } }, words: "bin/open-pr.sh" },
 };
 
 /** The suite edges a testing line draws, with the words and tone each takes. */
