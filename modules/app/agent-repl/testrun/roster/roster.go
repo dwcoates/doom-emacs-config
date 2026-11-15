@@ -629,6 +629,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/creategate":                 {"daemon/"},
 	"internal/ctxend":                     {"daemon/"},
 	"internal/dirpath":                    {"daemon/"},
+	"internal/gitlayout":                  {"daemon/"},
 	"internal/effortlevel":                {"daemon/internal/"},
 	"internal/envc":                       {"daemon/"},
 	"internal/freshinput":                 {"daemon/internal/"},

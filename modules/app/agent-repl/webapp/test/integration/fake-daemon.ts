@@ -17,6 +17,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+
+/**
+ * The webapp build the fake daemon states on every page attach: the build the
+ * integration harness's pages run (harness.ts HARNESS_WEBAPP_BUILD), spelled
+ * here because the harness imports this module.
+ */
+export const FAKE_DAEMON_WEBAPP_BUILD = "integration";
 import { join } from "node:path";
 import {
   ScalarType,
@@ -1625,7 +1632,7 @@ export function createFakeDaemon(): FakeDaemon {
         // it has read this frame.
         state.outbound.push(
           create(WatchPageResponseSchema, {
-            frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "test-webapp-build" }) },
+            frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: FAKE_DAEMON_WEBAPP_BUILD }) },
           }),
         );
         try {

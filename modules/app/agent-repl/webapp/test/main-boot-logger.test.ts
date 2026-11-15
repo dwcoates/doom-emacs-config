@@ -188,6 +188,12 @@ describe("the webapp's boot against a real page", () => {
     // OUT, not replaced. A page has no logger; installing one is `boot`'s job.
     resetLoggingForTests();
     document.body.innerHTML = shellHTML();
+    // THE PAGE STATES ITS BUILD off its built entry tag (webapp-build.ts), which
+    // the shell's own script tag stands for once built.
+    const entry = document.createElement("script");
+    entry.setAttribute("type", "module");
+    entry.setAttribute("src", "/assets/index-test-webapp-build.js");
+    document.body.append(entry);
     window.history.replaceState(null, "", PAGE_ADDRESS);
     realFetch = globalThis.fetch;
     // A transport that refuses drives the boot straight to its failure path,

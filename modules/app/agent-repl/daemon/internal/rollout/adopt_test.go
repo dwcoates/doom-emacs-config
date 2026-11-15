@@ -1628,14 +1628,19 @@ func TestAFailedAdoptionMayBeRunAgainByALaterCaller(t *testing.T) {
 		t.Fatal("precondition: the first adoption succeeded")
 	}
 
+	// THE LATCH IS PROVED BY A LATER CALLER RUNNING IT, not read at one
+	// instant: the daemon's own retry may hold it again in between (the
+	// read raced that retry in a loaded full run, 2026-11-15).
+	h.fleet.mu.Lock()
+	delete(h.fleet.adoptErr, ws)
+	h.fleet.mu.Unlock()
+
 	// Act.
-	h.c.mu.Lock()
-	adopting := h.c.rendezvous[ws].adopting
-	h.c.mu.Unlock()
+	err := h.c.AdoptHost(context.Background(), ws)
 
 	// Assert.
-	if adopting {
-		t.Fatal("a failed adoption left the latch closed; no later caller could run it again")
+	if err != nil {
+		t.Fatalf("a later caller could not run the adoption again after a failure: %v", err)
 	}
 }
 

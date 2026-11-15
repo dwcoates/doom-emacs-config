@@ -626,7 +626,7 @@ func splitJoinable(plan []migration) (additive, contracts []migration, refusal s
 		case MigrationContract:
 			contracts = append(contracts, m)
 		default:
-			return nil, nil, fmt.Sprintf("step %d (%s) is breaking; it cannot run while the incumbent still writes the file", m.To, m.Name)
+			return nil, nil, fmt.Sprintf("step %d (%s) is a breaking migration; it cannot run while the incumbent still writes the file", m.To, m.Name)
 		}
 	}
 	return additive, contracts, ""

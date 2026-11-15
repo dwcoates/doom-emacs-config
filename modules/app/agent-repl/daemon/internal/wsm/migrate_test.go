@@ -1334,7 +1334,7 @@ func TestSplitJoinable(t *testing.T) {
 		{name: "additive steps then contracts", plan: []migration{add(1), con(2), con(3)}, wantAdditive: 1, wantContracts: 2},
 		{name: "contracts alone", plan: []migration{con(1)}, wantContracts: 1},
 		{name: "an additive step after a contract", plan: []migration{con(1), add(2)}, wantRefusal: "follows a contract step"},
-		{name: "a breaking step", plan: []migration{add(1), brk(2)}, wantRefusal: "is breaking"},
+		{name: "a breaking step", plan: []migration{add(1), brk(2)}, wantRefusal: "is a breaking migration"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

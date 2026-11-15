@@ -144,6 +144,9 @@ it(
       composer: true,
       workspaceId: daemon.workspaceId,
       workspaceDir: daemon.workspaceDir,
+      // The fresh page runs the build the world's daemons serve, as a page
+      // the successor loaded does; another build would wait for its reload.
+      webappBuild: daemon.webappBuild,
     });
 
     // Assert (3) — the fresh page adopted the workspace on the SUCCESSOR

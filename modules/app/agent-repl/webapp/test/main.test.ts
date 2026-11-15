@@ -155,6 +155,12 @@ function installShell(): void {
   // The module script tag goes: this file imports main.ts itself, and jsdom
   // would otherwise try to fetch the bundle over http.
   document.body.innerHTML = body[1].replace(/<script[\s\S]*?<\/script>/gi, "");
+  // THE PAGE STATES ITS BUILD off its built entry tag (webapp-build.ts), which
+  // the shell's own script tag stands for once built.
+  const entry = document.createElement("script");
+  entry.setAttribute("type", "module");
+  entry.setAttribute("src", "/assets/index-test-webapp-build.js");
+  document.body.append(entry);
 }
 
 /** Point the page at a workspace (or, with "", at nothing). */

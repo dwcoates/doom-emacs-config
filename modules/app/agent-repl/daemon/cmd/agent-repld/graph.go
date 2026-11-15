@@ -1248,7 +1248,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			drainController.ResumeFolded(ctx)
 			elispReloader()
 		},
-		PublishViews:   views.PublishViews,
+		PublishViews: views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)
