@@ -820,6 +820,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
 		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
+		ColdDown:        func(ws ids.WorkspaceID, since time.Time) { drainController.ColdDown(ws, since) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
 		// bring-up retires the park's terminal under; the views' park is
 		// lifted once it is back, as a revival lifts it.

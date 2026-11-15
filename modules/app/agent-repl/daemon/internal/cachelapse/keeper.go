@@ -161,6 +161,10 @@ type Deps struct {
 	// CycleDown asks for WS's session to be stood down after the keep-alive
 	// asked at BEAT (drain.Controller.CycleDown).
 	CycleDown func(ws ids.WorkspaceID, beat time.Time)
+	// ColdDown asks for WS's session to be parked the moment its cache is
+	// known cold at SINCE (drain.Controller.ColdDown): a cold cache owes no
+	// keep-alive, so the keep-alive cycle never parks it.
+	ColdDown func(ws ids.WorkspaceID, since time.Time)
 	// Restore brings a session the keep-alive cycle parked back up, calling
 	// DONE once with how its start ended. It returns at once.
 	Restore func(ws ids.WorkspaceID, done func(error))
@@ -279,6 +283,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs a positive keep-alive interval")
 	case deps.CycleDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the keep-alive cycle's stand-down")
+	case deps.ColdDown == nil:
+		return nil, errors.New("cachelapse: the keeper needs the cold cache's stand-down")
 	case deps.Restore == nil:
 		return nil, errors.New("cachelapse: the keeper needs the parked sessions' restore")
 	case deps.Clock == nil:
@@ -362,6 +368,12 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 		k.deps.Telemetry.ObserveColdGate(ws, coldGateOutcome(cold), idle)
 	}
 	_ = k.markCold(context.Background(), ws, "the session parked at its cold gate")
+	// THE GATE ITSELF IS THE KNOWLEDGE THAT THE CACHE IS COLD, so its session
+	// is parked whether or not the mark was written: a shim a session still
+	// runs on at the gate owes no beat (beatPlanFor), and nothing else would
+	// stand it down before the idle cutoff. The drain finds nothing to do for
+	// a gate whose shim the fleet already stood down.
+	k.parkCold(ws, k.deps.Clock.Now(), "the session parked at its cold gate")
 	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
 }
 

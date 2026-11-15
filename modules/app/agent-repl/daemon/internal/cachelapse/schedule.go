@@ -351,9 +351,11 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		if k.markCold(ctx, ws, "the shim judged the cache lapsed") != nil {
 			// UNMARKED, the beat would be asked again at once and judged lapsed
 			// again: it is asked again shortly instead, and markCold recorded
-			// why at ERROR.
+			// why at ERROR. The retry's own mark parks the session.
 			k.beats[ws] = now.Add(BeatRetry)
+			return
 		}
+		k.parkCold(ws, now, "the shim judged the cache lapsed")
 	default:
 		observe(BeatOutcomeUnnamedJudgment)
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{

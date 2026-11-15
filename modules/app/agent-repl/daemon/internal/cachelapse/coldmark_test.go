@@ -225,3 +225,101 @@ func TestColdMarkWritesHaveOneHome(t *testing.T) {
 		t.Fatalf("the cold mark is written at %v, want only Keeper.markCold in coldmark.go", sites)
 	}
 }
+
+func TestTheCacheKnownColdParksTheSession(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		why  string
+	}{
+		{name: "when the shim judges a beat's cache lapsed", act: func(h *harness) {
+			h.keeper.beats[theWorkspace] = now
+			h.keeper.beatsDue(context.Background())
+		}, why: "the shim judged the cache lapsed"},
+		{name: "when the session parks at its cold gate", act: func(h *harness) {
+			h.keeper.ColdGateRaised(theWorkspace, true)
+		}, why: "the session parked at its cold gate"},
+		{name: "when the cold gate is raised again", act: func(h *harness) {
+			h.keeper.ColdGateRaised(theWorkspace, false)
+		}, why: "the session parked at its cold gate"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := dueHarness(t, lapsedAnswer())
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			if len(h.coldDowns) != 1 || h.coldDowns[0].ws != theWorkspace || !h.coldDowns[0].beat.Equal(now) {
+				t.Fatalf("cold parks = %+v, want one for the workspace at %v", h.coldDowns, now)
+			}
+			if len(h.cycled) != 0 {
+				t.Fatalf("cycle stand-downs = %+v, want none: the cold park is its own", h.cycled)
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opColdMark, Message: "the cache is known cold; its session is parked"})
+			if !ok || rec.Context["why"] != tt.why || rec.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("park record = %+v (found %v), want it at info naming why %q", rec, ok, tt.why)
+			}
+		})
+	}
+}
+
+func TestTheColdGateParksTheSessionEvenWhenItsMarkFails(t *testing.T) {
+	// Arrange
+	h := overdue(t)
+	h.db.coldErr = errors.New("store unreachable")
+
+	// Act
+	h.keeper.ColdGateRaised(theWorkspace, true)
+
+	// Assert
+	if len(h.coldDowns) != 1 {
+		t.Fatalf("cold parks = %+v, want the gate's session parked", h.coldDowns)
+	}
+	assertColdMarkFailureRecorded(t, h, "the session parked at its cold gate")
+}
+
+func TestALapsedJudgmentWhoseMarkFailsParksNothingYet(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, lapsedAnswer())
+	h.db.coldErr = errors.New("store unreachable")
+	h.keeper.beats[theWorkspace] = now
+
+	// Act
+	h.keeper.beatsDue(context.Background())
+
+	// Assert
+	if len(h.coldDowns) != 0 {
+		t.Fatalf("cold parks = %+v, want none until the retried beat's mark", h.coldDowns)
+	}
+}
+
+func TestAnAnswerParksNothing(t *testing.T) {
+	// Arrange: the answer's re-open is the session the user asked for.
+	h := overdue(t)
+
+	// Act
+	err := h.keeper.ColdGateAnswered(context.Background(), theWorkspace)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ColdGateAnswered: %v", err)
+	}
+	if len(h.coldDowns) != 0 {
+		t.Fatalf("cold parks = %+v, want none for an answer", h.coldDowns)
+	}
+}
+
+// TestColdParkAsksHaveOneHome fails when a source file in this package asks
+// for the cold park other than through Keeper.parkCold.
+func TestColdParkAsksHaveOneHome(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "k.deps.ColdDown(")
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "coldmark.go" {
+		t.Fatalf("the cold park is asked at %v, want only Keeper.parkCold in coldmark.go", sites)
+	}
+}

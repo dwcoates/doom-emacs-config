@@ -252,6 +252,8 @@ type harness struct {
 	telemetry  *fakeTelemetry
 	// cycled are the keep-alive cycle stand-downs asked for.
 	cycled []cycleCall
+	// coldDowns are the cold cache's parks asked for.
+	coldDowns []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
 	restoring []restoreCall
 	// nextKeepalives are the next keep-alives stated to the views, in order.
@@ -346,6 +348,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		CycleDown: func(ws ids.WorkspaceID, beat time.Time) {
 			h.cycled = append(h.cycled, cycleCall{ws: ws, beat: beat})
 		},
+		ColdDown: func(ws ids.WorkspaceID, since time.Time) {
+			h.coldDowns = append(h.coldDowns, cycleCall{ws: ws, beat: since})
+		},
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
 		},
@@ -401,6 +406,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			PublishRegistry: func(context.Context) error { return nil },
 			Interval:        KeepaliveInterval,
 			CycleDown:       func(ids.WorkspaceID, time.Time) {},
+			ColdDown:        func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},
 			Clock:           clocktest.New(now),
 			Log:             dlog.NewTestSurfaces(),
@@ -421,6 +427,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "republish", strip: func(d *Deps) { d.PublishRegistry = nil }},
 		{name: "keep-alive interval", strip: func(d *Deps) { d.Interval = 0 }},
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
+		{name: "cold cache's stand-down", strip: func(d *Deps) { d.ColdDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
 		{name: "telemetry", strip: func(d *Deps) { d.Telemetry = nil }},
