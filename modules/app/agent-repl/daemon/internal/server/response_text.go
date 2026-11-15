@@ -38,74 +38,67 @@ type responseHighlight struct {
 	words string
 }
 
-// responseHighlights is every workspace's held highlight and the root-feed
-// topic that states it (frontend.v1.FeedResponseHighlight). ONE MUTEX GUARDS
-// BOTH, so the published state is always the state held: a change and its
-// publication can never interleave with another workspace call's.
+// responseHighlights is every workspace's held highlight. ITS MUTEX ALSO
+// GUARDS EVERY PUBLICATION of the state it leaves (responseHighlightTopic),
+// so the published state is always the state held: a change and its
+// publication never interleave with another call's.
 type responseHighlights struct {
-	mu     sync.Mutex
-	held   map[ids.WorkspaceID]responseHighlight
-	topics map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseHighlight]
+	mu   sync.Mutex
+	held map[ids.WorkspaceID]responseHighlight
 }
 
-// newResponseHighlights answers an empty holder: no workspace holds a
-// highlight.
-func newResponseHighlights() responseHighlights {
-	return responseHighlights{
-		held:   map[ids.WorkspaceID]responseHighlight{},
-		topics: map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedResponseHighlight]{},
-	}
+// responseHighlightTopic answers a workspace's response-highlight topic
+// (frontend.v1.FeedResponseHighlight), creating it on first use. Publish to
+// it only with s.highlights.mu held.
+func (s *server) responseHighlightTopic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FeedResponseHighlight] {
+	return perWorkspace(s, s.responseHighlightTopics, ws)
 }
 
-// topicLocked answers WS's topic, creating it on first use SEEDED WITH NONE,
-// so a root watch accepted by a daemon that never held a highlight for WS
-// (one just restarted) is told it holds none. Called with mu held.
-func (h *responseHighlights) topicLocked(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FeedResponseHighlight] {
-	topic, ok := h.topics[ws]
-	if !ok {
-		topic = &publish.Topic[*frontendv1.FeedResponseHighlight]{}
+// watchResponseHighlight subscribes a root feed's watch to WS's highlight. A
+// topic nothing was published on yet is SEEDED WITH NONE first, so a watch
+// accepted by a daemon that never held a highlight for WS (one just
+// restarted) is told it holds none.
+func (s *server) watchResponseHighlight(ctx context.Context, ws ids.WorkspaceID) (<-chan *frontendv1.FeedResponseHighlight, func()) {
+	topic := s.responseHighlightTopic(ws)
+	s.highlights.mu.Lock()
+	defer s.highlights.mu.Unlock()
+	if _, published := topic.Latest(); !published {
 		topic.Publish(feedHighlightNone())
-		h.topics[ws] = topic
 	}
-	return topic
+	return topic.SubscribeStream(ctx)
 }
 
-// topic answers WS's response-highlight topic. It replays its latest value,
-// so a root watch accepted at any moment is told the state that stands.
-func (h *responseHighlights) topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.FeedResponseHighlight] {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.topicLocked(ws)
-}
-
-// set holds HIGHLIGHT for WS, or clears it when HIGHLIGHT is nil, and
-// publishes the state it leaves.
-func (h *responseHighlights) set(ws ids.WorkspaceID, highlight *responseHighlight) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// setResponseHighlight holds HIGHLIGHT for WS, or clears it when HIGHLIGHT is
+// nil, and publishes the state it leaves.
+func (s *server) setResponseHighlight(ws ids.WorkspaceID, highlight *responseHighlight) {
+	topic := s.responseHighlightTopic(ws)
+	s.highlights.mu.Lock()
+	defer s.highlights.mu.Unlock()
 	if highlight == nil {
-		delete(h.held, ws)
-		h.topicLocked(ws).Publish(feedHighlightNone())
+		delete(s.highlights.held, ws)
+		topic.Publish(feedHighlightNone())
 		return
 	}
-	h.held[ws] = *highlight
-	h.topicLocked(ws).Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Held{
+	s.highlights.held[ws] = *highlight
+	topic.Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Held{
 		Held: feedHighlightWords(*highlight),
 	}})
 }
 
-// take answers WS's highlight and ends it, false when none is held. A take
-// publishes `taken`, whatever the prompt that took it then does (a refused
-// revision included), so the page drops the paint of words no longer held.
-func (h *responseHighlights) take(ws ids.WorkspaceID) (responseHighlight, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	held, ok := h.held[ws]
+// takeResponseHighlight answers WS's highlight and ends it, false when none is
+// held. A take publishes `taken`, whatever the prompt that took it then does
+// (a refused revision included), so the page drops the paint of words no
+// longer held.
+func (s *server) takeResponseHighlight(ws ids.WorkspaceID) (responseHighlight, bool) {
+	topic := s.responseHighlightTopic(ws)
+	s.highlights.mu.Lock()
+	defer s.highlights.mu.Unlock()
+	held, ok := s.highlights.held[ws]
 	if !ok {
 		return responseHighlight{}, false
 	}
-	delete(h.held, ws)
-	h.topicLocked(ws).Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Taken{
+	delete(s.highlights.held, ws)
+	topic.Publish(&frontendv1.FeedResponseHighlight{State: &frontendv1.FeedResponseHighlight_Taken{
 		Taken: feedHighlightWords(held),
 	}})
 	return held, true
@@ -139,7 +132,7 @@ func (s *server) SelectResponseText(
 	ws := subject.Record.ID
 	highlighted := req.Msg.GetSelection().GetHighlighted()
 	if highlighted == nil {
-		s.highlights.set(ws, nil)
+		s.setResponseHighlight(ws, nil)
 		subject.Log.Debug(rpc, "the response highlight was cleared", nil)
 		resp.Result = &agentreplv1.SelectResponseTextResponse_Success{Success: &agentreplv1.SelectResponseTextSuccess{}}
 		return connect.NewResponse(resp), nil
@@ -151,7 +144,7 @@ func (s *server) SelectResponseText(
 			Reason: fmt.Sprintf("the row %q is not a settled final response of this workspace's root feed", row.GetValue()),
 		}))
 	}
-	s.highlights.set(ws, &responseHighlight{row: row, words: highlighted.GetWords()})
+	s.setResponseHighlight(ws, &responseHighlight{row: row, words: highlighted.GetWords()})
 	subject.Log.Debug(rpc, "words of a final response were highlighted; the next prompt revises it", dlog.Context{
 		"row": row.GetValue(), "words": len(highlighted.GetWords()),
 	})

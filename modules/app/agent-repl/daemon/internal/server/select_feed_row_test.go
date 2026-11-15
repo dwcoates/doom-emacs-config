@@ -1847,12 +1847,14 @@ func TestSelectFeedRowBranchRefusesARowThatIsNoSelectableResponseHoldingTheNode(
 	}
 }
 
-// TestSelectFeedRowBranchClickIsRecordedAtInfo pins that the click enters the
-// workspace log, naming the row, the label and the selection it left alone.
+// TestSelectFeedRowBranchClickIsRecordedAtInfo pins that a click in the
+// newest final response enters the workspace log, naming the row, the label
+// and the selection it ended so the entry binds to the clicked response.
 func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	h, log := newLoggedHarness(t)
 	h.Feed.finals = feedIDs("resp-0", "resp-1")
+	h.Feed.targets = map[string]string{"3.1": "resp-1"}
 	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
 	sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: "resp-0"}))
 
@@ -1861,11 +1863,11 @@ func TestSelectFeedRowBranchClickIsRecordedAtInfo(t *testing.T) {
 
 	// Assert.
 	for _, rec := range log.at("INFO") {
-		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["selected"] == "resp-0" {
+		if rec.Operation == opSelectFeedRow && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" && rec.Context["ended"] == "resp-0" {
 			return
 		}
 	}
-	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the selection resp-0", log.at("INFO"))
+	t.Fatalf("INFO records = %v, want one naming resp-1, its node 3.1 and the ended selection resp-0", log.at("INFO"))
 }
 
 // TestSelectClickedSetsTheSelectionAndRunsThenUnderTheLock pins the one way a

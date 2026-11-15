@@ -121,7 +121,7 @@ func (s *server) SubmitPrompt(
 	// highlight (response_text.go). An agent's prompt never does: the
 	// highlight is the user's, in the feed they are reading.
 	if sentBy == nil && target == nil {
-		if held, ok := s.highlights.take(subject.Record.ID); ok {
+		if held, ok := s.takeResponseHighlight(subject.Record.ID); ok {
 			return s.submitRevision(subject, req.Msg, resp, held)
 		}
 	}

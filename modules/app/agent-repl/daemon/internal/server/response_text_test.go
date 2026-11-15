@@ -409,15 +409,15 @@ func TestThePromptThatTakesTheHighlightStatesItTaken(t *testing.T) {
 
 func TestTakingWithNoHighlightHeldPublishesNothing(t *testing.T) {
 	// Arrange.
-	highlights := newResponseHighlights()
-	topic := highlights.topic("ws-1")
+	h := newHarness(t)
+	srv := h.Server.(*server)
+	topic := srv.responseHighlightTopic(testWorkspaceID)
 
 	// Act.
-	_, ok := highlights.take("ws-1")
+	_, ok := srv.takeResponseHighlight(testWorkspaceID)
 
 	// Assert.
-	got, _ := topic.Latest()
-	if ok || got.GetNone() == nil {
-		t.Fatalf("take answered %v and left %v, want false and none", ok, got)
+	if _, published := topic.Latest(); ok || published {
+		t.Fatalf("take answered %v and published %v, want false and nothing", ok, published)
 	}
 }

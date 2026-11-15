@@ -208,7 +208,7 @@ func (s *server) watchFeed(
 	// told the state the daemon holds, a just-restarted daemon's included.
 	var highlights <-chan *frontendv1.FeedResponseHighlight
 	if target.Feed.Root {
-		highlights, ackHighlight = s.highlights.topic(target.WS).SubscribeStream(streamCtx)
+		highlights, ackHighlight = s.watchResponseHighlight(streamCtx, target.WS)
 	}
 
 	s.acceptStream(ctx, rpc)
