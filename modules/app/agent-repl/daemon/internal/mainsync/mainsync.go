@@ -95,8 +95,11 @@ type Deps struct {
 	// (workspace.Verbs.Status's activity).
 	Running func(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// Open reopens a closed workspace, so the repair prompt reaches an agent.
-	Open    func(ctx context.Context, ws ids.WorkspaceID) error
-	Briefs  merge.BriefLoader
+	Open   func(ctx context.Context, ws ids.WorkspaceID) error
+	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
 	MintKey func(prefix string) (string, error)
 	// Serves reports whether this daemon serves: only the serving daemon
 	// writes a checkout or tells a workspace.
@@ -341,7 +344,7 @@ func (s *Syncer) tell(ctx context.Context, prompts prompthandler.Submitter, main
 			return
 		}
 	}
-	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, main.ID, BriefRepair, briefValues(f), "main-sync-repair", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:

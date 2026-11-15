@@ -15,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
@@ -1077,5 +1078,39 @@ func TestAnAsyncMergePlacedBehindAMergeNotInLineIsRefused(t *testing.T) {
 	// Assert
 	if err != nil || resp.Msg.GetError().GetPlacementBehindNotInLine().GetBehind() != "two" {
 		t.Fatalf("CreateWorkspace = %v, %v; want the placement_behind_not_in_line arm", resp, err)
+	}
+}
+
+func TestAnAgentSentPromptIsMeasuredAsAMessageBetweenWorkspaces(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		sender bool
+		want   []briefprompttest.Observed
+	}{
+		{name: "a prompt another workspace's agent sent", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, sender: true,
+			want: []briefprompttest.Observed{{Notice: NoticeAgentSent, Bytes: len("hello")}}},
+		{name: "the user's own prompt", origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			var sentBy *workspacev1.WorkspaceRef
+			if tt.sender {
+				sentBy = registerSender(h)
+			}
+
+			// Act
+			resp, err := submitAgentPrompt(h, tt.origin, sentBy)
+
+			// Assert
+			if err != nil || resp.Msg.GetError() != nil {
+				t.Fatalf("SubmitPrompt = %v, %v", resp, err)
+			}
+			if got := h.Notices.ObservedNotices(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("observed %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

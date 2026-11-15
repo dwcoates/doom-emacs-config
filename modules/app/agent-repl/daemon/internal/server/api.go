@@ -22,6 +22,7 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/deploy"
@@ -54,6 +55,10 @@ import (
 // than a constructor argument list so a wave-2 agent adding a handler adds a
 // field here and nowhere else.
 type Deps struct {
+	// Notices measures each prompt one workspace's agent sends another
+	// (briefprompt.Meter, notice type agent_sent), beside the daemon's own
+	// notices. REQUIRED.
+	Notices briefprompt.Meter
 	// TestBarrier serves the test barrier (AwaitIdle): set only for a daemon
 	// a test harness started (AGENT_REPL_TEST_BARRIER=1), which every other
 	// daemon refuses.

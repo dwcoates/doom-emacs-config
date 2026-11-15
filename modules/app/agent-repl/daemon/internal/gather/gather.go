@@ -97,6 +97,9 @@ type Deps struct {
 	Status func(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
 	// Clock stamps every instant and times every deadline.
 	Clock clock.Clock
 	Log   dlog.Surfaces
@@ -609,7 +612,7 @@ func (s *Service) tell(ctx context.Context, prompts prompthandler.Submitter, g w
 	if err != nil {
 		panic(fmt.Sprintf("gather: a GatherNotice does not encode: %v", err))
 	}
-	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: func(string) (string, error) { return key, nil }}.
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: func(string) (string, error) { return key, nil }, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, g.Caller, BriefNotice, map[string]string{"label": headline, "gather": string(g.ID), "notice": string(words)}, key, Origin)
 	switch {
 	case errors.Is(err, prompthandler.ErrDuplicateSubmission):

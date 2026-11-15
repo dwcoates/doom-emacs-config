@@ -14,6 +14,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -144,6 +145,7 @@ func newHarness(t *testing.T) *harness {
 			return &agentreplv1.WorkspaceStatus{Standing: &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Open{
 				Open: &agentreplv1.WorkspaceStatusOpen{Activity: activity}}}}, nil
 		},
+		Notices: &briefprompttest.Meter{},
 		Briefs: func(_ string, values map[string]string) (string, error) {
 			if h.briefErr != nil {
 				return "", h.briefErr

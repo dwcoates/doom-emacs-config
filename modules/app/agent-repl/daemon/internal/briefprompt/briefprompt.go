@@ -26,6 +26,21 @@ type Composer struct {
 	Briefs merge.BriefLoader
 	// MintKey mints an idempotency key for one submission.
 	MintKey func(prefix string) (string, error)
+	// Meter records every notice submitted, by its brief (the notice's
+	// type) and its size. REQUIRED: every daemon notice to a workspace goes
+	// through a Composer, so this is where they are all measured.
+	Meter Meter
+}
+
+// Meter records the notices the daemon sends workspaces. Each call is an
+// atomic add and never blocks the notice.
+type Meter interface {
+	// ObserveNotice records one notice submitted: its type (the brief it
+	// was composed from) and its text's size in UTF-8 bytes.
+	ObserveNotice(notice string, bytes int)
+	// CountSuppressedNotice records one notice of a type the daemon is set
+	// not to send, which was therefore never composed or submitted.
+	CountSuppressedNotice(notice string)
 }
 
 // Step is the step of a submission that failed, so a caller records the
@@ -68,6 +83,9 @@ func StepOf(err error) Step {
 // of ORIGIN, its key minted under KEY_PREFIX, answering the turn it was
 // submitted as. A failure is an *Error naming its step.
 func (c Composer) Submit(ctx context.Context, prompts prompthandler.Submitter, ws ids.WorkspaceID, brief string, values map[string]string, keyPrefix string, origin conversationv1.PromptOrigin) (ids.TurnID, error) {
+	if c.Meter == nil {
+		panic("briefprompt: a Composer submits with no Meter; every notice is measured")
+	}
 	text, err := c.Briefs(brief, values)
 	if err != nil {
 		return "", &Error{Step: StepCompose, Err: err}
@@ -80,5 +98,6 @@ func (c Composer) Submit(ctx context.Context, prompts prompthandler.Submitter, w
 	if err != nil {
 		return "", &Error{Step: StepSubmit, Err: err}
 	}
+	c.Meter.ObserveNotice(brief, len(text))
 	return outcome.Turn, nil
 }

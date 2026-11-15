@@ -25,6 +25,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/classifierupdate"
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/creategate"
@@ -2106,7 +2107,9 @@ func (f *fakeSidebar) Revision() uint64 { return f.revision }
 
 // harness is one running surface over real Connect handlers.
 type harness struct {
-	t *testing.T
+	// Notices records the prompts and notices measured (Deps.Notices).
+	Notices *briefprompttest.Meter
+	t       *testing.T
 	// IncumbentAddress is what the surface's IncumbentAddress dependency
 	// answers: the daemon serving what a joining daemon has not adopted, or
 	// empty when none does.
@@ -2328,7 +2331,11 @@ func newHarness(t *testing.T, opts ...option) *harness {
 	h.Opens = opens
 
 	h.Tests = &fakeTests{}
+	if h.Notices == nil {
+		h.Notices = &briefprompttest.Meter{}
+	}
 	deps := Deps{
+		Notices:           h.Notices,
 		Tests:             h.Tests,
 		SubagentMakers:    h.Makers,
 		DB:                h.DB,

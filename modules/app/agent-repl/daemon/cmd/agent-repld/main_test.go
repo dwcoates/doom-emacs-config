@@ -638,3 +638,28 @@ func TestTheZettelSocketPrecedence(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveFamilyNotices(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		want    bool
+		wantErr bool
+	}{
+		{name: "unset is off", env: "", want: false},
+		{name: "off", env: "off", want: false},
+		{name: "on", env: "on", want: true},
+		{name: "anything else is refused", env: "yes", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := resolveFamilyNotices(tt.env)
+
+			// Assert
+			if got != tt.want || (err != nil) != tt.wantErr {
+				t.Fatalf("resolveFamilyNotices(%q) = (%v, %v), want (%v, error %v)", tt.env, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

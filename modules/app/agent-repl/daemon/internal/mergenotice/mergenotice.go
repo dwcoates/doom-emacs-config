@@ -108,6 +108,9 @@ type Deps struct {
 	Untold Untold
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
 	// MintKey mints an idempotency key for one submission
 	// (prompthandler.MintKey): every notice is its own submission.
 	MintKey func(prefix string) (string, error)
@@ -284,7 +287,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // submits it to SUBSCRIBER, answering the turn it was submitted as, or the
 // record a failure is written with and why.
 func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, ended bool, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
-	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, subscriber, BriefNotice, Values(ended, sentences, change), "merge-queue-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:

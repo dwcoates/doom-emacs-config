@@ -364,14 +364,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// its loop runs on the notice lifetime, handed the prompt handler built
 	// below.
 	derivedNotices := workspacenotice.New(workspacenotice.Deps{
-		Workspaces: p.DB,
-		Briefs:     merge.BriefsFrom(paths.PromptsDir),
-		MintKey:    prompthandler.MintKey,
-		Log:        p.Surfaces,
+		Notices:       p.Metrics,
+		FamilyNotices: p.Opts.familyNotices,
+		Workspaces:    p.DB,
+		Briefs:        merge.BriefsFrom(paths.PromptsDir),
+		MintKey:       prompthandler.MintKey,
+		Log:           p.Surfaces,
 	})
 	// THE QUEUE IS BUILT BELOW; its Supersede is bound into holdsRef there.
 	holdsRef := &holdsForwarder{}
 	followNotices := workspacesubs.New(workspacesubs.Deps{
+		Notices:     p.Metrics,
 		Subscribers: p.DB,
 		Holds:       holdsRef,
 		Untold:      p.DB,
@@ -390,11 +393,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// A WORKSPACE GATHER follows its targets through the feed's answers (wired
 	// below) and resolves a target that closes on its close edge.
 	gathers := gather.New(gather.Deps{
-		DB:     p.DB,
-		Status: verbsRef.status,
-		Briefs: merge.BriefsFrom(paths.PromptsDir),
-		Clock:  clock.System{},
-		Log:    p.Surfaces,
+		Notices: p.Metrics,
+		DB:      p.DB,
+		Status:  verbsRef.status,
+		Briefs:  merge.BriefsFrom(paths.PromptsDir),
+		Clock:   clock.System{},
+		Log:     p.Surfaces,
 	})
 	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds, bypassTurnEnds, turnEnds, gathers.Edges())
 	p.DB = wsedges.ReportingEdges(p.DB, edges, log)
@@ -1346,6 +1350,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// orchestrator makes; they only buffer until their loop runs, which is
 	// handed the prompt handler built below.
 	queueNotices := mergenotice.New(mergenotice.Deps{
+		Notices:       p.Metrics,
 		Subscriptions: p.DB,
 		Holds:         queue,
 		Untold:        p.DB,
@@ -1454,6 +1459,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the GitHub leaf: %w", err)
 	}
 	pullRequests, err := prwatch.New(prwatch.Deps{
+		Notices:     p.Metrics,
 		OwnedMerged: verbsRef.closeWhenOwnedPullRequestsMerged,
 		Store:       p.DB,
 		GH:          gh,
@@ -1644,10 +1650,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// cannot be (internal/mainsync). It holds the repository's merge target
 	// and the main workspace's turn sequence while it writes.
 	mainSync, err := mainsync.New(mainsync.Deps{
-		Store:  p.DB,
-		Git:    git,
-		Target: mergeOrchestrator,
-		Turns:  queue,
+		Notices: p.Metrics,
+		Store:   p.DB,
+		Git:     git,
+		Target:  mergeOrchestrator,
+		Turns:   queue,
 		Running: func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 			status, err := verbs.Status(ctx, ws)
 			if err != nil {
@@ -1803,6 +1810,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
+			Notices: p.Metrics,
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
 			TestBarrier: os.Getenv(testBarrierEnv) == "1",

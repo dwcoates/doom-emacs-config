@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
@@ -117,6 +118,7 @@ func newRig(t *testing.T) *rig {
 	r.s, err = New(Deps{Store: r.store, Git: r.git, Target: r.target, Turns: r.turns,
 		Running: func(context.Context, ids.WorkspaceID) (bool, error) { return r.running, nil },
 		Open:    func(_ context.Context, ws ids.WorkspaceID) error { r.opened = append(r.opened, ws); return nil },
+		Notices: &briefprompttest.Meter{},
 		Briefs: func(name string, v map[string]string) (string, error) {
 			return name + "|" + v["branch"] + "|" + v["upstream_sha"] + "|" + v["cause"], nil
 		},
@@ -274,7 +276,7 @@ func TestNothingIsDoneWithoutTheWorkspaceOrTheServingRole(t *testing.T) {
 		{name: "no workspace for the main checkout", arrange: func(_ *testing.T, r *rig) { r.store.noWS = true }},
 		{name: "a daemon that does not serve", arrange: func(t *testing.T, r *rig) {
 			s, err := New(Deps{Store: r.store, Git: r.git, Target: r.target, Turns: r.turns, Running: func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil },
-				Open: func(context.Context, ids.WorkspaceID) error { return nil }, Briefs: func(string, map[string]string) (string, error) { return "", nil },
+				Open: func(context.Context, ids.WorkspaceID) error { return nil }, Notices: &briefprompttest.Meter{}, Briefs: func(string, map[string]string) (string, error) { return "", nil },
 				MintKey: func(string) (string, error) { return "", nil }, Serves: func() bool { return false }, Clock: clocktest.New(t0), Log: r.log})
 			if err != nil {
 				t.Fatal(err)

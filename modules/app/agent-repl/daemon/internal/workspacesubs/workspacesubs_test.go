@@ -15,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -136,6 +137,7 @@ func newFixture() *fixture {
 			}
 			return f.status(), nil
 		},
+		Notices: &briefprompttest.Meter{},
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if f.briefErr != nil {
 				return "", f.briefErr

@@ -115,6 +115,12 @@ type options struct {
 	// reachable at all: below it a re-opened tail's pinned start is still in
 	// the log, above it the token is expired and the client must re-open.
 	feedTailRetention int
+	// familyNotices is whether a child's siblings, and the child itself, are
+	// told of its family when it is created or adopted
+	// (workspacenotice.Deps.FamilyNotices). Off unless
+	// AGENT_REPL_SIBLING_NOTICES turns it on (owner ruling, 2026-11-15:
+	// every family notice started a turn in every sibling).
+	familyNotices bool
 	// footerMomentaryDwell is how long a MOMENTARY footer status
 	// (`interrupted`, `loading`) stands before the daemon's own successor push
 	// retires it. It is a real product window — the reader has to be able to
@@ -339,6 +345,11 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.feedTailRetention = retention
+	family, err := resolveFamilyNotices(os.Getenv(envSiblingNotices))
+	if err != nil {
+		return options{}, err
+	}
+	opts.familyNotices = family
 	dwell, err := resolveFooterMomentaryDwell(opts.footerMomentaryDwell, os.Getenv(envFooterMomentaryDwell))
 	if err != nil {
 		return options{}, err
@@ -393,6 +404,22 @@ func resolveFeedTailRetention(flagValue int, envValue string) (int, error) {
 		return 0, fmt.Errorf("agent-repld: -feed-tail-retention=%d is not a positive number of rows", flagValue)
 	}
 	return flagValue, nil
+}
+
+// envSiblingNotices turns family notices on: "on" or "off", unset meaning
+// off (owner ruling, 2026-11-15).
+const envSiblingNotices = "AGENT_REPL_SIBLING_NOTICES"
+
+// resolveFamilyNotices reads envSiblingNotices. A value other than "on",
+// "off" or empty is a refusal, never a fall-through to either.
+func resolveFamilyNotices(envValue string) (bool, error) {
+	switch envValue {
+	case "", "off":
+		return false, nil
+	case "on":
+		return true, nil
+	}
+	return false, fmt.Errorf("agent-repld: %s=%q is neither \"on\" nor \"off\"", envSiblingNotices, envValue)
 }
 
 // resolveSocket applies a service socket's precedence: the flag beats the

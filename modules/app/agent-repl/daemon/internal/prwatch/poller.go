@@ -66,6 +66,9 @@ type Deps struct {
 	Holds untoldnotice.Holds
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
 	// MintKey mints an idempotency key for one submission.
 	MintKey func(prefix string) (string, error)
 	// Serves reports whether this daemon serves (rollout.Controller's
@@ -533,7 +536,7 @@ func (w *Watcher) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 // submit composes and submits one notice, answering its turn, or the record a
 // failure is written with and why.
 func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, n owedNotice, sentences []string) (ids.TurnID, string, error) {
-	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey}.Submit(ctx, prompts, n.subscriber, n.brief, map[string]string{
+	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey, Meter: w.deps.Notices}.Submit(ctx, prompts, n.subscriber, n.brief, map[string]string{
 		"label":    n.label,
 		"activity": untoldnotice.Sentences(sentences),
 		"status":   n.status,

@@ -53,6 +53,8 @@ type merges struct {
 	steps, spans, mediations, chainRedeploys, chainSpans, rounds, roundCounts *prometheus.HistogramVec
 	inARow                                                                    prometheus.Gauge
 	changes                                                                   *prometheus.CounterVec
+	noticeSizes                                                               *prometheus.HistogramVec
+	noticesSuppressed                                                         *prometheus.CounterVec
 }
 
 func newMerges() merges {
@@ -84,6 +86,12 @@ func newMerges() merges {
 		changes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: QueueChangesName, Help: "Changes to a merge queue's line, by kind and, for a merge leaving, its cause.",
 		}, []string{"change", "cause"}),
+		noticeSizes: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: NoticeSizeName, Help: "Each notice sent to a workspace, by type: its size in UTF-8 bytes.", Buckets: noticeSizeBuckets,
+		}, []string{"notice"}),
+		noticesSuppressed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: NoticesSuppressedName, Help: "Notices of a type the daemon is set not to send, by type.",
+		}, []string{"notice"}),
 	}
 }
 
@@ -154,4 +162,36 @@ func (s *Surface) CountQueueChange(change, cause string) {
 		return
 	}
 	s.merges.changes.WithLabelValues(change, cause).Inc()
+}
+
+// The notices the daemon sends workspaces (briefprompt.Meter).
+const (
+	// NoticeSizeName is each notice's size in UTF-8 bytes, by its type (the
+	// brief it was composed from, or agent_sent for a prompt one workspace's
+	// agent sent another). Its count per type is how many were sent.
+	NoticeSizeName = "agentrepl_workspace_notice_bytes"
+	// NoticesSuppressedName counts the notices of a type the daemon is set
+	// not to send (AGENT_REPL_SIBLING_NOTICES), by type.
+	NoticesSuppressedName = "agentrepl_workspace_notices_suppressed_total"
+)
+
+// noticeSizeBuckets double from a one-line notice to a long brief.
+var noticeSizeBuckets = prometheus.ExponentialBuckets(64, 2, 11)
+
+// ObserveNotice implements briefprompt.Meter. The off surface records
+// nothing.
+func (s *Surface) ObserveNotice(notice string, bytes int) {
+	if s == nil {
+		return
+	}
+	s.merges.noticeSizes.WithLabelValues(notice).Observe(float64(bytes))
+}
+
+// CountSuppressedNotice implements briefprompt.Meter. The off surface
+// records nothing.
+func (s *Surface) CountSuppressedNotice(notice string) {
+	if s == nil {
+		return
+	}
+	s.merges.noticesSuppressed.WithLabelValues(notice).Inc()
 }
