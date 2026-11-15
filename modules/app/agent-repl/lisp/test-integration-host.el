@@ -1193,6 +1193,7 @@ actually pins IT."
 (declare-function agent-repl-host-handle-refusal "host")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl-link-successor-pending-p "daemon-link")
+(declare-function agent-repl-host--recorded-conn "host" (ws))
 (declare-function agent-repl-link-dial-successor "daemon-link")
 (declare-function agent-repl-connect-connection-address "connect")
 (declare-function agent-repl--ws-get "workspace")
@@ -1989,18 +1990,26 @@ produce it (host.el, and the deadlock recorded there).  So a failed adopt
 can no longer be answered by the page never having moved; it is answered
 by the page being back on the daemon that still serves the workspace,
 which is the same guarantee stated about the END state.  The `:conn' and
-the standing stream assertions are unchanged."
+the standing stream assertions are unchanged.
+
+AMENDED 2026-11-15: a transport failure onto a STANDING, live successor
+is retried with the workspace and its page left on the successor, because
+restoring and reloading on every attempt was ~800k reloads in the 0.440.1
+handover.  The END state is owed when the retry stops, so the successor
+here stops standing after the first failure, as a promotion or a lost
+successor stream makes it, and the assertions read the walk\='s end."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
       (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor)))
-              (conn-at-reload nil)
-              (agent-repl-connect-unary-timeout-seconds 0.3))
+        (let* ((successor-conn (agent-repl-connect-open
+                                (agent-repl-itest-daemon-address successor)))
+               (standing successor-conn)
+               (conn-at-reload nil)
+               (agent-repl-connect-unary-timeout-seconds 0.3))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn))
+                         (lambda () standing))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
                          (lambda (ws) (push (agent-repl-host-conn ws) conn-at-reload))))
                 (agent-repl-itest--gate successor "AdoptHostWorkspace")
@@ -2009,8 +2018,14 @@ the standing stream assertions are unchanged."
                       ;; Act.
                       (agent-repl-itest--push primary "host" '((transferred . ()))
                                               (plist-get ref :id))
-                      ;; Assert.
                       (agent-repl-itest--await-log primary "elisp.host.adopt-failed" "error")
+                      (setq standing nil)
+                      ;; Assert.
+                      (agent-repl-itest--wait-until
+                       (lambda () (not (eq (agent-repl-host--recorded-conn
+                                            agent-repl-itest-host--ws)
+                                           successor-conn)))
+                       nil "the stopped retry to put the workspace back")
                       (should (equal 1 (length (agent-repl-itest--subscribers
                                                 primary "host" (plist-get ref :id)))))
                       (should-not (eq (agent-repl-host-conn agent-repl-itest-host--ws)
