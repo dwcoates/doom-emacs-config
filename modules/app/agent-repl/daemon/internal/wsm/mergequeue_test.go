@@ -2822,3 +2822,45 @@ func TestEveryQueueReorderGoesThroughAssignQueuePlaces(t *testing.T) {
 		t.Fatalf("mergequeue.go parks seqs in %d places, want only assignQueuePlaces", n)
 	}
 }
+
+func TestAnAdmissionPastWaitingMergesPutsTheAdmittedMergeAheadOfThem(t *testing.T) {
+	tests := []struct {
+		name  string
+		admit int
+		want  []int
+	}{
+		{name: "the first merge waiting keeps its place", admit: 0, want: []int{0, 1, 2}},
+		{name: "a merge admitted past two goes ahead of them, which keep their order", admit: 2, want: []int{2, 0, 1}},
+		{name: "a merge admitted past one passes nobody behind it", admit: 1, want: []int{1, 0, 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			var line []WorkspaceID
+			for i := range 3 {
+				ws := testWorkspace(t, s)
+				queued(t, s, repo, ws.ID, instant.Add(time.Duration(i)*time.Second))
+				line = append(line, ws.ID)
+			}
+
+			// Act
+			err := s.AdmitMerge(context.Background(), repo, line[tt.admit])
+
+			// Assert
+			entries, readErr := s.MergeQueue(context.Background(), repo)
+			if err != nil || readErr != nil || len(entries) != len(tt.want) {
+				t.Fatalf("AdmitMerge = %v, queue = %+v (%v)", err, entries, readErr)
+			}
+			for i, want := range tt.want {
+				if entries[i].Workspace != line[want] {
+					t.Fatalf("place %d holds %s, want %s (queue %+v)", i, entries[i].Workspace, line[want], entries)
+				}
+			}
+			if entries[0].State != MergeAdmitted {
+				t.Fatalf("front = %+v, want the admitted merge", entries[0])
+			}
+		})
+	}
+}

@@ -1177,6 +1177,19 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 		}
 		f.queues[repo][i].State = wsm.MergeAdmitted
 		f.drainOwed[repo] = true
+		// THE ADMITTED MERGE GOES AHEAD OF EVERY MERGE WAITING BEFORE IT, as
+		// the durable queue moves it (wsm.AdmitMerge).
+		line := f.queues[repo]
+		first := i
+		for j := 0; j < i; j++ {
+			if line[j].State == wsm.MergeQueued {
+				first = j
+				break
+			}
+		}
+		admitted := line[i]
+		copy(line[first+1:i+1], line[first:i])
+		line[first] = admitted
 		return nil
 	}
 	return fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)

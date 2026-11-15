@@ -1544,16 +1544,21 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		return "", nil, false, nil
 	}
 	o.logHeldBehind(repo, entries)
-	front, found := nextInLine(entries)
+	// A MERGE WHOSE WORKSPACE THIS DAEMON DOES NOT SERVE IS PASSED OVER, at
+	// any place in line (owner ruling, 2026-11-15): an older daemon still
+	// serving it, or one it moved to and this daemon has not adopted yet, may
+	// hold it for as long as a turn runs there, and the merges behind it never
+	// wait on that. It keeps its place, and its adoption here kicks this pump,
+	// so it is the next admitted.
+	front, found := nextInLine(entries, func(ws ids.WorkspaceID) bool {
+		if o.movedAway(ws) || !o.deps.Standing.ServesWorkspace(ws) {
+			o.deps.Log.Global().Debug(op, "a merge in line whose workspace this daemon does not serve is passed over; it keeps its place and is admitted once its workspace is served here",
+				dlog.Context{"repo": string(repo), "workspace": string(ws)})
+			return false
+		}
+		return true
+	})
 	if !found {
-		return "", nil, false, nil
-	}
-	// A WORKSPACE HANDED TO ANOTHER DAEMON HAS ITS MERGES THERE, and one
-	// handed to this daemon and not adopted yet has them nowhere until its
-	// adoption kicks this pump.
-	if o.movedAway(front.Workspace) || !o.deps.Standing.ServesWorkspace(front.Workspace) {
-		o.deps.Log.Global().Debug(op, "the queue front's workspace moved to another daemon; it admits the merge there",
-			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace)})
 		return "", nil, false, nil
 	}
 	// A FRONT WHOSE BACKGROUND REBASE IS STILL RUNNING is admitted once it
@@ -1748,11 +1753,12 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	return "", false, nil
 }
 
-// nextInLine answers the first entry of a queue that is waiting in line: a
-// requested merge is in nobody's line, and an admitted one is already running.
-func nextInLine(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
+// nextInLine answers the first entry of a queue that is waiting in line and
+// whose workspace SERVEDHERE says this daemon serves: a requested merge is in
+// nobody's line, and an admitted one is already running.
+func nextInLine(entries []wsm.MergeQueueEntry, servedHere func(ids.WorkspaceID) bool) (wsm.MergeQueueEntry, bool) {
 	for _, entry := range entries {
-		if entry.State == wsm.MergeQueued && !entry.HeldBehind() && !entry.AheadFailed() {
+		if entry.State == wsm.MergeQueued && !entry.HeldBehind() && !entry.AheadFailed() && servedHere(entry.Workspace) {
 			return entry, true
 		}
 	}

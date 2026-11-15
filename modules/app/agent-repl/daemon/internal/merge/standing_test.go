@@ -3,7 +3,10 @@ package merge
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
+
+	"agent-repld/internal/wsm"
 )
 
 func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
@@ -118,6 +121,36 @@ func TestAFrontWhoseWorkspaceIsNotServedHereYetIsNotAdmitted(t *testing.T) {
 	// Assert
 	if got := c.runner.ran(c.dirs[theWorkspace]); got != 0 {
 		t.Fatalf("the gate ran %d times for a workspace not served here, want none", got)
+	}
+}
+
+// A MERGE WHOSE WORKSPACE ANOTHER DAEMON SERVES IS PASSED OVER, at any place
+// in line (owner ruling, 2026-11-15): the merge behind it runs, and it keeps
+// its place: once the merge admitted past it ends, it stands at the front.
+func TestAMergeWhoseWorkspaceIsServedElsewhereIsPassedOverAndKeepsItsPlace(t *testing.T) {
+	// Arrange: the front's workspace is still served by an older daemon.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.h.standing.serve(theWorkspace, false)
+
+	// Act
+	if err := c.h.admit(context.Background()); err != nil {
+		t.Fatalf("the pump ended on: %v", err)
+	}
+
+	// Assert
+	if got := c.runner.ran(c.dirs[theWorkspace]); got != 0 {
+		t.Fatalf("the gate ran %d times for a workspace not served here, want none", got)
+	}
+	c.h.db.mu.Lock()
+	line := slices.Clone(c.h.db.queues[c.h.repoKey()])
+	c.h.db.mu.Unlock()
+	if got := c.runner.ran(c.dirs["ws-b"]); got == 0 {
+		t.Fatal("the merge behind the passed-over one never ran its gate")
+	}
+	if len(line) != 1 || line[0].Workspace != theWorkspace || line[0].State != wsm.MergeQueued {
+		t.Fatalf("line = %+v, want ws-b gone through and the passed-over merge waiting at the front", line)
 	}
 }
 

@@ -333,6 +333,27 @@ func moveAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID, tar
 	return assignQueuePlaces(ctx, tx, key, places, order)
 }
 
+// admittedAhead moves ID, a merge just admitted, ahead of every merge still
+// waiting in line before it (moveAhead): the admission passed them over
+// because another daemon still serves their workspaces (owner ruling,
+// 2026-11-15). The line's order is the order merges run in, so the roster's
+// head is the merge running and every place the line reads stays true. The
+// merges passed over keep their order, directly behind it.
+func admittedAhead(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) error {
+	seq, _, err := entryPlace(ctx, tx, key, id)
+	if err != nil {
+		return err
+	}
+	var first sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND seq < ?`, key, int(MergeQueued), seq).Scan(&first); err != nil {
+		return err
+	}
+	if !first.Valid {
+		return nil
+	}
+	return moveAhead(ctx, tx, key, id, first.Int64)
+}
+
 // MoveMerge moves a merge WAITING in line one place up or down its queue,
 // swapping it with the nearest waiting merge on that side. It answers whether
 // the merge moved.
@@ -833,13 +854,19 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 	})
 }
 
-// AdmitMerge marks the entry the orchestrator is running now, and marks its
+// AdmitMerge marks the entry the orchestrator is running now, moves it ahead
+// of every merge it was admitted past (admittedAhead), and marks its
 // repository as owing its queue_drained scripts IN THE SAME WRITE, so no
 // admitted merge leaves the repository without the debt. Only a waiting
 // (queued) entry is admitted; any other state is a refusal, as StepAsideMerge
 // and ReturnRemediatedMerge refuse a wrong prior state.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
-	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeQueued, MergeAdmitted, dlog.Context{}, oweQueueDrain)
+	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeQueued, MergeAdmitted, dlog.Context{}, func(ctx context.Context, tx *sql.Tx, key RepoKey) error {
+		if err := admittedAhead(ctx, tx, key, id); err != nil {
+			return err
+		}
+		return oweQueueDrain(ctx, tx, key)
+	})
 }
 
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
