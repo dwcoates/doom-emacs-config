@@ -150,6 +150,25 @@ func forwardEvents(argv []string) ([]string, []*os.File, error) {
 	return out, nil, nil
 }
 
+// eventsStream answers the runner's events stream at FD, made close-on-exec
+// first, as the lifeline is (life.Lifeline).
+//
+// NO UNIT HOLDS THE STREAM. The runner leads a session of its own, outside the
+// invoker's process group, and every unit it starts inherited the stream's
+// write end, so the invoker's read of the stream ended only once the last of
+// them had gone. A daemon whose exit cut a run killed the script's group and
+// then waited out its whole exit deadline on a stream the cut runner's units
+// still held (2026-11-15, `daemon.server.await_streams_ended`
+// "RunTests=1").
+func eventsStream(fd int) (*os.File, error) {
+	stream := os.NewFile(uintptr(fd), "testrun-events")
+	if stream == nil {
+		return nil, fmt.Errorf("--events-fd %d is not an open file", fd)
+	}
+	syscall.CloseOnExec(fd)
+	return stream, nil
+}
+
 // runnerCmd runs the suites, leading the run's session.
 func runnerCmd(argv []string) int {
 	log := life.CutLog(os.Getenv(ramdisk.EnvRunLog))
@@ -424,9 +443,9 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 	defer stop()
 	var emitter *events.Emitter
 	if args.EventsFD > 0 {
-		stream := os.NewFile(uintptr(args.EventsFD), "testrun-events")
-		if stream == nil {
-			log.Errorf("--events-fd %d is not an open file", args.EventsFD)
+		stream, err := eventsStream(args.EventsFD)
+		if err != nil {
+			log.Errorf("%v", err)
 			return 1
 		}
 		defer stream.Close()
