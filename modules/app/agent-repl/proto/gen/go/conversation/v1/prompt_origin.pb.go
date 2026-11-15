@@ -275,6 +275,11 @@ const (
 	// deploys its remediation (repoconfig.v1.LifecycleConfig.deploy_mediator).
 	// Drawn as the daemon's prompt to its own hidden workspace.
 	PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION PromptOrigin = 52
+	// The one notice of a followed GitHub Actions workflow run
+	// (agentrepl.v1.SubscribeGithubWorkflowRun): the run finished, with its
+	// workflow's name, its conclusion, its head commit and its web address.
+	// Submitted and drawn as a workspace notice is: no row, no held card.
+	PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE PromptOrigin = 53
 )
 
 // Enum value maps for PromptOrigin.
@@ -332,6 +337,7 @@ var (
 		50: "PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE",
 		51: "PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT",
 		52: "PROMPT_ORIGIN_DEPLOY_MEDIATION",
+		53: "PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -386,6 +392,7 @@ var (
 		"PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE":   50,
 		"PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT":     51,
 		"PROMPT_ORIGIN_DEPLOY_MEDIATION":            52,
+		"PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE":  53,
 	}
 )
 
@@ -420,7 +427,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xba\x0f\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xe8\x0f\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -474,7 +481,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x19PROMPT_ORIGIN_FINISH_HOOK\x101\x12+\n" +
 	"'PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE\x102\x12)\n" +
 	"%PROMPT_ORIGIN_COMMAND_TERMINAL_OUTPUT\x103\x12\"\n" +
-	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1ePROMPT_ORIGIN_DEPLOY_MEDIATION\x104\x12,\n" +
+	"(PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE\x105B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

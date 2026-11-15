@@ -1,0 +1,40 @@
+// endpoint_list_github_workflow_run_subscriptions.proto —
+// ListGithubWorkflowRunSubscriptions: the GitHub workflow runs one workspace
+// waits on, each with its subscription's health. AGENT API section. A READ.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/github_workflow_run.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListGithubWorkflowRunSubscriptionsRequest {
+  // The workspace whose subscriptions are listed.
+  workspace.v1.WorkspaceRef subscriber = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListGithubWorkflowRunSubscriptionsResponse {
+  oneof result {
+    ListGithubWorkflowRunSubscriptionsSuccess success = 1;
+    ListGithubWorkflowRunSubscriptionsError error = 2;
+  }
+}
+
+// The workspace's subscriptions.
+message ListGithubWorkflowRunSubscriptionsSuccess {
+  // Every subscription the workspace holds. Empty when it holds none.
+  repeated GithubWorkflowRunSubscription subscriptions = 1;
+}
+
+message ListGithubWorkflowRunSubscriptionsError {
+  oneof cause {
+    // The workspace is not in the daemon's registry.
+    ListGithubWorkflowRunSubscriptionsUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ListGithubWorkflowRunSubscriptionsUnknownSubscriber {}
