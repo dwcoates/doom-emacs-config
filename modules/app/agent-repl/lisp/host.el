@@ -2125,8 +2125,8 @@ webview are put back where they were, so a refusal or a transport failure
 leaves the workspace on the daemon that still serves it.
 
 A TRANSPORT FAILURE IS RETRIED, AND NOT RETRYING IT COST THE WHOLE
-ADOPTION WINDOW.  The adopt is an ordinary unary call under
-`agent-repl-connect-unary-timeout-seconds' (10s, connect.el), while the
+ADOPTION WINDOW.  The adopt is a unary call under its own bound,
+`agent-repl-host-adopt-timeout-seconds', while the
 rendezvous it joins completes only when EVERY participant has called —
 so on a loaded box this call can expire on a rendezvous that is merely
 still waiting for the page, and a dropped socket does the same thing.
@@ -2186,6 +2186,18 @@ standing successor, `closed' when NEW\='s connection is closed, and
    ((agent-repl-connect-failure-unreached-p detail) 'unreached)
    (t t)))
 
+(defconst agent-repl-host-adopt-timeout-seconds 30
+  "How long an AdoptHostWorkspace call may wait for the daemon's answer.
+The adopt joins a rendezvous the successor answers only once every
+participant has called and the workspace is adopted, so it waits as long
+as the handover's adoption does.  Measured from each `reattach' to its
+`adopted' over the twelve handovers of 2026-11-14 and 2026-11-15 (114 to
+142 workspaces each): p90 3.5 to 11.1s, the worst 13.6s (11-14 18:13).
+The generic `agent-repl-connect-unary-timeout-seconds' (10s) sat below
+that tail, so every handover timed the slow adopts out at the instant the
+daemon answered them, recorded each at ERROR and adopted it again (36
+workspaces at 12:55, 2026-11-15).  30s is a little over twice the worst.")
+
 (defun agent-repl-host--adopt-call (ws new token trigger old)
   "Issue AdoptHostWorkspace for WS on NEW, for reattach walk TOKEN.
 WS already stands moved onto NEW (`agent-repl-host--adopt-onto'); OLD is
@@ -2210,6 +2222,7 @@ is recorded."
        (lambda ()
          (agent-repl-rpc-adopt-host-workspace
           new (list :workspace ref)
+          :timeout agent-repl-host-adopt-timeout-seconds
           :on-response
           (lambda (response)
             (cond

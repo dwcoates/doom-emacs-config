@@ -3055,6 +3055,22 @@ far too late."
       (should (= 2 (cl-count :reload agent-repl-test-host--walk)))
       (should (eq (agent-repl-host--recorded-conn "ws-1") old)))))
 
+(ert-deftest agent-repl-test-host-adopt-call-waits-out-the-adoptions-own-bound ()
+  "The adopt waits `agent-repl-host-adopt-timeout-seconds', not the unary default."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((timeout :unset))
+      (cl-letf (((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+                 (lambda (&rest args) (setq timeout (plist-get (cddr args) :timeout)))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (equal timeout agent-repl-host-adopt-timeout-seconds))
+        (should (> agent-repl-host-adopt-timeout-seconds
+                   agent-repl-connect-unary-timeout-seconds))))))
+
 (ert-deftest agent-repl-test-host-adopt-call-runs-in-the-workspaces-log-context ()
   "The adopt's transport records land in the adopting workspace's own log."
   (agent-repl-test-host--with-harness
