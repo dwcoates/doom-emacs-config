@@ -3566,6 +3566,44 @@ func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
 	}
 }
 
+func TestRepositoryFlag(t *testing.T) {
+	tests := []struct {
+		text        string
+		owner, repo string
+		ok          bool
+	}{
+		{text: "o/r", owner: "o", repo: "r", ok: true},
+		{text: "o", ok: false},
+		{text: "/r", ok: false},
+		{text: "o/", ok: false},
+		{text: "o/r/x", ok: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			// Act
+			owner, repo, ok := repositoryFlag(tt.text)
+
+			// Assert
+			if owner != tt.owner || repo != tt.repo || ok != tt.ok {
+				t.Fatalf("repositoryFlag(%q) = %q, %q, %v; want %q, %q, %v", tt.text, owner, repo, ok, tt.owner, tt.repo, tt.ok)
+			}
+		})
+	}
+}
+
+func TestEveryRepositoryFlagIsReadByRepositoryFlag(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("agentcli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if n := strings.Count(string(src), `strings.Cut(*repository, "/")`); n != 0 {
+		t.Fatalf("%d -repository flags are split by hand; read every one through repositoryFlag", n)
+	}
+}
+
 func TestPullRequestEventSpellingsAreTheStoresEvents(t *testing.T) {
 	// Assert
 	members := wsm.AllPullRequestEvents().Members()

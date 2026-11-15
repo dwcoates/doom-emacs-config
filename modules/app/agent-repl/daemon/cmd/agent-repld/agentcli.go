@@ -2116,8 +2116,8 @@ func workspaceGithubQueueSubscribe(c *cliCall, args []string) int {
 	req := &agentreplv1.SubscribeGithubMergeQueueRequest{Subscriber: subscriber,
 		Repository: &agentreplv1.SubscribeGithubMergeQueueRequest_Subscribers{Subscribers: &agentreplv1.SubscribeGithubMergeQueueSubscribersRepository{}}}
 	if *repository != "" {
-		owner, repo, found := strings.Cut(*repository, "/")
-		if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		owner, repo, ok := repositoryFlag(*repository)
+		if !ok {
 			return c.usageFailed("-repository is OWNER/REPO, not %q", *repository)
 		}
 		req.Repository = &agentreplv1.SubscribeGithubMergeQueueRequest_Named{Named: &agentreplv1.GithubRepositoryRef{Owner: owner, Repo: repo}}
