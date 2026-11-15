@@ -207,6 +207,9 @@ type orchestrator struct {
 	// clears takenAway drops the merge instead of resuming it. Recorded and
 	// consumed under the same lock as takenAway (dequeue, AdoptWorkspace).
 	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
+	// moveLocks are the workspaces' move locks (lockMove), made on first use
+	// under mu.
+	moveLocks map[ids.WorkspaceID]*sync.Mutex
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// lines serializes, per repository, every decision that reads its line
@@ -357,6 +360,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		resumes:            map[ids.WorkspaceID]progressDoc{},
 		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
+		moveLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},
