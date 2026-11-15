@@ -610,7 +610,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/commandcatalog/catalogtest": {"daemon/internal/"},
 	"internal/creategate":                 {"daemon/"},
 	"internal/ctxend":                     {"daemon/"},
-	"internal/dirpath":                    {"daemon/internal/"},
+	"internal/dirpath":                    {"daemon/"},
 	"internal/effortlevel":                {"daemon/internal/"},
 	"internal/envc":                       {"daemon/"},
 	"internal/freshinput":                 {"daemon/internal/"},

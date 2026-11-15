@@ -61,7 +61,7 @@ func TestCheckRefusesADirectoryInsideATemporaryRoot(t *testing.T) {
 			if want := canon(t, tc.dir); inside.Dir != want {
 				t.Errorf("Dir = %q, want the canonical %q", inside.Dir, want)
 			}
-			if !within(inside.Dir, inside.Root) || !slices.Contains(g.Roots(), canon(t, tc.root)) {
+			if !dirpath.Within(inside.Dir, inside.Root) || !slices.Contains(g.Roots(), canon(t, tc.root)) {
 				t.Errorf("Root = %q, want a root holding %q (%q among %v)", inside.Root, inside.Dir, canon(t, tc.root), g.Roots())
 			}
 		})

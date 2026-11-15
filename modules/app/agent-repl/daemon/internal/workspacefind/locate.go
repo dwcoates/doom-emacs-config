@@ -2,11 +2,11 @@ package workspacefind
 
 import (
 	"path/filepath"
-	"strings"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	"agentrepl/protohelpers/rosterwalk"
 
+	"agent-repld/internal/dirpath"
 	"agent-repld/internal/wsm"
 )
 
@@ -56,7 +56,7 @@ func Locate(workspaces []wsm.Workspace, roster *frontendv1.WorkspaceRoster, by L
 				out = append(out, ws)
 			}
 		case by.Containing != "":
-			if within(filepath.Clean(by.Containing), dir) && deeper(dir, ws, deepest) {
+			if dirpath.Within(filepath.Clean(by.Containing), dir) && deeper(dir, ws, deepest) {
 				deepest = &ws
 			}
 		default:
@@ -77,9 +77,4 @@ func deeper(dir string, ws wsm.Workspace, best *wsm.Workspace) bool {
 	}
 	bestDir := filepath.Clean(best.Dir)
 	return len(dir) > len(bestDir) || (dir == bestDir && best.Closed && !ws.Closed)
-}
-
-// within reports whether PATH is DIR or lies under it.
-func within(path, dir string) bool {
-	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }
