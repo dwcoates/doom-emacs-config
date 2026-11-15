@@ -32,7 +32,7 @@ func withRemediation(t *testing.T, h *harness) {
 	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
 		t.Fatal(err)
 	}
-	oweAt(t, h, deployStarted.Add(time.Minute))
+	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
 }
 
 func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing.T) {
@@ -124,7 +124,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-remedy"); err != nil {
 						t.Fatal(err)
 					}
-					oweAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
+					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
 				}
 			}},
 	}

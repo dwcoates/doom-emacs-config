@@ -330,11 +330,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the git client: %w", err)
 	}
-	accounts, err := account.New(account.Roots{
-		Default:       p.Opts.defaultConfigDir,
-		MultiRepo:     p.Opts.multiRepoConfigDir,
-		MultiRepoRoot: os.Getenv(envMultiRepoRoot),
-	}, log)
+	accounts, err := account.New(accountRoots(p.Opts, os.Getenv), log)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the account resolver: %w", err)
 	}
@@ -841,8 +837,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				done(err)
 			})
 		},
-		Clock: clock.System{},
-		Log:   p.Surfaces,
+		HandedOver: workspace.HandedOver,
+		Clock:      clock.System{},
+		Log:        p.Surfaces,
 		// Every beat, lapse and cold gate lands in the metrics surface.
 		Telemetry: p.Metrics,
 		// THE PARK'S NEXT KEEP-ALIVE: both session-scoped views hold it for

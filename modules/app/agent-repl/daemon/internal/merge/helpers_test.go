@@ -344,7 +344,7 @@ func inMemoryChecks() wsm.DB {
 	return db
 }
 
-func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.Mediation, error) {
+func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Time, version string) (*wsm.ReplacedMediation, error) {
 	return f.checks.OweMediation(ctx, repo, at, version)
 }
 

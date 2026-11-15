@@ -354,9 +354,10 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
 		},
-		Clock:     h.clock,
-		Log:       h.log,
-		Telemetry: h.telemetry,
+		HandedOver: func(err error) bool { return errors.Is(err, errHandedOver) },
+		Clock:      h.clock,
+		Log:        h.log,
+		Telemetry:  h.telemetry,
 		NextKeepalive: func(ws ids.WorkspaceID, next time.Time) {
 			h.nextKeepalives = append(h.nextKeepalives, nextKeepaliveCall{ws: ws, next: next})
 		},
@@ -408,6 +409,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			CycleDown:       func(ids.WorkspaceID, time.Time) {},
 			ColdDown:        func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},
+			HandedOver:      func(error) bool { return false },
 			Clock:           clocktest.New(now),
 			Log:             dlog.NewTestSurfaces(),
 			Telemetry:       &fakeTelemetry{},
@@ -429,6 +431,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
 		{name: "cold cache's stand-down", strip: func(d *Deps) { d.ColdDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
+		{name: "handover classifier", strip: func(d *Deps) { d.HandedOver = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
 		{name: "telemetry", strip: func(d *Deps) { d.Telemetry = nil }},
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},

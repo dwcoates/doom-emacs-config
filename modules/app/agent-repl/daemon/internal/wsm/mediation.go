@@ -103,6 +103,14 @@ BEGIN
 END;
 `
 
+// ReplacedMediation is a mediation a newer deploy replaced
+// (Store.OweMediation), and whether the fix dispatched for it carries on into
+// the newer deploy's mediation: true when the newer deploy is not that fix's.
+type ReplacedMediation struct {
+	Mediation
+	DispatchCarried bool
+}
+
 // Prompted reports whether the mediator was told of this mediation.
 func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
 
@@ -113,7 +121,15 @@ func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
 // (ReleaseMediation). Its prompt is owed afresh. It answers the mediation it
 // replaced, read in the same write, nil when none was owed: the replacement
 // is how that mediation ended, so it is counted exactly once.
-func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*Mediation, error) {
+//
+// A DISPATCHED FIX OUTLIVES A DEPLOY THAT IS NOT ITS OWN: the newer deploy
+// ends the dispatch only when it is the remediation's, its finish deploying
+// (deploy_remediation_finishes). Any other deploy carries the dispatch into
+// its own mediation, so the remediation keeps landing directly and the
+// intake decides nothing until the fix's deploy (2026-11-15 20:57: a
+// landing's deploy replaced a dispatched check, and its intake approved that
+// deploy and ended the chain while the remediation's fix stood unlanded).
+func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*ReplacedMediation, error) {
 	const op = "daemon.wsm.owe_mediation"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
@@ -126,13 +142,25 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		return nil, err
 	}
 	fields := dlog.Context{"repo": string(key), "owed_at": nanos(at), "version": version}
-	var replaced *Mediation
+	var replaced *ReplacedMediation
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		prior, err := scanMediation(string(key), tx.QueryRowContext(ctx, mediationQuery, key))
 		if err != nil {
 			return err
 		}
-		replaced = prior
+		carried := false
+		if prior != nil && prior.Dispatched {
+			var own int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT count(*) FROM deploy_remediation_finishes WHERE workspace_id = ? AND step = 'deploying' AND step_at <= ?`,
+				string(prior.Remediation), nanos(at)).Scan(&own); err != nil {
+				return err
+			}
+			carried = own == 0
+		}
+		if prior != nil {
+			replaced = &ReplacedMediation{Mediation: *prior, DispatchCarried: carried}
+		}
 		// THE CHAIN PASSES TO THE NEWER DEPLOY, with its intake and its last
 		// remediation: it begins only where no mediation was owed, and counts
 		// a replaced mediation that had a fix dispatched as one remediation
@@ -143,7 +171,7 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		if prior != nil {
 			chainStart, redeploys = prior.ChainStartedAt, prior.ChainRedeploys
 			intake, remediation = prior.Intake, prior.Remediation
-			if prior.Dispatched {
+			if prior.Dispatched && !carried {
 				redeploys++
 			}
 			if prior.LastDispatchedAt != nil {
@@ -151,13 +179,13 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 			}
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at) VALUES (?, 0, ?, NULL, ?, '', ?, ?, ?, ?, 0, ?)
+			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at) VALUES (?, 0, ?, NULL, ?, '', ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at,
 			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = '',
 			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys,
-			   mediation_intake = excluded.mediation_intake, mediation_remediation = excluded.mediation_remediation, mediation_dispatched = 0,
+			   mediation_intake = excluded.mediation_intake, mediation_remediation = excluded.mediation_remediation, mediation_dispatched = excluded.mediation_dispatched,
 			   mediation_dispatched_at = excluded.mediation_dispatched_at`,
-			key, nanos(at), version, nanos(chainStart), redeploys, string(intake), string(remediation), dispatchedAt)
+			key, nanos(at), version, nanos(chainStart), redeploys, string(intake), string(remediation), carried, dispatchedAt)
 		return err
 	})
 	if err != nil {

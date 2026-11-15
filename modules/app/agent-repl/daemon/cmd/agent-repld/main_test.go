@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
@@ -105,6 +106,78 @@ func TestNoArgvIsLegal(t *testing.T) {
 	}
 	if opts.joining != "" {
 		t.Fatalf("opts.joining = %q, want an incumbent", opts.joining)
+	}
+}
+
+// TestParseFlagsRefusesAnArgumentThatIsNotAFlag is the 2026-11-15 stray
+// daemon: `agent-repld queue -h` named no command, the flag package stopped at
+// "queue", and the rest of argv was ignored, so a daemon booted.
+func TestParseFlagsRefusesAnArgumentThatIsNotAFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{name: "an unknown command with a help flag", argv: []string{"queue", "-h"}, want: `"queue" is not a command`},
+		{name: "an unknown command alone", argv: []string{"queue"}, want: `"queue" is not a command`},
+		{name: "a stray argument after the flags", argv: []string{"--fake", "extra"}, want: `"extra" is not a command`},
+		{name: "the refusal lists the commands", argv: []string{"queue"}, want: "the commands are " + strings.Join(commandNames(), ", ")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the case's argv.
+
+			// Act.
+			_, err := parseFlags("agent-repld", tc.argv)
+
+			// Assert.
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("parseFlags(%q) = %v, want an error naming %q", tc.argv, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCommandNamesAreEveryFirstArgumentMainAnswers(t *testing.T) {
+	// Arrange.
+	want := []string{thawGuardVerb, deployVerb, callVerb}
+	for noun := range cliNouns {
+		want = append(want, noun)
+	}
+
+	// Act.
+	got := commandNames()
+
+	// Assert.
+	if !slices.IsSorted(got) {
+		t.Fatalf("commandNames() = %v, want them sorted", got)
+	}
+	for _, name := range want {
+		if !slices.Contains(got, name) {
+			t.Fatalf("commandNames() = %v, want it to hold %q", got, name)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("commandNames() = %v, want exactly %v", got, want)
+	}
+}
+
+func TestAccountRootsAreTheConfigRootFlagsAndTheMultiRepoRoot(t *testing.T) {
+	// Arrange.
+	opts := options{defaultConfigDir: "/roots/default", multiRepoConfigDir: "/roots/multi"}
+	getenv := func(name string) string {
+		if name == envMultiRepoRoot {
+			return "/work"
+		}
+		return ""
+	}
+
+	// Act.
+	got := accountRoots(opts, getenv)
+
+	// Assert.
+	if want := (account.Roots{Default: "/roots/default", MultiRepo: "/roots/multi", MultiRepoRoot: "/work"}); got != want {
+		t.Fatalf("accountRoots() = %+v, want %+v", got, want)
 	}
 }
 

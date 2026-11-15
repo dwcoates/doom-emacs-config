@@ -46,6 +46,29 @@ func checked(t *testing.T) *harness {
 // to.
 func mediationKey(h *harness) wsm.RepoKey { return scopedKey(h) }
 
+// fixDeploysAt makes the deploy at AT the fix's: the chain's last
+// remediation's finish lands just before it, so its deploy replaces the
+// dispatched check (wsm.OweMediation ends a dispatch only at its fix's deploy).
+func fixDeploysAt(t *testing.T, h *harness, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	m := owedCheck(t, h)
+	if m == nil || m.Remediation == "" {
+		t.Fatalf("check %+v, want a remediation whose fix deploys", m)
+	}
+	landed := at.Add(-time.Second)
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: m.Remediation, Repo: mediationKey(h), StartedAt: landed}); err != nil {
+		t.Fatalf("BeginRemediationFinish: %v", err)
+	}
+	if _, err := h.db.AdvanceRemediationFinish(ctx, m.Remediation, wsm.RemediationGating, wsm.RemediationLanding, landed); err != nil {
+		t.Fatalf("AdvanceRemediationFinish: %v", err)
+	}
+	if _, err := h.db.RecordRemediationLanded(ctx, m.Remediation, "abc123", nil, landed); err != nil {
+		t.Fatalf("RecordRemediationLanded: %v", err)
+	}
+	oweAt(t, h, at)
+}
+
 // owe makes the harness's repository owe a check of the deploy at AT.
 func oweAt(t *testing.T, h *harness, at time.Time) {
 	t.Helper()
@@ -178,6 +201,30 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	}
 }
 
+func TestADeployThatIsNotTheFixsKeepsTheIntakeUntold(t *testing.T) {
+	// Arrange: the intake dispatched the first deploy; another landing's
+	// deploy replaces its check before the fix lands.
+	h := checked(t)
+	owe(t, h)
+	decideInTurn(t, h, Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem})
+	h.o.Mediate(context.Background())
+	h.queue.onSubmit = nil
+	told := len(h.queue.submissions)
+	oweAt(t, h, deployStarted.Add(time.Minute))
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert: the fix is still dispatched, and the intake decides nothing
+	// until its deploy.
+	if m := owedCheck(t, h); m == nil || !m.Dispatched || m.ChainRedeploys != 0 {
+		t.Fatalf("check %+v, want the dispatch carried and no remediation counted", m)
+	}
+	if len(h.queue.submissions) != told {
+		t.Fatalf("submissions %v, want the intake left untold", h.queue.submissions[told:])
+	}
+}
+
 func TestEachDeployOfTheChainIsToldToTheSameIntake(t *testing.T) {
 	// Arrange: the intake dispatches the first deploy; its fix deploys.
 	h := checked(t)
@@ -185,7 +232,7 @@ func TestEachDeployOfTheChainIsToldToTheSameIntake(t *testing.T) {
 	decideInTurn(t, h, Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem})
 	h.o.Mediate(context.Background())
 	h.queue.onSubmit = nil
-	oweAt(t, h, deployStarted.Add(time.Minute))
+	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
 
 	// Act
 	h.o.Mediate(context.Background())
@@ -679,8 +726,11 @@ func TestEveryCheckEndIsTimedOnceByHowItEnded(t *testing.T) {
 		{name: "an escalation", inTurn: decide(Decision{Kind: MediationEscalate, Summary: "yours"}),
 			want: []string{toldSpan, assessed(MediationEscalated), total(MediationEscalated)}},
 		{name: "a dispatch whose fix deploys", inTurn: decide(Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}),
-			after: func(t *testing.T, h *harness) { oweAt(t, h, deployStarted.Add(time.Minute)) },
+			after: func(t *testing.T, h *harness) { fixDeploysAt(t, h, deployStarted.Add(time.Minute)) },
 			want:  []string{toldSpan, assessed(MediationDispatched), total(MediationDispatched)}},
+		{name: "a dispatch a deploy not its fix's replaces", inTurn: decide(Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}),
+			after: func(t *testing.T, h *harness) { oweAt(t, h, deployStarted.Add(time.Minute)) },
+			want:  []string{toldSpan, assessed(MediationDispatched), total(MediationSuperseded)}},
 		{name: "a turn that decides nothing", want: []string{toldSpan, assessed(MediationUndecided), total(MediationUndecided)}},
 		{name: "a newer deploy before the intake is told", want: []string{total(MediationSuperseded)},
 			act: func(t *testing.T, h *harness) { oweAt(t, h, deployStarted.Add(time.Minute)) }},
@@ -752,7 +802,7 @@ func TestAChainOfRemediationsIsRecordedWhenTheQueueAdvances(t *testing.T) {
 
 	// Act: the first deploy's round, its fix's deploy, then its round.
 	h.o.Mediate(context.Background())
-	oweAt(t, h, deployStarted.Add(time.Minute))
+	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
 	h.o.Mediate(context.Background())
 
 	// Assert

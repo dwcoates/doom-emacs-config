@@ -621,7 +621,9 @@ func TestPprofServesOverAUnixSocket(t *testing.T) {
 // launcher's argv. The account is DETERMINED by the workspace's path, so both
 // config roots must have an answer; a daemon spawned without one exits before
 // it serves, and the reason has to be in its stderr rather than only implied
-// by a client's boot timeout.
+// by a client's boot timeout. The refusal comes before the boot claim, so it
+// writes no record at all: a misconfigured launch never takes the claim from
+// a deploy's handover (2026-11-15).
 func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -636,8 +638,7 @@ func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange / Act
-			// The graph refusal is the point of the test, not a stray warning.
-			d := harness.StartDaemon(t, harness.Opts{ExpectWarnings: []string{"daemon.cmd.graph"}, OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
+			d := harness.StartDaemon(t, harness.Opts{OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
 			code := d.AwaitExit()
 
 			// Assert

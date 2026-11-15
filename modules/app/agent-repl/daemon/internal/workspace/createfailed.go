@@ -8,13 +8,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
-	"agent-repld/internal/bounce"
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/replyquote"
-	"agent-repld/internal/rollout"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -56,7 +52,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 //
 // Three failures are not reported. A MERGE WORKSPACE's failure is the merge
 // queue's, which hands it back to the requester itself. A HANDOVER is not a
-// failure at all (createHandedOver): the create is the successor daemon's to
+// failure at all (HandedOver): the create is the successor daemon's to
 // make. A refusal of the CALLER'S OWN INPUT (callerInputRefusal) is the
 // caller's to correct, and the caller is answered with it: there is nothing
 // for the main worktree to investigate.
@@ -66,7 +62,7 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 		log.Debug(opCreateFailedReport, "a merge workspace's failed create is the merge queue's to hand back; it is not reported to the main worktree", nil)
 		return
 	}
-	if createHandedOver(cause) {
+	if HandedOver(cause) {
 		log.Debug(opCreateFailedReport, "the create was handed over or this daemon is exiting; it is not reported as a failure", nil)
 		return
 	}
@@ -82,29 +78,13 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 	})
 }
 
-// createHandedOver answers whether a create's error is a HANDOVER rather than a
-// failure: the workspace or the bring-up belongs to another daemon now, or
-// this one is exiting. Every case is the rollout's ordering, which the caller
-// is answered with and acts on; none is something to analyze.
-func createHandedOver(err error) bool {
-	var refusal *Refusal
-	if errors.As(err, &refusal) && (refusal.Arm == ArmTransferringAway || refusal.Arm == ArmNotYetAdopted) {
-		return true
-	}
-	return errors.Is(err, bringup.ErrNotServed) ||
-		errors.Is(err, shimclient.ErrStandingDown) ||
-		errors.Is(err, rollout.ErrNotYetAdopted) ||
-		errors.Is(err, bounce.ErrMovedAway) ||
-		errors.Is(err, context.Canceled)
-}
-
 // createRefusalArms classifies EVERY arm of agentrepl.v1.CreateWorkspaceError
 // by whether the CALLER'S OWN INPUT causes it (true): a name, a workspace, a
 // repository, a mode or a merge request the caller supplied and is answered
 // about, to correct and ask again. Nothing there is a fault of the daemon or
 // the repository, so none is reported to the main worktree. An arm marked
 // false is a fault of the daemon, the repository or the machine, which the
-// main worktree investigates, or a handover (createHandedOver), which is no
+// main worktree investigates, or a handover (HandedOver), which is no
 // failure at all.
 //
 // THE MAP IS EXHAUSTIVE (TestCreateRefusalArmsClassifyEveryArm checks it
