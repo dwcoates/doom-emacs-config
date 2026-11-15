@@ -705,6 +705,11 @@ type DB interface {
 	// MediationRoleOf answers the owed mediation a workspace is the intake
 	// or the last remediation of, nil for neither (mediation.go).
 	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// RecordDeployEscalation records WS as the deploy escalation workspace
+	// of REPO's queue, whose finish lands directly.
+	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error
+	// DeployEscalationOf answers the queue WS escalates a deploy of.
+	DeployEscalationOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
 	// BeginRemediationFinish records a remediation workspace's finish at its
 	// gate (remediationfinish.go).
 	BeginRemediationFinish(ctx context.Context, f RemediationFinish) (RemediationFinish, error)

@@ -22,11 +22,12 @@ import (
 // BriefDeployEscalation is an escalation workspace's first prompt.
 const BriefDeployEscalation = "deploy-escalation"
 
-// escalate puts check M of the repository at REPODIR before the user as
+// escalate puts check M of queue Q before the user as
 // SUMMARY with PROBLEMS, answering the escalation workspace. Each failure is
 // recorded at ERROR and answered: the check is released already, so the
 // escalation is lost to the user and the record is its account.
-func (o *orchestrator) escalate(ctx context.Context, repoDir string, m wsm.Mediation, summary string, problems []DeployProblem, fields dlog.Context) (ids.WorkspaceID, error) {
+func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, fields dlog.Context) (ids.WorkspaceID, error) {
+	repoDir := q.repository.Dir
 	name := "deploy-escalation-" + o.deps.Now().UTC().Format("20060102-150405")
 	fields = withField(withField(fields, "escalation", name), "summary", summary)
 	failed := func(message string, err error) (ids.WorkspaceID, error) {
@@ -38,6 +39,12 @@ func (o *orchestrator) escalate(ctx context.Context, repoDir string, m wsm.Media
 		return failed("the escalation workspace could not be made; the user is not told of the escalated deploy", err)
 	}
 	fields["workspace"] = string(made.ID)
+	// ITS FINISH LANDS DIRECTLY, as a remediation's does (FinishRemediation):
+	// recorded before it is briefed, so the role is the daemon's, never the
+	// agent's to choose (owner ruling, 2026-11-15).
+	if err := o.deps.DB.RecordDeployEscalation(ctx, made.ID, q.key, o.deps.Now()); err != nil {
+		return failed("the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told", err)
+	}
 	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, false); err != nil {
 		return failed("the escalation workspace's effort could not be set; it is not briefed and the user is not told", err)
 	}
