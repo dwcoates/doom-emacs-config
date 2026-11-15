@@ -58,6 +58,9 @@ Answers performance questions about agent-repl from stored history: what a laten
     - How the mediator's checks ended: `sum by (outcome) (increase_pure(agentrepl_deploy_mediation_seconds_count{span="total"}[W]))`; `approved` found nothing, `redeployed` fixed and deployed, `escalated` handed the deploy to the user.
     - How long checks take: `histogram_quantile(0.9, sum by (le, span, outcome) (increase_pure(agentrepl_deploy_mediation_seconds_bucket[W])))`; `rollout` is the hot reload, `assessment` the mediator's work.
     - Remediations deployed in a row before the queue advanced: `histogram_quantile(0.9, sum by (le) (increase_pure(agentrepl_deploy_remediation_chain_redeploys_bucket[W])))`, and right now: `agentrepl_deploy_remediations_in_a_row`.
+  - *NOTE*: messages between workspaces, each over a window `W` such as `7d`:
+    - Prompts agents sent to other workspaces (`agentrepld workspace prompt`): `sum(increase_pure(agentrepl_prompts_submitted_total{origin="PROMPT_ORIGIN_AGENT_SENT"}[W]))`; `sum by (origin) (...)` without the matcher is every submission by origin.
+    - Claude Code's own cross-session messages (SendMessage between sessions): `agentrepl_peer_messages{end="sender"} - agentrepl_peer_messages{end="sender"} offset W` through `--query`, or `--range 'agentrepl_peer_messages{end="sender"}' <hours> <step>` for its climb over time. It is a gauge read from the store, so never `increase_pure` it.
   - *NOTE*: a version reads `0.129.0` for a landing and `0.129.0+<commit>` for a build between landings; `git log` between two versions names the changes to read.
 
 2. Report.
@@ -77,7 +80,7 @@ Answers performance questions about agent-repl from stored history: what a laten
   - a2. A restart or a restart phase: add it to the daemon's restart vocabulary, and time it in the code that sees it start and end, in the one process that runs it.
   - b. A daemon-side counter, gauge or histogram: register it on the daemon's metrics registry in the package that owns the measured thing. Recording on a hot path MUST be a single atomic update, never a lock request handling takes, never I/O.
   - c. A store or sidecar metric: register it on that service's own registry.
-  - d. Labels: only `program`, `process`, `workspace` (by id), `latency`, `method`, `outcome`, `model`. NEVER a prompt, a path, a session id or a version.
+  - d. Labels: only `program`, `process`, `workspace` (by id), `latency`, `method`, `outcome`, `model`, or a closed vocabulary the code declares (a protobuf enum's spelling such as `origin`, a fixed set such as `end`). NEVER a prompt, a path, a session id or a version.
   - e. Tests: one for the recorded value, one per error path asserting the record the runtime's canonical logger writes, and the vocabulary test for a latency.
   - f. Add or change the metric's row in `<skill_base_dir>/CATALOG.md` in the same change: its series, type, labels with their values, and source. A change to a label, a label value, a bucket set, a restart or a phase updates its row too.
 

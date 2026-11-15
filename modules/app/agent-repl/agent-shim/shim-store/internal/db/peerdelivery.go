@@ -64,6 +64,15 @@ const (
 	  WHERE d.delivery_id = ? AND e.kind = ?
 	  ORDER BY d.end_kind ASC, d.book_agent_id ASC`
 
+	// peerMessageEndsSQL binds (the page-line kind): how many live page lines
+	// record each end of a cross-session message. Joined to the entry row so a
+	// retired line, whose row the index keeps, is excluded exactly as a page
+	// and the books lookup exclude it.
+	peerMessageEndsSQL = `SELECT d.end_kind, COUNT(*) FROM peer_delivery d
+	  CROSS JOIN entry e ON e.position = d.position
+	  WHERE e.kind = ?
+	  GROUP BY d.end_kind`
+
 	// lineageRootSQL binds (an agent id): the ROOT of that agent's lineage, the
 	// main agent its spawn chain leads up to, through a spawning agent, a
 	// workflow's spawner, or detached work's owner, exactly the edges the
@@ -92,6 +101,11 @@ const (
 // of two sessions: one message is sent by one session and delivered to one, so
 // the index's invariant is broken and the store refuses rather than choosing.
 var errAmbiguousDelivery = errors.New("one end of one delivery is held by more than one session")
+
+// errUnknownDeliveryEnd is the cause of an index row naming an end other than
+// the two writePeerDelivery writes: the index's invariant is broken, and the
+// count refuses rather than serving a series no reader expects.
+var errUnknownDeliveryEnd = errors.New("the delivery index holds an end it never writes")
 
 // peerDeliveryOf is the delivery id a stored entry's page line records and
 // which end of the message it is, or ("", "") when it records neither: the
@@ -208,6 +222,47 @@ func (d *DB) PeerDelivery(ctx context.Context, deliveryID string) (sender, recip
 	d.log.Log(base, "delivery %s: sender %s, recipient %s", deliveryID,
 		recordedOr(ends[deliveryEndSender]), recordedOr(ends[deliveryEndRecipient]))
 	return ends[deliveryEndSender], ends[deliveryEndRecipient], nil
+}
+
+// PeerMessageEnds answers how many live page lines record each end of a
+// cross-session message, keyed by end ("sender", "recipient"); an end no line
+// records is 0. Each end is indexed once per page line and a re-derived line
+// restates its own row, so the counts are exact and survive restarts.
+//
+// IT RECORDS NOTHING ON FAILURE: its one caller, the metrics surface's scrape,
+// owns the failure's record (once per cause), so a store that cannot answer
+// is not re-logged on every scrape.
+func (d *DB) PeerMessageEnds(ctx context.Context) (map[string]int64, error) {
+	base := logging.Fields{Operation: "store.db.peer-message-ends", Table: peerDeliveryTable}
+	started := d.mono()
+	rows, err := d.read.QueryContext(ctx, peerMessageEndsSQL, kindPageLine)
+	if err != nil {
+		return nil, storagef(err, "counting the ends of cross-session messages")
+	}
+	ends := map[string]int64{deliveryEndSender: 0, deliveryEndRecipient: 0}
+	for rows.Next() {
+		var end string
+		var count int64
+		if err := rows.Scan(&end, &count); err != nil {
+			rows.Close() //nolint:errcheck // the scan already failed
+			return nil, storagef(err, "scanning a count of cross-session message ends")
+		}
+		if _, known := ends[end]; !known {
+			rows.Close() //nolint:errcheck // the index's invariant is already broken
+			return nil, storagef(errUnknownDeliveryEnd, "the delivery index holds %d lines of end %q", count, end)
+		}
+		ends[end] = count
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close() //nolint:errcheck // the iteration already failed
+		return nil, storagef(err, "iterating the counts of cross-session message ends")
+	}
+	if err := rows.Close(); err != nil {
+		return nil, storagef(err, "closing the counts of cross-session message ends")
+	}
+	d.observeQuery(StatementPeerMessageEnds, peerDeliveryTable, base, started, int64(len(ends)))
+	d.traceStatement(ctx, StatementPeerMessageEnds, peerDeliveryTable, base, int64(len(ends)))
+	return ends, nil
 }
 
 // endSession is the one session holding one end of a delivery, from the books
