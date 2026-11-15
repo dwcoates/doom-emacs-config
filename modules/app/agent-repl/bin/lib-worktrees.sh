@@ -5,8 +5,9 @@
 # `git worktree list --porcelain` names the MAIN worktree first and every
 # linked worktree after it, each as a `worktree <path>` line. Every script that
 # asks which worktree is the main one, or which are linked, reads that list
-# here, so the parsing cannot drift between them. test-lib-worktrees.sh fails
-# any script that parses the list itself again.
+# here, so the parsing cannot drift between them, and so does every script
+# that asks which worktree holds a branch. test-lib-worktrees.sh fails any
+# script that parses the list itself again.
 #
 # Each function answers non-zero when git does: a caller decides whether that
 # is its own error to report.
@@ -31,4 +32,15 @@ linked_worktrees() {
     local roots
     roots="$(worktree_list "$1")" || return 1
     sed 1d <<<"$roots"
+}
+
+# branch_worktree DIR BRANCH: the worktree of DIR's repository that has BRANCH
+# checked out. Non-zero, with nothing printed, when none has.
+branch_worktree() {
+    local listing
+    listing="$(git -C "$1" worktree list --porcelain)" || return 1
+    awk -v want="branch refs/heads/$2" '
+        /^worktree / { root = substr($0, 10) }
+        $0 == want { print root; found = 1; exit }
+        END { exit !found }' <<<"$listing"
 }

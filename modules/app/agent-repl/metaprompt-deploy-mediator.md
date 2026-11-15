@@ -31,11 +31,10 @@
   - It never creates a workspace, a child, a one-shot or an async merge, and never only suggests a fix.
   - Avoid subagents: do the work in this conversation.
 - A fix is written on this workspace's own branch, rebased onto the main branch.
-- Before landing, run the full suite the way the merge queue's gate does: `agent-repld test run -every-suite`.
-  - It runs governed, and units whose inputs an earlier green run passed are reused.
-  - Fix every failure it finds, and rerun only the cases that failed until they pass.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch> "<changelog line>" <branch>`.
+  - It lands only through its gate: the branch committed, rebased onto the main branch, and the full suite passing on it, which the script runs itself.
   - `minor` for a feature, `patch` for a fix.
+  - Exit 4 is the gate's refusal, which it names: fix every failure on the branch, rerunning only the cases that failed until they pass, and land again.
   - Exit 1 is a branch that did not merge cleanly; resolve it on the branch and land again.
 - Deploy it: `/agent-repl-runtime deploy`.
   - That deploy owes a new round, which this workspace checks next, on a compacted context.

@@ -26,8 +26,13 @@
 #                         <side>.*, then user.*, then $EMAIL),
 #                         ls-files -s, log -1 --format, show -s --format=%ct,
 #                         rev-list --count A..B, worktree list --porcelain
+#                         (each worktree's `branch refs/heads/B` line, or
+#                         `detached`), merge-base --is-ancestor A B
 #   linked worktrees:     worktree add [-q|--quiet] (-b BRANCH | --detach) PATH,
-#                         which checks HEAD's tree out into PATH
+#                         which checks HEAD's tree out into PATH; -b creates
+#                         refs/heads/BRANCH at HEAD as one ref transaction,
+#                         and status --porcelain inside it compares its files
+#                         with that branch's tree
 #   hooks:                rev-parse --git-path hooks (core.hooksPath, else
 #                         <repository>/hooks)
 #   named refs:           rev-parse --abbrev-ref HEAD |
@@ -46,8 +51,9 @@
 # A LINKED WORKTREE is a directory whose .fakegit is a FILE naming the main
 # worktree ("main <path>"), as a real linked worktree's .git file names its
 # repository. Only where a linked worktree belongs is modelled -- rev-parse
-# --git-dir / --git-common-dir / --show-toplevel and worktree list -- and not
-# its own index or branch: any other call inside one exits 2. A linked
+# --git-dir / --git-common-dir / --show-toplevel and worktree list -- and the
+# branch `-b` checked out in it (status --porcelain against that branch's
+# tree), not its own index or commits: any other call inside one exits 2. A linked
 # worktree inside the main one is left out of the main one's snapshots, as
 # real git leaves a nested worktree out of its parent's status.
 #

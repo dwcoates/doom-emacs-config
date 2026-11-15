@@ -69,12 +69,35 @@ test_linked_worktrees_is_empty_with_none() {
   if [ -z "$got" ]; then pass "linked_worktrees is empty with no linked worktree"; else fail "no linked worktrees" "$got"; fi
 }
 
+test_branch_worktree_names_the_worktree_holding_the_branch() {
+  local repo got
+  repo="$(repo_with_linked 1)"
+  git -C "$repo" worktree add -q -b feature "$repo/feature-wt" >/dev/null
+  got="$(branch_worktree "$repo" feature)"
+  if [ "$got" = "$repo/feature-wt" ]; then pass "branch_worktree names the worktree that has the branch checked out"; else fail "branch_worktree" "$got"; fi
+}
+
+test_branch_worktree_names_the_main_worktree_for_its_branch() {
+  local repo got
+  repo="$(repo_with_linked 1)"
+  got="$(branch_worktree "$repo/wt1" master)"
+  if [ "$got" = "$repo" ]; then pass "branch_worktree names the main worktree for the branch it has checked out"; else fail "branch_worktree of the main branch" "$got"; fi
+}
+
+test_branch_worktree_fails_for_a_branch_no_worktree_holds() {
+  local repo got rc=0
+  repo="$(repo_with_linked 1)"
+  got="$(branch_worktree "$repo" nowhere)" || rc=$?
+  if [ "$rc" -ne 0 ] && [ -z "$got" ]; then pass "branch_worktree answers non-zero, printing nothing, for a branch no worktree holds"; else fail "branch_worktree of an unheld branch" "rc=$rc" "$got"; fi
+}
+
 test_every_function_fails_outside_a_repository() {
   local dir bad=""
   dir="$(mktemp -d "$TMP/plain.XXXXXX")"
   worktree_list "$dir" >/dev/null 2>&1 && bad="$bad worktree_list"
   main_worktree "$dir" >/dev/null 2>&1 && bad="$bad main_worktree"
   linked_worktrees "$dir" >/dev/null 2>&1 && bad="$bad linked_worktrees"
+  branch_worktree "$dir" master >/dev/null 2>&1 && bad="$bad branch_worktree"
   if [ -z "$bad" ]; then pass "every function answers non-zero outside a repository"; else fail "these answered zero outside a repository:$bad"; fi
 }
 
