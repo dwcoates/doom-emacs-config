@@ -541,9 +541,9 @@ func TestLineageOfAnOwnForkOfAnUnforkedConversationIsTheOwnForkAlone(t *testing.
 func byConversationFixture(t *testing.T) string {
 	t.Helper()
 	path := fixtureAt(t, stepNamed(t, "fork_lineage_by_conversation")-1)
-	for _, ws := range []string{"ws-child", "ws-own"} {
+	for i, ws := range []string{"ws-child", "ws-own"} {
 		execRaw(t, path, `INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, is_current, created_at, place)
-		VALUES (?, 'repo-1', ?, ?, ?, 'master', 0, 0, 0, 1, 60)`, ws, "/tmp/"+ws, ws, ws)
+		VALUES (?, 'repo-1', ?, ?, ?, 'master', 0, 0, 0, 1, ?)`, ws, "/tmp/"+ws, ws, ws, 60+i)
 	}
 	return path
 }
@@ -607,10 +607,10 @@ func TestAMigratedForkLineageMatchesAFreshOne(t *testing.T) {
 			openMigrated(t, fresh)
 
 			// Act
-			got, want := tableColumns(t, migrated, table), tableColumns(t, fresh, table)
+			got, want := columnSet(t, migrated, table), columnSet(t, fresh, table)
 
 			// Assert
-			if got != want {
+			if !slices.Equal(got, want) {
 				t.Fatalf("migrated %s columns = %q, a fresh file's = %q", table, got, want)
 			}
 		})

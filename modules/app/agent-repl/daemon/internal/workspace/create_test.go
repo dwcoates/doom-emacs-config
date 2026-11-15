@@ -2728,8 +2728,8 @@ func TestTakeOwedPlacementNoteAnswersNothingForAWorkspaceThatOwesNone(t *testing
 	// Arrange.
 	f := newFixture(t)
 	placementBrief(f)
-	withSubsection(f)
 	spec := standardSpec(t, f)
+	withSubsection(f)
 	ws := f.workspaceInRepo(t, "owes-none", spec.RepoDir)
 
 	// Act.

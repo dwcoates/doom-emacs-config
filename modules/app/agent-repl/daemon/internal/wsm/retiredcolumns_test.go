@@ -3,9 +3,20 @@ package wsm
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// columnSet answers TABLE's columns in the file at PATH, sorted: which
+// columns a route leaves, apart from the order an ALTER appends them in,
+// which the two routes to a layout legitimately differ in.
+func columnSet(t *testing.T, path, table string) []string {
+	t.Helper()
+	columns := strings.Split(tableColumns(t, path, table), ",")
+	slices.Sort(columns)
+	return columns
+}
 
 // openMigrated opens the file at PATH, migrating it to this build's layout,
 // and closes it.
@@ -90,10 +101,10 @@ func TestAMigratedFileMatchesAFreshOneOnceTheRetiredColumnsAreDropped(t *testing
 			openMigrated(t, fresh)
 
 			// Act
-			got, want := tableColumns(t, migrated, table), tableColumns(t, fresh, table)
+			got, want := columnSet(t, migrated, table), columnSet(t, fresh, table)
 
 			// Assert
-			if got != want {
+			if !slices.Equal(got, want) {
 				t.Fatalf("migrated %s columns = %q, a fresh file's = %q; the two routes drifted", table, got, want)
 			}
 		})
