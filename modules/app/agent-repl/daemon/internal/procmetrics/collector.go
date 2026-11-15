@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"agent-repld/internal/causelog"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+
+	"agentrepl/logging/causelog"
 
 	"github.com/prometheus/client_golang/prometheus"
 )

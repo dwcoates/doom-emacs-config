@@ -7,12 +7,13 @@ import (
 	"sort"
 	"sync"
 
-	"agent-repld/internal/causelog"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
+
+	"agentrepl/logging/causelog"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
