@@ -1177,7 +1177,8 @@ body {
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
    rows wherever they were arranged, each a small header over its rows, and
    fold away with the repository (their list is the section's .rows). An
-   empty subsection draws a slot to drag workspaces into. A subsection's rows
+   empty subsection draws its header alone, and a row dragged onto that
+   header lands in it (src/drag.ts). A subsection's rows
    are INDENTED under its header (owner request, 2026-10-20), so a row in it
    reads apart from the repository's own rows around it: one --row-indent
    step (see "THE ROW INDENT" below). */
@@ -1191,7 +1192,9 @@ body {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.3rem 0.7rem 0.15rem 1.55rem;
+  --subsection-head-pad-top: 0.3rem;
+  --subsection-head-pad-bottom: 0.15rem;
+  padding: var(--subsection-head-pad-top) 0.7rem var(--subsection-head-pad-bottom) 1.55rem;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -1224,6 +1227,20 @@ body {
    repository's does. */
 #ws-sidebar .sb-subsection.folded > .rows { display: none; }
 #ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
+/* SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
+   2026-11-13): a subsection that is folded or empty shows its header alone,
+   so between its header and the next subsection's header, and between the
+   header of one just above it and its own, the padding is a fifth of a
+   header's own. A gap that meets a workspace row, or a populated open
+   subsection's header over its rows, keeps a header's full padding. */
+#ws-sidebar .sb-subsection.folded:has(+ .sb-subsection) > .sb-subsection-head,
+#ws-sidebar .sb-subsection[data-empty]:has(+ .sb-subsection) > .sb-subsection-head {
+  padding-bottom: calc(var(--subsection-head-pad-bottom) * 0.2);
+}
+#ws-sidebar .sb-subsection.folded + .sb-subsection > .sb-subsection-head,
+#ws-sidebar .sb-subsection[data-empty] + .sb-subsection > .sb-subsection-head {
+  padding-top: calc(var(--subsection-head-pad-top) * 0.2);
+}
 
 /* THE DRAG (src/drag.ts): the item stays in its list as a dimmed
    slot that travels to where the drop would land, and a copy follows the

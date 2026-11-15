@@ -54,6 +54,7 @@ import { createControl } from "../src/control.js";
 import { DRAGGING_CLASS } from "../src/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 import { REVEAL_HIGHLIGHT_MS } from "../src/feed/feed.js";
+import { EMPTY_SUBSECTION_ATTRIBUTE } from "../src/sidebar/band-fit.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -6160,6 +6161,29 @@ describe("the repository's subsections and the drag", () => {
 
   it("greys a folded subsection's name as a folded repository's", () => {
     expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-collapsed\)/);
+  });
+
+  // SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
+  // 2026-11-13). The empty mark is band-fit.ts's, so the selector is built
+  // from it; test/webkit/subsection-gaps.webkit.test.ts measures the gaps.
+  const BARE_SUBSECTIONS = [".sb-subsection.folded", `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}]`];
+
+  it("names a subsection header's padding above and below through its tokens", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(
+      /--subsection-head-pad-top:\s*0\.3rem;[\s\S]*--subsection-head-pad-bottom:\s*0\.15rem;[\s\S]*padding:\s*var\(--subsection-head-pad-top\) 0\.7rem var\(--subsection-head-pad-bottom\) 1\.55rem/,
+    );
+  });
+
+  it.each(BARE_SUBSECTIONS)("cuts a %s header's padding below to a fifth when a subsection follows it", (bare) => {
+    expect(declarationsOf(`#ws-sidebar ${bare}:has(+ .sb-subsection) > .sb-subsection-head`)).toMatch(
+      /padding-bottom:\s*calc\(var\(--subsection-head-pad-bottom\) \* 0\.2\)/,
+    );
+  });
+
+  it.each(BARE_SUBSECTIONS)("cuts a subsection header's padding above to a fifth under a %s", (bare) => {
+    expect(declarationsOf(`#ws-sidebar ${bare} + .sb-subsection > .sb-subsection-head`)).toMatch(
+      /padding-top:\s*calc\(var\(--subsection-head-pad-top\) \* 0\.2\)/,
+    );
   });
 
   it("lays a subsection's header row on a band slightly darker than the rail", () => {
