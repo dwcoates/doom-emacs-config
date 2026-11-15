@@ -849,6 +849,9 @@ func TestAGateWhoseWorkspaceNameCannotBeReadRunsNothing(t *testing.T) {
 	r := failingTestsRun(t, h)
 	h.git.changedErr = errors.New("git diff failed")
 	round := r.openTab(context.Background(), TabTests)
+	h.o.mu.Lock()
+	h.o.running[h.repoKey()] = r
+	h.o.mu.Unlock()
 	h.db.mu.Lock()
 	delete(h.db.workspaces, theWorkspace)
 	h.db.mu.Unlock()
