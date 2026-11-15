@@ -659,6 +659,24 @@ describe("the salient kinds", () => {
     );
   });
 
+  it("draws the offline line alone while no retry waits for the network", () => {
+    const cell = salientCell("offline", { text: "cannot reach api.anthropic.com" }, "networkFault");
+    expect(cell.querySelector(".footer-activity-network-offline")?.textContent).toBe(
+      "cannot reach api.anthropic.com",
+    );
+  });
+
+  it("draws the offline line saying the failed turn is retried when the network returns", () => {
+    const cell = salientCell(
+      "offline",
+      { text: "cannot reach api.anthropic.com", retry: { attempt: 1 } },
+      "networkFault",
+    );
+    expect(cell.querySelector(".footer-activity-network-offline")?.textContent).toBe(
+      "cannot reach api.anthropic.com · retrying when the network returns",
+    );
+  });
+
   it("draws agent-repl's retry waiting for the network with no countdown", () => {
     const cell = salientCell(
       "retrying",

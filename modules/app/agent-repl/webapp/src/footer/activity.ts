@@ -462,9 +462,18 @@ function drawSalientKind(
   }
 }
 
-/** What the shim observed of the unreachable network, verbatim. */
+/**
+ * What the shim observed of the unreachable network, verbatim, then the
+ * pending retry when one waits for the network: a failed turn agent-repl
+ * retries draws no failure in the feed, so this line is where it is
+ * accounted for (owner ruling, 2026-11-15).
+ */
 export function drawFooterStatusActivityNetworkOffline(u: FooterStatusActivityNetworkOffline): HTMLElement {
-  return textLine("footer-activity-network-offline", u.text);
+  const line = textLine("footer-activity-network-offline", u.text);
+  if (u.retry !== undefined) {
+    line.appendChild(textLine("footer-activity-network-offline-retry", " · retrying when the network returns"));
+  }
+  return line;
 }
 
 /** The agent's push notification, verbatim. */
