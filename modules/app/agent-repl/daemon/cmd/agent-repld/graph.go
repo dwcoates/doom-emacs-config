@@ -330,11 +330,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the git client: %w", err)
 	}
-	accounts, err := account.New(account.Roots{
-		Default:       p.Opts.defaultConfigDir,
-		MultiRepo:     p.Opts.multiRepoConfigDir,
-		MultiRepoRoot: os.Getenv(envMultiRepoRoot),
-	}, log)
+	accounts, err := account.New(accountRoots(p.Opts, os.Getenv), log)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the account resolver: %w", err)
 	}
