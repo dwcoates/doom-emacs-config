@@ -19152,7 +19152,8 @@ describe("HoldParkedBridge", () => {
 
     // Assert
     const inFlight = response.result.case === "success" ? response.result.value.session?.turnInFlight?.value : undefined;
-    expect(inFlight?.startsWith("adopted-")).toBe(true);
+    // The turn runs under the remote prompt's own uuid (mintAdoptedTurn).
+    expect(inFlight).toBe(REMOTE);
   });
 
   it("answers the pay StartSession with no turn in flight when no remote prompt started one", async () => {
