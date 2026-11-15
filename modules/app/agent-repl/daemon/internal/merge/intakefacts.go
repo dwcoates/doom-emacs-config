@@ -164,6 +164,10 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if err != nil {
 		return "", err
 	}
+	gates, err := gateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
+	if err != nil {
+		return "", err
+	}
 	return o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
@@ -171,6 +175,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"chain":          chain,
 		"bound":          fmt.Sprint(q.bound),
 		"facts":          RenderFindings(SortFindings(window, before)),
+		"reuse":          RenderReuse(gates),
 	})
 }
 

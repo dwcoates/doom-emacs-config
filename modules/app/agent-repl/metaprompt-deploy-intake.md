@@ -23,8 +23,16 @@
 ### Decide every deploy as one of three
 
 - Nothing this deploy caused is wrong: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.
-- Something is wrong that the user should settle (a choice about how something looks or behaves, or no problem an agent could fix from the evidence): `agent-repld merge-queue mediation escalate -summary "<what is wrong, in one or two sentences>"`.
-  - The user is notified, the queue moves on, and the chain ends.
+- Something is wrong that the user should settle (a choice about how something looks or behaves, a NEW test reuse fact, or no problem an agent could fix from the evidence): escalate, with the findings on standard input as a dispatch's are:
+
+```bash
+agent-repld merge-queue mediation escalate -problems -summary "<what is wrong, in one or two sentences>" <<'JSON'
+[{"statement": "<what is wrong, as the evidence shows it>", "evidence": ["<a record, verbatim>"]}]
+JSON
+```
+
+  - This workspace never talks to the user: agent-repl makes a visible escalation workspace from the summary and findings, and notifies the user, whose click opens it.
+  - The queue moves on, and the chain ends.
 - Problems this deploy caused: dispatch them, with their evidence, to a remediation workspace.
   - `-restore` reopens the chain's last remediation workspace: choose it when a problem's records name the files or the change its landed fix made.
   - `-fresh` makes a new remediation workspace: choose it when the problems are unrelated to any earlier fix of the chain.
