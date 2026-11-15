@@ -15,7 +15,7 @@ The failing test cases, read off that run (also written to {{failing_tests_file}
 
 RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN. Your remediation is a loop over exactly those cases:
 1. Run exactly the tests listed in {{failing_tests_file}}, the cases above: each group comes with the `agent-repld test run` command that runs only its failing cases through the daemon, and `run all` runs every one of them at once -- never the whole suite, and never a test command by hand (the daemon starts every test run; `bin/background.sh` refuses any other). Where it says a unit's tests could not be named (a build, vet or typecheck failure, a crash, a timeout), read that unit's output in the archive and run the smallest selection that reaches it (`agent-repld test run -go DIR`, `-vitest FILE`, `-ert FILE`, or `-suite NAME`). Do not commit that file; it is excluded from commits already.
-2. Fix what fails, then rerun those same targeted cases. Repeat until every one of them passes.
+2. Fix what fails, then rerun those same targeted cases, together with the tests this branch itself added or changed, named one by one. Repeat until every one of them passes.
 3. Only then is the remediation resolved: commit and end your turn. The queue then runs the selected suites in full again (after its rebase), which is what checks everything else; a turn that ends with a failing case it was asked to fix spends an attempt and a full run of the selected suites on a known failure.
 
 IF A FAILING TEST CANNOT BE RUN ON ITS OWN (its suite has no targeted invocation, or the test only fails inside the whole suite), do not stop, and do not weaken the test or the code to get around it:

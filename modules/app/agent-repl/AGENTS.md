@@ -3749,6 +3749,6 @@ and its commit (or the open item). Test-performance lessons also go into the
 `/agent-repl-tests` skill; runtime profiling and the perf-sensitive list live in
 `/agent-repl-profile`.
 
-- Test runs share the machine with no host gate (owner ruling, 2026-10-14); every run is at nice 19. Run targeted tests while developing and one full run per complete change.
+- Test runs share the machine with no host gate (owner ruling, 2026-10-14); every run is at nice 19. A workspace runs only the tests its work added or changed; the full suite runs only as the merge queue's gate (owner ruling, 2026-11-15).
 - Direct pushes to master outside the merge queue move the target under gates that already passed, and that work is thrown away; master that is red makes every gate inherit the failure (same report). Land only what was rebased onto master and tested there.
 - Startup: a boot used to hold every workspace's bring-up behind a stale sidecar's restart (29s). Since b438e783b bring-ups run beside it: at the 15:34 hard bounce the daemon served +0.9s, every workspace had its go-ahead +1.8s, all 26 sessions were up 14.6s after the Emacs relaunch (54s at 13:39).

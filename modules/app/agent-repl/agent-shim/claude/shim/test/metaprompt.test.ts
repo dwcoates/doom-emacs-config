@@ -142,6 +142,19 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
   });
 
+  it("never lets a queue-landing workspace run the full suite, and scopes a gate failure's remediation", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("through_queue", home);
+    // Assert — owner ruling 2026-11-15: only the merge queue's gate runs the
+    // full suite; a workspace runs only what it added, changed, or was handed.
+    expect(text).toContain("A workspace NEVER runs the full suite, for any reason");
+    expect(text).toContain("The merge queue alone runs it, programmatically, as the gate of every landing.");
+    expect(text).toContain("That remediation runs only the failing tests it was handed, once fixed, and the tests the work added or changed.");
+    expect(text).not.toContain("The rare exception is a change with systemic knock-on effects");
+  });
+
   it("keeps a queue-bypass session off the merge queue, doing its own work, and alone managing the queue", () => {
     // Arrange
     const home = homeOnThisRepository();

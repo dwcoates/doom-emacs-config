@@ -32,8 +32,9 @@ in DIR. The daemon refuses `-worktree` from any workspace but a main one,
 and for a directory that is no worktree of the main workspace's repository.
 
 Name only the tests your own work added or changed. Every other test, and
-the full suite, runs only in the merge queue's gate (the metaprompt's "When
-to run which tests" rules how broad a run is).
+the full suite, runs only in the merge queue's gate: a workspace never runs
+the full suite (the metaprompt's "When to run which tests" rules how broad a
+run is).
 
 Selections (each a repeatable flag; paths relative to the working directory
 or absolute, inside the workspace's worktree):
@@ -51,8 +52,9 @@ or absolute, inside the workspace's worktree):
 -every-suite                   the whole roster (the merge queue's gate)
 ```
 
-`-every-suite` is the full suite; an agent names it only for a change with
-systemic knock-on effects, and says why.
+`-every-suite` is the full suite, the merge queue's gate. A workspace never
+names it (owner ruling, 2026-11-15); the one exception is a queue bypass
+holder's own landing gate, which stands in for the queue's.
 
 Options:
 
