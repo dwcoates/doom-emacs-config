@@ -2241,3 +2241,214 @@ standing successor's address: both go through daemon-link's helpers."
         (with-temp-buffer
           (insert-file-contents file)
           (should-not (search-forward "(remove-hook 'agent-repl-link-handover-functions" nil t)))))))
+
+;;;; ---- A successor is never stale ----
+
+(defun agent-repl-test-link--hand-over-to (conn address)
+  "Hand CONN's daemon over to a successor at ADDRESS and promote it.
+Returns the promoted primary: the old stream ended after the acceptance."
+  (agent-repl-test-link--announce-successor conn address)
+  (agent-repl-test-link--close conn '(:ended))
+  (agent-repl-link-primary))
+
+(ert-deftest agent-repl-test-link-successor-at-answers-the-primary-at-its-address ()
+  "A refusal naming the daemon that serves Emacs already is answered with the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((primary (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act / Assert
+      (should (eq (agent-repl-link-successor-at "127.0.0.1:9001") primary)))))
+
+(ert-deftest agent-repl-test-link-successor-at-the-primary-dials-nothing ()
+  "No second connection is opened to the primary's own daemon."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-successor-at "127.0.0.1:9001")
+    ;; Assert
+    (should (= (length agent-repl-test-link--streams) 1))
+    (should-not (agent-repl-link-successor-pending-p))))
+
+(ert-deftest agent-repl-test-link-successor-at-the-primary-is-logged ()
+  "Answering the primary for a successor address is on the record."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-successor-at "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :info "elisp.link.successor-at-primary"))))
+
+(ert-deftest agent-repl-test-link-dial-successor-at-the-primary-attaches-nothing ()
+  "A successor is never the primary's own daemon, whoever asks for the dial."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9001")
+    ;; Assert
+    (should-not (agent-repl-link-successor-pending-p))
+    (should (= (length agent-repl-test-link--streams) 1))
+    (should (agent-repl-test-link--logged-p :info "elisp.link.successor-is-primary"))))
+
+(ert-deftest agent-repl-test-link-announcement-of-the-primarys-own-address-attaches-nothing ()
+  "An announcement naming the serving daemon itself stands no successor."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9001")
+      ;; Assert
+      (should-not (agent-repl-link-successor))
+      (should-not (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-test-link-late-refusal-after-promotion-leaves-the-next-handover-free ()
+  "Regression 2026-11-15: a refusal naming the promoted daemon never blocks its own handover.
+The outgoing daemon answered `transferring_away' after the promotion,
+naming the daemon that had become the primary; the next deploy's
+announcement must still attach its own successor."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((old (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (promoted (agent-repl-test-link--hand-over-to old "127.0.0.1:9100")))
+      (agent-repl-link-successor-at "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--announce-successor promoted "127.0.0.1:9200")
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
+                     "127.0.0.1:9200"))
+      (should-not (agent-repl-test-link--logged-p
+                   :error "elisp.link.successor-address-changed")))))
+
+(ert-deftest agent-repl-test-link-late-refusal-after-promotion-converges-on-the-next-daemon ()
+  "The next handover after a late refusal promotes the daemon it announced."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((old (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (promoted (agent-repl-test-link--hand-over-to old "127.0.0.1:9100")))
+      (agent-repl-link-successor-at "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--hand-over-to promoted "127.0.0.1:9200")
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-link-primary))
+                     "127.0.0.1:9200")))))
+
+(ert-deftest agent-repl-test-link-announcement-supersedes-an-unaccepted-successor ()
+  "The serving daemon's newer announcement replaces a dial that was never accepted."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-link-dial-successor "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9200")))
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address
+                      agent-repl-link--pending-successor)
+                     "127.0.0.1:9200")))))
+
+(ert-deftest agent-repl-test-link-superseded-successor-dial-is-closed ()
+  "The superseded dial's connection is closed, never left standing."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-link-dial-successor "127.0.0.1:9100")
+      (let ((stale agent-repl-link--pending-successor))
+        ;; Act
+        (agent-repl-test-link--push
+         conn (list :arm :shutdown-announced
+                    :value (agent-repl-test-link--announcement :address "127.0.0.1:9200")))
+        ;; Assert
+        (should-not (agent-repl-connect-connection-alive-p stale))))))
+
+(ert-deftest agent-repl-test-link-superseded-successor-is-logged ()
+  "The supersession names both addresses at INFO."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-link-dial-successor "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9200")))
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.successor-superseded old=\"127.0.0.1:9100\" new=\"127.0.0.1:9200\"")))))
+
+(ert-deftest agent-repl-test-link-superseding-successor-runs-the-handover-hook-on-acceptance ()
+  "The superseding successor's acceptance is the handover the hooks hear of."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-link-dial-successor "127.0.0.1:9100")
+      (add-hook 'agent-repl-link-handover-functions
+                (agent-repl-test-link--record-hook :handover))
+      ;; Act
+      (let ((successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9200")))
+        ;; Assert
+        (should (equal (cdr (assq :handover agent-repl-test-link--hooks))
+                       (list conn successor)))))))
+
+(ert-deftest agent-repl-test-link-superseded-dial-accepting-late-accepts-nothing ()
+  "A dropped dial's late acceptance never accepts the dial that replaced it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-link-dial-successor "127.0.0.1:9100")
+      (let ((stale agent-repl-link--pending-successor))
+        (agent-repl-test-link--push
+         conn (list :arm :shutdown-announced
+                    :value (agent-repl-test-link--announcement :address "127.0.0.1:9200")))
+        ;; Act
+        (agent-repl-test-link--accept stale)
+        ;; Assert
+        (should-not (agent-repl-link-successor))
+        (should (equal (agent-repl-connect-connection-address
+                        agent-repl-link--pending-successor)
+                       "127.0.0.1:9200"))
+        (should (agent-repl-test-link--logged-p
+                 :warn "elisp.link.successor-accept-without-pending"))))))
+
+(ert-deftest agent-repl-test-link-announcement-refuses-to-replace-an-accepted-successor ()
+  "An accepted successor at another address is kept and the change is an ERROR (audit-3 #8)."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9200")))
+      ;; Assert
+      (should (eq (agent-repl-link-successor) successor))
+      (should (agent-repl-test-link--logged-p
+               :error "elisp.link.successor-address-changed")))))
+
+(ert-deftest agent-repl-test-link-refusal-naming-another-address-keeps-the-pending-dial ()
+  "Only the serving daemon's announcement supersedes: a refusal's other address is refused (audit-3 #30)."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9200")
+    ;; Assert
+    (should (equal (agent-repl-connect-connection-address
+                    agent-repl-link--pending-successor)
+                   "127.0.0.1:9100"))
+    (should (agent-repl-test-link--logged-p
+             :error "elisp.link.successor-address-changed"))))
+
+(ert-deftest agent-repl-test-link-successor-stream-cancel-drops-the-successor ()
+  "A cancelled successor stream leaves no closed connection recorded as the successor."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      ;; Act
+      (agent-repl-test-link--close (agent-repl-link-successor) '(:cancelled))
+      ;; Assert
+      (should-not (agent-repl-link-successor))
+      (should (agent-repl-test-link--logged-p :log "elisp.link.successor-stream-cancelled")))))

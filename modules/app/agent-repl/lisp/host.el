@@ -2314,7 +2314,10 @@ handover.  Its `transferred' push says which (`:handover-page'):
 
 (defun agent-repl-host--redial-successor (ws address)
   "Return the successor connection at ADDRESS for WS, dialing it if needed.
-A successor already standing at ADDRESS is returned as is.  Otherwise the
+A successor already standing at ADDRESS is returned as is, and so is the
+live primary when ADDRESS is its own: a refusal the outgoing daemon
+answered after the handover completed names the daemon that serves Emacs
+now, so WS is adopted there and nothing is dialed.  Otherwise the
 dial is made through `agent-repl-link-dial-successor', which is idempotent
 for the matching address; when a successor is standing at a DIFFERENT
 address DAEMON-LINK'S GUARD WINS (audit-3 #30 ruling) — it logs

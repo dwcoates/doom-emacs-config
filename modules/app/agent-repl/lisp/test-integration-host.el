@@ -1192,6 +1192,7 @@ actually pins IT."
 (declare-function agent-repl-host-stream "host")
 (declare-function agent-repl-host-handle-refusal "host")
 (declare-function agent-repl-link-successor "daemon-link")
+(declare-function agent-repl-link-successor-pending-p "daemon-link")
 (declare-function agent-repl-link-dial-successor "daemon-link")
 (declare-function agent-repl-connect-connection-address "connect")
 (declare-function agent-repl--ws-get "workspace")
@@ -2645,6 +2646,55 @@ adopts onto a daemon that has not proven it is listening."
                successor "host" (plist-get ref :id)))
           (ignore-errors
             (agent-repl-itest--release-gate successor "WatchDaemon")))))))
+
+;;;; ---- A refusal naming the daemon that already serves Emacs ----
+;;
+;; Regression, 2026-11-15: the outgoing daemon answered a per-workspace rpc
+;; with `transferring_away' AFTER the handover completed, naming the daemon
+;; that had just become the primary.  The link dialed the primary's own
+;; daemon as a successor of itself, that successor was never ended, and the
+;; next deploy's announcement hit `elisp.link.successor-address-changed'.
+
+(defmacro agent-repl-itest-host--with-refusal-naming-the-primary (primary &rest body)
+  "Stand the link on PRIMARY, select through a refusal naming PRIMARY, then BODY.
+BODY runs once the link has answered the redial with the primary."
+  (declare (indent 1) (debug (symbolp body)))
+  `(agent-repl-itest-host--with-link-and-subscription ,primary ref
+     (ignore ref)
+     (agent-repl-itest--script
+      ,primary "SelectWorkspace"
+      `((error . ((transferringAway
+                   . ((address . ,(agent-repl-itest-daemon-address ,primary))))))))
+     (agent-repl-host-select agent-repl-itest-host--ws)
+     (agent-repl-itest--await-log ,primary "elisp.link.successor-at-primary" "info")
+     ,@body))
+
+(ert-deftest agent-repl-itest-host-refusal-naming-the-primary-dials-no-successor ()
+  "The primary's own address stands no second watch and adopts on the primary."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-refusal-naming-the-primary primary
+      ;; Assert.
+      (agent-repl-itest--await-call primary "AdoptHostWorkspace")
+      (should (= 1 (length (agent-repl-itest--subscribers primary "daemon"))))
+      (should-not (agent-repl-link-successor))
+      (should-not (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-itest-host-refusal-naming-the-primary-leaves-the-next-handover-free ()
+  "The next announcement still attaches its successor: no stale successor blocks it."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-refusal-naming-the-primary primary
+      (agent-repl-itest--with-second-daemon primary successor
+        ;; Act.
+        (agent-repl-itest-host--announce
+         primary (agent-repl-itest-daemon-address successor))
+        ;; Assert.
+        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
+                                      "the announced successor to be ACCEPTED")
+        (should (equal (agent-repl-itest-daemon-address successor)
+                       (agent-repl-connect-connection-address
+                        (agent-repl-link-successor))))
+        (should-not (agent-repl-itest--logged-p
+                     primary "elisp.link.successor-address-changed"))))))
 
 ;;;; ---- Registering an existing directory (`SPC TAB p') ----
 

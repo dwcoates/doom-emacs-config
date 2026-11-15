@@ -316,17 +316,29 @@ worth an ERROR rather than an improvised reconnect."
 
 (defun agent-repl-link-successor-at (address)
   "Return the ACCEPTED successor connection at ADDRESS, dialing it if needed.
-A successor already standing at ADDRESS is returned as is; otherwise the
+The live primary is returned when it stands at ADDRESS: the handover that
+named it is over, and the daemon it named serves Emacs already.  A
+successor already standing at ADDRESS is returned as is; otherwise the
 dial goes through `agent-repl-link-dial-successor', which is idempotent
 for the matching address and whose guard wins when a successor stands at
 a DIFFERENT address.  Answers nil while the dial is not accepted yet --
 the caller then waits for acceptance (`agent-repl-link-on-successor-accepted')
 rather than sending anything to an unproven daemon."
-  (let ((standing (agent-repl-link-successor)))
-    (if (and standing
-             (equal address (agent-repl-connect-connection-address standing)))
-        standing
-      (agent-repl-link-dial-successor address))))
+  (let ((standing (agent-repl-link-successor))
+        (live (agent-repl-link-live)))
+    (cond
+     ;; THE DAEMON AT ADDRESS ALREADY SERVES THIS EMACS: a refusal the
+     ;; outgoing daemon answered after the handover completed names the
+     ;; daemon that is the primary now, and the primary is what the caller
+     ;; acts on -- never a second connection recorded as its own successor.
+     ((and live (equal address (agent-repl-connect-connection-address live)))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                        "elisp.link.successor-at-primary address=%S" address)
+      live)
+     ((and standing
+           (equal address (agent-repl-connect-connection-address standing)))
+      standing)
+     (t (agent-repl-link-dial-successor address)))))
 
 (defun agent-repl-link-on-successor-accepted (fn)
   "Call FN with the successor's connection once its `WatchDaemon' is ACCEPTED.
@@ -727,12 +739,14 @@ the stream\='s last frame was the planned ending
       ;; owns whatever it has not transferred, so the link is not down —
       ;; but the handover cannot complete, and host.el must not adopt onto
       ;; a corpse.
-      (if (eq kind :cancelled)
-          (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-cancelled")
-        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-lost outcome=%S" outcome)
-        (let ((successor agent-repl-link--successor))
-          (setq agent-repl-link--successor nil
-                agent-repl-link--successor-stream nil)
+      ;; Either way the successor is gone: a closed connection is never
+      ;; left recorded as the daemon the next handover is guarded against.
+      (let ((successor agent-repl-link--successor))
+        (setq agent-repl-link--successor nil
+              agent-repl-link--successor-stream nil)
+        (if (eq kind :cancelled)
+            (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-cancelled")
+          (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-stream-lost outcome=%S" outcome)
           (agent-repl-connect-close successor))))
      ((not (eq conn agent-repl-link--primary))
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.stale-stream-close outcome=%S" outcome))
@@ -868,7 +882,7 @@ window from the announced instants."
         (outage (or (plist-get announcement :expected-outage-ms) 0))
         (minted (or (plist-get announcement :minted-at-ms) 0)))
     (if address
-        (agent-repl-link--attach-successor conn address cause)
+        (agent-repl-link--attach-successor conn address cause t)
       (setq agent-repl-link--quiet-until-ms (+ minted outage)
             agent-repl-link--bounce-cause cause)
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
@@ -877,32 +891,70 @@ window from the announced instants."
                         agent-repl-link--quiet-until-ms)
       (agent-repl-link--refresh-indicator))))
 
-(defun agent-repl-link--attach-successor (old address cause)
+(defun agent-repl-link--attach-successor (old address cause &optional announced)
   "Dual-attach to the successor daemon at ADDRESS announced on OLD.
 The old connection is KEPT: until each workspace is transferred it is the
 daemon still serving it.  Re-announcements are idempotent — an already
 attached successor at the same address is a no-op, never a second
-connection."
-  (let ((attached (or agent-repl-link--successor agent-repl-link--pending-successor)))
+connection.  ANNOUNCED non-nil says ADDRESS rode a `shutdown_announced'
+on OLD\='s own stream rather than a per-workspace refusal.
+
+A SUCCESSOR IS NEVER THE PRIMARY\='S OWN DAEMON.  Regression, 2026-11-15:
+a `transferring_away' the outgoing daemon answered after the handover
+completed named the daemon just promoted, the link dialed it as a
+successor of itself, and that successor -- a handover no daemon would
+ever end -- refused the next deploy\='s real one, stranding the link on a
+dead daemon.  An ADDRESS the live primary stands on attaches nothing.
+
+THE SERVING DAEMON\='S ANNOUNCEMENT IS THE LATEST WORD.  An UNACCEPTED
+successor at another address is superseded by it: the dial is dropped and
+ADDRESS dialed instead.  An ACCEPTED one at another address is refused
+loudly (audit-3 #8), as is any changed address a refusal names (audit-3
+#30): workspaces may already stand on it."
+  (let ((attached (or agent-repl-link--successor agent-repl-link--pending-successor))
+        (live (agent-repl-link-live)))
     (cond
+     ((and live (equal address (agent-repl-connect-connection-address live)))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address=%S announced=%S"
+                        address (and announced t)))
      ((and attached
            (equal address (agent-repl-connect-connection-address attached)))
       (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-already-attached address=%S" address))
+     ((and announced
+           (eq attached agent-repl-link--pending-successor)
+           (eq old agent-repl-link--primary))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-superseded old=%S new=%S"
+                        (agent-repl-connect-connection-address attached) address)
+      (agent-repl-link--drop-pending-successor)
+      (agent-repl-link--dial-successor old address cause))
      (attached
       (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-address-changed old=%S new=%S"
                          (agent-repl-connect-connection-address attached)
                          address))
-     (t
-      (let ((opened (agent-repl-link--open
-                     address
-                     (lambda () (agent-repl-link--accept-successor old address cause)))))
-        (if (null opened)
-            (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-attach-failed address=%S cause=%S"
-                               address (plist-get cause :arm))
-          (setq agent-repl-link--pending-successor (car opened)
-                agent-repl-link--pending-successor-stream (cdr opened))
-          (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-pending address=%S cause=%S"
-                            address (plist-get cause :arm))))))))
+     (t (agent-repl-link--dial-successor old address cause)))))
+
+(defun agent-repl-link--drop-pending-successor ()
+  "Close the unaccepted successor dial and forget it.
+Nothing was adopted onto it, by construction, so nothing else is owed."
+  (let ((pending agent-repl-link--pending-successor))
+    (setq agent-repl-link--pending-successor nil
+          agent-repl-link--pending-successor-stream nil)
+    (agent-repl-connect-close pending)))
+
+(defun agent-repl-link--dial-successor (old address cause)
+  "Stand an unaccepted successor dial at ADDRESS, announced on OLD with CAUSE."
+  (let* (conn
+         (opened (agent-repl-link--open
+                  address
+                  (lambda () (agent-repl-link--accept-successor conn old address cause)))))
+    (setq conn (car opened))
+    (if (null opened)
+        (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-attach-failed address=%S cause=%S"
+                           address (plist-get cause :arm))
+      (setq agent-repl-link--pending-successor (car opened)
+            agent-repl-link--pending-successor-stream (cdr opened))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-pending address=%S cause=%S"
+                        address (plist-get cause :arm)))))
 
 (defun agent-repl-link-dial-successor (address)
   "Dial the successor daemon at ADDRESS outside a shutdown announcement.
@@ -917,9 +969,11 @@ which is still nil while the dial awaits acceptance."
   (agent-repl-link--attach-successor (agent-repl-link-primary) address nil)
   (agent-repl-link-successor))
 
-(defun agent-repl-link--accept-successor (old address cause)
-  "Record the successor at ADDRESS as ADOPTABLE: it ACCEPTED its watch.
-Announced on OLD with CAUSE.  Until this runs `agent-repl-link-successor'
+(defun agent-repl-link--accept-successor (conn old address cause)
+  "Record the successor CONN at ADDRESS as ADOPTABLE: it ACCEPTED its watch.
+Announced on OLD with CAUSE.  CONN is the dial that accepted, so a dial
+already dropped (superseded, or dead) can never accept the one that
+replaced it.  Until this runs `agent-repl-link-successor'
 answers nil, so host.el cannot send an adopt to a daemon that has not
 proven it is listening; from here the handover hooks run with both
 connections.  When the old daemon\='s stream already ended
@@ -927,9 +981,11 @@ connections.  When the old daemon\='s stream already ended
 the successor is promoted at once: the order in which Emacs reads the
 old end and this acceptance changes nothing a consumer sees.  A successor
 dialed while the link was down (OLD nil) is the link itself now."
-  (if (null agent-repl-link--pending-successor)
-      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accept-without-pending address=%S"
-                        address)
+  (if (not (and conn (eq conn agent-repl-link--pending-successor)))
+      (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-accept-without-pending address=%S pending=%S"
+                        address (and agent-repl-link--pending-successor
+                                     (agent-repl-connect-connection-address
+                                      agent-repl-link--pending-successor)))
     (setq agent-repl-link--successor agent-repl-link--pending-successor
           agent-repl-link--successor-stream agent-repl-link--pending-successor-stream
           agent-repl-link--pending-successor nil
