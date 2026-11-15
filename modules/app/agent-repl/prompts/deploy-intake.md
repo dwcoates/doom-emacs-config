@@ -9,4 +9,4 @@ What the daemon found in every system's logs since the deploy began, grouped by 
 
 Also read `~/.claude/skills/agent-repl-runtime/run.sh --doctor`: a fault it reports is a problem of this deploy only when its records are NEW above.
 
-Decide this deploy in this turn, as your session's rules say: approve, escalate, or dispatch the problems this deploy caused. File each SEEN BEFORE group first, unless an open workspace already works on it.
+Decide this deploy in this turn, as your session's rules say: approve, escalate, or dispatch the problems this deploy caused. First send each SEEN BEFORE group, with its records, to `merge-queue-stall-triage`, and name it in your decision's summary.

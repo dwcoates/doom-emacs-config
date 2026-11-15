@@ -42,6 +42,6 @@ JSON
 ### File what this deploy did not cause
 
 - A SEEN BEFORE group, or any defect that predates the deploy, never holds the queue.
-- File each one before deciding, unless an open workspace already works on it (`agent-repld workspace find -text "<words>"`).
-  - File it as a one-shot that lands through the queue: `agent-repld workspace create -context fresh -one-shot -prompt "<the defect and its records>"`.
+- Send each one, with its records, to `merge-queue-stall-triage`, which dispatches its fix through the queue (owner ruling, 2026-11-14): `agent-repld workspace prompt merge-queue-stall-triage "<the defect and its records>"`.
+  - Name each one in the decision's summary too.
 - Then decide the deploy on what remains.
