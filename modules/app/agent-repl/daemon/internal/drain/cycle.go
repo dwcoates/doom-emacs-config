@@ -52,6 +52,26 @@ var visitReason = standDownReason{
 	life:   shimlife.StandDownSettingsVisit,
 }
 
+// A SESSION WHOSE CACHE GOES COLD IS PARKED AT ONCE (owner ruling,
+// 2026-11-15). A cold cache owes no keep-alive (cachelapse.Keeper), so the
+// keep-alive cycle never comes round to park it, and it stayed up until the
+// idle sweep's cutoff: 76 of 87 live sessions on 2026-11-14 were marked cold
+// when a Wi-Fi outage lapsed their beats, and stayed live all night. The cache
+// keeper asks for this stand-down (ColdDown) the moment it knows the cache
+// cold, under the keep-alive cycle's rules, a merge-queued workspace
+// included; the next prompt revives the park.
+
+// opCold is the operation a cold cache's stand-down records under.
+const opCold = "daemon.drain.cold_park"
+
+// coldReason is a cold cache's stand-down reason.
+var coldReason = standDownReason{
+	op:     opCold,
+	detail: "parked the moment its cache was known cold; the transcript was left as it stood",
+	done:   "parked an idle session whose cache went cold",
+	life:   shimlife.StandDownCacheCold,
+}
+
 // cycleState is one pending cycle stand-down's bookkeeping, under c.mu.
 type cycleState struct {
 	// beat is the instant a real turn since which keeps the session up: the
@@ -84,6 +104,12 @@ func (c *controller) CycleDown(ws ids.WorkspaceID, beat time.Time) {
 // started it at SINCE, the user having switched away. It returns at once.
 func (c *controller) VisitDown(ws ids.WorkspaceID, since time.Time) {
 	c.askDown(ws, since, visitReason)
+}
+
+// ColdDown asks for the stand-down of WS's session, its cache having been
+// known cold at SINCE. It returns at once.
+func (c *controller) ColdDown(ws ids.WorkspaceID, since time.Time) {
+	c.askDown(ws, since, coldReason)
 }
 
 // askDown asks for WS's stand-down for REASON unless a real turn has run
