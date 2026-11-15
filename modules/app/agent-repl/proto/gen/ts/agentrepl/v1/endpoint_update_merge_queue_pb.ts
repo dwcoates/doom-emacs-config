@@ -154,8 +154,7 @@ export type UpdateMergeQueuePause = Message<"agentrepl.v1.UpdateMergeQueuePause"
    * the holder's end-of-turn resume. A pause without it -- one the owner
    * asked for, to save power or to look at the queue -- stands until it is
    * resumed explicitly, whoever made it (2026-11-14: the let-through resumed
-   * a pause the owner had asked for, and the queue ran overnight). A hard
-   * stop is never made to land; the two are refused together. (Added
+   * a pause the owner had asked for, and the queue ran overnight). (Added
    * 2026-11-15.)
    *
    * @generated from field: bool to_land = 3;
