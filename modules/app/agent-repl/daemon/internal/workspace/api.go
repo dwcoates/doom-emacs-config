@@ -365,6 +365,13 @@ type Verbs interface {
 	// does not hold it: agent-repl is always a known project. An empty DIR
 	// registers nothing. The boot calls it before EnsureMainWorktrees.
 	EnsureHomeRepository(ctx context.Context, dir string) error
+	// FinishOwedNukes finishes every nuke that stopped part way, leaving one
+	// that fails again owed. The boot calls it before it reads the registry.
+	FinishOwedNukes(ctx context.Context) error
+	// TakeOwedPlacementNote answers the subsection placement note a
+	// prompt-less root's first prompt owes, and the restore that owes it
+	// again when the queue refuses the prompt (prompthandler.OwedPlacements).
+	TakeOwedPlacementNote(ctx context.Context, ws ids.WorkspaceID) (string, bool, func(), error)
 	// OpenThreads has the chat service open every chat thread, naming each
 	// after its first question and abbreviating its questions; the threads
 	// open on their own goroutine.

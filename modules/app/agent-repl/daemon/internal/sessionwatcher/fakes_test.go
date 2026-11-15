@@ -2270,10 +2270,13 @@ func workValues(ids []*conversationv1.DetachedWorkId) []string {
 	return out
 }
 
-// assertPerAgentOrder asserts the feed saw one agent's activities in the order
-// they were sent, and that each frame's feed call is immediately followed by
-// its footer call — nothing from another stream landed between the two, which
-// is what serialization buys the resolvers.
+// assertPerAgentOrder asserts every view saw one agent's activities in the
+// order they were sent. The feed and the footer are told under the watcher's
+// lock, so each frame's feed call is immediately followed by its footer call:
+// nothing from another stream lands between the two. The roster and the
+// topbar are told once the lock is released (viewedges.go), so another
+// stream's frame may land before them, but each still sees one agent's frames
+// in the order sent.
 func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 	t.Helper()
 	seen := 0
@@ -2288,16 +2291,25 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 		if i+1 >= len(got) || got[i+1].name() != "footer.OnActivity" || got[i+1].detail != want {
 			t.Fatalf("%s activity %q was interrupted between the feed and the footer", agent, want)
 		}
-		if i+2 >= len(got) || got[i+2].name() != "sidebar.OnActivity" || got[i+2].detail != want {
-			t.Fatalf("%s activity %q was interrupted between the footer and the roster", agent, want)
-		}
-		if i+3 >= len(got) || got[i+3].name() != "topbar.OnActivity" || got[i+3].detail != want {
-			t.Fatalf("%s activity %q was interrupted between the roster and the topbar", agent, want)
-		}
 		seen++
 	}
 	if seen != frames {
 		t.Fatalf("the feed saw %d of %s's %d activities", seen, agent, frames)
+	}
+	for _, view := range []string{"sidebar.OnActivity", "topbar.OnActivity"} {
+		n := 0
+		for _, e := range got {
+			if e.name() != view || e.agent != agent {
+				continue
+			}
+			if want := agent + "-" + itoa(n); e.detail != want {
+				t.Fatalf("%s took %s activity %d = %q, want %q", view, agent, n, e.detail, want)
+			}
+			n++
+		}
+		if n != frames {
+			t.Fatalf("%s took %d of %s's %d activities", view, n, agent, frames)
+		}
 	}
 }
 

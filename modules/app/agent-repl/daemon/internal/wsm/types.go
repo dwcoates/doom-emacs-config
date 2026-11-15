@@ -91,6 +91,10 @@ type Workspace struct {
 	// closed before it was the other conversation's, so CacheClock leaves it
 	// out.
 	ConversationBoundAt *time.Time
+	// NukeOwedAt is when a nuke of the workspace began, set while one that
+	// stopped part way is owed (owednuke.go); nil otherwise. The boot finishes
+	// it, and nothing restores the worktree of a workspace that owes one.
+	NukeOwedAt *time.Time
 	// CacheColdTurnAt is the turn clock (LastTurnEndedAt) at which the
 	// workspace's prompt cache was last known cold (cachecold.go): its cold
 	// gate was raised or answered, or its shim judged the cache lapsed. Nil

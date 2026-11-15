@@ -2607,6 +2607,205 @@ func TestCreateClosesARootsFirstMessageWithTheSubsectionPlacementNote(t *testing
 	}
 }
 
+// ---- A prompt-less root's owed placement note ------------------------------
+
+func TestAPromptlessCreateOwesThePlacementNoteOnlyForARoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		asChild  bool
+		wantOwed bool
+	}{
+		{name: "a root is owed the note", wantOwed: true},
+		{name: "a child is never asked to file itself", asChild: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := standardSpec(t, f)
+			spec.InitialPrompt = ""
+			if tt.asChild {
+				parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
+				id := parent.ID
+				spec.Parent = &id
+			}
+
+			// Act.
+			ws, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if got := f.db.owedPlacements[ws.ID]; got != tt.wantOwed {
+				t.Fatalf("placement note owed = %v, want %v", got, tt.wantOwed)
+			}
+			if len(f.queue.submissions) != 0 {
+				t.Fatalf("submitted %d prompts, want none for a prompt-less create", len(f.queue.submissions))
+			}
+		})
+	}
+}
+
+func TestAPromptlessCreateThatCannotOweThePlacementNoteFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.owePlacementErr = errors.New("the state database is locked")
+	spec := standardSpec(t, f)
+	spec.InitialPrompt = ""
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, f.db.owePlacementErr) {
+		t.Fatalf("Create = %v, want the failed mark", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSubsectionPlacement, Message: "could not record the placement note a prompt-less workspace's first prompt owes"}); !ok {
+		t.Fatalf("records = %+v, want the failed mark at ERROR", f.log.logger.Records())
+	}
+}
+
+// owingPlacement registers a root workspace whose next prompt owes the
+// placement note, in the repository standardSpec creates in.
+func owingPlacement(t *testing.T, f *fixture) wsm.Workspace {
+	t.Helper()
+	spec := standardSpec(t, f)
+	ws := f.workspaceInRepo(t, "owing", spec.RepoDir)
+	f.db.owedPlacements = map[ids.WorkspaceID]bool{ws.ID: true}
+	return ws
+}
+
+func TestTakeOwedPlacementNote(t *testing.T) {
+	sub := wsm.SubsectionID("sub-1")
+	tests := []struct {
+		name     string
+		arrange  func(t *testing.T, f *fixture, ws wsm.Workspace)
+		wantNote string
+	}{
+		{name: "a repository with a subsection asks for the note", arrange: func(t *testing.T, f *fixture, _ wsm.Workspace) {
+			withSubsection(f)
+		}, wantNote: prompts.Wrap("\n\nPLACE")},
+		{name: "a repository with nowhere to file it asks nothing", arrange: func(*testing.T, *fixture, wsm.Workspace) {}},
+		{name: "a workspace filed before its first prompt asks nothing", arrange: func(t *testing.T, f *fixture, ws wsm.Workspace) {
+			withSubsection(f)
+			ws.Subsection = &sub
+			f.db.with(ws)
+		}},
+		{name: "a workspace given a parent before its first prompt asks nothing", arrange: func(t *testing.T, f *fixture, ws wsm.Workspace) {
+			withSubsection(f)
+			parent := ids.WorkspaceID("parent")
+			ws.Parent = &parent
+			f.db.with(ws)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			placementBrief(f)
+			ws := owingPlacement(t, f)
+			tt.arrange(t, f, ws)
+
+			// Act.
+			note, owed, _, err := f.verbs.TakeOwedPlacementNote(context.Background(), ws.ID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("TakeOwedPlacementNote: %v", err)
+			}
+			if note != tt.wantNote || owed != (tt.wantNote != "") {
+				t.Fatalf("TakeOwedPlacementNote = (%q, %v), want (%q, %v)", note, owed, tt.wantNote, tt.wantNote != "")
+			}
+			if f.db.owedPlacements[ws.ID] {
+				t.Fatal("the owed mark was not taken")
+			}
+		})
+	}
+}
+
+func TestTakeOwedPlacementNoteAnswersNothingForAWorkspaceThatOwesNone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+	withSubsection(f)
+	ws := f.workspaceInRepo(t, "owes-none", spec.RepoDir)
+
+	// Act.
+	note, owed, _, err := f.verbs.TakeOwedPlacementNote(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil || owed || note != "" {
+		t.Fatalf("TakeOwedPlacementNote = (%q, %v, %v), want nothing owed", note, owed, err)
+	}
+}
+
+func TestTakeOwedPlacementNoteRestoreOwesItAgain(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	ws := owingPlacement(t, f)
+	withSubsection(f)
+	_, _, restore, err := f.verbs.TakeOwedPlacementNote(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("TakeOwedPlacementNote: %v", err)
+	}
+
+	// Act.
+	restore()
+
+	// Assert.
+	if !f.db.owedPlacements[ws.ID] {
+		t.Fatal("the restore did not owe the note again")
+	}
+}
+
+func TestTakeOwedPlacementNoteFailures(t *testing.T) {
+	tests := []struct {
+		name        string
+		arrange     func(f *fixture)
+		wantMessage string
+		wantOwed    bool
+	}{
+		{
+			name:        "the take fails",
+			arrange:     func(f *fixture) { f.db.takePlacementErr = errors.New("the state database is locked") },
+			wantMessage: "could not take the placement note the workspace's prompt owes; the prompt was not forwarded",
+			wantOwed:    true,
+		},
+		{
+			name:        "the brief will not load",
+			arrange:     func(f *fixture) { withSubsection(f); delete(f.briefs, BriefSubsectionPlacement) },
+			wantMessage: "could not read a create note's brief",
+			wantOwed:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			placementBrief(f)
+			ws := owingPlacement(t, f)
+			tt.arrange(f)
+
+			// Act.
+			_, owed, _, err := f.verbs.TakeOwedPlacementNote(context.Background(), ws.ID)
+
+			// Assert.
+			if err == nil || owed {
+				t.Fatalf("TakeOwedPlacementNote = (%v, %v), want a failure", owed, err)
+			}
+			if f.db.owedPlacements[ws.ID] != tt.wantOwed {
+				t.Fatalf("owed after the failure = %v, want %v", f.db.owedPlacements[ws.ID], tt.wantOwed)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: tt.wantMessage}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), tt.wantMessage)
+			}
+		})
+	}
+}
+
 // ---- A new workspace's summary note ----------------------------------------
 
 func TestCreateClosesTheFirstMessageWithTheSummaryNoteAfterThePlacementNote(t *testing.T) {

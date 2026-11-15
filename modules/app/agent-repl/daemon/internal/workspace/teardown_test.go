@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -664,5 +666,129 @@ func TestNukeOfAThreadWhoseDirectoryWillNotGoKeepsTheRecord(t *testing.T) {
 	}
 	if !hasRecord(f, "error", opNuke) {
 		t.Fatal("no error record for the directory that would not go")
+	}
+}
+
+// TestNukeOwesItselfBeforeItDestroysAnything pins the mark a stopped nuke is
+// finished from: it is recorded before git destroys the worktree.
+func TestNukeOwesItselfBeforeItDestroysAnything(t *testing.T) {
+	// Arrange: git fails, so the nuke stops part way.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.git.nukeErr = errors.New("fatal: unable to remove the aside copy")
+
+	// Act.
+	err := f.verbs.Nuke(context.Background(), "w1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Nuke() = nil error, want the git failure surfaced")
+	}
+	if !slices.Equal(f.db.owedNukes, []ids.WorkspaceID{"w1"}) {
+		t.Fatalf("owed nukes = %v, want w1", f.db.owedNukes)
+	}
+	if f.db.workspaces["w1"].NukeOwedAt == nil {
+		t.Fatal("the stopped nuke's record carries no owed mark")
+	}
+}
+
+// TestNukeDestroysNothingWhenItCannotOweItself pins the mark's error path: a
+// nuke that cannot record itself owed destroys nothing, forgets nothing, and
+// records why at ERROR.
+func TestNukeDestroysNothingWhenItCannotOweItself(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.oweNukeErr = errors.New("the database is gone")
+
+	// Act.
+	err := f.verbs.Nuke(context.Background(), "w1")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the database is gone") {
+		t.Fatalf("Nuke() = %v, want the failed mark surfaced", err)
+	}
+	if len(f.git.nuked) != 0 || len(f.db.forgotten) != 0 {
+		t.Fatalf("nuked = %+v, forgotten = %v, want nothing destroyed", f.git.nuked, f.db.forgotten)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opNuke, Message: "could not record the nuke as owed; nothing was destroyed"}); !ok {
+		t.Fatalf("records = %+v, want the failed mark at ERROR", f.log.logger.Records())
+	}
+}
+
+// TestFinishOwedNukes covers the boot's sweep: an owed nuke is finished, one
+// that fails again stays owed with its ERROR, and a workspace that owes none
+// is left alone.
+func TestFinishOwedNukes(t *testing.T) {
+	owed := time.Unix(5, 0)
+	tests := []struct {
+		name          string
+		gitErr        error
+		wantForgotten []ids.WorkspaceID
+		wantRecord    dlog.RecordQuery
+	}{
+		{
+			name:          "an owed nuke is finished",
+			wantForgotten: []ids.WorkspaceID{"w-owed"},
+			wantRecord:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opNuke, Message: "finished a nuke that had stopped part way"},
+		},
+		{
+			name:       "a nuke that fails again stays owed",
+			gitErr:     errors.New("fatal: unable to remove the aside copy"),
+			wantRecord: dlog.RecordQuery{Level: dlog.LevelError, Operation: opNuke, Message: "an owed nuke could not be finished; it stays owed for the next boot"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w-clean", t.TempDir())
+			ws := f.workspace("w-owed", t.TempDir())
+			ws.NukeOwedAt = &owed
+			f.db.with(ws)
+			f.git.nukeErr = tt.gitErr
+
+			// Act.
+			err := f.verbs.(*verbs).FinishOwedNukes(context.Background())
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("FinishOwedNukes: %v", err)
+			}
+			if !slices.Equal(f.db.forgotten, tt.wantForgotten) {
+				t.Fatalf("forgotten = %v, want %v", f.db.forgotten, tt.wantForgotten)
+			}
+			for _, n := range f.git.nuked {
+				if n.WorktreeDir == f.db.workspaces["w-clean"].Dir {
+					t.Fatal("a workspace that owes no nuke was nuked")
+				}
+			}
+			rec, ok := dlog.FindRecord(f.log.logger.Records(), tt.wantRecord)
+			if !ok {
+				t.Fatalf("records = %+v, want %+v", f.log.logger.Records(), tt.wantRecord)
+			}
+			if rec.Context[dlog.KeyWorkspaceID] != "w-owed" {
+				t.Fatalf("record = %+v, want it naming w-owed", rec)
+			}
+		})
+	}
+}
+
+// TestFinishOwedNukesSurfacesAnUnreadableRegistry pins the sweep's one
+// returned failure, recorded at ERROR.
+func TestFinishOwedNukesSurfacesAnUnreadableRegistry(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.listWorkspacesErr = errors.New("the database is gone")
+
+	// Act.
+	err := f.verbs.(*verbs).FinishOwedNukes(context.Background())
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the database is gone") {
+		t.Fatalf("FinishOwedNukes = %v, want the list failure", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opNuke, Message: "could not list the workspaces to finish the owed nukes"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
 	}
 }

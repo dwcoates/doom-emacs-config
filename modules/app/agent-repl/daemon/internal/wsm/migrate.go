@@ -261,6 +261,12 @@ var migrations = []migration{
 	{To: 138, Name: "merge_queue_mediation_roles", Kind: MigrationAdditive, DDL: mediationRolesDDL},
 	// IT IS ADDITIVE: see remediationFinishesDDL.
 	{To: 139, Name: "deploy_remediation_finishes", Kind: MigrationAdditive, DDL: remediationFinishesDDL},
+	// IT IS BREAKING: see retiredColumnsDDL.
+	{To: 140, Name: "retired_columns_dropped", Kind: MigrationBreaking, DDL: retiredColumnsDDL},
+	// IT IS BREAKING: see forkLineageByConversationDDL.
+	{To: 141, Name: "fork_lineage_by_conversation", Kind: MigrationBreaking, DDL: forkLineageByConversationDDL},
+	{To: 142, Name: "owed_nukes", Kind: MigrationAdditive, DDL: owedNukeDDL},
+	{To: 143, Name: "owed_placement_notes", Kind: MigrationAdditive, DDL: owedPlacementNotesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

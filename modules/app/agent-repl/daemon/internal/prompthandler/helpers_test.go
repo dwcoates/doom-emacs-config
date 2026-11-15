@@ -283,6 +283,7 @@ type harness struct {
 	feed  *fakeFeed
 	asks  *fakeAsks
 	owed  *fakeOwed
+	place *fakePlacements
 
 	// asked records every panel command the source was asked for.
 	askedMu  sync.Mutex
@@ -317,6 +318,31 @@ func (o *fakeOwed) OwedNote(_ context.Context, ws ids.WorkspaceID) (string, bool
 		return "", false, o.err
 	}
 	return o.note, o.note != "", nil
+}
+
+// fakePlacements is the owed placement notes: it answers `note` as owed
+// (empty answers none) or `err`, records every workspace asked about, and
+// counts the restores of a taken note.
+type fakePlacements struct {
+	mu       sync.Mutex
+	note     string
+	err      error
+	asked    []ids.WorkspaceID
+	restored int
+}
+
+func (p *fakePlacements) TakeOwedPlacementNote(_ context.Context, ws ids.WorkspaceID) (string, bool, func(), error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.asked = append(p.asked, ws)
+	if p.err != nil {
+		return "", false, func() {}, p.err
+	}
+	return p.note, p.note != "", func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.restored++
+	}, nil
 }
 
 // fakeAsks is the standing-ask answerer: it answers `answered` and `err`, and
@@ -378,6 +404,7 @@ func newHarness(t *testing.T) *harness {
 		feed:   &fakeFeed{},
 		asks:   &fakeAsks{},
 		owed:   &fakeOwed{},
+		place:  &fakePlacements{},
 		minted: "minted-turn",
 		log:    dlog.NewTestSurfaces(),
 		panel: &agentreplv1.SubmitPromptCommandPanel{
@@ -390,6 +417,7 @@ func newHarness(t *testing.T) *harness {
 		Feed:       h.feed,
 		Asks:       h.asks,
 		Summaries:  h.owed,
+		Placements: h.place,
 		PromptsDir: contextSummaryBriefDir(t),
 		Panels: func(_ context.Context, _ ids.WorkspaceID, command conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 			h.askedMu.Lock()

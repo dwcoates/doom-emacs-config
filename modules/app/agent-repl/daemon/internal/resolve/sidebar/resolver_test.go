@@ -1,6 +1,7 @@
 package sidebar_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -935,5 +936,122 @@ func TestSetIncumbentArms(t *testing.T) {
 				t.Fatalf("revision %d -> %d, want a new roster = %v", before, roster.GetRevision(), tc.wantNewRevision)
 			}
 		})
+	}
+}
+
+// TestOnActivityRendersOnlyWhenItChangesTheRowsFacts pins OnActivity's
+// decline: a turn's first activity and the answer to a retried call change
+// the row's facts and are recorded; any other streamed frame declines, so it
+// is not recorded and renders nothing.
+func TestOnActivityRendersOnlyWhenItChangesTheRowsFacts(t *testing.T) {
+	tests := []struct {
+		name string
+		// before is what reached the row ahead of the frame under test.
+		before func(r sidebarResolver)
+		// frame is the activity under test, from the agent named.
+		agent      string
+		frame      *conversationv1.AgentActivity
+		wantRecord bool
+		wantStatus string
+	}{
+		{
+			name:       "the turn's first activity is taken",
+			before:     func(sidebarResolver) {},
+			agent:      "main",
+			frame:      prose(),
+			wantRecord: true,
+			wantStatus: "thinking",
+		},
+		{
+			name:       "a repeated activity declines",
+			before:     func(r sidebarResolver) { r.OnActivity(theWS, agent("main"), prose()) },
+			agent:      "main",
+			frame:      prose(),
+			wantRecord: false,
+			wantStatus: "thinking",
+		},
+		{
+			name: "a repeated activity answering the retried call is taken",
+			before: func(r sidebarResolver) {
+				r.OnActivity(theWS, agent("main"), prose())
+				r.OnApiError(theWS, agent("main"), apiRetry())
+			},
+			agent:      "main",
+			frame:      prose(),
+			wantRecord: true,
+			wantStatus: "thinking",
+		},
+		{
+			name: "a repeated activity leaving the retried call unanswered declines",
+			before: func(r sidebarResolver) {
+				r.OnActivity(theWS, agent("main"), prose())
+				r.OnApiError(theWS, agent("main"), apiRetry())
+			},
+			agent:      "sub-1",
+			frame:      prose(),
+			wantRecord: false,
+			wantStatus: "api_retrying",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetTurn(theWS, &footer.TurnStarted{At: epoch})
+			tt.before(r)
+			before := countOperation(r.surfaces.Records(), "daemon.sidebar.on_activity")
+
+			// Act.
+			r.OnActivity(theWS, agent(tt.agent), tt.frame)
+
+			// Assert.
+			recorded := countOperation(r.surfaces.Records(), "daemon.sidebar.on_activity") > before
+			if recorded != tt.wantRecord {
+				t.Fatalf("on_activity recorded = %v, want %v", recorded, tt.wantRecord)
+			}
+			if got := statusName(onlyRow(t, r)); got != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// countOperation counts RECORDS whose operation is OP.
+func countOperation(records []dlog.Record, op string) int {
+	n := 0
+	for _, rec := range records {
+		if rec.Operation == op {
+			n++
+		}
+	}
+	return n
+}
+
+// TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary pins
+// logFor for a landed workspace whose worktree was reaped: its records go to
+// the central sink naming it, and nothing records an invariant violation
+// (TestALateFactsRefusalIsOfferedAgainMidWork, 2026-11-13).
+func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *testing.T) {
+	// Arrange: the workspace's directory can host no sink.
+	r := arrange(t)
+	r.surfaces.BindWorkspaceIDs(func(string) (string, error) {
+		return "", errors.New("the worktree was reaped")
+	})
+
+	// Act: a fact that moves the row's status arm.
+	r.OnLink(theWS, shimclient.LinkConnected)
+
+	// Assert.
+	var routed bool
+	for _, rec := range r.surfaces.Records() {
+		if _, ok := rec.Context["invariant_violation"]; ok {
+			t.Fatalf("record %s carries an invariant violation: %+v", rec.Operation, rec.Context)
+		}
+		if rec.Operation == "daemon.sidebar.status_arm_changed" && rec.Context["workspace_id"] == string(theWS) && rec.Context[dlog.KeyUnroutableWorkspace] != nil {
+			routed = true
+		}
+	}
+	if !routed {
+		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", r.surfaces.Records())
 	}
 }

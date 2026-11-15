@@ -63,6 +63,8 @@ func newHandler(deps Deps) (*handler, error) {
 		return nil, fmt.Errorf("the prompt handler needs a standing-ask answerer")
 	case deps.Summaries == nil:
 		return nil, fmt.Errorf("the prompt handler needs the workspace summaries' keeper")
+	case deps.Placements == nil:
+		return nil, fmt.Errorf("the prompt handler needs the owed placement notes")
 	case deps.PromptsDir == "":
 		return nil, fmt.Errorf("the prompt handler needs the briefs' directory")
 	}
@@ -172,9 +174,18 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 	if err != nil {
 		return Outcome{}, err
 	}
-	said, restore, err := h.openWithContextSummary(ctx, ws, said, origin, sentBy, target, ask, log)
+	said, restorePlacement, err := h.askForOwedPlacement(ctx, ws, said, origin, sentBy, target, ask)
 	if err != nil {
 		return Outcome{}, err
+	}
+	said, restoreSummary, err := h.openWithContextSummary(ctx, ws, said, origin, sentBy, target, ask, log)
+	if err != nil {
+		restorePlacement()
+		return Outcome{}, err
+	}
+	restore := func() {
+		restoreSummary()
+		restorePlacement()
 	}
 	disposition, err := h.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: ws, Turn: turn, Said: said, Origin: origin, SentBy: sentBy, Target: target, Delivery: delivery, Ask: ask,
@@ -221,12 +232,35 @@ func (h *handler) askForOwedSummary(ctx context.Context, ws ids.WorkspaceID, sai
 	if err != nil || !owed {
 		return said, err
 	}
+	return withNoteBlock(said, note), nil
+}
+
+// askForOwedPlacement closes SAID with the note asking the workspace's agent
+// to file itself into a subsection, owed because it was created with no first
+// message to carry it (workspace.Verbs.TakeOwedPlacementNote). Only a prompt
+// that carries a workspace note asks (carriesWorkspaceNote). The note rides
+// as its own text block, wholly a meta span. RESTORE owes it again when the
+// queue refuses the prompt.
+func (h *handler) askForOwedPlacement(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, target *feedid.Ref, ask *wsm.ThreadAsk) (_ *conversationv1.UserSaid, restore func(), _ error) {
+	none := func() {}
+	if !carriesWorkspaceNote(said, origin, sentBy, target, ask) {
+		return said, none, nil
+	}
+	note, owed, restore, err := h.deps.Placements.TakeOwedPlacementNote(ctx, ws)
+	if err != nil || !owed {
+		return said, none, err
+	}
+	return withNoteBlock(said, note), restore, nil
+}
+
+// withNoteBlock answers SAID with NOTE appended as its own text block.
+func withNoteBlock(said *conversationv1.UserSaid, note string) *conversationv1.UserSaid {
 	blocks := make([]*conversationv1.UserContentBlock, 0, len(said.GetContent().GetBlocks())+1)
 	blocks = append(blocks, said.GetContent().GetBlocks()...)
 	blocks = append(blocks, &conversationv1.UserContentBlock{
 		Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: note}},
 	})
-	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}, nil
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: blocks}}
 }
 
 // openWithContextSummary opens SAID with the summary of the workspace's queue

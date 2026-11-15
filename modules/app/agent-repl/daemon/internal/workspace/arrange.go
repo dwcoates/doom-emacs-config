@@ -169,9 +169,9 @@ func (v *verbs) place(ctx context.Context, op string, ws []ids.WorkspaceID, into
 // one registry read every roster is drawn from.
 func (v *verbs) SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error) {
 	log := v.deps.Log.Global()
-	reg, ok := v.readRegistry(ctx, log, opSidebarArrangement)
-	if !ok {
-		return nil, errors.New("read the sidebar arrangement: the registry could not be read")
+	reg, err := v.readRegistry(ctx, log, opSidebarArrangement)
+	if err != nil {
+		return nil, fmt.Errorf("read the sidebar arrangement: %w", err)
 	}
 	out := sidebar.Arranged(reg, log)
 	log.Debug(opSidebarArrangement, "read the sidebar arrangement", dlog.Context{"repositories": len(out)})

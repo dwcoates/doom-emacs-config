@@ -153,21 +153,18 @@ func (r *resolver) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return 
 // workspace's OWN durable sink from the registry's directory; a fact for a
 // workspace the registry does not carry is an invariant violation, recorded as
 // one rather than written globally by default.
+//
+// A REGISTERED WORKSPACE WHOSE DIRECTORY CANNOT HOST A SINK IS ORDINARY: a
+// landed workspace keeps its registry row after its worktree is reaped, and
+// the roster renders it on. Its records go to the central sink naming it
+// (dlog.Surfaces.WorkspaceOrCentral, the surface for callers that render
+// every workspace the registry holds), and nothing about it is a violation.
 func (r *resolver) logFor(ws ids.WorkspaceID) dlog.Logger {
 	for _, rec := range r.state.reg.Workspaces {
 		if rec.ID != ws {
 			continue
 		}
-		log, err := r.log.Workspace(rec.Dir)
-		if err != nil {
-			return r.log.Global().With(dlog.Context{
-				"workspace_id":        string(ws),
-				"workspace_dir":       rec.Dir,
-				"invariant_violation": "the roster could not resolve a registered workspace's log sink",
-				"cause":               err.Error(),
-			})
-		}
-		return log.With(dlog.Context{"workspace_id": string(ws)})
+		return r.log.WorkspaceOrCentral(rec.Dir).With(dlog.Context{"workspace_id": string(ws)})
 	}
 	return r.log.Global().With(dlog.Context{
 		"workspace_id":        string(ws),
@@ -365,6 +362,16 @@ func (r *resolver) mutateWorkspace(ws ids.WorkspaceID, operation, message string
 // transition of its own: apply is handed the workspace's log sink, and runs
 // under the same lock as the render it precedes.
 func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger)) {
+	r.mutateWorkspaceIf(ws, operation, message, ctx, func(s *wsState, log dlog.Logger) bool {
+		apply(s, log)
+		return true
+	})
+}
+
+// mutateWorkspaceIf is mutateWorkspaceLogged for a change that may decline
+// under the lock: when APPLY answers false it changed nothing about the
+// workspace, and nothing is rendered, published or recorded for it.
+func (r *resolver) mutateWorkspaceIf(ws ids.WorkspaceID, operation, message string, ctx dlog.Context, apply func(*wsState, dlog.Logger) bool) {
 	if ctx == nil {
 		ctx = dlog.Context{}
 	}
@@ -372,8 +379,7 @@ func (r *resolver) mutateWorkspaceLogged(ws ids.WorkspaceID, operation, message 
 	r.commit(&mutation{
 		operation: operation, message: message, ctx: ctx, ws: ws, scoped: true,
 		apply: func(log dlog.Logger) bool {
-			apply(r.state.workspace(ws), log)
-			return true
+			return apply(r.state.workspace(ws), log)
 		},
 	})
 }
@@ -516,9 +522,9 @@ func (r *resolver) SetRegistrySelected(reg Registry, ws ids.WorkspaceID, stamp S
 // a selection. The store makes at most one workspace current, and the
 // change names it, so every other row the roster holds stops being current.
 //
-// THE CALLER ORDERS IT AGAINST EVERY WHOLE REGISTRY READ (the workspace
-// verbs' selection lock): a read taken before this select's write can
-// never be installed after it.
+// THE CALLER ORDERS IT AGAINST EVERY WHOLE REGISTRY INSTALL (the workspace
+// verbs' selection lock and select count): a read taken before this select's
+// write can never be installed after it.
 func (r *resolver) SetSelection(sel wsm.Selection, stamp SelectStamp) bool {
 	ctx := stampContext(dlog.Context{"workspace_id": string(sel.Current), "again": sel.Again, "rows": len(sel.Workspaces)}, stamp)
 	applied := false
@@ -1096,15 +1102,25 @@ func (r *resolver) SetStateUnreported(ws ids.WorkspaceID, unreported bool) {
 }
 
 // OnActivity moves the row to thinking.
+//
+// AN ACTIVITY CHANGES THE ROW'S FACTS ONLY TWICE: the turn's first activity
+// (sawActivity) and the answer to a retried call (retrying). Every other
+// streamed frame declines, so it renders and publishes nothing: rendered, it
+// was a whole-roster render the topic dropped as a duplicate, on every frame
+// (2026-11-11, agent-repld's top cost in a `sample`). A footer status the
+// frame moved reaches the row through FooterStatusChanged, not here.
 func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
-	r.mutateWorkspaceLogged(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
-		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) {
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.on_activity", "the roster took a turn's activity",
+		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState, log dlog.Logger) bool {
+			changed := !s.sawActivity
 			s.sawActivity = true
 			if s.retrying != "" && ladder.RetryAnsweredBy(s.retrying, agent.GetValue(), act) {
 				log.Debug("daemon.sidebar.retry_cleared", "the retried call was answered; the row leaves api_retrying",
 					dlog.Context{"agent_id": agent.GetValue()})
 				s.retrying = ""
+				changed = true
 			}
+			return changed
 		})
 }
 

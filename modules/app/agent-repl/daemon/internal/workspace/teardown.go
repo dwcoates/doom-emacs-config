@@ -192,6 +192,16 @@ func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace)
 		log.Debug(opNuke, "no live session to kill before the nuke", nil)
 	}
 
+	// THE NUKE IS OWED BEFORE ANYTHING IS DESTROYED, so one that stops part
+	// way -- a forced removal that failed after it set the tree aside, with
+	// the branch and this record left -- is finished by the next boot
+	// (FinishOwedNukes) rather than waiting for someone to nuke it again,
+	// and its missing worktree is never restored meanwhile.
+	if err := v.deps.DB.OweNuke(ctx, ws, v.now()); err != nil {
+		log.Error(opNuke, "could not record the nuke as owed; nothing was destroyed", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("nuke %q: record it owed: %w", ws, err)
+	}
+
 	if err := v.destroyStorage(ctx, log, record); err != nil {
 		return err
 	}
@@ -207,6 +217,38 @@ func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace)
 		"repository_forgotten": report.RepositoryDir,
 	})
 	v.republishRegistry(ctx, log, opNuke)
+	return nil
+}
+
+// FinishOwedNukes finishes every nuke that stopped part way (wsm
+// Workspace.NukeOwedAt): the boot runs it before it reads the registry, so a
+// nuke whose forced removal failed after setting the tree aside is finished
+// on its own. A nuke that fails again is recorded at ERROR and stays owed for
+// the next boot; only a registry that cannot be read is returned.
+func (v *verbs) FinishOwedNukes(ctx context.Context) error {
+	log := v.deps.Log.Global()
+	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error(opNuke, "could not list the workspaces to finish the owed nukes", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("finish the owed nukes: list the workspaces: %w", err)
+	}
+	for _, record := range workspaces {
+		if record.NukeOwedAt == nil {
+			continue
+		}
+		// The worktree is gone or set aside, so its records go to the
+		// central sink naming it.
+		wsLog := v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{
+			dlog.KeyWorkspaceID: string(record.ID), "nuke_owed_at": record.NukeOwedAt.UTC(),
+		})
+		if err := v.nuke(ctx, wsLog, record); err != nil {
+			wsLog.Error(opNuke, "an owed nuke could not be finished; it stays owed for the next boot", dlog.Context{
+				"dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
+			})
+			continue
+		}
+		wsLog.Info(opNuke, "finished a nuke that had stopped part way", dlog.Context{"dir": record.Dir, "branch": record.Branch})
+	}
 	return nil
 }
 

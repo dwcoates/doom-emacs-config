@@ -188,6 +188,9 @@ type Deps struct {
 	// Summaries answers the note a prompt to a workspace with no summary
 	// closes with (wssummary.Keeper).
 	Summaries OwedSummaries
+	// Placements answers the subsection placement note a prompt-less root's
+	// first prompt closes with (workspace.Verbs.TakeOwedPlacementNote).
+	Placements OwedPlacements
 	// PromptsDir is where the briefs are read from: the BriefContextSummary
 	// note a prompt opens with is composed from it.
 	PromptsDir string
@@ -209,6 +212,15 @@ type Deps struct {
 	MovedOn func(ctx context.Context, ws ids.WorkspaceID)
 	// Log is the handler's logger.
 	Log dlog.Surfaces
+}
+
+// OwedPlacements is the workspace verbs' owed placement note, seen from the
+// handler.
+type OwedPlacements interface {
+	// TakeOwedPlacementNote answers the meta-wrapped note asking the
+	// workspace's agent to file itself into a subsection, false when none is
+	// owed, and RESTORE, which owes it again for a prompt the queue refused.
+	TakeOwedPlacementNote(ctx context.Context, ws ids.WorkspaceID) (note string, owed bool, restore func(), err error)
 }
 
 // OwedSummaries is the workspace summaries' keeper, seen from the handler.

@@ -1547,6 +1547,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:         p.DB,
 		Asks:       verbs,
 		Summaries:  summaries,
+		Placements: verbs,
 		PromptsDir: paths.PromptsDir,
 		Panels:     server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
 		MintTurn:   wsm.NewTurnID,
@@ -1889,6 +1890,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			EnsureHomeRepository: func(ctx context.Context) error {
 				return verbs.EnsureHomeRepository(ctx, homeRepositoryCheckout(paths.Checkout, os.Getenv))
 			},
+			FinishOwedNukes:        verbs.FinishOwedNukes,
 			OpenThreads:            verbs.OpenThreads,
 			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,

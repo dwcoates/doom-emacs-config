@@ -17,7 +17,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
-	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -113,9 +112,11 @@ type watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu lockwatch.Mutex
-	// unwatch retires mu from the stall watchdog; Close calls it. A no-op
-	// when no watchdog was wired.
+	// mu is the watcher's lock; the roster and topbar edges a hold queues on
+	// it are handed over when it is released (viewedges.go).
+	mu edgeMutex
+	// unwatch retires mu and its delivery lock from the stall watchdog;
+	// Close calls it. A no-op when no watchdog was wired.
 	unwatch func()
 
 	// gen is the fleet's generation. A re-open bumps it, so a goroutine whose
@@ -505,9 +506,15 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		attaching: session.Started == nil,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
+	w.mu.log = w.log
 	w.unwatch = func() {}
 	if sinks.Stalls != nil {
-		w.unwatch = sinks.Stalls.Watch(&w.mu, stallLockName, ws, w.log)
+		unwatchMu := sinks.Stalls.Watch(&w.mu.Mutex, stallLockName, ws, w.log)
+		unwatchViews := sinks.Stalls.Watch(&w.mu.delivering, viewLockName, ws, w.log)
+		w.unwatch = func() {
+			unwatchMu()
+			unwatchViews()
+		}
 	}
 	// A RESUME STARTS FROM ITS PREDECESSOR'S POINTERS, so every watch it opens
 	// is a catch-up; a replay starts from none, so every watch opens on its
@@ -1116,6 +1123,10 @@ func (w *watcher) Close() error {
 	// reads the state client, and the daemon closes that client once every
 	// watcher is closed.
 	w.dispatching.Wait()
+	// So is the view delivery: a topbar edge writes the store too, and a
+	// delivery that took its edges before Close took the lock is still
+	// running.
+	w.mu.awaitDelivered()
 	// The watchdog stops watching only now: every hold Close itself took is
 	// over, and the next tick settles a stall this watcher was reported for.
 	w.unwatch()
@@ -1284,7 +1295,7 @@ func (w *watcher) publishLiveWorkLocked() {
 	w.sinks.Lifecycle.OnLiveWorkChanged(w.ws, live)
 	// The roster hears the same set: its `idle_async` arm retires on an empty
 	// one, which no announcement can ever state.
-	w.sinks.Sidebar.OnLiveWorkChanged(w.ws, live)
+	w.mu.later(func() { w.sinks.Sidebar.OnLiveWorkChanged(w.ws, live) })
 	// AND THE FOOTER HEARS THE SAME SET, for the same reason and out of the
 	// same value: the strip's `background` arm and the roster's `idle_async`
 	// arm are two renderings of ONE fact, so they cannot be allowed to resolve
@@ -1452,9 +1463,10 @@ func (w *watcher) raiseLinkFaultLocked(state LinkState) {
 // bare attachment to the daemon's own machinery (the host view's
 // `shim_attached`, which no view sink carries).
 func (w *watcher) publishLinkLocked() {
-	w.sinks.Footer.OnLink(w.ws, w.link)
-	w.sinks.Topbar.OnLink(w.ws, w.link)
-	w.sinks.Sidebar.OnLink(w.ws, w.link)
+	link := w.link
+	w.sinks.Footer.OnLink(w.ws, link)
+	w.mu.later(func() { w.sinks.Topbar.OnLink(w.ws, link) })
+	w.mu.later(func() { w.sinks.Sidebar.OnLink(w.ws, link) })
 	w.sinks.Lifecycle.OnLinkChanged(w.ws, w.link == shimclient.LinkConnected)
 }
 
@@ -2282,9 +2294,9 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	if first {
 		defer close(w.factsIn)
 	}
-	w.sinks.Topbar.OnSessionStarted(w.ws, started)
+	w.mu.later(func() { w.sinks.Topbar.OnSessionStarted(w.ws, started) })
 	w.sinks.Footer.OnSessionStarted(w.ws, started)
-	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
+	w.mu.later(func() { w.sinks.Sidebar.OnSessionStarted(w.ws, started) })
 	w.sinks.Feed.OnSessionStarted(w.ws, started)
 	if t := started.GetTurnInFlight(); t != nil {
 		ahead := ids.TurnID(t.GetValue())
@@ -2336,7 +2348,7 @@ func (w *watcher) standOpenAsksLocked(asks []*conversationv1.SessionOpenAsk) {
 			w.log.Info("daemon.sessionwatcher.open_ask_at_attach",
 				"the session's facts name a consent ask open; the views stand it", ctx)
 			w.sinks.Footer.OnPermission(w.ws, agent, permission)
-			w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+			w.mu.later(func() { w.sinks.Sidebar.OnPermission(w.ws, agent, permission) })
 			if w.sinks.Merge != nil {
 				w.sinks.Merge.OnPermission(w.ws, agent, permission)
 			}
@@ -2399,7 +2411,7 @@ func (w *watcher) standRunningAtAttachLocked(turn ids.TurnID) {
 			"turn_id": string(turn), "row_known": startedAt != nil,
 		})
 	w.sinks.Footer.OnTurnRunningAtAttach(w.ws, turn, startedAt)
-	w.sinks.Sidebar.OnTurnRunningAtAttach(w.ws, turn, startedAt)
+	w.mu.later(func() { w.sinks.Sidebar.OnTurnRunningAtAttach(w.ws, turn, startedAt) })
 }
 
 // restoreWaitingLocked stands the turns the session's facts name as WAITING

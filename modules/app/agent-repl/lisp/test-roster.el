@@ -1291,9 +1291,13 @@ that follows must not care which of the two got there first."
             (should (equal (agent-repl--extract-panel-id (buffer-name buf)) "new-name")))
         (kill-buffer buf)))))
 
-(ert-deftest agent-repl-test-roster-a-rename-onto-a-tombstone-keeps-the-old-tab ()
-  "A collision with a tombstoned name is refused whole: the tab keeps its name."
-  ;; Arrange
+;; The daemon frees a name once its workspace is forgotten or nuked, so a
+;; tombstone Emacs keeps under a name the roster now gives another workspace
+;; is stale, and is purged before the row is reconciled.
+
+(ert-deftest agent-repl-test-roster-a-rename-onto-a-freed-name-renames-the-tab ()
+  "A rename onto a name whose workspace left the roster takes the name."
+  ;; Arrange -- "gone" leaves the roster, so its name is tombstoned.
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
@@ -1304,13 +1308,57 @@ that follows must not care which of the two got there first."
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
-    ;; Act -- "gone" is now tombstoned; rename b onto it
+    ;; Act -- the daemon gives b the freed name.
     (agent-repl-roster-apply
      (agent-repl-test-roster--roster
       :sections (list (agent-repl-test-roster--section
                        "repo" (list (agent-repl-test-roster--row "b" "gone" :ready))))))
     ;; Assert
-    (should (equal (agent-repl-test-roster--tabs) '("stays")))))
+    (should (equal (agent-repl-test-roster--tabs) '("gone")))
+    (should (equal (agent-repl--ws-by-ref-id "b") "gone"))))
+
+(ert-deftest agent-repl-test-roster-an-open-onto-a-freed-name-takes-no-old-identity ()
+  "A new row under a freed name is born fresh, never the old workspace revived."
+  ;; Arrange -- "gone" leaves the roster, so its name is tombstoned.
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "gone" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section "repo" nil))))
+    (should (agent-repl--ws-tombstoned-p "gone"))
+    ;; Act -- another workspace is born under the freed name.
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "c" "gone" :ready))))))
+    ;; Assert
+    (should (equal (agent-repl--ws-by-ref-id "c") "gone"))
+    (should-not (agent-repl--ws-get "gone" :last-killed-at))))
+
+(ert-deftest agent-repl-test-roster-a-purged-tombstone-is-recorded ()
+  "The purge of a stale tombstone is recorded at INFO, naming both ids."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "gone" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section "repo" nil))))
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "c" "gone" :ready)))))))
+      ;; Assert
+      (should (member "elisp.roster.tombstone-purged: ws=gone tombstone-id=a row-id=c" logged)))))
 
 (ert-deftest agent-repl-test-roster-a-reopened-row-gets-a-live-tab-again ()
   "A row that closed and came back is LIVE again, not left tombstoned.

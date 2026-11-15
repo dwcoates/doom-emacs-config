@@ -19,7 +19,8 @@ import (
 // they left the roster with their merge queue entries.
 
 // SettleMissingDirectory settles the OPEN workspace ws, whose directory a stat
-// found gone with statErr, answering whether it was recreated. Every outcome
+// found gone with statErr, answering whether it was recreated. One that owes a
+// nuke is left as it is, for the nuke to finish. Every outcome
 // is recorded under op, the step that asked: a recreation and the ruled
 // automatic close at INFO, a close that could not be written at ERROR. A
 // restore git could not perform is the restorer's own ERROR, and the row is
@@ -32,6 +33,13 @@ func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Wo
 		dlog.KeyWorkspaceID:  string(ws.ID),
 		dlog.KeyWorkspaceDir: ws.Dir,
 		"error":              statErr.Error(),
+	}
+	// A WORKSPACE THAT OWES A NUKE IS LEFT FOR THE NUKE: its tree is gone
+	// because the nuke set it aside, and restoring it from the branch the
+	// nuke has yet to delete would bring back what is being destroyed.
+	if ws.NukeOwedAt != nil {
+		log.Info(op, "the workspace directory is gone because a nuke is under way; it is left for the nuke to finish", fields)
+		return false, nil
 	}
 	restored, err := v.RestoreMissingWorktree(ctx, op, ws)
 	if restored {

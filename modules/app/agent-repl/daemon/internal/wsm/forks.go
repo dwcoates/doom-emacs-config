@@ -60,6 +60,59 @@ const ownForkDDL = `
 ALTER TABLE pending_forks ADD COLUMN parent_vendor_session_id TEXT;
 `
 
+// forkLineageByConversationDDL is the layout-141 step: a lineage describes a
+// CONVERSATION, so it is keyed by the workspace and the conversation the fork
+// continues (vendor_session_id), and a bind to another conversation no longer
+// forgets it. A queue-bypass switch back onto a parked conversation that was a
+// fork drew no inherited past once the switch away had deleted its lineage
+// (2026-11-10). An own fork also records the conversation it copied
+// (parent_vendor_session_id), so the walk continues through that
+// conversation's own lineage; a fork of another workspace leaves it NULL and
+// continues through the conversation that workspace runs.
+//
+// A row is carried to the conversation its workspace's session names: every
+// bind of the build before this step deleted the lineage it left, so a
+// standing row is the bound conversation's. An own fork's copied conversation
+// is the one parked beside it, when one is. A row whose workspace names no
+// conversation breaks that invariant and fails the step (vendor_session_id is
+// NOT NULL) rather than being dropped.
+//
+// A fresh file runs the same statements over its empty tables. IT IS
+// BREAKING: the build before it inserts lineage rows naming no conversation.
+const forkLineageByConversationDDL = `
+CREATE TABLE fork_lineage_by_conversation (
+  workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  vendor_session_id        TEXT NOT NULL,
+  parent_workspace_id      TEXT NOT NULL,
+  parent_vendor_session_id TEXT,
+  parent_book              TEXT NOT NULL,
+  through_ms               INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, vendor_session_id)
+);
+INSERT INTO fork_lineage_by_conversation
+  (workspace_id, vendor_session_id, parent_workspace_id, parent_vendor_session_id, parent_book, through_ms)
+SELECT l.workspace_id, NULLIF(s.vendor_session_id, ''), l.parent_workspace_id,
+  CASE WHEN l.parent_workspace_id = l.workspace_id THEN NULLIF(p.vendor_session_id, '') END,
+  l.parent_book, l.through_ms
+FROM fork_lineage AS l
+LEFT JOIN sessions AS s ON s.workspace_id = l.workspace_id
+LEFT JOIN workspace_parked_conversations AS p ON p.workspace_id = l.workspace_id;
+CREATE TABLE fork_uninherited_turns_by_conversation (
+  workspace_id      TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  vendor_session_id TEXT NOT NULL,
+  turn_id           TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, vendor_session_id, turn_id)
+);
+INSERT INTO fork_uninherited_turns_by_conversation (workspace_id, vendor_session_id, turn_id)
+SELECT u.workspace_id, NULLIF(s.vendor_session_id, ''), u.turn_id
+FROM fork_uninherited_turns AS u
+LEFT JOIN sessions AS s ON s.workspace_id = u.workspace_id;
+DROP TABLE fork_uninherited_turns;
+DROP TABLE fork_lineage;
+ALTER TABLE fork_lineage_by_conversation RENAME TO fork_lineage;
+ALTER TABLE fork_uninherited_turns_by_conversation RENAME TO fork_uninherited_turns;
+`
+
 // PendingFork is a fork the create recorded and the bring-up has not made.
 type PendingFork struct {
 	// Workspace is the fork.
@@ -110,6 +163,11 @@ type ForkLineage struct {
 	Workspace WorkspaceID
 	// Parent is the workspace it was forked from.
 	Parent WorkspaceID
+	// ParentVendorSessionID is the conversation an OWN fork copied, which the
+	// walk continues through; empty for a fork of another workspace, whose
+	// walk continues through the conversation that workspace runs. Recorded
+	// by ResolveFork from the pending fork, never set by its caller.
+	ParentVendorSessionID string
 	// ParentBook is the agent the parent's stored history is filed under.
 	ParentBook string
 	// ThroughMs is the inclusive upper bound, epoch ms, on the places of the
@@ -175,17 +233,22 @@ func (s *store) ResolveFork(ctx context.Context, vendorSessionID string, lineage
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM pending_forks WHERE workspace_id = ? AND parent_workspace_id = ?`,
-			lineage.Workspace, lineage.Parent)
+		// THE PENDING FORK NAMES THE CONVERSATION AN OWN FORK COPIED, which
+		// its lineage records so the walk continues through it.
+		var copied sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT parent_vendor_session_id FROM pending_forks WHERE workspace_id = ? AND parent_workspace_id = ?`,
+			lineage.Workspace, lineage.Parent).Scan(&copied)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: workspace %q owes no fork from %q", lineage.Workspace, lineage.Parent)
+		}
 		if err != nil {
 			return err
 		}
-		if n, err := res.RowsAffected(); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM pending_forks WHERE workspace_id = ? AND parent_workspace_id = ?`,
+			lineage.Workspace, lineage.Parent); err != nil {
 			return err
-		} else if n != 1 {
-			return fmt.Errorf("wsm: workspace %q owes no fork from %q", lineage.Workspace, lineage.Parent)
 		}
-		res, err = tx.ExecContext(ctx, `UPDATE sessions SET vendor_session_id = ? WHERE workspace_id = ?`,
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET vendor_session_id = ? WHERE workspace_id = ?`,
 			vendorSessionID, lineage.Workspace)
 		if err != nil {
 			return err
@@ -196,14 +259,14 @@ func (s *store) ResolveFork(ctx context.Context, vendorSessionID string, lineage
 			return fmt.Errorf("wsm: workspace %q has no session row to record its fork on", lineage.Workspace)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO fork_lineage (workspace_id, parent_workspace_id, parent_book, through_ms) VALUES (?, ?, ?, ?)`,
-			lineage.Workspace, lineage.Parent, lineage.ParentBook, lineage.ThroughMs); err != nil {
+			`INSERT INTO fork_lineage (workspace_id, vendor_session_id, parent_workspace_id, parent_vendor_session_id, parent_book, through_ms) VALUES (?, ?, ?, ?, ?, ?)`,
+			lineage.Workspace, vendorSessionID, lineage.Parent, copied, lineage.ParentBook, lineage.ThroughMs); err != nil {
 			return err
 		}
 		for _, turn := range lineage.Uninherited {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO fork_uninherited_turns (workspace_id, turn_id) VALUES (?, ?) ON CONFLICT DO NOTHING`,
-				lineage.Workspace, turn); err != nil {
+				`INSERT INTO fork_uninherited_turns (workspace_id, vendor_session_id, turn_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+				lineage.Workspace, vendorSessionID, turn); err != nil {
 				return err
 			}
 		}
@@ -216,42 +279,63 @@ func (s *store) ResolveFork(ctx context.Context, vendorSessionID string, lineage
 const maxForkDepth = 256
 
 // Lineage answers where a workspace's inherited past is read from, nearest
-// first: its own fork, then its parent's, and so on to the first workspace that
-// was not forked. Empty for a workspace that was never forked.
+// first: the lineage of the conversation its session is bound to, then the
+// lineage of the conversation that one was forked from, and so on to the first
+// conversation that was not forked. Empty for a workspace bound to no forked
+// conversation, and for one bound to none at all.
 //
-// AN OWN FORK ENDS THE WALK. Its parent is the workspace itself, whose lineage
-// the bind that owed the fork forgot (BindSession), so nothing lies past it.
+// THE WALK IS BY CONVERSATION. An own fork continues through the conversation
+// it copied (ParentVendorSessionID); a fork of another workspace through the
+// conversation that workspace is bound to. An own fork that records no copied
+// conversation was made by a build that forgot the lineage behind it at the
+// bind, so nothing lies past it.
 func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, error) {
 	var out []ForkLineage
 	err := s.read(ctx, "daemon.wsm.fork_lineage", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		seen := map[WorkspaceID]bool{}
-		for at := id; ; {
+		type key struct {
+			ws   WorkspaceID
+			conv string
+		}
+		conv, err := s.boundConversation(ctx, id)
+		if err != nil || conv == "" {
+			return err
+		}
+		seen := map[key]bool{}
+		for at := (key{ws: id, conv: conv}); ; {
 			if seen[at] || len(out) == maxForkDepth {
-				return fmt.Errorf("wsm: the lineage of %q loops back to %q", id, at)
+				return fmt.Errorf("wsm: the lineage of %q loops back to %q (conversation %q)", id, at.ws, at.conv)
 			}
 			seen[at] = true
 			var (
 				link   ForkLineage
 				parent string
+				copied sql.NullString
 			)
 			err := s.q(ctx).QueryRowContext(ctx,
-				`SELECT parent_workspace_id, parent_book, through_ms FROM fork_lineage WHERE workspace_id = ?`, at).
-				Scan(&parent, &link.ParentBook, &link.ThroughMs)
+				`SELECT parent_workspace_id, parent_vendor_session_id, parent_book, through_ms FROM fork_lineage WHERE workspace_id = ? AND vendor_session_id = ?`, at.ws, at.conv).
+				Scan(&parent, &copied, &link.ParentBook, &link.ThroughMs)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
 			if err != nil {
 				return err
 			}
-			link.Workspace, link.Parent = at, WorkspaceID(parent)
-			if link.Uninherited, err = s.uninheritedTurns(ctx, at); err != nil {
+			link.Workspace, link.Parent, link.ParentVendorSessionID = at.ws, WorkspaceID(parent), copied.String
+			if link.Uninherited, err = s.uninheritedTurns(ctx, at.ws, at.conv); err != nil {
 				return err
 			}
 			out = append(out, link)
-			if link.Parent == at {
+			next := key{ws: link.Parent, conv: link.ParentVendorSessionID}
+			switch {
+			case next.conv != "":
+			case link.Parent == at.ws:
 				return nil
+			default:
+				if next.conv, err = s.boundConversation(ctx, link.Parent); err != nil || next.conv == "" {
+					return err
+				}
 			}
-			at = link.Parent
+			at = next
 		}
 	})
 	if err != nil {
@@ -260,10 +344,22 @@ func (s *store) Lineage(ctx context.Context, id WorkspaceID) ([]ForkLineage, err
 	return out, nil
 }
 
-// uninheritedTurns reads one fork's uninherited turns. Called inside a read.
-func (s *store) uninheritedTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error) {
+// boundConversation answers the conversation workspace ID's session is bound
+// to, empty when it has no session or is bound to none. Called inside a read.
+func (s *store) boundConversation(ctx context.Context, id WorkspaceID) (string, error) {
+	var conv sql.NullString
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT vendor_session_id FROM sessions WHERE workspace_id = ?`, id).Scan(&conv)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return conv.String, err
+}
+
+// uninheritedTurns reads one fork's uninherited turns: workspace ID's
+// conversation CONV's. Called inside a read.
+func (s *store) uninheritedTurns(ctx context.Context, id WorkspaceID, conv string) ([]TurnID, error) {
 	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT turn_id FROM fork_uninherited_turns WHERE workspace_id = ? ORDER BY turn_id`, id)
+		`SELECT turn_id FROM fork_uninherited_turns WHERE workspace_id = ? AND vendor_session_id = ? ORDER BY turn_id`, id, conv)
 	if err != nil {
 		return nil, err
 	}

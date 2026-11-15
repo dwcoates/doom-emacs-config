@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2906,5 +2907,86 @@ func TestAJoiningDaemonOpensNoThread(t *testing.T) {
 	// Assert
 	if got := h.threadOpens.Load(); got != 0 {
 		t.Fatalf("OpenThreads calls = %d on a joining daemon, want 0", got)
+	}
+}
+
+// TestTheBootFinishesTheOwedNukesBeforeItReadsTheRegistry pins the owed-nuke
+// step's place: a workspace the sweep forgets is read by no later step, so
+// its gone directory is neither restored nor closed.
+func TestTheBootFinishesTheOwedNukesBeforeItReadsTheRegistry(t *testing.T) {
+	// Arrange: a workspace whose tree a stopped nuke set aside.
+	h := newHarness(t)
+	dir := t.TempDir()
+	ws := h.register(t, dir, sessionlock.StateFree)
+	mustRemove(t, dir)
+	h.finishNukes = func(ctx context.Context) {
+		if _, err := h.db.Forget(ctx, ws.ID); err != nil {
+			t.Fatalf("Forget: %v", err)
+		}
+	}
+
+	// Act
+	report, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.nukeFinishes.Load(); got != 1 {
+		t.Fatalf("FinishOwedNukes calls = %d, want 1", got)
+	}
+	if slices.Contains(report.MissingDirClosed, ws.ID) || slices.Contains(report.MissingDirRestored, ws.ID) {
+		t.Fatalf("report = %+v, want the nuked workspace read by no later step", report)
+	}
+}
+
+// TestAnOwedNukeSweepFailureFailsTheBoot pins the step's one failure: a
+// registry the sweep could not read fails the boot, recorded at ERROR.
+func TestAnOwedNukeSweepFailureFailsTheBoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.nukeFinishErr = errors.New("the registry could not be listed")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, h.nukeFinishErr) {
+		t.Fatalf("Run = %v, want the owed-nuke failure", err)
+	}
+	if !h.hasRecord("error", "daemon.boot.run") {
+		t.Fatal("the failed owed-nuke sweep was not recorded at ERROR")
+	}
+}
+
+// TestAJoiningDaemonFinishesNoOwedNuke pins that a successor, which writes
+// nothing, leaves the owed nukes to the incumbent's next boot.
+func TestAJoiningDaemonFinishesNoOwedNuke(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
+
+	// Act
+	if _, err := h.seq.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Assert
+	if got := h.nukeFinishes.Load(); got != 0 {
+		t.Fatalf("FinishOwedNukes calls = %d on a joining daemon, want 0", got)
+	}
+}
+
+func TestNewRefusesASequenceWithNoOwedNukeFinisher(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.deps
+	deps.FinishOwedNukes = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a sequence that cannot finish the owed nukes")
 	}
 }

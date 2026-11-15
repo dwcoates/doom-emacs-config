@@ -13,6 +13,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -342,5 +343,72 @@ func TestEveryDeferredBriefIsQueuedThroughQueueBrief(t *testing.T) {
 	// Assert.
 	if len(direct) != 0 {
 		t.Fatalf("files queuing a deferred brief outside queueBrief = %v, want none", direct)
+	}
+}
+
+// TestARegistryReadASelectOvertookIsReadAgainBeforeItIsInstalled pins
+// installRegistry's guard: a select that lands while a republish reads the
+// registry makes that read stale, so it is never installed; the registry is
+// read again, and the roster takes the one carrying the select.
+func TestARegistryReadASelectOvertookIsReadAgainBeforeItIsInstalled(t *testing.T) {
+	// Arrange: the republish's first read lets a select land mid-read.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.workspace("w2", t.TempDir())
+	v := f.verbs.(*verbs)
+	reads := 0
+	f.db.onReadArrangement = func() {
+		reads++
+		if reads != 1 {
+			return
+		}
+		if err := v.Select(context.Background(), "w2", Switch{History: RecordSelection}); err != nil {
+			t.Fatalf("Select: %v", err)
+		}
+	}
+
+	// Act: a priority change republishes the whole registry.
+	if err := v.SetPriority(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+
+	// Assert.
+	if reads != 2 {
+		t.Fatalf("registry reads = %d, want 2: the overtaken read and the one installed", reads)
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("registries installed = %d, want exactly one", len(f.sidebar.registries))
+	}
+	if got := f.sidebar.registries[0].Current; got == nil || *got != "w2" {
+		t.Fatalf("installed current = %v, want w2, the select that overtook the first read", got)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "debug", Operation: opSetPriority, Message: "a select landed while the registry was read, so the read may predate its selection; it is taken again"}); !ok {
+		t.Fatalf("records = %v, want the overtaken read recorded", f.log.logger.Records())
+	}
+}
+
+// TestARegistryInstallReturnsAFailedRead pins the install's error path: a
+// read that fails installs nothing, is recorded by readRegistry, and is
+// returned to the caller.
+func TestARegistryInstallReturnsAFailedRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.readArrangementErr = errors.New("the database is gone")
+	v := f.verbs.(*verbs)
+	installed := false
+
+	// Act.
+	err := v.installRegistry(context.Background(), f.log.logger, "daemon.workspace.test", func(sidebar.Registry) { installed = true })
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the database is gone") {
+		t.Fatalf("installRegistry = %v, want the read's failure", err)
+	}
+	if installed {
+		t.Fatal("a failed read was installed")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.workspace.test", Message: "could not read the workspaces, repositories and subsections for the roster"}); !ok {
+		t.Fatalf("records = %v, want the failed read at error", f.log.logger.Records())
 	}
 }

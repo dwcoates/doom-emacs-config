@@ -27,7 +27,7 @@ import (
 func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		return Deps{
-			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{}, Summaries: &fakeOwed{}, PromptsDir: "p",
+			DB: newFakeDB(), Queue: &fakeQueue{}, Feed: &fakeFeed{}, Asks: &fakeAsks{}, Summaries: &fakeOwed{}, Placements: &fakePlacements{}, PromptsDir: "p",
 			Panels: func(context.Context, ids.WorkspaceID, conversationv1.SessionCommand) (*agentreplv1.SubmitPromptCommandPanel, error) {
 				return nil, nil
 			},
@@ -45,6 +45,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"panel source", func(d *Deps) { d.Panels = nil }},
 		{"standing-ask answerer", func(d *Deps) { d.Asks = nil }},
 		{"summaries' keeper", func(d *Deps) { d.Summaries = nil }},
+		{"owed placement notes", func(d *Deps) { d.Placements = nil }},
 		{"briefs' directory", func(d *Deps) { d.PromptsDir = "" }},
 	}
 	for _, tc := range tests {
@@ -1406,5 +1407,79 @@ func TestTheContextSummaryBriefSplicesItsSummary(t *testing.T) {
 	}
 	if !strings.HasPrefix(note, prompts.MetaOpen) || !strings.Contains(note, "SUMMARY-TEXT") {
 		t.Fatalf("note = %q, want the meta-wrapped brief carrying the summary", note)
+	}
+}
+
+// placementNoteText is the note the fake placements answer as owed.
+const placementNoteText = "\n\n<!--agent-repl:meta-->file yourself<!--/agent-repl:meta-->"
+
+func TestAPromptToAWorkspaceThatOwesAPlacementNoteCarriesIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.place.note = placementNoteText
+
+	// Act
+	if _, err := h.submit("fix the footer"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if got, want := forwardedTexts(t, h), []string{"fix the footer", placementNoteText}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded blocks = %q, want the user's words then the note as its own block", got)
+	}
+	if h.place.restored != 0 {
+		t.Fatalf("restores = %d, want none for a prompt the queue took", h.place.restored)
+	}
+}
+
+func TestAPromptCarryingNoDirectiveNeverTakesThePlacementNote(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.place.note = placementNoteText
+
+	// Act
+	_, err := h.h.Submit(context.Background(), theWorkspace, userSaid("hello"), "key-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, nil, wsm.DeliveryOrdinary, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(h.place.asked) != 0 {
+		t.Fatalf("the placements were asked about %v, want never", h.place.asked)
+	}
+}
+
+func TestARefusedPromptOwesThePlacementNoteAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.place.note = placementNoteText
+	h.queue.submitErr = errors.New("the queue refused it")
+
+	// Act
+	_, err := h.submit("fix the footer")
+
+	// Assert
+	if !errors.Is(err, h.queue.submitErr) {
+		t.Fatalf("Submit = %v, want the queue's refusal", err)
+	}
+	if h.place.restored != 1 {
+		t.Fatalf("restores = %d, want the taken note owed again", h.place.restored)
+	}
+}
+
+func TestAFailedPlacementNoteTakeForwardsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.place.err = errors.New("the state database is locked")
+
+	// Act
+	_, err := h.submit("fix the footer")
+
+	// Assert
+	if !errors.Is(err, h.place.err) {
+		t.Fatalf("Submit = %v, want the take's failure", err)
+	}
+	if n := len(h.queue.forwarded()); n != 0 {
+		t.Fatalf("forwarded %d submissions, want none", n)
 	}
 }

@@ -343,17 +343,21 @@ func TestSelectLogsItsPublishAtInfo(t *testing.T) {
 	}
 }
 
-// TestEveryWholeRegistryInstallHoldsTheSelectionLock pins the ordering that
-// keeps a stale registry from regressing a newer selection: each whole
-// registry read runs under the selection lock a select's write and push
-// take, so no select can land between a read and its install.
-func TestEveryWholeRegistryInstallHoldsTheSelectionLock(t *testing.T) {
+// TestARegistryReadHoldsTheSelectionLockOnlyForASelect pins which whole
+// registry reads hold the selection lock. A select's own read (a followed
+// selection, or a select whose change the roster refused) is part of the
+// select and holds it. A republish's and the opening roster's read hold it
+// NOT, so a select is never left waiting behind a whole-registry read
+// (2026-11-09: 15-230ms with 86 tabs); installRegistry keeps a read a select
+// overtook from being installed instead.
+func TestARegistryReadHoldsTheSelectionLockOnlyForASelect(t *testing.T) {
 	stored := ids.WorkspaceID("w2")
 	tests := []struct {
 		name string
 		// arrange readies the fixture for the install.
-		arrange func(f *fixture)
-		install func(ctx context.Context, v *verbs) error
+		arrange  func(f *fixture)
+		install  func(ctx context.Context, v *verbs) error
+		wantHeld bool
 	}{
 		{
 			name:    "a verb's republish",
@@ -369,7 +373,8 @@ func TestEveryWholeRegistryInstallHoldsTheSelectionLock(t *testing.T) {
 				f.sidebar.selected = []ids.WorkspaceID{"w1"}
 				f.db.current = &stored
 			},
-			install: func(ctx context.Context, v *verbs) error { return v.FollowStoredSelection(ctx) },
+			install:  func(ctx context.Context, v *verbs) error { return v.FollowStoredSelection(ctx) },
+			wantHeld: true,
 		},
 		{
 			name:    "a select whose change the roster refused",
@@ -377,6 +382,7 @@ func TestEveryWholeRegistryInstallHoldsTheSelectionLock(t *testing.T) {
 			install: func(ctx context.Context, v *verbs) error {
 				return v.Select(ctx, "w1", Switch{History: RecordSelection})
 			},
+			wantHeld: true,
 		},
 	}
 	for _, tt := range tests {
@@ -404,8 +410,8 @@ func TestEveryWholeRegistryInstallHoldsTheSelectionLock(t *testing.T) {
 			}
 
 			// Assert.
-			if len(held) == 0 || slices.Contains(held, false) {
-				t.Fatalf("selection lock held across each registry read = %v, want held at every read", held)
+			if len(held) == 0 || slices.Contains(held, !tt.wantHeld) {
+				t.Fatalf("selection lock held across each registry read = %v, want %v at every read", held, tt.wantHeld)
 			}
 		})
 	}

@@ -181,7 +181,7 @@ func TestRoutePermission(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", permissionUpdate("p-1", "act-1", "Claude wants to read foo.txt", "Read file"))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnPermission", "footer.OnPermission", "sidebar.OnPermission", "lifecycle.OnNotification", "asks.NeedsInput"})
+	assertNames(t, got, []string{"feed.OnPermission", "footer.OnPermission", "lifecycle.OnNotification", "asks.NeedsInput", "sidebar.OnPermission"})
 	note := requireEvent(t, got, "lifecycle.OnNotification").note
 	if note.Kind != NotificationPermissionRequested {
 		t.Fatalf("notification kind = %q, want %q", note.Kind, NotificationPermissionRequested)
@@ -965,8 +965,9 @@ func TestDetachedLostIsAnOrdinaryTerminal(t *testing.T) {
 
 	// Assert.
 	assertNames(t, got, []string{
-		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"feed.OnAgentTerminal", "footer.OnAgentTerminal",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"sidebar.OnAgentTerminal", "sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.LiveWork().Empty() {
 		t.Fatal("lost work stayed in the live set")
@@ -1014,7 +1015,8 @@ func TestRouteBashTerminalSettlesTheFeedBeforeTheSetDropsIt(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"feed.OnBash", "footer.OnBash",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"sidebar.OnLiveWorkChanged",
 	})
 	feed := requireEvent(t, got, "feed.OnLiveWorkChanged")
 	if feed.live == nil || len(feed.live.Shells) != 0 {
@@ -1048,8 +1050,9 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 	// Assert: the frame is this run's TERMINAL, so the live set loses it in the
 	// same breath the chip retires.
 	assertNames(t, got, []string{
-		"feed.OnActivity", "footer.OnActivity", "sidebar.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"feed.OnActivity", "footer.OnActivity", "footer.OnSubagent",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"sidebar.OnActivity", "topbar.OnActivity", "sidebar.OnLiveWorkChanged",
 	})
 }
 
@@ -1065,8 +1068,9 @@ func TestRouteDetachedWorkAnnouncement(t *testing.T) {
 
 	// Assert.
 	assertNames(t, got, []string{
-		"feed.OnDetachedWork", "footer.OnDetachedWork", "sidebar.OnDetachedWork",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"feed.OnDetachedWork", "footer.OnDetachedWork",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"sidebar.OnDetachedWork", "sidebar.OnLiveWorkChanged",
 	})
 }
 
@@ -1105,14 +1109,14 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			// TestRouteDiagnosticsRecordsTheHealthFactBeforePublishingTheView.
 			name:   "diagnostics is the health reporter's, the topbar's, the roster's and the footer's",
 			update: diagnosticsUpdate(),
-			want:   []string{"lifecycle.OnSessionDiagnostics", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
+			want:   []string{"lifecycle.OnSessionDiagnostics", "footer.OnSessionUpdate", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
 		},
 		{
 			// The footer's tokens cell is the turn's growth of this same
 			// reading, so both surfaces take the one update.
 			name:   "context usage is the topbar's and the footer's",
 			update: contextUsageUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "footer.OnSessionUpdate"},
+			want:   []string{"footer.OnSessionUpdate", "topbar.OnSessionUpdate"},
 		},
 		{
 			name:   "identity rotation is the topbar's, and its new id is recorded as the resume handle",
@@ -1127,7 +1131,7 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		{
 			name:   "an mcp server's health is the topbar's, and its change the footer's",
 			update: mcpServerUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "footer.OnSessionUpdate"},
+			want:   []string{"footer.OnSessionUpdate", "topbar.OnSessionUpdate"},
 		},
 		{
 			// The vendor's ai-title was previously UNROUTED and fell to the
@@ -1145,12 +1149,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		{
 			name:   "a model change is the topbar's, the roster's and the footer's",
 			update: modelChangedUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
+			want:   []string{"footer.OnSessionUpdate", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
 		},
 		{
 			name:   "a permission mode change is the topbar's, the roster's and the footer's",
 			update: permissionModeChangedUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "footer.OnSessionUpdate"},
+			want:   []string{"footer.OnSessionUpdate", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
 		},
 		{
 			// Visibility only: no live-work, lifecycle or roster sink reads a
@@ -1278,8 +1282,8 @@ func TestRouteQueryDied(t *testing.T) {
 	// watcher may be its only source for which turn that is.
 	assertNames(t, got, []string{
 		"footer.OnSessionUpdate", "feed.OnTurnOpened", "feed.OnSessionUpdate",
-		"sidebar.OnSessionUpdate",
-		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "footer.OnLiveWorkChanged", "feed.OnLiveWorkChanged",
+		"sidebar.OnSessionUpdate", "sidebar.OnLiveWorkChanged",
 		"lifecycle.OnTurnEnded", "lifecycle.OnQueryDied",
 	})
 	if !h.w.Free() {
