@@ -624,7 +624,15 @@ func (o *orchestrator) noteFacts(ws ids.WorkspaceID, repo wsm.RepoKey, hadFacts 
 	subject, found := memberNamed(queue.Members, ws)
 	if !found {
 		o.events.mu.Unlock()
-		o.deps.Log.Global().Error(opQueueEvents, "a merge published a new step while not in its queue's line; its subscribers are not told of the change", fields)
+		// A MERGE REPAIRING OUT OF LINE STEPS LEGITIMATELY: its resolving
+		// rebase or its fixing turn moves its own footer from step to step,
+		// while every queue surface draws it by its repair slot alone
+		// (QueueSnapshot.Remediating), so its step is no queue change.
+		if _, aside := memberNamed(queue.Remediating, ws); aside {
+			o.deps.Log.Global().Debug(opQueueEvents, "a merge repairing out of line moved to a new step; its queue's subscribers see its repair slot, not its step, so no change is reported", fields)
+			return
+		}
+		o.deps.Log.Global().Error(opQueueEvents, "a merge published a new step while neither in its queue's line nor repairing out of it; its subscribers are not told of the change", fields)
 		return
 	}
 	change := QueueChange{Kind: QueueChangeStepped, Subject: subject, Queue: queue}

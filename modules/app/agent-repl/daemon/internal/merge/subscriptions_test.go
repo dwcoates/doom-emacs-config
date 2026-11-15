@@ -220,8 +220,36 @@ func TestAStepOfAMergeNotInLineIsRecordedAndNotReported(t *testing.T) {
 	if kinds := h.events.kinds(); len(kinds) != 0 {
 		t.Fatalf("changes = %v, want none", kinds)
 	}
-	if !loggedLike(h, logLike{level: "error", op: opQueueEvents, text: "a merge published a new step while not in its queue's line"}) {
+	if !loggedLike(h, logLike{level: "error", op: opQueueEvents, text: "a merge published a new step while neither in its queue's line nor repairing out of it"}) {
 		t.Fatalf("no error record: %+v", h.logs.Records())
+	}
+}
+
+func TestAStepOfAMergeRepairingOutOfLineIsRecordedAtDebugAndNotReported(t *testing.T) {
+	// Arrange: a merge whose facts were published in line, stepped aside to
+	// resolve its waiting rebase's conflicts, as 2026-11-15's rollouts met.
+	h := newHarness(t)
+	rawInLine(t, h, theWorkspace)
+	h.o.publish(h.repoKey(), theWorkspace, MergeFacts{State: StateQueued, Step: footer.StepEnqueued, QueuedAt: h.clock()})
+	if _, err := h.db.StepAsideMerge(context.Background(), h.repoKey(), theWorkspace, wsm.MergeAsideWaitingConflicts); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	before := len(h.events.reported())
+
+	// Act.
+	h.o.publish(h.repoKey(), theWorkspace, merging(h, footer.StepConflictResolution))
+
+	// Assert.
+	if got := h.events.kinds()[before:]; len(got) != 0 {
+		t.Fatalf("changes = %v, want none for a step out of line", got)
+	}
+	for _, r := range h.logs.Records() {
+		if r.Operation == opQueueEvents && (r.Level == "error" || r.Level == "warn") {
+			t.Fatalf("the step out of line recorded %s %q, want no error", r.Level, r.Message)
+		}
+	}
+	if !loggedLike(h, logLike{level: "debug", op: opQueueEvents, text: "a merge repairing out of line moved to a new step"}) {
+		t.Fatalf("no debug record of the step out of line: %+v", h.logs.Records())
 	}
 }
 
