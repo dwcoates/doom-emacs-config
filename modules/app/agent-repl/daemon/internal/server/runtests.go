@@ -256,7 +256,14 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 		done <- ran{result, err}
 	}()
 
-	reader := bufio.NewReader(events)
+	// THE EVENTS ARE READ OFF THIS GOROUTINE, so the relay ends when the run is
+	// stopped, not when the last holder of the pipe's write end lets go. The
+	// script's group dies with the stop, but testrun's runner leads a session
+	// of its own and winds its units down after it; a relay that read to EOF
+	// waited for that wind-down, and a daemon's exit spent its whole deadline
+	// on the RunTests stream (2026-11-15, `daemon.server.await_streams_ended`
+	// "RunTests=1", and every GOAWAY after it left unsent).
+	frames := readTestRunEvents(events, runCtx.Done())
 	outcome, sendErr := runUnended, error(nil)
 	// THE RUN'S END IS HELD UNTIL ITS SCRIPT EXITS, so the end relayed agrees
 	// with the exit status: the script still runs steps after the runner has
@@ -264,9 +271,17 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	// non-zero after an ended passed is relayed as ended failed, naming the
 	// exit (2026-11-14: gates exited 1 while the stream said passed).
 	var ended *testrunv1.TestRunEvent
+relay:
 	for {
-		ev := &testrunv1.TestRunEvent{}
-		err := protodelim.UnmarshalFrom(reader, ev)
+		var read testRunRead
+		select {
+		case read = <-frames:
+		case <-runCtx.Done():
+			// THE RUN WAS STOPPED (the daemon's exit, the caller gone, an
+			// unreadable stream): what it still writes is no longer relayed.
+			break relay
+		}
+		ev, err := read.event, read.err
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -275,7 +290,6 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 			// stopped, and its end is said as the runner's failure.
 			log.Error(opRunTests, "a test run's events could not be read; the run is stopped", dlog.Context{"dir": dir, "run": run, "cause": err.Error()})
 			cancel()
-			_, _ = io.Copy(io.Discard, reader)
 			break
 		}
 		switch {
@@ -303,7 +317,10 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 			}
 		}
 	}
-	events.Close() //nolint:errcheck // read to its end
+	// CLOSING THE READ END ENDS THE READER, which a write end still held
+	// elsewhere would otherwise keep blocked; a writer still running is
+	// refused its writes rather than held on a full pipe.
+	events.Close() //nolint:errcheck // the reader ends on the close
 	result := <-done
 	if ended == nil && sendErr == nil && s.life.Err() != nil {
 		// The daemon's exit stopped the run (RunTests); its caller is told
@@ -344,6 +361,43 @@ func (s *server) relayTestRun(ctx context.Context, log dlog.Logger, stream *conn
 	}
 	log.Info(opRunTests, "a workspace's selected tests ran", dlog.Context{"dir": dir, "run": run, "outcome": outcome.String(), "exit_code": result.run.ExitCode, "wall_seconds": result.run.Wall.Seconds()})
 	return outcome, nil
+}
+
+// testRunRead is one read of a test run's events stream: the event, or the
+// error that ended the stream (io.EOF at its orderly end).
+type testRunRead struct {
+	event *testrunv1.TestRunEvent
+	err   error
+}
+
+// readTestRunEvents reads EVENTS on a goroutine of its own, answering each
+// event, and then the error that ended the stream (io.EOF at its orderly end),
+// on the channel it returns. It ends at the stream's end, at a read that
+// fails, or once STOP is closed: a relay that stopped reading never holds it
+// on a send, and the relay's close of EVENTS ends a read still blocked.
+func readTestRunEvents(events *os.File, stop <-chan struct{}) <-chan testRunRead {
+	frames := make(chan testRunRead)
+	reader := bufio.NewReader(events)
+	// inflight: joined: STOP or the stream's end ends it, and the relay closes
+	// EVENTS before it returns.
+	go func() {
+		for {
+			ev := &testrunv1.TestRunEvent{}
+			read := testRunRead{event: ev, err: protodelim.UnmarshalFrom(reader, ev)}
+			if read.err != nil {
+				read.event = nil
+			}
+			select {
+			case frames <- read:
+			case <-stop:
+				return
+			}
+			if read.err != nil {
+				return
+			}
+		}
+	}()
+	return frames
 }
 
 // errUnknownTestWorkspace is a test run's workspace this daemon does not
