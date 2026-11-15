@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1045,5 +1046,53 @@ func TestAVerdictThatCannotBeRetiredIsLogged(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "error", opTurnEnded, "could not retire the verdicts judged against the ended turn; the prompts held behind it still read as waiting for it") {
 		t.Fatalf("records = %v, want the failure at error", h.log.Records())
+	}
+}
+
+// heldMergeBriefUnderLease holds the merge's own brief behind a running turn,
+// under the merge's lease, and leaves the workspace idle with no edge left to
+// deliver it.
+func heldMergeBriefUnderLease(t *testing.T, h *harness) {
+	t.Helper()
+	running(t, h, "running-turn", "the running work")
+	heldMergeBrief(t, h, "t-brief")
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+}
+
+func TestDeliverHeldDeliversTheMergesHeldBriefOnAnIdleWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	heldMergeBriefUnderLease(t, h)
+	h.watcher.idle()
+
+	// Act
+	err := h.q.DeliverHeld(context.Background(), theWorkspace)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DeliverHeld: %v", err)
+	}
+	if started := h.sender.started(); !slices.Equal(started, []ids.TurnID{"t-brief"}) {
+		t.Fatalf("started = %v, want the merge's brief", started)
+	}
+}
+
+func TestDeliverHeldWithATurnRunningLeavesItToThatTurnsEnd(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	heldMergeBriefUnderLease(t, h)
+
+	// Act
+	err := h.q.DeliverHeld(context.Background(), theWorkspace)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DeliverHeld: %v", err)
+	}
+	if started := h.sender.started(); len(started) != 0 {
+		t.Fatalf("started = %v, want nothing beside the running turn", started)
+	}
+	if !logged(h.log.Records(), "info", opTurnEnded, "asked to deliver what is held, with a turn running; its end delivers it") {
+		t.Fatalf("records = %+v, want the deferral recorded", h.log.Records())
 	}
 }

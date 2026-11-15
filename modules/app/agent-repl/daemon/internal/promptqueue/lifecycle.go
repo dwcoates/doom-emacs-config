@@ -654,6 +654,30 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	q.popIfIdle(ctx, d, log)
 }
 
+// DeliverHeld implements Queue.
+func (q *queue) DeliverHeld(ctx context.Context, ws ids.WorkspaceID) error {
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return err
+	}
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	if _, running := q.turnInFlight(ws); running {
+		log.Info(opTurnEnded, "asked to deliver what is held, with a turn running; its end delivers it", nil)
+		return nil
+	}
+	if q.factsPending(ws, "the asked delivery", log, q.popIfIdle) {
+		return nil
+	}
+	delivered, err := q.popAndDeliver(ctx, d, log)
+	if err != nil {
+		log.Error(opTurnEnded, "the held entry asked for was not delivered", dlog.Context{"cause": err.Error()})
+		return err
+	}
+	log.Info(opTurnEnded, "asked to deliver what is held, with nothing running", dlog.Context{"delivered": delivered})
+	return nil
+}
+
 // popIfIdle delivers the next free entry when no turn runs, as a turn end
 // would. The caller holds the delivery lock (d).
 func (q *queue) popIfIdle(ctx context.Context, d *delivery, log dlog.Logger) {
