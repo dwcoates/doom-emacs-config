@@ -9,7 +9,7 @@
 // machine in the LID-CLOSED QUIET STATE (quiet.go): the energy mode in use is
 // recorded and Low Power Mode set (energy.go), the views stop, the configured
 // applications freeze and the display sleeps, all undone when the lid opens,
-// the recorded energy mode restored last. The lid is HEARD through IOKit's clamshell notification (lid_darwin.go), never
+// the recorded energy mode restored last. The lid is HEARD through IOKit's clamshell notification (notify_darwin.go), never
 // polled. It also READS the
 // standing, which the script only half did: whether the Wi-Fi interface is
 // joined to a network, and whether sleep is disabled. The controller re-reads
@@ -136,38 +136,40 @@ type Config struct {
 	// FakeLid is EnvLid's value; empty is the operating system's lid
 	// (SystemLid).
 	FakeLid string
+	// FakePowerSource is EnvPowerSource's value; empty is the operating
+	// system's power source (SystemPowerSource).
+	FakePowerSource string
 }
 
 // Lid is the LidWatcher the config names.
 func (c Config) Lid() LidWatcher {
-	if c.FakeLid == "" {
-		return SystemLid()
-	}
-	if l, err := parseLidLine(c.FakeLid); err == nil {
-		return FixedLid(l)
-	}
-	return SocketLid(c.FakeLid)
+	return pickWatcher(c.FakeLid, parseLidLine, SystemLid, FixedLid, SocketLid)
+}
+
+// PowerSource is the PowerSourceWatcher the config names.
+func (c Config) PowerSource() PowerSourceWatcher {
+	return pickWatcher(c.FakePowerSource, parsePowerSourceLine, SystemPowerSource, FixedPowerSource, SocketPowerSource)
 }
 
 // ConfigFromEnv resolves the Config from getenv. A tools dir that is set but
 // not absolute is REFUSED: a relative dir resolves against whatever the
 // daemon's working directory happens to be, which is never what was meant.
-// Fake tools without a fake lid are REFUSED too: the real lid would then move
-// a display the fake tools only pretend to set, and a fake lid is likewise
-// refused without fake tools.
+// Fake tools without a fake lid and a fake power source are REFUSED too
+// (fakeFact): the real lid would then move a display the fake tools only
+// pretend to set, and the real power source an energy mode they only pretend
+// to write; a fake lid or power source is likewise refused without fake
+// tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	cfg := Config{Tools: DefaultTools()}
 	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
-	_, lidErr := parseLidLine(lid)
-	switch {
-	case dir != "" && lid == "":
-		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; fake host tools never hear the real lid", EnvToolsDir, EnvLid)
-	case lid != "" && dir == "":
-		return Config{}, fmt.Errorf("persistentwifi: %s is set without %s; a fake lid never moves the real display", EnvLid, EnvToolsDir)
-	case lid != "" && lidErr != nil && !filepath.IsAbs(lid):
-		return Config{}, fmt.Errorf("persistentwifi: %s=%q is neither a lid state nor an absolute socket path", EnvLid, lid)
+	if err := fakeFact(EnvLid, lid, dir, parseLidLine); err != nil {
+		return Config{}, err
 	}
-	cfg.FakeLid = lid
+	source := getenv(EnvPowerSource)
+	if err := fakeFact(EnvPowerSource, source, dir, parsePowerSourceLine); err != nil {
+		return Config{}, err
+	}
+	cfg.FakeLid, cfg.FakePowerSource = lid, source
 	if dir != "" {
 		if !filepath.IsAbs(dir) {
 			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)

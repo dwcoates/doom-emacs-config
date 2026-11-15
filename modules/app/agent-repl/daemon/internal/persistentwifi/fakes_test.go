@@ -434,6 +434,32 @@ func (f *fakeLidWatcher) Watch(ctx context.Context, heard func(Lid)) error {
 	}
 }
 
+// fakePowerSourceWatcher hands Watch's heard every power source sent on
+// sources, then answers end once sources is closed, or nil when ctx ends
+// first.
+type fakePowerSourceWatcher struct {
+	sources chan PowerSource
+	end     error
+}
+
+func newFakePowerSourceWatcher() *fakePowerSourceWatcher {
+	return &fakePowerSourceWatcher{sources: make(chan PowerSource)}
+}
+
+func (f *fakePowerSourceWatcher) Watch(ctx context.Context, heard func(PowerSource)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case p, ok := <-f.sources:
+			if !ok {
+				return f.end
+			}
+			heard(p)
+		}
+	}
+}
+
 // fakeNetwork is a scripted network change signal (netwatch.Watcher.Changed).
 // taken is told each time the signal is taken, so a test knows Run holds the
 // channel a fire closes.

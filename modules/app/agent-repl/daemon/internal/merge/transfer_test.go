@@ -746,3 +746,98 @@ func TestAwaitLetGoWaitsForTheCutRunToFinish(t *testing.T) {
 		})
 	}
 }
+
+func TestAHoldTakesNothingBackOfAWorkspaceItsTransferHandedOn(t *testing.T) {
+	// Arrange: the workspace's transfer suspended its merge; a handover's
+	// hold read the merge running before the transfer took it.
+	h := newHarness(t)
+	release, done := heldInGateForTransfer(t, h)
+	t.Cleanup(func() { close(release) })
+	if err := h.o.SuspendForTransfer(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("SuspendForTransfer: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the pump was told %v", err)
+	}
+
+	// Act.
+	err := h.o.suspendHeldOne(context.Background(), theWorkspace, suspendHandover)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("suspendHeldOne = %v, want nil", err)
+	}
+	if loggedLike(h, logLike{op: "daemon.merge.adopt", text: "took the workspace's merges"}) {
+		t.Fatal("the hold took back a workspace its transfer handed on")
+	}
+	h.o.mu.Lock()
+	mark, away := h.o.takenAway[theWorkspace]
+	h.o.mu.Unlock()
+	if !away || mark.by != suspendTransfer.by {
+		t.Fatalf("the workspace's mark = %+v (away %v), want the transfer's still standing", mark, away)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.transfer", text: "were already handed on by its workspace's transfer"}) {
+		t.Fatal("the refused hold was not recorded")
+	}
+}
+
+func TestAnOwnTakeBackTakesBackOnlyWhatNoTransferHandedOnSince(t *testing.T) {
+	tests := []struct {
+		name     string
+		mark     suspension
+		wantTook bool
+	}{
+		{name: "its own suspension's mark", mark: suspendPause, wantTook: true},
+		{name: "a transfer's mark since", mark: suspendTransfer, wantTook: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.o.mu.Lock()
+			h.o.takenAway[theWorkspace] = tt.mark
+			h.o.mu.Unlock()
+
+			// Act.
+			took, err := h.o.takeBackOwn(context.Background(), theWorkspace, suspendPause)
+
+			// Assert.
+			if err != nil || took != tt.wantTook {
+				t.Fatalf("takeBackOwn = %v, %v, want %v", took, err, tt.wantTook)
+			}
+			adopted := loggedLike(h, logLike{op: "daemon.merge.adopt", text: "took the workspace's merges"})
+			if adopted != tt.wantTook {
+				t.Fatalf("adopted = %v, want %v", adopted, tt.wantTook)
+			}
+			h.o.mu.Lock()
+			_, away := h.o.takenAway[theWorkspace]
+			h.o.mu.Unlock()
+			if away == tt.wantTook {
+				t.Fatalf("mark standing = %v after the take-back, want %v", away, !tt.wantTook)
+			}
+		})
+	}
+}
+
+func TestTheMoveLockIsHeldPerWorkspaceUntilReleased(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	unlock := h.o.lockMove(theWorkspace)
+
+	// Assert.
+	h.o.mu.Lock()
+	lock := h.o.moveLocks[theWorkspace]
+	h.o.mu.Unlock()
+	if lock.TryLock() {
+		t.Fatal("the move lock was free while held")
+	}
+	other := h.o.lockMove("ws-other")
+	other()
+	unlock()
+	if !lock.TryLock() {
+		t.Fatal("the move lock stayed held after its release")
+	}
+	lock.Unlock()
+}

@@ -14,6 +14,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -90,12 +91,17 @@ type fixture struct {
 	prompts *fakePrompts
 	logs    *dlog.TestSurfaces
 	reg     fakeWorkspaces
+	meter   *briefprompttest.Meter
 }
 
 // newFixture builds a service over a registry holding owner, source and
-// requester (open), whose briefs splice their placeholders in a fixed order.
-func newFixture() *fixture {
-	f := &fixture{prompts: &fakePrompts{}, logs: dlog.NewTestSurfaces()}
+// requester (open), whose briefs splice their placeholders in a fixed order,
+// with family notices on.
+func newFixture() *fixture { return newFixtureFamily(true) }
+
+// newFixtureFamily is newFixture with family notices on or off.
+func newFixtureFamily(family bool) *fixture {
+	f := &fixture{prompts: &fakePrompts{}, logs: dlog.NewTestSurfaces(), meter: &briefprompttest.Meter{}}
 	f.reg = fakeWorkspaces{byID: map[ids.WorkspaceID]wsm.Workspace{
 		owner:     {ID: owner, Name: "owner"},
 		source:    {ID: source, Name: "source"},
@@ -103,7 +109,9 @@ func newFixture() *fixture {
 	}, failFor: map[ids.WorkspaceID]error{}}
 	keys := 0
 	f.s = New(Deps{
-		Workspaces: f.reg,
+		Workspaces:    f.reg,
+		Notices:       f.meter,
+		FamilyNotices: family,
 		Briefs: func(name string, values map[string]string) (string, error) {
 			switch name {
 			case BriefDerived:
@@ -510,6 +518,62 @@ func TestDeliverAdoptedTellsOnlyTheSiblings(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.prompts.got, want) {
 		t.Errorf("submissions = %+v, want %+v", f.prompts.got, want)
+	}
+}
+
+func TestFamilyNoticesOffTellsNoFamilyAndCountsWhatItSuppressed(t *testing.T) {
+	tests := []struct {
+		name           string
+		event          Event
+		wantSuppressed []string
+		wantTold       []submission
+	}{
+		{name: "a created child: its siblings and itself are not told; its owner still is",
+			event:          Event{Kind: Created, Workspace: derived(idp(owner), nil, nil)},
+			wantSuppressed: []string{BriefSibling, BriefSibling, BriefChild},
+			wantTold: []submission{{ws: owner, text: "derived|workspace `child`: created|is a child of this workspace and was cut from this workspace's branch and lands into it|It was just created, at branch `b-child`.", origin: OriginDerived, defer_: true}}},
+		{name: "an adopted child: its siblings are not told",
+			event:          Event{Kind: Adopted, Workspace: wsm.Workspace{ID: child}, unread: true},
+			wantSuppressed: []string{BriefSibling, BriefSibling}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixtureFamily(false)
+			f.withSiblings()
+			f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+			// Act
+			f.deliverNow(tt.event)
+
+			// Assert
+			if !reflect.DeepEqual(f.prompts.got, tt.wantTold) {
+				t.Errorf("submissions = %+v, want %+v", f.prompts.got, tt.wantTold)
+			}
+			if got := f.meter.Suppressed(); !reflect.DeepEqual(got, tt.wantSuppressed) {
+				t.Errorf("suppressed = %v, want %v", got, tt.wantSuppressed)
+			}
+			if _, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "info", Operation: op,
+				Message: "family notices are off, so neither the child's siblings nor the child are told of its family"}); !ok {
+				t.Errorf("no record of the suppression: %+v", f.logs.Records())
+			}
+		})
+	}
+}
+
+func TestEverySentNoticeIsMeasuredByItsTypeAndSize(t *testing.T) {
+	// Arrange
+	f := newFixture()
+	f.withSiblings()
+	f.reg.byID[child] = derived(idp(owner), nil, nil)
+
+	// Act
+	f.deliverNow(Event{Kind: Adopted, Workspace: wsm.Workspace{ID: child}, unread: true})
+
+	// Assert: one observation per sibling told, sized by its composed text.
+	want := []briefprompttest.Observed{{Notice: BriefSibling, Bytes: len("sibling|child|owner")}, {Notice: BriefSibling, Bytes: len("sibling|child|owner")}}
+	if got := f.meter.ObservedNotices(); !reflect.DeepEqual(got, want) {
+		t.Errorf("observed = %+v, want %+v", got, want)
 	}
 }
 

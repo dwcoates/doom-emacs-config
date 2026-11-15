@@ -198,6 +198,25 @@ the human-facing text.  CODE is the Connect error code string when the
 daemon supplied one; STATUS is the HTTP status when one was read."
   (list :kind kind :code code :status status :message message))
 
+(defun agent-repl-connect--undelivered-failure (method address proc event)
+  "Return the `:transport' failure of METHOD at ADDRESS that got no HTTP answer.
+PROC is the socket's process and EVENT its sentinel event.  A nil PROC is
+a dial that never connected: the kernel refused it, so NO DAEMON LISTENS
+at ADDRESS, and the failure says so with `:unreached t'
+\=(`agent-repl-connect-failure-unreached-p').  A socket that connected and
+then ended unanswered carries no such mark: a daemon was there.  THE ONE
+SPELLING for both the unary and the streaming sentinel."
+  (let ((detail (agent-repl-connect--failure
+                 :transport
+                 (agent-repl-connect--transport-message method address event))))
+    (if proc detail (append detail (list :unreached t)))))
+
+(defun agent-repl-connect-failure-unreached-p (detail)
+  "Return non-nil when failure plist DETAIL is a dial no daemon answered.
+The kernel refused the connect, so nothing listens at the address: a
+caller retrying onto that daemon has nobody left to retry onto."
+  (and (plist-get detail :unreached) t))
+
 (defun agent-repl-connect-failure-message (detail)
   "Return the human-facing text of failure plist DETAIL."
   (plist-get detail :message))
@@ -522,6 +541,45 @@ into a generic silence."
   (when (process-live-p process)
     (delete-process process)))
 
+(defun agent-repl-connect--error-text (err)
+  "Return the human text of socket error ERR: its leading strings, joined.
+`make-network-process' signals with data like (\"make client process
+failed\" \"Connection refused\" :name ... :filter CLOSURE ...), and
+`error-message-string' prints all of it, closures included.  The leading
+strings are the whole message; the error\='s symbol stands in when there
+are none."
+  (let ((strings (let (acc)
+                   (catch 'done
+                     (dolist (part (cdr-safe err))
+                       (if (stringp part) (push part acc) (throw 'done nil))))
+                   (nreverse acc))))
+    (if strings
+        (mapconcat #'identity strings ": ")
+      (format "%s" (car-safe err)))))
+
+(defun agent-repl-connect--record-dial-failed (log-scope name host port err)
+  "Record at ERROR that dialing HOST:PORT for exchange NAME signalled ERR.
+Answers ERR\='s message, which the exchange\='s sentinel is handed as its
+event.  THE RECORD CARRIES THE MESSAGE ONLY, NEVER ERR ITSELF:
+`make-network-process' signals with its whole argument plist as data, the
+connection\='s filter and sentinel closures included, so printing ERR
+wrote ~7KB of byte-code into every record (2026-11-15: a dial loop filled
+a 5x64MB rotation in ten minutes).  LOG-SCOPE is the exchange\='s own."
+  (let ((message (agent-repl-connect--error-text err)))
+    (agent-repl--error log-scope "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
+                       name host port message)
+    message))
+
+(defun agent-repl-connect--record-send-failed (log-scope name err)
+  "Record at ERROR that writing exchange NAME\='s request signalled ERR.
+Answers ERR\='s message; the record carries it alone, for the reason
+`agent-repl-connect--record-dial-failed' gives.  LOG-SCOPE is the
+exchange\='s own."
+  (let ((message (agent-repl-connect--error-text err)))
+    (agent-repl--error log-scope "elisp.connect.request-send-failed name=%S error=%S"
+                       name message)
+    message))
+
 (defun agent-repl-connect--open-socket (name host port request filter sentinel log-scope)
   "Open a socket to HOST:PORT as process NAME and send REQUEST on it.
 FILTER receives raw response bytes and SENTINEL every status change.
@@ -575,16 +633,12 @@ from."
                :filter filter
                :sentinel #'ignore))
       (error
-       (setq refusal (error-message-string err))
-       (agent-repl--error log-scope "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
-                          name host port err)))
+       (setq refusal (agent-repl-connect--record-dial-failed log-scope name host port err))))
     (when process
       (condition-case err
           (process-send-string process request)
         (error
-         (setq refusal (error-message-string err))
-         (agent-repl--error log-scope "elisp.connect.request-send-failed name=%S error=%S"
-                            name err)
+         (setq refusal (agent-repl-connect--record-send-failed log-scope name err))
          (agent-repl-connect--close-socket process))))
     (if (process-live-p process)
         (set-process-sentinel process sentinel)
@@ -624,6 +678,12 @@ work after teardown."
   (address nil :type string)
   (streams nil :type list)
   (alive-p t))
+
+(defun agent-repl-connect-connection-at-p (conn address)
+  "Return non-nil when CONN is a connection to the daemon at ADDRESS.
+A nil CONN is at no address.  THE ONE SPELLING of \"does this connection
+stand at that address\", so no caller hand-rolls the nil guard."
+  (and conn (equal address (agent-repl-connect-connection-address conn)) t))
 
 (defun agent-repl-connect-open (address)
   "Return a connection object for the daemon listening at ADDRESS.
@@ -743,9 +803,8 @@ the call is idempotent.  Returns the socket process."
                               :status status)))
                     ((null status)
                      (settle :failure
-                             (agent-repl-connect--failure
-                              :transport
-                              (agent-repl-connect--transport-message method address event))))
+                             (agent-repl-connect--undelivered-failure
+                              method address proc event)))
                     ;; A DECLARED LENGTH THE PEER DID NOT DELIVER IS A DROP,
                     ;; not a body.  Parsing what arrived would turn a severed
                     ;; connection into an unrelated `malformed' complaint
@@ -1069,9 +1128,8 @@ nothing.  Returns the stream object."
                            :status status)))
                    ((null status)
                     (list :error
-                          (agent-repl-connect--failure
-                           :transport
-                           (agent-repl-connect--transport-message method address event))))
+                          (agent-repl-connect--undelivered-failure
+                           method address proc event)))
                    ((/= status 200)
                     (list :error
                           (agent-repl-connect--connect-error-detail status error-body)))

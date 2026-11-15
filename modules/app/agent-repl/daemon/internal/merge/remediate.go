@@ -329,8 +329,12 @@ func (o *orchestrator) takeBackSteppedAside(r *run, aside suspension, fields dlo
 		log.Error(opRemediate, "the merge that stepped aside did not let go", withField(fields, "error", err.Error()))
 		return
 	}
-	if err := o.AdoptWorkspace(ctx, r.ws); err != nil {
+	took, err := o.takeBackOwn(ctx, r.ws, aside)
+	if err != nil {
 		log.Error(opRemediate, "could not take back the merge that stepped aside to remediate", withField(fields, "error", err.Error()))
+		return
+	}
+	if !took {
 		return
 	}
 	log.Info(opRemediate, "took back the merge that stepped aside as remediating out of line; "+aside.resumes, fields)
@@ -569,14 +573,7 @@ func (o *orchestrator) drawBackInLine(ctx context.Context, ws ids.WorkspaceID, r
 
 // lineLock answers REPO's line lock (orchestrator.lines).
 func (o *orchestrator) lineLock(repo wsm.RepoKey) *sync.Mutex {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	line, ok := o.lines[repo]
-	if !ok {
-		line = &sync.Mutex{}
-		o.lines[repo] = line
-	}
-	return line
+	return keyedLock(o, o.lines, repo)
 }
 
 // lineWrite makes WRITE, a store write that moves an entry of REPO's line

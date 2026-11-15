@@ -58,6 +58,7 @@ Answers performance questions about agent-repl from stored history: what a laten
     - How the mediator's checks ended: `sum by (outcome) (increase_pure(agentrepl_deploy_mediation_seconds_count{span="total"}[W]))`; `approved` found nothing, `redeployed` fixed and deployed, `escalated` handed the deploy to the user.
     - How long checks take: `histogram_quantile(0.9, sum by (le, span, outcome) (increase_pure(agentrepl_deploy_mediation_seconds_bucket[W])))`; `rollout` is the hot reload, `assessment` the mediator's work.
     - Remediations deployed in a row before the queue advanced: `histogram_quantile(0.9, sum by (le) (increase_pure(agentrepl_deploy_remediation_chain_redeploys_bucket[W])))`, and right now: `agentrepl_deploy_remediations_in_a_row`.
+  - *NOTE*: messages between workspaces, over a window `W`: how many by type, `sum by (notice) (increase_pure(agentrepl_workspace_notice_bytes_count[W]))`; their sizes, `histogram_quantile(0.9, sum by (le, notice) (increase_pure(agentrepl_workspace_notice_bytes_bucket[W])))`; notices switched off, `sum by (notice) (increase_pure(agentrepl_workspace_notices_suppressed_total[W]))`.
   - *NOTE*: a version reads `0.129.0` for a landing and `0.129.0+<commit>` for a build between landings; `git log` between two versions names the changes to read.
 
 2. Report.

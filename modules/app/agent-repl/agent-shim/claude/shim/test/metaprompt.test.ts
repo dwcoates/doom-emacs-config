@@ -142,17 +142,33 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session runs in bypass queue mode, which agent-repl also calls queue bypass mode.");
   });
 
-  it("lets a queue-bypass session dispatch like any other, and keeps the queue its alone to manage", () => {
+  it("never lets a queue-landing workspace run the full suite, and scopes a gate failure's remediation", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("through_queue", home);
+    // Assert — owner ruling 2026-11-15: only the merge queue's gate runs the
+    // full suite; a workspace runs only what it added, changed, or was handed.
+    expect(text).toContain("A workspace NEVER runs the full suite, for any reason");
+    expect(text).toContain("The merge queue alone runs it, programmatically, as the gate of every landing.");
+    expect(text).toContain("That remediation runs only the failing tests it was handed, once fixed, and the tests the work added or changed.");
+    expect(text).not.toContain("The rare exception is a change with systemic knock-on effects");
+  });
+
+  it("keeps a queue-bypass session off the merge queue, doing its own work, and alone managing the queue", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("bypassing_queue", home);
-    // Assert — owner ruling 2026-11-14: the queue keeps running, so the
-    // session's children land through it, and only the session manages it.
-    expect(text).toContain("This workspace creates child workspaces, one-shots and async merges as any workspace does");
-    expect(text).toContain("This workspace never marks itself a one-shot");
+    // Assert — owner ruling 2026-11-15: bypass mode exists to skip the queue,
+    // and creates no child or subagent the user did not explicitly ask for.
+    expect(text).toContain("nothing this workspace lands or dispatches ever goes through it");
+    expect(text).toContain("it creates no child workspace and runs no subagent unless the user explicitly asks");
+    expect(text).toContain("Several such branches are merged into one branch and land at once");
+    expect(text).toContain("runs only the tests its changes add or change");
+    expect(text).toContain("No child or subagent of this workspace ever runs it");
     expect(text).toContain("Only this workspace pauses or resumes the merge queue");
-    expect(text).not.toContain("never creates a child workspace");
+    expect(text).not.toContain("creates child workspaces, one-shots and async merges as any workspace does");
   });
 
   it("has a queue-bypass session pause the queue only to land, and resume it at once", () => {
@@ -162,7 +178,9 @@ describe("this repository's committed metaprompt", () => {
     const text = readLandingSection("bypassing_queue", home);
     // Assert — owner ruling 2026-11-14: the queue is paused for no longer
     // than a landing needs, and a moved main branch is rebased onto first.
-    expect(text).toContain("Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here`.");
+    expect(text).toContain("Pause the queue only once a change is complete and about to land: `agent-repld merge-queue pause -repository here -to-land`.");
+    // 2026-11-14: a pause the owner asked for outlives the turn's end.
+    expect(text).toContain("A pause the user asks for (to save power, to look at the queue) is made without `-to-land`, so it outlives this turn: `agent-repld merge-queue pause -repository here`.");
     expect(text).toContain("Resume the queue the moment the landing is done: `agent-repld merge-queue resume -repository here`.");
     expect(text).toContain("If the main branch moved since the work began, rebase onto it and resolve every conflict.");
     expect(text).not.toContain("Before the first change of every prompt");
@@ -222,6 +240,7 @@ describe("this repository's committed metaprompt", () => {
     // and the table is not a backlog.
     expect(text).toContain("I start its fix at once, without asking.");
     expect(text).toContain("dispatches each fix as its own async merge the moment it notices it");
+    expect(text).toContain("A workspace in queue bypass mode fixes it itself");
     expect(text).toContain("A deficiency goes in the table in agent-repl's `modules/app/agent-repl/org/todo.md` only when its fix cannot start now.");
     expect(text).not.toContain("The moment a one-shot workspace adds a row to the todo table, it stops being a one-shot");
   });

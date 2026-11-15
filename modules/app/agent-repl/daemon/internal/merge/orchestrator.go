@@ -164,6 +164,11 @@ type orchestrator struct {
 	// handOffLocks serialize each requester's hand-offs, so its async
 	// requests join the line in the order they were asked for.
 	handOffLocks map[ids.WorkspaceID]*sync.Mutex
+	// dropLocks serialize each workspace's drops of its waiting merge
+	// (dropQueued), so two exits asking at once (a cold gate raised twice,
+	// an eviction beside it) never both act on one entry: the second reads
+	// the entry the first already took off (leftFirst).
+	dropLocks map[ids.WorkspaceID]*sync.Mutex
 	// requestingTurns is the turn in flight when each workspace's merge was
 	// asked for, until TakeRequestingTurn is asked about it.
 	requestingTurns map[ids.WorkspaceID]ids.TurnID
@@ -207,6 +212,9 @@ type orchestrator struct {
 	// clears takenAway drops the merge instead of resuming it. Recorded and
 	// consumed under the same lock as takenAway (dequeue, AdoptWorkspace).
 	abandonsAtTakeBack map[ids.WorkspaceID]AbandonCause
+	// moveLocks are the workspaces' move locks (lockMove), made on first use
+	// under mu.
+	moveLocks map[ids.WorkspaceID]*sync.Mutex
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// lines serializes, per repository, every decision that reads its line
@@ -285,6 +293,10 @@ type orchestrator struct {
 	// begins waiting for its line lock (lineWrite): THE TEST SEAM, NIL IN
 	// PRODUCTION, that shows the write held behind a decision reading the line.
 	onLineWait func(repo wsm.RepoKey)
+	// onDropWait, when set, is called with the workspace as a drop of its
+	// waiting merge begins waiting for its drop lock (takeOffQueue): THE TEST
+	// SEAM, NIL IN PRODUCTION, that shows a second drop held behind the first.
+	onDropWait func(ws ids.WorkspaceID)
 	// onBoundaryAsk, when set, is called once a restart has asked a running
 	// merge to stop at its next step boundary, before the restart waits for
 	// it. Nil in production; tests release the step in flight from it.
@@ -350,6 +362,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
 		asyncWaits:         map[ids.WorkspaceID]*asyncWait{},
 		handOffLocks:       map[ids.WorkspaceID]*sync.Mutex{},
+		dropLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
 		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),
@@ -357,6 +370,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		resumes:            map[ids.WorkspaceID]progressDoc{},
 		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
+		moveLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
 		offers:             map[ids.WorkspaceID]bool{},
 		repoOf:             map[ids.WorkspaceID]wsm.RepoKey{},

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
@@ -34,7 +36,13 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 }
 
 func composer(briefErr, mintErr error) Composer {
+	return composerMetered(briefErr, mintErr, &briefprompttest.Meter{})
+}
+
+// composerMetered is composer recording into METER.
+func composerMetered(briefErr, mintErr error, meter Meter) Composer {
 	return Composer{
+		Meter: meter,
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if briefErr != nil {
 				return "", briefErr
@@ -131,4 +139,45 @@ func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestASubmittedNoticeIsMeasuredByItsBriefAndSize(t *testing.T) {
+	// Arrange
+	meter := &briefprompttest.Meter{}
+
+	// Act
+	_, err := composerMetered(nil, nil, meter).Submit(context.Background(), &fakePrompts{}, "ws-1", "a-brief", map[string]string{"x": "y"}, "k", origin)
+
+	// Assert: the brief is the notice's type, and the size is its text's.
+	want := []briefprompttest.Observed{{Notice: "a-brief", Bytes: len("a-brief:y")}}
+	if got := meter.ObservedNotices(); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("observed %+v (err %v), want %+v", got, err, want)
+	}
+}
+
+func TestAFailedSubmissionIsNotMeasured(t *testing.T) {
+	// Arrange
+	meter := &briefprompttest.Meter{}
+
+	// Act
+	_, err := composerMetered(nil, nil, meter).Submit(context.Background(), &fakePrompts{err: errors.New("refused")}, "ws-1", "a-brief", nil, "k", origin)
+
+	// Assert
+	if err == nil || len(meter.ObservedNotices()) != 0 {
+		t.Fatalf("err %v, observed %+v; want the failure and nothing measured", err, meter.ObservedNotices())
+	}
+}
+
+func TestAComposerWithNoMeterFailsHard(t *testing.T) {
+	// Arrange
+	c := composerMetered(nil, nil, nil)
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a Composer with no Meter submitted; want a panic")
+		}
+	}()
+
+	// Act
+	_, _ = c.Submit(context.Background(), &fakePrompts{}, "ws-1", "b", nil, "k", origin)
 }

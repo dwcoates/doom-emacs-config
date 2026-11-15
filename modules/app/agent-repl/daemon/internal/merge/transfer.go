@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -47,7 +48,36 @@ var errHandedOver = errors.New("merge: the workspace is handed over to the succe
 // transfer must not hand a session over to a successor while this daemon still
 // drives it -- and the caller takes the workspace back.
 func (o *orchestrator) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
+	unlock := o.lockMove(ws)
+	defer unlock()
 	return o.suspendFor(ctx, ws, suspendTransfer)
+}
+
+// errAlreadyHandedOn is what suspendFor answers a suspension this daemon
+// takes back itself (a pause's or a handover's hold) for a workspace a
+// suspension that hands it on (its transfer) already took: the workspace's
+// merges are another daemon's now, so this one neither suspends nor takes
+// back anything of them.
+var errAlreadyHandedOn = errors.New("merge: the workspace's merges were already handed on; this daemon takes nothing of them back")
+
+// lockMove takes WS's MOVE LOCK and answers its release. It serializes the
+// steps that move a workspace's merges in or out of this daemon -- a
+// transfer's suspension, a hold's suspension together with its take-back,
+// and every take-back (AdoptWorkspace) -- so a hold can never take back a
+// workspace between its transfer's suspension and the transfer's end
+// (2026-11-15: a handover's hold took back a workspace its transfer had
+// just handed on, and this daemon rebased a worktree whose session the
+// successor drove, the session's turn still writing it).
+func (o *orchestrator) lockMove(ws ids.WorkspaceID) func() {
+	o.mu.Lock()
+	lock, ok := o.moveLocks[ws]
+	if !ok {
+		lock = &sync.Mutex{}
+		o.moveLocks[ws] = lock
+	}
+	o.mu.Unlock()
+	lock.Lock()
+	return lock.Unlock
 }
 
 // SuspendForRestart is SuspendForTransfer's stopping point taken for a
@@ -176,19 +206,54 @@ func (o *orchestrator) suspendHeld(ctx context.Context, repos []wsm.RepoKey, why
 	sort.Slice(running, func(i, j int) bool { return running[i] < running[j] })
 	var first error
 	for _, ws := range running {
-		if err := o.suspendFor(ctx, ws, why); err != nil {
-			o.deps.Log.Global().Error(why.op, "could not suspend a running merge for "+why.by, dlog.Context{
-				"workspace": string(ws), "error": err.Error()})
-			if first == nil {
-				first = err
-			}
-			continue
-		}
-		if err := o.AdoptWorkspace(ctx, ws); err != nil && first == nil {
+		if err := o.suspendHeldOne(ctx, ws, why); err != nil && first == nil {
 			first = err
 		}
 	}
 	return first
+}
+
+// suspendHeldOne is suspendHeld's suspension and take-back of one workspace,
+// under its move lock: a workspace its transfer already handed on is left to
+// the daemon it went to.
+func (o *orchestrator) suspendHeldOne(ctx context.Context, ws ids.WorkspaceID, why suspension) error {
+	unlock := o.lockMove(ws)
+	defer unlock()
+	err := o.suspendFor(ctx, ws, why)
+	if errors.Is(err, errAlreadyHandedOn) {
+		return nil
+	}
+	if err != nil {
+		o.deps.Log.Global().Error(why.op, "could not suspend a running merge for "+why.by, dlog.Context{
+			"workspace": string(ws), "error": err.Error()})
+		return err
+	}
+	_, err = o.takeBackOwnLocked(ctx, ws, why)
+	return err
+}
+
+// takeBackOwn takes back WS's merges a suspension of this daemon's own
+// (WHY: a hold, a step aside) took, under WS's move lock: unless a
+// suspension that hands them on (a transfer) took them since, which leaves
+// them where they went. It answers whether it took them back.
+func (o *orchestrator) takeBackOwn(ctx context.Context, ws ids.WorkspaceID, why suspension) (bool, error) {
+	unlock := o.lockMove(ws)
+	defer unlock()
+	return o.takeBackOwnLocked(ctx, ws, why)
+}
+
+// takeBackOwnLocked is takeBackOwn under WS's move lock, which the caller
+// holds.
+func (o *orchestrator) takeBackOwnLocked(ctx context.Context, ws ids.WorkspaceID, why suspension) (bool, error) {
+	o.mu.Lock()
+	prior, away := o.takenAway[ws]
+	o.mu.Unlock()
+	if away && !prior.takenBack() {
+		o.deps.Log.Global().Info(why.op, "the workspace's merges were handed on by "+prior.by+" after "+why.by+" took them; they are not taken back here",
+			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by})
+		return false, nil
+	}
+	return true, o.adoptWorkspace(ctx, ws)
 }
 
 // errRestarting is the cause a restart cuts a suspended run's waits with.
@@ -198,6 +263,15 @@ var errRestarting = errors.New("merge: the workspace is restarting; the merge is
 func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why suspension) error {
 	op := why.op
 	o.mu.Lock()
+	// A WORKSPACE ALREADY HANDED ON STAYS HANDED ON: its first suspension's
+	// mark stands, and a suspension this daemon would take back itself
+	// takes nothing (errAlreadyHandedOn).
+	if prior, away := o.takenAway[ws]; away && !prior.takenBack() && why.takenBack() {
+		o.mu.Unlock()
+		o.deps.Log.Global().Info(op, "the workspace's merges were already handed on by "+prior.by+"; "+why.by+" neither suspends nor takes back anything of them",
+			dlog.Context{"workspace": string(ws), "handed_on_by": prior.by})
+		return errAlreadyHandedOn
+	}
 	o.takenAway[ws] = why
 	wait := o.requested[ws]
 	delete(o.requested, ws)
@@ -382,6 +456,14 @@ func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
 // once the workspace is its own, and the incumbent's take-back of a transfer
 // that did not land.
 func (o *orchestrator) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
+	unlock := o.lockMove(ws)
+	defer unlock()
+	return o.adoptWorkspace(ctx, ws)
+}
+
+// adoptWorkspace is AdoptWorkspace under WS's move lock, which the caller
+// holds.
+func (o *orchestrator) adoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error {
 	const op = "daemon.merge.adopt"
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {

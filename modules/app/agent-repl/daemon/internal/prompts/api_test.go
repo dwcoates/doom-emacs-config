@@ -391,6 +391,22 @@ func TestTheFixCommitBriefKeepsItsPlaceholderSet(t *testing.T) {
 	}
 }
 
+func TestTheRebaseCommitBriefKeepsItsPlaceholderSet(t *testing.T) {
+	// Arrange.
+	want := []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-rebase-commit")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := sameSet("placeholders", want, got.Placeholders); err != nil {
+		t.Fatalf("merge-rebase-commit: %v", err)
+	}
+}
+
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
 	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
@@ -469,7 +485,7 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 		"RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
 		"the `agent-repld test run` command that runs only its failing cases through the daemon",
 		"never the whole suite, and never a test command by hand",
-		"Fix what fails, then rerun those same targeted cases. Repeat until every one of them passes.",
+		"Fix what fails, then rerun those same targeted cases, together with the tests this branch itself added or changed, named one by one. Repeat until every one of them passes.",
 		"Only then is the remediation resolved: commit and end your turn",
 		"The queue then runs the selected suites in full again",
 	}

@@ -1592,6 +1592,7 @@ export class TurnEngine {
         opened.concludeThrough(through);
       },
       servedThrough: () => opened.servedThrough(),
+      openedOn: () => opened.openedOn(),
       close: () => {
         opened.close();
       },

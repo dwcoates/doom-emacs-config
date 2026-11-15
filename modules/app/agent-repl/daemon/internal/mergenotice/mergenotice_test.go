@@ -11,6 +11,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -168,6 +169,7 @@ func newFixture(subs fakeSubscriptions) *fixture {
 		Subscriptions: f.subs,
 		Holds:         f.holds,
 		Untold:        f.untold,
+		Notices: &briefprompttest.Meter{},
 		Briefs: func(name string, values map[string]string) (string, error) {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)

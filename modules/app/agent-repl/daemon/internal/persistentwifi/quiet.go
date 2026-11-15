@@ -16,7 +16,9 @@ const opQuiet = "daemon.persistentwifi.quiet"
 // the mode on and the lid heard closed, the machine does no work for a screen
 // nobody sees, so the battery goes to agent work. Entering it, in order:
 //
-//  1. the energy mode in use is recorded and Low Power Mode set (energy.go);
+//  1. on battery power, the energy mode in use is recorded and Low Power
+//     Mode set (energy.go), which then follows the power source while the
+//     state stands;
 //  2. the views stop (Views): the daemon resolves and publishes no view for a
 //     local page, and the pages and Emacs idle on the standing's push;
 //  3. the configured applications are frozen (Freezer);
@@ -100,7 +102,7 @@ func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energ
 	// WHETHER THE MACHINE STANDS ON THE HOTSPOT is learned at the quiet
 	// state's first beat (hotspotdwell.go).
 	c.hotspot = hotspotDwell{unknown: true, check: c.clock.Now()}
-	energyStep := c.lowerEnergyLocked(ctx, energy, trigger)
+	energyStep := c.holdEnergyLocked(ctx, energy, trigger)
 	c.views.Set(true)
 	frozen := c.freezer.Freeze(ctx, trigger)
 	display := c.sleepDisplayLocked(ctx, trigger)
@@ -108,7 +110,7 @@ func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energ
 		c.telemetry.SetLidQuiet(true)
 	}
 	c.log.Info(opQuiet, "the lid closed with persistent wifi on; the machine entered the lid-closed quiet state", dlog.Context{
-		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode),
+		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode), "power_source": c.powerSource.name(),
 		"frozen": frozenNames(frozen), "display": displayArm(display), "energy": energyModeArm(energyStep)})
 	return quietSteps{display: display, energy: energyStep}
 }
@@ -124,12 +126,12 @@ func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, energ
 	display := c.wakeDisplayLocked(ctx, trigger)
 	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)
-	energyStep := c.restoreEnergyLocked(ctx, energy, trigger, true)
+	energyStep := c.restoreEnergyLocked(ctx, energy, trigger, "the lid-closed quiet state was left", true)
 	if c.telemetry != nil {
 		c.telemetry.SetLidQuiet(false)
 	}
 	c.log.Info(opQuiet, "the machine left the lid-closed quiet state; every view was brought to its current state", dlog.Context{
-		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode),
+		"trigger": trigger, "lid": c.lid.name(), "mode": modeName(mode), "power_source": c.powerSource.name(),
 		"thawed": frozenNames(thawed), "display": displayArm(display), "energy": energyModeArm(energyStep)})
 	return quietSteps{display: display, energy: energyStep}
 }

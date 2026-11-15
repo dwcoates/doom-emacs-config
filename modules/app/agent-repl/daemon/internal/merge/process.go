@@ -253,14 +253,86 @@ type replay struct {
 // up, and an error when a rebase command failed outright; in both cases the
 // rebase is left exactly where git left it.
 func (r *run) rebase(ctx context.Context, tip, targetBranch string) (*outcome, error) {
+	return r.untilCommitted(ctx, tip, targetBranch, func() (*outcome, error) { return r.rebaseOnce(ctx, tip, targetBranch) })
+}
+
+// worktreeDirty is how one rebase attempt ends when the worktree it would
+// rebase has uncommitted changes: found by the clean check before it, or by
+// git refusing to start over them (gitclient.ErrDirtyWorktree). Nothing was
+// replayed and no rebase stands.
+type worktreeDirty struct {
+	dir string
+	// refused is git's own refusal, nil when the clean check found the
+	// changes first.
+	refused error
+}
+
+func (d *worktreeDirty) Error() string {
+	if d.refused != nil {
+		return fmt.Sprintf("merge: git refused to rebase over the uncommitted changes in %s: %v", d.dir, d.refused)
+	}
+	return fmt.Sprintf("merge: the worktree %s has uncommitted changes, so it cannot be rebased", d.dir)
+}
+
+// untilCommitted runs the rebase FIRST attempts, and once more after each time
+// it met uncommitted changes and the workspace's session was prompted to
+// commit them (BriefRebaseCommit), while the merge keeps its place: the
+// changes are the requester's, and a rebase never goes over work it would
+// lose. A retry is a fresh rebaseOnce, so it replays exactly what the
+// commits made the branch. A git-only background rebase prompts nothing: its
+// dirt is answered (worktreeDirty) and the member keeps its base. The
+// prompts are MaxCommitPrompts for the whole rebase; a worktree still dirty
+// after the last fails the merge in its conflicts.
+func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, first func() (*outcome, error)) (*outcome, error) {
+	const op = "daemon.merge.rebase"
+	attempt, used := first, 0
+	for {
+		out, err := attempt()
+		var dirty *worktreeDirty
+		if !errors.As(err, &dirty) {
+			return out, err
+		}
+		if r.background && !r.resolving {
+			return nil, err
+		}
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dirty.dir, "refused_by_git": dirty.refused != nil}
+		r.o.log(ctx, r.ws).Info(op, "the rebase met uncommitted changes in the worktree; the workspace is prompted to commit them and the merge keeps its place", fields)
+		clean, err := r.promptUntilCommitted(ctx, commitAsk{
+			op:        op,
+			brief:     BriefRebaseCommit,
+			reading:   "before its rebase starts again",
+			origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+			vars:      r.commitBriefVars(targetBranch),
+			prompted:  "the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them",
+			committed: "the worktree's changes are committed; the rebase starts again",
+		}, &used)
+		if err != nil {
+			return nil, err
+		}
+		if !clean {
+			why := fmt.Sprintf("the worktree %s still has uncommitted changes after %d prompts to commit them, so %s cannot be rebased", r.subject.dir, MaxCommitPrompts, r.subject.branch)
+			r.o.log(ctx, r.ws).Info(op, "the worktree stayed dirty after the last prompt to commit; the merge fails", withField(fields, "why", why))
+			out := failedIn(footer.FailedConflicts, why)
+			return &out, nil
+		}
+		attempt = func() (*outcome, error) { return r.rebaseOnce(ctx, tip, targetBranch) }
+	}
+}
+
+// rebaseOnce is one attempt at the rebase: the worktree checked, then the
+// branch's own commits replayed.
+func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.rebase"
 	dir, branch := r.subject.dir, r.subject.branch
+	if err := r.clearLeftoverRebase(ctx); err != nil {
+		return nil, err
+	}
 	clean, err := r.git.IsClean(ctx, dir)
 	if err != nil {
 		return nil, fmt.Errorf("merge: reading whether %s is clean: %w", dir, err)
 	}
 	if !clean {
-		return nil, fmt.Errorf("merge: the worktree %s has uncommitted changes, so %s cannot be rebased", dir, branch)
+		return nil, &worktreeDirty{dir: dir}
 	}
 	checkedOut, err := r.git.CurrentBranch(ctx, dir)
 	if err != nil {
@@ -360,6 +432,10 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 		if err != nil {
 			if errors.Is(err, errMergeStopping) {
 				return nil, err
+			}
+			if errors.Is(err, gitclient.ErrDirtyWorktree) {
+				r.settleRebasing(ctx, p, "the worktree had uncommitted changes; nothing was replayed")
+				return nil, &worktreeDirty{dir: dir, refused: err}
 			}
 			r.rebaseFailed(ctx, p, err)
 			return nil, fmt.Errorf("merge: rebasing %s onto %s: %w", branch, short(tip), err)
@@ -477,10 +553,12 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 	if head == branchHead && p.done == 0 {
 		r.o.log(ctx, r.ws).Info(op, "the rebase had not begun before the restart; it begins now", dlog.Context{
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
-		r.resumeReplay(p)
-		r.publishReplay()
-		step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
-		return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+		return r.untilCommitted(ctx, tip, targetBranch, func() (*outcome, error) {
+			r.resumeReplay(p)
+			r.publishReplay()
+			step, err := r.git.StartRebase(ctx, dir, tip, shasOf(p.commits))
+			return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+		})
 	}
 	return r.contradiction(ctx, fmt.Sprintf("no rebase stands in %s, and %s is at %s: neither on %s's tip %s nor at %s, where it stood before the recorded rebase",
 		dir, branch, short(head), targetBranch, short(tip), short(branchHead))), nil
@@ -1036,46 +1114,99 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 // times. It answers nil once the worktree is clean, and the failed outcome
 // when it is still dirty after the last prompt.
 func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt int, targetBranch string) (*outcome, error) {
-	const op = "daemon.merge.fixes"
+	clean, err := r.promptUntilCommitted(ctx, commitAsk{
+		op:        "daemon.merge.fixes",
+		brief:     BriefFixCommit,
+		reading:   "after the fixing turn",
+		origin:    fixOrigin,
+		tab:       TabFixes,
+		fields:    dlog.Context{"attempt": attempt},
+		vars:      r.commitBriefVars(targetBranch),
+		prompted:  "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place",
+		committed: "the fixing attempt's changes are committed; the merge goes on",
+	}, new(int))
+	if err != nil || clean {
+		return nil, err
+	}
+	why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", r.subject.dir, MaxCommitPrompts)
+	return r.fixGaveUp(ctx, round, n, attempt, why), nil
+}
+
+// commitBriefVars are the values every commit brief takes beyond its prompt
+// count: the branch, its worktree and the target.
+func (r *run) commitBriefVars(targetBranch string) map[string]string {
+	return map[string]string{
+		"source_branch": r.subject.branch,
+		"worktree_dir":  r.subject.dir,
+		"target_branch": r.briefTarget(targetBranch),
+	}
+}
+
+// commitAsk is one step's prompt to commit what its worktree holds: the
+// record operation, the brief and its values beyond the prompt count, the
+// turn's origin, the progress tab the turn is recorded in ("" records none),
+// the record's own fields, when its clean check reads (for its error), and
+// the messages it is prompted and committed with.
+type commitAsk struct {
+	op, brief, reading  string
+	vars                map[string]string
+	origin              conversationv1.PromptOrigin
+	tab                 string
+	fields              dlog.Context
+	prompted, committed string
+}
+
+// promptUntilCommitted is THE ONE commit prompt of a merge that met
+// uncommitted changes in the worktree it works in: while the worktree is not
+// clean, the workspace's session is prompted to commit (ASK's brief) while
+// the merge keeps its place, until USED reaches MaxCommitPrompts. It answers
+// true once the worktree is clean, false when it is still dirty after the
+// last prompt.
+func (r *run) promptUntilCommitted(ctx context.Context, ask commitAsk, used *int) (bool, error) {
 	dir := r.subject.dir
-	for prompt := 1; ; prompt++ {
+	prompted := false
+	for {
 		clean, err := r.git.IsClean(ctx, dir)
 		if err != nil {
-			return nil, fmt.Errorf("merge: reading whether %s is clean after the fixing turn: %w", dir, err)
+			return false, fmt.Errorf("merge: reading whether %s is clean %s: %w", dir, ask.reading, err)
 		}
-		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "attempt": attempt, "worktree": dir}
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dir}
+		for k, v := range ask.fields {
+			fields[k] = v
+		}
 		if clean {
-			if prompt > 1 {
-				fields["prompts"] = prompt - 1
-				r.o.log(ctx, r.ws).Info(op, "the fixing attempt's changes are committed; the merge goes on", fields)
+			if prompted {
+				fields["prompts"] = *used
+				r.o.log(ctx, r.ws).Info(ask.op, ask.committed, fields)
 			}
-			return nil, nil
+			return true, nil
 		}
-		if prompt > MaxCommitPrompts {
-			why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", dir, MaxCommitPrompts)
-			return r.fixGaveUp(ctx, round, n, attempt, why), nil
+		if *used >= MaxCommitPrompts {
+			return false, nil
 		}
-		fields["prompt"], fields["of"] = prompt, MaxCommitPrompts
-		r.o.log(ctx, r.ws).Info(op, "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place", fields)
-		text, err := r.o.deps.Briefs(BriefFixCommit, map[string]string{
-			"source_branch": r.subject.branch,
-			"worktree_dir":  dir,
-			"target_branch": r.briefTarget(targetBranch),
-			"prompt":        fmt.Sprintf("%d", prompt),
-			"max_prompts":   fmt.Sprintf("%d", MaxCommitPrompts),
-		})
+		*used++
+		prompted = true
+		fields["prompt"], fields["of"] = *used, MaxCommitPrompts
+		r.o.log(ctx, r.ws).Info(ask.op, ask.prompted, fields)
+		vars := map[string]string{"prompt": fmt.Sprintf("%d", *used), "max_prompts": fmt.Sprintf("%d", MaxCommitPrompts)}
+		for k, v := range ask.vars {
+			vars[k] = v
+		}
+		text, err := r.o.deps.Briefs(ask.brief, vars)
 		if err != nil {
-			return nil, fmt.Errorf("merge: composing the commit brief: %w", err)
+			return false, fmt.Errorf("merge: composing the commit brief: %w", err)
 		}
 		turn := wsm.NewTurnID()
-		if err := r.checkpoint(ctx, TabFixes, func(d *progressDoc) { d.Turn = string(turn) }); err != nil {
-			return nil, err
+		if ask.tab != "" {
+			if err := r.checkpoint(ctx, ask.tab, func(d *progressDoc) { d.Turn = string(turn) }); err != nil {
+				return false, err
+			}
 		}
-		if _, err := r.o.submitThen(ctx, r.ws, turn, text, fixOrigin, nil); err != nil {
-			return nil, err
+		if _, err := r.o.submitThen(ctx, r.ws, turn, text, ask.origin, nil); err != nil {
+			return false, err
 		}
 		if err := stillWanted(ctx); err != nil {
-			return nil, err
+			return false, err
 		}
 	}
 }

@@ -498,6 +498,10 @@ type Daemon struct {
 	// Lid is the fake host's lid (AGENT_REPL_PERSISTENT_WIFI_LID),
 	// starting open, so no test ever hears the real machine's lid.
 	Lid *FakeLid
+	// PowerSource is the fake host's power source
+	// (AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE), starting on AC power, so no
+	// test ever hears the real machine's.
+	PowerSource *FakePowerSource
 	// PromptsDir is the copy of prompts/ the daemon reads its briefs from.
 	PromptsDir string
 	// WebappDir is the served dist.
@@ -724,6 +728,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
 		Lid:                NewFakeLid(t, sockRoot),
+		PowerSource:        NewFakePowerSource(t, sockRoot),
 		t:                  t,
 		expected:           map[string]bool{},
 		required:           map[string]bool{},
@@ -912,6 +917,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
 		"AGENT_REPL_PERSISTENT_WIFI_LID="+d.Lid.Path,
+		"AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE="+d.PowerSource.Path,
 		"AGENT_REPL_LAUNCH_AGENTS_DIR="+filepath.Join(root, "LaunchAgents"),
 		"AGENT_REPL_SYSTEMD_USER_DIR="+filepath.Join(root, "systemd-user"),
 		fakegit.EnvStateFile+"="+d.Git.StateFile,

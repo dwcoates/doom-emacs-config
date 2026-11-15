@@ -890,6 +890,52 @@ flattened into a generic silence."
       (should (eq (plist-get failure :kind) :transport))
       (should (string-match-p "failed with code 61" (plist-get failure :message))))))
 
+(defun agent-repl-test-connect--refuse-dial (record)
+  "Deliver RECORD's death as a dial the kernel refused: no process ever stood."
+  (let ((process (plist-get record :process)))
+    (when (process-live-p process) (delete-process process))
+    (funcall (plist-get record :sentinel)
+             nil "make client process failed: Connection refused")))
+
+(ert-deftest agent-repl-test-connect-unary-refused-dial-is-unreached ()
+  "A dial the kernel refused says no daemon listens there."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((failure nil))
+      (agent-repl-connect-unary (agent-repl-test-connect--conn) "DaemonHealth" "{}"
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (agent-repl-test-connect--refuse-dial (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (agent-repl-connect-failure-unreached-p failure))
+      (should (eq (plist-get failure :kind) :transport)))))
+
+(ert-deftest agent-repl-test-connect-unary-dropped-socket-is-not-unreached ()
+  "A socket that connected and then ended unanswered reached a daemon."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((failure nil))
+      (agent-repl-connect-unary (agent-repl-test-connect--conn) "DaemonHealth" "{}"
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should-not (agent-repl-connect-failure-unreached-p failure))
+      (should-not (plist-member failure :unreached)))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-dial-is-unreached ()
+  "A stream whose dial the kernel refused closes as unreached."
+  (agent-repl-test-connect--with-transport
+    ;; Arrange
+    (let ((outcome nil))
+      (agent-repl-connect-stream (agent-repl-test-connect--conn) "WatchDaemon" "{}"
+                                 #'ignore (lambda (o) (setq outcome o)))
+      ;; Act
+      (agent-repl-test-connect--refuse-dial (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (eq (car outcome) :error))
+      (should (agent-repl-connect-failure-unreached-p (cadr outcome))))))
+
 (ert-deftest agent-repl-test-connect-unary-reports-a-drop-mid-body ()
   "A peer that hangs up inside a declared body fails as a DROP, not as JSON.
 Parsing what arrived would turn a severed connection into an unrelated
@@ -1639,6 +1685,96 @@ deletion re-runs whatever sentinel is installed at that moment."
       (funcall branch 'fake-proc)
       ;; Assert
       (should (= runs 1)))))
+
+;;;; ---- Dial failure records ----
+
+(defconst agent-repl-test-connect--dial-error
+  (list 'file-error "make client process failed" "Connection refused"
+        :name "agent-repl-connect-AdoptHostWorkspace"
+        :host "127.0.0.1" :service 64995
+        :filter (lambda (_proc _chunk) 'the-filter-closure-body))
+  "The error `make-network-process' signals for a refused dial: its data
+carries the call's whole argument plist, the filter closure included.")
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-names-host-port-and-message ()
+  "A refused dial is recorded at ERROR with its host, port and message."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-dial-failed
+     "ws" "agent-repl-connect-AdoptHostWorkspace" "127.0.0.1" 64995
+     agent-repl-test-connect--dial-error)
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching
+             'error "dial-failed .*host=\"127.0.0.1\" port=64995 error=\".*Connection refused\""))))
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-carries-no-closure ()
+  "The record never prints the filter or sentinel the error data carries."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-dial-failed
+     "ws" "agent-repl-connect-AdoptHostWorkspace" "127.0.0.1" 64995
+     agent-repl-test-connect--dial-error)
+    ;; Assert
+    (should-not (agent-repl-test-connect--logs-matching 'error "the-filter-closure-body\\|:filter"))))
+
+(ert-deftest agent-repl-test-connect-dial-failed-record-answers-the-message ()
+  "The sentinel's event is the error's message."
+  (agent-repl-test-connect--with-transport
+    ;; Act / Assert
+    (should (equal (agent-repl-connect--record-dial-failed
+                    "ws" "n" "127.0.0.1" 64995 agent-repl-test-connect--dial-error)
+                   "make client process failed: Connection refused"))))
+
+(ert-deftest agent-repl-test-connect-error-text-names-the-error-with-no-strings ()
+  "An error with no message strings is named by its symbol."
+  ;; Act / Assert
+  (should (equal (agent-repl-connect--error-text (list 'quit)) "quit")))
+
+(ert-deftest agent-repl-test-connect-send-failed-record-carries-no-closure ()
+  "A request write that signals is recorded by its message alone."
+  (agent-repl-test-connect--with-transport
+    ;; Act
+    (agent-repl-connect--record-send-failed
+     "ws" "n" (list 'error "Process not running" :filter (lambda () 'the-filter-closure-body)))
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching 'error "request-send-failed .*Process not running"))
+    (should-not (agent-repl-test-connect--logs-matching 'error "the-filter-closure-body"))))
+
+;;;; ---- A connection at an address ----
+
+(ert-deftest agent-repl-test-connect-connection-at-p-answers-the-connections-own-address ()
+  "A connection stands at the address it was opened on."
+  ;; Arrange
+  (let ((conn (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
+    ;; Act / Assert
+    (should (eq (agent-repl-connect-connection-at-p conn "127.0.0.1:9001") t))))
+
+(ert-deftest agent-repl-test-connect-connection-at-p-refuses-another-address ()
+  "A connection does not stand at any other address."
+  ;; Arrange
+  (let ((conn (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
+    ;; Act / Assert
+    (should-not (agent-repl-connect-connection-at-p conn "127.0.0.1:9100"))))
+
+(ert-deftest agent-repl-test-connect-connection-at-p-answers-nil-for-no-connection ()
+  "No connection stands at any address."
+  ;; Act / Assert
+  (should-not (agent-repl-connect-connection-at-p nil "127.0.0.1:9001")))
+
+(defconst agent-repl-test-connect--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The `lisp/' directory these tests were loaded from.")
+
+(ert-deftest agent-repl-test-connect-connection-at-p-is-the-one-spelling ()
+  "No source compares a connection\='s address to ADDRESS by hand."
+  (let ((dir agent-repl-test-connect--lisp-dir))
+    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (equal (file-name-nondirectory file) "connect.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (should-not (re-search-forward
+                       "(equal address (agent-repl-connect-connection-address" nil t)))))))
 
 (provide 'test-connect)
 

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2795,5 +2796,224 @@ func TestEnqueueRecordsTheWaitOnTheMergeARequestIsPlacedBehind(t *testing.T) {
 	entry, ok := h.entryOf(theWorkspace)
 	if !ok || entry.WaitsOn != theMergeWorkspace || entry.WaitsOnName != "feature-merge" || !entry.HeldBehind() {
 		t.Fatalf("entry = %+v, %v; want it waiting on the merge it was placed behind", entry, ok)
+	}
+}
+
+// dropLeftFirstOp is the operation every drop of a waiting merge records under.
+const dropLeftFirstOp = "daemon.merge.drop_queued"
+
+// setRecord changes the harness workspace's registry record as CHANGE says.
+func setRecord(h *harness, ws ids.WorkspaceID, change func(*wsm.Workspace)) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	record := h.db.workspaces[ws]
+	change(&record)
+	h.db.workspaces[ws] = record
+}
+
+// droppedCount answers how many entries the fake store has taken off.
+func droppedCount(h *harness) int {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return len(h.db.dropped)
+}
+
+// dropRecords answers the drop's records at LEVEL.
+func dropRecords(h *harness, level string) []dlog.Record {
+	var out []dlog.Record
+	for _, r := range h.logs.Records() {
+		if r.Operation == dropLeftFirstOp && r.Level == level {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestADropWhoseEntryAlreadyLeftIsAnsweredByWhyItLeft(t *testing.T) {
+	landedAt := time.Unix(1_700_000_100, 0).UTC()
+	cases := []struct {
+		name string
+		// leave takes the entry off before the drop, as another exit would.
+		leave func(t *testing.T, h *harness)
+		// wantErr is whether the drop answers an error.
+		wantErr bool
+		level   string
+		text    string
+		context map[string]string
+	}{
+		{
+			name: "an earlier eviction keeps its request off the queue",
+			leave: func(t *testing.T, h *harness) {
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop)); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			},
+			level:   "info",
+			text:    "the merge had already left its queue when the drop came, its request standing off the queue",
+			context: map[string]string{"left_cause": string(CauseUserDrop), "cause": string(CauseWorkspaceClosed)},
+		},
+		{
+			name: "a landing ends the request",
+			leave: func(t *testing.T, h *harness) {
+				setRecord(h, theWorkspace, func(r *wsm.Workspace) { r.MergedAt = &landedAt })
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, wsm.MergeLeftLanded); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			},
+			level:   "info",
+			text:    "the merge had already landed when the drop came",
+			context: map[string]string{"merged_at": landedAt.Format(time.RFC3339Nano)},
+		},
+		{
+			name: "the workspace's close ends the request",
+			leave: func(t *testing.T, h *harness) {
+				setRecord(h, theWorkspace, func(r *wsm.Workspace) { r.Closed = true })
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, wsm.MergeLeftWorkspaceClosed); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			},
+			level: "info",
+			text:  "the merge had already left its queue with its workspace's close",
+		},
+		{
+			name: "no record of leaving is an inconsistency",
+			leave: func(t *testing.T, h *harness) {
+				if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, wsm.MergeLeftLanded); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+			},
+			wantErr: true,
+			level:   "error",
+			text:    "a merge this daemon knew as queued has no queue entry and no record of leaving it",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a merge queued here, whose entry another exit took off
+			// while this daemon still knows the queue it stood in.
+			h := newHarness(t)
+			enqueue(t, h)
+			tc.leave(t, h)
+			dropsBefore := droppedCount(h)
+
+			// Act.
+			err := h.o.dequeue(context.Background(), theWorkspace, CauseWorkspaceClosed)
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("dequeue = %v, want an error %v", err, tc.wantErr)
+			}
+			if tc.wantErr && !errors.Is(err, errNoQueueEntry) {
+				t.Fatalf("dequeue = %v, want it to carry the read that found the entry gone", err)
+			}
+			if !loggedLike(h, logLike{level: tc.level, op: dropLeftFirstOp, text: tc.text, context: tc.context}) {
+				t.Fatalf("no %s record %q: %+v", tc.level, tc.text, h.logs.Records())
+			}
+			if !tc.wantErr && len(dropRecords(h, "error")) != 0 {
+				t.Fatalf("the idempotent drop recorded errors: %+v", dropRecords(h, "error"))
+			}
+			if got := droppedCount(h); got != dropsBefore {
+				t.Fatalf("the store dropped %v, want nothing more taken off", h.db.dropped)
+			}
+			h.o.mu.Lock()
+			_, known := h.o.repoOf[theWorkspace]
+			h.o.mu.Unlock()
+			if known {
+				t.Fatal("the daemon still notes a queue for a merge with no entry in it")
+			}
+		})
+	}
+}
+
+func TestADropWhoseEntryLeavesBetweenItsReadAndItsRemovalIsIdempotent(t *testing.T) {
+	// Arrange: an exit that is no drop takes the entry off right after the
+	// drop read it.
+	h := newHarness(t)
+	enqueue(t, h)
+	var once sync.Once
+	h.db.mu.Lock()
+	h.db.onQueueRead = func() {
+		once.Do(func() {
+			if err := h.db.RemoveMergeQueueEntry(context.Background(), h.repoKey(), theWorkspace, string(CauseUserDrop)); err != nil {
+				t.Errorf("RemoveMergeQueueEntry: %v", err)
+			}
+		})
+	}
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Evict = %v, want the drop idempotent", err)
+	}
+	if !loggedLike(h, logLike{level: "info", op: dropLeftFirstOp, text: "the merge had already left its queue when the drop came", context: map[string]string{"left_cause": string(CauseUserDrop)}}) {
+		t.Fatalf("no info record of the merge that left first: %+v", h.logs.Records())
+	}
+	if errs := dropRecords(h, "error"); len(errs) != 0 {
+		t.Fatalf("the drop recorded errors: %+v", errs)
+	}
+}
+
+func TestTwoDropsOfOneMergeAtOnceTakeItOffOnce(t *testing.T) {
+	// Arrange: the first drop holds after reading the entry, and the second
+	// is let go only once it waits on the first's drop lock.
+	h := newHarness(t)
+	enqueue(t, h)
+	firstRead, releaseFirst := make(chan struct{}), make(chan struct{})
+	var readOnce sync.Once
+	h.db.mu.Lock()
+	h.db.onQueueRead = func() {
+		readOnce.Do(func() {
+			close(firstRead)
+			<-releaseFirst
+		})
+	}
+	h.db.mu.Unlock()
+	secondWaits := make(chan struct{})
+	var waits int
+	var waitsMu sync.Mutex
+	h.o.onDropWait = func(ids.WorkspaceID) {
+		waitsMu.Lock()
+		defer waitsMu.Unlock()
+		if waits++; waits == 2 {
+			close(secondWaits)
+		}
+	}
+	first := make(chan error, 1)
+	go func() { first <- h.o.Evict(context.Background(), theWorkspace) }()
+	<-firstRead
+	second := make(chan error, 1)
+	go func() { second <- h.o.Evict(context.Background(), theWorkspace) }()
+	<-secondWaits
+
+	// Act.
+	close(releaseFirst)
+
+	// Assert.
+	if err := <-first; err != nil {
+		t.Fatalf("the first drop = %v, want it to take the merge off", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("the second drop = %v, want it idempotent", err)
+	}
+	if droppedCount(h) != 1 {
+		t.Fatalf("the store dropped %v, want the merge taken off once", h.db.dropped)
+	}
+	released := 0
+	for _, r := range dropRecords(h, "info") {
+		if r.Message == "released a queued merge" {
+			released++
+		}
+	}
+	if released != 1 {
+		t.Fatalf("%d release records, want one", released)
+	}
+	if !loggedLike(h, logLike{level: "info", op: dropLeftFirstOp, text: "the merge had already left its queue when the drop came"}) {
+		t.Fatalf("no info record of the second drop finding the merge gone: %+v", h.logs.Records())
+	}
+	if errs := dropRecords(h, "error"); len(errs) != 0 {
+		t.Fatalf("the drops recorded errors: %+v", errs)
 	}
 }

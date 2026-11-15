@@ -1160,6 +1160,9 @@ func TestAPausedQueueCarriesItsRecord(t *testing.T) {
 	}{
 		{name: "the user's pause", pause: pausedBy(), want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at,
 			By: &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_User{User: &frontendv1.RosterMergeQueuePauserUser{}}}}},
+		{name: "the host's pause for its fault", pause: &wsm.MergeQueuePause{At: epoch, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserHost, Cause: "too many open files in system"}},
+			want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at,
+				By: &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Host{Host: &frontendv1.RosterMergeQueuePauserHost{Cause: "too many open files in system"}}}}},
 		{name: "a workspace's hard stop", pause: &wsm.MergeQueuePause{At: epoch, Hard: true, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "doom"}},
 			want: &frontendv1.RosterMergeQueuePaused{PausedAtMs: &at, Hard: true,
 				By: &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Workspace{Workspace: &frontendv1.RosterMergeQueuePauserWorkspace{Name: "doom"}}}}},

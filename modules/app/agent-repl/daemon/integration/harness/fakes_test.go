@@ -1,8 +1,10 @@
 package harness
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,5 +181,69 @@ func TestEveryHarnessExecutableIsWrittenThroughWriteExecutable(t *testing.T) {
 	// Assert
 	if len(byHand) != 0 {
 		t.Fatalf("executables written by hand at %v, want writeExecutable", byHand)
+	}
+}
+
+// readStateLine reads one line a stateSocket wrote. The read is bounded by
+// the test binary's own deadline, set on the connection when it is dialed.
+func readStateLine(t *testing.T, r *bufio.Reader) string {
+	t.Helper()
+	line, err := r.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read a state line: %v", err)
+	}
+	return strings.TrimSpace(line)
+}
+
+func TestStateSocketWritesEachConnectionTheStateThenEveryChange(t *testing.T) {
+	// Arrange: two daemons connect, a handover's predecessor and successor.
+	dir, err := os.MkdirTemp("/tmp", "hss")
+	if err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	s := newStateSocket(t, dir, "shade", "light")
+	var readers []*bufio.Reader
+	for range 2 {
+		conn, err := net.Dial("unix", s.Path)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		if deadline, ok := t.Deadline(); ok {
+			_ = conn.SetReadDeadline(deadline)
+		}
+		r := bufio.NewReader(conn)
+		if got := readStateLine(t, r); got != "light" {
+			t.Fatalf("first line = %q, want the standing state light", got)
+		}
+		readers = append(readers, r)
+	}
+
+	// Act
+	s.set("dark")
+
+	// Assert: each connection hears the change on its own stream.
+	for i, r := range readers {
+		if got := readStateLine(t, r); got != "dark" {
+			t.Fatalf("connection %d heard %q, want dark", i, got)
+		}
+	}
+}
+
+func TestFakeLidIsAStateSocketNamedLidStartingOpen(t *testing.T) {
+	// Arrange
+	dir, err := os.MkdirTemp("/tmp", "hsl")
+	if err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	// Act
+	l := NewFakeLid(t, dir)
+
+	// Assert
+	if l.Path != filepath.Join(dir, "lid") || l.state != "open" {
+		t.Fatalf("lid socket %s in state %q, want %s open", l.Path, l.state, filepath.Join(dir, "lid"))
 	}
 }

@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -432,5 +433,192 @@ func TestTheDaemonsExitAbortsAResolvingRebaseAndKeepsItsBase(t *testing.T) {
 	w.h.db.mu.Unlock()
 	if held {
 		t.Fatal("C's lease outlived the exit")
+	}
+}
+
+func TestAWaitingRebaseGitRefusesOverChangesKeepsItsBaseAndPromptsNothing(t *testing.T) {
+	// Arrange: git refuses C's rebase over changes its clean check missed.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.refuseDirty(w.dirs["ws-c"], 1)
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	if got := w.git.tree("b-ws-c"); got != "base+w1" {
+		t.Fatalf("C holds %s, want its base kept (base+w1)", got)
+	}
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("C's session got %d prompts, want none from a git-only rebase", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "a waiting merge's worktree is not ready to rebase") {
+		t.Fatal("the kept base was not recorded")
+	}
+	if got := w.entryOf(t, "ws-c"); got.State != wsm.MergeQueued {
+		t.Fatalf("C = %+v, want it still waiting in its place", got)
+	}
+	w.finish(t)
+}
+
+func TestAWaitingMergesFreenessIsReadOnlyUnderItsLease(t *testing.T) {
+	// Arrange: every freeness read of C records whether C's lease was held.
+	w := newWaitingWorld(t, "ws-c")
+	var mu sync.Mutex
+	var heldAtRead []bool
+	w.h.freeness.mu.Lock()
+	w.h.freeness.onFree = func(ws ids.WorkspaceID) {
+		if ws != "ws-c" {
+			return
+		}
+		w.h.db.mu.Lock()
+		_, held := w.h.db.leases["ws-c"]
+		w.h.db.mu.Unlock()
+		mu.Lock()
+		heldAtRead = append(heldAtRead, held)
+		mu.Unlock()
+	}
+	w.h.freeness.mu.Unlock()
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert: the hook watches the pass alone; the queue's drain reads
+	// freeness with the store's lock held.
+	w.h.freeness.mu.Lock()
+	w.h.freeness.onFree = nil
+	w.h.freeness.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(heldAtRead) == 0 {
+		t.Fatal("C's freeness was never read")
+	}
+	for i, held := range heldAtRead {
+		if !held {
+			t.Fatalf("freeness read %d of C came before its lease was held: %v", i+1, heldAtRead)
+		}
+	}
+	w.finish(t)
+}
+
+func TestAWaitingMergeThisDaemonNoLongerServesIsNotRebased(t *testing.T) {
+	// Arrange: C was handed to a successor once its pass began.
+	w := newWaitingWorld(t, "ws-c")
+	r := liveRun(t, w.h, "ws-c")
+	w.h.standing.mu.Lock()
+	w.h.standing.notServed["ws-c"] = true
+	w.h.standing.mu.Unlock()
+
+	// Act
+	got := r.excludedUnderLease()
+
+	// Assert
+	if got != "this daemon no longer serves the workspace" {
+		t.Fatalf("excludedUnderLease = %q, want the unserved workspace named", got)
+	}
+}
+
+func TestAResolvingSlotHolderThisDaemonNoLongerServesTakesNothing(t *testing.T) {
+	// Arrange: C holds the resolving-conflicts slot; its workspace went to a
+	// successor.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+	w.h.standing.mu.Lock()
+	w.h.standing.notServed["ws-c"] = true
+	w.h.standing.mu.Unlock()
+
+	// Act
+	w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+
+	// Assert
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 0 {
+		t.Fatalf("C's session got %d conflict prompts here, want none", got)
+	}
+	if got := w.entryOf(t, "ws-c"); got.Slot != wsm.MergeSlotResolvingConflicts {
+		t.Fatalf("C = %+v, want it still holding the slot for the daemon that serves it", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "belongs to a workspace this daemon no longer serves") {
+		t.Fatal("the unserved slot holder was not recorded")
+	}
+	w.h.db.mu.Lock()
+	_, held := w.h.db.leases["ws-c"]
+	w.h.db.mu.Unlock()
+	if held {
+		t.Fatal("C's lease outlived the refusal")
+	}
+}
+
+func TestTheDaemonsExitLeavesAResolvingRebaseStandingWhileItsTurnStillWorks(t *testing.T) {
+	// Arrange: C's resolving rebase prompted its conflict turn, which is
+	// still working in the worktree when the daemon exits.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+	prompted := make(chan struct{})
+	w.h.queue.mu.Lock()
+	w.h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.WS != "ws-c" {
+			return
+		}
+		w.h.mu.Lock()
+		w.h.awaitGate = make(chan struct{})
+		w.h.mu.Unlock()
+		w.h.freeness.mu.Lock()
+		w.h.freeness.busyWS = map[ids.WorkspaceID]bool{"ws-c": true}
+		w.h.freeness.mu.Unlock()
+		close(prompted)
+	}
+	w.h.queue.mu.Unlock()
+	resolved := make(chan struct{})
+	go func() {
+		defer close(resolved)
+		w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+	}()
+	<-prompted
+
+	// Act
+	w.h.o.Drain(context.Background())
+	receiveWithin(t, resolved, "the resolving rebase ending at the exit")
+
+	// Assert
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "the rebase is left standing for the next run to clear") {
+		t.Fatal("the rebase left standing was not recorded")
+	}
+	if standing, _ := w.git.RebaseInProgress(context.Background(), w.dirs["ws-c"]); !standing {
+		t.Fatal("the exit aborted the rebase under the turn still working in it")
+	}
+	w.h.db.mu.Lock()
+	_, held := w.h.db.leases["ws-c"]
+	w.h.db.mu.Unlock()
+	if held {
+		t.Fatal("C's lease outlived the exit")
+	}
+}
+
+func TestAResolvingRebaseClearsARebaseACutRunLeftStandingOnceFree(t *testing.T) {
+	// Arrange: C holds the resolving-conflicts slot, and a cut run left a
+	// rebase standing in its worktree; the workspace is free.
+	w := newWaitingWorld(t, "ws-c")
+	w.git.conflict("w1", "a1", "x.go")
+	w.land(t)
+	w.awaitPass(t)
+	dir := w.dirs["ws-c"]
+	w.git.cmu.Lock()
+	w.git.rebases[dir] = &chainRebase{branch: "b-ws-c"}
+	w.git.cmu.Unlock()
+
+	// Act
+	w.h.o.resolveWaiting(context.Background(), w.h.repoKey(), "ws-c")
+
+	// Assert
+	if !w.recorded("info", "daemon.merge.rebase", "a rebase a cut run left standing for its turn was aborted") {
+		t.Fatal("the leftover was not cleared")
+	}
+	if got := w.prompts("ws-c", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("C's session got %d conflict prompts, want the fresh rebase's one", got)
 	}
 }

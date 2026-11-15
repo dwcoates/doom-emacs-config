@@ -134,6 +134,24 @@ func AwaitSessionServes(t testing.TB, ctx context.Context, host *Stream[*agentre
 	return AwaitView(t, ctx, host, "the session reporting live, attached and open", SessionServes)
 }
 
+// BootWifiStanding reports whether a daemon-stream push is the
+// persistent-wifi standing a fake host's boot settles on: the lid heard, open
+// as NewFakeLid starts it. THE FIRST STANDING A STREAM GETS MAY PRECEDE IT:
+// the boot reads the standing before it subscribes to the lid, so a stream
+// opened in between is told the lid unheard, and the lid's report
+// republishes the standing after (2026-11-14, a handover test that took the
+// unheard standing then saw the lid's push where it asserted none).
+func BootWifiStanding(r *agentreplv1.WatchDaemonResponse) bool {
+	return r.GetPersistentWifi().GetLidOpen() != nil
+}
+
+// AwaitBootWifiStanding waits on S for the settled boot standing
+// (BootWifiStanding), and answers it.
+func AwaitBootWifiStanding(t testing.TB, ctx context.Context, s *Stream[*agentreplv1.WatchDaemonResponse]) *agentreplv1.PersistentWifiState {
+	t.Helper()
+	return AwaitView(t, ctx, s, "the persistent-wifi boot standing with the lid heard", BootWifiStanding).GetPersistentWifi()
+}
+
 // AwaitNext answers the next push, whatever it is.
 func AwaitNext[T any](t testing.TB, ctx context.Context, s *Stream[T], what string) T {
 	t.Helper()

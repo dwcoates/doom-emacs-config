@@ -11664,6 +11664,39 @@ describe("the teardown's tails", () => {
     expect([context?.["concluded_through"], context?.["served_through"]]).toEqual(["p-9", "p-3"]);
   });
 
+  it("names how a tail that does not end within its conclusion budget opened", async () => {
+    // Arrange: the tail opened as a catch-up from p-q on a book whose newest
+    // line was p-n, and never ends.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    h.persistence.newestAtOpen = "p-n";
+    const watching = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          opening: {
+            case: "knownThrough",
+            value: create(conversationv1.HistoryPointerSchema, { value: "p-q" }),
+          },
+        }),
+      )[Symbol.asyncIterator]();
+    await watching.next();
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const context = logContextFor(mark, "did not end within its conclusion budget");
+    expect([
+      context?.["opening"],
+      context?.["opened_through"],
+      context?.["newest_at_open"],
+      context?.["deferred"],
+    ]).toEqual(["knownThrough", "p-q", "p-n", false]);
+  });
+
   it("VOUCHES for the agent when reading the head, so a book never written is not asked for", async () => {
     // Arrange. A session killed before its first turn has an agent with no book,
     // and asking the store for one earns an `unknown_agent` refusal on every

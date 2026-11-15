@@ -108,6 +108,15 @@ type Deps struct {
 	Workspaces Workspaces
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
+	// FamilyNotices is whether a child's siblings, and the child itself, are
+	// told of its family (tellFamily). Off, each notice it would have sent is
+	// counted as suppressed and nothing is submitted: a family notice starts
+	// a turn in every sibling, reviving parked ones (owner ruling,
+	// 2026-11-15, AGENT_REPL_SIBLING_NOTICES).
+	FamilyNotices bool
 	// MintKey mints an idempotency key for one submission.
 	MintKey func(prefix string) (string, error)
 	Log     dlog.Surfaces
@@ -288,12 +297,23 @@ func (s *Service) tellFamily(ctx context.Context, prompts prompthandler.Submitte
 	if len(siblings) == 0 {
 		return
 	}
+	if !s.deps.FamilyNotices {
+		for range siblings {
+			s.deps.Notices.CountSuppressedNotice(BriefSibling)
+		}
+		if event.Kind == Created {
+			s.deps.Notices.CountSuppressedNotice(BriefChild)
+		}
+		fields["siblings"] = len(siblings)
+		log.Info(op, "family notices are off, so neither the child's siblings nor the child are told of its family", fields)
+		return
+	}
 	parent, err := s.deps.Workspaces.Workspace(ctx, *ws.Parent)
 	if err != nil {
 		log.Error(op, "could not read a child's parent; its siblings are not told", dlog.WithCause(fields, err))
 		return
 	}
-	composer := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}
+	composer := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}
 	submit := func(to ids.WorkspaceID, brief string, values map[string]string) {
 		fields := dlog.Context{"workspace": string(ws.ID), "event": event.Kind.String(), "told": string(to), "brief": brief}
 		turn, err := composer.Submit(ctx, prompts, to, brief, values, "derived-workspace-notice", OriginDerived)
@@ -326,7 +346,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 		log.Info(op, "a derived workspace's source is closed; it runs no session to tell", fields)
 		return
 	}
-	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, told.Source, BriefDerived, DerivedValues(told, event), "derived-workspace-notice", OriginDerived)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:

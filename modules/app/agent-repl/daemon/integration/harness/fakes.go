@@ -514,12 +514,13 @@ func FakeDisplay(t testing.TB, dir string) string {
 	return strings.TrimSpace(string(b))
 }
 
-// FakeLid is the daemon's lid on a fake host
-// (AGENT_REPL_PERSISTENT_WIFI_LID): a Unix socket that writes each daemon
-// connecting to it the lid's state, then every change. Each connection is a
-// stream of its own, so a handover's predecessor and successor both hear the
-// lid and neither takes the other's lines.
-type FakeLid struct {
+// stateSocket is one heard host fact on a fake host (the lid, the power
+// source): a Unix socket that writes each daemon connecting to it the fact's
+// state, then every change, one name per line (persistentwifi's
+// watchSocket). Each connection is a stream of its own, so a handover's
+// predecessor and successor both hear the fact and neither takes the other's
+// lines.
+type stateSocket struct {
 	// Path is the socket the daemon is pointed at.
 	Path string
 	ln   net.Listener
@@ -529,16 +530,16 @@ type FakeLid struct {
 	conns map[net.Conn]bool
 }
 
-// NewFakeLid serves the socket in dir, a directory short enough for a socket
-// path, with the lid open.
-func NewFakeLid(t testing.TB, dir string) *FakeLid {
+// newStateSocket serves the socket named name in dir, a directory short
+// enough for a socket path, standing in state.
+func newStateSocket(t testing.TB, dir, name, state string) *stateSocket {
 	t.Helper()
-	path := filepath.Join(dir, "lid")
+	path := filepath.Join(dir, name)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		t.Fatalf("harness: listen on the lid socket: %v", err)
+		t.Fatalf("harness: listen on the %s socket: %v", name, err)
 	}
-	l := &FakeLid{Path: path, ln: ln, state: "open", conns: map[net.Conn]bool{}}
+	s := &stateSocket{Path: path, ln: ln, state: state, conns: map[net.Conn]bool{}}
 	accepted := make(chan struct{})
 	go func() {
 		defer close(accepted)
@@ -547,22 +548,46 @@ func NewFakeLid(t testing.TB, dir string) *FakeLid {
 			if err != nil {
 				return
 			}
-			l.mu.Lock()
-			l.conns[conn] = true
-			_, _ = conn.Write([]byte(l.state + "\n"))
-			l.mu.Unlock()
+			s.mu.Lock()
+			s.conns[conn] = true
+			_, _ = conn.Write([]byte(s.state + "\n"))
+			s.mu.Unlock()
 		}
 	}()
 	t.Cleanup(func() {
 		_ = ln.Close()
 		<-accepted
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		for conn := range l.conns {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for conn := range s.conns {
 			_ = conn.Close()
 		}
 	})
-	return l
+	return s
+}
+
+// set stands the state and writes it to every connected daemon. A daemon
+// that has gone away is dropped.
+func (s *stateSocket) set(state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = state
+	for conn := range s.conns {
+		if _, err := conn.Write([]byte(state + "\n")); err != nil {
+			_ = conn.Close()
+			delete(s.conns, conn)
+		}
+	}
+}
+
+// FakeLid is the daemon's lid on a fake host
+// (AGENT_REPL_PERSISTENT_WIFI_LID), a stateSocket.
+type FakeLid struct{ *stateSocket }
+
+// NewFakeLid serves the lid's socket in dir with the lid open.
+func NewFakeLid(t testing.TB, dir string) *FakeLid {
+	t.Helper()
+	return &FakeLid{newStateSocket(t, dir, "lid", "open")}
 }
 
 // Close closes the lid.
@@ -571,19 +596,22 @@ func (l *FakeLid) Close() { l.set("closed") }
 // Open opens the lid.
 func (l *FakeLid) Open() { l.set("open") }
 
-// set stands the state and writes it to every connected daemon. A daemon
-// that has gone away is dropped.
-func (l *FakeLid) set(state string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.state = state
-	for conn := range l.conns {
-		if _, err := conn.Write([]byte(state + "\n")); err != nil {
-			_ = conn.Close()
-			delete(l.conns, conn)
-		}
-	}
+// FakePowerSource is the daemon's power source on a fake host
+// (AGENT_REPL_PERSISTENT_WIFI_POWER_SOURCE), a stateSocket.
+type FakePowerSource struct{ *stateSocket }
+
+// NewFakePowerSource serves the power source's socket in dir with the
+// machine on AC power.
+func NewFakePowerSource(t testing.TB, dir string) *FakePowerSource {
+	t.Helper()
+	return &FakePowerSource{newStateSocket(t, dir, "power", "ac")}
 }
+
+// Unplug moves the machine onto its battery.
+func (p *FakePowerSource) Unplug() { p.set("battery") }
+
+// PlugIn moves the machine onto AC power.
+func (p *FakePowerSource) PlugIn() { p.set("ac") }
 
 // NewFakeHostTools writes the persistent-wifi host tools into dir
 // (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR) and answers it. The machine they

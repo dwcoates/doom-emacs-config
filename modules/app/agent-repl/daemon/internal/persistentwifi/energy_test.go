@@ -236,7 +236,7 @@ func TestLeavingWithNoRecordRestoresNothing(t *testing.T) {
 		t.Fatalf("calls = %v, clears = %d, want nothing restored or cleared", h.r.ran(), h.energy.clears)
 	}
 	infos := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opEnergy,
-		Message: "the lid-closed quiet state was left with no energy mode recorded (entered by an earlier build, or never recorded); nothing is restored"})
+		Message: "the lid-closed quiet state was left with no energy mode recorded (Low Power Mode was never set: on AC power, or entered by an earlier build); nothing is restored"})
 	if len(infos) != 1 || infos[0].Context["trigger"] != "lid_open" {
 		t.Fatalf("energy INFO records = %+v, want the missing record noted once", h.records(dlog.LevelInfo, opEnergy))
 	}

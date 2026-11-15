@@ -196,6 +196,11 @@ func (s *server) SubmitPrompt(
 	if cerr == nil {
 		s.drawSent(sent, sentFateOf(outcome.Disposition))
 	}
+	// A PROMPT ONE WORKSPACE'S AGENT SENT ANOTHER is measured with the
+	// daemon's own notices, as one more kind of message between workspaces.
+	if sentBy != nil && cerr == nil && resp.GetError() == nil {
+		s.deps.Notices.ObserveNotice(NoticeAgentSent, saidBytes(said))
+	}
 	// AN ACCEPTED PROMPT ENDS THE SELECTION it was sent with, a reply target
 	// or a prompt alike (a genuine success — a minted turn, a hold, a command
 	// answer — never a refusal arm or a transport error), and the webapp
@@ -487,4 +492,18 @@ func bubbleRefused(r refusal) refusal {
 	fields["kind"] = refusalarm.Nested(kind)
 	r.Fields = fields
 	return r
+}
+
+// NoticeAgentSent is the notice type a prompt one workspace's agent sent
+// another is measured under (briefprompt.Meter).
+const NoticeAgentSent = "agent_sent"
+
+// saidBytes is the size of SAID's text in UTF-8 bytes, summed over its text
+// blocks; an image or other block adds nothing.
+func saidBytes(said *conversationv1.UserSaid) int {
+	n := 0
+	for _, b := range said.GetContent().GetBlocks() {
+		n += len(b.GetText().GetText())
+	}
+	return n
 }

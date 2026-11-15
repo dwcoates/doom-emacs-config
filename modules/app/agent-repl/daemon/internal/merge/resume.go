@@ -191,6 +191,14 @@ func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fie
 		if err := o.ensureSession(ctx, ws); err != nil {
 			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
 		}
+		// THE QUEUE IS ASKED TO DELIVER IT NOW: the edge that would have
+		// delivered it (a turn's end, a drain's end) may have come and gone
+		// while no run of this merge stood, and an idle workspace has no
+		// edge left to come (2026-11-15 05:56:36: the head waited on its held
+		// turn until it was evicted).
+		if err := o.deps.Queue.DeliverHeld(ctx, ws); err != nil {
+			return wsm.CloseFailed, fmt.Errorf("merge: delivering the merge's held turn: %w", err)
+		}
 		return o.deps.AwaitTurnEnd(ctx, ws, turn)
 	}
 	// A TURN NEVER DELIVERED IS SUBMITTED WITH THE TEXT ITS RECORD CARRIES; a

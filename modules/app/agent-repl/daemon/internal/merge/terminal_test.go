@@ -213,6 +213,31 @@ func TestSelfReloadFiresOnlyAfterTheLeaseIsReleased(t *testing.T) {
 	}
 }
 
+// TestABranchAlreadyOnItsTargetOwesNoDeploy pins 2026-11-15 06:01:48: a
+// merge that concluded with nothing to land fired no rollout, whatever its
+// deploy hook asked, so no deploy owed a mediation.
+func TestABranchAlreadyOnItsTargetOwesNoDeploy(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ownCheckout()
+	h.git.mu.Lock()
+	h.git.contained = true
+	h.git.mu.Unlock()
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.rollout.mu.Lock()
+	defer h.rollout.mu.Unlock()
+	if h.rollout.fired != 0 {
+		t.Fatalf("the self-reload fired %d times for a merge that landed nothing, want none", h.rollout.fired)
+	}
+}
+
 // TestSelfReloadCarriesTheLandedRange covers what the trigger classifies: the
 // merge commit's own second-parent history, read off the commit.
 func TestSelfReloadCarriesTheLandedRange(t *testing.T) {

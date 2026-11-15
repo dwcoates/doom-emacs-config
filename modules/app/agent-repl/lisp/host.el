@@ -73,6 +73,9 @@
 (declare-function agent-repl-evaluate-text "evaluate" (text))
 (declare-function agent-repl-link-dial-successor "daemon-link" (address))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl-connect-connection-at-p "connect" (conn address))
+(declare-function agent-repl-connect-failure-unreached-p "connect" (detail))
+(declare-function agent-repl--with-log-context "core" (workspace request-id function))
 (declare-function agent-repl-rpc-watch-host-workspace "rpc"
                   (conn ref on-push on-close &optional on-open))
 
@@ -618,8 +621,8 @@ the successor through the adopt walk.  TRIGGER is recorded.  Answers
 non-nil when a walk was started, nil when WS already stands there."
   (let ((conn (agent-repl-link-serving-conn address))
         (current (agent-repl-host-conn ws)))
-    (if (and current (agent-repl-connect-connection-alive-p current)
-             (equal address (agent-repl-connect-connection-address current)))
+    (if (and (agent-repl-connect-connection-at-p current address)
+             (agent-repl-connect-connection-alive-p current))
         (progn
           (agent-repl--info ws "elisp.host.served-here-already ws=%s address=%S trigger=%s"
                             ws address trigger)
@@ -2008,12 +2011,13 @@ Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
     (agent-repl-host--put ws :held-calls held)
     (agent-repl--info ws "elisp.host.call-held ws=%s method=%s held=%d" ws method (length held))))
 
-(defun agent-repl-host--release-held (ws outcome)
+(defun agent-repl-host--release-held (ws outcome &optional to)
   "Send every call held for WS, in the order it was made: its adopt is OUTCOME.
 OUTCOME names how the hold ended (`adopted', `refused', `failed',
-`superseded', `withdrawn', `forgotten').  Each call goes to the daemon WS
-stands on NOW (`agent-repl-host-conn-or-primary'): the successor once WS
-is adopted, the daemon it was put back on otherwise.  A call with no
+`superseded', `withdrawn', `forgotten').  Each call goes to TO when given
+\(a retrying adopt names the daemon that still serves WS), and otherwise
+to the daemon WS stands on NOW (`agent-repl-host-conn-or-primary'): the
+successor once WS is adopted, the daemon it was put back on otherwise.  A call with no
 daemon to go to, and a send that signals, answers its own ON-FAILURE, at
 ERROR, and the calls after it are still sent."
   (let ((held (plist-get (agent-repl-host--entry ws) :held-calls)))
@@ -2022,7 +2026,7 @@ ERROR, and the calls after it are still sent."
       (agent-repl--info ws "elisp.host.held-calls-sent ws=%s count=%d outcome=%s"
                         ws (length held) outcome)
       (dolist (call held)
-        (let ((conn (agent-repl-host-conn-or-primary ws))
+        (let ((conn (or to (agent-repl-host-conn-or-primary ws)))
               (method (plist-get call :method)))
           (if (null conn)
               (progn
@@ -2097,94 +2101,134 @@ for it, which delays its exit, which delays the primary stream close
 Emacs promotes on — `TestEmacsHandoverTransfersAtFreeness' missing a 21s
 bound on a promotion healthy runs make in ~2s.
 
-So a failure re-walks the adopt after `agent-repl-host-handover-retry-delay',
-exactly as a `not_yet_adopted' refusal already does, and STOPS when the
-successor NEW is no longer the standing one: a promotion or a lost
-successor stream clears it, and there is then nothing left to adopt onto.
-A refusal is not retried here — the daemon answered, and its arms have
-their own walk."
-  (let ((ref (agent-repl-host-ref ws))
-        (address (agent-repl-connect-connection-address new))
-        (old (agent-repl-host--recorded-conn ws)))
+So a transport failure re-issues the adopt CALL after
+`agent-repl-host-handover-retry-delay' (`agent-repl-host--adopt-call'),
+exactly as a `not_yet_adopted' refusal already does.  A RETRY RELOADS
+NOTHING: WS stays moved onto NEW, page and all, because the page there IS
+the rendezvous\='s web participant; only the walk\='s end puts `:conn' and
+the page back, once.  Regression, 2026-11-15: each attempt restored the
+page and the next reloaded it again, two reloads per attempt for every
+workspace, ~800k reloads that kept Emacs too busy to read the very stream
+ends that would have ended the loop.  The retry STOPS
+\(`agent-repl-host--adopt-retryable-p') when NEW is no longer the standing
+successor (a promotion or a lost successor stream clears it), when NEW\='s
+connection is closed, and when the dial was refused outright: no daemon
+listens at NEW then, and there is nobody left to adopt onto.  A refusal
+is not retried here — the daemon answered, and its arms have their own
+walk."
+  (let ((old (agent-repl-host--recorded-conn ws)))
     (cond
      ((not (agent-repl-host--reattach-current-p ws token))
-      ;; A scheduled retry of a walk a newer one has since superseded.
+      ;; A walk a newer one has since superseded.
       (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
-     ((null ref)
+     ((null (agent-repl-host-ref ws))
       (agent-repl-host--put ws :reattach nil)
       (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws))
      (t
-      (let ((restore
-             (lambda ()
-               (agent-repl-host--put ws :conn old)
-               (agent-repl-frontend-reload-webview ws)
-               (agent-repl--info ws "elisp.host.webview-restored ws=%s address=%S"
-                                 ws (and old (agent-repl-connect-connection-address old))))))
-        ;; THE WALK REMEMBERS WHERE IT CAME FROM, so a withdrawn transfer can
-        ;; put WS back while this adopt is still unanswered
-        ;; (`agent-repl-host--transfer-withdrawn').
-        (agent-repl-host--put ws :reattach
-                              (plist-put (plist-get (agent-repl-host--entry ws) :reattach)
-                                         :from old))
-        (agent-repl-host--put ws :conn new)
-        (agent-repl-host--handover-reload-webview ws)
-        (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
-                          ws address)
-        (agent-repl-rpc-adopt-host-workspace
-         new (list :workspace ref)
-         :on-response
-         (lambda (response)
-           (cond
-            ((not (agent-repl-host--reattach-current-p ws token))
-             (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
-            (t
-             (pcase (plist-get response :arm)
-               (:success
-                (agent-repl-host--put ws :handover-page nil)
-                (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
-                (agent-repl-host--reattached ws new ref trigger)
-                (agent-repl-host--release-held ws "adopted"))
-               (:error
-                (funcall restore)
-                (agent-repl-host--put ws :reattach nil)
-                (agent-repl-host--on-refused ws "adopt" (plist-get response :value))
-                (agent-repl-host--release-held ws "refused"))
-               (arm
-                (funcall restore)
-                (agent-repl-host--put ws :reattach nil)
-                (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm)
-                (agent-repl-host--release-held ws "refused"))))))
-         :on-failure
-         (lambda (detail)
-           (cond
-            ((not (agent-repl-host--reattach-current-p ws token))
-             (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
-            (t
-             (funcall restore)
-             ;; THE HOLD ENDS WITH THE ADOPT'S DEADLINE: the calls held for
-             ;; WS go now, to the daemon `restore' put it back on, before
-             ;; any retry moves it again.
-             (agent-repl-host--release-held ws "failed")
-             (cond
-              ((eq new (agent-repl-link-successor))
-               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
-                                  ws detail)
-               (run-at-time agent-repl-host-handover-retry-delay nil
-                            #'agent-repl-host--adopt-onto ws new token trigger))
-              ;; THE SUCCESSOR WAS PROMOTED WHILE THIS ADOPT WAS IN FLIGHT.  The
-              ;; promotion walked only the workspaces standing on the old
-              ;; daemon, and this one stood on NEW for the call; restored onto
-              ;; the old daemon, whose connection the promotion closes, it was
-              ;; stranded there with no walk left (2026-10-25: six workspaces).
-              ;; NEW serves every workspace now, so it registers there.
-              ((eq new (agent-repl-link-primary))
-               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
-                                  ws detail)
-               (agent-repl-host--reattach ws new :register "adopt-after-promotion"))
-              (t
-               (agent-repl-host--put ws :reattach nil)
-               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
-                                  ws detail))))))))))))
+      ;; THE WALK REMEMBERS WHERE IT CAME FROM, so a withdrawn transfer can
+      ;; put WS back while this adopt is still unanswered
+      ;; (`agent-repl-host--transfer-withdrawn').
+      (agent-repl-host--put ws :reattach
+                            (plist-put (plist-get (agent-repl-host--entry ws) :reattach)
+                                       :from old))
+      (agent-repl-host--put ws :conn new)
+      (agent-repl-host--handover-reload-webview ws)
+      (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
+                        ws (agent-repl-connect-connection-address new))
+      (agent-repl-host--adopt-call ws new token trigger old)))))
+
+(defun agent-repl-host--adopt-retryable-p (new detail)
+  "Answer t when an adopt onto NEW that failed with DETAIL is retried.
+Otherwise answer why it stops: `not-successor' when NEW is no longer the
+standing successor, `closed' when NEW\='s connection is closed, and
+`unreached' when the dial was refused, so no daemon listens at NEW."
+  (cond
+   ((not (eq new (agent-repl-link-successor))) 'not-successor)
+   ((not (agent-repl-connect-connection-alive-p new)) 'closed)
+   ((agent-repl-connect-failure-unreached-p detail) 'unreached)
+   (t t)))
+
+(defun agent-repl-host--adopt-call (ws new token trigger old)
+  "Issue AdoptHostWorkspace for WS on NEW, for reattach walk TOKEN.
+WS already stands moved onto NEW (`agent-repl-host--adopt-onto'); OLD is
+the daemon it came from, which every ending but success puts it back on.
+A transport failure retries THIS call and nothing more.  The call runs in
+WS\='s own log context, so its transport records land in WS\='s log, not
+in whichever workspace is current when a retry timer fires (2026-11-15:
+every workspace\='s retries filled one bystander\='s rotation).  TRIGGER
+is recorded."
+  (let ((ref (agent-repl-host-ref ws))
+        (address (agent-repl-connect-connection-address new))
+        (restore
+         (lambda ()
+           (agent-repl-host--put ws :conn old)
+           (agent-repl-frontend-reload-webview ws)
+           (agent-repl--info ws "elisp.host.webview-restored ws=%s address=%S"
+                             ws (and old (agent-repl-connect-connection-address old))))))
+    (if (not (agent-repl-host--reattach-current-p ws token))
+        (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger)
+      (agent-repl--with-log-context
+       ws nil
+       (lambda ()
+         (agent-repl-rpc-adopt-host-workspace
+          new (list :workspace ref)
+          :on-response
+          (lambda (response)
+            (cond
+             ((not (agent-repl-host--reattach-current-p ws token))
+              (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
+             (t
+              (pcase (plist-get response :arm)
+                (:success
+                 (agent-repl-host--put ws :handover-page nil)
+                 (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
+                 (agent-repl-host--reattached ws new ref trigger)
+                 (agent-repl-host--release-held ws "adopted"))
+                (:error
+                 (funcall restore)
+                 (agent-repl-host--put ws :reattach nil)
+                 (agent-repl-host--on-refused ws "adopt" (plist-get response :value))
+                 (agent-repl-host--release-held ws "refused"))
+                (arm
+                 (funcall restore)
+                 (agent-repl-host--put ws :reattach nil)
+                 (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm)
+                 (agent-repl-host--release-held ws "refused"))))))
+          :on-failure
+          (lambda (detail)
+            (if (not (agent-repl-host--reattach-current-p ws token))
+                (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger)
+              (let ((retry (agent-repl-host--adopt-retryable-p new detail)))
+                (cond
+                 ((eq retry t)
+                  ;; THE HOLD ENDS WITH THE ADOPT'S DEADLINE: the calls held
+                  ;; for WS go now, to the daemon that still serves it, while
+                  ;; the retry keeps WS and its page on NEW.
+                  (agent-repl-host--release-held
+                   ws "failed" (and old (agent-repl-connect-connection-alive-p old) old))
+                  (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
+                                     ws detail)
+                  (run-at-time agent-repl-host-handover-retry-delay nil
+                               #'agent-repl-host--adopt-call ws new token trigger old))
+                 (t
+                  (funcall restore)
+                  (agent-repl-host--release-held ws "failed")
+                  (cond
+                   ;; THE SUCCESSOR WAS PROMOTED WHILE THIS ADOPT WAS IN
+                   ;; FLIGHT.  The promotion walked only the workspaces
+                   ;; standing on the old daemon, and this one stood on NEW
+                   ;; for the call; restored onto the old daemon, whose
+                   ;; connection the promotion closes, it was stranded there
+                   ;; with no walk left (2026-10-25: six workspaces).  NEW
+                   ;; serves every workspace now, so it registers there.
+                   ((eq new (agent-repl-link-primary))
+                    (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
+                                       ws detail)
+                    (agent-repl-host--reattach ws new :register "adopt-after-promotion"))
+                   (t
+                    (agent-repl-host--put ws :reattach nil)
+                    (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil stopped=%s"
+                                       ws detail retry))))))))))))))
 
 (defun agent-repl-host--transferred (ws &optional value)
   "Adopt WS onto the successor daemon after the old one released it.
@@ -2314,7 +2358,10 @@ handover.  Its `transferred' push says which (`:handover-page'):
 
 (defun agent-repl-host--redial-successor (ws address)
   "Return the successor connection at ADDRESS for WS, dialing it if needed.
-A successor already standing at ADDRESS is returned as is.  Otherwise the
+A successor already standing at ADDRESS is returned as is, and so is the
+live primary when ADDRESS is its own: a refusal the outgoing daemon
+answered after the handover completed names the daemon that serves Emacs
+now, so WS is adopted there and nothing is dialed.  Otherwise the
 dial is made through `agent-repl-link-dial-successor', which is idempotent
 for the matching address; when a successor is standing at a DIFFERENT
 address DAEMON-LINK'S GUARD WINS (audit-3 #30 ruling) — it logs
@@ -2323,8 +2370,7 @@ adopt is sent to an address the link never attached.
 Answers nil while the dial has not been ACCEPTED yet — the caller must
 then wait for acceptance rather than adopt onto an unproven daemon."
   (let ((standing (agent-repl-link-successor)))
-    (unless (and standing
-                 (equal address (agent-repl-connect-connection-address standing)))
+    (unless (agent-repl-connect-connection-at-p standing address)
       (agent-repl--info ws "elisp.host.redial ws=%s address=%S standing=%S"
                         ws address
                         (and standing

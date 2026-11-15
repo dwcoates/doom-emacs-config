@@ -119,10 +119,10 @@ func TestAHandoverWhoseSuccessorDiesAtBootTransfersNothingAndKeepsServing(t *tes
 	host := d.WatchHost(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
 	daemonStream := d.WatchDaemonStream()
-	// The Emacs stream opens with the standing persistent-wifi state; it is
-	// taken here so the probe below sees only what the handover announced.
-	harness.AwaitView(t, d.Ctx(), daemonStream, "the persistent-wifi standing",
-		func(r *agentreplv1.WatchDaemonResponse) bool { return r.GetPersistentWifi() != nil })
+	// The Emacs stream opens with the standing persistent-wifi state; its
+	// settled boot standing is taken here so the probe below sees only what
+	// the handover announced, never the lid's later report.
+	harness.AwaitBootWifiStanding(t, d.Ctx(), daemonStream)
 	stampRefusedLayout(t, d)
 
 	// Act

@@ -3,7 +3,9 @@
 package integration
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -28,6 +30,22 @@ func recordedEnergyMode(t *testing.T, d *harness.Daemon) string {
 	return rec.Mode
 }
 
+// awaitPowerSource waits for d to have heard its power source as source
+// ("ac" or "battery"), so a lid or mode change after it is decided on it.
+func awaitPowerSource(d *harness.Daemon, source string) {
+	d.AwaitLogRecord(d.RunLogPath(), "the power source heard as "+source, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.persistentwifi.power_source" && r.Message == "the power source changed" &&
+			r.Context["power_source"] == source
+	})
+}
+
+// awaitEnergyRecord waits for d's energy step to record msg with trigger.
+func awaitEnergyRecord(d *harness.Daemon, msg, trigger string) {
+	d.AwaitLogRecord(d.RunLogPath(), msg+" on "+trigger, func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.persistentwifi.energy" && r.Message == msg && r.Context["trigger"] == trigger
+	})
+}
+
 // ==========================================================================
 // Persistent wifi mode. The daemon reads the machine's standing before it
 // serves, pushes it on every Emacs WatchDaemon stream, and changes it through
@@ -44,11 +62,7 @@ func TestAnEmacsStreamIsToldTheStandingAndAToggleTurnsItOver(t *testing.T) {
 	// concurrent suite run its host tools outran the remainder (2026-10-20).
 	bootCtx, cancelBoot := d.WaitCtx()
 	defer cancelBoot()
-	// THE STANDING ONCE THE LID IS HEARD: the boot read precedes the lid's
-	// subscription, so the first push a stream gets may or may not carry it.
-	first := harness.AwaitView(t, bootCtx, stream, "the standing with the lid heard", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi().GetLidOpen() != nil
-	}).GetPersistentWifi()
+	first := harness.AwaitBootWifiStanding(t, bootCtx, stream)
 	if first.GetOff() == nil || first.GetJoined().GetNetworkName() != harness.FakeHostNetwork {
 		t.Fatalf("boot standing = %v, want off and joined to %q", first, harness.FakeHostNetwork)
 	}
@@ -89,9 +103,7 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
 	openCtx, cancelOpen := d.WaitCtx()
 	defer cancelOpen()
-	harness.AwaitView(t, openCtx, stream, "the lid heard open", func(r *agentreplv1.WatchDaemonResponse) bool {
-		return r.GetPersistentWifi().GetLidOpen() != nil
-	})
+	harness.AwaitBootWifiStanding(t, openCtx, stream)
 	onCtx, cancelOn := d.WaitCtx()
 	defer cancelOn()
 	if _, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
@@ -100,7 +112,9 @@ func TestWithTheModeOnClosingTheLidQuietsTheMachineAndOpeningItWakes(t *testing.
 		t.Fatalf("UpdatePersistentWifiMode(on) error = %v", err)
 	}
 
-	// Act: close the lid.
+	// Act: close the lid, on battery power.
+	d.PowerSource.Unplug()
+	awaitPowerSource(d, "battery")
 	d.Lid.Close()
 
 	// Assert: the quiet state stands, the display asleep at the user's level.
@@ -143,6 +157,8 @@ func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	// Arrange.
 	d := harness.StartDaemon(t, harness.Opts{})
 	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
+	d.PowerSource.Unplug()
+	awaitPowerSource(d, "battery")
 	d.Lid.Close()
 	closedCtx, cancelClosed := d.WaitCtx()
 	defer cancelClosed()
@@ -176,4 +192,83 @@ func TestTurningTheModeOffUnderAClosedLidWakesTheDisplay(t *testing.T) {
 	if got := harness.FakeDisplay(t, d.HostToolsDir); got != "awake" {
 		t.Fatalf("display = %s, want awake", got)
 	}
+}
+
+// TestNoTestHandRollsTheBootWifiStanding pins that every wait for the settled
+// boot standing goes through harness.AwaitBootWifiStanding: a hand-rolled
+// predicate drifts (one took the first standing, its lid unheard, and failed
+// on the lid's later push, 2026-11-14).
+func TestNoTestHandRollsTheBootWifiStanding(t *testing.T) {
+	// Arrange: the predicate's body, assembled so this file does not hold it.
+	predicate := "GetPersistentWifi()" + ".GetLidOpen() != nil"
+	files, err := filepath.Glob("*_test.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("list the package's test files = %v, %v, want them", files, err)
+	}
+
+	for _, file := range files {
+		// Act
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+
+		// Assert
+		if strings.Contains(string(src), predicate) {
+			t.Errorf("%s hand-rolls %q, want harness.AwaitBootWifiStanding", file, predicate)
+		}
+	}
+}
+
+func TestUnderAClosedLidLowPowerModeFollowsThePowerSource(t *testing.T) {
+	t.Parallel()
+	// Arrange: the mode on, the machine on AC power.
+	d := harness.StartDaemon(t, harness.Opts{})
+	stream := d.WatchEmacsDaemonStream(harness.UnfocusedEditor())
+	awaitPowerSource(d, "ac")
+	onCtx, cancelOn := d.WaitCtx()
+	defer cancelOn()
+	if _, err := d.Client().UpdatePersistentWifiMode(onCtx, connect.NewRequest(&agentreplv1.UpdatePersistentWifiModeRequest{
+		Action: &agentreplv1.UpdatePersistentWifiModeRequest_On{On: &agentreplv1.UpdatePersistentWifiModeOn{}},
+	})); err != nil {
+		t.Fatalf("UpdatePersistentWifiMode(on) error = %v", err)
+	}
+
+	t.Run("a lid closed on AC power quiets the machine without Low Power Mode", func(t *testing.T) {
+		// Act
+		d.Lid.Close()
+
+		// Assert
+		closedCtx, cancelClosed := d.WaitCtx()
+		defer cancelClosed()
+		harness.AwaitView(t, closedCtx, stream, "the closed lid quieted the machine", func(r *agentreplv1.WatchDaemonResponse) bool {
+			s := r.GetPersistentWifi()
+			return s.GetLidClosed() != nil && s.GetQuiet().GetDisplayAsleep() != nil
+		})
+		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
+			t.Fatalf("energy mode = %s, recorded %q, want the user's %s untouched and nothing recorded", got, kept, harness.FakeEnergyMode)
+		}
+	})
+
+	t.Run("losing AC power under the closed lid sets Low Power Mode", func(t *testing.T) {
+		// Act
+		d.PowerSource.Unplug()
+
+		// Assert
+		awaitEnergyRecord(d, "the lid-closed quiet state put the machine in Low Power Mode", "power_source_battery")
+		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != "1" || kept != harness.FakeEnergyMode {
+			t.Fatalf("energy mode = %s, recorded %q, want Low Power Mode with the user's %s recorded", got, kept, harness.FakeEnergyMode)
+		}
+	})
+
+	t.Run("regaining AC power under the closed lid restores the recorded mode", func(t *testing.T) {
+		// Act
+		d.PowerSource.PlugIn()
+
+		// Assert
+		awaitEnergyRecord(d, "the recorded energy mode was restored", "power_source_ac")
+		if got, kept := harness.FakeEnergyModeIn(t, d.HostToolsDir), recordedEnergyMode(t, d); got != harness.FakeEnergyMode || kept != "" {
+			t.Fatalf("energy mode = %s, recorded %q, want the user's %s restored and the record forgotten", got, kept, harness.FakeEnergyMode)
+		}
+	})
 }

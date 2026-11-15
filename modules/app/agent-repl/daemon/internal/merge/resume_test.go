@@ -16,6 +16,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/prototext"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
@@ -1064,5 +1065,57 @@ func TestAResumedConflictTheHardStopInterruptedIsPromptedAgainWithoutSpendingAnA
 	}
 	if got := h.footer.last(); got.State == StateFailed {
 		t.Fatalf("facts = %+v, want no failure: the stopped attempt never counted", got)
+	}
+}
+
+func TestAReattachedTurnStillHeldAsksTheQueueToDeliverItBeforeAwaitingIt(t *testing.T) {
+	// Arrange: the queue still holds the merge's turn; no edge is left to
+	// deliver it (2026-11-15 05:56:36).
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.held["turn-held"] = wsm.HeldPrompt{Turn: "turn-held"}
+	h.db.mu.Unlock()
+
+	// Act
+	close, err := h.o.reattachTurn(context.Background(), theWorkspace, dlog.Context{}, "turn-held", "", fixOrigin)
+
+	// Assert
+	if err != nil || close != wsm.CloseCompleted {
+		t.Fatalf("reattachTurn = (%v, %v), want the held turn awaited to its end", close, err)
+	}
+	h.queue.mu.Lock()
+	asked := slices.Clone(h.queue.deliverAsked)
+	h.queue.mu.Unlock()
+	if !slices.Equal(asked, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("delivery asked for %v, want the merge's workspace once", asked)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !slices.Equal(h.awaitedTurns, []ids.TurnID{"turn-held"}) {
+		t.Fatalf("awaited %v, want the held turn", h.awaitedTurns)
+	}
+}
+
+func TestAReattachedTurnWhoseDeliveryCannotBeAskedFailsWithTheCause(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.held["turn-held"] = wsm.HeldPrompt{Turn: "turn-held"}
+	h.db.mu.Unlock()
+	h.queue.mu.Lock()
+	h.queue.deliverErr = errors.New("the holds could not be read")
+	h.queue.mu.Unlock()
+
+	// Act
+	_, err := h.o.reattachTurn(context.Background(), theWorkspace, dlog.Context{}, "turn-held", "", fixOrigin)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the holds could not be read") {
+		t.Fatalf("reattachTurn = %v, want the delivery's failure", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.awaitedTurns) != 0 {
+		t.Fatalf("awaited %v, want nothing awaited after a failed delivery", h.awaitedTurns)
 	}
 }

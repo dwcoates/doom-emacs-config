@@ -3,12 +3,9 @@ package persistentwifi
 import (
 	"context"
 	"errors"
-	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"agent-repld/internal/appfreeze"
@@ -272,57 +269,9 @@ func TestWatchLidEndedByItsContextRecordsNothing(t *testing.T) {
 	}
 }
 
-// lidServer serves a Unix socket in a short directory, writing each
-// connection the lines given and then holding it open until hold is closed
-// (or closing it at once when end is set). It answers the socket's path.
-func lidServer(t *testing.T, lines string, end bool) (path string, hold chan struct{}) {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "pwl")
-	if err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	path = filepath.Join(dir, "lid")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	hold = make(chan struct{})
-	var held sync.WaitGroup
-	t.Cleanup(func() {
-		_ = ln.Close()
-		select {
-		case <-hold:
-		default:
-			close(hold)
-		}
-		held.Wait()
-	})
-	held.Add(1)
-	go func() {
-		defer held.Done()
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			held.Add(1)
-			go func() {
-				defer held.Done()
-				defer conn.Close()
-				_, _ = conn.Write([]byte(lines))
-				if !end {
-					<-hold
-				}
-			}()
-		}
-	}()
-	return path, hold
-}
-
 func TestSocketLidHearsEachLine(t *testing.T) {
 	// Arrange.
-	path, _ := lidServer(t, "open\nclosed\nnone\nbogus\n", false)
+	path, _ := lineServer(t, "open\nclosed\nnone\nbogus\n", false)
 	var heard []Lid
 
 	// Act.
@@ -339,7 +288,7 @@ func TestSocketLidHearsEachLine(t *testing.T) {
 
 func TestSocketLidEndsQuietlyWithItsContext(t *testing.T) {
 	// Arrange.
-	path, _ := lidServer(t, "open\n", false)
+	path, _ := lineServer(t, "open\n", false)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act: the first line cancels, which closes the connection under the
@@ -357,7 +306,7 @@ func TestSocketLidEndsQuietlyWithItsContext(t *testing.T) {
 // still hears the lid.
 func TestSocketLidGivesEachWatchItsOwnStream(t *testing.T) {
 	// Arrange.
-	path, _ := lidServer(t, "open\n", false)
+	path, _ := lineServer(t, "open\n", false)
 	ctxA, cancelA := context.WithCancel(context.Background())
 	ctxB, cancelB := context.WithCancel(context.Background())
 	heardB := make(chan Lid, 1)
@@ -382,7 +331,7 @@ func TestSocketLidGivesEachWatchItsOwnStream(t *testing.T) {
 
 func TestSocketLidReportsAStreamThatEnded(t *testing.T) {
 	// Arrange.
-	path, _ := lidServer(t, "open\n", true)
+	path, _ := lineServer(t, "open\n", true)
 
 	// Act.
 	err := SocketLid(path).Watch(context.Background(), func(Lid) {})

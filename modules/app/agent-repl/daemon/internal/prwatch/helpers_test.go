@@ -15,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/clock/clocktest"
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ghclient"
@@ -250,7 +251,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}}
-	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
+	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log,
 		OwnedMerged: func(_ context.Context, ws ids.WorkspaceID) error {
 			r.ownedMerged = append(r.ownedMerged, ws)

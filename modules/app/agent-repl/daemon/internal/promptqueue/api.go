@@ -410,6 +410,13 @@ type Queue interface {
 	// answered before the merge drives the session. It answers an error only
 	// when the queue's state could not be read.
 	FlushHeld(ctx context.Context, ws ids.WorkspaceID) error
+	// DeliverHeld delivers the next held entry when nothing runs and no
+	// bounce drains the workspace, exactly as a turn's end would: what a merge
+	// resuming onto its own turn the queue still holds asks, so a hold that
+	// no edge is left to deliver never stands on an idle workspace while the
+	// merge waits on it (2026-11-15 05:56:36, sidebar-fold-workspace-selection).
+	// It answers an error only when the queue's state could not be read.
+	DeliverHeld(ctx context.Context, ws ids.WorkspaceID) error
 	// OnFree is the watcher's freeness edge: the last turn or detached item
 	// ended. It takes a registered bounce.
 	OnFree(ws ids.WorkspaceID)

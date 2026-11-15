@@ -1118,8 +1118,8 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 	}
 	fields := dlog.Context{"repo": string(key), "paused": pause != nil}
 	var at sql.NullInt64
-	var by, name, pauser sql.NullString
-	hard := false
+	var by, name, pauser, cause sql.NullString
+	hard, toLand := false, false
 	if pause != nil {
 		if err := pause.validate(); err != nil {
 			s.log.Error(op, "refused a merge queue pause whose record is malformed", withError(fields, err))
@@ -1131,17 +1131,22 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *Me
 			name = sql.NullString{String: pause.By.Name, Valid: true}
 			pauser = sql.NullString{String: string(pause.By.Workspace), Valid: true}
 		}
-		hard = pause.Hard
+		if pause.By.Kind == MergeQueuePauserHost {
+			cause = sql.NullString{String: pause.By.Cause, Valid: true}
+		}
+		hard, toLand = pause.Hard, pause.ToLand
 		fields["by"] = pause.By.Kind.column()
 		fields["hard"] = hard
+		fields["to_land"] = toLand
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard) VALUES (?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard, paused_to_land, paused_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET paused = excluded.paused, paused_at = excluded.paused_at,
 			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name,
-			   paused_by_workspace = excluded.paused_by_workspace, paused_hard = excluded.paused_hard`,
-			key, pause != nil, at, by, name, pauser, hard)
+			   paused_by_workspace = excluded.paused_by_workspace, paused_hard = excluded.paused_hard,
+			   paused_to_land = excluded.paused_to_land, paused_cause = excluded.paused_cause`,
+			key, pause != nil, at, by, name, pauser, hard, toLand, cause)
 		return err
 	})
 }
@@ -1167,12 +1172,12 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 	}
 	var pause *MergeQueuePause
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		var paused, hard bool
+		var paused, hard, toLand bool
 		var at sql.NullInt64
-		var by, name, pauser sql.NullString
+		var by, name, pauser, cause sql.NullString
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
-			Scan(&paused, &at, &by, &name, &pauser, &hard)
+			`SELECT paused, paused_at, paused_by, paused_by_name, paused_by_workspace, paused_hard, paused_to_land, paused_cause FROM merge_queue_repos WHERE repo_key = ?`, key).
+			Scan(&paused, &at, &by, &name, &pauser, &hard, &toLand, &cause)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -1183,9 +1188,12 @@ func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueueP
 		if err != nil {
 			return &DecodeError{Table: "merge_queue_repos", Row: string(key), Field: "paused_by", Err: err}
 		}
-		pause = &MergeQueuePause{By: MergeQueuePauser{Kind: kind, Name: name.String}, Hard: hard}
-		if kind == MergeQueuePauserWorkspace {
+		pause = &MergeQueuePause{By: MergeQueuePauser{Kind: kind, Name: name.String}, Hard: hard, ToLand: toLand}
+		switch kind {
+		case MergeQueuePauserWorkspace:
 			pause.By.Workspace = WorkspaceID(pauser.String)
+		case MergeQueuePauserHost:
+			pause.By.Cause = cause.String
 		}
 		if at.Valid {
 			pause.At = fromNanos(at.Int64)

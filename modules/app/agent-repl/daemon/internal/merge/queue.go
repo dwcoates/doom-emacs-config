@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"time"
 
@@ -55,9 +56,14 @@ func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) erro
 }
 
 // ResumeOwnPause resumes the ONE queue SCOPE names when the pause standing on
-// it is workspace WS's own, and answers whether it resumed it. A queue that
-// runs, or stands paused by the user, by another workspace, or by a pause
-// written before its pauser's id was kept, is left as it stands.
+// it is workspace WS's own and was made to land a change, and answers whether
+// it resumed it. A queue that runs, or stands paused by the user, by the host,
+// by another workspace, by a pause written before its pauser's id was kept,
+// or by WS's own pause made for any other reason, is left as it stands.
+//
+// A PAUSE THE OWNER ASKED FOR SURVIVES THE TURN'S END (2026-11-14 20:47:10:
+// the owner told merge-queue-stall-triage to pause the queue to save power,
+// and the let-through resumed it the moment that turn ended).
 func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error) {
 	const op = "daemon.merge.resume_own_pause"
 	o.pauseWrites.Lock()
@@ -82,6 +88,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 		o.deps.Log.Global().Info(op, "the queue stands no pause of the workspace's own, so it is left as it stands", fields)
 		return false, nil
 	}
+	if !pause.ToLand {
+		o.deps.Log.Global().Info(op, "the workspace's own pause was not made to land a change, so it stands until it is resumed", dlog.Context{
+			"repo": string(repo), "workspace": string(ws), "hard": pause.Hard})
+		return false, nil
+	}
 	if err := o.setPaused(ctx, &scope, nil); err != nil {
 		return false, err
 	}
@@ -90,10 +101,11 @@ func (o *orchestrator) ResumeOwnPause(ctx context.Context, scope RepositoryScope
 }
 
 // pauseRecord is the record a pause BY writes now: who asked, by the asking
-// workspace's name as it stands, and whether it is a hard stop. A workspace
+// workspace's name as it stands, whether it is a hard stop, and whether it was
+// made to land a change. A workspace
 // the registry cannot read is refused, recorded under OP.
 func (o *orchestrator) pauseRecord(ctx context.Context, op string, by Pauser, hard bool) (*wsm.MergeQueuePause, error) {
-	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard}
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard, ToLand: by.ToLand}
 	if by.By == RequestedByUser {
 		return pause, nil
 	}
@@ -121,6 +133,15 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 	if err != nil {
 		return err
 	}
+	return o.pauseRepos(ctx, op, repos, pause, scope != nil)
+}
+
+// pauseRepos is setPaused's write over the queues of REPOS, resolved: PAUSE
+// pauses them with its record, nil resumes them, and a change that would
+// change none of them is refused. SCOPED is whether the asker named one
+// repository, for the record.
+func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.RepoKey, pause *wsm.MergeQueuePause, scoped bool) error {
+	paused := pause != nil
 	var changed []wsm.RepoKey
 	for _, repo := range repos {
 		was, err := o.deps.DB.MergeQueuePaused(ctx, repo)
@@ -143,7 +164,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scope != nil})
+	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
 	if paused {
 		suspended := o.suspendHeld(ctx, repos, suspendPause)
 		return errors.Join(suspended, o.redrawPaused(ctx, op, changed))
@@ -153,6 +174,19 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.kick(repo)
 	}
 	return redrawn
+}
+
+// holdForHostFault pauses REPO's queue in the host's name, naming CAUSE: a
+// merge's test gate whose runner could not be built or started. The pause
+// suspends the merge whose gate it was, as any pause does, and stands until
+// it is resumed; the merge's gate then runs again from its start, with no
+// fixing attempt spent. A queue already paused is left as it stands: its
+// pause suspends the merge the same way.
+func (o *orchestrator) holdForHostFault(ctx context.Context, repo wsm.RepoKey, cause string) error {
+	o.pauseWrites.Lock()
+	defer o.pauseWrites.Unlock()
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserHost, Cause: cause}}
+	return o.pauseRepos(ctx, "daemon.merge.pause", []wsm.RepoKey{repo}, pause, true)
 }
 
 // HardStop pauses the queues SCOPE names as Pause does, and stops the work
@@ -744,28 +778,11 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 		return err
 	}
 	o.withdrawRequest(ws)
-	entry, err := o.entryOf(ctx, repo, ws)
+	entry, err := o.takeOffQueue(ctx, repo, ws, cause)
+	if gone := (*entryGone)(nil); errors.As(err, &gone) {
+		return o.leftFirst(ctx, ws, repo, cause, gone)
+	}
 	if err != nil {
-		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
-		return err
-	}
-	// AN ADMITTED MERGE WITH NO RUN AND NO RESUME HERE is not a waiting one:
-	// another daemon drives it, a handover is moving it, or its run is
-	// starting. Dropping only its entry would leave its lease over none, so
-	// it is refused, loudly.
-	if entry.State == wsm.MergeAdmitted {
-		err := fmt.Errorf("merge: the merge of %s is admitted with no run in this daemon; it is taken off where it runs", ws)
-		log.Error(op, "refused to drop an admitted merge as a waiting one", dlog.Context{
-			"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
-		return err
-	}
-	if ledger, ok := o.leaseOf(ws); ok {
-		if err := o.settleLeavingQueueTab(ctx, repo, ws, ledger, string(cause)); err != nil {
-			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
-		}
-	}
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
-		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
 	}
 	o.mu.Lock()
@@ -791,6 +808,113 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.kick(repo)
 	return nil
+}
+
+// takeOffQueue reads WS's entry in REPO and removes it for CAUSE, under WS's
+// drop lock (dropLocks), so a second drop of the same merge waits for the
+// first and then reads the entry gone. It answers the entry it removed, or,
+// when the entry had already left -- before the read, or between the read
+// and the removal through an exit that is no drop -- an *entryGone for
+// leftFirst to explain. Every other failure is recorded here.
+func (o *orchestrator) takeOffQueue(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, cause AbandonCause) (wsm.MergeQueueEntry, error) {
+	const op = "daemon.merge.drop_queued"
+	log := o.log(ctx, ws)
+	drop := o.dropLock(ws)
+	if o.onDropWait != nil {
+		o.onDropWait(ws)
+	}
+	drop.Lock()
+	defer drop.Unlock()
+	entry, err := o.entryOf(ctx, repo, ws)
+	if errors.Is(err, errNoQueueEntry) {
+		return wsm.MergeQueueEntry{}, &entryGone{found: err}
+	}
+	if err != nil {
+		log.Error(op, "could not read a queued merge's queue entry", dlog.Context{"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	// AN ADMITTED MERGE WITH NO RUN AND NO RESUME HERE is not a waiting one:
+	// another daemon drives it, a handover is moving it, or its run is
+	// starting. Dropping only its entry would leave its lease over none, so
+	// it is refused, loudly.
+	if entry.State == wsm.MergeAdmitted {
+		err := fmt.Errorf("merge: the merge of %s is admitted with no run in this daemon; it is taken off where it runs", ws)
+		log.Error(op, "refused to drop an admitted merge as a waiting one", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	if ledger, ok := o.leaseOf(ws); ok {
+		if err := o.settleLeavingQueueTab(ctx, repo, ws, ledger, string(cause)); err != nil {
+			log.Error(op, "could not settle a dropped merge's queue tab", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		}
+	}
+	err = o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause))
+	if errors.Is(err, wsm.ErrNotFound) {
+		return wsm.MergeQueueEntry{}, &entryGone{found: err}
+	}
+	if err != nil {
+		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
+		return wsm.MergeQueueEntry{}, err
+	}
+	return entry, nil
+}
+
+// entryGone is takeOffQueue's answer for an entry that had already left its
+// queue: FOUND is the read or the removal that found it gone.
+type entryGone struct{ found error }
+
+func (e *entryGone) Error() string { return e.found.Error() }
+func (e *entryGone) Unwrap() error { return e.found }
+
+// dropLock answers the lock WS's drops are serialized by (dropLocks).
+func (o *orchestrator) dropLock(ws ids.WorkspaceID) *sync.Mutex {
+	return keyedLock(o, o.dropLocks, ws)
+}
+
+// leftFirst answers a drop of WS's merge for CAUSE that found its entry in
+// REPO already gone (GONE): the drop is idempotent when the store records
+// why the merge left -- its request standing off the queue (an earlier drop,
+// an eviction, a failure), its workspace's close, or its landing -- and that
+// is recorded at INFO, with the why. An entry gone with none of those is an
+// inconsistency between this daemon and its store, recorded at ERROR and
+// answered as an error. Either way this daemon's note of the queue it stood
+// in is forgotten: no entry of it stands there.
+func (o *orchestrator) leftFirst(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, cause AbandonCause, gone *entryGone) error {
+	const op = "daemon.merge.drop_queued"
+	log := o.log(ctx, ws)
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "found": gone.Error()}
+	o.mu.Lock()
+	if o.repoOf[ws] == repo {
+		delete(o.repoOf, ws)
+	}
+	o.mu.Unlock()
+	off, kept, err := o.deps.DB.OffQueueMergeOf(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read why a merge whose entry was gone when its drop came left its queue", withField(fields, "error", err.Error()))
+		return err
+	}
+	if kept {
+		fields["left_cause"], fields["left_at"] = off.Cause, off.LeftAt.UTC().Format(time.RFC3339Nano)
+		log.Info(op, "the merge had already left its queue when the drop came, its request standing off the queue; nothing is taken off", fields)
+		return nil
+	}
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error(op, "could not read the workspace of a merge whose entry was gone when its drop came", withField(fields, "error", err.Error()))
+		return err
+	}
+	switch {
+	case record.MergedAt != nil:
+		fields["merged_at"] = record.MergedAt.UTC().Format(time.RFC3339Nano)
+		log.Info(op, "the merge had already landed when the drop came; nothing is taken off", fields)
+		return nil
+	case record.Closed:
+		log.Info(op, "the merge had already left its queue with its workspace's close when the drop came; nothing is taken off", fields)
+		return nil
+	}
+	err = fmt.Errorf("merge: the merge of %s has no entry in %s and the store records no leaving of it: %w", ws, repo, gone)
+	log.Error(op, "a merge this daemon knew as queued has no queue entry and no record of leaving it", withField(fields, "error", err.Error()))
+	return err
 }
 
 // queuedSentence is the abandoned terminal's sentence of a merge that left

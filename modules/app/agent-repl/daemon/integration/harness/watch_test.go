@@ -1,8 +1,11 @@
 package harness
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
 // TestStreamDrainKeepsAPumpFromWedging pins the property a PARTICIPANT HOLD
@@ -127,5 +130,60 @@ func TestPendingPushMatching(t *testing.T) {
 				t.Fatalf("pendingPushMatching = (%d, %t), want (%d, %t)", got, ok, tc.want, tc.wantOK)
 			}
 		})
+	}
+}
+
+func TestBootWifiStanding(t *testing.T) {
+	tests := []struct {
+		name string
+		push *agentreplv1.WatchDaemonResponse
+		want bool
+	}{
+		{name: "a push that is no standing is not it", push: &agentreplv1.WatchDaemonResponse{}, want: false},
+		{name: "a standing with the lid unheard is not it", push: wifiPush(&agentreplv1.PersistentWifiState{}), want: false},
+		{name: "a standing with the lid heard closed is not it", push: wifiPush(&agentreplv1.PersistentWifiState{
+			Lid: &agentreplv1.PersistentWifiState_LidClosed{LidClosed: &agentreplv1.PersistentWifiLidClosed{}},
+		}), want: false},
+		{name: "a standing with the lid heard open is it", push: wifiPush(lidOpenStanding()), want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := BootWifiStanding(tc.push)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("BootWifiStanding(%v) = %t, want %t", tc.push, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAwaitBootWifiStandingPassesOverTheStandingWithTheLidUnheard(t *testing.T) {
+	// Arrange: the stream is told the boot's first read, then the lid's.
+	ch := make(chan *agentreplv1.WatchDaemonResponse, 2)
+	ch <- wifiPush(&agentreplv1.PersistentWifiState{})
+	ch <- wifiPush(lidOpenStanding())
+	s := &Stream[*agentreplv1.WatchDaemonResponse]{C: ch, t: t, cancel: func() {}}
+
+	// Act
+	got := AwaitBootWifiStanding(t, context.Background(), s)
+
+	// Assert
+	if got.GetLidOpen() == nil {
+		t.Fatalf("AwaitBootWifiStanding = %v, want the standing with the lid heard open", got)
+	}
+	if len(ch) != 0 {
+		t.Fatalf("pushes left unread = %d, want none: the wait took the settled standing", len(ch))
+	}
+}
+
+func wifiPush(s *agentreplv1.PersistentWifiState) *agentreplv1.WatchDaemonResponse {
+	return &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_PersistentWifi{PersistentWifi: s}}
+}
+
+func lidOpenStanding() *agentreplv1.PersistentWifiState {
+	return &agentreplv1.PersistentWifiState{
+		Lid: &agentreplv1.PersistentWifiState_LidOpen{LidOpen: &agentreplv1.PersistentWifiLidOpen{}},
 	}
 }

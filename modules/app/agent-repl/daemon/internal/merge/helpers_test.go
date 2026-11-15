@@ -1160,7 +1160,7 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 			return f.restampRepairsLocked(repo)
 		}
 	}
-	return fmt.Errorf("no queue entry for %s", id)
+	return fmt.Errorf("wsm: merge queue entry for workspace %s in repo %q: %w", id, repo, wsm.ErrNotFound)
 }
 
 // keepOffQueueLocked stands for the store's one queue-exit transition
@@ -1460,6 +1460,12 @@ type fakeGit struct {
 	mu      sync.Mutex
 	// standing answers RebaseInProgress: a rebase stands in the worktree.
 	standing bool
+	// cleanSeq answers IsClean in order ahead of every other answer: a
+	// worktree a writer dirtied between two reads.
+	cleanSeq []bool
+	// leftStanding is a rebase a cut run left standing, which stands until it
+	// is aborted.
+	leftStanding bool
 	// onTip answers CommitsBetween(_, _, "HEAD"): what a standing rebase has
 	// replayed onto its tip.
 	onTip []gitclient.Commit
@@ -1564,10 +1570,13 @@ type fakeGit struct {
 	rebaseResolved map[int][]string
 	// rebaseStuck names the replays (1-based) whose rerere-resolved stop
 	// every command answers again: a continue git refuses, moving nothing.
-	rebaseStuck    map[int][]string
-	rebaseMet      map[int]bool
-	rebaseErr      error
-	rebaseCommands []string
+	rebaseStuck map[int][]string
+	rebaseMet   map[int]bool
+	rebaseErr   error
+	// startsRefusedDirty is how many of the next StartRebase calls git
+	// refuses over uncommitted changes (gitclient.ErrDirtyWorktree).
+	startsRefusedDirty int
+	rebaseCommands     []string
 	// deletedBranches records DeleteBranchAt as BRANCH@HEAD; deleteBranchErr
 	// fails it.
 	deletedBranches []string
@@ -1880,6 +1889,11 @@ func (g *fakeGit) IsClean(_ context.Context, dir string) (bool, error) {
 	g.record("is_clean")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if len(g.cleanSeq) > 0 {
+		clean := g.cleanSeq[0]
+		g.cleanSeq = g.cleanSeq[1:]
+		return clean, nil
+	}
 	if clean, ok := g.cleanByDir[dir]; ok {
 		return clean, nil
 	}
@@ -1941,16 +1955,28 @@ func (g *fakeGit) StartRebase(_ context.Context, _, onto string, commits []strin
 	g.record("start_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
+	if g.startsRefusedDirty > 0 {
+		g.startsRefusedDirty--
+		return gitclient.RebaseStep{}, dirtyStartRefusal()
+	}
 	g.rebaseTotal = len(commits)
 	g.rebaseReplayed = 0
-	g.rebaseCommands = append(g.rebaseCommands, "start "+onto)
 	return g.replayLocked()
+}
+
+// dirtyStartRefusal is git refusing to start a rebase over uncommitted
+// changes, as gitclient answers it: every fake that scripts the refusal
+// answers this one error.
+func dirtyStartRefusal() error {
+	return fmt.Errorf("%w: git rebase exited 1: error: cannot rebase: You have unstaged changes", gitclient.ErrDirtyWorktree)
 }
 
 func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.leftStanding = false
 	g.rebaseCommands = append(g.rebaseCommands, "abort")
 	return nil
 }
@@ -1989,7 +2015,7 @@ func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.standing, nil
+	return g.standing || g.leftStanding, nil
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
@@ -2161,6 +2187,10 @@ type fakeQueue struct {
 	// flushErr is what FlushHeld answers.
 	flushed  []ids.WorkspaceID
 	flushErr error
+	// deliverAsked are the workspaces DeliverHeld was asked for; deliverErr is
+	// its answer.
+	deliverAsked []ids.WorkspaceID
+	deliverErr   error
 }
 
 // FlushHeld records the flush and answers flushErr.
@@ -2169,6 +2199,14 @@ func (q *fakeQueue) FlushHeld(_ context.Context, ws ids.WorkspaceID) error {
 	defer q.mu.Unlock()
 	q.flushed = append(q.flushed, ws)
 	return q.flushErr
+}
+
+// DeliverHeld records the ask and answers deliverErr.
+func (q *fakeQueue) DeliverHeld(_ context.Context, ws ids.WorkspaceID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.deliverAsked = append(q.deliverAsked, ws)
+	return q.deliverErr
 }
 
 // flushes answers every workspace whose held prompts were flushed.
@@ -2919,8 +2957,10 @@ type fakeFreeness struct {
 	busyWS   map[ids.WorkspaceID]bool
 	blockers []string
 	awaitErr error
-	waiting  chan struct{}
-	release  chan struct{}
+	// onFree, when set, is called on every Free read.
+	onFree  func(ws ids.WorkspaceID)
+	waiting chan struct{}
+	release chan struct{}
 
 	mu      sync.Mutex
 	awaited int
@@ -2928,8 +2968,13 @@ type fakeFreeness struct {
 
 func (f *fakeFreeness) Free(ws ids.WorkspaceID) bool {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return !f.busy && !f.busyWS[ws]
+	onFree := f.onFree
+	free := !f.busy && !f.busyWS[ws]
+	f.mu.Unlock()
+	if onFree != nil {
+		onFree(ws)
+	}
+	return free
 }
 
 // Blockers answers the scripted blockers while busy, none once free.
@@ -3228,6 +3273,7 @@ func newHarness(t *testing.T) *harness {
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
 	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
+	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 
 	h.repoRoot = t.TempDir()
 	h.script = filepath.Join(h.stateDir, "test-all.sh")

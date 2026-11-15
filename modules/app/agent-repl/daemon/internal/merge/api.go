@@ -59,6 +59,10 @@ const (
 	// BriefFixCommit asks a fixing turn that ended with uncommitted changes
 	// to commit them before the merge goes on.
 	BriefFixCommit = "merge-fix-commit"
+	// BriefRebaseCommit asks the session of a merge whose rebase met
+	// uncommitted changes in its worktree to commit them before the rebase
+	// starts again.
+	BriefRebaseCommit = "merge-rebase-commit"
 )
 
 // MaxCommitPrompts bounds how many times a fixing turn that ended with
@@ -135,9 +139,10 @@ type Orchestrator interface {
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// ResumeOwnPause resumes the one queue SCOPE names only when the pause
-	// standing on it is workspace WS's own, answering whether it did: the
-	// queue bypass holder lets its own pause through at its turn's end, and
-	// never the user's or another workspace's.
+	// standing on it is workspace WS's own AND was made to land a change,
+	// answering whether it did: the queue bypass holder lets its own landing
+	// pause through at its turn's end, and never a pause the owner asked for,
+	// the user's, the host's, or another workspace's.
 	ResumeOwnPause(ctx context.Context, scope RepositoryScope, ws ids.WorkspaceID) (bool, error)
 	// Status answers each registered repository's queue as it stands, its
 	// started merges' steps filled in: the one repository a scope names (an
@@ -553,6 +558,10 @@ type Pauser struct {
 	By Requester
 	// Asker is the asking workspace; empty for the user.
 	Asker ids.WorkspaceID
+	// ToLand marks a pause made to land a change
+	// (agentrepl.v1.UpdateMergeQueuePause.to_land), the only pause the queue
+	// bypass holder's end-of-turn let-through lifts (ResumeOwnPause).
+	ToLand bool
 }
 
 // String names a requester for the log record.

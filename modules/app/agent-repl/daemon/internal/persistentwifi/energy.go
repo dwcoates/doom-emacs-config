@@ -11,24 +11,67 @@ import (
 
 const opEnergy = "daemon.persistentwifi.energy"
 
-// THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE AND NOTHING ELSE (owner
-// ruling, 2026-11-13): "persistent wifi mode should only update the low vs
-// high when the lid closes (switching to low when closing, restoring to
-// whatever it was when opening)".
+// THE ENERGY MODE FOLLOWS THE LID-CLOSED QUIET STATE AND THE POWER SOURCE
+// (owner rulings, 2026-11-13: "persistent wifi mode should only update the
+// low vs high when the lid closes (switching to low when closing, restoring
+// to whatever it was when opening)"; 2026-11-14: with the lid closed on AC
+// power Low Power Mode is never engaged, losing AC engages it, and regaining
+// AC with the lid still closed disengages it). energyWanted is the one
+// decision:
 //
-//   - While the quiet state stands, the machine runs Low Power Mode. Before
-//     the first Low Power write the mode in use (the user's) is recorded,
-//     durably (EnergyStore), so a daemon that adopts the standing state
-//     across a restart, a handover or a crash restores what the first one
-//     recorded.
-//   - While it does not stand, a recorded mode is restored, then forgotten.
-//     With nothing recorded nothing is written, so with the lid open the
-//     user's own choice is never overridden: no beat, no mode change and no
-//     power source ever writes the energy mode.
+//   - While the quiet state stands on battery power, the machine runs Low
+//     Power Mode. Before the first Low Power write the mode in use (the
+//     user's) is recorded, durably (EnergyStore), so a daemon that adopts the
+//     standing state across a restart, a handover or a crash restores what
+//     the first one recorded.
+//   - While it stands on AC power, or does not stand, a recorded mode is
+//     restored, then forgotten. With nothing recorded nothing is written, so
+//     the user's own choice is never overridden: with the lid open or on AC
+//     power no beat and no mode change ever writes the energy mode.
+//   - While a fact the decision turns on is not yet heard (the lid, or the
+//     power source with the lid closed), nothing is written either way, so a
+//     daemon booting under a closed lid never restores a Low Power Mode it is
+//     about to hold, only to set it again a moment later.
 //
-// Both halves decide by STATES (holdEnergyLocked), never by transitions: a
+// Every half decides by STATES (holdEnergyLocked), never by transitions: a
 // Low Power write or a restore that failed is tried again on the next beat
 // while its state lasts, and its record is kept until the restore takes.
+// Every write is recorded at INFO with the trigger that asked and the
+// decision's reason ("because").
+
+// energyHold is what the energy step does with the facts as they stand.
+type energyHold int
+
+const (
+	// energyKeep writes nothing: a fact the decision turns on is unheard.
+	energyKeep energyHold = iota
+	// energyLower records the mode in use, then sets Low Power Mode.
+	energyLower
+	// energyRestore restores a recorded mode, then forgets it.
+	energyRestore
+)
+
+// energyWanted is THE ONE DECISION of the energy mode, answering the hold
+// and its reason for the record. quiet is whether the quiet state stands,
+// which only a heard closed lid makes so; an unwatched power source is never
+// a battery.
+func energyWanted(quiet bool, lid lidKind, source powerSourceKind) (energyHold, string) {
+	switch {
+	case lid == lidUnheard:
+		return energyKeep, "the lid is not yet heard"
+	case !quiet:
+		return energyRestore, "the lid-closed quiet state does not stand"
+	case source == powerSourceBattery:
+		return energyLower, "the lid is closed on battery power"
+	case source == powerSourceAC:
+		return energyRestore, "the lid is closed on AC power"
+	case source == powerSourceUnheard:
+		return energyKeep, "the power source is not yet heard"
+	case source == powerSourceUnwatched:
+		return energyRestore, "the power source is not heard"
+	}
+	panic(fmt.Sprintf("persistentwifi: energyWanted was handed an unnamed power source %d", int(source)))
+}
 
 // restoreAction is what a restore does with the mode in use and the one
 // recorded: THE ONE DECISION, asked by the daemon and the thaw guard alike.
@@ -61,21 +104,27 @@ func decideRestore(energy, kept string) restoreAction {
 	return restoreWrite
 }
 
-// holdEnergyLocked holds the energy mode to the quiet state as it stands
-// (c.quiet): lowered while it stands, restored while it does not. energy is
-// the mode in use as read (reading.energy). Every beat asks it, so a failed
-// step is retried by state. Caller holds mu.
+// holdEnergyLocked holds the energy mode to the facts as they stand
+// (energyWanted). energy is the mode in use as read (reading.energy). Every
+// beat, lid and power source asks it, so a failed step is retried by state.
+// Caller holds mu.
 func (c *Controller) holdEnergyLocked(ctx context.Context, energy, trigger string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
-	if c.quiet {
-		return c.lowerEnergyLocked(ctx, energy, trigger)
+	hold, because := energyWanted(c.quiet, c.lid.kind, c.powerSource.kind)
+	switch hold {
+	case energyLower:
+		return c.lowerEnergyLocked(ctx, energy, trigger, because)
+	case energyRestore:
+		return c.restoreEnergyLocked(ctx, energy, trigger, because, false)
 	}
-	return c.restoreEnergyLocked(ctx, energy, trigger, false)
+	c.log.Debug(opEnergy, "the energy mode is held as it is", dlog.Context{"trigger": trigger, "because": because})
+	return energyUnchanged()
 }
 
-// lowerEnergyLocked is the quiet state's half: the mode in use is recorded
-// (or the kept record adopted), then Low Power Mode set. A record that cannot
-// be read or kept writes nothing. Caller holds mu.
-func (c *Controller) lowerEnergyLocked(ctx context.Context, energy, trigger string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+// lowerEnergyLocked is the engaging half: the mode in use is recorded (or
+// the kept record adopted), then Low Power Mode set. A record that cannot be
+// read or kept writes nothing. because is energyWanted's reason. Caller
+// holds mu.
+func (c *Controller) lowerEnergyLocked(ctx context.Context, energy, trigger, because string) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	if energy == "" {
 		c.log.Debug(opEnergy, "the energy mode in use is unread or the machine names none; Low Power Mode is not set",
 			dlog.Context{"trigger": trigger})
@@ -96,7 +145,7 @@ func (c *Controller) lowerEnergyLocked(ctx context.Context, energy, trigger stri
 	}
 	c.energyCause = ""
 	c.log.Info(opEnergy, "the lid-closed quiet state put the machine in Low Power Mode",
-		dlog.Context{"trigger": trigger, "was": energy, "recorded": kept})
+		dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
 	return &agentreplv1.UpdatePersistentWifiModeEnergyMode{
 		Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_LowPower{LowPower: &agentreplv1.UpdatePersistentWifiModeEnergyModeLowPower{}},
 	}
@@ -131,10 +180,11 @@ func (c *Controller) keepEnergyLocked(energy, trigger string) (string, error) {
 	return kept, nil
 }
 
-// restoreEnergyLocked is the other half: a recorded mode is restored, then
-// forgotten (decideRestore). leaving says the quiet state is being left now,
-// when a missing record is worth a record. Caller holds mu.
-func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger string, leaving bool) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
+// restoreEnergyLocked is the disengaging half: a recorded mode is restored,
+// then forgotten (decideRestore). because is the reason it is asked.
+// leaving says the quiet state is being left now, when a missing record is
+// worth a record. Caller holds mu.
+func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, because string, leaving bool) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	rec, ok, err := c.energyStore.Load()
 	if err != nil {
 		return c.energyFailedLocked(ctx, trigger,
@@ -147,8 +197,8 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger st
 	if kept == "" {
 		c.energyCause = ""
 		if leaving {
-			c.log.Info(opEnergy, "the lid-closed quiet state was left with no energy mode recorded (entered by an earlier build, or never recorded); nothing is restored",
-				dlog.Context{"trigger": trigger, "energy": energy})
+			c.log.Info(opEnergy, "the lid-closed quiet state was left with no energy mode recorded (Low Power Mode was never set: on AC power, or entered by an earlier build); nothing is restored",
+				dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "energy": energy})
 		}
 		return energyUnchanged()
 	}
@@ -158,17 +208,17 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger st
 			dlog.Context{"trigger": trigger, "recorded": kept})
 		return energyUnchanged()
 	case restoreAlready:
-		c.forgetEnergyLocked(ctx, trigger, "the machine already runs the recorded energy mode; the record is forgotten", energy, kept)
+		c.forgetEnergyLocked(ctx, trigger, because, "the machine already runs the recorded energy mode; the record is forgotten", energy, kept)
 		return energyUnchanged()
 	case restoreUserMoved:
-		c.forgetEnergyLocked(ctx, trigger, "the energy mode was changed after the lid-closed quiet state set Low Power Mode; that choice stands and the recorded mode is forgotten", energy, kept)
+		c.forgetEnergyLocked(ctx, trigger, because, "the energy mode was changed after the lid-closed quiet state set Low Power Mode; that choice stands and the recorded mode is forgotten", energy, kept)
 		return energyUnchanged()
 	}
 	if err := c.pmsetAll(ctx, "powermode", kept); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
 			"the recorded energy mode could not be restored; the record is kept and the restore tried again on the next beat", err)
 	}
-	c.forgetEnergyLocked(ctx, trigger, "the recorded energy mode was restored", energy, kept)
+	c.forgetEnergyLocked(ctx, trigger, because, "the recorded energy mode was restored", energy, kept)
 	return &agentreplv1.UpdatePersistentWifiModeEnergyMode{
 		Outcome: &agentreplv1.UpdatePersistentWifiModeEnergyMode_Restored{
 			Restored: &agentreplv1.UpdatePersistentWifiModeEnergyModeRestored{PowerMode: kept},
@@ -177,16 +227,16 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger st
 }
 
 // forgetEnergyLocked clears the record once nothing is owed on it, recording
-// why at INFO. A record that cannot be cleared stays held, so the next beat
+// why at INFO with because, the reason the restore was asked. A record that cannot be cleared stays held, so the next beat
 // forgets it again. Caller holds mu.
-func (c *Controller) forgetEnergyLocked(ctx context.Context, trigger, why, energy, kept string) {
+func (c *Controller) forgetEnergyLocked(ctx context.Context, trigger, because, why, energy, kept string) {
 	if err := c.energyStore.Clear(); err != nil {
 		c.energyFailedLocked(ctx, trigger, "the recorded energy mode could not be cleared; it is cleared again on the next beat", err)
 		return
 	}
 	c.energyKept = ""
 	c.energyCause = ""
-	c.log.Info(opEnergy, why, dlog.Context{"trigger": trigger, "was": energy, "recorded": kept})
+	c.log.Info(opEnergy, why, dlog.Context{"trigger": trigger, "because": because, "power_source": c.powerSource.name(), "was": energy, "recorded": kept})
 }
 
 // energyFailedLocked records a failed energy step at ERROR, once per
@@ -195,7 +245,7 @@ func (c *Controller) forgetEnergyLocked(ctx context.Context, trigger, why, energ
 func (c *Controller) energyFailedLocked(ctx context.Context, trigger, msg string, err error) *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 	if ctx.Err() == nil {
 		if cause := err.Error(); cause != c.energyCause {
-			c.log.Error(opEnergy, msg, dlog.Context{"trigger": trigger, "lid": c.lid.name(), "quiet": c.quiet, "cause": cause})
+			c.log.Error(opEnergy, msg, dlog.Context{"trigger": trigger, "lid": c.lid.name(), "power_source": c.powerSource.name(), "quiet": c.quiet, "cause": cause})
 			c.energyCause = cause
 		}
 	}

@@ -60,6 +60,19 @@ type Request struct {
 	// next bring-up, if any, spawns the installed build anyway, and a relaunch
 	// would revive a workspace nobody asked to be running.
 	ReplacesShim bool
+	// WaitsBehindMerge marks an unforced shim REPLACEMENT that waits for a
+	// merge holding the workspace's lease to release it (a stale build, a
+	// stale skill set): the registry does not take it while a merge's lease
+	// stands, so it never drains the workspace the merge is driving, and the
+	// lease's release takes it (promptqueue OnLeaseChanged).
+	//
+	// A BOUNCE AND A MERGE NEVER WAIT ON EACH OTHER (2026-11-14 20:47 to
+	// 05:4x, the doom queue stalled 8.5 hours). Taken at a turn's end and
+	// only then deferred behind the merge's lease by its run, the bounce had
+	// swallowed the turn end, and the drain's end delivered nothing under the
+	// merge's holding lease: the merge's own held turn was never delivered,
+	// the merge waited on it, and the bounce waited on the merge.
+	WaitsBehindMerge bool
 	// WaitFor is the gate the request waits on before it runs. The zero value
 	// is GateFreeness. Only a MOVE (KeepDraining) may ask for
 	// GateDispatchQuiet.

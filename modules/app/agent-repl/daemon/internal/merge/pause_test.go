@@ -365,15 +365,18 @@ func TestAPauseWhoseRedrawFailsIsRecordedAndThePauseStands(t *testing.T) {
 }
 
 func TestResumeOwnPauseResumesOnlyThePauseOfTheAskingWorkspace(t *testing.T) {
-	own := &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one", Workspace: theWorkspace}}
-	ownHard := &wsm.MergeQueuePause{At: epochPause, Hard: true, By: own.By}
+	own := &wsm.MergeQueuePause{At: epochPause, ToLand: true, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one", Workspace: theWorkspace}}
+	ownHard := &wsm.MergeQueuePause{At: epochPause, Hard: true, ToLand: true, By: own.By}
 	tests := []struct {
 		name        string
 		pause       *wsm.MergeQueuePause
 		wantResumed bool
 	}{
-		{name: "its own pause", pause: own, wantResumed: true},
-		{name: "its own hard stop", pause: ownHard, wantResumed: true},
+		{name: "its own pause to land a change", pause: own, wantResumed: true},
+		{name: "its own hard stop to land a change", pause: ownHard, wantResumed: true},
+		// 2026-11-14 20:47:10: the owner asked for this pause, to save power.
+		{name: "its own pause not made to land", pause: &wsm.MergeQueuePause{At: epochPause, By: own.By}},
+		{name: "the host's pause", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserHost, Cause: "no runner"}}},
 		{name: "the user's pause", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}}},
 		{name: "another workspace's pause", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-two", Workspace: otherWorkspace}}},
 		{name: "a workspace pause that names no id", pause: &wsm.MergeQueuePause{At: epochPause, By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one"}}},
@@ -462,3 +465,41 @@ var epochPause = time.Date(2026, 11, 13, 18, 0, 0, 0, time.UTC)
 // scopedKey is the queue key a scope naming the harness's repository resolves
 // to (queueKeyOf).
 func scopedKey(h *harness) wsm.RepoKey { return wsm.RepoKey(h.repoRoot + "/.git") }
+
+func TestAPauseRecordsWhetherItWasMadeToLand(t *testing.T) {
+	tests := []struct {
+		name   string
+		hard   bool
+		toLand bool
+	}{
+		{name: "a pause made to land a change", toLand: true},
+		{name: "a pause the owner asked for"},
+		{name: "a hard stop made to land a change", hard: true, toLand: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			seedQueue(h, scopedKey(h), false)
+			by := Pauser{By: RequestedByUser, ToLand: tt.toLand}
+
+			// Act
+			var err error
+			if tt.hard {
+				err = h.o.HardStop(context.Background(), &RepositoryScope{ID: theRepository}, by)
+			} else {
+				err = h.o.Pause(context.Background(), &RepositoryScope{ID: theRepository}, by)
+			}
+
+			// Assert
+			if err != nil {
+				t.Fatalf("pause: %v", err)
+			}
+			h.db.mu.Lock()
+			defer h.db.mu.Unlock()
+			if got := h.db.pauses[scopedKey(h)]; got == nil || got.ToLand != tt.toLand || got.Hard != tt.hard {
+				t.Fatalf("pause = %+v, want to_land %v, hard %v", got, tt.toLand, tt.hard)
+			}
+		})
+	}
+}

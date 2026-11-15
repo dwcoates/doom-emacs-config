@@ -85,6 +85,9 @@ type Deps struct {
 	Status func(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.WorkspaceStatus, error)
 	// Briefs loads and splices a brief at use time.
 	Briefs merge.BriefLoader
+	// Notices measures every notice this service submits
+	// (briefprompt.Composer.Meter). REQUIRED.
+	Notices briefprompt.Meter
 	// MintKey mints an idempotency key for one submission.
 	MintKey func(prefix string) (string, error)
 	// Now stamps a parent's one update told.
@@ -217,7 +220,7 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
 func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
-	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
 		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(event, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
