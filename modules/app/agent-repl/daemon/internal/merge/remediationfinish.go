@@ -558,6 +558,19 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 // no owner.
 func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
+	// A CLOSED ESCALATION'S FINISH IS OVER: no chain's end forgets it, so its
+	// close does, or a record would stand for a workspace nobody finishes.
+	if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws); err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a deploy escalation", withField(fields, "error", err.Error()))
+	} else if escalation {
+		ended, err := o.deps.DB.EndRemediationFinish(ctx, ws)
+		if err != nil {
+			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy escalation's finish could not be ended", withField(fields, "error", err.Error()))
+		} else if ended {
+			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy escalation's finish was ended", fields)
+		}
+		return
+	}
 	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a remediation at work", withField(fields, "error", err.Error()))

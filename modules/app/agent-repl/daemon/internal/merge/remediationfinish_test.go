@@ -529,3 +529,27 @@ func TestABranchThatMovedWhileItsGateRanIsSentBackNotLanded(t *testing.T) {
 		t.Fatalf("FinishRemediation = %v, finish %+v, landings %d; want it sent back to work, nothing landed", err, f, len(h.hooks.runs))
 	}
 }
+
+func TestAClosedEscalationsFinishIsEnded(t *testing.T) {
+	// Arrange: an escalation whose finish stands at fixing.
+	h := finishing(t)
+	ctx := context.Background()
+	if err := h.db.RecordDeployEscalation(ctx, "ws-escalation", mediationKey(h), deployStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	h.o.OnWorkspaceClosed(ctx, "ws-escalation")
+
+	// Assert
+	f, err := h.db.RemediationFinishOf(ctx, "ws-escalation")
+	if err != nil || f != nil {
+		t.Fatalf("finish = %+v (%v), want the closed escalation's finish ended", f, err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish, Message: "a closed deploy escalation's finish was ended"}); !ok {
+		t.Fatalf("records = %+v, want the end recorded", h.logs.Records())
+	}
+}
