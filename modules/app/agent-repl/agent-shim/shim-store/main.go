@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -133,7 +134,10 @@ func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot st
 	if err != nil {
 		return err
 	}
-	defer closeMetricsSurface(metricsSurface, log)
+	// CLOSED ONCE, by whichever of its two defers runs first: this one on a
+	// boot that fails before the database opens, the one below otherwise.
+	closeMetrics := sync.OnceFunc(func() { closeMetricsSurface(metricsSurface, log) })
+	defer closeMetrics()
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(log, os.Getenv, os.UserHomeDir)
@@ -173,6 +177,14 @@ func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot st
 	if err := registerPeerMessages(metricsSurface, database, log); err != nil {
 		return err
 	}
+	// THE METRICS SURFACE CLOSES BEFORE THE DATABASE. Its close pushes every
+	// series one last time and ends the scrapes it serves, and the
+	// cross-session message count is read from this database; closed after
+	// it, the last push read a closed database and recorded
+	// `store.metrics.peer-messages` "sql: database is closed" at ERROR on an
+	// orderly shutdown (2026-11-15). Deferred after database.Close's, so it
+	// runs first.
+	defer closeMetrics()
 
 	// THE LEDGER SWEEP RUNS FOR AS LONG AS THE STORE SERVES, AND STOPS BEFORE
 	// THE DATABASE CLOSES. Its defer is registered AFTER database.Close's, so
