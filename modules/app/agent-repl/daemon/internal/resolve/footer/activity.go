@@ -183,12 +183,21 @@ func (r *resolver) vendorFaultActivity(s *wsState) *frontendv1.FooterStatusVendo
 // networkFaultActivity resolves the cell under a network fault: the offline
 // line the shim observed first, because it explains the step; it always
 // stands while the fault does, so the shared lines never reach this cell.
-func (r *resolver) networkFaultActivity(_ *wsState, fault *Fault) *frontendv1.FooterStatusNetworkFaultActivity {
+//
+// A FAILED TURN WHOSE RETRY WAITS FOR THE NETWORK is accounted for on this
+// line (owner ruling, 2026-11-15): the feed draws no failure for a turn
+// agent-repl retries, and the network fault's line outranks the retrying
+// line, so the offline line goes on to say the retry is pending.
+func (r *resolver) networkFaultActivity(s *wsState, fault *Fault) *frontendv1.FooterStatusNetworkFaultActivity {
+	offline := &frontendv1.FooterStatusActivityNetworkOffline{Text: offlineLine(fault.Detail)}
+	if retry := s.vendorRetry; retry != nil && retry.awaitingNetwork {
+		// retry.attempt counts the failed turn as the first attempt (attemptOfRetry).
+		offline.Retry = &frontendv1.FooterStatusActivityNetworkOfflineRetry{Attempt: uint32(retry.attempt - 1)}
+	}
 	return &frontendv1.FooterStatusNetworkFaultActivity{Tier: &frontendv1.FooterStatusNetworkFaultActivity_Salient{
 		Salient: &frontendv1.FooterStatusNetworkFaultSalient{
-			At: stamp(fault.At),
-			Kind: &frontendv1.FooterStatusNetworkFaultSalient_Offline{
-				Offline: &frontendv1.FooterStatusActivityNetworkOffline{Text: offlineLine(fault.Detail)}},
+			At:   stamp(fault.At),
+			Kind: &frontendv1.FooterStatusNetworkFaultSalient_Offline{Offline: offline},
 		}}}
 }
 
