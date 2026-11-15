@@ -30,9 +30,9 @@ html.agent-repl-host body {
 
 /* THE SHOWN WORKSPACE'S COLD GATE (host/gate.ts), a full-width band at the
    window's bottom, in the slot the hidden input window gave up: at least the
-   composer's height Emacs told (--gate-dock-height; 18.4vh,
-   `agent-repl-input-height-fraction`, only for a slot never told), growing to
-   fit a selection such as the compact submenu and shrinking back, never
+   composer's height Emacs told (--gate-dock-height; the band is drawn only
+   once a slot is told, since Emacs tells it as it hides the input), growing
+   to fit a selection such as the compact submenu and shrinking back, never
    scrolling (owner, 2026-10-29). The pages end above it, so
    it covers nothing. One pixel of lift keeps the card's bottom border on
    screen (owner, 2026-10-06). */
@@ -42,7 +42,7 @@ html.agent-repl-host #webhost-gate {
   right: 0;
   bottom: 0;
   z-index: 1;
-  min-height: var(--gate-dock-height, 18.4vh);
+  min-height: var(--gate-dock-height);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;

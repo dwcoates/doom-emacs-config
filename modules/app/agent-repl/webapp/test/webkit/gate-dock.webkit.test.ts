@@ -13,9 +13,10 @@
  * draws it, in real headless WebKit over the real stylesheet, and measures.
  *
  * IN THE WEBHOST THE GATE IS THE WEBHOST'S (src/host/gate.ts, owner request
- * 2026-10-29): every case runs again over the webhost's `#webhost-gate`, so
- * the gate looks and sizes exactly as the page's dock did; and a page in the
- * webhost draws no standing gate of its own.
+ * 2026-10-29): every case runs again over the webhost's `#webhost-gate`; and
+ * a page in the webhost draws no standing gate of its own. A page on its own
+ * (a browser tab) has no composer whose slot it could take, so its dock is
+ * its card's own height, still growing to fit a taller gate.
  */
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -113,12 +114,6 @@ interface Dock {
 
 const DOCKS: readonly Dock[] = [
   {
-    name: "the page's dock",
-    id: "gate-dock",
-    html: `<!doctype html><html style="${DOCK_HEIGHT_PROPERTY}: ${TOLD_HEIGHT}px"><head></head><body><div id="main-col"><div id="inline"></div></div><div id="gate-dock" hidden></div></body></html>`,
-    host: false,
-  },
-  {
     name: "the webhost's gate",
     id: WEBHOST_GATE_ID,
     html: `<!doctype html><html class="${HOST_ROOT_CLASS}"><head></head><body><div class="webhost-frames"><div id="main-col"><div id="inline"></div></div></div><div id="${WEBHOST_GATE_ID}" style="${DOCK_HEIGHT_PROPERTY}: ${TOLD_HEIGHT}px" hidden></div></body></html>`,
@@ -214,6 +209,36 @@ describe.each(DOCKS)("the docked gate in WebKit, in $name", (where) => {
       return dock.getBoundingClientRect().height;
     }, where.id);
     expect(height).toBeCloseTo(TOLD_HEIGHT, 1);
+  });
+});
+
+describe("a page's own dock in WebKit", () => {
+  let browser: Browser;
+  let page: Page;
+
+  beforeAll(async () => {
+    const css = await pageStylesheet();
+    browser = await webkit.launch();
+    page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+    await page.setContent(
+      `<!doctype html><html><head></head><body><div id="main-col"><div id="inline"></div></div><div id="gate-dock" hidden></div></body></html>`,
+    );
+    await page.addStyleTag({ content: css });
+  });
+
+  afterAll(async () => {
+    await browser.close();
+  });
+
+  it("is its card's own height", async () => {
+    const got = await drawIn(page, "gate-dock", true, false);
+    expect(got.card.height).toBeCloseTo(got.dockInnerHeight, 1);
+  });
+
+  it("grows for a taller gate without scrolling", async () => {
+    const short = await drawIn(page, "gate-dock", true, false);
+    const tall = await drawIn(page, "gate-dock", true, true);
+    expect([tall.dockHeight > short.dockHeight, tall.dockScrolls]).toEqual([true, false]);
   });
 });
 

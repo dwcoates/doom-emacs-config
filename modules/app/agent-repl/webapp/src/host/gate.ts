@@ -104,6 +104,8 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
   let shown: string | null = null;
   let drawn: Drawn | null = null;
   let band = -1;
+  /** The shown workspace whose gate waits for its slot, recorded once per wait. */
+  let awaiting: string | null = null;
 
   el.id = WEBHOST_GATE_ID;
   el.setAttribute("data-component", "gate-dock");
@@ -136,20 +138,34 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
     drawn = null;
   };
 
-  /** Size the slot by what Emacs told for the shown page, or the stylesheet's fallback. */
-  const sizeSlot = (): void => {
-    const pixels = shown === null ? undefined : slots.get(shown);
-    if (pixels === undefined) {
-      el.style.removeProperty(DOCK_HEIGHT_PROPERTY);
-      return;
-    }
+  /** Size the band by the slot Emacs told for the page drawn now. */
+  const sizeSlot = (pixels: number): void => {
     el.style.setProperty(DOCK_HEIGHT_PROPERTY, `${pixels}px`);
   };
 
   /** Draw the shown page's gate, keeping the card drawn while its row and facts are unchanged. */
   const render = (): void => {
     const wanted = shown === null ? undefined : gates.get(shown);
-    if (wanted === undefined || wanted.row === undefined || wanted.gate === undefined || wanted.workspace === undefined) {
+    // THE BAND WAITS FOR ITS SLOT. Emacs tells a workspace's slot as it hides
+    // that workspace's input window (lisp/window.el), so a gate whose slot was
+    // never told stands where the input is still on screen: drawn now, the
+    // band would cover the composer at a height nobody measured.
+    const slot = shown === null ? undefined : slots.get(shown);
+    const waiting = wanted !== undefined && slot === undefined ? shown : null;
+    if (waiting !== awaiting && waiting !== null) {
+      log.info("the shown workspace's gate stands, but Emacs has not told its slot; the band waits for it", {
+        operation: "webhost.gate.awaiting-slot",
+        context: { workspace: waiting },
+      });
+    }
+    awaiting = waiting;
+    if (
+      wanted === undefined ||
+      slot === undefined ||
+      wanted.row === undefined ||
+      wanted.gate === undefined ||
+      wanted.workspace === undefined
+    ) {
       if (drawn !== null) {
         log.info("the shown workspace's gate is gone; the webhost's gate band hides", {
           operation: "webhost.gate.hidden",
@@ -158,7 +174,7 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
       }
       clear();
       el.hidden = true;
-      sizeSlot();
+      el.style.removeProperty(DOCK_HEIGHT_PROPERTY);
       placeBand();
       return;
     }
@@ -169,7 +185,7 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
       drawn.row.value === row.value &&
       equals(FeedColdGateSchema, drawn.gate, gate)
     ) {
-      sizeSlot();
+      sizeSlot(slot);
       placeBand();
       return;
     }
@@ -186,10 +202,10 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
     el.append(card);
     drawn = { workspace: workspace.id, row, gate, card };
     el.hidden = false;
-    sizeSlot();
+    sizeSlot(slot);
     log.info("the shown workspace's gate stands; the webhost draws it in the composer's slot", {
       operation: "webhost.gate.drawn",
-      context: { workspace: workspace.id, row: row.value, slot: slots.get(workspace.id) ?? "fallback" },
+      context: { workspace: workspace.id, row: row.value, slot },
     });
     // THE BAND IS PLACED NOW, in the same turn as the draw, so no frame shows
     // the page running under the gate before the size watch reports.
@@ -224,10 +240,7 @@ export function createWebhostGate(env: WebhostGateEnv): WebhostGate {
     },
     setSlot(id, pixels) {
       slots.set(id, pixels);
-      if (id === shown) {
-        sizeSlot();
-        placeBand();
-      }
+      if (id === shown) render();
     },
     dispose() {
       el.removeEventListener(GATE_ANSWERING_EVENT, onAnswering);

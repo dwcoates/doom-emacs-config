@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  DOCK_HEIGHT_PROPERTY,
-  toldDockHeight,
   DOCKED_CARD_CLASS,
   DOCKED_ROW_CLASS,
   installGateDock,
@@ -45,7 +43,6 @@ let installed: GateDock | null = null;
 afterEach(() => {
   installed?.dispose();
   installed = null;
-  document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
   document.documentElement.classList.remove(WEBHOST_GATE_CLASS);
 });
 
@@ -79,6 +76,24 @@ describe("installGateDock on the feed's real shape", () => {
       row.classList.contains(DOCKED_ROW_CLASS),
       dock.hidden,
     ]).toEqual([false, false, true, false]);
+  });
+
+  it("hides the docked row by a rule that matches a row inside the body", async () => {
+    // Arrange
+    const { feed, dock } = page();
+    const { row } = gateRow("standing");
+    bodiedFeed(feed, row);
+    installed = installGateDock(feed, dock);
+    await settle();
+    const hiding = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{\s*display:\s*none;\s*\}/g)]
+      .map((m) => m[1].trim())
+      .filter((selector) => selector.includes(DOCKED_ROW_CLASS));
+
+    // Act
+    const matched = hiding.filter((selector) => row.matches(selector));
+
+    // Assert
+    expect(matched.length).toBeGreaterThan(0);
   });
 
   it("undocks when the gate's row leaves the body", async () => {
@@ -255,27 +270,14 @@ describe("installGateDock", () => {
     expect([card.parentElement, other.classList.contains(DOCKED_ROW_CLASS)]).toEqual([dock, false]);
   });
 
-  it("takes the height Emacs told it", () => {
-    // Arrange
-    document.documentElement.style.setProperty(DOCK_HEIGHT_PROPERTY, "137px");
-
-    // Act / Assert
-    expect(toldDockHeight(document)).toBe("137px");
-  });
-
-  it("falls back when Emacs never told a height", () => {
-    // Arrange / Act / Assert
-    expect(toldDockHeight(document)).toBeNull();
-  });
-
-  it("floors the dock at exactly the told property (the fraction only as fallback)", () => {
+  it("takes no composer's slot, since a page on its own has none", () => {
     // Arrange
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).toMatch(/(?<![-\w])min-height: var\(--gate-dock-height, 18\.4vh\)/);
+    expect(rule).not.toMatch(/min-height|--gate-dock-height/);
   });
 
   it("sets no fixed or maximum height, so a taller gate grows the dock (owner request, 2026-10-29)", () => {
