@@ -378,8 +378,9 @@ type testRunRead struct {
 func readTestRunEvents(events *os.File, stop <-chan struct{}) <-chan testRunRead {
 	frames := make(chan testRunRead)
 	reader := bufio.NewReader(events)
-	// inflight: joined: STOP or the stream's end ends it, and the relay closes
-	// EVENTS before it returns.
+	// STOP or the stream's end ends it, and the relay closes EVENTS before it
+	// returns, so the relay that starts it outlives it.
+	// inflight: joined: the relay that starts it ends it.
 	go func() {
 		for {
 			ev := &testrunv1.TestRunEvent{}
