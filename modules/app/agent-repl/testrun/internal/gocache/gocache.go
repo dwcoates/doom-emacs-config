@@ -80,6 +80,9 @@ func (g *Guard) Deadline(unit string, bound time.Duration) (time.Time, error) {
 		return now.Add(bound), nil
 	}
 	g.Log.Infof("go build cache: cmd/go's daily trim of %s (last trim %s) falls due before unit %s's time limit of %s ends, so the run trims it first, bounded at %s", g.Dir, describe(last), unit, bound, g.Bound)
+	if err := g.makeDue(last, now); err != nil {
+		return time.Time{}, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), g.Bound)
 	defer cancel()
 	began := g.Clock.Now()
@@ -99,6 +102,25 @@ func (g *Guard) Deadline(unit string, bound time.Duration) (time.Time, error) {
 	}
 	g.Log.Infof("go build cache: trimmed %s in %s; its next trim falls due at %s", g.Dir, now.Sub(began), last.Add(TrimInterval).UTC().Format(time.RFC3339))
 	return now.Add(bound), nil
+}
+
+// makeDue retires a trim record cmd/go would still honor at NOW, so the
+// run's own trim walks the cache rather than declining it. A trim that falls
+// due within a unit's limit but not yet is the case: cmd/go trims only once
+// the record is TrimInterval old, so in the bound's last stretch before that
+// it declined, left the record as it stood, and every unit then failed
+// (2026-11-15 11:21Z, a record of 2026-11-14 12:21Z). A missing record is one
+// cmd/go trims on, and the trim writes a fresh one.
+func (g *Guard) makeDue(last, now time.Time) error {
+	if last.IsZero() || !now.Before(last.Add(TrimInterval)) || !now.After(last.Add(-FutureSlack)) {
+		return nil
+	}
+	path := filepath.Join(g.Dir, TrimFile)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("gocache: retire the trim record %s so cmd/go trims now: %w", path, err)
+	}
+	g.Log.Infof("go build cache: the trim of %s is not due by cmd/go's own test until %s, so its record was retired for the run's trim", g.Dir, last.Add(TrimInterval).UTC().Format(time.RFC3339))
+	return nil
 }
 
 // untrimmedThrough reports whether every go command that ends between now

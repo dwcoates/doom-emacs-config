@@ -33,12 +33,13 @@
 - Land it in this order:
   1. Pause the queue (above).
   2. If the main branch moved since the work began, rebase onto it and resolve every conflict.
-  3. Run the full suite (Tests, below).
-  4. Land it with `land-direct.sh` (below).
-  5. Resume the queue.
+  3. Land it with `land-direct.sh` (below).
+  4. Resume the queue.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch|none> "<changelog line>" <branch>`.
-  - It merges the branch into the main branch, writes the changelog line, and tags the next version.
-  - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose deploy config versions nothing.
+  - It lands one branch, and only through its gate: the branch checked out and committed in its worktree, rebased onto the main branch, and the full suite passing on it (`agent-repld test run -every-suite`, run by the script itself).
+  - It then merges the branch into the main branch, writes the changelog line, and tags the next version.
+  - `minor` for a feature, `patch` for a fix or a visual change, `none` for a repository whose lifecycle config versions nothing.
+  - Exit 4 is the gate's refusal, which it names: fix it on the branch, with the queue resumed meanwhile, and land again.
   - Exit 1 is a branch that did not merge cleanly; resolve it on the branch and land again.
 - Deploy it: `/agent-repl-runtime deploy` for agent-repl, or the repository's own deploy.
 - Watch every deploy until it has settled, and fix what it broke before calling it done.
@@ -67,9 +68,7 @@
   - Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.
   - An ungoverned run takes every core, which the user feels on their machine.
 - While writing a change, run only the tests it adds or changes, and keep every test it touches compiling.
-- Before each landing, with the queue paused, run the full suite on the branch rebased onto the main branch: `agent-repld test run -every-suite`.
-  - Land only when it passes: a failure is fixed on the branch, with the queue resumed meanwhile, and the landing starts over.
-  - A pass is the run's ended state AND its `test-all.log` free of any failure, the placement check's included.
+- `land-direct.sh` runs the full suite before every landing, so never run it by hand before one.
   - A change can break a test it never touches, which no targeted run sees (2026-11-14: 0.436.0 landed a broken test this way).
   - The full suite took 4m47s, measured 2026-11-14.
 - Bypass queue mode never leaves the main branch broken.

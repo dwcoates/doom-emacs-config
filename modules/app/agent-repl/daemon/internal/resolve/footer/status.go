@@ -492,6 +492,8 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	switch m.Step {
 	case StepAwaitingFree:
 		arm.Substatus = &frontendv1.FooterStatusMerging_AwaitingFree{AwaitingFree: r.awaitingFree(s)}
+	case StepFinishing:
+		arm.Substatus = &frontendv1.FooterStatusMerging_Finishing{Finishing: &frontendv1.FooterSubStatusMergingFinishing{}}
 	case StepEnqueued:
 		arm.Substatus = &frontendv1.FooterStatusMerging_Enqueued{Enqueued: &frontendv1.FooterSubStatusMergingEnqueued{
 			Place: uint32(m.QueuePlace), Waiting: uint32(m.QueueWaiting)}}

@@ -440,6 +440,15 @@ type DB interface {
 	// PayHandBack deletes mergeWS's owed report once it was submitted, and
 	// answers whether one was there.
 	PayHandBack(ctx context.Context, mergeWS WorkspaceID) (bool, error)
+	// RecordUndeployedLanding records a landing as waiting for the deploy
+	// that carries it (undeployedlandings.go).
+	RecordUndeployedLanding(ctx context.Context, landing UndeployedLanding) error
+	// CoverUndeployedLandings marks every waiting landing covered by the
+	// deploy committing now, and answers how many it newly covered.
+	CoverUndeployedLandings(ctx context.Context) (int, error)
+	// TakeDeployedLandings deletes and answers, oldest first, the landings a
+	// deploy that ended carries: only the covered ones when coveredOnly.
+	TakeDeployedLandings(ctx context.Context, coveredOnly bool) ([]UndeployedLanding, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. A key whose
 	// submission the queue ACCEPTED answers ClaimAccepted with that turn and
 	// binds nothing; a key claimed for a submission that never reached

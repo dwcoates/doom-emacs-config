@@ -466,12 +466,7 @@ func TestAnEmojiAckOwnersPostDeployDefaultReactsMerged(t *testing.T) {
 func TestADeployPromptExpandsItsOwnersThread(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.hooksOnly(anyTarget(promptHookOf("tell {{slack_thread}} the checks passed")))
-	h.mu.Lock()
-	h.config.PreDeploy.EmojiAck = h.config.PreDeploy.UserOrWorkspace
-	h.config.PostDeploy = &repoconfigv1.LifecycleStageHooks{EmojiAck: &repoconfigv1.LifecycleHookList{}}
-	h.mu.Unlock()
-	h.emojiAckOwner()
+	emojiAckPromptHook(h, "tell {{slack_thread}} the checks passed")
 	enqueue(t, h)
 
 	// Act
@@ -482,9 +477,74 @@ func TestADeployPromptExpandsItsOwnersThread(t *testing.T) {
 	// Assert
 	h.queue.mu.Lock()
 	defer h.queue.mu.Unlock()
-	if len(h.queue.submissions) != 1 || h.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText() != "tell "+theThread+" the checks passed" {
-		t.Fatalf("submissions = %+v, want the prompt with its thread", h.queue.submissions)
+	if len(h.queue.submissions) != 1 || h.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText() != BriefHookPrompt+" tell "+theThread+" the checks passed" {
+		t.Fatalf("submissions = %+v, want the prompt with its thread, inside the hook brief", h.queue.submissions)
 	}
+}
+
+// emojiAckPromptHook arranges a deploy whose one pre-deploy hook is the
+// prompt TEXT, for an emoji-ack owner.
+func emojiAckPromptHook(h *harness, text string) {
+	h.hooksOnly(anyTarget(promptHookOf(text)))
+	h.mu.Lock()
+	h.config.PreDeploy.EmojiAck = h.config.PreDeploy.UserOrWorkspace
+	h.config.PostDeploy = &repoconfigv1.LifecycleStageHooks{EmojiAck: &repoconfigv1.LifecycleHookList{}}
+	h.mu.Unlock()
+	h.emojiAckOwner()
+}
+
+func TestADeployPromptIsSubmittedInsideTheBriefThatStoresAnOpenedPullRequest(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	emojiAckPromptHook(h, "open the pull request")
+	enqueue(t, h)
+
+	// Act
+	if err := h.admit(t.Context()); err != nil {
+		t.Fatalf("the deploy failed: %v", err)
+	}
+
+	// Assert
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, values := range h.briefValues {
+		if values["prompt"] == "open the pull request" && len(values) == 1 {
+			return
+		}
+	}
+	t.Fatalf("brief values = %v, want the hook brief given the configured prompt alone", h.briefValues)
+}
+
+func TestADeployPromptWhoseBriefCannotBeComposedFailsTheDeployBeforeItRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	emojiAckPromptHook(h, "open the pull request")
+	delete(h.briefs, BriefHookPrompt)
+	enqueue(t, h)
+
+	// Act
+	_ = h.admit(t.Context())
+
+	// Assert
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateFailed || facts.FailedArea != footer.FailedHook || !strings.Contains(facts.Detail, "its pre-deploy prompt hook could not be composed") {
+		t.Fatalf("facts = %+v, want the deploy failed on the hook's brief", facts)
+	}
+	h.queue.mu.Lock()
+	submitted := len(h.queue.submissions)
+	h.queue.mu.Unlock()
+	if submitted != 0 {
+		t.Fatalf("submissions = %d, want none", submitted)
+	}
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.merge.hook" && strings.Contains(rec.Message, "could not compose a prompt hook's brief") {
+			if rec.Context["stage"] != TabPreDeploy || !strings.Contains(fmt.Sprint(rec.Context["cause"]), BriefHookPrompt) {
+				t.Fatalf("record context = %v, want the stage and the cause", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no daemon.merge.hook error among %v", h.logs.Records())
 }
 
 func TestADeployPromptNamingTheThreadOfAWorkspaceWithNoneFailsTheDeploy(t *testing.T) {

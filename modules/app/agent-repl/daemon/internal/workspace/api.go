@@ -872,9 +872,9 @@ type Deps struct {
 	Topbar  topbar.Resolver
 	Sidebar sidebar.Resolver
 	Host    HostRelay
-	// PullRequests anchors the subscription an owned pull-request link takes
-	// (prwatch.Watcher.Anchor).
-	PullRequests PullRequestAnchor
+	// PullRequests answers the subscription an owned pull-request link takes,
+	// anchored by the watcher's first read (prwatch.Watcher.FollowFromFirstRead).
+	PullRequests PullRequestFollower
 	// Banners raises the desktop banner an agent notification earns.
 	Banners Banners
 	// Sessions brings sessions up and down; injected so the verbs do not own

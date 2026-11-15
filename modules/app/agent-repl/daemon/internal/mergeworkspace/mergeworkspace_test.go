@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1262,6 +1263,21 @@ func TestSweepWhoseRetirementTheStandDownCutShortRecordsItAtInfo(t *testing.T) {
 type failingDB struct {
 	wsm.DB
 	oweErr, coverErr, owedErr, payErr error
+	coverLandingsErr, takeLandingsErr error
+}
+
+func (d failingDB) CoverUndeployedLandings(ctx context.Context) (int, error) {
+	if d.coverLandingsErr != nil {
+		return 0, d.coverLandingsErr
+	}
+	return d.DB.CoverUndeployedLandings(ctx)
+}
+
+func (d failingDB) TakeDeployedLandings(ctx context.Context, coveredOnly bool) ([]wsm.UndeployedLanding, error) {
+	if d.takeLandingsErr != nil {
+		return nil, d.takeLandingsErr
+	}
+	return d.DB.TakeDeployedLandings(ctx, coveredOnly)
 }
 
 func (d failingDB) OweHandBack(ctx context.Context, owed wsm.OwedHandBack) error {
@@ -1307,6 +1323,16 @@ func (f *fixture) owe(t *testing.T, mergeWS wsm.Workspace) {
 	t.Helper()
 	if err := f.svc.HandBack(context.Background(), "ws-requester", mergeWS, owedLanding); err != nil {
 		t.Fatalf("HandBack: %v", err)
+	}
+}
+
+// landed records MERGEWS's landing as waiting for its deploy, as the merge's
+// terminal does for every landing whose deploy is owed.
+func (f *fixture) landed(t *testing.T, mergeWS wsm.Workspace) {
+	t.Helper()
+	landing := wsm.UndeployedLanding{MergeWorkspace: mergeWS.ID, MergeName: mergeWS.Name, LandedAt: time.Unix(100, 0)}
+	if err := f.db.RecordUndeployedLanding(context.Background(), landing); err != nil {
+		t.Fatalf("RecordUndeployedLanding: %v", err)
 	}
 }
 
@@ -1567,7 +1593,13 @@ func TestPayOwedCutShortByAStandDownSaysSoAtInfo(t *testing.T) {
 	f.svc.PayOwed(ctx, true, nil)
 
 	// Assert
-	if r, ok := f.recordWith(dlog.LevelInfo, "the daemon stood down mid-payment"); !ok || r.Context["left_undone"] != "could not read the owed landing reports; they stay owed" {
+	var undone []any
+	for _, r := range f.logs.Records() {
+		if r.Level == dlog.LevelInfo && r.Message == "the daemon stood down mid-payment" {
+			undone = append(undone, r.Context["left_undone"])
+		}
+	}
+	if !slices.Contains(undone, any("could not read the owed landing reports; they stay owed")) {
 		t.Fatalf("records = %+v, want the cut-short payment at INFO with what it left undone", f.logs.Records())
 	}
 	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); ok {
@@ -1640,6 +1672,7 @@ func TestPayOwedTellsTheQueueHowTheDeployEnded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
+			f.landed(t, wsm.Workspace{ID: "ws-merge-a", Name: "a-merge"})
 			f.owe(t, wsm.Workspace{ID: "ws-merge-a", Name: "a-merge"})
 			if err := f.svc.CoverOwed(context.Background()); err != nil {
 				t.Fatalf("CoverOwed: %v", err)
@@ -1685,5 +1718,82 @@ func TestPayOwedTellsTheQueueOfTheDeployEvenWhenTheReportsCannotBeRead(t *testin
 	}
 	if _, ok := f.recordWith(dlog.LevelError, "could not read the owed landing reports; they stay owed"); !ok {
 		t.Fatalf("the read failure was not recorded: %+v", f.logs.Records())
+	}
+}
+
+func TestPayOwedNamesALandingThatOwesNoReport(t *testing.T) {
+	// Arrange: a one-shot's landing, which owes nobody a report.
+	f := newFixture(t)
+	f.landed(t, wsm.Workspace{ID: "ws-one-shot", Name: "one-shot-fix"})
+	if err := f.svc.CoverOwed(context.Background()); err != nil {
+		t.Fatalf("CoverOwed: %v", err)
+	}
+
+	// Act
+	f.svc.PayOwed(context.Background(), true, nil)
+
+	// Assert
+	want := merge.DeployEnd{Carried: []string{"one-shot-fix"}}
+	if len(f.deploys.ends) != 1 || !reflect.DeepEqual(f.deploys.ends[0], want) {
+		t.Fatalf("told %+v, want %+v", f.deploys.ends, want)
+	}
+	if len(f.prompts.sent) != 0 {
+		t.Fatalf("sent = %+v, want no report for a landing that owes none", f.prompts.sent)
+	}
+}
+
+func TestPayOwedNamesALandingOnlyOnce(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.landed(t, wsm.Workspace{ID: "ws-one-shot", Name: "one-shot-fix"})
+	if err := f.svc.CoverOwed(context.Background()); err != nil {
+		t.Fatalf("CoverOwed: %v", err)
+	}
+	f.svc.PayOwed(context.Background(), true, nil)
+
+	// Act
+	f.svc.PayOwed(context.Background(), true, nil)
+
+	// Assert
+	if len(f.deploys.ends) != 2 || f.deploys.ends[1].Carried != nil {
+		t.Fatalf("told %+v, want the second deploy carrying nothing", f.deploys.ends)
+	}
+}
+
+func TestCoverOwedThatCannotCoverTheLandingsIsAnErrorRecordedWithItsCause(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.withDB(failingDB{DB: f.db, coverLandingsErr: errors.New("locked")})
+
+	// Act
+	err := f.svc.CoverOwed(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("CoverOwed = nil, want the failure")
+	}
+	if r, ok := f.recordWith(dlog.LevelError, "could not mark the landings waiting for a deploy covered by it; the next deploy's notice names them"); !ok || r.Context["cause"] != "locked" {
+		t.Fatalf("the failure was not recorded at ERROR with its cause: %+v", f.logs.Records())
+	}
+}
+
+func TestPayOwedThatCannotTakeTheLandingsRecordsItAndStillPaysTheReports(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.owe(t, wsm.Workspace{ID: "ws-merge", Name: "sample-merge"})
+	f.withDB(failingDB{DB: f.db, takeLandingsErr: errors.New("unreadable")})
+
+	// Act
+	f.svc.PayOwed(context.Background(), false, nil)
+
+	// Assert
+	if len(f.prompts.sent) != 1 {
+		t.Fatalf("sent = %+v, want the owed report paid", f.prompts.sent)
+	}
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil {
+		t.Fatalf("told %+v, want the deploy told with no landing named", f.deploys.ends)
+	}
+	if r, ok := f.recordWith(dlog.LevelError, "could not take the landings the deploy carries; its notice names none of them"); !ok || r.Context["cause"] != "unreadable" {
+		t.Fatalf("the failed take was not recorded at ERROR with its cause: %+v", f.logs.Records())
 	}
 }

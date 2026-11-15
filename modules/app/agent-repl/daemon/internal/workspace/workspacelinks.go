@@ -25,19 +25,21 @@ const (
 	maxLinkLabelWords = 8
 )
 
-// PullRequestAnchor reads a pull request to anchor the subscription an owned
-// link takes (prwatch.Watcher.Anchor).
-type PullRequestAnchor interface {
-	Anchor(ctx context.Context, subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error)
+// PullRequestFollower answers the subscription an owned link takes, which
+// the pull-request watcher's first read anchors
+// (prwatch.Watcher.FollowFromFirstRead): storing a link never waits on
+// GitHub.
+type PullRequestFollower interface {
+	FollowFromFirstRead(subscriber ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) wsm.PullRequestSubscription
 }
 
 // SetLink stores URL under LABEL on the workspace, owned or a reference, or
 // relabels it and sets its ownership anew when the workspace already holds it
 // (agentrepl.v1.ChangeWorkspaceLinksSet), and republishes the topbar title
 // that opens the shown links. An OWNED GitHub pull request the workspace
-// holds no subscription to is read and subscribed in the same write
-// (wsm.LinkSet.Subscribe); a read that fails subscribes it unanchored, so its
-// first successful read tells what is already on the pull request. A url the
+// holds no subscription to is subscribed in the same write
+// (wsm.LinkSet.Subscribe), unread: the watcher's first read of it anchors the
+// subscription, so the verb answers at once whether GitHub is up or not. A url the
 // external browser would refuse to open is refused invalid_link, and a label
 // that is not two to eight words in one sentence invalid_label, before
 // anything is written. An owned link may name ANNOUNCES, a link the workspace
@@ -86,11 +88,8 @@ func (v *verbs) ownedSubscription(ctx context.Context, log dlog.Logger, ws ids.W
 			return nil, nil
 		}
 	}
-	sub, _, err := v.deps.PullRequests.Anchor(ctx, ws, pr, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
-	if err != nil {
-		// The leaf recorded the failure; this records what it cost.
-		log.Info(opChangeLinks, "the owned pull request could not be read, so it is followed unanchored: its first successful read tells what is already on it", dlog.WithCause(fields, err))
-	}
+	sub := v.deps.PullRequests.FollowFromFirstRead(ws, pr, wsm.AllPullRequestEvents(), wsm.PullRequestOriginOwnedLink)
+	log.Debug(opChangeLinks, "the owned pull request is followed from the watcher's first read of it", fields)
 	return &sub, nil
 }
 

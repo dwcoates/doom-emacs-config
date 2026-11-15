@@ -186,6 +186,8 @@ parsed:
 		case joined == "rev-parse --git-common-dir", joined == "rev-parse --path-format=absolute --git-common-dir":
 			fmt.Fprintf(out, "%s\n", r.g)
 			return nil
+		case joined == "status --porcelain":
+			return r.linkedStatus(out)
 		case joined == "rev-parse --show-toplevel", joined == "rev-parse --git-path hooks",
 			joined == "worktree list --porcelain", strings.HasPrefix(joined, "worktree add "):
 		default:
@@ -316,13 +318,25 @@ parsed:
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "worktree %s\n\n", phys)
+		mainBranch, err := firstLineRaw(r.g + "/branch")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "worktree %s\nbranch refs/heads/%s\n\n", phys, mainBranch)
 		wts, err := readLines(r.g + "/worktrees")
 		if err != nil {
 			return err
 		}
 		for _, wt := range wts {
-			fmt.Fprintf(out, "worktree %s\n\n", wt)
+			branch, err := linkedBranch(wt)
+			if err != nil {
+				return err
+			}
+			if branch == "" {
+				fmt.Fprintf(out, "worktree %s\ndetached\n\n", wt)
+			} else {
+				fmt.Fprintf(out, "worktree %s\nbranch refs/heads/%s\n\n", wt, branch)
+			}
 		}
 	case joined == "rev-parse --git-path hooks":
 		hooks, err := r.hooksPath()
@@ -405,6 +419,11 @@ parsed:
 		}
 		ct, _ := firstLineRaw(r.g + "/commits/" + sha + "/ct")
 		fmt.Fprintf(out, "%s\n", ct)
+	case strings.HasPrefix(joined, "merge-base --is-ancestor "):
+		if len(opts) != 3 {
+			return die(2, "unmodelled merge-base form: %s", argsJoined)
+		}
+		return r.isAncestor(opts[1], opts[2])
 	case strings.HasPrefix(joined, "rev-list --count "):
 		if len(opts) != 2 {
 			return die(2, "unmodelled rev-list form: %s", argsJoined)
@@ -1346,7 +1365,16 @@ func (r *repo) worktreeAdd(opts []string, argsJoined string) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(wt+"/.fakegit", []byte("main "+r.main+"\n"), 0o644); err != nil {
+	marker := "main " + r.main + "\n"
+	if branch != "(detached)" {
+		// `-b BRANCH` creates the branch at HEAD, as one ref transaction, and
+		// checks it out in the new worktree.
+		if err := r.transact("refs/heads/"+branch, zeroOID, r.headSHA); err != nil {
+			return err
+		}
+		marker += "branch " + branch + "\n"
+	}
+	if err := os.WriteFile(wt+"/.fakegit", []byte(marker), 0o644); err != nil {
 		return err
 	}
 	phys, err := physical(wt)
@@ -1354,6 +1382,89 @@ func (r *repo) worktreeAdd(opts []string, argsJoined string) error {
 		return err
 	}
 	return appendFile(r.g+"/worktrees", phys+"\n")
+}
+
+// linkedBranch answers the branch linked worktree WT has checked out, empty
+// for a detached one: the second line of its .fakegit file.
+func linkedBranch(wt string) (string, error) {
+	lines, err := readLines(wt + "/.fakegit")
+	if err != nil {
+		return "", err
+	}
+	for _, l := range lines {
+		if b, ok := strings.CutPrefix(l, "branch "); ok {
+			return b, nil
+		}
+	}
+	return "", nil
+}
+
+// linkedStatus is `status --porcelain` in a linked worktree: every path whose
+// file differs from the tree of the branch it has checked out (a linked
+// worktree has no index of its own in the model, so a staged change reads as
+// an unstaged one).
+func (r *repo) linkedStatus(out io.Writer) error {
+	branch, err := linkedBranch(r.top)
+	if err != nil {
+		return err
+	}
+	if branch == "" {
+		return die(2, "unmodelled invocation inside a detached linked worktree: status --porcelain")
+	}
+	sha, ok := r.resolve("refs/heads/" + branch)
+	if !ok {
+		return die(128, "the branch %s of %s names no commit", branch, r.top)
+	}
+	snap, err := r.snapshot()
+	if err != nil {
+		return err
+	}
+	head, err := readEntries(r.g + "/commits/" + sha + "/tree")
+	if err != nil {
+		return err
+	}
+	w, h, seen := map[string]string{}, map[string]string{}, map[string]bool{}
+	for _, e := range snap {
+		w[e.path], seen[e.path] = e.blob, true
+	}
+	for _, e := range head {
+		h[e.path], seen[e.path] = e.blob, true
+	}
+	var lines []string
+	for p := range seen {
+		if w[p] != h[p] {
+			lines = append(lines, " M "+p)
+		}
+	}
+	sort.Strings(lines)
+	for _, l := range lines {
+		fmt.Fprintf(out, "%s\n", l)
+	}
+	return nil
+}
+
+// isAncestor is `merge-base --is-ancestor A B`: exit 0 when A is B or one of
+// B's ancestors, 1 when it is not. History is linear, so B's parent chain is
+// every ancestor it has.
+func (r *repo) isAncestor(aRev, bRev string) error {
+	a, ok := r.resolve(aRev)
+	if !ok {
+		return die(128, "Not a valid object name %s", aRev)
+	}
+	b, ok := r.resolve(bRev)
+	if !ok {
+		return die(128, "Not a valid object name %s", bRev)
+	}
+	for sha := b; sha != ""; {
+		if sha == a {
+			return nil
+		}
+		var err error
+		if sha, err = parentOf(r.g, sha); err != nil {
+			return err
+		}
+	}
+	return die(1, "")
 }
 
 // ---- file helpers ------------------------------------------------------------

@@ -100,7 +100,11 @@ const (
 	// StepAwaitingFree is a merge that holds the workspace and waits for it
 	// to fall free before it starts (owner ruling, 2026-10-08): its bubble is
 	// not placed until it starts, so nothing lands in the feed after it.
-	StepAwaitingFree       MergeStep = "awaiting_free"
+	StepAwaitingFree MergeStep = "awaiting_free"
+	// StepFinishing is a deploy running its workspace's finish hooks
+	// (repoconfig.v1.LifecycleConfig.finish): after the turn that asked for
+	// it ended, before it is put in line.
+	StepFinishing          MergeStep = "finishing"
 	StepEnqueued           MergeStep = "enqueued"
 	StepPreDeploy          MergeStep = "pre_deploy"
 	StepRebasing           MergeStep = "rebasing"

@@ -14,6 +14,7 @@ import (
 	"agentrepl/testrun/seatwait"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -839,5 +840,107 @@ func TestRunnerUnavailableCauseNamesWhatTheRunnerHit(t *testing.T) {
 				t.Fatalf("cause = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// branchConfigFails arranges a landing whose rebased branch's lifecycle
+// config fails its read with ERR, while its target's reads as configured.
+func branchConfigFails(t *testing.T, err error) *harness {
+	t.Helper()
+	h := newHarness(t)
+	landing(h, 1)
+	h.mu.Lock()
+	h.configErrAt = map[string]error{h.sourceD: err}
+	h.mu.Unlock()
+	return h
+}
+
+func TestABranchConfigThisDaemonCannotReadFailsTheMergeBeforeItsGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantDetail string
+	}{
+		{name: "a field this build does not read", err: &lifecycleconfig.InvalidError{Path: "/ws/.agent-repl/lifecycle.yaml", Detail: `unknown field "new_field"`},
+			wantDetail: "cannot read (unknown field \"new_field\"); land the support for a new field first"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := branchConfigFails(t, tt.err)
+
+			// Act.
+			admitted(t, h)
+
+			// Assert.
+			if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "other" || !strings.Contains(got.Detail, tt.wantDetail) {
+				t.Fatalf("facts = %+v, want the merge failed in other naming %q", got, tt.wantDetail)
+			}
+		})
+	}
+}
+
+func TestABranchCarryingNoLifecycleConfigIsGatedAsUsual(t *testing.T) {
+	// Arrange: the repository's config lives in its main checkout alone.
+	h := branchConfigFails(t, &lifecycleconfig.MissingError{Path: "/ws/.agent-repl/lifecycle.yaml"})
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", got)
+	}
+}
+
+func TestABranchConfigThisDaemonCannotReadStartsNoRunner(t *testing.T) {
+	// Arrange.
+	h := branchConfigFails(t, &lifecycleconfig.InvalidError{Path: "/ws/.agent-repl/lifecycle.yaml", Detail: "bad"})
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	if len(h.runner.argv) != 0 {
+		t.Fatalf("the runner was started %d times, want none", len(h.runner.argv))
+	}
+}
+
+func TestABranchConfigThisDaemonCannotReadIsRecordedAtWarn(t *testing.T) {
+	// Arrange.
+	h := branchConfigFails(t, &lifecycleconfig.InvalidError{Path: "/ws/.agent-repl/lifecycle.yaml", Detail: "bad"})
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == "daemon.merge.branch_config" && rec.Level == "warn" {
+			if rec.Context["dir"] != h.sourceD || !strings.Contains(fmt.Sprint(rec.Context["error"]), "bad") {
+				t.Fatalf("record context = %v, want the branch's dir and the read's error", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("no daemon.merge.branch_config warning among %v", h.logs.Records())
+}
+
+func TestABranchConfigReadThatFailsOtherwiseEndsTheMergeOnTheError(t *testing.T) {
+	// Arrange.
+	h := branchConfigFails(t, errors.New("permission denied"))
+
+	// Act.
+	admitted(t, h)
+
+	// Assert: the run aborts on the read's error.
+	if got := h.footer.last(); got.State != StateFailed || !strings.Contains(got.Detail, "permission denied") {
+		t.Fatalf("facts = %+v, want the merge failed on the read's error", got)
+	}
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	if len(h.runner.argv) != 0 {
+		t.Fatalf("the runner was started %d times, want none", len(h.runner.argv))
 	}
 }

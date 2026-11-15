@@ -961,14 +961,15 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 }
 
 // configuredPrompt runs prompt hook i of a stage in its own tab round, and
-// answers the round and how its turn ended. A round with no kind means the
+// answers the round and how its turn ended. TEXT is the configured prompt the
+// tab draws; SUBMITTED is what the turn is sent (BriefHookPrompt around it). A round with no kind means the
 // hook was finished before the restart this run resumes from, and nothing was
 // run.
 //
 // A RESUME AT THIS PROMPT REATTACHES TO ITS TURN. The turn lives in the shim,
 // which outlived the daemon: the round it drew in is drawn live again and the
 // run waits for that same turn's end.
-func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.MergeStep, i int, text string,
+func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.MergeStep, i int, text, submitted string,
 	origin conversationv1.PromptOrigin, landed *outcomeDoc) (tabRound, wsm.TurnClose, error) {
 	if res, ok := r.resumingAt(kind); ok {
 		if i < res.PromptIndex {
@@ -988,7 +989,7 @@ func (r *run) configuredPrompt(ctx context.Context, kind string, step footer.Mer
 	}); err != nil {
 		return round, wsm.CloseFailed, err
 	}
-	close, err := r.runConfiguredPrompt(ctx, turn, text, origin)
+	close, err := r.runConfiguredPrompt(ctx, turn, submitted, origin)
 	return round, close, err
 }
 

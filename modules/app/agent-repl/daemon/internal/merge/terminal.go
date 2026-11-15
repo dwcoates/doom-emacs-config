@@ -114,7 +114,11 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.head(landedHead{success: r.success(endedMS, out), version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: r.landingDeploy(ctx, out)})
+		deploy := r.landingDeploy(ctx, out)
+		if deploy == LandingDeployOwed {
+			r.recordUndeployed(ctx, log, out)
+		}
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedLanded, Summary: fmt.Sprintf("it landed as commit %s", out.landed), MergedInto: out.target, Deploy: deploy})
 		fields := dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits),
 			"source": r.source.Kind.String(), "closes": string(r.subject.closes)}
@@ -123,6 +127,22 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		}
 		log.Info(op, "a merge landed", fields)
 	}
+}
+
+// recordUndeployed records a landing whose deploy is owed as waiting for
+// it, before the deploy is told (selfReload), so the deploy that carries it
+// names it when it ends: every landing, a one-shot's as much as an async
+// merge's (wsm undeployed_landings). A failed record leaves the landing
+// standing; only the deploy's notice will not name it.
+func (r *run) recordUndeployed(ctx context.Context, log dlog.Logger, out outcome) {
+	name := r.o.workspaceName(ctx, r.ws)
+	landing := wsm.UndeployedLanding{MergeWorkspace: r.ws, MergeName: name, LandedAt: r.o.deps.Now()}
+	fields := dlog.Context{"workspace": string(r.ws), "merge_name": name, "commit": out.landed}
+	if err := r.o.deps.DB.RecordUndeployedLanding(ctx, landing); err != nil {
+		log.Error("daemon.merge.record_undeployed", "could not record the landing as waiting for its deploy; the deploy's notice will not name it", dlog.WithCause(fields, err))
+		return
+	}
+	log.Debug("daemon.merge.record_undeployed", "recorded the landing as waiting for the deploy that carries it", fields)
 }
 
 // success is the head's merged arm: the commit the target now carries, and

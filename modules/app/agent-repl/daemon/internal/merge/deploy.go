@@ -343,7 +343,17 @@ func (r *run) runHook(ctx context.Context, stage stageOf, i int, hook *repoconfi
 				"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i, "originator": r.target.owner.kind.String(), "cause": err.Error()})
 			return fmt.Sprintf("its %s prompt hook %v", stageWords(stage.kind), err), nil
 		}
-		round, close, err := r.configuredPrompt(ctx, stage.kind, stage.step, i, text, stage.origin, doc)
+		// A PULL REQUEST THE TURN OPENS IS STORED AS THE WORKSPACE'S OWNED
+		// LINK, so the daemon follows it: the configured prompt is submitted
+		// inside the brief that says so (2026-11-03: three pull requests
+		// explanation-engine's hooks opened were never followed).
+		submitted, err := r.o.deps.Briefs(BriefHookPrompt, map[string]string{"prompt": text})
+		if err != nil {
+			r.o.log(ctx, r.ws).Error("daemon.merge.hook", "could not compose a prompt hook's brief; the deploy fails", dlog.Context{
+				"workspace": string(r.ws), "lease": string(r.lease.ID), "stage": stage.kind, "hook": i, "cause": err.Error()})
+			return fmt.Sprintf("its %s prompt hook could not be composed (%v)", stageWords(stage.kind), err), nil
+		}
+		round, close, err := r.configuredPrompt(ctx, stage.kind, stage.step, i, text, submitted, stage.origin, doc)
 		if round.kind == "" {
 			return "", nil
 		}

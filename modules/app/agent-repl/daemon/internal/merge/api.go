@@ -63,6 +63,10 @@ const (
 	// uncommitted changes in its worktree to commit them before the rebase
 	// starts again.
 	BriefRebaseCommit = "merge-rebase-commit"
+	// BriefHookPrompt is what a deploy stage's prompt hook submits: the
+	// configured prompt, and the step that stores a pull request the turn
+	// opens as the workspace's owned link.
+	BriefHookPrompt = "merge-hook-prompt"
 )
 
 // MaxCommitPrompts bounds how many times a fixing turn that ended with
