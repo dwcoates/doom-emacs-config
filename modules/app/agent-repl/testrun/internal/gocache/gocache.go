@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/run"
 )
 
@@ -60,7 +61,7 @@ type Guard struct {
 	Trim func(ctx context.Context, dir string) error
 	// Bound is the run's own trim's time limit (TrimBound).
 	Bound time.Duration
-	Log  *run.Log
+	Log   *run.Log
 }
 
 // Deadline answers when a unit bounded by bound must be killed, once the
@@ -138,13 +139,11 @@ func describe(last time.Time) string {
 // when the trim is due, exactly as any build would. GOPATH mode keeps any
 // go.mod above dir, and the toolchain switch it could name, out of it.
 func GoTrim(ctx context.Context, dir string) error {
-	cmd := exec.CommandContext(ctx, "go", "build", "-n", "unsafe")
+	cmd := command.Bounded(ctx, "go", "build", "-buildvcs=false", "-n", "unsafe")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOCACHE="+dir, "GO111MODULE=off", "GOWORK=off", "GOFLAGS=")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go build -n unsafe in %s: %w: %s", dir, err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	out, err := cmd.CombinedOutput()
+	return command.Outcome(ctx, TrimBound, "go build -n unsafe in "+dir, "", out, err)
 }
 
 // Dir answers the cache directory go commands started with env use.
