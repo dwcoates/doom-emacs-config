@@ -2768,3 +2768,57 @@ func TestRequestMergeRefusesANameForAMergePlacedBehindNone(t *testing.T) {
 		t.Fatalf("entries = %+v, want nothing recorded", entries)
 	}
 }
+
+func TestAssignQueuePlacesReordersMergesAmongTheirOwnPlaces(t *testing.T) {
+	// Arrange: three merges waiting, front first.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	var line []WorkspaceID
+	for i := range 3 {
+		ws := testWorkspace(t, s)
+		queued(t, s, repo, ws.ID, instant.Add(time.Duration(i)*time.Second))
+		line = append(line, ws.ID)
+	}
+	before, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: the last two trade places.
+	err = s.writeQueue(context.Background(), "test", dlog.Context{}, key, func(ctx context.Context, tx *sql.Tx) error {
+		places := []int64{}
+		for _, ws := range line[1:] {
+			seq, _, err := entryPlace(ctx, tx, key, ws)
+			if err != nil {
+				return err
+			}
+			places = append(places, seq)
+		}
+		return assignQueuePlaces(ctx, tx, key, places, []WorkspaceID{line[2], line[1]})
+	})
+
+	// Assert
+	after, readErr := s.MergeQueue(context.Background(), repo)
+	if err != nil || readErr != nil || len(after) != 3 || after[0].Workspace != line[0] || after[1].Workspace != line[2] || after[2].Workspace != line[1] {
+		t.Fatalf("assignQueuePlaces = %v, queue %+v (%v), want the last two traded", err, after, readErr)
+	}
+	if len(before) != 3 {
+		t.Fatalf("before = %+v", before)
+	}
+}
+
+// THE QUEUE REORDERS THROUGH ONE HELPER: a hand-rolled seq swap elsewhere
+// would skip the negative parking the unique (repo_key, seq) index needs.
+func TestEveryQueueReorderGoesThroughAssignQueuePlaces(t *testing.T) {
+	src, err := os.ReadFile("mergequeue.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(src), "SET seq = -seq"); n != 1 {
+		t.Fatalf("mergequeue.go parks seqs in %d places, want only assignQueuePlaces", n)
+	}
+}
