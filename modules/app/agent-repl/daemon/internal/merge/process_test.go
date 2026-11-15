@@ -2842,3 +2842,26 @@ func TestAFreshRebaseClearsARebaseACutRunLeftStanding(t *testing.T) {
 		t.Fatalf("facts = %+v, want the merge landed", facts)
 	}
 }
+
+func TestEveryCommitBriefTakesTheBranchItsWorktreeAndTheTarget(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	r := liveRun(t, h, theWorkspace)
+	r.subject = subject{dir: h.sourceD, branch: "feature"}
+
+	// Act.
+	got := r.commitBriefVars("master")
+
+	// Assert.
+	want := map[string]string{"source_branch": "feature", "worktree_dir": h.sourceD, "target_branch": r.briefTarget("master")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commitBriefVars = %v, want %v", got, want)
+	}
+	for _, brief := range []string{BriefFixCommit, BriefRebaseCommit} {
+		for key := range want {
+			if !slices.Contains(h.briefs[brief], key) {
+				t.Fatalf("brief %s takes no %q, which every commit brief shares", brief, key)
+			}
+		}
+	}
+}

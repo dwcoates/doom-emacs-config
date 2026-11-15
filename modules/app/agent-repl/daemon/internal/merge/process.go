@@ -298,15 +298,11 @@ func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, firs
 		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dirty.dir, "refused_by_git": dirty.refused != nil}
 		r.o.log(ctx, r.ws).Info(op, "the rebase met uncommitted changes in the worktree; the workspace is prompted to commit them and the merge keeps its place", fields)
 		clean, err := r.promptUntilCommitted(ctx, commitAsk{
-			op:      op,
-			brief:   BriefRebaseCommit,
-			reading: "before its rebase starts again",
-			origin:  conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
-			vars: map[string]string{
-				"source_branch": r.subject.branch,
-				"worktree_dir":  r.subject.dir,
-				"target_branch": r.briefTarget(targetBranch),
-			},
+			op:        op,
+			brief:     BriefRebaseCommit,
+			reading:   "before its rebase starts again",
+			origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+			vars:      r.commitBriefVars(targetBranch),
 			prompted:  "the worktree the merge rebases has uncommitted changes; the workspace is prompted to commit them",
 			committed: "the worktree's changes are committed; the rebase starts again",
 		}, &used)
@@ -1119,17 +1115,13 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 // when it is still dirty after the last prompt.
 func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt int, targetBranch string) (*outcome, error) {
 	clean, err := r.promptUntilCommitted(ctx, commitAsk{
-		op:      "daemon.merge.fixes",
-		brief:   BriefFixCommit,
-		reading: "after the fixing turn",
-		origin:  fixOrigin,
-		tab:     TabFixes,
-		fields:  dlog.Context{"attempt": attempt},
-		vars: map[string]string{
-			"source_branch": r.subject.branch,
-			"worktree_dir":  r.subject.dir,
-			"target_branch": r.briefTarget(targetBranch),
-		},
+		op:        "daemon.merge.fixes",
+		brief:     BriefFixCommit,
+		reading:   "after the fixing turn",
+		origin:    fixOrigin,
+		tab:       TabFixes,
+		fields:    dlog.Context{"attempt": attempt},
+		vars:      r.commitBriefVars(targetBranch),
 		prompted:  "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place",
 		committed: "the fixing attempt's changes are committed; the merge goes on",
 	}, new(int))
@@ -1138,6 +1130,16 @@ func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt i
 	}
 	why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", r.subject.dir, MaxCommitPrompts)
 	return r.fixGaveUp(ctx, round, n, attempt, why), nil
+}
+
+// commitBriefVars are the values every commit brief takes beyond its prompt
+// count: the branch, its worktree and the target.
+func (r *run) commitBriefVars(targetBranch string) map[string]string {
+	return map[string]string{
+		"source_branch": r.subject.branch,
+		"worktree_dir":  r.subject.dir,
+		"target_branch": r.briefTarget(targetBranch),
+	}
 }
 
 // commitAsk is one step's prompt to commit what its worktree holds: the
