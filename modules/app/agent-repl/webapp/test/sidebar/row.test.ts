@@ -33,6 +33,7 @@ import {
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
   drawRosterRowMergePaused,
+  drawRosterRowMergeTurn,
   mergedToday,
   drawRosterRowWhen,
   drawStatusMark,
@@ -227,7 +228,7 @@ describe("the status mark", () => {
   });
 
   it("holds an async merge's glyph still", () => {
-    expect(drawStatusMark("ready", "R.status", { oneShot: false, asyncMerging: true, mergePaused: false }).classList.contains("breathes")).toBe(false);
+    expect(drawStatusMark("ready", "R.status", { oneShot: false, asyncMerging: true, mergeTurn: false, mergePaused: false }).classList.contains("breathes")).toBe(false);
   });
 });
 
@@ -2858,6 +2859,24 @@ describe("the merge-paused marker", () => {
     const mark = row({ id: "ws-1", mergePaused: true }).mergePaused;
     expect(mark).toBeDefined();
     expect(drawRosterRowMergePaused(mark!, "R.mergePaused")).toBe(true);
+  });
+});
+
+describe("a row carrying the merge-turn marker", () => {
+  it("draws the purple merge glyph on a thinking row whose name keeps the turn's red and breath", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} }, mergeTurn: true }), sidebarContext(), "R");
+    expect([
+      dotOf(drawn).getAttribute("data-glyph"),
+      dotOf(drawn).classList.contains("ink-purple"),
+      drawn.classList.contains("tone-red"),
+      nameOf(drawn).classList.contains("breathes"),
+    ]).toEqual(["merge", true, true, true]);
+  });
+
+  it("answers true for a merge-turn marker that is there", () => {
+    const mark = row({ id: "ws-1", mergeTurn: true }).mergeTurn;
+    expect(mark).toBeDefined();
+    expect(drawRosterRowMergeTurn(mark!, "R.mergeTurn")).toBe(true);
   });
 });
 

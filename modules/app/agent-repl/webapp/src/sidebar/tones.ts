@@ -141,23 +141,31 @@ export function rosterArmMark(arm: string): RosterArmMark {
 /**
  * The row's markers that change its status MARK, each read off its own
  * `frontend.v1.RosterRow` field by presence: `one_shot`
- * (`RosterRowOneShot`), `async_merging` (`RosterRowAsyncMerging`) and
- * `merge_paused` (`RosterRowMergePaused`).
+ * (`RosterRowOneShot`), `async_merging` (`RosterRowAsyncMerging`),
+ * `merge_turn` (`RosterRowMergeTurn`) and `merge_paused`
+ * (`RosterRowMergePaused`).
  */
 export interface RowMarkers {
   oneShot: boolean;
   asyncMerging: boolean;
+  mergeTurn: boolean;
   mergePaused: boolean;
 }
 
 /** A row carrying no marker. */
-export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMerging: false, mergePaused: false });
+export const NO_MARKERS: RowMarkers = Object.freeze({ oneShot: false, asyncMerging: false, mergeTurn: false, mergePaused: false });
 
 /** The status arms that draw the row's OWN merge: a merge running or waiting. */
 const OWN_MERGE_ARMS: ReadonlySet<string> = new Set(["merging", "mergeQueued"]);
 
 /**
  * The mark for a row standing on ARM with MARKERS.
+ *
+ * A MERGE IN FLIGHT RUNNING A TURN (`merge_turn`, owner request 2026-11-15)
+ * draws the merge glyph the `merging` arm draws, in the `merging` arm's ink,
+ * in place of whatever mark the turn's arm draws, the one-shot glyph
+ * included. The row keeps the turn's tone and motion, so its NAME is the
+ * turn's color and breathes with the turn.
  *
  * A one-shot draws its glyph in place of the arm's own mark ONLY while it
  * works (`render-colors.json#one_shot_glyph_arms`, owner ruling 2026-10-13):
@@ -184,14 +192,19 @@ const OWN_MERGE_ARMS: ReadonlySet<string> = new Set(["merging", "mergeQueued"]);
  */
 export function rosterRowMark(arm: string, markers: RowMarkers): RosterArmMark {
   const mark = rosterArmMark(arm);
-  const ownMerge = OWN_MERGE_ARMS.has(arm);
+  const ownMerge = OWN_MERGE_ARMS.has(arm) || markers.mergeTurn;
   if (markers.mergePaused && !ownMerge && !markers.asyncMerging) {
     throw new MalformedView(
       "RosterRow.merge_paused",
-      `the marker stands on arm '${arm}' with no async_merging marker, so the row draws no merge for it to pause`,
+      `the marker stands on arm '${arm}' with no merge_turn or async_merging marker, so the row draws no merge for it to pause`,
     );
   }
   const paused = pausedMergeMark();
+  if (markers.mergeTurn) {
+    const glyph = glyphName("merging");
+    const drawn = { ...mark, glyph, image: GLYPH_IMAGES[glyph], ink: rosterStatusColor("merging") };
+    return markers.mergePaused ? { ...drawn, ink: paused.ink } : drawn;
+  }
   if (markers.oneShot && oneShotGlyphArm(arm)) {
     return { toneClass: mark.toneClass, glyph: "target", image: GLYPH_IMAGES.target, ink: undefined, motion: "breathes" };
   }
