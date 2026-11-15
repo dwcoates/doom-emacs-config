@@ -147,6 +147,12 @@ timer of its own. The details live in `daemon/internal/cachelapse`:
   `keepalive_cycle`). It is restored `RestoreLead` (one minute) before its next
   beat, at most `MaxRestores` (3) at once. An idle workspace's memory is free
   between beats.
+- **A cold cache is parked at once** (owner ruling, 2026-11-15). A cache
+  known cold owes no beat, so the cycle above never parks it. When the keeper
+  marks it cold (a beat the shim judged lapsed) or its session parks at its
+  cold gate, the session is parked through the same stand-down
+  (`drain.Controller.ColdDown`, reason `cache_cold`) under the same rules,
+  a merge-queued workspace included. The next prompt revives it.
 - **Remote control keeps the shim up between beats** (owner ruling,
   2026-10-31). A workspace whose remote-control mode is on still gets every
   beat, but no beat is followed by the park, and no settings visit stands it

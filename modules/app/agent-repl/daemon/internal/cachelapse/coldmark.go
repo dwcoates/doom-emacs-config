@@ -3,6 +3,7 @@ package cachelapse
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -56,4 +57,18 @@ func (k *Keeper) markCold(ctx context.Context, ws ids.WorkspaceID, why string) e
 	}
 	log.Info(opColdMark, "marked the workspace's cache cold; no keep-alive is owed until a turn closes after it", fields)
 	return nil
+}
+
+// parkCold asks for WS's session to be parked, its cache known cold at SINCE
+// (owner ruling, 2026-11-15): a cold cache owes no keep-alive, so the
+// keep-alive cycle never comes round to park it, and it stayed up until the
+// idle sweep's cutoff (2026-11-14: 76 of 87 live sessions, cold after a
+// Wi-Fi outage lapsed their beats, stayed live all night). The drain parks it
+// under the keep-alive cycle's rules, never under a turn. It is THE ONE ask of
+// the cold park (TestColdParkAsksHaveOneHome).
+func (k *Keeper) parkCold(ws ids.WorkspaceID, since time.Time, why string) {
+	k.deps.Log.Global().Info(opColdMark, "the cache is known cold; its session is parked", dlog.Context{
+		"workspace": string(ws), "why": why, "since": since,
+	})
+	k.deps.ColdDown(ws, since)
 }
