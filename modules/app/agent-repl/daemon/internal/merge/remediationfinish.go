@@ -484,6 +484,15 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 			continue
 		}
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
+		// AN ESCALATION'S FINISH IS DONE AT ITS DEPLOY: no chain's end
+		// forgets it (wsm.EndRemediationFinishesOf), so its deploy does.
+		if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, f.Workspace); err != nil {
+			errs = append(errs, err)
+		} else if escalation {
+			if _, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace); err != nil {
+				errs = append(errs, err)
+			}
+		}
 	}
 	return errors.Join(errs...)
 }

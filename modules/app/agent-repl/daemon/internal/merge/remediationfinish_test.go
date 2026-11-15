@@ -450,3 +450,27 @@ func TestEveryBriefTheQueueNamesIsCheckedIn(t *testing.T) {
 		}
 	}
 }
+
+func TestADeployedEscalationsFinishIsEnded(t *testing.T) {
+	// Arrange: an escalation's finish stands deploying.
+	h := finishing(t)
+	ctx := context.Background()
+	if err := h.db.RecordDeployEscalation(ctx, "ws-escalation", mediationKey(h), deployStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-escalation", wsm.RemediationGating, wsm.RemediationDeploying, deployStarted); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: its deploy begins.
+	err := h.o.remediationDeployed(ctx, mediationKey(h), deployStarted.Add(time.Minute))
+
+	// Assert
+	f, readErr := h.db.RemediationFinishOf(ctx, "ws-escalation")
+	if err != nil || readErr != nil || f != nil {
+		t.Fatalf("remediationDeployed = %v; finish %+v (%v), want the escalation's finish ended at its deploy", err, f, readErr)
+	}
+}
