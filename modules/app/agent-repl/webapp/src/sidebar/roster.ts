@@ -908,15 +908,17 @@ export function drawQueueCount(count: number): HTMLElement {
  * One repository's group inside the Merge Queue section: its header, then
  * its queue. The group states its queue's line (`DEPLOYS_LINE_ATTRIBUTE`),
  * so a change to the line drops the hand's fold. A double click on the
- * header pauses a running queue or resumes a paused one
- * (`merge-queue-view.ts`).
+ * header, or a click on its queue's merge glyph, pauses a running queue or
+ * resumes a paused one (`merge-queue-view.ts`).
  */
 export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: SidebarContext, path: string): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const queuePath = `${path}.queue`;
   const queue = requireMessage(u.queue, queuePath);
-  const head = drawRosterMergedRepoGroupHeader(requireMessage(u.header, `${path}.header`), `${path}.header`);
-  const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, sc, queuePath), sc);
+  const header = requireMessage(u.header, `${path}.header`);
+  const head = drawRosterMergedRepoGroupHeader(header, `${path}.header`);
+  const name = requireMessage(header.label, `${path}.header.label`).text;
+  const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, { key, name }, sc, queuePath), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
   if (queue.mediation !== undefined) head.appendChild(drawQueueMediationLabel(queue.mediation, `${queuePath}.mediation`));
   head.appendChild(drawQueueCount(queueCount(queue)));

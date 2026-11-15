@@ -9,7 +9,9 @@
  * in the amber a paused merge bubble is framed in, and the head's clock
  * stopped at the pause. The label's hover says who paused it and when. A
  * DOUBLE CLICK ON THE LABEL PAUSES A RUNNING QUEUE OR RESUMES A PAUSED ONE
- * (owner request, 2026-10-31), a single click being the group's fold.
+ * (owner request, 2026-10-31), a single click being the group's fold, and
+ * A SINGLE CLICK ON THE QUEUE'S MERGE GLYPH DOES THE SAME (owner request,
+ * 2026-11-11): the glyph is a control on every queue group drawn.
  *
  * A QUEUE IS DRAWN AS A SMALL MERGE BUBBLE AND ITS LINE (owner request,
  * 2026-10-25): the merge at the head as a card -- who it is credited to, the
@@ -56,6 +58,7 @@ import { discardMergeRefusal, requeueMergeRefusal, updateMergeQueueRefusal } fro
 import { userRequester } from "../rpc/requester.js";
 import { moveToAction, waitingMergeDrag } from "../merge-queue-move.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { createControl } from "../control.js";
 import type { SidebarContext } from "./context.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
 import { labelledControl } from "../control.js";
@@ -118,7 +121,7 @@ export function drawQueuedGroupHead(
   if (queue.paused !== undefined) group.setAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, queue.paused.hard ? "hard" : "pause");
   head.addEventListener("dblclick", (event) => {
     event.preventDefault();
-    void switchQueue(head, sc, key, queue.paused === undefined ? "pause" : "resume");
+    void toggleQueue(head, sc, key, queue);
   });
   log.debug("drew a queued Deploys group", {
     operation: "sidebar.merge-queue.group",
@@ -158,8 +161,22 @@ export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: strin
   return `${text}. Double-click to resume.`;
 }
 
-/** What a double click on a queued group's header asks of its queue. */
-type QueueSwitch = "pause" | "resume";
+/** What a double click on a queued group's header, or a click on its glyph, asks of its queue. */
+export type QueueSwitch = "pause" | "resume";
+
+/** What a toggle of QUEUE asks: a running queue is paused, a paused (or stopped) one resumed. */
+export function queueSwitchOf(queue: RosterRepoMergeQueue): QueueSwitch {
+  return queue.paused === undefined ? "pause" : "resume";
+}
+
+/**
+ * THE ONE QUEUE TOGGLE: the header's double click and the glyph's click both
+ * ask the daemon to pause or resume REPOSITORY's QUEUE through here, drawing
+ * a refusal at CONTROL.
+ */
+export function toggleQueue(control: HTMLElement, sc: SidebarContext, repository: RepositoryRef, queue: RosterRepoMergeQueue): Promise<boolean> {
+  return switchQueue(control, sc, repository, queueSwitchOf(queue));
+}
 
 /** Ask the daemon to pause or resume REPOSITORY's queue, as TO says, drawing a refusal at CONTROL. */
 function switchQueue(control: HTMLElement, sc: SidebarContext, repository: RepositoryRef, to: QueueSwitch): Promise<boolean> {
@@ -171,6 +188,8 @@ function switchQueue(control: HTMLElement, sc: SidebarContext, repository: Repos
   return fireVerb(control, {
     sc,
     rpc: "UpdateMergeQueue",
+    // A refusal's or a failure's record names the queue and what was asked of it.
+    context: { repository: repository.id, action: to },
     // The webapp acts on the queue for the user alone, and says so.
     call: (client) =>
       client.updateMergeQueue({
@@ -180,6 +199,58 @@ function switchQueue(control: HTMLElement, sc: SidebarContext, repository: Repos
     schema: UpdateMergeQueueResponseSchema,
     refusalText: updateMergeQueueRefusal,
   });
+}
+
+/** The repository a queue group is drawn for: its key, and the name its label draws. */
+export interface QueueRepository {
+  key: RepositoryRef;
+  name: string;
+}
+
+/** The class of the queue's merge glyph, the control that toggles its queue. */
+export const MERGE_QUEUE_GLYPH_CLASS = "sb-mq-glyph";
+
+/** The glyph's hover and accessible name: what its click does to REPOSITORY's queue. */
+export function queueGlyphTitle(name: string, to: QueueSwitch): string {
+  return `${to === "pause" ? "Pause" : "Resume"} the ${name} queue`;
+}
+
+/**
+ * The queue's merge glyph, a control whose click pauses or resumes
+ * REPOSITORY's QUEUE (`toggleQueue`). The click never reaches the line it is
+ * drawn in, so it selects no workspace; the line goes busy while it is asked
+ * and a refusal is drawn under it.
+ */
+export function drawQueueGlyph(queue: RosterRepoMergeQueue, repository: QueueRepository, sc: SidebarContext): HTMLElement {
+  const glyph = createControl();
+  glyph.className = MERGE_QUEUE_GLYPH_CLASS;
+  glyph.textContent = MERGE_GLYPH;
+  const title = queueGlyphTitle(repository.name, queueSwitchOf(queue));
+  glyph.title = title;
+  glyph.setAttribute("aria-label", title);
+  glyph.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const line = glyph.closest<HTMLElement>(`.${MERGE_QUEUE_CARD_LINE_CLASS}`);
+    if (line === null) throw new Error("invariant: a queue's glyph is drawn in a card line");
+    void toggleQueue(line, sc, repository.key, queue);
+  });
+  return glyph;
+}
+
+/** The class of the line a queue with no head draws its glyph on. Each is one line of the band fit. */
+export const MERGE_QUEUE_CONTROL_CLASS = "sb-mq-control";
+
+/**
+ * The line a queue with no head draws its GLYPH on, above the merges
+ * remediating and those in a GitHub merge queue, so every queue group has
+ * its toggle.
+ */
+export function drawQueueControlLine(glyph: HTMLElement): HTMLElement {
+  const line = document.createElement("div");
+  line.className = `${MERGE_QUEUE_CARD_LINE_CLASS} ${MERGE_QUEUE_CONTROL_CLASS}`;
+  line.appendChild(glyph);
+  return line;
 }
 
 /** The class of the head's card. Each card is one line of the band fit. */
@@ -202,18 +273,22 @@ export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
  * slot and the merges awaiting each (repairsOf), then each waiting merge in
  * the order it will run. A listed queue has its head unless its line is empty
  * and a merge stands out of line. A press on a waiting merge drags it among
- * the waiting (`queueDrag`).
+ * the waiting (`queueDrag`). A queue without a head draws REPOSITORY's queue
+ * glyph on a line of its own in the head's place.
  */
-export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterMergeQueue(u: RosterRepoMergeQueue, repository: QueueRepository, sc: SidebarContext, path: string): HTMLElement {
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
+  const glyph = drawQueueGlyph(u, repository, sc);
   // A HEAD IS ABSENT ONLY WHILE THE LINE IS EMPTY AND A MERGE STANDS OUT OF
   // LINE, A WORKSPACE STANDS IN A GITHUB MERGE QUEUE, OR A MERGE STANDS OFF
   // THE QUEUE
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
   const repairs = repairsOf(u, path);
   if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0 && u.mediation === undefined)) {
-    body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, sc, `${path}.head`));
+    body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, glyph, sc, `${path}.head`));
+  } else {
+    body.appendChild(drawQueueControlLine(glyph));
   }
   for (const repair of repairs) {
     body.appendChild(drawRosterMergeQueueRepair(repair, sc));
@@ -293,7 +368,7 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
 }
 
 /**
- * The head's card: a small merge bubble. Its head line is the merge glyph, the
+ * The head's card: a small merge bubble. Its head line is the merge GLYPH (the queue's toggle, `drawQueueGlyph`), the
  * credited workspace's name and how long it has run or waited -- stopped at
  * the pause while its queue is PAUSED, and not drawn for a pause whose
  * instant was not recorded; then its stages so far. IT DRAWS NO STATUS LINE
@@ -305,6 +380,7 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
 export function drawRosterMergeQueueHead(
   u: RosterMergeQueueHead,
   paused: RosterMergeQueuePaused | undefined,
+  glyph: HTMLElement,
   sc: SidebarContext,
   path: string,
 ): HTMLElement {
@@ -313,7 +389,7 @@ export function drawRosterMergeQueueHead(
   const card = drawSubjectControl(subject, sc, MERGE_QUEUE_HEAD_CLASS, `${path}.subject`);
   card.setAttribute("data-standing", standing.case);
 
-  const line = drawCardLine(subject, `${path}.subject`);
+  const line = drawCardLine(subject, glyph, `${path}.subject`);
   card.appendChild(line);
 
   if (u.stages.length > 0) {
@@ -508,16 +584,12 @@ export function drawRosterMergeQueueWaiting(
 export const MERGE_QUEUE_CARD_LINE_CLASS = "sb-mq-head-line";
 
 /**
- * The head card's name line: the merge glyph, then the name U is credited
+ * The head card's name line: the merge GLYPH, then the name U is credited
  * under. The card appends what follows the name on its own line.
  */
-export function drawCardLine(u: RosterMergeQueueSubject, path: string): HTMLElement {
+export function drawCardLine(u: RosterMergeQueueSubject, glyph: HTMLElement, path: string): HTMLElement {
   const line = document.createElement("div");
   line.className = MERGE_QUEUE_CARD_LINE_CLASS;
-  const glyph = document.createElement("span");
-  glyph.className = "sb-mq-glyph";
-  glyph.setAttribute("aria-hidden", "true");
-  glyph.textContent = MERGE_GLYPH;
   line.append(glyph, drawSubjectName(u, path));
   return line;
 }

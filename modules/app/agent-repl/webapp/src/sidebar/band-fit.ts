@@ -99,6 +99,7 @@ import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import {
+  MERGE_QUEUE_CONTROL_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
@@ -147,8 +148,9 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 
 /**
  * What one line is: a row, a folded repository section's header, the
- * header of a subsection that is folded or empty, a queue's head card or
- * waiting merge, or a folded Deploys group's header.
+ * header of a subsection that is folded or empty, a queue's head card,
+ * headless queue's glyph line or waiting merge, or a folded Deploys group's
+ * header.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -156,6 +158,7 @@ const LINE_SELECTOR = [
   ".sb-subsection.folded > .sb-subsection-head",
   `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
   `.${MERGE_QUEUE_HEAD_CLASS}`,
+  `.${MERGE_QUEUE_CONTROL_CLASS}`,
   `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
   `.${MERGE_QUEUE_GITHUB_CLASS}`,

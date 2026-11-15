@@ -875,6 +875,37 @@ describe("a transport failure", () => {
   });
 });
 
+describe("a verb's stated context", () => {
+  /** Run OpenWorkspace answered by OPEN, stating CONTEXT, and answer the record for OPERATION. */
+  async function recorded(open: () => ReturnType<typeof create<typeof OpenWorkspaceResponseSchema>>, operation: string) {
+    const capture = captureLogRecords();
+    await runVerb(createControl(), {
+      sc: target({ openWorkspace: open }).sc,
+      rpc: "OpenWorkspace",
+      call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+      schema: OpenWorkspaceResponseSchema,
+      refusalText: (cause) => openWorkspaceRefusal(cause as never),
+      context: { repository: "repo-1", action: "pause" },
+    });
+    return forwardedRecord(capture, operation);
+  }
+
+  it("rides on a refusal's record", async () => {
+    const record = await recorded(
+      () => create(OpenWorkspaceResponseSchema, { result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } } }),
+      "sidebar.verbs.refused",
+    );
+    expect(record.context).toMatchObject({ rpc: "OpenWorkspace", arm: "unknownWorkspace", repository: "repo-1", action: "pause" });
+  });
+
+  it("rides on a transport failure's record", async () => {
+    const record = await recorded(() => {
+      throw new Error("no route");
+    }, "sidebar.verbs.failed");
+    expect(record.context).toMatchObject({ rpc: "OpenWorkspace", repository: "repo-1", action: "pause" });
+  });
+});
+
 describe("a successful verb", () => {
   it("draws nothing, because the roster push carries the new state", async () => {
     const t = target({

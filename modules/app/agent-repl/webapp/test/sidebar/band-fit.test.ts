@@ -372,6 +372,16 @@ describe("regionLines", () => {
   });
 
 
+  it("counts a headless queue's glyph line as a line", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML =
+      '<div class="repo"><div class="repo-head"></div><div class="rows sb-merge-queue"><div class="sb-mq-head-line sb-mq-control"></div><div class="sb-mq-waiting sb-mq-remediating"></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".repo-head, .sb-mq-control, .sb-mq-waiting")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head-line sb-mq-control", "sb-mq-waiting sb-mq-remediating"]);
+  });
+
   it.each([
     { name: "counts a folded Deploys group's header as a line", folded: true, want: ["merged-group-head", "row"] },
     { name: "counts an open Deploys group's header as no line", folded: false, want: ["row"] },
