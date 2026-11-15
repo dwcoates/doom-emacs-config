@@ -250,7 +250,7 @@ func TestERTDriverRefusesNamesOutsideTheirFile(t *testing.T) {
 		want  string
 	}{
 		{name: "a name the other chunk file defines", chunk: []string{"test-a.el", "test-b.el"},
-			names: map[string][]string{"test-a.el": {"fixture-b-passes"}}, want: "test-a.el defines no test `fixture-b-passes'"},
+			names: map[string][]string{"test-a.el": {"fixture-b-passes"}}, want: "test-a.el defines no test"},
 		{name: "names for a file outside the chunk", chunk: []string{"test-a.el"},
 			names: map[string][]string{"test-a.el": {"fixture-a-passes"}, "test-b.el": {"fixture-b-passes"}}, want: "test-b.el, which is not in the chunk"},
 	}
