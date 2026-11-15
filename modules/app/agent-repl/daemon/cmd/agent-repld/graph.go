@@ -1232,7 +1232,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		LockProbe:               fleet.ProbeLock,
 		StartSession:            fleet.Start,
 		BringingUp:              bringingUp,
-		PublishViews:            views.PublishViews,
+		// THE FOLDS' STAND-DOWNS ARE DERIVED AGAIN once this daemon owns what
+		// it serves: their waits lived in the previous daemon's memory alone.
+		// The drain controller is built after this one, so it is read at the
+		// call, never captured nil.
+		ServingSettled: func(ctx context.Context) { drainController.ResumeFolded(ctx) },
+		PublishViews:   views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
 			sidebarResolver.SetStateUnreported(ws, unreported)

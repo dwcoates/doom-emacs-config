@@ -1560,15 +1560,33 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 		}
 		if session, found := sessions[ws.ID]; found {
 			record.VendorSessionID = session.VendorSessionID
-			if session.ShimPID != nil {
-				record.ShimPID = *session.ShimPID
-				// THE PID IS WHAT MAKES IT A PRESERVE. A handover leaves a
-				// running shim running, and this is the entry whose free lock
-				// on the other side genuinely means the session died.
-				record.Intent = IntentPreserve
-			}
+		}
+		// THE PID IS WHAT MAKES IT A PRESERVE, and it is read off the shim
+		// the fleet holds live, never off the session row. A row keeps the
+		// pid of a shim that left by any path but the park, so every
+		// handover re-read the same long-dead pids as preserved sessions and
+		// the successor reconciled each as one that died: the same ten pids
+		// in 26 handovers in 72h (2026-10-30), 29 in 72h (2026-11-14). A
+		// handover leaves a running shim running, and this is the entry whose
+		// free lock on the other side genuinely means the session died.
+		if pid, live := c.livePID(ws.ID); live {
+			record.ShimPID = pid
+			record.Intent = IntentPreserve
 		}
 		m.Sessions = append(m.Sessions, record)
 	}
 	return m
+}
+
+// livePID answers the pid of the shim the fleet holds for WS, and whether one
+// is held and not dying (shimclient.Client.Died reads the process's own state).
+func (c *controller) livePID(ws ids.WorkspaceID) (int, bool) {
+	client, held := c.deps.Shims.Client(ws)
+	if !held {
+		return 0, false
+	}
+	if _, died := client.Died(); died {
+		return 0, false
+	}
+	return client.PID(), true
 }

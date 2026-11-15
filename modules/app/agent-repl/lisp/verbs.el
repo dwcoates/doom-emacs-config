@@ -1483,6 +1483,9 @@ is named by its keyword and fields rather than dropped."
        (agent-repl-verbs-temporary-directory-sentence (plist-get arm :value)))
       (:not-a-worktree (format "%s is not a git worktree" dir))
       (:parent-not-open (agent-repl-verbs-family-sentence "register" keyword (plist-get arm :value)))
+      (:transferring-away
+       (format "%s is being handed over to the successor daemon at %s; add it again once the handover ends"
+               dir (plist-get (plist-get arm :value) :address)))
       (_ (format "the daemon refused %s: %s%s" dir
                  (if keyword (substring (symbol-name keyword) 1) "unstated")
                  (agent-repl-verbs--refusal-fields arm))))))

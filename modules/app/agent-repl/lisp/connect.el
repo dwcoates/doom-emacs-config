@@ -186,7 +186,14 @@ guess an advertiser -- see `agent-repl-daemon--begin'."
 
 ;;;; ---- Failure detail ----
 
-(cl-defun agent-repl-connect--failure (kind message &key code status)
+(defconst agent-repl-connect-refusal-address-key "Agent-Repl-Refusal-Address"
+  "The end-stream metadata key a refused stream names its daemon under.
+The daemon\='s `server.RefusalAddressKey': a stream refused
+`transferring_away' names the successor, one refused `not_yet_adopted'
+the daemon serving the workspace meanwhile.  A unary rpc carries the
+same address in its arm\='s `address' field.")
+
+(cl-defun agent-repl-connect--failure (kind message &key code status address)
   "Return the failure plist handed to ON-FAILURE / ON-CLOSE `(:error D)'.
 KIND is the transport-level classification keyword: `:http' (the daemon
 answered with a non-200 and a Connect error body), `:transport' (the
@@ -195,8 +202,10 @@ socket could not carry the exchange through), `:timeout', `:malformed'
 `:no-end-frame'
 \(the producer closed a stream without its terminal envelope).  MESSAGE is
 the human-facing text.  CODE is the Connect error code string when the
-daemon supplied one; STATUS is the HTTP status when one was read."
-  (list :kind kind :code code :status status :message message))
+daemon supplied one; STATUS is the HTTP status when one was read.
+ADDRESS is the daemon a refused stream names
+\(`agent-repl-connect-refusal-address-key'), or nil."
+  (list :kind kind :code code :status status :message message :address address))
 
 (defun agent-repl-connect--undelivered-failure (method address proc event)
   "Return the `:transport' failure of METHOD at ADDRESS that got no HTTP answer.
@@ -921,7 +930,10 @@ exactly once, and OPENED-P makes ON-OPEN run exactly once."
   "Return the ON-CLOSE outcome carried by terminal PAYLOAD of METHOD.
 `{}' is `(:ended)'; an `error' object is `(:error DETAIL)'.  A payload
 that will not parse is itself a transport failure — a producer that ends a
-stream unintelligibly has not ended it cleanly."
+stream unintelligibly has not ended it cleanly.  The daemon a refused
+stream names rides the frame\='s `metadata' object
+\(`agent-repl-connect-refusal-address-key') and lands on DETAIL\='s
+`:address'."
   (condition-case err
       (let* ((parsed (if (string-empty-p (string-trim payload))
                          nil
@@ -934,7 +946,10 @@ stream unintelligibly has not ended it cleanly."
                  :http (or (alist-get 'message error-object)
                            (alist-get 'code error-object)
                            "stream ended with an error")
-                 :code (alist-get 'code error-object)))))
+                 :code (alist-get 'code error-object)
+                 :address (agent-repl-connect--metadata-value
+                           (alist-get 'metadata parsed)
+                           agent-repl-connect-refusal-address-key)))))
     (error
      (list :error
            (agent-repl-connect--failure
@@ -985,6 +1000,23 @@ the stream stays open."
 
 (defconst agent-repl-connect--handover-refusals '("transferring_away" "not_yet_adopted")
   "The refusal arms of a handover, which a stream's owner walks as a handover.")
+
+(defun agent-repl-connect--metadata-value (metadata key)
+  "Return KEY\='s value in an end frame\='s METADATA object, or nil.
+METADATA maps a header name to a list of values (connect-go\='s
+`http.Header'); a key it does not hold, or holds with no value, answers
+nil.  A key held with SEVERAL values is a producer breach: the daemon sets
+each refusal key once, so it signals rather than picking one, and the end
+frame is read as malformed (`agent-repl-connect--end-frame-reason')."
+  (let ((values (alist-get (intern key) metadata)))
+    (pcase values
+      ('nil nil)
+      (`(,value) (and (stringp value) (not (string-empty-p value)) value))
+      (_ (error "End frame metadata %s holds %S, want one value" key values)))))
+
+(defun agent-repl-connect-refusal-address (detail)
+  "Return the daemon address a refused stream\='s DETAIL names, or nil."
+  (plist-get detail :address))
 
 (defun agent-repl-connect-refused-arm (detail)
   "Return the arm a daemon's refused stream open named in DETAIL, or nil.

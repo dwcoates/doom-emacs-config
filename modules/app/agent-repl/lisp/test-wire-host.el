@@ -1990,8 +1990,16 @@ guessed at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_register_workspace.pb.go" "RegisterWorkspaceError")
                        #'string<)
-                 (sort (list "notAWorktree" "insideTemporaryDirectory" "parentNotOpen")
+                 (sort (list "notAWorktree" "insideTemporaryDirectory" "parentNotOpen" "transferringAway")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-transferring-away-arm ()
+  "RegisterWorkspaceError's `transferring_away' arm decodes the successor's
+address the workspace registers at."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-error
+                  "{\"transferringAway\":{\"address\":\"127.0.0.1:7001\"}}")
+                 '(:cause (:arm :transferring-away :value (:address "127.0.0.1:7001"))))))
 
 (ert-deftest agent-repl-test-wire-host-register-error-parent-not-open-arm ()
   "RegisterWorkspaceError's `parent_not_open' arm decodes its parent and state."

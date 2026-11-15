@@ -1187,23 +1187,54 @@ func TestAHandoverWithAFailedTransferDoesNotExit(t *testing.T) {
 // lock read on the successor as a session that silently died — a fault raised
 // on the most ordinary handover there is.
 func TestTheManifestNamesAWorkspaceWithNoShimAsNoSession(t *testing.T) {
-	// Arrange: a registered workspace whose session record carries no shim pid.
-	h := newHarness(t)
-	ws, dir := h.workspace(t)
-	if err := h.db.SetShimPID(context.Background(), ws, nil); err != nil {
-		t.Fatalf("SetShimPID: %v", err)
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{
+			name: "a session row with no pid and no shim held",
+			arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+				if err := h.db.SetShimPID(context.Background(), ws, nil); err != nil {
+					t.Fatalf("SetShimPID: %v", err)
+				}
+				delete(h.fleet.live, ws)
+			},
+		},
+		{
+			// The row keeps the pid of a shim that left by a path other than
+			// the park: the same dead pids were re-read as preserved at every
+			// handover.
+			name: "a session row whose pid names a shim the fleet no longer holds",
+			arrange: func(_ *testing.T, h *harness, ws ids.WorkspaceID) {
+				delete(h.fleet.live, ws)
+			},
+		},
+		{
+			name: "a shim the fleet holds that has died",
+			arrange: func(_ *testing.T, h *harness, ws ids.WorkspaceID) {
+				h.fleet.live[ws].Die()
+			},
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, dir := h.workspace(t)
+			tc.arrange(t, h, ws)
 
-	// Act
-	m := h.c.manifest(context.Background(), "127.0.0.1:1", []wsm.Workspace{{ID: ws, Dir: dir}},
-		map[ids.WorkspaceID]Participants{})
+			// Act
+			m := h.c.manifest(context.Background(), "127.0.0.1:1", []wsm.Workspace{{ID: ws, Dir: dir}},
+				map[ids.WorkspaceID]Participants{})
 
-	// Assert
-	if len(m.Sessions) != 1 {
-		t.Fatalf("manifest sessions = %d, want the workspace's entry (it arms the rendezvous)", len(m.Sessions))
-	}
-	if got := m.Sessions[0].Intent; got != IntentNoSession {
-		t.Fatalf("intent = %s, want %s", got, IntentNoSession)
+			// Assert
+			if len(m.Sessions) != 1 {
+				t.Fatalf("manifest sessions = %d, want the workspace's entry (it arms the rendezvous)", len(m.Sessions))
+			}
+			if got := m.Sessions[0]; got.Intent != IntentNoSession || got.ShimPID != 0 {
+				t.Fatalf("entry = %+v, want %s with no pid", got, IntentNoSession)
+			}
+		})
 	}
 }
 
@@ -2087,9 +2118,11 @@ func TestAManifestWhoseSessionReadFailsRecordsItOnce(t *testing.T) {
 	if len(m.Sessions) != len(workspaces) {
 		t.Fatalf("manifest sessions = %d, want an entry per workspace (each arms the rendezvous)", len(m.Sessions))
 	}
+	// The live shims are the fleet's to say, so each is still preserved; the
+	// unread session lends no entry its vendor session.
 	for _, entry := range m.Sessions {
-		if entry.Intent != IntentNoSession || entry.VendorSessionID != "" {
-			t.Fatalf("manifest sessions = %+v, want no entry claiming an unread session", m.Sessions)
+		if entry.Intent != IntentPreserve || entry.VendorSessionID != "" {
+			t.Fatalf("manifest sessions = %+v, want each live shim preserved and no entry claiming an unread session", m.Sessions)
 		}
 	}
 	var failures int

@@ -4991,6 +4991,83 @@ made, and a fresh Emacs drew every workspace severed."
         (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
                        (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))))))
 
+;; A REFUSED STREAM THAT NAMES ITS DAEMON (`agent-repl-connect-refusal-address')
+;; is followed there, as a unary refusal's `address' is.
+
+(defun agent-repl-test-host--refuse-naming (ws arm address)
+  "Close WS's host stream refused ARM, its end frame naming ADDRESS."
+  (funcall (plist-get (agent-repl-host-stream ws) :on-close)
+           (list :error (list :kind :http :code "failed_precondition" :status nil
+                              :message (format "WatchHostWorkspace closed the stream: %s: elsewhere" arm)
+                              :address address))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-registers-there ()
+  "A stream refused not_yet_adopted naming the daemon that serves the workspace
+meanwhile views it there: the workspace registers on that daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (agent-repl-test-host--subscribe "ws-1")
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (equal (mapcar (lambda (call)
+                                 (list (car call) (agent-repl-connect-connection-address (nth 1 call))))
+                               (cl-remove-if-not (lambda (call) (equal (car call) "RegisterWorkspace"))
+                                                 agent-repl-test-host--calls))
+                       '(("RegisterWorkspace" "127.0.0.1:6666"))))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-adopts-nothing ()
+  "A workspace viewed where it is served is not adopted onto a standing successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-records-the-serving-daemon ()
+  "The refusal is recorded at INFO naming the daemon that serves the workspace."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (agent-repl-test-host--with-dir
+        ;; Arrange
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
+        ;; Assert
+        (should (agent-repl-test-host--logged-p
+                 :info "elisp.host.stream-refused-not-yet-adopted ws=ws-1 serving=\"127.0.0.1:6666\""))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-dials-it ()
+  "A stream refused transferring_away naming its successor dials that address,
+not the successor the link recorded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
+    ;; Assert
+    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9200")))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-records-it ()
+  "The refusal is recorded at INFO naming the successor."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.stream-refused-transferred ws=ws-1 address=\"127.0.0.1:9200\""))))
+
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."
   (agent-repl-test-host--with-harness
@@ -6024,6 +6101,112 @@ no walk."
         ;; Act / Assert
         (should-error (agent-repl-host--record-registration nil "/w" :teleported nil))
         (should (string-match-p "record-registration-unknown-arm" (car fatals)))))))
+
+;; A REGISTRATION REFUSED `transferring_away' IS HANDOVER NEWS: the daemon
+;; named the successor it handed the workspace to, so the walk goes on to it.
+
+(defconst agent-repl-test-host--register-handed-away
+  (list :response (list :arm :error
+                        :value '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9100")))))
+  "A RegisterWorkspace answer refusing a workspace handed to 127.0.0.1:9100.")
+
+(defmacro agent-repl-test-host--registering-at-the-incumbent (&rest body)
+  "Run BODY with ws-1 standing on an incumbent that refuses its registration.
+The incumbent answers `transferring_away' naming 127.0.0.1:9100.
+INCUMBENT is bound to its connection."
+  (declare (indent 0))
+  `(agent-repl-test-host--with-harness
+     (agent-repl-test-host--with-dirs '("ws-1")
+       (let ((incumbent (agent-repl-connect-open "127.0.0.1:9001")))
+         (agent-repl-test-host--subscribe "ws-1" incumbent)
+         (setq agent-repl-test-host--register-answer agent-repl-test-host--register-handed-away
+               agent-repl-test-host--calls nil)
+         ,@body))))
+
+(ert-deftest agent-repl-test-host-record-registration-routes-a-workspace-handed-away ()
+  "A workspace's registration refused transferring_away is recorded at INFO
+and handed to the handover walk, never recorded as a refusal."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let (routed)
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (ws arm) (push (list ws arm) routed))))
+        ;; Act
+        (should-not (agent-repl-host--record-registration
+                     "ws-1" "/w" :refused
+                     '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9100")))
+                     "ws-1")))
+      ;; Assert
+      (should (equal routed '(("ws-1" (:arm :transferring-away :value (:address "127.0.0.1:9100"))))))
+      (should (agent-repl-test-host--logged-p
+               :info "elisp.host.register-transferring-away dir=\"/w\" fields=(:address \"127.0.0.1:9100\")"))
+      (should-not (agent-repl-test-host--logged-p :error "elisp.host.register-refused")))))
+
+(ert-deftest agent-repl-test-host-record-registration-of-no-workspace-handed-away-is-a-refusal ()
+  "A dir registered before any workspace exists has no walk to route, so its
+transferring_away is recorded at ERROR like any refusal."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-host--record-registration
+     nil "/w" :refused '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9100"))))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.register-refused dir=\"/w\""))))
+
+(ert-deftest agent-repl-test-host-register-walk-refused-transferring-away-adopts-on-the-successor ()
+  "THE DEFECT: an incumbent that handed the workspace on answered its
+registration success, and Emacs stayed on it.  Refused, the walk adopts
+the workspace on the successor the refusal names."
+  (agent-repl-test-host--registering-at-the-incumbent
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      ;; Act
+      (agent-repl-host--reattach "ws-1" incumbent :register "not-yet-adopted")
+      ;; Assert
+      (should (equal (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-register-walk-refused-transferring-away-records-no-failure ()
+  "The superseded register walk ends without a register-failed ERROR."
+  (agent-repl-test-host--registering-at-the-incumbent
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    ;; Act
+    (agent-repl-host--reattach "ws-1" incumbent :register "not-yet-adopted")
+    ;; Assert
+    (should-not (seq-some (lambda (entry) (eq (car entry) :error)) agent-repl-test-host--logs))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.register-transferring-away"))))
+
+(ert-deftest agent-repl-test-host-register-walk-handed-away-to-an-unaccepted-successor-is-not-detached ()
+  "A successor not accepted yet adopts the workspace on its acceptance, so the
+register walk ends at INFO and arms no detached re-walk."
+  (agent-repl-test-host--registering-at-the-incumbent
+    ;; Arrange
+    (setq agent-repl-test-host--dial-accepts nil)
+    ;; Act
+    (agent-repl-host--reattach "ws-1" incumbent :register "not-yet-adopted")
+    ;; Assert
+    (should-not (plist-get (agent-repl-host--entry "ws-1") :detached))
+    (should (plist-get (agent-repl-host--entry "ws-1") :adopt-pending))
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.not-yet-adopted-register-handed-over ws=ws-1"))
+    (should-not (seq-some (lambda (entry) (eq (car entry) :error)) agent-repl-test-host--logs))))
+
+(ert-deftest agent-repl-test-host-batched-walk-refused-transferring-away-adopts-on-the-successor ()
+  "Each dir of a batch refused transferring_away walks on to the successor,
+with no register-failed ERROR."
+  (agent-repl-test-host--registering-at-the-incumbent
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      ;; Act
+      (agent-repl-host--reattach-all '("ws-1") incumbent "link-up")
+      ;; Assert
+      (should (equal (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref)))))
+      (should-not (seq-some (lambda (entry) (eq (car entry) :error)) agent-repl-test-host--logs)))))
 
 (ert-deftest agent-repl-test-host-lone-and-batched-registrations-share-one-record ()
   "A lone register and a batch record a failed dir through the one recorder."

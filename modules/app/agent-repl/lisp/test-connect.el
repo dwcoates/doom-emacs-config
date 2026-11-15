@@ -1244,6 +1244,42 @@ frames begin."
     ;; Assert
     (should (eq (car (car agent-repl-test-connect--closes)) :error))))
 
+(ert-deftest agent-repl-test-connect-stream-refused-names-its-daemon ()
+  "A refused stream whose end frame names a daemon in its metadata carries it
+on the failure as `:address'."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--feed
+     record (agent-repl-connect-envelope-encode
+             #x02 (concat "{\"error\":{\"code\":\"failed_precondition\",\"message\":"
+                          "\"WatchHostWorkspace closed the stream: not_yet_adopted: not yet\"},"
+                          "\"metadata\":{\"Agent-Repl-Refusal-Address\":[\"127.0.0.1:8888\"]}}")))
+    (agent-repl-test-connect--exit record)
+    ;; Assert
+    (should (equal (agent-repl-connect-refusal-address (cadr (car agent-repl-test-connect--closes)))
+                   "127.0.0.1:8888"))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-naming-no-daemon-has-no-address ()
+  "A refused stream whose end frame carries no metadata names no daemon."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--refuse record "not_yet_adopted")
+    ;; Assert
+    (should (null (agent-repl-connect-refusal-address (cadr (car agent-repl-test-connect--closes)))))))
+
+(ert-deftest agent-repl-test-connect-stream-refusal-address-with-two-values-is-malformed ()
+  "A refusal address held twice is a producer breach: the end frame reads as
+malformed, never as one of the two."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--feed
+     record (agent-repl-connect-envelope-encode
+             #x02 (concat "{\"error\":{\"code\":\"failed_precondition\",\"message\":\"m\"},"
+                          "\"metadata\":{\"Agent-Repl-Refusal-Address\":[\"a:1\",\"b:2\"]}}")))
+    (agent-repl-test-connect--exit record)
+    ;; Assert
+    (should (eq (plist-get (cadr (car agent-repl-test-connect--closes)) :kind) :malformed))))
+
 (ert-deftest agent-repl-test-connect-refused-arm ()
   "The arm is read off a refused open's message, and nothing else names one."
   ;; Arrange

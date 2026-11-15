@@ -486,8 +486,10 @@ type fakeVerbs struct {
 	// registerAllAnswers is what it answers.
 	registerAllDirs    [][]string
 	registerAllAnswers []workspace.Registered
-	// registerRecord is what a lone Register answers.
+	// registerRecord is what a lone Register answers, or registerErr when
+	// set.
 	registerRecord wsm.Workspace
+	registerErr    error
 	// registeredPaths records every RegisterRepository path the verb received.
 	registeredPaths []string
 	// arrangements records every ArrangeSidebar verb call, spelled
@@ -901,8 +903,11 @@ func (f *fakeVerbs) SetSummary(_ context.Context, _ ids.WorkspaceID, summary str
 	return summary, nil
 }
 
-// Register answers registerRecord.
+// Register answers registerRecord, or registerErr when set.
 func (f *fakeVerbs) Register(context.Context, string, wsm.RegisterFacts) (wsm.Workspace, error) {
+	if f.registerErr != nil {
+		return wsm.Workspace{}, f.registerErr
+	}
 	return f.registerRecord, nil
 }
 
