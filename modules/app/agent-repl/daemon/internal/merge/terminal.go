@@ -1089,8 +1089,13 @@ func (r *run) landingDeploy(ctx context.Context, out outcome) LandingDeploy {
 	if r.deploy != nil {
 		return *r.deploy
 	}
+	// A MERGE THAT LANDED NOTHING DEPLOYS NOTHING, whatever its deploy hook
+	// asked: its branch was already on the target, so the running build is
+	// the target's already (2026-11-15 06:01:48: fork-transcript-config-dir
+	// concluded with zero commits, its hook asked for the rollout, and the
+	// no-op deploy owed a mediation that held the queue).
 	decided := LandingNotDeployed
-	if out.failed == "" && r.rolloutRequested {
+	if out.failed == "" && out.alreadyOn == "" && r.rolloutRequested {
 		decided = LandingDeployOwed
 	}
 	r.deploy = &decided
