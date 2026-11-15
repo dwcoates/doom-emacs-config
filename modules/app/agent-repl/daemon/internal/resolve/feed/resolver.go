@@ -72,6 +72,10 @@ type resolver struct {
 	// references link into (pullrefs.go). It lives here rather than on
 	// wsState so a reset, which empties the feed, keeps it.
 	pullTargets map[ids.WorkspaceID]pullrefs.Target
+	// pullKnown is the pull requests each workspace's text has named, which
+	// its bare references resolve against (pullrefs.go, knownPulls). It lives
+	// here for the reason pullTargets does.
+	pullKnown map[ids.WorkspaceID]*pullrefs.Known
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -679,6 +683,7 @@ func newResolver(deps Deps) (*resolver, error) {
 		hostAsks:    map[ids.WorkspaceID]*agentreplv1.HostAsk{},
 		deliveries:  map[string]*peerDelivery{},
 		pullTargets: map[ids.WorkspaceID]pullrefs.Target{},
+		pullKnown:   map[ids.WorkspaceID]*pullrefs.Known{},
 	}
 	deps.Quiet.Follow(QuietViewName, r.followQuiet)
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
@@ -1055,10 +1060,16 @@ func (r *resolver) reportUnplaceableAgent(s *wsState, agent string, cause error)
 // context; nil Warnings leaves the log as the only record, which is what a
 // test that is not about the topbar wants.
 func (r *resolver) raiseWarning(s *wsState, key, line string) {
+	r.raiseWarningFor(s.id, key, line)
+}
+
+// raiseWarningFor is raiseWarning for a workspace named by its id, for state
+// that lives beside the workspaces' states rather than on one.
+func (r *resolver) raiseWarningFor(ws ids.WorkspaceID, key, line string) {
 	if r.deps.Warnings == nil {
 		return
 	}
-	r.deps.Warnings.RaiseWarning(s.id, key, line)
+	r.deps.Warnings.RaiseWarning(ws, key, line)
 }
 
 // outputPlacement is where a row of TURN the SESSION ITSELF draws belongs — a

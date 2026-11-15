@@ -227,6 +227,9 @@ type durableStores struct {
 	rolledBack  RolledBackTurnStore
 	signedIn    SignedInTurnStore
 	reconnected ReconnectedTurnStore
+	// pullReferences is the durable record of the pull requests each
+	// workspace's text named.
+	pullReferences PullReferenceStore
 }
 
 // newDurableHarness is newHarness whose durable turn sets live in STORES; two
@@ -299,14 +302,15 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 			}
 			return out, nil
 		},
-		Now:         func() time.Time { return time.UnixMilli(h.nowMs) },
-		AfterFunc:   h.clock.AfterFunc,
-		Faults:      h.faults,
-		Warnings:    h.warnings,
-		RolledBack:  stores.rolledBack,
-		SignedIn:    stores.signedIn,
-		Reconnected: stores.reconnected,
-		ChessBoards: h.boards,
+		Now:            func() time.Time { return time.UnixMilli(h.nowMs) },
+		AfterFunc:      h.clock.AfterFunc,
+		Faults:         h.faults,
+		Warnings:       h.warnings,
+		RolledBack:     stores.rolledBack,
+		SignedIn:       stores.signedIn,
+		Reconnected:    stores.reconnected,
+		PullReferences: stores.pullReferences,
+		ChessBoards:    h.boards,
 		WorkspaceName: func(ws ids.WorkspaceID) (string, error) {
 			if h.nameErr != nil {
 				return "", h.nameErr

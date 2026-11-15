@@ -71,7 +71,7 @@ func TestLinkify(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := Linkify(tc.in, work, tc.arriving)
+			got, _ := Linkify(tc.in, Links{Home: &work}, tc.arriving)
 
 			// Assert
 			if got != tc.want {
@@ -86,7 +86,7 @@ func TestLinkifyRepoReferenceUsesTheTargetsOwner(t *testing.T) {
 	target := Target{Owner: "someone", Repo: "doom"}
 
 	// Act
-	got := Linkify("see gns-server#7 and #8", target, false)
+	got, _ := Linkify("see gns-server#7 and #8", Links{Home: &target}, false)
 
 	// Assert
 	want := "see [gns-server#7](https://github.com/someone/gns-server/pull/7) and [#8](https://github.com/someone/doom/pull/8)"

@@ -255,6 +255,7 @@ var migrations = []migration{
 	// chain, and an owed mediation it writes after this step is chained by
 	// the step's triggers.
 	{To: 135, Name: "merge_queue_mediation_chain", Kind: MigrationAdditive, DDL: mediationChainDDL},
+	{To: 136, Name: "pull_references", Kind: MigrationAdditive, DDL: pullReferencesDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

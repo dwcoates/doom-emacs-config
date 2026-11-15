@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/wsm"
+	"strings"
 )
 
 func TestParseURLNamesAGitHubPullRequest(t *testing.T) {
@@ -104,5 +106,25 @@ func TestResolveNamesAPullRequestOrSaysWhyNot(t *testing.T) {
 				t.Fatalf("Resolve = %v, %v; want %v", got, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestURLOfSpellsTheAddressAsPullrefsDoes(t *testing.T) {
+	// Arrange
+	pr := wsm.PullRequestKey{Owner: "ChessCom", Repo: "gns-server", Number: 613}
+
+	// Act
+	got := URLOf(pr)
+
+	// Assert: one spelling of the address, so the two never drift apart.
+	if want := (pullrefs.Target{Owner: "ChessCom", Repo: "gns-server"}).PullURL("613"); got != want {
+		t.Fatalf("URLOf = %q, want pullrefs' %q", got, want)
+	}
+}
+
+func TestPullPathIsThePullrefsPattern(t *testing.T) {
+	// Assert: the path ParseURL reads is the shape pullrefs scans text for.
+	if !strings.Contains(pullPath.String(), pullrefs.PullPathPattern) {
+		t.Fatalf("pullPath = %q, want it built on pullrefs.PullPathPattern", pullPath.String())
 	}
 }

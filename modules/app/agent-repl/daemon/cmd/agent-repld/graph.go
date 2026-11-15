@@ -710,7 +710,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		RolledBack: p.DB,
 		SignedIn:   p.DB,
 		// A CONNECTION FAILURE THE NETWORK ANSWERED stays answered too.
-		Reconnected: p.DB,
+		Reconnected:    p.DB,
+		PullReferences: p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,
