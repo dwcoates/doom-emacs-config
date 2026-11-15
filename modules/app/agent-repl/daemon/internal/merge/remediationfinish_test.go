@@ -115,8 +115,11 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 	if f == nil || f.Step != wsm.RemediationDeploying || f.LandedHead != tipAfter {
 		t.Fatalf("finish %+v, want it deploying having landed %s", f, tipAfter)
 	}
-	if len(h.runner.argv) != 1 || len(h.hooks.runs) != 1 || h.hooks.runs[0].argv[3] != "patch" || h.hooks.runs[0].argv[4] != "fix the reaper" {
-		t.Fatalf("gate runs %v, landing runs %+v; want one full gate and one direct landing of a patch", h.runner.argv, h.hooks.runs)
+	// The landing lands the commit its gate passed on, without a second
+	// suite: land-direct.sh --gated-at COMMIT REPO PART LINE BRANCH.
+	if len(h.runner.argv) != 1 || len(h.hooks.runs) != 1 || h.hooks.runs[0].argv[2] != "--gated-at" || h.hooks.runs[0].argv[3] == "" ||
+		h.hooks.runs[0].argv[5] != "patch" || h.hooks.runs[0].argv[6] != "fix the reaper" {
+		t.Fatalf("gate runs %v, landing runs %+v; want one full gate and one direct landing of a patch at its gated commit", h.runner.argv, h.hooks.runs)
 	}
 	h.db.mu.Lock()
 	closed, closure, merged := h.db.closed["ws-remedy"], h.db.closures["ws-remedy"], !h.db.mergedAt["ws-remedy"].IsZero()
@@ -502,5 +505,51 @@ func TestTheRemediationsResumeBriefsTakeTheValuesTheResumeSupplies(t *testing.T)
 				t.Fatalf("compose %s: %v", tt.brief, err)
 			}
 		})
+	}
+}
+
+func TestABranchThatMovedWhileItsGateRanIsSentBackNotLanded(t *testing.T) {
+	// Arrange: the branch's head reads one commit before the gate and
+	// another after it passes.
+	h := finishing(t)
+	record, err := h.db.Workspace(context.Background(), "ws-remedy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.git.mu.Lock()
+	h.git.refSeqs[record.Branch] = []string{"1111111111111111111111111111111111111111", "3333333333333333333333333333333333333333"}
+	h.git.mu.Unlock()
+
+	// Act
+	err = h.o.FinishRemediation(context.Background(), "ws-remedy", aRemediationPatch)
+
+	// Assert
+	f := finishOf(t, h)
+	if err != nil || f == nil || f.Step != wsm.RemediationFixing || len(h.hooks.runs) != 0 {
+		t.Fatalf("FinishRemediation = %v, finish %+v, landings %d; want it sent back to work, nothing landed", err, f, len(h.hooks.runs))
+	}
+}
+
+func TestAClosedEscalationsFinishIsEnded(t *testing.T) {
+	// Arrange: an escalation whose finish stands at fixing.
+	h := finishing(t)
+	ctx := context.Background()
+	if err := h.db.RecordDeployEscalation(ctx, "ws-escalation", mediationKey(h), deployStarted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	h.o.OnWorkspaceClosed(ctx, "ws-escalation")
+
+	// Assert
+	f, err := h.db.RemediationFinishOf(ctx, "ws-escalation")
+	if err != nil || f != nil {
+		t.Fatalf("finish = %+v (%v), want the closed escalation's finish ended", f, err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish, Message: "a closed deploy escalation's finish was ended"}); !ok {
+		t.Fatalf("records = %+v, want the end recorded", h.logs.Records())
 	}
 }

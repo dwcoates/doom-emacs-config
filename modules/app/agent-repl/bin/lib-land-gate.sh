@@ -26,8 +26,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib-worktrees.sh"
 # LAND_GATE_REFUSED is the status of a landing the gate refused.
 LAND_GATE_REFUSED=4
 
+# land_gate MAIN BRANCH [GATED] — GATED is the commit a caller's own full
+# suite already passed on, rebased onto MAIN's head (the daemon's gate of a
+# deploy remediation or escalation): the branch's tip must be exactly that
+# commit, and the suite is not run a second time.
 land_gate() {
-    local main="$1" branch="$2" wt dirty head tip suite_log rc after_head after_tip
+    local main="$1" branch="$2" gated="${3:-}" wt dirty head tip suite_log rc after_head after_tip
     if ! wt="$(branch_worktree "$main" "$branch")"; then
         echo "$branch is checked out in no worktree of $main, so the full suite cannot run on it; check it out and land again"
         return "$LAND_GATE_REFUSED"
@@ -42,6 +46,14 @@ land_gate() {
     if ! git -C "$main" merge-base --is-ancestor "$head" "$tip"; then
         echo "$branch is not rebased onto the main branch's head $head; rebase it, resolve every conflict, and land again"
         return "$LAND_GATE_REFUSED"
+    fi
+    if [ -n "$gated" ]; then
+        if [ "$tip" != "$gated" ]; then
+            echo "$branch's tip $tip is not the commit $gated its gate passed on; gate it again and land again"
+            return "$LAND_GATE_REFUSED"
+        fi
+        echo "[land-direct] $branch's tip $tip is the commit its caller's full suite passed on; the suite is not run again" >&2
+        return 0
     fi
     suite_log="$(mktemp "${TMPDIR:-/tmp}/land-direct-suite.XXXXXX")" || { echo "land-direct: could not create the suite's log" >&2; return 2; }
     echo "[land-direct] running the full suite on $branch in $wt; its stream is in $suite_log" >&2

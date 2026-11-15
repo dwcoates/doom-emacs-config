@@ -113,6 +113,39 @@ test_a_rebased_clean_branch_passes_after_the_full_suite_in_its_worktree() {
   fi
 }
 
+test_a_branch_gated_at_its_tip_passes_without_running_the_suite_again() {
+  mkrepo
+  set +e
+  RUN_OUT="$(land_gate "$REPO" fresh "$THIRD" 2>/dev/null)"
+  RUN_RC=$?
+  set -e
+  if [ "$RUN_RC" -eq 0 ] && [ -z "$(suite_calls)" ]; then
+    pass "a branch its caller gated at its tip passes without running the suite again"
+  else
+    fail "a branch its caller gated at its tip passes without running the suite again" "exit=$RUN_RC" "$RUN_OUT" "suite: $(suite_calls)"
+  fi
+}
+
+test_a_branch_whose_tip_is_not_the_gated_commit_is_refused() {
+  mkrepo
+  set +e
+  RUN_OUT="$(land_gate "$REPO" fresh "$SECOND" 2>/dev/null)"
+  RUN_RC=$?
+  set -e
+  expect_refused "a branch whose tip is not the commit its gate passed on is refused" "is not the commit $SECOND its gate passed on"
+  if [ -z "$(suite_calls)" ]; then pass "a mismatched gated landing runs no suite"; else fail "a mismatched gated landing runs no suite" "$(suite_calls)"; fi
+}
+
+test_a_gated_at_that_is_no_full_commit_is_a_usage_error() {
+  mkrepo
+  land --gated-at abc123 "$REPO" patch "line" fresh
+  if [ "$RUN_RC" -eq 2 ] && grep_in "$RUN_OUT" -qF "names the full commit the caller's suite passed on"; then
+    pass "a --gated-at that is no full commit is a usage error"
+  else
+    fail "a --gated-at that is no full commit is a usage error" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
 test_a_branch_behind_the_main_head_is_refused_before_the_suite() {
   mkrepo
   gate stale
