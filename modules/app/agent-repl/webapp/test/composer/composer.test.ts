@@ -914,6 +914,20 @@ describe("a command panel that sets no arm", () => {
 // shape a future schema would produce.
 // ---------------------------------------------------------------------------
 
+describe("submitPromptRefusal: no session", () => {
+  it("says the daemon's account of why there is no session", () => {
+    expect(submitPromptRefusal({ case: "noSession", value: { detail: "no revival is wired for this workspace" } } as never)).toBe(
+      "this workspace has no session to prompt (no revival is wired for this workspace) — your text is kept",
+    );
+  });
+
+  it("says the plain sentence when the daemon gave no account", () => {
+    expect(submitPromptRefusal({ case: "noSession", value: { detail: "" } } as never)).toBe(
+      "this workspace has no session to prompt — your text is kept",
+    );
+  });
+});
+
 describe("submitPromptRefusal: the agent-only arm", () => {
   it("refuses slashCommandFromAgent, which never answers a user's prompt", () => {
     expect(() =>

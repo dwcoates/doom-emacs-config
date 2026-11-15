@@ -490,7 +490,11 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
     case "duplicateSubmission":
       return "this prompt was already submitted — the earlier one stands";
     case "noSession":
-      return "this workspace has no session to prompt — your text is kept";
+      // THE DAEMON'S ACCOUNT of why it could not bring a session back,
+      // echoed verbatim and never switched on.
+      return reason.value.detail === ""
+        ? "this workspace has no session to prompt — your text is kept"
+        : `this workspace has no session to prompt (${reason.value.detail}) — your text is kept`;
     case "bubbleRefused":
       return bubbleRefusedSentence(reason.value);
     case "coldGate":

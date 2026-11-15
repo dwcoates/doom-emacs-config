@@ -3455,7 +3455,7 @@ carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-submit-prompt-error
                     (agent-repl-test-wire-verbs--parse "{\"noSession\":{}}"))
-                   '(:reason (:arm :no-session :value nil))))))
+                   '(:reason (:arm :no-session :value (:detail "")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-error-unset-reason-is-a-breach ()
   "SubmitPromptError with no arm set says nothing actionable, so it is a
