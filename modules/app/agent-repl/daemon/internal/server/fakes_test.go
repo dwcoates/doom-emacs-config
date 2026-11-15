@@ -1219,7 +1219,7 @@ type fakeMerge struct {
 	// decisions records every DecideMediation, which decideErr answers.
 	decisions []fakeDecision
 	decideErr error
-	// remediations answers IsDeployRemediation, which remediationErr fails;
+	// remediations answers LandsDirectly, which remediationErr fails;
 	// remediationFinishes records every FinishRemediation, which
 	// remediationFinishErr answers.
 	remediations         map[ids.WorkspaceID]bool
@@ -1463,7 +1463,7 @@ func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d mer
 	return f.decideErr
 }
 
-func (f *fakeMerge) IsDeployRemediation(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+func (f *fakeMerge) LandsDirectly(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 	return f.remediations[ws], f.remediationErr
 }
 

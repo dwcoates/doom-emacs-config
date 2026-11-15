@@ -17,6 +17,12 @@
  * answers to a valid report, and a refusal (`workspace_ref_mismatch`) is a
  * defect that sending again would only repeat, so it is recorded loudly and
  * the batch dropped.
+ *
+ * THE REPORTER ENDS WHEN THE PAGE GOES QUIET. A quiet page (a workspace a
+ * handover moved to a successor) sends nothing more on its client, ever, so a
+ * report scheduled after it would only be refused by the page itself. The
+ * latencies it still holds have no daemon left to take them: they are dropped
+ * with a record of how many, and so is every latency recorded after.
  */
 import { create } from "@bufbuild/protobuf";
 import {
@@ -56,6 +62,8 @@ export interface LatencyReportDeps {
   readonly after: (ms: number, fn: () => void) => () => void;
   /** Call FN every time the page's stream re-attaches; answers the stop. */
   readonly onAttached: (fn: () => void) => () => void;
+  /** Call FN once, when the page goes quiet; answers the stop. */
+  readonly onQuiesced: (fn: () => void) => () => void;
 }
 
 /** The installed reporter. */
@@ -75,7 +83,16 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
   let pending: ReportedLatency[] = [];
   let dropped = 0;
   let inFlight = false;
+  let ended = false;
   let cancelScheduled: (() => void) | undefined;
+
+  /** Drop COUNT latencies the quiet page can no longer send, saying why. */
+  const dropAtEnd = (count: number, why: string): void => {
+    log.info(`dropped ${count.toString()} latencies ${why}: the page went quiet, so no daemon is left to take them`, {
+      operation: "latency.report-ended",
+      context: { latencies: count, dropped },
+    });
+  };
 
   const schedule = (): void => {
     cancelScheduled ??= deps.after(REPORT_DELAY_MS, () => {
@@ -87,7 +104,7 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
   const flush = async (cause: "recorded" | "attached"): Promise<void> => {
     cancelScheduled?.();
     cancelScheduled = undefined;
-    if (inFlight || pending.length === 0) return;
+    if (ended || inFlight || pending.length === 0) return;
     inFlight = true;
     const batch = pending;
     pending = [];
@@ -109,6 +126,11 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
         context: { cause, latencies: batch.length, refusal: String(result.case === "error" ? result.value.cause.case : result.case) },
       });
     } catch (err) {
+      // A CALL OUT WHEN THE PAGE WENT QUIET has nowhere to wait for.
+      if (ended) {
+        dropAtEnd(batch.length, "whose report failed");
+        return;
+      }
       // The call did not reach the daemon (its transport failure is already
       // recorded by callUnary): the batch goes back, oldest first.
       pending = [...batch, ...pending];
@@ -140,10 +162,25 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
     void flush("attached");
   });
 
+  const end = (): void => {
+    if (ended) return;
+    ended = true;
+    cancelScheduled?.();
+    cancelScheduled = undefined;
+    stopAttached();
+    if (pending.length > 0) dropAtEnd(pending.length, "held unsent");
+    pending = [];
+  };
+  const stopQuiesced = deps.onQuiesced(end);
+
   return {
     record(kind, seconds, workspace = deps.workspace) {
       if (workspace === undefined) {
         throw new Error(`latency-report: a ${String(kind)} latency names no workspace, and the page has none of its own`);
+      }
+      if (ended) {
+        dropAtEnd(1, `of kind ${String(kind)} recorded after the end`);
+        return;
       }
       pending.push(create(ReportedLatencySchema, { kind, workspace, seconds }));
       trim();
@@ -153,6 +190,7 @@ export function installLatencyReport(deps: LatencyReportDeps): LatencyReporter {
       cancelScheduled?.();
       cancelScheduled = undefined;
       stopAttached();
+      stopQuiesced();
     },
   };
 }
@@ -173,6 +211,7 @@ export function installDaemonLatencyReport(ctx: DaemonContext, workspace?: Works
       return () => window.clearTimeout(timer);
     },
     onAttached: (fn) => ctx.streams.onAttached(fn),
+    onQuiesced: (fn) => ctx.onQuiesced(fn),
   });
 }
 

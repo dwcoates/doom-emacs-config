@@ -277,10 +277,10 @@ type Orchestrator interface {
 	// DecideMediation is the chain's intake WS's decision on the deploy its
 	// chain owes a check of (mediation.go).
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
-	// IsDeployRemediation answers whether WS is the remediation workspace a
-	// fix is dispatched to now, whose finish lands directly
-	// (remediationfinish.go).
-	IsDeployRemediation(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// LandsDirectly answers whether WS's finish lands directly
+	// (FinishRemediation): a deploy remediation a fix is dispatched to, or a
+	// deploy escalation workspace the daemon made.
+	LandsDirectly(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 	// FinishRemediation runs remediation workspace WS's finish: the full
 	// gate, the direct landing and the deploy, each step recorded before it
 	// starts (remediationfinish.go).

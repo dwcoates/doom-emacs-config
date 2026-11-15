@@ -738,3 +738,24 @@ func TestTheRoutingBriefPassesAMessageThroughOnAnyDoubt(t *testing.T) {
 		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }
+
+func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
+	// Arrange
+	want := []string{
+		"wait for the user's ruling before changing anything",
+		"`agent-repld workspace finished here -version-part patch",
+		"your finish does not join the merge queue",
+		"lands the branch directly on the main branch and deploys it",
+	}
+
+	// Act
+	got, err := Load(repoPromptsDir, "deploy-escalation")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("deploy-escalation does not say %q", phrase)
+	}
+}

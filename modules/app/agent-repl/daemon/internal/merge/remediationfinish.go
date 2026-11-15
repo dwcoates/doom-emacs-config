@@ -69,14 +69,29 @@ const landDirectScript = "bin/land-direct.sh"
 // is that with headroom for a cold disk.
 const landDirectBoundSeconds = 5
 
-// IsDeployRemediation implements Orchestrator: WS is the remediation
-// workspace of an owed check a fix is dispatched for.
-func (o *orchestrator) IsDeployRemediation(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+// LandsDirectly implements Orchestrator: WS is a deploy check workspace whose
+// finish lands directly -- the remediation of an owed check a fix is
+// dispatched for, or a deploy escalation workspace the daemon made.
+func (o *orchestrator) LandsDirectly(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	repo, err := o.directLandingRepo(ctx, ws)
+	return repo != "", err
+}
+
+// directLandingRepo answers the queue WS lands directly for, empty when its
+// finish goes through the queue.
+func (o *orchestrator) directLandingRepo(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, error) {
 	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return role != nil && !role.Intake && role.Mediation.Dispatched, nil
+	if role != nil && !role.Intake && role.Mediation.Dispatched {
+		return role.Repo, nil
+	}
+	repo, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws)
+	if err != nil || !escalation {
+		return "", err
+	}
+	return repo, nil
 }
 
 // FinishRemediation implements Orchestrator: records WS's finish at its gate
@@ -84,17 +99,17 @@ func (o *orchestrator) IsDeployRemediation(ctx context.Context, ws ids.Workspace
 // that does not match the repository.
 func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID, version *wsm.VersionIncrement) error {
 	fields := dlog.Context{"workspace": string(ws)}
-	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
+	repo, err := o.directLandingRepo(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not read the role of the workspace finishing", withField(fields, "error", err.Error()))
 		return err
 	}
-	if role == nil || role.Intake || !role.Mediation.Dispatched {
-		err := fmt.Errorf("merge: workspace %s is no remediation a fix is dispatched to", ws)
-		o.deps.Log.Global().Error(opRemediationFinish, "a remediation finish reached a workspace no fix is dispatched to", withField(fields, "error", err.Error()))
+	if repo == "" {
+		err := fmt.Errorf("merge: workspace %s is no remediation a fix is dispatched to and no deploy escalation", ws)
+		o.deps.Log.Global().Error(opRemediationFinish, "a direct finish reached a workspace that lands through the queue", withField(fields, "error", err.Error()))
 		return err
 	}
-	fields["repo"] = string(role.Repo)
+	fields["repo"] = string(repo)
 	target, err := o.remediationTarget(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not read where the remediation lands", withField(fields, "error", err.Error()))
@@ -107,7 +122,7 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 	case version != nil && !versioned:
 		return unexpectedVersion(ws, reasonUnversionedRepository, "the repository's deploy config %s versions nothing", target.repoRoot)
 	}
-	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: role.Repo, StartedAt: o.deps.Now(), Version: version})
+	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version})
 	if errors.Is(err, wsm.ErrRemediationFinishing) {
 		o.deps.Log.Global().Warn(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
 		return refuse(ArmAlreadyMerging, ws, "this remediation's finish is already running")
@@ -353,7 +368,7 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		return nil
 	}
 	// The failure is recorded by the escalation itself.
-	_, _ = o.escalate(ctx, q.repository.Dir, *m, summary, nil, fields)
+	_, _ = o.escalate(ctx, q, *m, summary, nil, fields)
 	o.republishMediation(ctx, repo)
 	o.kick(repo)
 	return nil

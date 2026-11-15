@@ -31,6 +31,7 @@ import type {
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { SidebarContext } from "./context.js";
 import { detailsPanel, requireFactHome, syncDetailsEntry } from "./detail-more.js";
+import { contextAt, handoverAddress, isHandoverArm } from "./handover.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 
@@ -242,10 +243,7 @@ async function fetchWorkspace(
   block: HTMLElement,
   at: string | null = null,
 ): Promise<void> {
-  const unary =
-    at === null || ctx.clientAt === undefined
-      ? ctx
-      : { client: ctx.clientAt(at), failures: ctx.failures, isQuiesced: () => ctx.isQuiesced() };
+  const unary = (at === null ? null : contextAt(ctx, at)) ?? ctx;
   const resp = await callUnary(
     unary,
     "GetWorkspaceMemory",
@@ -261,21 +259,22 @@ async function fetchWorkspace(
     }
     case "error": {
       const cause = requireCase(result.value.cause, "GetWorkspaceMemoryError.cause");
-      // A HANDOVER IS NEVER DRAWN AS A FAILURE. The daemon still serving the
-      // workspace is asked instead, once; with none named, or this one not
-      // serving it either, the panel says the workspace is moving.
-      if (cause.case === "notYetAdopted") {
-        const address = cause.value.address;
-        if (at === null && address !== undefined && address !== "" && ctx.clientAt !== undefined) {
-          log.info("a workspace's memory is asked of the daemon that still serves it", {
+      // A HANDOVER IS NEVER DRAWN AS A FAILURE, at either end of it
+      // (sidebar/handover.ts). The daemon serving the workspace is asked
+      // instead, once; with none named, or this one not serving it either,
+      // the panel says the workspace is moving.
+      if (isHandoverArm(cause.case)) {
+        const address = handoverAddress("GetWorkspaceMemoryError.cause", cause);
+        if (at === null && address !== null && ctx.clientAt !== undefined) {
+          log.info("a workspace's memory is asked of the daemon that serves it", {
             operation: "sidebar.memory.served-elsewhere",
-            context: { workspace: workspace.id, address },
+            context: { workspace: workspace.id, arm: cause.case, address },
           });
           return fetchWorkspace(ctx, workspace, block, address);
         }
         log.info("a workspace's memory waits on a handover", {
           operation: "sidebar.memory.handover",
-          context: { workspace: workspace.id },
+          context: { workspace: workspace.id, arm: cause.case },
         });
         fillNote(block, "moving to the new daemon");
         return;

@@ -969,12 +969,12 @@ func (s *server) FinishWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
-	// A DEPLOY REMEDIATION LANDS DIRECTLY, by its recorded role: its finish
-	// runs the full gate, lands on the main branch and deploys, never through
-	// the queue its check holds (merge.FinishRemediation).
-	remediation, err := s.deps.Merge.IsDeployRemediation(ctx, subject.Record.ID)
+	// A DEPLOY REMEDIATION OR ESCALATION LANDS DIRECTLY, by its recorded
+	// role: its finish runs the full gate, lands on the main branch and
+	// deploys, never through the queue (merge.FinishRemediation).
+	remediation, err := s.deps.Merge.LandsDirectly(ctx, subject.Record.ID)
 	if err != nil {
-		subject.Log.Error("daemon.server.finish_workspace", "could not read whether the finishing workspace is a deploy remediation; nothing was finished", dlog.Context{"rpc": rpc, "error": err.Error()})
+		subject.Log.Error("daemon.server.finish_workspace", "could not read whether the finishing workspace lands directly; nothing was finished", dlog.Context{"rpc": rpc, "error": err.Error()})
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	success := &agentreplv1.FinishWorkspaceSuccess{Landing: &agentreplv1.FinishWorkspaceSuccess_Queued{Queued: &agentreplv1.FinishWorkspaceSuccessQueued{}}}

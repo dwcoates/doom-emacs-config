@@ -603,7 +603,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 	o.endChain(ctx, q.key, *m, MediationUndecided)
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told", fields)
 	// The failure is recorded by the escalation itself.
-	_, _ = o.escalate(ctx, q.repository.Dir, *m, "the deploy intake ended its turn without deciding the deploy; the queue moved on", nil, fields)
+	_, _ = o.escalate(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy; the queue moved on", nil, fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
 }
@@ -667,7 +667,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	o.deps.Log.Global().Info(opMediation, "the intake decided the deploy; the queue advances", withField(fields, "released", released))
 	if d.Kind == MediationEscalate {
 		// The failure is recorded by the escalation itself.
-		_, _ = o.escalate(ctx, q.repository.Dir, m, d.Summary, d.Problems, fields)
+		_, _ = o.escalate(ctx, q, m, d.Summary, d.Problems, fields)
 	}
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)

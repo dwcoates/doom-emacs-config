@@ -99,7 +99,9 @@ type fakeDB struct {
 	// finish call goes to, so the harness keeps the store's own rules;
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
-	checks               wsm.DB
+	checks wsm.DB
+	// escalationRecordErr fails RecordDeployEscalation.
+	escalationRecordErr  error
 	mediationErr         error
 	dispatchErr          error
 	remediationFinishErr error
@@ -380,6 +382,20 @@ func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, 
 
 func (f *fakeDB) MediationRoleOf(ctx context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
 	return f.checks.MediationRoleOf(ctx, ws)
+}
+
+func (f *fakeDB) RecordDeployEscalation(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, at time.Time) error {
+	f.mu.Lock()
+	err := f.escalationRecordErr
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return f.checks.RecordDeployEscalation(ctx, ws, repo, at)
+}
+
+func (f *fakeDB) DeployEscalationOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	return f.checks.DeployEscalationOf(ctx, ws)
 }
 
 func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationFinish) (wsm.RemediationFinish, error) {

@@ -142,3 +142,42 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 		})
 	}
 }
+
+func TestAnEscalationWorkspaceIsRecordedAsLandingDirectly(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+
+	// Act
+	if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}); err != nil {
+		t.Fatalf("DecideMediation: %v", err)
+	}
+
+	// Assert
+	repo, found, err := h.db.DeployEscalationOf(context.Background(), "ws-escalate")
+	if err != nil || !found || repo != mediationKey(h) {
+		t.Fatalf("DeployEscalationOf = (%q, %v, %v), want the escalation recorded for its queue", repo, found, err)
+	}
+}
+
+func TestAnEscalationThatCannotBeRecordedIsNotBriefed(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	h.db.mu.Lock()
+	h.db.escalationRecordErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	_ = h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem})
+
+	// Assert
+	if subs := escalationBriefs(h); len(subs) != 0 {
+		t.Fatalf("briefed the escalation %d times, want none", len(subs))
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told"}); !ok {
+		t.Fatalf("records = %+v, want the failed record at ERROR", h.logs.Records())
+	}
+}

@@ -66,7 +66,7 @@ func finishOf(t *testing.T, h *harness) *wsm.RemediationFinish {
 	return f
 }
 
-func TestIsDeployRemediationAnswersTheWorkspaceAFixIsDispatchedTo(t *testing.T) {
+func TestLandsDirectlyAnswersTheWorkspaceAFixIsDispatchedTo(t *testing.T) {
 	tests := []struct {
 		name string
 		ws   ids.WorkspaceID
@@ -74,19 +74,23 @@ func TestIsDeployRemediationAnswersTheWorkspaceAFixIsDispatchedTo(t *testing.T) 
 	}{
 		{name: "the remediation at work", ws: "ws-remedy", want: true},
 		{name: "the chain's intake", ws: "ws-intake"},
+		{name: "a deploy escalation workspace", ws: "ws-escalation", want: true},
 		{name: "any other workspace", ws: theWorkspace},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := finishing(t)
+			if err := h.db.RecordDeployEscalation(context.Background(), "ws-escalation", mediationKey(h), deployStarted); err != nil {
+				t.Fatal(err)
+			}
 
 			// Act
-			got, err := h.o.IsDeployRemediation(context.Background(), tt.ws)
+			got, err := h.o.LandsDirectly(context.Background(), tt.ws)
 
 			// Assert
 			if err != nil || got != tt.want {
-				t.Fatalf("IsDeployRemediation = (%v, %v), want %v", got, err, tt.want)
+				t.Fatalf("LandsDirectly = (%v, %v), want %v", got, err, tt.want)
 			}
 		})
 	}
@@ -281,7 +285,7 @@ func TestAFinishOfAWorkspaceNoFixIsDispatchedToFailsLoudly(t *testing.T) {
 		t.Fatal("FinishRemediation finished the intake")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
-		Message: "a remediation finish reached a workspace no fix is dispatched to"}); !ok {
+		Message: "a direct finish reached a workspace that lands through the queue"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
@@ -396,5 +400,25 @@ func TestARemediationClosedWhoseNameCannotBeReadKeepsTheHoldAndSaysSo(t *testing
 	}
 	if !loggedLike(h, logLike{level: "error", op: opRemediationFinish, text: "could not be escalated without its name; the queue stays held", context: map[string]string{"workspace": "ws-remedy"}}) {
 		t.Fatal("no ERROR record names the held queue and the workspace")
+	}
+}
+
+func TestADeployEscalationsFinishLandsDirectly(t *testing.T) {
+	// Arrange: the escalation workspace the daemon made, its chain ended.
+	h := finishing(t)
+	h.db.mu.Lock()
+	h.db.workspaces["ws-escalation"] = h.db.workspaces["ws-remedy"]
+	h.db.mu.Unlock()
+	if err := h.db.RecordDeployEscalation(context.Background(), "ws-escalation", mediationKey(h), deployStarted); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-escalation", aRemediationPatch)
+
+	// Assert
+	f, readErr := h.db.RemediationFinishOf(context.Background(), "ws-escalation")
+	if err != nil || readErr != nil || f == nil || !sameQueue(f.Repo, mediationKey(h)) {
+		t.Fatalf("FinishRemediation = %v; finish %+v (%v), want its direct finish recorded for its queue", err, f, readErr)
 	}
 }
