@@ -56,8 +56,6 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
-
-	"agentrepl/logging/hostcpu"
 )
 
 // Kernel is the real Reader.
@@ -193,11 +191,10 @@ func (Kernel) Args(pid int) ([]string, error) {
 
 // Host implements Reader.
 func (Kernel) Host(path string) (Host, error) {
-	load, err := hostcpu.Read()
+	cpu, err := hostCPUSeconds()
 	if err != nil {
-		return Host{}, fmt.Errorf("procmetrics: %w", err)
+		return Host{}, err
 	}
-	cpu := map[string]float64{"user": load.User, "system": load.System, "idle": load.Idle, "nice": load.Nice}
 	var vm C.vm_statistics64_data_t
 	var page C.vm_size_t
 	if kr := C.pm_vm(&vm, &page); kr != C.KERN_SUCCESS {

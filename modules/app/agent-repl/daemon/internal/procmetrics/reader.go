@@ -23,7 +23,12 @@
 //     command the agent runs), the daemon's other descendants are its tools.
 package procmetrics
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	"agentrepl/logging/hostcpu"
+)
 
 // ErrGone is a process that exited between the listing and the read: an
 // ordinary schedule, never an error worth recording.
@@ -87,4 +92,15 @@ type Reader interface {
 	Args(pid int) ([]string, error)
 	// Host reads the host, its disk figures for the volume holding path.
 	Host(path string) (Host, error)
+}
+
+// hostCPUSeconds reads the host's CPU time in each mode through hostcpu, the
+// one reader testrun's CPU governor shares, so the two never disagree on the
+// host's load. Every platform's Host reads it here.
+func hostCPUSeconds() (map[string]float64, error) {
+	load, err := hostcpu.Read()
+	if err != nil {
+		return nil, fmt.Errorf("procmetrics: %w", err)
+	}
+	return map[string]float64{"user": load.User, "system": load.System, "idle": load.Idle, "nice": load.Nice}, nil
 }

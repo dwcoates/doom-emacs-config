@@ -127,12 +127,25 @@ func TestHandParsed(t *testing.T) {
 // module reads a /proc file by hand (HandParsed). The daemon's sources are
 // held to the same in internal/procgroup.
 func TestEveryProcFileIsParsedByProcstat(t *testing.T) {
-	// Arrange: this package sits at the module root's procstat/.
-	root := ".."
+	// Arrange: the module's root, the nearest go.mod above this package, by
+	// its absolute path (as the daemon's scans find theirs).
+	root, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		if filepath.Dir(root) == root {
+			t.Fatal("no go.mod above the package under test")
+		}
+		root = filepath.Dir(root)
+	}
 	var offenders []string
 
 	// Act
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

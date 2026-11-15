@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"golang.org/x/sys/unix"
-
-	"agentrepl/logging/hostcpu"
 )
 
 // Kernel is the real Reader: /proc, read through procfs.
@@ -33,9 +31,9 @@ func (Kernel) Args(pid int) ([]string, error) { return proc.Args(pid) }
 
 // Host implements Reader.
 func (Kernel) Host(path string) (Host, error) {
-	load, err := hostcpu.Read()
+	cpu, err := hostCPUSeconds()
 	if err != nil {
-		return Host{}, fmt.Errorf("procmetrics: %w", err)
+		return Host{}, err
 	}
 	memory, total, err := proc.Memory()
 	if err != nil {
@@ -46,7 +44,7 @@ func (Kernel) Host(path string) (Host, error) {
 		return Host{}, fmt.Errorf("procmetrics: statfs %s: %w", path, err)
 	}
 	return Host{
-		CPUSeconds:       map[string]float64{"user": load.User, "system": load.System, "idle": load.Idle, "nice": load.Nice},
+		CPUSeconds:       cpu,
 		MemoryBytes:      memory,
 		MemoryTotalBytes: total,
 		DiskFreeBytes:    fs.Bavail * uint64(fs.Bsize),
