@@ -491,12 +491,28 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 		log.Info(opRestore, "the workspace's directory is gone, so its parked session can never be restored; its keep-alive is retired",
 			dlog.Context{"cause": err.Error()})
 		k.forget(ws)
+	case k.deps.HandedOver(err):
+		// A HANDOVER IS THE ROLLOUT'S ORDERING, NOT A FAILURE: a deploy hands
+		// every workspace to the successor, whose own keeper restores it, and
+		// this daemon's beat for it is refused as transferring_away until the
+		// exit ends it (2026-11-15 20:07, an ERROR in the deploy intake). The
+		// retry stays armed, because a handover that is withdrawn gives the
+		// workspace back to this daemon, and its beat is owed again.
+		log.Info(opRestore, "the parked session is served by another daemon now, so this one does not restore it; it is asked again shortly",
+			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})
+		k.retryRestore(ws)
 	default:
 		log.Error(opRestore, "the parked session could not be restored; it is asked again shortly",
 			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})
-		if _, armed := k.beats[ws]; armed {
-			k.restores[ws] = k.deps.Clock.Now().Add(BeatRetry)
-		}
+		k.retryRestore(ws)
 	}
 	k.pump(ctx)
+}
+
+// retryRestore asks WS's restore again after BeatRetry, while its beat still
+// stands.
+func (k *Keeper) retryRestore(ws ids.WorkspaceID) {
+	if _, armed := k.beats[ws]; armed {
+		k.restores[ws] = k.deps.Clock.Now().Add(BeatRetry)
+	}
 }
