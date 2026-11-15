@@ -43,6 +43,7 @@ import (
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/gobuild"
+	"agentrepl/testrun/internal/gocache"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/proctable"
@@ -403,6 +404,14 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		}
 		log.Infof("core budget: the whole host, %d seats for its %d cores at %.0f cores a seat, from this run's own pool %s, with no CPU governor: a queue bypass holder's run (%s); this run ranks %d", slots, runtime.NumCPU(), cores.UngovernedSeatCores, plan.Dir, cores.UngovernedEnv, rank)
 	}
+	// THE GO BUILD CACHE every unit's go commands share, resolved in the
+	// environment the units inherit, so its trim is kept out of their time
+	// limits (gocache.Guard).
+	goCacheDir, err := gocache.Dir(os.Environ())
+	if err != nil {
+		log.Errorf("%v", err)
+		return 1
+	}
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -450,7 +459,8 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Log:         log,
 		Exec:        run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:       run.WallClock{},
-		After:       time.After,
+		At:          run.AtDeadline,
+		GoCache:     &gocache.Guard{Dir: goCacheDir, Clock: run.WallClock{}, Trim: gocache.GoTrim, Bound: gocache.TrimBound, Log: log},
 		Slots:       slots,
 		Cores:       host,
 		HistoryPath: histPath,

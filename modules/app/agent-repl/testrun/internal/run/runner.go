@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"time"
 
 	"agentrepl/testrun/internal/sched"
@@ -139,21 +140,38 @@ type Runner struct {
 	Cores Cores
 	Exec  Executor
 	Clock Clock
-	// After answers a channel that receives once d has passed: what a
-	// unit's time limit waits on (time.After in production).
-	After func(d time.Duration) <-chan time.Time
-	Log   *Log
+	// At answers a channel that receives once deadline has come: what a
+	// unit's time limit waits on (AtDeadline in production).
+	At func(deadline time.Time) <-chan time.Time
+	// GoCache fixes each unit's deadline once the host's Go build cache
+	// cannot fall due for its trim before it (gocache.Guard).
+	GoCache GoCache
+	Log     *Log
 	// Ended, when set, is told each unit's result as its verdict is
 	// reported, with the unit's whole output (nil for a unit that never
 	// started): a caller streaming the run's progress (events.Emitter).
 	Ended func(res Result, output []byte)
 }
 
-// grant is a unit's answer from the host's core pool.
+// GoCache keeps cmd/go's trim of the build cache every unit's go commands
+// share out of their time limits (gocache.Guard).
+type GoCache interface {
+	// Deadline answers when a unit bounded by bound is killed, once the
+	// cache's trim cannot fall due before then, trimming it first when it
+	// would.
+	Deadline(unit string, bound time.Duration) (time.Time, error)
+}
+
+// AtDeadline is the real deadline timer.
+func AtDeadline(deadline time.Time) <-chan time.Time { return time.After(time.Until(deadline)) }
+
+// grant is a unit's answer from the host's core pool and its Go cache.
 type grant struct {
 	id      string
 	release func() error
-	err     error
+	// deadline is when the unit is killed (GoCache.Deadline).
+	deadline time.Time
+	err      error
 }
 
 type completion struct {
@@ -179,8 +197,11 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	if r.Cores == nil {
 		return nil, nil, fmt.Errorf("run: no host core pool to hold the units' cores")
 	}
-	if r.After == nil {
+	if r.At == nil {
 		return nil, nil, fmt.Errorf("run: no timer to hold the units to their time limits")
+	}
+	if r.GoCache == nil {
+		return nil, nil, fmt.Errorf("run: no Go cache guard to keep its trim out of the units' time limits")
 	}
 	for _, s := range specs {
 		if s.Bound <= 0 {
@@ -188,6 +209,11 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		if s.Cores <= 0 {
 			return nil, nil, fmt.Errorf("run: unit %s (%s) has no expected cores (%v); the CPU governor admits every unit by them", s.ID, s.Suite, s.Cores)
+		}
+		for _, kv := range s.Env {
+			if strings.HasPrefix(kv, "GOCACHE=") {
+				return nil, nil, fmt.Errorf("run: unit %s (%s) sets its own %s, whose trim the run's Go cache guard does not keep out of its time limit", s.ID, s.Suite, kv)
+			}
 		}
 	}
 	units := make([]sched.Unit, len(specs))
@@ -263,7 +289,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		suiteOf(s.Suite, now)
 		starts[s.ID] = now
 	}
-	start := func(s Spec) {
+	start := func(s Spec, deadline time.Time) {
 		begin(s)
 		out := &bytes.Buffer{}
 		p, err := r.Exec.Start(s, out)
@@ -272,7 +298,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			return
 		}
 		running[s.ID] = p
-		go r.await(s, p, out, done)
+		go r.await(s, deadline, p, out, done)
 	}
 
 	// ONE HOLD AT A TIME, IN THE QUEUE'S ORDER. The next unit the queue
@@ -289,9 +315,23 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			inFlight++
 			used += u.Width()
 			holding = true
+			bound := byID[u.ID].Bound
 			go func() {
 				release, err := r.Cores.Hold(u.ID, u.Width(), byID[u.ID].Cores)
-				granted <- grant{id: u.ID, release: release, err: err}
+				if err != nil {
+					granted <- grant{id: u.ID, err: err}
+					return
+				}
+				// THE DEADLINE IS FIXED HERE, after the unit holds its cores
+				// and before it starts, so the Go cache's trim cannot fall
+				// due while the unit may still be running.
+				deadline, err := r.GoCache.Deadline(u.ID, bound)
+				if err != nil {
+					r.releaseCores(u.ID, release)
+					granted <- grant{id: u.ID, err: err}
+					return
+				}
+				granted <- grant{id: u.ID, release: release, deadline: deadline}
 			}()
 		}
 		if inFlight == 0 {
@@ -307,7 +347,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 				continue
 			}
 			releases[g.id] = g.release
-			start(byID[g.id])
+			start(byID[g.id], g.deadline)
 			continue
 		case c = <-done:
 		case <-ctx.Done():
@@ -406,11 +446,12 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 }
 
 // await waits for a started unit to exit and reports it on done. A unit still
-// running at its time limit is killed, and reported as timed out.
+// running at its deadline is killed, and reported as timed out.
 //
-// THE TIME LIMIT IS THE UNIT'S OWN. Its clock starts once the unit holds its
-// cores and has started, so a wait for CPU or seats never counts against it.
-func (r *Runner) await(s Spec, p Process, out *bytes.Buffer, done chan<- completion) {
+// THE TIME LIMIT IS THE UNIT'S OWN. Its deadline is fixed once the unit holds
+// its cores (GoCache.Deadline), so a wait for CPU or seats, or for the Go
+// cache's trim, never counts against it.
+func (r *Runner) await(s Spec, deadline time.Time, p Process, out *bytes.Buffer, done chan<- completion) {
 	waited := make(chan completion, 1)
 	go func() {
 		exit, usage, err := p.Wait()
@@ -419,7 +460,7 @@ func (r *Runner) await(s Spec, p Process, out *bytes.Buffer, done chan<- complet
 	select {
 	case c := <-waited:
 		done <- c
-	case <-r.After(s.Bound):
+	case <-r.At(deadline):
 		r.Log.Errorf("unit %s (%s) ran past its time limit of %s (%d times its expected %s) and is killed", s.ID, s.Suite, s.Bound, BoundFactor, s.Expected)
 		p.Kill()
 		c := <-waited

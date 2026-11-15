@@ -180,7 +180,37 @@ func newRunner(slots int, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
 
 func newRunnerOn(slots int, c *fakeCores, e *fakeExec) (*Runner, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
-	return &Runner{Slots: slots, Cores: c, Exec: e, Clock: &tickClock{}, After: never, Log: &Log{Out: out, Err: errOut}}, out, errOut
+	return &Runner{Slots: slots, Cores: c, Exec: e, Clock: &tickClock{}, At: never, GoCache: &fakeGoCache{e: e}, Log: &Log{Out: out, Err: errOut}}, out, errOut
+}
+
+// epoch is when every fake Go cache guard fixes a unit's deadline from.
+var epoch = time.Date(2026, 11, 10, 10, 51, 0, 0, time.UTC)
+
+// fakeGoCache answers each unit's deadline as epoch plus its bound, and
+// records, per unit asked, how many units had started by then.
+type fakeGoCache struct {
+	mu sync.Mutex
+	e  *fakeExec
+	// asked is each unit asked for, in order; startedBefore the count of
+	// units the executor had started when it was.
+	asked         []string
+	startedBefore []int
+	// err fails a unit's deadline.
+	err map[string]error
+}
+
+func (g *fakeGoCache) Deadline(unit string, bound time.Duration) (time.Time, error) {
+	g.e.mu.Lock()
+	started := len(g.e.started)
+	g.e.mu.Unlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asked = append(g.asked, unit)
+	g.startedBefore = append(g.startedBefore, started)
+	if err := g.err[unit]; err != nil {
+		return time.Time{}, err
+	}
+	return epoch.Add(bound), nil
 }
 
 func spec(id, suite string, deps ...string) Spec {
@@ -188,19 +218,19 @@ func spec(id, suite string, deps ...string) Spec {
 }
 
 // never is a timer that never fires: no unit reaches its time limit.
-func never(time.Duration) <-chan time.Time { return nil }
+func never(time.Time) <-chan time.Time { return nil }
 
 // timers hands each unit's time limit a channel the test fires.
 type timers struct {
 	mu     sync.Mutex
-	asked  []time.Duration
+	asked  []time.Time
 	expire chan time.Time
 }
 
-func (t *timers) After(d time.Duration) <-chan time.Time {
+func (t *timers) At(deadline time.Time) <-chan time.Time {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.asked = append(t.asked, d)
+	t.asked = append(t.asked, deadline)
 	return t.expire
 }
 
@@ -972,7 +1002,7 @@ func TestRunKillsAUnitAtItsTimeLimitAndFailsIt(t *testing.T) {
 	e := &fakeExec{scripts: map[string]script{"hang": {output: "started\n", hold: make(chan struct{})}}}
 	r, out, errOut := newRunner(1, e)
 	tm := &timers{expire: make(chan time.Time, 1)}
-	r.After = tm.After
+	r.At = tm.At
 	tm.expire <- time.Time{}
 
 	// Act
@@ -988,8 +1018,8 @@ func TestRunKillsAUnitAtItsTimeLimitAndFailsIt(t *testing.T) {
 	if suiteByName(suites, "s").Outcome != Failed {
 		t.Fatalf("suite = %+v, want it failed", suiteByName(suites, "s"))
 	}
-	if len(tm.asked) != 1 || tm.asked[0] != time.Minute {
-		t.Fatalf("time limits asked = %v, want the unit's one-minute bound", tm.asked)
+	if len(tm.asked) != 1 || !tm.asked[0].Equal(epoch.Add(time.Minute)) {
+		t.Fatalf("time limits asked = %v, want the deadline the Go cache guard fixed from the unit's one-minute bound", tm.asked)
 	}
 	if !slices.Equal(e.killed, []string{"hang"}) {
 		t.Fatalf("killed = %v, want the unit killed", e.killed)
@@ -1007,7 +1037,7 @@ func TestRunLetsAUnitThatEndsInTimePass(t *testing.T) {
 	e := &fakeExec{scripts: map[string]script{"quick": {}}}
 	r, _, errOut := newRunner(1, e)
 	tm := &timers{}
-	r.After = tm.After
+	r.At = tm.At
 
 	// Act
 	results, _, err := r.Run(context.Background(), []Spec{spec("quick", "s")})
@@ -1085,7 +1115,7 @@ func TestRunRefusesARunWithoutATimer(t *testing.T) {
 	// Arrange
 	e := &fakeExec{scripts: map[string]script{"a": {}}}
 	r, _, _ := newRunner(1, e)
-	r.After = nil
+	r.At = nil
 
 	// Act
 	_, _, err := r.Run(context.Background(), []Spec{spec("a", "s")})
@@ -1093,5 +1123,124 @@ func TestRunRefusesARunWithoutATimer(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "no timer") {
 		t.Fatalf("Run = %v, want the run refused", err)
+	}
+}
+
+func TestRunRefusesARunWithoutAGoCacheGuard(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{"a": {}}}
+	r, _, _ := newRunner(1, e)
+	r.GoCache = nil
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{spec("a", "s")})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "no Go cache guard") {
+		t.Fatalf("Run = %v, want the run refused", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started = %v, want nothing run", e.started)
+	}
+}
+
+func TestRunRefusesAUnitWithItsOwnGoCache(t *testing.T) {
+	// Arrange: a unit whose go commands would use a cache the guard does not keep.
+	e := &fakeExec{scripts: map[string]script{"a": {}}}
+	r, _, _ := newRunner(1, e)
+	own := spec("a", "s")
+	own.Env = []string{"GOFLAGS=-count=1", "GOCACHE=/tmp/elsewhere"}
+
+	// Act
+	_, _, err := r.Run(context.Background(), []Spec{own})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "unit a (s) sets its own GOCACHE=/tmp/elsewhere") {
+		t.Fatalf("Run = %v, want the unit refused", err)
+	}
+	if len(e.started) != 0 {
+		t.Fatalf("started = %v, want nothing run", e.started)
+	}
+}
+
+func TestRunFixesEachDeadlineAfterTheHoldAndBeforeTheStart(t *testing.T) {
+	// Arrange: two units in a row on one slot.
+	e := &fakeExec{scripts: map[string]script{"a": {}, "b": {}}}
+	r, _, _ := newRunner(1, e)
+	g := r.GoCache.(*fakeGoCache)
+	tm := &timers{}
+	r.At = tm.At
+	b := spec("b", "s", "a")
+	b.Bound = 2 * time.Minute
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{spec("a", "s"), b}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: each unit's deadline was asked before it, and after the one
+	// before it, started; and each unit's timer waits on its own deadline.
+	if !slices.Equal(g.asked, []string{"a", "b"}) || !slices.Equal(g.startedBefore, []int{0, 1}) {
+		t.Fatalf("deadlines asked %v with %v units started before each, want a then b, each before its own start", g.asked, g.startedBefore)
+	}
+	want := []time.Time{epoch.Add(time.Minute), epoch.Add(2 * time.Minute)}
+	if !slices.EqualFunc(tm.asked, want, time.Time.Equal) {
+		t.Fatalf("timers asked %v, want %v", tm.asked, want)
+	}
+}
+
+func TestRunDoesNotAskTheGoCacheForAUnitThatCannotHoldItsCores(t *testing.T) {
+	// Arrange
+	e := &fakeExec{scripts: map[string]script{}}
+	c := newCores(4)
+	c.holdErr = map[string]error{"a": errors.New("seats directory is gone")}
+	r, _, _ := newRunnerOn(1, c, e)
+	g := r.GoCache.(*fakeGoCache)
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{spec("a", "s")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if len(g.asked) != 0 {
+		t.Fatalf("deadlines asked %v, want none for a unit without its cores", g.asked)
+	}
+}
+
+func TestRunFailsAUnitWhoseGoCacheCannotBeKeptUntrimmed(t *testing.T) {
+	// Arrange: the guard cannot fix unit a's deadline; b runs after it.
+	e := &fakeExec{scripts: map[string]script{"b": {}}}
+	c := newCores(4)
+	r, _, errOut := newRunnerOn(1, c, e)
+	g := r.GoCache.(*fakeGoCache)
+	g.err = map[string]error{"a": errors.New("gocache: trimming /cache before unit a failed: exit status 1")}
+
+	// Act
+	results, suites, err := r.Run(context.Background(), []Spec{spec("a", "s"), spec("b", "t")})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := suiteByName(suites, "s"); got.Outcome != Failed {
+		t.Fatalf("suite s = %v, want Failed", got.Outcome)
+	}
+	if got := suiteByName(suites, "t"); got.Outcome != Passed {
+		t.Fatalf("suite t = %v, want Passed: one unit's guard failure must not stop the rest", got.Outcome)
+	}
+	if want := "unit a (s) could not start: gocache: trimming /cache before unit a failed: exit status 1"; !strings.Contains(errOut.String(), want) {
+		t.Fatalf("stderr = %q, want %q", errOut.String(), want)
+	}
+	for _, res := range results {
+		if res.Spec.ID == "a" && res.Exit != -1 {
+			t.Fatalf("unit a exit = %d, want -1", res.Exit)
+		}
+	}
+	if !slices.Equal(e.started, []string{"b"}) {
+		t.Fatalf("started %v, want only b", e.started)
+	}
+	if !slices.Contains(c.released, "a") || c.held != 0 {
+		t.Fatalf("released %v with %d seats still held, want a's cores given back", c.released, c.held)
 	}
 }

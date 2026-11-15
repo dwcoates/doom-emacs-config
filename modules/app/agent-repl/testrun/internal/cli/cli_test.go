@@ -467,6 +467,13 @@ func (f fakeReuser) Record(_ reuse.Mode, _ []reuse.SuiteVerdict, units []run.Res
 	return nil
 }
 
+// untrimmed is a Go cache whose trim never falls due.
+type untrimmed struct{}
+
+func (untrimmed) Deadline(_ string, bound time.Duration) (time.Time, error) {
+	return time.Time{}.Add(bound), nil
+}
+
 type harness struct {
 	deps      Deps
 	reuser    *fakeReuser
@@ -497,7 +504,8 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		Log:         &run.Log{Out: out, Err: errOut},
 		Exec:        e,
 		Clock:       &tick{},
-		After:       func(time.Duration) <-chan time.Time { return nil },
+		At:          func(time.Time) <-chan time.Time { return nil },
+		GoCache:     untrimmed{},
 		Slots:       4,
 		Cores:       freeCores{},
 		HistoryPath: filepath.Join(root, "history.json"),
