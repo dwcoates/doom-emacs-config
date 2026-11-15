@@ -35,6 +35,7 @@ import {
   type AgentOpening,
   type AgentPageSession,
   type AgentTailFrame,
+  type TailOpeningRecord,
 } from "./persistence.js";
 import {
   isRetryableRead,
@@ -514,6 +515,34 @@ function firstRowGate(): FirstRowGate {
   };
 }
 
+/**
+ * Count a book's NEWEST LINE, as an open named it, among the pointers a reading
+ * session has handed its consumer, unless it is already there.
+ *
+ * THE CONSUMER HOLDS IT ONCE THE OPEN HAS RETURNED, WHATEVER THE OPENING. The
+ * store names `newest` BY PLACE, and a teardown concludes through exactly that
+ * pointer (the book's head). A repaint's page starts on it. A catch-up page
+ * holds every line first written after the caller's `known_through` mark, so
+ * the newest line is either on that page or was written at or before the
+ * mark, which the caller already holds. A tail-only open is empty by request
+ * and anchors on it. Catch-up runs BY WRITE while the head runs BY PLACE, so a
+ * mark can name a line written after the head yet placed before it, and a
+ * session that counted only what it carried then stood for a head it never
+ * would: `KillSession` spent its whole conclusion budget on it at every
+ * rollout (2026-11-14, `concluded_through` sip1-3ygtn under a mark of
+ * sip1-3ygtq).
+ *
+ * It is recorded as CONTENT_UNKNOWN, so a later write at the same pointer is
+ * never withheld as already served.
+ */
+function holdsNewest(
+  served: Map<string, string>,
+  newest: conversationv1.HistoryPointer | undefined,
+): void {
+  if (newest !== undefined && !served.has(newest.value))
+    served.set(newest.value, CONTENT_UNKNOWN);
+}
+
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
 
@@ -667,19 +696,27 @@ export function createReader(options: ReaderOptions): Reader {
      * THE BOOK'S NEWEST LINE AS OF THE OPEN, as the store names it on every
      * open (unset: the book holds none).
      *
-     * A tail-only page is empty by request, so this is the only thing such a
-     * session stands on: the pointer a teardown concluding through the book's
-     * head names (already "served", so the tail ends at once instead of
-     * spending its conclusion budget on a line it will never carry), the mark
-     * a lossless re-open passes as `known_through` (never a repaint, which
-     * would replay history nobody asked for), and whether the book was empty.
+     * It is the pointer a teardown concluding through the book's head names
+     * when nothing was written since, so it counts as served for EVERY opening
+     * ({@link holdsNewest}). A tail-only page is empty by request, so for such
+     * a session it is also the mark a lossless re-open passes as
+     * `known_through` (never a repaint, which would replay history nobody
+     * asked for), and the only word on whether the book was empty.
      */
     const newest =
       opened.newest === undefined ? undefined : toHistoryPointer(opened.newest);
+    const openedOn: TailOpeningRecord = {
+      opening: opening.case,
+      mark: knownThrough?.value,
+      newest: newest?.value,
+      deferred: false,
+    };
     LOGGER.debug(
       {
         agent: agent.value,
         opening: opening.case,
+        known_through: openedOn.mark,
+        newest: openedOn.newest,
         entries: page.entries.length,
       },
       "opened an agent's book and pinned its tail",
@@ -714,8 +751,9 @@ export function createReader(options: ReaderOptions): Reader {
     const served = new Map<string, string>();
     if (knownThrough !== undefined)
       served.set(knownThrough.value, CONTENT_UNKNOWN);
-    if (opening.case === "tailOnly" && newest !== undefined)
-      served.set(newest.value, CONTENT_UNKNOWN);
+    // THE BOOK'S NEWEST LINE AS OF THE OPEN IS THE CONSUMER'S, whatever the
+    // opening asked for (see {@link holdsNewest}).
+    holdsNewest(served, newest);
     for (const line of opened.page.lines) {
       if (line.at !== undefined)
         served.set(line.at.value, lineFingerprint(line));
@@ -734,6 +772,17 @@ export function createReader(options: ReaderOptions): Reader {
     /** Whether the consumer has been handed everything the conclusion named. */
     const settled = (): boolean =>
       concluding && (concludeAt === undefined || served.has(concludeAt.value));
+    /**
+     * End the tail when the conclusion is settled, answering whether it did:
+     * the ONE place a settled conclusion stops the tail, whichever path served
+     * the last pointer it named.
+     */
+    const endIfSettled = (): boolean => {
+      if (!settled()) return false;
+      stopped = true;
+      abort.abort();
+      return true;
+    };
     // CANCELLING THE CALL IS HOW A STANDING TAIL ENDS. Connect's stream close
     // drains the body, which on a standing stream never completes — so
     // `close()` aborts the call rather than merely leaving the loop.
@@ -807,11 +856,7 @@ export function createReader(options: ReaderOptions): Reader {
               servedThrough = frame.value.at;
               yield frame;
               barrenEnds = 0;
-              if (settled()) {
-                stopped = true;
-                abort.abort();
-                return;
-              }
+              if (endIfSettled()) return;
             }
             if (stopped) return;
           } catch (error) {
@@ -948,12 +993,19 @@ export function createReader(options: ReaderOptions): Reader {
             if (entry.at !== undefined) served.set(entry.at.value, fingerprint);
             yield { case: "entry", value: entry };
             barrenEnds = 0;
-            if (settled()) {
-              stopped = true;
-              abort.abort();
-              return;
-            }
+            if (endIfSettled()) return;
           }
+          // THE RE-OPEN'S NEWEST LINE IS THE CONSUMER'S NOW, as the open's
+          // was -- counted only AFTER the fresh lines went out, because a
+          // newest line BY PLACE can be written before other fresh lines, and
+          // a conclusion through it must not end the tail with those owed.
+          holdsNewest(
+            served,
+            reopened.newest === undefined
+              ? undefined
+              : toHistoryPointer(reopened.newest),
+          );
+          if (endIfSettled()) return;
           token = reopened.watch;
           // A fresh controller per attempt: the aborted one stays aborted.
           abort = new AbortController();
@@ -966,6 +1018,7 @@ export function createReader(options: ReaderOptions): Reader {
       foundNothing: newest === undefined,
       tail,
       servedThrough: () => servedThrough?.value,
+      openedOn: () => openedOn,
       concludeThrough: (through) => {
         if (stopped) return;
         concluding = true;
@@ -973,10 +1026,7 @@ export function createReader(options: ReaderOptions): Reader {
         // Nothing left to wait for: either no pointer was named, or the tail
         // has already served it. Ending now is the honest answer, and holding
         // the stream open for a row that will never come would wedge the exit.
-        if (settled()) {
-          stopped = true;
-          abort.abort();
-        }
+        endIfSettled();
       },
       close: () => {
         if (stopped) return;
@@ -1092,6 +1142,15 @@ export function createReader(options: ReaderOptions): Reader {
       }),
       foundNothing: true,
       servedThrough: () => lastServed,
+      // THE REAL SESSION'S OPENING, once there is one: until then the book is
+      // still waiting to be written, and only the caller's own mark is known.
+      openedOn: () =>
+        inner?.openedOn() ?? {
+          opening: opening.case,
+          mark: innerMark?.value,
+          newest: undefined,
+          deferred: true,
+        },
       tail: {
         async *[Symbol.asyncIterator]() {
           const session = await openWhenWritten();
