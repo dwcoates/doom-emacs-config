@@ -108,7 +108,7 @@ window.treeFace = {
         finalAnswer: true,
         result: { case: "success", value: { prose: { prose: treeProse(text) } } },
       }),
-      pagedRowContext(),
+      pagedRowContext("tree-face-response"),
     );
     const item = document.createElement("div");
     item.className = "feed-item";

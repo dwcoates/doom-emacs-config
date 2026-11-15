@@ -419,7 +419,8 @@ its branch is in flight.  The tab bar paints its [N] run purple from it
   "Walk the list rows ROWS depth-first under LABEL, pushing entries onto ACC.
 ROWS are one list's own row type (`RosterOpenRow', `RosterHiddenRow',
 `RosterMergedRow', `RosterClosedRow'), each a plist carrying the shared
-`:row' and, for the lists that nest, its family (`agent-repl-roster-row-kin').  Each entry
+`:row' and, for the lists that nest, its family (`agent-repl-roster-row-kin').
+Each entry
 is `(:row ROW :label LABEL :section SECTION :collapsed C :tab TAB)'.
 SECTION names which list the row sits in -- `:repository' (the Open
 section), `:hidden', `:merged' or `:closed' -- so a reader that treats them

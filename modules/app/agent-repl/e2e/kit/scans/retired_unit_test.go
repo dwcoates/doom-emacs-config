@@ -115,3 +115,71 @@ func TestCheckRetiredCountsOnlyARowProvingBothHalves(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckOneTierPinsOnlyARowProvingOneHalf(t *testing.T) {
+	dir := retiredFixture(t)
+	shim := retiredPin{flag: "-vitest", path: "agent-shim/claude/shim/test/integration/frames.test.ts", name: "a query that dies denies the ask"}
+	daemon := retiredPin{flag: "-go", path: "daemon/integration", name: "TestTheDaemonHalf"}
+	tests := []struct {
+		name      string
+		step      retiredStep
+		live      bool
+		wantError string // "" for a row the section holds
+	}{
+		{"the shim's half alone", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{shim}}, false, ""},
+		{"the daemon's half alone", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{daemon}}, false, ""},
+		{"both halves belong in section (f)", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{shim, daemon}}, false, "move its row to section (f)"},
+		{"no pin at all", retiredStep{step: "TestFaults/Gone", scenario: "x"}, false, "pins no replacement"},
+		{"a pinned test that does not exist", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{{flag: "-go", path: daemon.path, name: "TestRenamed"}}}, false, "declares TestRenamed"},
+		{"a step still live", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{daemon}}, true, "is still a step"},
+		{"a scenario the vendor does not register", retiredStep{step: "TestFaults/Gone", scenario: "nope", pins: []retiredPin{daemon}}, false, "does not register"},
+		{"a pin in neither tier", retiredStep{step: "TestFaults/Gone", scenario: "x", pins: []retiredPin{{flag: "-go", path: "e2e", name: "TestFaults"}}}, false, "in neither the shim's tier"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &errorRecorder{}
+
+			// Act
+			checkOneTier(r, []retiredStep{tt.step}, map[string]bool{"x": true}, func(string) bool { return tt.live }, dir)
+
+			// Assert
+			if tt.wantError == "" {
+				if len(r.errs) != 0 {
+					t.Fatalf("errors = %q, want none", r.errs)
+				}
+				return
+			}
+			if !strings.Contains(strings.Join(r.errs, "\n"), tt.wantError) {
+				t.Errorf("errors = %q, want one saying %q", r.errs, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestParseRetiredUnderReadsOnlyItsOwnSection(t *testing.T) {
+	// Arrange
+	lines := strings.Split(strings.Join([]string{
+		retiredHeading,
+		"| Retired step | Scenario | Replacement tests |",
+		"|---|---|---|",
+		"| `TestFaults/A` | `!x` | `-go daemon/integration=TestA` |",
+		"",
+		oneTierHeading,
+		"| Retired step | Scenario | Replacement tests |",
+		"|---|---|---|",
+		"| `TestTurns/B` | `!y` | `-go daemon/integration=TestB` |",
+		"",
+		"## Another section",
+		"| `TestTurns/C` | `!z` | `-go daemon/integration=TestC` |",
+	}, "\n"), "\n")
+
+	// Act
+	f := parseRetiredUnder(t, lines, retiredHeading)
+	g := parseRetiredUnder(t, lines, oneTierHeading)
+
+	// Assert
+	if len(f) != 1 || f[0].step != "TestFaults/A" || len(g) != 1 || g[0].step != "TestTurns/B" || g[0].scenario != "y" {
+		t.Fatalf("section (f) = %+v, section (g) = %+v; want each its own one row", f, g)
+	}
+}

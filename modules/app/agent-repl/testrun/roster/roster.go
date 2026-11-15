@@ -25,7 +25,7 @@ const (
 	ERT
 	// GoModule is a Go module's tests, split by top-level test.
 	GoModule
-	// Vitest is a TypeScript package: a typecheck and split test files.
+	// Vitest is a TypeScript package: a typecheck, knip and split test files.
 	Vitest
 	// E2E is the cross-system Go suite: one build, its top-level tests split
 	// into chunks.
@@ -138,7 +138,7 @@ type Suite struct {
 // integration, named by its path relative to Suite.Path, "." the root, and
 // "[tags]" after a tagged pass's: "integration[integration]"), a vitest test
 // file or an ERT test file (named by its path relative to Suite.Path), a
-// suite-wide check ("vet", "vet[perf]", "typecheck"), or, for a script or e2e
+// suite-wide check ("vet", "vet[perf]", "typecheck", "knip"), or, for a script or e2e
 // suite, the whole suite (named "").
 //
 // Paths are spelled as Suite.Path is: relative to the module root, or to the
@@ -268,6 +268,8 @@ var Suites = []Suite{
 	{Name: "go-deps-harness", Kind: Script, Path: "bin/test-check-go-deps.sh", Harness: true, Reuse: harness("bin/", ".")},
 	{Name: "personal-values-harness", Kind: Script, Path: "bin/test-check-personal-values.sh", Harness: true, NeverReused: "it walks the whole module for every personal value a tracked file may carry"},
 	{Name: "realtest-harness", Kind: Script, Path: "bin/test-realtest.sh", Harness: true, Reuse: scripts(moduleScripts, "e2e/realtest/")},
+	{Name: "byte-compile-harness", Kind: Script, Path: "bin/test-byte-compile.sh", Harness: true, Reuse: scripts(moduleScripts, "bin/compile-prelude.el")},
+	{Name: "shellcheck-harness", Kind: Script, Path: "bin/test-shellcheck.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "doctor-harness", Kind: Script, Path: "scripts/test-agent-shim-doctor.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
 	{Name: "bounce-harness", Kind: Script, Path: "scripts/test-bounce-agent-repl-forcefully.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
 	{Name: "log-discovery-harness", Kind: Script, Path: "scripts/test-agent-repl-log-discovery.sh", Reuse: scripts([]string{"scripts/", "bin/"})},
@@ -412,6 +414,14 @@ var Suites = []Suite{
 	// against what grammar.js generates.
 	{Name: "tree-sitter-tldr", Kind: Script, Path: "tree-sitter-tldr/test-tree-sitter-tldr.sh",
 		Reuse: &Reuse{Inputs: []string{"tree-sitter-tldr/", "bin/"}, Generated: []string{"tree-sitter-tldr/node_modules/"}}},
+	// THE LINT GATES, each failing on any warning so none lands to
+	// accumulate. The byte-compiler over lisp/'s sources:
+	{Name: "byte-compile", Kind: Script, Path: "bin/byte-compile.sh", Reuse: harness("lisp/", "bin/compile-prelude.el")},
+	// shellcheck over every shell script of the module and of the
+	// repository's hooks, .claude scripts and bin/. It reads exactly the
+	// roots `bin/shellcheck.sh --roots` prints (ShellcheckRoots, which
+	// daemon/reposcans holds to the script).
+	{Name: "shellcheck", Kind: Script, Path: "bin/shellcheck.sh", Harness: true, Reuse: harness(ShellcheckRoots...)},
 	// The density report scans every system's logging calls.
 	{Name: "logging-density", Kind: Script, Path: "bin/report-logging-density.sh", Reuse: harness(append([]string{"bin/"}, loggingDensityInputs...)...)},
 	// THE E2E HARNESS and its tests: the world every scenario builds
@@ -445,6 +455,13 @@ var Suites = []Suite{
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
 		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
 		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
+}
+
+// ShellcheckRoots are the directories the shellcheck suite's script walks for
+// shell scripts: `bin/shellcheck.sh --roots`, spelled as Suite.Path is.
+var ShellcheckRoots = []string{
+	"bin/", "scripts/", "hooks/", "proto/scripts/", "skills/", "tree-sitter-tldr/", "wifi-helper/",
+	"agent-shim/claude/shim/test/integration-support/", "/.githooks/", "/.claude/", "/bin/",
 }
 
 // harness is a script suite's declaration: its one unit, the whole suite,

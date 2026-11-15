@@ -512,7 +512,7 @@ server picks."
    body))
 
 (defvar agent-repl-connect--request-count 0
-  "How many request ids this Emacs has minted (`agent-repl-connect--mint-request-id').")
+  "How many request ids `agent-repl-connect--mint-request-id' has minted.")
 
 (defun agent-repl-connect--mint-request-id ()
   "Return a request id no other call from any Emacs has carried.

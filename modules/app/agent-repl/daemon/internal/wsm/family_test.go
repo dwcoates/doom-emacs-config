@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
 )
 
@@ -473,7 +474,7 @@ func TestRequireOpenParentAnswersTheRefusalWithoutLoggingAFailure(t *testing.T) 
 	// Assert
 	requireParentNotOpen(t, err, parent, ParentClosed)
 	for _, rec := range log.Records() {
-		if rec.Level == "ERROR" {
+		if rec.Level == dlog.LevelError {
 			t.Fatalf("a refused parent was logged at ERROR: %+v", rec)
 		}
 	}

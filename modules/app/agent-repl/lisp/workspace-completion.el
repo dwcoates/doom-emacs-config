@@ -109,7 +109,8 @@ style only keeps a completion UI from narrowing them again by prefix.")
   (agent-repl-completion-match-table agent-repl--workspace-completion-category names))
 
 (defun agent-repl--workspace-completion-annotation (workspaces)
-  "Return the `:annotation-function' over WORKSPACES, a list of (NAME . REPOSITORIES).
+  "Return the `:annotation-function' over WORKSPACES.
+WORKSPACES is a list of (NAME . REPOSITORIES).
 Each name's annotation is its repositories' names, comma-joined, in
 `agent-repl-workspace-completion-repository', padded so the column starts
 two spaces past the longest name in WORKSPACES.  Empty for a name whose

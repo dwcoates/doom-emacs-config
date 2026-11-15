@@ -340,14 +340,21 @@ export function regionLines(region: HTMLElement): HTMLElement[] {
  * line's BOTTOM, so whatever is drawn above a line (a repository section's
  * header, a Deploys repository group's) is shown together with it,
  * never dangling at the viewport's foot. Measured against the region's
- * scrolled content, so a scrolled or capped region measures the same as an
- * uncapped one.
+ * scrolled content, so a scrolled region measures the same as an unscrolled
+ * one.
+ *
+ * THE LAST STOP IS THE WHOLE REGION AS DRAWN, in fractional pixels: the
+ * region is uncapped (`fitBands` lets every viewport go first), so its drawn
+ * height is its whole content's. Its `scrollHeight` is rounded to a whole
+ * pixel, and summed over the sections that rounding left the lowest one's
+ * stretch short of the rail's foot (0.73px, 2026-11-14).
  */
 export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] = regionLines(region)): number[] {
-  const origin = region.getBoundingClientRect().top + region.clientTop - region.scrollTop;
+  const box = region.getBoundingClientRect();
+  const origin = box.top + region.clientTop - region.scrollTop;
   const bottoms = lines.map((line) => line.getBoundingClientRect().bottom - origin);
   if (bottoms.length === 0) return [0];
-  return [0, ...bottoms.slice(0, -1), region.scrollHeight];
+  return [0, ...bottoms.slice(0, -1), box.height];
 }
 
 /**
@@ -561,9 +568,13 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   // it out, clamping its scroll to its top. Each viewport's position is read
   // first and put back once it is sized (`restoreScroll`).
   const tops = bands.map((band) => band.region.scrollTop);
-  // A stretched viewport stands taller than its rows, so it is let go before
-  // the rows are measured: the stops are the rows' own, never the stretch's.
-  for (const band of bands) band.region.style.height = "";
+  // EVERY VIEWPORT IS LET GO BEFORE THE ROWS ARE MEASURED: a stretched one
+  // stands taller than its rows and a capped one shorter, and the stops are
+  // the rows' own, the whole region's last among them (`regionStops`).
+  for (const band of bands) {
+    band.region.style.height = "";
+    band.region.style.maxHeight = "";
+  }
   const room = measureRoom(scroller, pane, bands);
   const open = measure(openSection);
   const queue = measure(queueSection);

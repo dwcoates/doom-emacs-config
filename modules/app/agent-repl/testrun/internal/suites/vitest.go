@@ -68,7 +68,12 @@ func parseVitestList(dir string, out []byte) ([]string, error) {
 // TypecheckSlots is a vitest suite's typecheck width.
 const TypecheckSlots = 2
 
-// vitestUnits is the typecheck and the test files split into chunks. Coverage
+// KnipSlots is a vitest suite's knip width. MEASURED (2026-11-14, Low Power,
+// three runs over the webapp and the shim): user+sys over wall came to 1.5-1.7
+// cores, node's compiler thread and GC as tsc's, so it holds two slots.
+const KnipSlots = 2
+
+// vitestUnits is the typecheck, knip and the test files split into chunks. Coverage
 // adds chunk blobs and their merged report only when explicitly requested.
 func vitestUnits(l Layout, s roster.Suite) (Units, error) {
 	dir := l.resolve(s.Path)
@@ -185,6 +190,10 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 	// worker threads measured 1.5-1.75 cores on average across four full
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.
 	typecheck.Slots = TypecheckSlots
+	// knip is the package's unused-export gate: an export, file or dependency
+	// nothing uses fails the suite instead of accumulating (its knip.json).
+	knip := spec(s.Name+":knip", s.Name, dir, []string{"npm", "run", "knip"})
+	knip.Slots = KnipSlots
 	reporter := filepath.Join(l.Module, "testrun", "vitest", "items-reporter.mjs")
 	if len(batches) == 0 {
 		return Units{}, fmt.Errorf("suites: %s has no batch of test files to run", s.Name)
@@ -223,7 +232,7 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
 	splits := batchSplits(s.Name, s.Name, batches, chunk, named)
-	atomic := []run.Spec{typecheck}
+	atomic := []run.Spec{typecheck, knip}
 	if l.Coverage {
 		merge := spec(s.Name+":coverage", s.Name, dir, []string{
 			"npx", "vitest", "run", "--merge-reports=" + blobs, "--coverage",

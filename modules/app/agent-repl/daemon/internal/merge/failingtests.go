@@ -32,7 +32,7 @@ import (
 //	vitest                         " FAIL  test/x.test.ts > describe > name"
 //	script harnesses               "FAIL - what failed" / "  FAIL: what failed"
 //
-// A FAILED UNIT WHOSE TESTS CANNOT BE NAMED (a build, vet or typecheck unit, a
+// A FAILED UNIT WHOSE TESTS CANNOT BE NAMED (a build, vet, typecheck or knip unit, a
 // crash, a timeout) IS SAID SO in the file, naming the unit, so the agent knows
 // to read that unit's block in the archive.
 
@@ -292,7 +292,8 @@ func readERTUnit(s *failingSuite, lines []string, module string) bool {
 // config.
 func readVitestUnit(s *failingSuite, unit string, suite roster.Suite, lines []string, module string) bool {
 	if strings.Contains(unit, ":") {
-		// The typecheck (or coverage) unit: no test to name.
+		// A suite-wide check (typecheck, knip) or the coverage unit: no test
+		// to name.
 		return false
 	}
 	dir := filepath.Join(module, suite.Path)
@@ -397,7 +398,7 @@ func (f failingTests) render(archive string) string {
 			}
 		}
 		for _, unit := range s.unnamed {
-			b.WriteString(fmt.Sprintf("\nunnamed: the tests of %s could not be named (a build, vet or typecheck failure, a crash or a timeout); read its output in the archive: grep -n %s %s\n",
+			b.WriteString(fmt.Sprintf("\nunnamed: the tests of %s could not be named (a build, vet, typecheck or knip failure, a crash or a timeout); read its output in the archive: grep -n %s %s\n",
 				unit, shellword.Quote(regexp.QuoteMeta(unit)), archive))
 		}
 	}

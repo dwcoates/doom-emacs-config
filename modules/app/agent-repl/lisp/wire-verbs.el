@@ -114,6 +114,7 @@
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-wire--decode-optional-double "wire-common" (message-name field object))
 
 
 ;;;; ---- Shared primitives ----------------------------------------------
@@ -456,7 +457,8 @@ commission with a note naming it."
   "Encode CreateWorkspaceStandard from plist VALUE.
 The RELATIONSHIP is required: a child of a parent, or a peer.  Every
 other field is optional: an absent initial prompt is an empty workspace,
-and an absent name means the daemon mints one.  The editor names no landing target, so the relationship\='s default
+and an absent name means the daemon mints one.  The editor names no landing
+target, so the relationship\='s default
 applies, and no deploy hooks: a workspace it creates deploys by its
 repository\='s own config."
   (let ((out (list (cons 'relationship
@@ -3350,7 +3352,8 @@ Returns (:wifi ONEOF :mode ONEOF :lid ONEOF :quiet QUIET).  Each ONEOF is
 the lid: has not heard it yet) -- the facts are independent, and an
 unassigned one is the daemon saying it does not know, never a contract
 breach.  QUIET is `agent-repl-wire-decode-persistent-wifi-quiet''s plist
-while the lid-closed quiet state stands, else nil.  Shared by the WatchDaemon push and UpdatePersistentWifiMode's
+while the lid-closed quiet state stands, else nil.  Shared by the WatchDaemon
+push and UpdatePersistentWifiMode's
 success."
   (let ((message "PersistentWifiState")
         (object (agent-repl-wire--object "PersistentWifiState" json)))
@@ -5709,7 +5712,8 @@ reaching the wire."
     (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
 
 (defun agent-repl-wire-decode-update-held-prompt-release-refused (json)
-  "Decode UpdateHeldPromptReleaseRefused from JSON into (:cause (:arm ARM :value nil)).
+  "Decode UpdateHeldPromptReleaseRefused from JSON.
+Returns (:cause (:arm ARM :value nil)).
 THE ARM IS THE CAUSE, so an unset cause is a contract breach."
   (let ((message "UpdateHeldPromptReleaseRefused"))
     (agent-repl-wire-verbs--check-keys

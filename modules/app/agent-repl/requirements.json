@@ -768,7 +768,7 @@
     {
       "id": "shellcheck",
       "kind": "program",
-      "why": "lints every bin/ and scripts/ shell script in the shell suites",
+      "why": "the shellcheck suite's gate (bin/shellcheck.sh), which lints every shell script of the module and the repository's hooks, .claude scripts and bin/",
       "profile": "dev",
       "platforms": [
         "darwin",

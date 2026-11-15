@@ -72,7 +72,8 @@
   "Output of fewer words than this reaches the agent inline; more goes by path.")
 
 (defvar agent-repl-terminal--runs (make-hash-table :test 'eq)
-  "Each terminal buffer's awaited run: a plist (:ws :token :command :output :status).")
+  "Each terminal buffer's awaited run.
+A plist (:ws :token :command :output :status).")
 
 (defvar agent-repl-terminal--next-token 0
   "The counter every run's token is minted from.")

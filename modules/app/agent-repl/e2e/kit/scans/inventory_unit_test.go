@@ -33,11 +33,35 @@ func TestEveryStepRunsInExactlyOneScenario(t *testing.T) {
 	}
 }
 
-func TestEveryWorldBuildingTestIsAScenario(t *testing.T) {
-	// Arrange
-	pkg := parseE2EPackage(t)
+// worldBuildingPackages are the packages whose top-level tests may build a
+// world, relative to the e2e package: the e2e package itself, and the
+// harness that builds the worlds (kit/stack), whose own tests could build
+// one as easily.
+var worldBuildingPackages = []string{".", "kit/stack"}
 
-	// Act
+func TestEveryWorldBuildingTestIsAScenario(t *testing.T) {
+	for _, dir := range worldBuildingPackages {
+		t.Run(dir, func(t *testing.T) {
+			// Arrange
+			pkg := parseTestPackage(t, dir)
+			if len(pkg.tests) == 0 {
+				t.Fatalf("the package %s declares no top-level test; the scan read nothing", dir)
+			}
+
+			// Act
+			offenders := worldBuildingOutsideScenarios(pkg)
+
+			// Assert
+			if len(offenders) > 0 {
+				t.Fatalf("top-level tests of %s that build a world outside a scenario: %s; add the coverage as a step of the scenario whose subject it extends (scenarios_test.go)", dir, strings.Join(offenders, ", "))
+			}
+		})
+	}
+}
+
+// worldBuildingOutsideScenarios is every top-level test of PKG that reaches
+// a world builder and is not a scenario, each with the builder it reaches.
+func worldBuildingOutsideScenarios(pkg e2ePackage) []string {
 	var offenders []string
 	for _, name := range kit.SortedKeys(pkg.tests) {
 		if _, isScenario := pkg.scenarios[name]; isScenario {
@@ -47,10 +71,46 @@ func TestEveryWorldBuildingTestIsAScenario(t *testing.T) {
 			offenders = append(offenders, name+" (reaches "+builder+")")
 		}
 	}
+	return offenders
+}
 
-	// Assert
-	if len(offenders) > 0 {
-		t.Fatalf("top-level tests that build a world outside a scenario: %s; add the coverage as a step of the scenario whose subject it extends (scenarios_test.go)", strings.Join(offenders, ", "))
+func TestWorldBuildingOutsideScenariosNamesEachOffender(t *testing.T) {
+	tests := []struct {
+		name string
+		pkg  e2ePackage
+		want []string
+	}{
+		{
+			name: "a test that builds a world directly is named with its builder",
+			pkg:  e2ePackage{tests: map[string]string{"TestA": "a_test.go"}, refs: map[string][]string{"TestA": {"NewWorld"}}},
+			want: []string{"TestA (reaches NewWorld)"},
+		},
+		{
+			name: "a test that reaches a builder through a helper is named",
+			pkg: e2ePackage{tests: map[string]string{"TestA": "a_test.go"},
+				refs: map[string][]string{"TestA": {"helper"}, "helper": {"SharedWorld"}}},
+			want: []string{"TestA (reaches SharedWorld)"},
+		},
+		{
+			name: "a scenario that builds worlds is not an offender",
+			pkg: e2ePackage{tests: map[string]string{"TestS": "s_test.go"}, scenarios: map[string][]string{"TestS": {"testStep"}},
+				refs: map[string][]string{"TestS": {"NewWorld"}}},
+		},
+		{
+			name: "a test that builds no world is not an offender",
+			pkg:  e2ePackage{tests: map[string]string{"TestA": "a_test.go"}, refs: map[string][]string{"TestA": {"helper"}, "helper": {"other"}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := worldBuildingOutsideScenarios(tt.pkg)
+
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -316,7 +316,7 @@ journal_of() { cat "$1/.fakegit/agent-repl-safe-test-runs/$2/journal" 2>/dev/nul
 
 # A live process that is never an ancestor of the hook: a childless sleep
 # this harness started, so nothing descends from it.
-sleep 600 </dev/null >/dev/null 2>&1 &
+sleep 600 >/dev/null 2>&1 &
 readonly NOT_AN_ANCESTOR=$!
 trap 'kill "$NOT_AN_ANCESTOR" 2>/dev/null; rm -rf "$TMP"' EXIT
 

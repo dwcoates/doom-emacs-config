@@ -32,6 +32,12 @@ import (
 // retiredHeading opens the document's section of retired steps.
 const retiredHeading = "## (f) Steps retired to an integration tier"
 
+// oneTierHeading opens the document's section of steps retired to ONE
+// system's tier: their replacements prove one half, so they count nothing
+// covered, and the section only pins them, so a replacement renamed or
+// deleted fails the check rather than going unnoticed.
+const oneTierHeading = "## (g) Steps retired to one system's tier"
+
 // retiredStep is one row of that section.
 type retiredStep struct {
 	// line is the row's line in the document, 1-based.
@@ -76,10 +82,16 @@ var retiredPinForm = regexp.MustCompile("`(-go|-vitest) ([^=` ]+)=([^`]+)`")
 // under retiredHeading, through matrixCells, as table (a)'s rows are read.
 func parseRetired(t *testing.T, lines []string) []retiredStep {
 	t.Helper()
+	return parseRetiredUnder(t, lines, retiredHeading)
+}
+
+// parseRetiredUnder reads the retired steps' table under HEADING.
+func parseRetiredUnder(t *testing.T, lines []string, heading string) []retiredStep {
+	t.Helper()
 	var out []retiredStep
 	in := false
 	for i, line := range lines {
-		if strings.HasPrefix(line, retiredHeading) {
+		if strings.HasPrefix(line, heading) {
 			in = true
 			continue
 		}
@@ -114,30 +126,7 @@ func checkRetired(t errorReporter, steps []retiredStep, canonical map[string]boo
 	out := map[string][]retiredPin{}
 	for _, s := range steps {
 		where := fmt.Sprintf("%s:%d", matrixPath, s.line)
-		ok := true
-		if !canonical[s.scenario] {
-			t.Errorf("%s: retired step %s names %q, which the mocked vendor does not register", where, s.step, s.scenario)
-			ok = false
-		}
-		if live(s.step) {
-			t.Errorf("%s: %s is still a step of its scenario, so it is not retired", where, s.step)
-			ok = false
-		}
-		tiers := map[string]bool{}
-		for _, p := range s.pins {
-			tier := p.tier()
-			if tier == "" {
-				t.Errorf("%s: %s names %s, which is in neither the shim's tier (-vitest agent-shim/claude/shim/...) nor the daemon's (-go daemon/...)", where, s.step, p)
-				ok = false
-				continue
-			}
-			if err := pinnedTestExists(moduleDir, p); err != nil {
-				t.Errorf("%s: %s names %s: %v", where, s.step, p, err)
-				ok = false
-				continue
-			}
-			tiers[tier] = true
-		}
+		tiers, ok := checkPins(t, s, canonical, live, moduleDir)
 		for _, tier := range []string{tierShim, tierDaemon} {
 			if !tiers[tier] {
 				t.Errorf("%s: %s names no replacement in the %s's tier: a retired step counts its scenario covered only when its pins prove both halves", where, s.step, tier)
@@ -149,6 +138,60 @@ func checkRetired(t errorReporter, steps []retiredStep, canonical map[string]boo
 		}
 	}
 	return out
+}
+
+// checkPins is what every retired step's row must be, in either section: its
+// scenario one the vendor registers, its step no longer live, and every pin
+// an existing test in the shim's tier or the daemon's. It fails the test for
+// each fault, and answers the tiers the existing pins sit in and whether the
+// row had no fault.
+func checkPins(t errorReporter, s retiredStep, canonical map[string]bool, live func(step string) bool, moduleDir string) (map[string]bool, bool) {
+	t.Helper()
+	where := fmt.Sprintf("%s:%d", matrixPath, s.line)
+	ok := true
+	if !canonical[s.scenario] {
+		t.Errorf("%s: retired step %s names %q, which the mocked vendor does not register", where, s.step, s.scenario)
+		ok = false
+	}
+	if live(s.step) {
+		t.Errorf("%s: %s is still a step of its scenario, so it is not retired", where, s.step)
+		ok = false
+	}
+	tiers := map[string]bool{}
+	for _, p := range s.pins {
+		tier := p.tier()
+		if tier == "" {
+			t.Errorf("%s: %s names %s, which is in neither the shim's tier (-vitest agent-shim/claude/shim/...) nor the daemon's (-go daemon/...)", where, s.step, p)
+			ok = false
+			continue
+		}
+		if err := pinnedTestExists(moduleDir, p); err != nil {
+			t.Errorf("%s: %s names %s: %v", where, s.step, p, err)
+			ok = false
+			continue
+		}
+		tiers[tier] = true
+	}
+	return tiers, ok
+}
+
+// checkOneTier fails the test for every row of the one-tier section that
+// is not one: a fault checkPins finds, a row pinning no replacement, or a
+// row whose pins prove both halves, which belongs in section (f), where it
+// counts its scenario covered.
+func checkOneTier(t errorReporter, steps []retiredStep, canonical map[string]bool, live func(step string) bool, moduleDir string) {
+	t.Helper()
+	for _, s := range steps {
+		where := fmt.Sprintf("%s:%d", matrixPath, s.line)
+		if len(s.pins) == 0 {
+			t.Errorf("%s: %s pins no replacement test", where, s.step)
+			continue
+		}
+		tiers, _ := checkPins(t, s, canonical, live, moduleDir)
+		if tiers[tierShim] && tiers[tierDaemon] {
+			t.Errorf("%s: %s's pins prove both halves; move its row to section (f), where it counts %s covered", where, s.step, s.scenario)
+		}
+	}
 }
 
 // errorReporter is the part of *testing.T checkRetired reports through.

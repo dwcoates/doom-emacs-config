@@ -488,7 +488,8 @@ Not loaded, or loaded with the rule that lets it go: held while working
 (or with no status yet), unloaded at the hold\='s end for a page within
 the hold after its last turn (`agent-repl-page-unload--hold-ends'), and
 unloaded on the switch away for everything else
-\(`agent-repl-page-unload--reason').  The daemon serves it on the rail\='s workspace memory hover
+\(`agent-repl-page-unload--reason').  The daemon serves it on the rail\='s
+workspace memory hover
 \(endpoint_report_page_residency.proto)."
   (if (not (agent-repl-webhost-has-page-p ws))
       (list :arm :not-loaded :value nil)

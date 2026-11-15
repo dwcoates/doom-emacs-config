@@ -979,7 +979,8 @@ main workspace a click on the name selects, nil when the daemon names none."
 
 (defun agent-repl-wire-decode-roster-open-row-children-fold (value)
   "Decode VALUE as `RosterOpenRowChildrenFold', a plist `(:fold ARM)'.
-`:collapsed' children have their tabs folded off the bar, `:expanded' are listed."
+`:collapsed' children have their tabs folded off the bar, `:expanded' are
+listed."
   (let ((object (agent-repl-wire--object "RosterOpenRowChildrenFold" value)))
     (agent-repl-wire--check-keys "RosterOpenRowChildrenFold" object '(expanded collapsed))
     (agent-repl-wire--decoded

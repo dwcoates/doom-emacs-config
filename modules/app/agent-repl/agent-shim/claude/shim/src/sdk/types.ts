@@ -24,7 +24,6 @@
 import type {
   AccountInfo,
   AgentInfo,
-  BackgroundTaskSummary,
   CanUseTool,
   EffortLevel,
   McpServerStatus,
@@ -33,36 +32,16 @@ import type {
   PermissionResult,
   PermissionUpdate,
   Query,
-  SDKAPIRetryMessage,
-  SDKAssistantMessage,
   SDKBackgroundTasksChangedMessage,
-  SDKCompactBoundaryMessage,
   SDKControlGetContextUsageResponse,
   SDKControlGetUsageResponse,
   SDKControlInitializeResponse,
   SDKControlInterruptResponse,
-  SDKConversationResetMessage,
-  SDKHookResponseMessage,
-  SDKHookStartedMessage,
-  SDKInformationalMessage,
-  SDKLocalCommandOutputMessage,
   SDKMessage,
-  SDKModelRefusalFallbackMessage,
-  SDKModelRefusalNoFallbackMessage,
-  SDKNotificationMessage,
-  SDKPartialAssistantMessage,
-  SDKPermissionDeniedMessage,
-  SDKRateLimitEvent,
-  SDKResultMessage,
-  SDKSessionStateChangedMessage,
-  SDKStatusMessage,
   SDKSystemMessage,
   SDKTaskNotificationMessage,
-  SDKTaskProgressMessage,
   SDKTaskStartedMessage,
   SDKTaskUpdatedMessage,
-  SDKThinkingTokensMessage,
-  SDKToolProgressMessage,
   SDKUserMessage,
   SDKUserMessageReplay,
   RewindFilesResult,
@@ -92,56 +71,14 @@ export type SdkUserMessage = SDKUserMessage;
  */
 export type SdkUserMessageReplay = SDKUserMessageReplay;
 
-/** `type: "assistant"` — one API response's content blocks, whole. */
-export type SdkAssistantMessage = SDKAssistantMessage;
-/** `type: "result"` — THE only source of a turn terminal. */
-export type SdkResultMessage = SDKResultMessage;
-/** `type: "stream_event"` — message_start / content_block_* / message_delta. */
-export type SdkPartialAssistantMessage = SDKPartialAssistantMessage;
-/** `type: "system", subtype: "init"` — the session's opening facts. */
-export type SdkSystemMessage = SDKSystemMessage;
 /** `type: "system", subtype: "task_started"` — DetachedWorkId meets its call. */
 export type SdkTaskStartedMessage = SDKTaskStartedMessage;
 /** `type: "system", subtype: "task_updated"`. */
 export type SdkTaskUpdatedMessage = SDKTaskUpdatedMessage;
 /** `type: "system", subtype: "task_notification"` — a task's terminal fact. */
 export type SdkTaskNotificationMessage = SDKTaskNotificationMessage;
-/** `type: "system", subtype: "task_progress"`. */
-export type SdkTaskProgressMessage = SDKTaskProgressMessage;
 /** `type: "system", subtype: "background_tasks_changed"` — the live set. */
 export type SdkBackgroundTasksChangedMessage = SDKBackgroundTasksChangedMessage;
-/** `type: "system", subtype: "status"`. */
-export type SdkStatusMessage = SDKStatusMessage;
-/** `type: "system", subtype: "compact_boundary"`. */
-export type SdkCompactBoundaryMessage = SDKCompactBoundaryMessage;
-/** `type: "system", subtype: "hook_started"`. */
-export type SdkHookStartedMessage = SDKHookStartedMessage;
-/** `type: "system", subtype: "hook_response"`. */
-export type SdkHookResponseMessage = SDKHookResponseMessage;
-/** `type: "system", subtype: "notification"`. */
-export type SdkNotificationMessage = SDKNotificationMessage;
-/** `type: "system", subtype: "permission_denied"` — the gate's own record. */
-export type SdkPermissionDeniedMessage = SDKPermissionDeniedMessage;
-/** `type: "system", subtype: "api_retry"`. */
-export type SdkApiRetryMessage = SDKAPIRetryMessage;
-/** `type: "system", subtype: "session_state_changed"`. */
-export type SdkSessionStateChangedMessage = SDKSessionStateChangedMessage;
-/** `type: "system", subtype: "thinking_tokens"`. */
-export type SdkThinkingTokensMessage = SDKThinkingTokensMessage;
-/** `type: "system", subtype: "rate_limit_event"`. */
-export type SdkRateLimitEvent = SDKRateLimitEvent;
-/** `type: "system", subtype: "informational"`. */
-export type SdkInformationalMessage = SDKInformationalMessage;
-/** `type: "system", subtype: "model_refusal_fallback"`. */
-export type SdkModelRefusalFallbackMessage = SDKModelRefusalFallbackMessage;
-/** `type: "system", subtype: "model_refusal_no_fallback"`. */
-export type SdkModelRefusalNoFallbackMessage = SDKModelRefusalNoFallbackMessage;
-/** `type: "system", subtype: "local_command_output"`. */
-export type SdkLocalCommandOutputMessage = SDKLocalCommandOutputMessage;
-/** `type: "system", subtype: "tool_progress"` — the nine kinds' progress beat. */
-export type SdkToolProgressMessage = SDKToolProgressMessage;
-/** `type: "system", subtype: "conversation_reset"` — the identity rotation. */
-export type SdkConversationResetMessage = SDKConversationResetMessage;
 
 // ---------------------------------------------------------------------------
 // The permission boundary
@@ -200,8 +137,6 @@ export type SlashCommandLike = SlashCommand;
 export type AgentInfoLike = AgentInfo;
 /** `query.mcpServerStatus()` — the source of SessionUpdate.mcp_server. */
 export type McpServerStatusLike = McpServerStatus;
-/** One entry of the background-task table `task_started` and friends describe. */
-export type BackgroundTaskSummaryLike = BackgroundTaskSummary;
 
 /**
  * `query.interrupt()`'s receipt.

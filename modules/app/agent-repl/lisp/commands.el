@@ -86,6 +86,8 @@
                   (ref dispatched-at &optional lander))
 (declare-function agent-repl-host-editor-switch-count "host" ())
 (declare-function agent-repl-verbs--land-on-tab "agent-repl-verbs" (ref why ws))
+(declare-function agent-repl-verb-set-hidden "verbs" (ws hidden))
+(declare-function agent-repl--completing-read-under-ivy "core" (alist entry prompt table))
 (declare-function agent-repl-verb-open "agent-repl-verbs" (ref))
 (declare-function agent-repl-verb-swap "agent-repl-verbs" (ws target))
 (declare-function agent-repl-verb-move "agent-repl-verbs" (ws target))
@@ -613,6 +615,7 @@ touched and the agent is not contacted."
 (defvar recentf-list)
 (defvar agent-repl-ws-state-icon-default)
 (defvar agent-repl-status-dot-glyph)
+(defvar agent-repl-status-color-table)
 
 (defun agent-repl--record-last-file-visit ()
   "Cache the visited file as `:last-file' on the current workspace.

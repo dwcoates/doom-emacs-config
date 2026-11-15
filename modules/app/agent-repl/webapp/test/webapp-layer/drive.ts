@@ -192,6 +192,8 @@ export async function type(
  * the turn's own rows are drawn, and the unary answers long before them. It
  * bounds a composer that is CLOSED (the footer reading merging, closing or
  * disconnected), which is a fault to name rather than a press to drop.
+ *
+ * @alias the same number as TURN_BUDGET_MS, under the name of what it bounds.
  */
 export const COMPOSER_READY_BUDGET_MS = TURN_BUDGET_MS;
 
@@ -333,6 +335,9 @@ export function rows(app: MountedApp, kind: string, unit?: string): HTMLElement[
  * counter that a failed test left one ahead makes every LATER test in the
  * file fail for a reason that is not its own, which is how one broken
  * assertion became "21 failed" the first time this layer ran.
+ *
+ * @public the layer's turn-driving API for its area tests, whose drive
+ * calls the scenario matrix's scan counts (e2e/kit/scans/scenariomatrix_test.go).
  */
 export async function driveTurn(
   app: MountedApp,
@@ -408,7 +413,12 @@ export async function driveScenario(
   return rows(app, kind, unit);
 }
 
-/** Drive a scenario and answer the LAST row of the named kind it drew. */
+/**
+ * Drive a scenario and answer the LAST row of the named kind it drew.
+ *
+ * @public the layer's turn-driving API for its area tests, whose drive
+ * calls the scenario matrix's scan counts (e2e/kit/scans/scenariomatrix_test.go).
+ */
 export async function driveScenarioRow(
   app: MountedApp,
   scenario: string,
@@ -421,7 +431,12 @@ export async function driveScenarioRow(
   return last;
 }
 
-/** Wait for the turn to be terminal — its `turn_ended` row is drawn. */
+/**
+ * Wait for the turn to be terminal — its `turn_ended` row is drawn.
+ *
+ * @public the layer's turn-driving API for its area tests, whose drive
+ * calls the scenario matrix's scan counts (e2e/kit/scans/scenariomatrix_test.go).
+ */
 export async function awaitTurnEnded(app: MountedApp, expected = 1): Promise<void> {
   await awaitDrawn(app, `${expected} turn_ended row(s)`, () => rows(app, "turnEnded").length >= expected);
 }
@@ -431,6 +446,9 @@ export async function awaitTurnEnded(app: MountedApp, expected = 1): Promise<voi
  * character it holds. A live response types its text out at the daemon's
  * reveal pace even once it has settled (src/reveal-pace.ts), so a test that
  * reads a settled response's body waits for the reveal, never for a duration.
+ *
+ * @public the layer's turn-driving API for its area tests, whose drive
+ * calls the scenario matrix's scan counts (e2e/kit/scans/scenariomatrix_test.go).
  */
 export async function awaitTypedOut(app: MountedApp, row: HTMLElement): Promise<void> {
   await awaitDrawn(app, `the full text of response row ${rowID(row)}`, () => {
@@ -443,6 +461,9 @@ export async function awaitTypedOut(app: MountedApp, row: HTMLElement): Promise<
  * Wait until ROW's card title has typed out whole: a row that arrived live
  * types its title (src/feed/title-reveal.ts), and a part-shown title carries
  * its shown length on `TITLE_REVEALED_ATTRIBUTE` until it is shown whole.
+ *
+ * @public the layer's turn-driving API for its area tests, whose drive
+ * calls the scenario matrix's scan counts (e2e/kit/scans/scenariomatrix_test.go).
  */
 export async function awaitTitleTypedOut(app: MountedApp, row: HTMLElement): Promise<void> {
   await awaitDrawn(app, `the whole title of row ${rowID(row)}`, () =>

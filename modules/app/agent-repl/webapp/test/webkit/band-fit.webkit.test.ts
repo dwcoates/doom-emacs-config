@@ -84,6 +84,8 @@ interface Viewport {
   whole: number;
   /** Lines the viewport cuts through. */
   cut: number;
+  /** The height of its first line, in px; 0 when it draws none. */
+  line: number;
   /** Whether a repository group's header is shown without the line under it. */
   danglingHead: boolean;
   scrolls: boolean;
@@ -117,8 +119,10 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
+      let lineHeight = 0;
       for (const line of region.querySelectorAll(".row, .merged-group.folded > .merged-group-head")) {
         if (line.getBoundingClientRect().height === 0) continue;
+        if (lineHeight === 0) lineHeight = line.getBoundingClientRect().height;
         const r = line.getBoundingClientRect();
         if (r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5) whole += 1;
         else if (r.top < box.bottom - 0.5 && r.bottom > box.top + 0.5) cut += 1;
@@ -129,7 +133,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
         const next = head.parentElement?.querySelector(".row")?.getBoundingClientRect();
         if (h.top >= box.top - 0.5 && h.top < box.bottom - 0.5 && next !== undefined && next.bottom > box.bottom + 0.5) danglingHead = true;
       }
-      return { whole, cut, danglingHead, scrolls: region.scrollHeight > region.clientHeight };
+      return { whole, cut, line: lineHeight, danglingHead, scrolls: region.scrollHeight > region.clientHeight };
     };
     const region = (selector: string): HTMLElement => document.querySelector(selector) as HTMLElement;
     return {
@@ -332,7 +336,16 @@ describe("the band fit in WebKit", () => {
 
   it("grows Hidden Workspaces, not older merges, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, today: 0, expanded: true }));
-    expect([got.hidden.whole > 5, got.merged.whole, got.railScrolls]).toEqual([true, 5, false]);
+    // Older merges past the open group's five rows take only the room left
+    // too short for one more Hidden line: a merged line is drawn shorter than
+    // a Hidden one, so that room may still hold one.
+    const olderPastFloor = got.merged.whole - 5;
+    expect([got.hidden.whole > 5, olderPastFloor >= 0, olderPastFloor * got.merged.line < got.hidden.line, got.railScrolls]).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
   });
 
   it("grows older merges into the room a whole Open section and Hidden Workspaces leave", async () => {

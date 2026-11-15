@@ -400,7 +400,7 @@ func addProgramGraphs(d Deps, set *InputSet, s roster.Suite, names []string) err
 // its batch, confined as a whole: its inputs are every member's import graph,
 // with its config's and the config's setup files', the package's manifests,
 // and the runner's reporter, so a member reading what no member declares
-// fails loudly. The typecheck is one unit over the package's
+// fails loudly. The typecheck and knip are each one unit over the package's
 // tree and every file's graph; the integration bundle is infra.
 
 // vitestManifests are the package files every vitest unit reads when present.
@@ -439,18 +439,19 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		b.own(batch, sp.Group).Members = append([]string(nil), sp.Items...)
 		configOf[batch] = config
 	}
-	typecheck := ""
+	var checks []string
 	for _, a := range u.Atomic {
 		switch a.ID {
-		case s.Name + ":typecheck":
-			typecheck = "typecheck"
-			b.own(typecheck, a.ID)
+		case s.Name + ":typecheck", s.Name + ":knip":
+			check := strings.TrimPrefix(a.ID, s.Name+":")
+			checks = append(checks, check)
+			b.own(check, a.ID)
 		case s.Name + ":integration-build":
 			b.infra = append(b.infra, a.ID)
 		case s.Name + ":coverage":
 			b.own("coverage", a.ID).Never = "a coverage report is rebuilt by every coverage run, which reuses nothing"
 		default:
-			return nil, nil, fmt.Errorf("reuse: %s's unit %s is no file's, typecheck's or build's", s.Name, a.ID)
+			return nil, nil, fmt.Errorf("reuse: %s's unit %s is no file's, typecheck's, knip's or build's", s.Name, a.ID)
 		}
 	}
 	graph := NewImportGraph(d.Repo)
@@ -512,16 +513,20 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		unit.Desc = batchDesc(s, name, unit.Members, fmt.Sprintf("config=%q", config))
 		all.AddAll(set)
 	}
-	if typecheck != "" && b.units[typecheck].Never == "" {
-		// tsc reads the package's whole tree and every file it imports.
-		set, err := unitSet(d, s, typecheck, runner)
+	for _, check := range checks {
+		if b.units[check].Never != "" {
+			continue
+		}
+		// tsc and knip each read the package's whole tree and every file it
+		// imports.
+		set, err := unitSet(d, s, check, runner)
 		if err != nil {
 			return nil, nil, err
 		}
 		set.AddAll(env)
 		set.AddAll(all)
-		b.units[typecheck].Set = set
-		b.units[typecheck].Desc = unitDesc(s, typecheck)
+		b.units[check].Set = set
+		b.units[check].Desc = unitDesc(s, check)
 	}
 	return b.list(), b.infra, nil
 }
