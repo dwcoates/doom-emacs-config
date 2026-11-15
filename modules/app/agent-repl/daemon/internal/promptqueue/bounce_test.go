@@ -2131,6 +2131,40 @@ func TestATurnEndUnderAMergesLeaseDeliversTheMergesBriefAndLeavesTheBounceRegist
 	}
 }
 
+// A HANDOVER NEVER WAITS BEHIND A MERGE (2026-11-15, 0.444.10's rollout
+// never settled): a handover's transfer joined a replacement held behind a
+// merge's lease on a free workspace, and the whole bounce stayed held while
+// the handover kept the merge suspended under that lease.
+func TestAQuietMoveBesideAReplacementHeldBehindAMergeRunsAndCarriesIt(t *testing.T) {
+	// Arrange: a free workspace whose replacement is held behind a merge.
+	h := newHarness(t)
+	restart, transfer := newGate(), newGate()
+	h.lease(wsm.HolderMerge, wsm.PolicyHold)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, restart.mergeWaitingReplacement()); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act
+	decision, err := h.q.RequestBounce(context.Background(), theWorkspace, transfer.quietMoving("handover_transfer"))
+
+	// Assert: the move runs now, carrying the replacement it overtook.
+	if err != nil || !decision.Now {
+		t.Fatalf("RequestBounce = (%+v, %v), want the move started at once", decision, err)
+	}
+	transfer.awaitStart(t)
+	_, carried, err := h.q.SealMove(context.Background(), theWorkspace)
+	if err != nil || len(carried) != 1 || carried[0].Reason != "build_stale" {
+		t.Fatalf("SealMove = (%+v, %v), want the held replacement carried", carried, err)
+	}
+	transfer.finish(h, nil)
+	if restart.runs.Load() != 0 {
+		t.Fatalf("the carried replacement ran on the daemon the workspace left")
+	}
+	if !logged(h.log.Records(), "info", opBounce, "a merge's lease holds the workspace; the dispatch-quiet move runs now and carries the replacement waiting behind the merge to the daemon it moves to") {
+		t.Fatalf("records = %+v, want the overtaking move recorded at INFO", h.log.Records())
+	}
+}
+
 func TestABounceHeldBehindAMergesLeaseIsTakenWhenTheLeaseIsReleased(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
