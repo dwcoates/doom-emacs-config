@@ -1463,6 +1463,9 @@ type fakeGit struct {
 	// cleanSeq answers IsClean in order ahead of every other answer: a
 	// worktree a writer dirtied between two reads.
 	cleanSeq []bool
+	// leftStanding is a rebase a cut run left standing, which stands until it
+	// is aborted.
+	leftStanding bool
 	// onTip answers CommitsBetween(_, _, "HEAD"): what a standing rebase has
 	// replayed onto its tip.
 	onTip []gitclient.Commit
@@ -1973,6 +1976,7 @@ func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.leftStanding = false
 	g.rebaseCommands = append(g.rebaseCommands, "abort")
 	return nil
 }
@@ -2011,7 +2015,7 @@ func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {
 	g.record("rebase_in_progress")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.standing, nil
+	return g.standing || g.leftStanding, nil
 }
 
 func (g *fakeGit) AddWorktree(_ context.Context, _, worktreeDir, branch string) error {
@@ -2941,8 +2945,10 @@ type fakeFreeness struct {
 	busyWS   map[ids.WorkspaceID]bool
 	blockers []string
 	awaitErr error
-	waiting  chan struct{}
-	release  chan struct{}
+	// onFree, when set, is called on every Free read.
+	onFree  func(ws ids.WorkspaceID)
+	waiting chan struct{}
+	release chan struct{}
 
 	mu      sync.Mutex
 	awaited int
@@ -2950,8 +2956,13 @@ type fakeFreeness struct {
 
 func (f *fakeFreeness) Free(ws ids.WorkspaceID) bool {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return !f.busy && !f.busyWS[ws]
+	onFree := f.onFree
+	free := !f.busy && !f.busyWS[ws]
+	f.mu.Unlock()
+	if onFree != nil {
+		onFree(ws)
+	}
+	return free
 }
 
 // Blockers answers the scripted blockers while busy, none once free.

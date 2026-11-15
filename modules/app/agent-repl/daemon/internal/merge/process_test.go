@@ -2818,3 +2818,27 @@ func TestPromptUntilCommittedPromptsOnlyWhileDirtyAndWithinTheBudget(t *testing.
 		})
 	}
 }
+
+func TestAFreshRebaseClearsARebaseACutRunLeftStanding(t *testing.T) {
+	// Arrange: a cut background rebase left its rebase standing.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.leftStanding = true
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	h.git.mu.Lock()
+	commands := append([]string(nil), h.git.rebaseCommands...)
+	h.git.mu.Unlock()
+	if len(commands) < 2 || commands[0] != "abort" || !strings.HasPrefix(commands[1], "start ") {
+		t.Fatalf("rebase commands = %v, want the leftover aborted before the rebase starts", commands)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.rebase", text: "a rebase a cut run left standing for its turn was aborted"}) {
+		t.Fatal("the cleared leftover was not recorded")
+	}
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", facts)
+	}
+}

@@ -1409,6 +1409,17 @@ like an improvement still needs that conversation. Code:
   to `MaxCommitPrompts` times, and fails the merge only if the worktree is
   still dirty after the last prompt. This covers fixing turns in line, out of
   line and resumed after a restart, since every one ends in `fixSettled`.
+- **A rebase never fails on uncommitted changes it meets.** When the
+  worktree is dirty at the rebase's clean check, or git refuses to start the
+  rebase over changes (`gitclient.ErrDirtyWorktree`), the merge keeps its
+  place and prompts the workspace to commit (`prompts/merge-rebase-commit.md`,
+  `run.untilCommitted`), up to `MaxCommitPrompts` times for the whole rebase,
+  then rebases afresh; a git-only waiting rebase prompts nothing and keeps its
+  base. Nothing but the merge writes the tree while it holds it: a background
+  rebase reads its workspace's freeness only once it holds the lease, and
+  only in the daemon that serves the workspace (`run.excludedUnderLease`); a
+  handover's hold never takes back a workspace its transfer already handed on
+  (`lockMove`, `errAlreadyHandedOn`).
 - **After remediation, the selected suites run again**, selected afresh from
   the branch's whole diff, fixing commits included.
 - **Four fixing attempts, five consecutive conflict failures, and

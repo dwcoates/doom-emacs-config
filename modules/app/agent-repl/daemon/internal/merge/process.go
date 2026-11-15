@@ -328,6 +328,9 @@ func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, firs
 func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.rebase"
 	dir, branch := r.subject.dir, r.subject.branch
+	if err := r.clearLeftoverRebase(ctx); err != nil {
+		return nil, err
+	}
 	clean, err := r.git.IsClean(ctx, dir)
 	if err != nil {
 		return nil, fmt.Errorf("merge: reading whether %s is clean: %w", dir, err)

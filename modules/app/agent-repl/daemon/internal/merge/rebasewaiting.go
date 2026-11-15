@@ -34,7 +34,9 @@ import (
 // A MEMBER THAT IS BUSY IS SKIPPED, never waited for (owner ruling): a turn in
 // flight, live detached work, a worktree with uncommitted changes or another
 // branch checked out is the requester's own business, so that member keeps
-// its base this round, said at INFO, and catches up at a later landing.
+// its base this round, said at INFO, and catches up at a later landing. Its
+// freeness is read only once its lease is held (excludedUnderLease), so no
+// turn starts between the read and the rebase.
 //
 // THE REBASE HOLDS THE MERGE LEASE ONLY WHILE IT RUNS. A waiting sync merge's
 // requester stays usable (no hold from enqueue); during its rebase the lease
@@ -126,11 +128,6 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 	ws := entry.Workspace
 	log := o.log(ctx, ws)
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
-	if !o.deps.Freeness.Free(ws) {
-		fields["blockers"] = o.deps.Freeness.Blockers(ws)
-		log.Info(op, "a waiting merge's workspace is busy; it keeps its base this round and catches up at a later landing", fields)
-		return
-	}
 	queuedMS, err := enqueuedMS(entry)
 	if err != nil {
 		log.Error(op, "could not read when a waiting merge was queued; it keeps its base this round", withField(fields, "error", err.Error()))
@@ -162,7 +159,35 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 	}
 	r.lease = lease
 	o.deps.Queue.OnLeaseChanged(ws)
+	if why := r.excludedUnderLease(); why != "" {
+		fields["why"] = why
+		log.Info(op, "a waiting merge's workspace is busy; it keeps its base this round and catches up at a later landing", fields)
+		r.giveBack(ctx)
+		return
+	}
 	r.settleBackground(runCtx, r.rebaseInBackground(runCtx, fields))
+}
+
+// excludedUnderLease answers why nothing of a background run may touch its
+// worktree, or "" when the run may: it is read once the run holds its
+// workspace's merge lease, so no prompt can start a turn after the read.
+//
+// NO WRITER BUT THE MERGE WHILE IT HOLDS THE TREE. The worktree's writers are
+// its session's turn and detached work, which freeness answers for -- but
+// only in the daemon that serves the workspace: a session handed to a
+// successor is no session here, and reads free while it still writes
+// (2026-11-15: an exiting daemon rebased a worktree whose conflict turn was
+// still regenerating protobuf bindings in it, and git refused the rebase over
+// the turn's changes). So a workspace this daemon does not serve is never
+// rebased here, and one that is busy waits for a later round.
+func (r *run) excludedUnderLease() string {
+	if !r.o.deps.Standing.ServesWorkspace(r.ws) {
+		return "this daemon no longer serves the workspace"
+	}
+	if !r.o.deps.Freeness.Free(r.ws) {
+		return fmt.Sprintf("the workspace is busy: %v", r.o.deps.Freeness.Blockers(r.ws))
+	}
+	return ""
 }
 
 // rebaseInBackground is a waiting member's rebase proper.
@@ -176,6 +201,9 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	r.mu.Lock()
 	r.subject = subject
 	r.mu.Unlock()
+	if err := r.clearLeftoverRebase(ctx); err != nil {
+		return backgroundEnd{err: err}
+	}
 	if skip := r.backgroundSkip(ctx); skip != "" {
 		log.Info(op, "a waiting merge's worktree is not ready to rebase; it keeps its base this round", withField(fields, "why", skip))
 		return backgroundEnd{}
@@ -336,11 +364,6 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 		log.Error(op, "could not read the entry of the merge holding the resolving-conflicts slot; it stays out of line until the next boot", withField(fields, "error", err.Error()))
 		return
 	}
-	if !o.deps.Freeness.Free(ws) {
-		fields["blockers"] = o.deps.Freeness.Blockers(ws)
-		giveUp("the merge holding the resolving-conflicts slot has a busy workspace; it returns to the line and meets the conflict at the head")
-		return
-	}
 	queuedMS, err := enqueuedMS(entry)
 	if err != nil {
 		log.Error(op, "could not read when the merge holding the resolving-conflicts slot was queued; it stays out of line until the next boot", withField(fields, "error", err.Error()))
@@ -370,6 +393,19 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 	}
 	r.lease = lease
 	o.deps.Queue.OnLeaseChanged(ws)
+	if !o.deps.Standing.ServesWorkspace(ws) {
+		// THE SLOT IS THE SERVING DAEMON'S: the workspace's merges went with
+		// it, and its take-back there arms the slot again.
+		r.giveBack(settle)
+		log.Info(op, "the merge holding the resolving-conflicts slot belongs to a workspace this daemon no longer serves; the daemon that serves it takes up the slot", fields)
+		return
+	}
+	if why := r.excludedUnderLease(); why != "" {
+		fields["why"] = why
+		r.giveBack(settle)
+		giveUp("the merge holding the resolving-conflicts slot has a busy workspace; it returns to the line and meets the conflict at the head")
+		return
+	}
 	r.settleBackground(runCtx, r.rebaseInBackground(runCtx, fields))
 }
 
@@ -388,6 +424,15 @@ func (r *run) standDownBackground(ctx context.Context) {
 		switch {
 		case err != nil:
 			log.Error(op, "could not read whether the cut rebase of a waiting merge stands; it is left as git left it", withField(fields, "error", err.Error()))
+		case standing && !r.o.deps.Freeness.Free(r.ws):
+			// THE MERGE NEVER ACTS ON A TREE ITS OWN TURN STILL WRITES: the
+			// conflict turn the rebase prompted runs on in the session
+			// (2026-11-15: an abort here reverted a worktree under the turn
+			// regenerating bindings in it). The rebase is left standing,
+			// and the next run clears it once it holds the free tree
+			// (clearLeftoverRebase).
+			log.Info(op, "the daemon's exit cut a waiting merge's rebase while its session's turn still works in the worktree; the rebase is left standing for the next run to clear once the turn ended",
+				withField(fields, "blockers", r.o.deps.Freeness.Blockers(r.ws)))
 		case standing:
 			if err := r.o.deps.Git.AbortRebase(ctx, dir); err != nil {
 				log.Error(op, "could not abort the cut rebase of a waiting merge; it is left as git left it", withField(fields, "error", err.Error()))
@@ -397,6 +442,29 @@ func (r *run) standDownBackground(ctx context.Context) {
 		}
 	}
 	r.giveBack(ctx)
+}
+
+// clearLeftoverRebase aborts a rebase a cut background run left standing in
+// the worktree for its turn (standDownBackground). It is called only by a run
+// that holds the workspace's lease with the workspace free -- no turn and no
+// detached work, so no writer -- and before the run reads or rebases the
+// tree: a fresh rebase never starts over another's.
+func (r *run) clearLeftoverRebase(ctx context.Context) error {
+	const op = "daemon.merge.rebase"
+	dir := r.subject.dir
+	standing, err := r.git.RebaseInProgress(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("merge: reading whether a rebase stands in %s: %w", dir, err)
+	}
+	if !standing {
+		return nil
+	}
+	if err := r.git.AbortRebase(ctx, dir); err != nil {
+		return fmt.Errorf("merge: aborting the rebase a cut run left standing in %s: %w", dir, err)
+	}
+	r.o.log(ctx, r.ws).Info(op, "a rebase a cut run left standing for its turn was aborted now that the workspace is free; the branch is back at its base", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dir})
+	return nil
 }
 
 // registerBackground registers a waiting member's rebase by its workspace,
