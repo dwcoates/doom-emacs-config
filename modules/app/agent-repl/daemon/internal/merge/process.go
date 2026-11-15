@@ -1036,46 +1036,93 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 // times. It answers nil once the worktree is clean, and the failed outcome
 // when it is still dirty after the last prompt.
 func (r *run) requireCommitted(ctx context.Context, round tabRound, n, attempt int, targetBranch string) (*outcome, error) {
-	const op = "daemon.merge.fixes"
+	clean, err := r.promptUntilCommitted(ctx, commitAsk{
+		op:      "daemon.merge.fixes",
+		brief:   BriefFixCommit,
+		reading: "after the fixing turn",
+		origin:  fixOrigin,
+		tab:     TabFixes,
+		fields:  dlog.Context{"attempt": attempt},
+		vars: map[string]string{
+			"source_branch": r.subject.branch,
+			"worktree_dir":  r.subject.dir,
+			"target_branch": r.briefTarget(targetBranch),
+		},
+		prompted:  "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place",
+		committed: "the fixing attempt's changes are committed; the merge goes on",
+	}, new(int))
+	if err != nil || clean {
+		return nil, err
+	}
+	why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", r.subject.dir, MaxCommitPrompts)
+	return r.fixGaveUp(ctx, round, n, attempt, why), nil
+}
+
+// commitAsk is one step's prompt to commit what its worktree holds: the
+// record operation, the brief and its values beyond the prompt count, the
+// turn's origin, the progress tab the turn is recorded in ("" records none),
+// the record's own fields, when its clean check reads (for its error), and
+// the messages it is prompted and committed with.
+type commitAsk struct {
+	op, brief, reading  string
+	vars                map[string]string
+	origin              conversationv1.PromptOrigin
+	tab                 string
+	fields              dlog.Context
+	prompted, committed string
+}
+
+// promptUntilCommitted is THE ONE commit prompt of a merge that met
+// uncommitted changes in the worktree it works in: while the worktree is not
+// clean, the workspace's session is prompted to commit (ASK's brief) while
+// the merge keeps its place, until USED reaches MaxCommitPrompts. It answers
+// true once the worktree is clean, false when it is still dirty after the
+// last prompt.
+func (r *run) promptUntilCommitted(ctx context.Context, ask commitAsk, used *int) (bool, error) {
 	dir := r.subject.dir
-	for prompt := 1; ; prompt++ {
+	prompted := false
+	for {
 		clean, err := r.git.IsClean(ctx, dir)
 		if err != nil {
-			return nil, fmt.Errorf("merge: reading whether %s is clean after the fixing turn: %w", dir, err)
+			return false, fmt.Errorf("merge: reading whether %s is clean %s: %w", dir, ask.reading, err)
 		}
-		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "attempt": attempt, "worktree": dir}
+		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "worktree": dir}
+		for k, v := range ask.fields {
+			fields[k] = v
+		}
 		if clean {
-			if prompt > 1 {
-				fields["prompts"] = prompt - 1
-				r.o.log(ctx, r.ws).Info(op, "the fixing attempt's changes are committed; the merge goes on", fields)
+			if prompted {
+				fields["prompts"] = *used
+				r.o.log(ctx, r.ws).Info(ask.op, ask.committed, fields)
 			}
-			return nil, nil
+			return true, nil
 		}
-		if prompt > MaxCommitPrompts {
-			why := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", dir, MaxCommitPrompts)
-			return r.fixGaveUp(ctx, round, n, attempt, why), nil
+		if *used >= MaxCommitPrompts {
+			return false, nil
 		}
-		fields["prompt"], fields["of"] = prompt, MaxCommitPrompts
-		r.o.log(ctx, r.ws).Info(op, "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place", fields)
-		text, err := r.o.deps.Briefs(BriefFixCommit, map[string]string{
-			"source_branch": r.subject.branch,
-			"worktree_dir":  dir,
-			"target_branch": r.briefTarget(targetBranch),
-			"prompt":        fmt.Sprintf("%d", prompt),
-			"max_prompts":   fmt.Sprintf("%d", MaxCommitPrompts),
-		})
+		*used++
+		prompted = true
+		fields["prompt"], fields["of"] = *used, MaxCommitPrompts
+		r.o.log(ctx, r.ws).Info(ask.op, ask.prompted, fields)
+		vars := map[string]string{"prompt": fmt.Sprintf("%d", *used), "max_prompts": fmt.Sprintf("%d", MaxCommitPrompts)}
+		for k, v := range ask.vars {
+			vars[k] = v
+		}
+		text, err := r.o.deps.Briefs(ask.brief, vars)
 		if err != nil {
-			return nil, fmt.Errorf("merge: composing the commit brief: %w", err)
+			return false, fmt.Errorf("merge: composing the commit brief: %w", err)
 		}
 		turn := wsm.NewTurnID()
-		if err := r.checkpoint(ctx, TabFixes, func(d *progressDoc) { d.Turn = string(turn) }); err != nil {
-			return nil, err
+		if ask.tab != "" {
+			if err := r.checkpoint(ctx, ask.tab, func(d *progressDoc) { d.Turn = string(turn) }); err != nil {
+				return false, err
+			}
 		}
-		if _, err := r.o.submitThen(ctx, r.ws, turn, text, fixOrigin, nil); err != nil {
-			return nil, err
+		if _, err := r.o.submitThen(ctx, r.ws, turn, text, ask.origin, nil); err != nil {
+			return false, err
 		}
 		if err := stillWanted(ctx); err != nil {
-			return nil, err
+			return false, err
 		}
 	}
 }
