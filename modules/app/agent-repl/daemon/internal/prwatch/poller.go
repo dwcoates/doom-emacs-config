@@ -194,14 +194,9 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) map[wsm.PullRequ
 		w.deps.Log.Error(opPoll, "could not read the pull-request subscriptions; nothing is polled this tick", dlog.WithCause(nil, err))
 		return followed
 	}
-	byPR := map[wsm.PullRequestKey][]wsm.PullRequestSubscription{}
-	var order []wsm.PullRequestKey
-	for _, sub := range subs {
-		if _, seen := byPR[sub.PullRequest]; !seen {
-			order = append(order, sub.PullRequest)
-		}
-		byPR[sub.PullRequest] = append(byPR[sub.PullRequest], sub)
-		followed[sub.PullRequest] = true
+	byPR, order := grouped(subs, func(s wsm.PullRequestSubscription) wsm.PullRequestKey { return s.PullRequest }, itself[wsm.PullRequestSubscription])
+	for _, pr := range order {
+		followed[pr] = true
 	}
 	var read, queued []wsm.PullRequestKey
 	for _, pr := range order {
@@ -303,11 +298,7 @@ func (w *Watcher) recordState(ctx context.Context, pr wsm.PullRequestKey, state 
 // of SUBS waits on one. A SPENT RATE LIMIT IS WAITED OUT: no read is made
 // before GitHub resets it, since every one would be refused.
 func (w *Watcher) rateLimitWait(subs []wsm.PullRequestSubscription) (time.Time, bool) {
-	failing := make([]*wsm.PullRequestFailure, len(subs))
-	for i, sub := range subs {
-		failing[i] = sub.Failing
-	}
-	return w.rateLimitWaitOf(failing)
+	return w.rateLimitWaitOf(failingOf(subs, func(s wsm.PullRequestSubscription) *wsm.PullRequestFailure { return s.Failing }))
 }
 
 // rateLimitWaitOf is rateLimitWait over the failing stretches of any GitHub
@@ -373,15 +364,8 @@ func (f queueFacts) ask(pr wsm.PullRequestKey) *queueAsk { return f[pr] }
 // repository. A query that fails is every one of its pull requests' failure.
 func (w *Watcher) readQueueFacts(ctx context.Context, prs []wsm.PullRequestKey) queueFacts {
 	out := queueFacts{}
-	byRepo := map[repository][]uint32{}
-	var order []repository
-	for _, pr := range prs {
-		repo := repository{pr.Owner, pr.Repo}
-		if _, seen := byRepo[repo]; !seen {
-			order = append(order, repo)
-		}
-		byRepo[repo] = append(byRepo[repo], pr.Number)
-	}
+	byRepo, order := grouped(prs, func(pr wsm.PullRequestKey) repository { return repository{pr.Owner, pr.Repo} },
+		func(pr wsm.PullRequestKey) uint32 { return pr.Number })
 	for _, repo := range order {
 		facts, failures, err := readPRQueues(ctx, w.deps.GH, repo, byRepo[repo])
 		for _, n := range byRepo[repo] {

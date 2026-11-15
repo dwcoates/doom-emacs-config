@@ -154,14 +154,7 @@ func (w *Watcher) pollRuns(ctx context.Context) {
 		w.deps.Log.Error(opRunPoll, "could not read the workflow-run subscriptions; no run is polled this tick", dlog.WithCause(nil, err))
 		return
 	}
-	byRun := map[wsm.GithubWorkflowRunKey][]wsm.GithubWorkflowRunSubscription{}
-	var order []wsm.GithubWorkflowRunKey
-	for _, sub := range subs {
-		if _, seen := byRun[sub.Run]; !seen {
-			order = append(order, sub.Run)
-		}
-		byRun[sub.Run] = append(byRun[sub.Run], sub)
-	}
+	byRun, order := grouped(subs, func(s wsm.GithubWorkflowRunSubscription) wsm.GithubWorkflowRunKey { return s.Run }, itself[wsm.GithubWorkflowRunSubscription])
 	for _, key := range order {
 		if ctx.Err() != nil {
 			return
@@ -173,11 +166,10 @@ func (w *Watcher) pollRuns(ctx context.Context) {
 // pollRun reads KEY's run and advances SUBS.
 func (w *Watcher) pollRun(ctx context.Context, key wsm.GithubWorkflowRunKey, subs []wsm.GithubWorkflowRunSubscription) {
 	fields := dlog.Context{"workflow_run": key.String(), "subscribers": len(subs)}
-	failing := make([]*wsm.PullRequestFailure, len(subs))
+	failing := failingOf(subs, func(s wsm.GithubWorkflowRunSubscription) *wsm.PullRequestFailure { return s.Failing })
 	recovered := false
-	for i, sub := range subs {
-		failing[i] = sub.Failing
-		recovered = recovered || sub.Failing != nil
+	for _, f := range failing {
+		recovered = recovered || f != nil
 	}
 	if resets, waiting := w.rateLimitWaitOf(failing); waiting {
 		w.deps.Log.Debug(opRunPoll, "the rate limit is spent; the run is read once it resets", dlog.Merge(fields, dlog.Context{"resets_at": resets}))

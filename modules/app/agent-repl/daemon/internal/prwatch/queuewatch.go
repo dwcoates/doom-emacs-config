@@ -167,14 +167,7 @@ func (w *Watcher) pollQueues(ctx context.Context, queues *queueReads) {
 		w.deps.Log.Error(opQueuePoll, "could not read the merge-queue subscriptions; no queue is polled this tick", dlog.WithCause(nil, err))
 		return
 	}
-	byQueue := map[wsm.GithubMergeQueueKey][]wsm.GithubMergeQueueSubscription{}
-	var order []wsm.GithubMergeQueueKey
-	for _, sub := range subs {
-		if _, seen := byQueue[sub.Queue]; !seen {
-			order = append(order, sub.Queue)
-		}
-		byQueue[sub.Queue] = append(byQueue[sub.Queue], sub)
-	}
+	byQueue, order := grouped(subs, func(s wsm.GithubMergeQueueSubscription) wsm.GithubMergeQueueKey { return s.Queue }, itself[wsm.GithubMergeQueueSubscription])
 	for _, key := range order {
 		if ctx.Err() != nil {
 			return
@@ -186,11 +179,7 @@ func (w *Watcher) pollQueues(ctx context.Context, queues *queueReads) {
 // pollQueue reads KEY's queue and advances SUBS.
 func (w *Watcher) pollQueue(ctx context.Context, key wsm.GithubMergeQueueKey, subs []wsm.GithubMergeQueueSubscription, queues *queueReads) {
 	fields := dlog.Context{"merge_queue": key.String(), "subscribers": len(subs)}
-	failing := make([]*wsm.PullRequestFailure, len(subs))
-	for i, sub := range subs {
-		failing[i] = sub.Failing
-	}
-	if resets, waiting := w.rateLimitWaitOf(failing); waiting {
+	if resets, waiting := w.rateLimitWaitOf(failingOf(subs, func(s wsm.GithubMergeQueueSubscription) *wsm.PullRequestFailure { return s.Failing })); waiting {
 		w.deps.Log.Debug(opQueuePoll, "the rate limit is spent; the queue is read once it resets", dlog.Merge(fields, dlog.Context{"resets_at": resets}))
 		return
 	}
