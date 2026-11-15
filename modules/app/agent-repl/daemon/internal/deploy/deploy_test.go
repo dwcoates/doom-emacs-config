@@ -266,6 +266,60 @@ func TestElispIsUpToDateWhenEveryEmacsRunsIt(t *testing.T) {
 	}
 }
 
+func TestAMovingDaemonLeavesTheElispReloadToItsSuccessor(t *testing.T) {
+	// Arrange: this daemon runs the OLD build, and an Emacs runs older elisp.
+	h := newHarness(t)
+	h.d.deps.DaemonBuild = hashOf(t, theOld.daemon)
+	h.rollout.acceptance = rollout.HandoverAcceptance{Workspaces: 1}
+	h.clients.emacs = []EmacsClient{{ID: "stale", Build: "older"}}
+
+	// Act
+	result, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if got := outcome(t, result, ComponentElisp); got.Kind != DeferredToSuccessor || len(h.clients.elispPushes) != 0 {
+		t.Fatalf("elisp = %+v, pushes %v; want the reload left to the successor", got, h.clients.elispPushes)
+	}
+	if !logged(h.log, "info", opDecide, "its successor pushes the elisp reload once it serves") {
+		t.Fatalf("records = %+v, want the deferral recorded", h.log.Records())
+	}
+}
+
+func TestReloadStaleElispPushesTheReloadToEveryStaleEmacs(t *testing.T) {
+	// Arrange: the successor serves; one Emacs still runs older elisp.
+	h := newHarness(t)
+	h.clients.emacs = []EmacsClient{{ID: "current", Build: h.elisp}, {ID: "stale", Build: "older"}}
+
+	// Act
+	h.d.ReloadStaleElisp()
+
+	// Assert
+	if len(h.clients.elispPushes) != 1 || len(h.clients.elispPushes[0]) != 1 || h.clients.elispPushes[0][0] != "stale" {
+		t.Fatalf("pushes = %v, want the stale stream alone", h.clients.elispPushes)
+	}
+}
+
+func TestReloadStaleElispOfAnUnreadableBuildPushesNothingAndSaysWhy(t *testing.T) {
+	// Arrange: the module root names no elisp at all.
+	h := newHarness(t)
+	h.d.deps.Live.ModuleRoot = filepath.Join(t.TempDir(), "gone")
+	h.clients.emacs = []EmacsClient{{ID: "stale", Build: "older"}}
+
+	// Act
+	h.d.ReloadStaleElisp()
+
+	// Assert
+	if len(h.clients.elispPushes) != 0 {
+		t.Fatalf("pushes = %v, want none", h.clients.elispPushes)
+	}
+	if !logged(h.log, "error", opDecide, "the checkout's elisp build could not be read") {
+		t.Fatalf("records = %+v, want the unreadable build at ERROR", h.log.Records())
+	}
+}
+
 func TestAStaleDaemonIsHandedOverAndItsSuccessorTakesTheRest(t *testing.T) {
 	tests := []struct {
 		name  string

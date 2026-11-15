@@ -801,6 +801,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// controller it drives, so it reaches both late-bound: every edge it takes
 	// is applied by its Run loop, which starts once the graph is built.
 	var drainController drain.Controller
+	// elispReloader is the deployer's ReloadStaleElisp, bound once the
+	// deployer is built (it is built after the rollout controller that calls
+	// it once this daemon serves).
+	var elispReloader func()
 	// THE SAME CUTOFF THE IDLE SWEEP RESOLVES (drain.New): the keeper sends
 	// no beat a session will not live to need.
 	idleCutoff, err := drain.ResolveIdleCutoff(p.Opts.idleCutoff)
@@ -1236,7 +1240,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// it serves: their waits lived in the previous daemon's memory alone.
 		// The drain controller is built after this one, so it is read at the
 		// call, never captured nil.
-		ServingSettled: func(ctx context.Context) { drainController.ResumeFolded(ctx) },
+		// THE ELISP RELOAD a deploy that moved the daemon left to this one is
+		// pushed here too, once this daemon serves (deploy.ReloadStaleElisp):
+		// the editor reloads only against a daemon of its own build. The
+		// deployer is built after this controller, so it is read at the call.
+		ServingSettled: func(ctx context.Context) {
+			drainController.ResumeFolded(ctx)
+			elispReloader()
+		},
 		PublishViews:   views.PublishViews,
 		StateUnreported: func(ws ids.WorkspaceID, unreported bool) {
 			footerResolver.SetStateUnreported(ws, unreported)
@@ -1296,6 +1307,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	elispReloader = deployer.ReloadStaleElisp
 	// THIS DAEMON PROVES IT CAN SPAWN ITS OWN SUCCESSOR before anything is
 	// served (rollout.Controller.PreflightSpawn): a joining successor that
 	// cannot ends its boot here, so its incumbent's handover is refused and
