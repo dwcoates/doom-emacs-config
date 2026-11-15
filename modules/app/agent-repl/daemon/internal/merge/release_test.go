@@ -2,7 +2,6 @@ package merge
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -212,9 +211,10 @@ func TestEvictingAMergeWithARebaseStandingAbortsItAndSaysSo(t *testing.T) {
 	enqueue(t, c.h)
 	done := admitAsync(c.h, context.Background())
 	<-inGate
-	c.h.git.mu.Lock()
-	c.h.git.standing = true
-	c.h.git.mu.Unlock()
+	dir := c.dirs[theWorkspace]
+	c.git.cmu.Lock()
+	c.git.rebases[dir] = &chainRebase{}
+	c.git.cmu.Unlock()
 
 	// Act.
 	if err := c.h.o.Evict(context.Background(), theWorkspace); err != nil {
@@ -223,10 +223,10 @@ func TestEvictingAMergeWithARebaseStandingAbortsItAndSaysSo(t *testing.T) {
 	<-done
 
 	// Assert.
-	c.h.git.mu.Lock()
-	aborted := slices.Contains(c.h.git.rebaseCommands, "abort")
-	c.h.git.mu.Unlock()
-	if !aborted {
+	c.git.cmu.Lock()
+	_, standing := c.git.rebases[dir]
+	c.git.cmu.Unlock()
+	if standing {
 		t.Fatal("the rebase standing in the evicted merge's worktree was not aborted")
 	}
 	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.abandoned", text: "abandoned a running merge", context: map[string]string{"rebase_aborted": "true"}}) {

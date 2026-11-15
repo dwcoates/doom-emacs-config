@@ -854,6 +854,7 @@ func TestTakeSessionFailsOnAnUnusableDeployConfig(t *testing.T) {
 func TestAwaitWorkspacesFreeWaitsForTheOtherWorkspaceToo(t *testing.T) {
 	// Arrange: a merge of another workspace's branch, both busy.
 	h := newHarness(t)
+	h.registerOther(otherWorkspace, "ws-two", "agent/two")
 	r := ledgeredRun(t, h)
 	r.subject.other = otherWorkspace
 	h.freeness.busy = true
