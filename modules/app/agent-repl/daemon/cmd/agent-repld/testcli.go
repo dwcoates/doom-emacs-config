@@ -113,6 +113,10 @@ func testRun(c *cliCall, args []string) int {
 	if *cpuLoad > 0 && !*asUser {
 		return c.usageFailed("-cpu-load is the user's alone: pass -as-user only when the user asks for load")
 	}
+	// A DRY RUN PLANS: it sends the run plan-only, which changes nothing, so
+	// a selection the planner refuses fails its dry run as it fails a real
+	// one (2026-11-02: an atomic unit's refusal passed every dry run).
+	c.planOnly = c.dryRun != nil && *c.dryRun
 	if !c.dial(*stateDir) {
 		return exitFailure
 	}
@@ -139,7 +143,7 @@ func testRun(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	run.Coverage, run.Record, run.Remeasure, run.NoReuse = *coverage, *record, *remeasure, *noReuse
+	run.Coverage, run.Record, run.Remeasure, run.NoReuse, run.PlanOnly = *coverage, *record, *remeasure, *noReuse, c.planOnly
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Ungoverned: *ungoverned}
 	if *worktree != "" {
 		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}
@@ -208,7 +212,7 @@ func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) 
 			code, aborted = exitFailure, frame.GetEvent().GetAborted()
 		case frame.GetError() != nil, frame.GetEvent().GetRefused() != nil:
 			code = exitRefused
-		case frame.GetEvent().GetEnded().GetPassed() != nil:
+		case frame.GetEvent().GetEnded().GetPassed() != nil, frame.GetEvent().GetEnded().GetPlanned() != nil:
 			code = exitSuccess
 		case frame.GetEvent().GetEnded().GetFailed() != nil:
 			code, failed = exitTestsFailed, true

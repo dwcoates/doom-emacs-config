@@ -146,7 +146,16 @@ message TestRunEnded {
     TestRunEndedPassed passed = 1;
     // At least one unit failed or was cancelled.
     TestRunEndedFailed failed = 2;
+    // A plan-only run (TestRunRequest.plan_only) planned every unit and ran
+    // none.
+    TestRunEndedPlanned planned = 3;
   }
+}
+
+// A plan-only run planned every unit and ran none.
+message TestRunEndedPlanned {
+  // How many units the run planned.
+  int32 planned_units = 1;
 }
 
 // No unit failed.

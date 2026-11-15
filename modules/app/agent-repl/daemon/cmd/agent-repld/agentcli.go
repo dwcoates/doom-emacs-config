@@ -263,6 +263,11 @@ type cliCall struct {
 	roster *frontendv1.WorkspaceRoster
 	// dryRun is the command's -dry-run flag, set by flags.
 	dryRun *bool
+	// planOnly says the command's dry run sends its one request because the
+	// request itself changes nothing: `test run -dry-run` sends a plan-only
+	// run (testrun.v1.TestRunRequest.plan_only), so no dry-run interceptor
+	// stops it.
+	planOnly bool
 }
 
 // flags is the command's flag set, carrying the shared -state-dir and
@@ -306,7 +311,7 @@ func (c *cliCall) dial(stateDir string) bool {
 // dialAddress makes the command's client for the daemon at ADDRESS.
 func (c *cliCall) dialAddress(address string) {
 	var options []connect.ClientOption
-	if c.dryRun != nil && *c.dryRun {
+	if c.dryRun != nil && *c.dryRun && !c.planOnly {
 		options = append(options, connect.WithInterceptors(dryRunInterceptor(c.out)))
 	}
 	c.client = c.deps.client(address, options...)

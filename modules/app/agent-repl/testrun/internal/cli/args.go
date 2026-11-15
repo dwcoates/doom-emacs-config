@@ -37,6 +37,8 @@ type Args struct {
 	// NoReuse (--no-reuse) runs every selected suite even when an earlier
 	// run passed its exact inputs (agentrepl/testrun/internal/reuse).
 	NoReuse bool
+	// PlanOnly ends the run at its plan (testrun.v1.TestRunRequest.plan_only).
+	PlanOnly bool
 	// Targeted marks a run narrowed below whole suites (a test-name filter):
 	// it neither reuses nor records a pass, because a pass of some of a
 	// suite's tests says nothing about the rest.
@@ -173,6 +175,7 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 	}
 	a.Remeasure = req.GetRemeasure()
 	a.NoReuse = a.NoReuse || req.GetNoReuse()
+	a.PlanOnly = req.GetPlanOnly()
 	if !whole {
 		return a, nil
 	}

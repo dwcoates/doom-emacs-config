@@ -42,8 +42,10 @@ func runTestCLI(t *testing.T, daemon *testRunsDaemon, args ...string) (int, stri
 	var out, errOut bytes.Buffer
 	deps := cliDeps{
 		address: func(string) (string, error) { return server.URL, nil },
-		client: func(string, ...connect.ClientOption) agentreplv1connect.AgentReplClient {
-			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL)
+		// The command's options are kept, so a dry run's interceptor stops
+		// what it would stop against a real daemon.
+		client: func(_ string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
+			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL, options...)
 		},
 		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
 		getwd:   func() (string, error) { return "/wt/caller/src", nil },
@@ -72,6 +74,8 @@ func TestTestRunExitsByHowTheRunEnded(t *testing.T) {
 		want   int
 	}{
 		{name: "a passing run", frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}, want: exitSuccess},
+		{name: "a plan-only run that planned", frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+			Outcome: &testrunv1.TestRunEnded_Planned{Planned: &testrunv1.TestRunEndedPlanned{PlannedUnits: 3}}}}})}, want: exitSuccess},
 		{name: "a failing run", frames: []*agentreplv1.RunTestsResponse{endedFrame(false)}, want: exitTestsFailed},
 		{name: "a refused selection", frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: "no"}}})}, want: exitRefused},
 		{name: "a daemon error", frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}}}}}, want: exitRefused},
@@ -301,8 +305,10 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 	}{
 		{name: "an agent's run names its workspace as the requester", args: []string{"-go", "pkg"},
 			check: func(r *agentreplv1.RunTestsRequest) bool {
-				return r.GetRequester().GetWorkspace().GetWorkspace().GetId() == "ws-caller" && r.GetCpuLoad() == nil
+				return r.GetRequester().GetWorkspace().GetWorkspace().GetId() == "ws-caller" && r.GetCpuLoad() == nil && !r.GetRun().GetPlanOnly()
 			}},
+		{name: "a dry run is sent plan-only, past the dry run's interceptor", args: []string{"-go", "pkg=TestA", "-dry-run"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetPlanOnly() }},
 		{name: "coverage of a suite", args: []string{"-suite", "webapp", "-coverage"},
 			check: func(r *agentreplv1.RunTestsRequest) bool {
 				return r.GetRun().GetCoverage() && r.GetRun().GetSelections()[0].GetSuite().GetName() == "webapp"
