@@ -58,6 +58,13 @@ type Store interface {
 	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, turn ids.TurnID, sentences []string, took int) error
 	LinkedPullRequests(ctx context.Context) ([]wsm.PullRequestKey, error)
 	RecordPullRequestState(ctx context.Context, pr wsm.PullRequestKey, state wsm.PullRequestState, at time.Time) ([]ids.WorkspaceID, error)
+	LiveGithubWorkflowRunSubscriptions(ctx context.Context) ([]wsm.GithubWorkflowRunSubscription, error)
+	RecordGithubWorkflowRunRead(ctx context.Context, run wsm.GithubWorkflowRunKey, readAt time.Time) error
+	OweGithubWorkflowRunCompletion(ctx context.Context, c wsm.GithubWorkflowRunCompletion) (bool, error)
+	RecordGithubWorkflowRunReadFailure(ctx context.Context, run wsm.GithubWorkflowRunKey, f wsm.PullRequestFailure) ([]ids.WorkspaceID, error)
+	OweGithubWorkflowRunNotice(ctx context.Context, subscriber ids.WorkspaceID, run wsm.GithubWorkflowRunKey, sentences []string) error
+	OwedGithubWorkflowRunNotices(ctx context.Context) ([]wsm.GithubWorkflowRunOwed, error)
+	RecordGithubWorkflowRunNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, run wsm.GithubWorkflowRunKey, turn ids.TurnID, sentences []string, took int) error
 }
 
 // Deps are the watcher's collaborators: everything but the prompt handler,
@@ -109,6 +116,9 @@ type Watcher struct {
 	// ran into resets; no state read is made before it (pollLinked). Only
 	// the one Tick running at a time touches it.
 	linkedResetsAt time.Time
+	// wake asks the Run loop to deliver what is owed now (Wake); one pending
+	// wake stands for any number asked.
+	wake chan struct{}
 }
 
 // New builds the watcher, refusing a missing collaborator.
@@ -119,23 +129,44 @@ func New(deps Deps) (*Watcher, error) {
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
 	}
-	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{},
+	return &Watcher{deps: deps, reader: newReader(deps.GH), places: map[wsm.PullRequestKey]*placed{}, wake: make(chan struct{}, 1),
 		gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the pull-request polls")}, nil
 }
 
 // Run polls and tells on the cadence until ctx ends: once at once, then
-// every Every, one tick after the other.
+// every Every, one tick after the other. A Wake between ticks delivers what
+// is owed at once, on this same loop, so a delivery never runs beside a
+// tick's and no notice is submitted twice.
 func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
-	tick := func(ctx context.Context) { w.Tick(ctx, prompts) }
-	tick(ctx)
-	_ = clock.Repeat(ctx, w.deps.Clock, w.deps.Every, w.deps.Every, tick)
-	w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
+	w.Tick(ctx, prompts)
+	next := w.deps.Clock.After(w.deps.Every)
+	for {
+		select {
+		case <-ctx.Done():
+			w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
+			return
+		case <-next:
+			w.Tick(ctx, prompts)
+			next = w.deps.Clock.After(w.deps.Every)
+		case <-w.wake:
+			w.DeliverNow(ctx, prompts)
+		}
+	}
+}
+
+// DeliverNow submits every owed notice, when this daemon serves, without
+// polling: what a Wake runs.
+func (w *Watcher) DeliverNow(ctx context.Context, prompts prompthandler.Submitter) {
+	if !w.gate.Admits() {
+		return
+	}
+	w.deliverOwed(ctx, prompts)
 }
 
 // Tick polls every followed pull request, the state of every other linked
-// one, and every followed merge queue once, then submits every notice owed,
-// when this daemon serves. A queue both kinds need is read once
-// (queueReads).
+// one, and every followed merge queue and workflow run once, then submits
+// every notice owed, when this daemon serves. A queue both kinds need is read
+// once (queueReads).
 func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	if !w.gate.Admits() {
 		return
@@ -144,6 +175,7 @@ func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	polled := w.poll(ctx, queues)
 	w.pollLinked(ctx, polled)
 	w.pollQueues(ctx, queues)
+	w.pollRuns(ctx)
 	w.deliverOwed(ctx, prompts)
 }
 
@@ -572,6 +604,18 @@ func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitt
 	}
 	for _, o := range queued {
 		w.deliver(ctx, prompts, githubMergeQueueNotice(w.deps.Store, o))
+	}
+	runs, err := w.deps.Store.OwedGithubWorkflowRunNotices(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+		return
+	}
+	if err != nil {
+		w.deps.Log.Error(opNotice, "could not read the owed workflow-run notices; none is told this tick", dlog.WithCause(nil, err))
+		return
+	}
+	for _, o := range runs {
+		w.deliver(ctx, prompts, githubWorkflowRunNotice(w.deps.Store, o))
 	}
 }
 

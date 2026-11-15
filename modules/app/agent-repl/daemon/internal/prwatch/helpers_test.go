@@ -169,11 +169,13 @@ func pathChecks(head string) string {
 	return fmt.Sprintf("%s/commits/%s/check-runs?per_page=100&page=1", base, head)
 }
 
-// fakePrompts records each submission.
+// fakePrompts records each submission, announcing each on submitted when
+// a test sets it.
 type fakePrompts struct {
-	mu   sync.Mutex
-	got  []submitted
-	fail error
+	mu        sync.Mutex
+	got       []submitted
+	fail      error
+	submitted chan struct{}
 }
 
 type submitted struct {
@@ -189,6 +191,9 @@ func (p *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conver
 		return prompthandler.Outcome{}, p.fail
 	}
 	p.got = append(p.got, submitted{ws: ws, text: said.GetContent().GetBlocks()[0].GetText().GetText(), origin: origin})
+	if p.submitted != nil {
+		p.submitted <- struct{}{}
+	}
 	return prompthandler.Outcome{Turn: ids.TurnID(fmt.Sprintf("turn-%d", len(p.got)))}, nil
 }
 
