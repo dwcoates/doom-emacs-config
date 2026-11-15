@@ -97,8 +97,8 @@ func TestADeployCheckWorkspaceIsSetToItsRolesEffort(t *testing.T) {
 	}
 }
 
-func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
-	// Arrange
+func TestASessionlessDeployCheckWorkspaceHasItsEffortPickedForItsStart(t *testing.T) {
+	// Arrange: no session yet, so no effort selector is served.
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
 
@@ -106,8 +106,26 @@ func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
 	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, true)
 
 	// Assert
+	if err != nil || f.topbarPicked != intakeEffort || len(f.fleet.efforts) != 0 {
+		t.Fatalf("SetDeployCheckEffort = %v, picked %v, set %+v; want the intake's effort picked and nothing set", err, f.topbarPicked, f.fleet.efforts)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "picked the deploy check workspace's effort; its session starts at it"}); !ok {
+		t.Fatalf("records = %+v, want the pick at INFO", f.log.logger.Records())
+	}
+}
+
+func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
+	// Arrange: the live session serves no level the role asks for.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{remediationEffort}, true
+
+	// Act
+	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, true)
+
+	// Assert
 	if err == nil {
-		t.Fatal("SetDeployCheckEffort set an effort the model serves none of")
+		t.Fatal("SetDeployCheckEffort set an effort the model does not serve")
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace's effort could not be set"}); !ok {
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
