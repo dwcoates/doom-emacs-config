@@ -321,3 +321,74 @@ func TestDir(t *testing.T) {
 		})
 	}
 }
+
+// cmdGoTrim is a fake trim that declines as cmd/go does: it walks the cache
+// and writes a fresh record only when the record is missing, unreadable, a
+// day old or an hour ahead.
+func cmdGoTrim(clk *clock, trims *int) func(context.Context, string) error {
+	return func(_ context.Context, d string) error {
+		path := filepath.Join(d, TrimFile)
+		if data, err := os.ReadFile(path); err == nil {
+			if secs, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
+				last := time.Unix(secs, 0)
+				if clk.Now().Before(last.Add(TrimInterval)) && clk.Now().After(last.Add(-FutureSlack)) {
+					return nil
+				}
+			}
+		}
+		*trims++
+		began := clk.Now()
+		clk.advance(trimTook)
+		return os.WriteFile(path, []byte(strconv.FormatInt(began.Unix(), 10)), 0o644)
+	}
+}
+
+func TestDeadlineTrimsATrimDueWithinTheBoundThatCmdGoWouldStillDecline(t *testing.T) {
+	// Arrange: the trim falls due half way through the unit's limit.
+	bound := time.Hour
+	f := newFixture(t, unix(now.Add(-TrimInterval+bound/2)))
+	f.g.Trim = cmdGoTrim(f.clk, f.trims)
+
+	// Act
+	deadline, err := f.g.Deadline("a", bound)
+
+	// Assert
+	if err != nil || *f.trims != 1 || !deadline.Equal(now.Add(trimTook).Add(bound)) {
+		t.Fatalf("Deadline = %v, %v with %d trims; want one trim and the limit counted from its end", deadline, err, *f.trims)
+	}
+	if !strings.Contains(f.out.String(), "its record was retired for the run's trim") {
+		t.Fatalf("log = %q, want the retired record said", f.out.String())
+	}
+}
+
+func TestDeadlineLeavesARecordCmdGoAlreadyTrimsOn(t *testing.T) {
+	// Arrange: the trim is a day old, so cmd/go trims on the record as it stands.
+	f := newFixture(t, unix(now.Add(-TrimInterval)))
+	f.g.Trim = cmdGoTrim(f.clk, f.trims)
+
+	// Act
+	_, err := f.g.Deadline("a", time.Second)
+
+	// Assert
+	if err != nil || *f.trims != 1 || strings.Contains(f.out.String(), "retired") {
+		t.Fatalf("Deadline err %v with %d trims, log %q; want the trim with no record retired", err, *f.trims, f.out.String())
+	}
+}
+
+func TestDeadlineFailsWhenTheRecordCannotBeRetired(t *testing.T) {
+	// Arrange: a trim due within the bound, in a cache whose record cannot be removed.
+	bound := time.Hour
+	f := newFixture(t, unix(now.Add(-TrimInterval+bound/2)))
+	if err := os.Chmod(f.g.Dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.g.Dir, 0o755) })
+
+	// Act
+	deadline, err := f.g.Deadline("a", bound)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "retire the trim record") || !deadline.IsZero() || *f.trims != 0 {
+		t.Fatalf("Deadline = %v, %v with %d trims; want the retirement's failure and no trim", deadline, err, *f.trims)
+	}
+}
