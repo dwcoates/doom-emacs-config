@@ -77,7 +77,7 @@ import type {
   FeedResponseRevision,
   FeedResponseSuccess,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { drawSignInAction } from "../../login/request.js";
+import { drawSignInActions } from "../../login/request.js";
 import { log } from "../../log.js";
 import {
   BUBBLE_MORE_ELLIPSIS,
@@ -503,15 +503,21 @@ export function drawFeedResponseProse(u: FeedResponseProse, path: string): Parse
 
 /**
  * A vendor notice drawn on its own: its outcome card, headed by the notice's
- * neutral marker, with the vendor's words verbatim as its face. The daemon
- * composes the head; this end states it and adds nothing.
+ * neutral marker, with the vendor's words verbatim as its face, and the
+ * sign-in action under them when the daemon set it (the vendor refused the
+ * account, `FeedResponseNotice.sign_in`). The daemon composes the head; this
+ * end states it and adds nothing.
  */
 export function drawFeedResponseNotice(u: FeedResponseNotice, words: string, rc: RowContext, path: string): HTMLElement {
   log.debug("drawing a vendor notice as its card", {
     operation: "feed.cards.response.notice",
-    context: { path, length: words.length },
+    context: { path, length: words.length, sign_in: u.signIn !== undefined },
   });
-  return drawOutcomeCard(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx }, `${path}.marker`, [words]);
+  const card = drawOutcomeCard(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx }, `${path}.marker`, [words]);
+  if (u.signIn !== undefined) {
+    card.append(drawSignInActions("outcome-marker-actions", "outcome-marker-action", "feed.notice-sign-in"));
+  }
+  return card;
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */
@@ -581,10 +587,7 @@ function renderedText(slot: HTMLElement): string {
 function cutShortFooter(u: FeedResponseError): HTMLElement[] {
   const footer = [cutShortMarker()];
   if (u.signIn !== undefined) {
-    const actions = document.createElement("div");
-    actions.className = RESPONSE_CUT_SHORT_ACTIONS_CLASS;
-    actions.append(drawSignInAction("response-sign-in", "feed.response-sign-in"));
-    footer.push(actions);
+    footer.push(drawSignInActions(RESPONSE_CUT_SHORT_ACTIONS_CLASS, "response-sign-in", "feed.response-sign-in"));
   }
   return footer;
 }

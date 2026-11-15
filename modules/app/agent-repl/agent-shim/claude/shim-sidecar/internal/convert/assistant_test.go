@@ -380,6 +380,21 @@ func TestServerErrorRecordNoticeIsTransient(t *testing.T) {
 	}
 }
 
+func TestAccountRecordNoticeIsTheAccount(t *testing.T) {
+	// Arrange. The vendor's account class decides, whatever the words.
+	c := newTestConverter(t)
+	line := `{"type":"assistant","uuid":"a1","isSidechain":false,"isApiErrorMessage":true,"error":"authentication_failed","timestamp":"` + ts1 +
+		`","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"Login expired · Please run /login"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	if activityOf(entries[0]).GetResponse().GetSuccess().GetSynthesizedNotice().GetAccount() == nil {
+		t.Fatal("an authentication_failed notice must classify as the account")
+	}
+}
+
 func TestSyntheticNoResponseRecordIsWithheld(t *testing.T) {
 	// Arrange. No model wrote these words; it is the vendor's own placeholder for
 	// a turn that produced nothing.

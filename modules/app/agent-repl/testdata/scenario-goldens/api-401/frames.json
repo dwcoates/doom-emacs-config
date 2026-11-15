@@ -281,7 +281,7 @@
                   "markdown": "Authentication failed."
                 },
                 "synthesizedNotice": {
-                  "unclassified": {}
+                  "account": {}
                 },
                 "settledAt": {
                   "atMs": "1800000000003"

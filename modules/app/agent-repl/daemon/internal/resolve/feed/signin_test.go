@@ -248,3 +248,101 @@ func TestASignInRecordsTheAnsweredTurns(t *testing.T) {
 		t.Fatalf("recorded %v, want [t1]", store.turns)
 	}
 }
+
+func TestASignInRetiresTheAccountNoticeOfATurnThatWentOn(t *testing.T) {
+	// Arrange
+	store := &fakeTurnSet{}
+	h := newDurableHarness(t, durableStores{signedIn: store})
+	h.deliverPrompt("t1", "question")
+	h.subjectNotice("u-n1", "Login expired · Please run /login", "t1", accountSubject())
+	h.subjectNotice("u-n2", "API Error: 400 bad request", "t1", unclassifiedSubject())
+
+	// Act
+	err := h.resolver.OnSignedIn(testWorkspace)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OnSignedIn: %v", err)
+	}
+	if h.noticeRowDrawn("u-n1") {
+		t.Fatal("the account notice stood after a completed sign-in")
+	}
+	if !h.noticeRowDrawn("u-n2") {
+		t.Fatal("a notice no sign-in answers was retired too")
+	}
+	if len(store.turns) != 1 || store.turns[0] != ids.TurnID("t1") {
+		t.Fatalf("recorded %v, want [t1]", store.turns)
+	}
+	for field, value := range map[string]any{"subject": "account", "row": root("u-n1"), "turn": "t1", "answered_by": "sign_in"} {
+		if !h.hasRecordWith("info", opCardAnswered, field, value) {
+			t.Fatalf("records = %+v, want the retirement recorded with %s = %v", h.records(), field, value)
+		}
+	}
+}
+
+func TestAnAccountNoticeASignInAnsweredStaysRetiredAfterARestart(t *testing.T) {
+	// Arrange
+	store := &fakeTurnSet{}
+	before := newDurableHarness(t, durableStores{signedIn: store})
+	before.deliverPrompt("t1", "question")
+	before.subjectNotice("u-n1", "Login expired · Please run /login", "t1", accountSubject())
+	if err := before.resolver.OnSignedIn(testWorkspace); err != nil {
+		t.Fatalf("OnSignedIn: %v", err)
+	}
+
+	// Act: the successor replays the conversation.
+	after := newDurableHarness(t, durableStores{signedIn: store})
+	after.deliverPrompt("t1", "question")
+	after.subjectNotice("u-n1", "Login expired · Please run /login", "t1", accountSubject())
+
+	// Assert
+	if after.noticeRowDrawn("u-n1") {
+		t.Fatal("the answered account notice was drawn again after a restart")
+	}
+}
+
+func TestASignInFailureRowIsLoggedAsAnswered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.failedTurn("t1", authFailed())
+
+	// Act
+	if err := h.resolver.OnSignedIn(testWorkspace); err != nil {
+		t.Fatalf("OnSignedIn: %v", err)
+	}
+
+	// Assert
+	for _, subject := range []string{"ending_sign_in", "sign_in_failure"} {
+		if !h.hasRecordWith("info", opCardAnswered, "subject", subject) {
+			t.Fatalf("records = %+v, want a retirement recorded with subject %s", h.records(), subject)
+		}
+	}
+}
+
+func TestLeavesOnSignIn(t *testing.T) {
+	cases := []struct {
+		name string
+		row  *frontendv1.FeedRow
+		want bool
+	}{
+		{name: "a broken bubble", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{Result: &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{}}}},
+		}}}, want: true},
+		{name: "an account notice", row: noticeRowOf(accountSubject()), want: true},
+		{name: "a transient notice", row: noticeRowOf(transientSubject())},
+		{name: "a model response", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{}},
+		}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := leavesOnSignIn(tc.row)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("leavesOnSignIn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -171,9 +171,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 			// actually wrote, and nothing downstream could pull them apart
 			// again. A notice of a turn that ended on a fault is folded into
 			// that ending's card at the upsert door (notice.go).
-			bubble.Notice = &frontendv1.FeedResponseNotice{
-				Marker: noticeMarker(notice.SynthesizedNotice),
-			}
+			bubble.Notice = drawnNotice(notice.SynthesizedNotice)
 			log.Debug("daemon.feed.response_synthesized_notice",
 				"a vendor-synthesized notice was drawn as a notice rather than as the agent's answer",
 				dlog.Context{"unit": unit, "subject": noticeSubject(notice.SynthesizedNotice)})

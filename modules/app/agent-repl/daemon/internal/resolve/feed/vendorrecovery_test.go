@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/ids"
 )
@@ -212,15 +213,7 @@ func TestAnOutageCardThatSortsBeforeTheNewestServiceIsRetiredAsItIsDrawn(t *test
 // its producer classed as trouble waiting cures.
 func (h *harness) transientNotice(unit, text, turn string) {
 	h.t.Helper()
-	h.resolver.OnActivity(testWorkspace, mainAgent(),
-		responseFrame(unit, &conversationv1.AgentResponseSuccess{
-			Prose: &conversationv1.AgentResponseProse{Markdown: text},
-			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
-				SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
-					Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}},
-				},
-			},
-		}, nil), &conversationv1.TurnId{Value: turn}, nil)
+	h.subjectNotice(unit, text, turn, transientSubject())
 }
 
 func TestAVendorServingALaterTurnRetiresATransientNoticeBeforeIt(t *testing.T) {
@@ -264,6 +257,12 @@ func TestANoticeNoOutageCuredStandsAfterTheVendorServes(t *testing.T) {
 		draw func(h *harness)
 	}{
 		{name: "an unclassified notice", draw: func(h *harness) { h.notice("u-t1", "API Error: 400 bad request", "t1") }},
+		{name: "an approaching allowance", draw: func(h *harness) {
+			h.subjectNotice("u-t1", "You're approaching your limit", "t1", usageWarningSubject())
+		}},
+		{name: "a changed allowance window", draw: func(h *harness) {
+			h.subjectNotice("u-t1", "Switched to the extra allowance", "t1", usageTransitionSubject())
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,5 +304,169 @@ func TestATransientNoticeOlderThanTheNewestServiceIsRetiredAsItIsDrawn(t *testin
 	// Assert
 	if h.noticeRowDrawn("u-t1") {
 		t.Fatal("a transient notice older than the feed's newest service was drawn")
+	}
+}
+
+func TestCureOfIsTheOneRetirementRule(t *testing.T) {
+	ending := func(errored *frontendv1.FeedTurnEndedErrored) *frontendv1.FeedRow {
+		return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_TurnEnded{TurnEnded: &frontendv1.FeedTurnEnded{
+			Outcome: &frontendv1.FeedTurnEnded_Errored{Errored: errored},
+		}}}
+	}
+	vendorFault := func(expansion *frontendv1.FeedOutcomeVendorFaultExpansion) *frontendv1.FeedOutcomeMarker {
+		return &frontendv1.FeedOutcomeMarker{Family: &frontendv1.FeedOutcomeMarker_VendorFault{VendorFault: &frontendv1.FeedOutcomeMarkerVendorFault{Expansion: expansion}}}
+	}
+	cases := []struct {
+		name    string
+		row     *frontendv1.FeedRow
+		want    cardCure
+		answers bool
+	}{
+		{name: "trouble waiting cures leaves on service", row: noticeRowOf(transientSubject()), want: cardCure{subject: "vendor_transient", service: true}, answers: true},
+		{name: "an exhausted allowance leaves on service", row: noticeRowOf(usageLimitSubject()), want: cardCure{subject: "usage_limit", service: true}, answers: true},
+		{name: "the account refused leaves on service or sign-in", row: noticeRowOf(accountSubject()), want: cardCure{subject: "account", service: true, signIn: true}, answers: true},
+		{name: "an approaching allowance stays", row: noticeRowOf(usageWarningSubject())},
+		{name: "a changed window stays", row: noticeRowOf(usageTransitionSubject())},
+		{name: "an unclassified notice stays", row: noticeRowOf(unclassifiedSubject())},
+		{name: "an overloaded ending leaves on service", row: ending(&frontendv1.FeedTurnEndedErrored{
+			Marker: vendorFault(&frontendv1.FeedOutcomeVendorFaultExpansion{}),
+			Error:  &frontendv1.FeedTurnEndedErrored_Overloaded{Overloaded: &frontendv1.FeedTurnErrorOverloaded{}},
+		}), want: cardCure{subject: "ending_overloaded", service: true}, answers: true},
+		{name: "an ending offering sign-in leaves on sign-in", row: ending(&frontendv1.FeedTurnEndedErrored{
+			Marker: vendorFault(&frontendv1.FeedOutcomeVendorFaultExpansion{SignIn: &frontendv1.FeedOutcomeSignIn{}}),
+		}), want: cardCure{subject: "ending_sign_in", signIn: true}, answers: true},
+		{name: "an ending of a refused request stays", row: ending(&frontendv1.FeedTurnEndedErrored{
+			Marker: vendorFault(&frontendv1.FeedOutcomeVendorFaultExpansion{}),
+		})},
+		{name: "a model response is no card", row: &frontendv1.FeedRow{Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Response{Response: &frontendv1.FeedResponse{}},
+		}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, answers := cureOf(tc.row)
+
+			// Assert
+			if answers != tc.answers || got != tc.want {
+				t.Fatalf("cureOf = %+v, %v, want %+v, %v", got, answers, tc.want, tc.answers)
+			}
+		})
+	}
+}
+
+func TestAVendorServingAgainRetiresEveryNoticeItsServiceAnswers(t *testing.T) {
+	cases := []struct {
+		name    string
+		subject *conversationv1.AgentResponseSynthesizedNotice
+		want    string
+	}{
+		{name: "trouble waiting cures", subject: transientSubject(), want: "vendor_transient"},
+		{name: "an exhausted allowance", subject: usageLimitSubject(), want: "usage_limit"},
+		{name: "the account refused, refreshed by the vendor", subject: accountSubject(), want: "account"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("t1", "question")
+			h.subjectNotice("u-t1", "the vendor's words", "t1", tc.subject)
+
+			// Act
+			h.liveResponse("u-t2", "back again", "t2")
+
+			// Assert
+			if h.noticeRowDrawn("u-t1") {
+				t.Fatal("the notice stood after the vendor served a later turn")
+			}
+			for field, value := range map[string]any{"subject": tc.want, "row": root("u-t1"), "turn": "t1", "evidence_row": root("u-t2"), "evidence_turn": "t2", "answered_by": "service"} {
+				if !h.hasRecordWith("info", opCardAnswered, field, value) {
+					t.Fatalf("records = %+v, want the retirement recorded with %s = %v", h.records(), field, value)
+				}
+			}
+		})
+	}
+}
+
+func TestTheModelServingLaterInTheSameTurnRetiresItsNotice(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	h.transientNotice("u-n1", "API Error: Connection dropped (ECONNRESET)", "t1")
+
+	// Act
+	h.liveResponse("u-r1", "recovered within the turn", "t1")
+
+	// Assert
+	if h.noticeRowDrawn("u-n1") {
+		t.Fatal("the notice stood after the model answered later in its own turn")
+	}
+	if !h.hasRecordWith("info", opCardAnswered, "evidence_turn", "t1") {
+		t.Fatalf("records = %+v, want the retirement naming the same turn's evidence", h.records())
+	}
+}
+
+func TestTheNoticesOwnTurnConcludingIsNoEvidence(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	h.transientNotice("u-n1", "API Error: 529 overloaded", "t1")
+
+	// Act
+	h.terminal("t1", completed(""), nil)
+
+	// Assert
+	if !h.noticeRowDrawn("u-n1") {
+		t.Fatal("the notice's own turn concluding retired it with no service by the model")
+	}
+}
+
+func TestANoticeDrawnBeforeTheSameTurnsLaterModelRowIsRetiredAsItIsDrawn(t *testing.T) {
+	// Arrange: the model's later row of t1 is placed first, as a page loaded
+	// on scroll-back draws it.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "question", 1_000)
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity("u-r1", "recovered"),
+		&conversationv1.TurnId{Value: "t1"}, placeAt(3_000))
+
+	// Act
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("u-n1", &conversationv1.AgentResponseSuccess{
+			Prose:      &conversationv1.AgentResponseProse{Markdown: "You've hit your session limit"},
+			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{SynthesizedNotice: usageLimitSubject()},
+		}, nil), &conversationv1.TurnId{Value: "t1"}, placeAt(2_000))
+
+	// Assert
+	if h.noticeRowDrawn("u-n1") {
+		t.Fatal("a notice older than its own turn's later model row was drawn")
+	}
+}
+
+func TestAnsweringEvidence(t *testing.T) {
+	cases := []struct {
+		name          string
+		served, model servedEvidence
+		key, turn     string
+		want          string
+	}{
+		{name: "another turn's later service", served: servedEvidence{row: "s", key: "b", turn: "t2"}, key: "a", turn: "t1", want: "s"},
+		{name: "the own turn's later conclusion is none", served: servedEvidence{row: "s", key: "b", turn: "t1"}, key: "a", turn: "t1"},
+		{name: "the own turn's later model row", served: servedEvidence{row: "s", key: "c", turn: "t1"}, model: servedEvidence{row: "m", key: "b", turn: "t1"}, key: "a", turn: "t1", want: "m"},
+		{name: "service before the card is none", served: servedEvidence{row: "s", key: "a", turn: "t2"}, model: servedEvidence{row: "m", key: "a", turn: "t2"}, key: "b", turn: "t1"},
+		{name: "no service at all", key: "a", turn: "t1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := &feedState{served: tc.served, servedByModel: tc.model}
+
+			// Act
+			got, found := f.answeringEvidence(tc.key, tc.turn)
+
+			// Assert
+			if found != (tc.want != "") || got.row != tc.want {
+				t.Fatalf("answeringEvidence = %+v, %v, want row %q", got, found, tc.want)
+			}
+		})
 	}
 }

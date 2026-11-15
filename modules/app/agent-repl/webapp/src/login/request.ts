@@ -75,3 +75,16 @@ export function drawSignInAction(className: string, operation: string): HTMLElem
   });
   return button;
 }
+
+/**
+ * A row holding the "sign in" action alone: what a surface that offers
+ * nothing but the sign-in draws under its words (a broken response bubble, a
+ * vendor notice that the account was refused). ROWCLASS is the surface's
+ * class for the row; ACTIONCLASS and OPERATION are `drawSignInAction`'s.
+ */
+export function drawSignInActions(rowClass: string, actionClass: string, operation: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = rowClass;
+  row.append(drawSignInAction(actionClass, operation));
+  return row;
+}
