@@ -2052,12 +2052,13 @@ Nil when ID is nil, or no workspace\='s outstanding adopt walk is on CONN."
 (defun agent-repl-host--release-held (ws outcome &optional to)
   "Send every call held for WS, in the order it was made.
 Its adopt is OUTCOME, which names how the hold ended (`adopted',
-`refused', `failed', `superseded', `withdrawn', `forgotten').  Each call goes to TO when given
-\(a retrying adopt names the daemon that still serves WS), and otherwise
-to the daemon WS stands on NOW (`agent-repl-host-conn-or-primary'): the
-successor once WS is adopted, the daemon it was put back on otherwise.  A call with no
-daemon to go to, and a send that signals, answers its own ON-FAILURE, at
-ERROR, and the calls after it are still sent."
+`refused', `failed', `superseded', `withdrawn', `forgotten').  Each call
+goes to TO when given \(a retrying adopt names the daemon that still
+serves WS), and otherwise to the daemon WS stands on NOW
+\(`agent-repl-host-conn-or-primary'): the successor once WS is adopted,
+the daemon it was put back on otherwise.  A call with no daemon to go
+to, and a send that signals, answers its own ON-FAILURE, at ERROR, and
+the calls after it are still sent."
   (let ((held (plist-get (agent-repl-host--entry ws) :held-calls)))
     (when held
       (agent-repl-host--put ws :held-calls nil)
