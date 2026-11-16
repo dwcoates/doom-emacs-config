@@ -275,6 +275,11 @@ type Keeper struct {
 	// is recorded at INFO only when it changes (owesNone); owned by Run
 	// alone.
 	noBeat map[ids.WorkspaceID]string
+	// owedFrom is when each workspace that owed no keep-alive began owing
+	// them again (owesAgain): a beat due before it was never owed, so a cache
+	// that lapsed then is no miss of the keeper's (missed); owned by Run
+	// alone.
+	owedFrom map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -330,6 +335,7 @@ func New(deps Deps) (*Keeper, error) {
 		parkedFlying: map[ids.WorkspaceID]bool{},
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
 		noBeat:       map[ids.WorkspaceID]string{},
+		owedFrom:     map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 

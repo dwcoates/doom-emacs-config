@@ -16,11 +16,21 @@
 // 10-minute window's stalls on any one phase (2026-10-18). Sustained relief
 // put 14 to 20 there, nearly every one of the window's 20 beats. Beat sets the
 // line at 8, twice the chance clustering.
+//
+// THE LINE STANDS ABOVE CHANCE, NOT AT A FIXED COUNT. A phase within
+// Tolerance spans 1/30 of the cycle, so a window's stalls land on any one
+// phase by chance alone in proportion to how many there are: a busy window of
+// 364 stalls put about 12 on every phase, and its busiest phase showed 19
+// with no beat behind it (2026-11-16, raised as sustained pressure). The
+// error is raised when a phase holds Beat MORE stalls than chance puts there
+// (ChanceOnPhase), which is Beat itself for the quiet windows it was measured
+// on.
 package stallbeat
 
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -39,8 +49,16 @@ const Window = 10 * time.Minute
 // Tolerance is how far from the beat's phase a stall still counts as on it.
 const Tolerance = 500 * time.Millisecond
 
-// Beat is how many stalls of one window on one phase raise the error.
+// Beat is how many stalls of one window on one phase, beyond what chance puts
+// there (ChanceOnPhase), raise the error.
 const Beat = 8
+
+// ChanceOnPhase answers how many of N stalls fall within Tolerance of any one
+// phase by chance alone, rounded to a whole stall: the share of Period that
+// Tolerance spans either side of a phase.
+func ChanceOnPhase(n int) int {
+	return int(math.Round(float64(n) * float64(2*Tolerance) / float64(Period)))
+}
 
 // Deps are the detector's collaborators, every one required.
 type Deps struct {
@@ -72,7 +90,8 @@ func New(deps Deps) (*Detector, error) {
 
 // Observe takes one stall: the moment the webhost recorded it and how long the
 // main thread was blocked. It raises the error once per Window while Beat or
-// more of the window's stalls fall within Tolerance of one phase of Period.
+// more of the window's stalls beyond chance's share (ChanceOnPhase) fall
+// within Tolerance of one phase of Period.
 func (d *Detector) Observe(at time.Time, blockedMS int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -87,7 +106,8 @@ func (d *Detector) Observe(at time.Time, blockedMS int64) {
 		return
 	}
 	phase, onBeat, blocked := bestBeat(d.stalls)
-	if onBeat < Beat {
+	chance := ChanceOnPhase(len(d.stalls))
+	if onBeat < Beat+chance {
 		return
 	}
 	d.raised = at
@@ -96,6 +116,7 @@ func (d *Detector) Observe(at time.Time, blockedMS int64) {
 		onBeat, Window, len(d.stalls), Period), dlog.Context{
 		"stalls_on_beat":     onBeat,
 		"stalls_in_window":   len(d.stalls),
+		"chance_on_phase":    chance,
 		"blocked_ms_on_beat": blocked,
 		"phase_ms":           phase.Milliseconds(),
 		"window_s":           int(Window.Seconds()),

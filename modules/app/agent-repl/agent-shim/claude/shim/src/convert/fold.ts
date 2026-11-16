@@ -116,6 +116,7 @@ import {
   convertStreamEvent,
   convertModelRefusal,
   convertThinkingTokens,
+  settleCutUnits,
   StreamBlocks,
 } from "./stream-events.js";
 import {
@@ -123,6 +124,7 @@ import {
   absorbedTurnTerminal,
   convertResult,
   isUserStop,
+  turnEnding,
   type VendorApiError,
 } from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
@@ -423,8 +425,12 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // this turn's vendor never stated.
       const vendorApiError = state.vendorApiError ?? {};
       state.vendorApiError = undefined;
-      // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not.
-      state.streams.endTurn();
+      // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not, and what
+      // it left unsettled is judged by how the turn ended: a stop or a failure
+      // cut it, and it settles as cut before the terminal.
+      const ending = turnEnding(message);
+      const cutUnits = state.streams.endTurn(ending);
+      const settled = ending === "completed" ? [] : settleCutUnits(message, context, cutUnits, ending);
       // A CUT NEVER OUTLIVES ITS TURN. One still held here is a summary the
       // vendor never stated, and holding it into the next turn is what left a
       // compaction undrawn for minutes. It lands before the terminal, which
@@ -444,7 +450,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
         { vendorUuid: message.uuid },
         isUserStop(message),
       );
-      const before = [...released, ...cut];
+      const before = [...released, ...settled, ...cut];
       return before.length === 0 ? output : { ...output, entries: [...before, ...output.entries] };
     }
 
@@ -530,9 +536,25 @@ function convertSystemMessage(
         state.compaction,
       );
       const all = superseded.length === 0 ? entries : [...superseded, ...entries];
-      return message.subtype === "init" ? [...all, ...settleClear(message, context, state)] : all;
+      if (message.subtype !== "init") return all;
+      offerSessionTools(message, state.calls);
+      return [...all, ...settleClear(message, context, state)];
     }
   }
+}
+
+/**
+ * Record the tools the vendor's init says the session offers, so a call
+ * naming any other is known for one to a tool that does not exist
+ * (convertToolUse). An init that names no tool list records nothing.
+ */
+function offerSessionTools(message: SdkMessage, calls: CallRegistry): void {
+  const tools = (message as unknown as { readonly tools?: unknown }).tools;
+  if (!Array.isArray(tools)) {
+    LOGGER.debug({}, "the init named no tool list; the session's offered tools stay unknown");
+    return;
+  }
+  calls.offer(tools.filter((tool): tool is string => typeof tool === "string"));
 }
 
 /**

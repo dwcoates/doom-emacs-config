@@ -1261,8 +1261,13 @@ message AgentResponseFailureReason {
     // on a boundary the CALLER set rather than on the model's own ending —
     // which is why it is a stop rather than a success.
     AgentResponseStoppedAtStopSequence stop_sequence = 5;
+    // The vendor request carrying the response failed mid-arrival (the API
+    // could not be reached, or answered an error), and the turn ended on that
+    // failure: the prose is cut short.
+    AgentResponseRequestFailed request_failed = 6;
   }
 }
+message AgentResponseRequestFailed {}
 message AgentResponseStoppedAtStopSequence {}
 message AgentResponseStoppedAtMaxTokens {}
 // The refusal, with the vendor's own account.
@@ -3687,6 +3692,14 @@ message AgentUnmodeledStart {
   // AgentMcpToolCall, so no call that lands here was served by one.
   reserved 4;
   reserved "mcp_server";
+
+  // The session offers no tool by this name: the agent called a tool that
+  // does not exist (a misspelled or miscased name, such as `bash` for
+  // `Bash`), and the vendor refuses the call. Not a tool this schema has yet
+  // to catch up with, so nothing about it asks for modelling. FALSE when the
+  // session offers the tool, and when the producer had not yet learned the
+  // session's tools.
+  bool not_offered = 5;
 }
 
 // The tool returned.

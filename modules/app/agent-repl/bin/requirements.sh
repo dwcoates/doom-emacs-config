@@ -9,6 +9,7 @@
 #   requirements.sh uninstall
 #   requirements.sh list      [--profile run|dev|all]
 #   requirements.sh purge-legacy-hooks
+#   requirements.sh define-service LABEL
 #
 # THE MANIFESTS ARE THE ONE RECORD. `requirements.json` at the module root
 # names agent-repl's own requirements and `includes` each system's manifest
@@ -122,7 +123,7 @@ say() { printf '[requirements] %s\n' "$*"; }
 err() { printf '[requirements] ERROR: %s\n' "$*" >&2; }
 
 usage() {
-  sed -n '5,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '5,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die_usage() {
@@ -1272,6 +1273,40 @@ install_git_hook() {
   chmod +x "$HOOK_DEST"
 }
 
+# write_service_definition ENTRY: the directories the service runs in, the
+# files the entry ships beside its program, and its rendered definition, which
+# the service manager loads next. install's step, and the daemon's when a
+# deploy finds a service unloaded with no definition (define-service).
+write_service_definition() {
+  local e="$1" dest from to
+  dest="$(service_definition "$e")"
+  # No service manager creates these, and the services bind sockets and open
+  # their logs and databases in them.
+  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$(dirname "$dest")"
+  while IFS=$'\t' read -r from to; do
+    [ -n "$from" ] || continue
+    mkdir -p "$(dirname "$CACHE_ROOT/$to")"
+    cp "$MODULE_DIR/$from" "$CACHE_ROOT/$to"
+  done < <(service_files "$e")
+  rendered_service "$e" >"$dest"
+}
+
+# cmd_define_service LABEL: write the definition of the service LABEL names,
+# from its entry, without building or loading anything. The daemon's deploy
+# runs it when the service manager holds no LABEL and no definition exists (a
+# service added since this machine's install), then starts the service from it.
+cmd_define_service() {
+  local label="$1" e
+  e="$(printf '%s\n' "$ENTRIES" | jq -c --arg l "$label" --arg p "$(platform)" '
+    select(.kind == "service" and .label == $l)
+    | select((.platforms == null) or (.platforms | index($p)))')"
+  if [ -z "$e" ]; then
+    err "define-service: no service entry on $(platform) is labelled $label"; return 1
+  fi
+  write_service_definition "$e"
+  say "define-service: wrote $(service_definition "$e")"
+}
+
 install_service() {
   local e="$1" label dest
   label="$(field "$e" .label)"
@@ -1284,23 +1319,15 @@ install_service() {
     err "install: $(field "$e" .id): not installed from the linked worktree $MODULE_DIR; the services every workspace shares are installed from the main checkout ($(module_main_worktree)) only"
     return 1
   fi
-  # No service manager creates these, and the services bind sockets and open
-  # their logs and databases in them.
-  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock" "$CACHE_ROOT/store" "$(dirname "$dest")"
   if [ -n "$(field "$e" .command)" ]; then
     if ! find_program "$(field "$e" .command)" >/dev/null; then
       err "install: $(field "$e" .id): $(field "$e" .command) is not on PATH; install it first"; return 1
     fi
   else
+    mkdir -p "$CACHE_ROOT/bin"
     "$BUILD_FRONTEND" "$(field "$e" .build_target)"
   fi
-  local from to
-  while IFS=$'\t' read -r from to; do
-    [ -n "$from" ] || continue
-    mkdir -p "$(dirname "$CACHE_ROOT/$to")"
-    cp "$MODULE_DIR/$from" "$CACHE_ROOT/$to"
-  done < <(service_files "$e")
-  rendered_service "$e" >"$dest"
+  write_service_definition "$e"
   # The service manager reads the definition just written, keeps the service
   # at every login, and runs it now from that definition (lib-service.sh).
   service_load "$label" || { err "install: $(field "$e" .id): $SERVICE_FAILED_STEP failed"; return 1; }
@@ -1610,8 +1637,13 @@ purge_legacy_hook_entries() {
 
 main() {
   [ "$#" -ge 1 ] || die_usage "no verb given"
-  local verb="$1"
+  local verb="$1" label=""
   shift
+  if [ "$verb" = define-service ]; then
+    [ "$#" -ge 1 ] || die_usage "define-service needs a service label"
+    label="$1"
+    shift
+  fi
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --profile)
@@ -1624,13 +1656,14 @@ main() {
     esac
   done
   case "$verb" in
-    check|install|uninstall|list) resolve_package_manager ;;
+    check|install|uninstall|list|define-service) resolve_package_manager ;;
   esac
   case "$verb" in
     check) load_manifests; cmd_check ;;
     install) [ "$JSON" -eq 0 ] || die_usage "--json is for check"; load_manifests; cmd_install ;;
     uninstall) load_manifests; cmd_uninstall ;;
     list) load_manifests; cmd_list ;;
+    define-service) load_manifests; cmd_define_service "$label" ;;
     purge-legacy-hooks) command -v jq >/dev/null 2>&1 || { err "purge-hooks: jq is not installed; settings.json is never edited without it"; exit 2; }; purge_legacy_hook_entries ;;
     help|-h|--help) usage ;;
     *) die_usage "unknown verb: $verb" ;;

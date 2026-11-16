@@ -1028,6 +1028,11 @@ func (r *resolver) observeUnmodeled(s *wsState, act *conversationv1.AgentActivit
 	if name == "" {
 		return
 	}
+	// A TOOL THE SESSION NEVER OFFERED is no blind spot of the contract: the
+	// agent called one that does not exist, and the vendor refused it.
+	if start.Start.GetNotOffered() {
+		return
+	}
 	call, held := s.unmodeled[name]
 	if !held {
 		call = &unmodeledCall{toolName: name, seq: s.nextSeq()}

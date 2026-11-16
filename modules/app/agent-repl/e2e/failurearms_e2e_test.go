@@ -36,13 +36,14 @@ import (
 // independently written area files.
 // ---------------------------------------------------------------------------
 
-// faApiErrorWarnings are the two records a MID-TURN vendor request failure
+// faApiErrorWarnings are the records a MID-TURN vendor request failure
 // legitimately leaves, and they are this file's own subject: every scenario
-// here asks the fake vendor to fail a request mid-turn, the watcher routes
-// that failure, and the feed files it as the turn's evidence. Declared for the
-// same reason the query-death area declares its own trail — a fault the
-// arrangement provokes is a fault the daemon is RIGHT to record.
-var faApiErrorWarnings = []string{"daemon.sessionwatcher.api_error", "daemon.feed.api_error"}
+// here asks the fake vendor to fail a request mid-turn, and the feed files it
+// as the turn's evidence. Declared for the same reason the query-death area
+// declares its own trail — a fault the arrangement provokes is a fault the
+// daemon is RIGHT to record. The watcher's own record of the failure is INFO,
+// since the vendor retries its request, so it is declared nowhere.
+var faApiErrorWarnings = []string{"daemon.feed.api_error"}
 
 // faDriveErrored drives one named failure scenario to completion and answers
 // the turn's FeedTurnEndedErrored, failing loudly if the turn ended on any

@@ -1089,7 +1089,10 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
-		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
+		// INFO, NOT WARN: the vendor's own request failed and the vendor
+		// retries it; nobody in agent-repl can act on it, and the feed, the
+		// footer and the sidebar draw it for the user (AGENTS.md, levels).
+		w.log.Info("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
 			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
 		})
 		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place)
@@ -1165,10 +1168,8 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 	// activity carries (internal/resolve/topbar's observeUsage), and a sink
 	// handed only the unmodeled frames would count nothing at all.
 	w.mu.later(func() { w.sinks.Topbar.OnActivity(w.ws, agent, act) })
-	if act.GetUnmodeled() != nil {
-		w.log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", dlog.Context{
-			"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(act.GetUnmodeled()),
-		})
+	if unmodeled := act.GetUnmodeled(); unmodeled != nil {
+		logUnmodeled(w.log, agent, unmodeled)
 	}
 	w.reapEndedMonitorLocked(act)
 	w.routeDetachedSubagentLocked(agent, act)
@@ -2198,6 +2199,24 @@ func mcpToolName(call *conversationv1.AgentMcpToolCall) string {
 
 // unmodeledToolName is the tool an unmodeled call named, from whichever of its
 // frames carried it.
+// logUnmodeled records an unmodeled unit's frame. A tool the schema does not
+// model is a WARN once per unit, at its start; its later frames are the same
+// gap, recorded at DEBUG. A call to a tool the session never offered (the
+// model named `bash` for `Bash`, 2026-11-16) is no gap at all: the vendor
+// refuses it, and it is recorded at INFO.
+func logUnmodeled(log dlog.Logger, agent *conversationv1.AgentId, unmodeled *conversationv1.AgentUnmodeled) {
+	fields := dlog.Context{"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(unmodeled)}
+	start := unmodeled.GetStart()
+	switch {
+	case start == nil:
+		log.Debug("daemon.sessionwatcher.unmodeled_activity", "a later frame of an activity the schema does not model", fields)
+	case start.GetNotOffered():
+		log.Info("daemon.sessionwatcher.unmodeled_activity", "the agent called a tool the session does not offer; the vendor refuses it", fields)
+	default:
+		log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", fields)
+	}
+}
+
 func unmodeledToolName(unmodeled *conversationv1.AgentUnmodeled) string {
 	if start := unmodeled.GetStart(); start != nil {
 		return start.GetToolName()

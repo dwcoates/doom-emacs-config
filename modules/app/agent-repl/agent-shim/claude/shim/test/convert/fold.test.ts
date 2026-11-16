@@ -437,6 +437,38 @@ describe("tool calls", () => {
     expect(activityOf(output.entries[0])?.item.case).toBe("unmodeled");
   });
 
+  describe("a call to a tool the session does not offer", () => {
+    /** The vendor's init naming the session's tools. */
+    const initOffering = (tools: readonly string[]): SdkMessage =>
+      ({ type: "system", subtype: "init", uuid: "uuid-init", session_id: "session-1", tools }) as unknown as SdkMessage;
+
+    /** Whether folding `messages` then a call to `name` marks the call not offered. */
+    function notOffered(messages: readonly SdkMessage[], name: string): boolean | undefined {
+      const fold = createFold();
+      const context = foldContext();
+      for (const message of messages) fold.onSdkMessage(message, context);
+      const output = fold.onSdkMessage(assistant("msg-call", [{ type: "tool_use", id: "toolu_c", name, input: {} }]), context);
+      const item = activityOf(output.entries[0])?.item;
+      return item?.case === "unmodeled" && item.value.result.case === "start" ? item.value.result.value.notOffered : undefined;
+    }
+
+    it("marks a name the init never offered", () => {
+      expect(notOffered([initOffering(["Bash", "Read"])], "bash")).toBe(true);
+    });
+
+    it("does not mark an unmodeled tool the init offered", () => {
+      expect(notOffered([initOffering(["Bash", "StructuredOutput"])], "StructuredOutput")).toBe(false);
+    });
+
+    it("does not mark a call before any init named the tools", () => {
+      expect(notOffered([], "bash")).toBe(false);
+    });
+
+    it("does not mark a call after an init that named no tool list", () => {
+      expect(notOffered([{ type: "system", subtype: "init", uuid: "u", session_id: "s" } as unknown as SdkMessage], "bash")).toBe(false);
+    });
+  });
+
   it("makes an MCP server's tool an ordinary MCP tool call, never unmodeled", () => {
     const fold = createFold();
 
@@ -2223,6 +2255,33 @@ describe("where the fold ends a stream", () => {
     expect(detected).toEqual(["turn_end"]);
   });
 
+  it("judges at the turn's result what the main stream left unsettled at its message_stop", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([
+      ...strandedBlock(null, "msg_main"),
+      streamOn(null, { type: "message_stop" }),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "done",
+        uuid: "uuid-result",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+    ]);
+
+    // Assert.
+    expect(detected).toEqual(["message_stop"]);
+  });
+
+  it("does NOT judge the main stream's unsettled unit at its message_stop alone", () => {
+    // Arrange, Act.
+    const detected = unsettledDetectedAt([...strandedBlock(null, "msg_main"), streamOn(null, { type: "message_stop" })]);
+
+    // Assert.
+    expect(detected).toEqual([]);
+  });
+
   it("does NOT end a subagent's stream at the turn's result", () => {
     // Arrange, Act.
     const detected = unsettledDetectedAt([
@@ -3063,5 +3122,137 @@ describe("the calls in flight under the mocked vendor", () => {
 
     // Assert
     expect(heldIds(fold)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A unit its turn cut
+// ---------------------------------------------------------------------------
+
+describe("a streamed unit the turn cut", () => {
+  const UNSETTLED = "invariant violated: a streamed unit was started and never settled; its row stays unsettled";
+  const CUT = "the turn cut a unit its stream started; it settles as cut";
+
+  function on(event: Record<string, unknown>, uuid: string): SdkMessage {
+    return { type: "stream_event", uuid, session_id: "session-1", parent_tool_use_id: null, event } as unknown as SdkMessage;
+  }
+
+  /** A main-stream response that opens prose and reasoning, says "half an ans", and is stopped. */
+  function cutResponse(): SdkMessage[] {
+    return [
+      on({ type: "message_start", message: { id: "msg_cut" } }, "u-start"),
+      on({ type: "content_block_start", index: 0, content_block: { type: "thinking" } }, "u-b0"),
+      on({ type: "content_block_start", index: 1, content_block: { type: "text" } }, "u-b1"),
+      on({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "half " } }, "u-d1"),
+      on({ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "an ans" } }, "u-d2"),
+      on({ type: "message_stop" }, "u-stop"),
+    ];
+  }
+
+  const userStop = {
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    terminal_reason: "aborted_streaming",
+    uuid: "uuid-stop",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+
+  const failed = {
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    terminal_reason: "api_error",
+    errors: ["No response from API"],
+    api_error_status: null,
+    uuid: "uuid-failed",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+
+  /** Fold the cut response then `terminal`, answering the result's entries and the records written. */
+  function foldCut(terminal: SdkMessage): { entries: readonly PersistEntry[]; messages: string[] } {
+    const fold = createFold();
+    const context = foldContext();
+    let entries: readonly PersistEntry[] = [];
+    const records = logRecordsDuring(() => {
+      for (const message of cutResponse()) fold.onSdkMessage(message, context);
+      entries = fold.onSdkMessage(terminal, context).entries;
+    });
+    return { entries, messages: records.map((r) => r.message) };
+  }
+
+  /** The cut terminals among `entries`, by unit id. */
+  function cutTerminals(entries: readonly PersistEntry[]): Map<string, conversationv1.AgentActivity["item"]> {
+    const out = new Map<string, conversationv1.AgentActivity["item"]>();
+    for (const entry of entries) {
+      const activity = activityOf(entry);
+      if (activity?.activityId?.value.startsWith("msg_cut:")) out.set(activity.activityId.value, activity.item);
+    }
+    return out;
+  }
+
+  it("settles a response a user stop cut as aborted, carrying the prose that arrived", () => {
+    // Arrange, Act.
+    const { entries } = foldCut(userStop);
+
+    // Assert.
+    const item = cutTerminals(entries).get("msg_cut:1");
+    if (item?.case !== "response" || item.value.result.case !== "failure") throw new Error("expected a failed response");
+    expect(item.value.result.value.reason?.reason.case).toBe("aborted");
+    expect(item.value.result.value.prose?.markdown).toBe("half an ans");
+  });
+
+  it("settles a response a failed turn cut as request_failed", () => {
+    // Arrange, Act.
+    const { entries } = foldCut(failed);
+
+    // Assert.
+    const item = cutTerminals(entries).get("msg_cut:1");
+    if (item?.case !== "response" || item.value.result.case !== "failure") throw new Error("expected a failed response");
+    expect(item.value.result.value.reason?.reason.case).toBe("requestFailed");
+  });
+
+  it("settles reasoning a turn cut as a failure", () => {
+    // Arrange, Act.
+    const { entries } = foldCut(userStop);
+
+    // Assert.
+    const item = cutTerminals(entries).get("msg_cut:0");
+    expect(item?.case === "thinking" ? item.value.result.case : undefined).toBe("failure");
+  });
+
+  it("records a cut at INFO and reports no violation", () => {
+    // Arrange, Act.
+    const { messages } = foldCut(userStop);
+
+    // Assert.
+    expect(messages.filter((m) => m === CUT)).toHaveLength(2);
+    expect(messages).not.toContain(UNSETTLED);
+  });
+
+  it("lands the cut terminals before the turn's own terminal", () => {
+    // Arrange, Act.
+    const { entries } = foldCut(userStop);
+
+    // Assert.
+    const last = entries[entries.length - 1];
+    expect(activityOf(last)?.activityId?.value.startsWith("msg_cut:") ?? false).toBe(false);
+    expect(cutTerminals(entries).size).toBe(2);
+  });
+
+  it("still reports a violation and settles nothing when the turn completed", () => {
+    // Arrange, Act.
+    const { entries, messages } = foldCut({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "done",
+      uuid: "uuid-done",
+      session_id: "session-1",
+    } as unknown as SdkMessage);
+
+    // Assert.
+    expect(messages.filter((m) => m === UNSETTLED)).toHaveLength(2);
+    expect(cutTerminals(entries).size).toBe(0);
   });
 });

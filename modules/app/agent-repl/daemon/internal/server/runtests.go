@@ -351,6 +351,13 @@ relay:
 		return outcome, sendErr
 	}
 	switch {
+	case result.err != nil && ctx.Err() != nil:
+		// THE CALLER LEFT (its command was interrupted, or its session ended),
+		// which cancels the run and kills its script: the run is stopped as
+		// asked, no failure of the runner's (2026-11-16, "scriptrunner: run
+		// env: context canceled (signal: killed)" recorded at ERROR).
+		log.Info(opRunTests, "a test run's caller went away, so its run was stopped", dlog.Context{"dir": dir, "run": run, "cause": result.err.Error()})
+		return runUnended, ctx.Err()
 	case result.err != nil:
 		log.Error(opRunTests, "a test run could not be run", dlog.Context{"dir": dir, "run": run, "cause": result.err.Error()})
 		return runUnended, sendRunnerFailed(stream, run, -1, fmt.Sprintf("run %s: %v", strings.Join(argv, " "), result.err))
