@@ -2335,7 +2335,7 @@ func (f *fakeTopbar) AwaitEdge(t *testing.T) participantEdge { return f.edges.aw
 
 type fakeSidebar struct {
 	sidebar.Resolver
-	topic publish.Topic[*frontendv1.WorkspaceRoster]
+	topic publish.Topic[*frontendv1.RosterPush]
 	// revision is what Revision answers.
 	revision uint64
 	// recency is the recency reach Emacs streams attach and reports replace,
@@ -2344,6 +2344,12 @@ type fakeSidebar struct {
 	// recencyReleased, when a test sets it before a stream opens, is told
 	// each stream's release of its reach.
 	recencyReleased chan struct{}
+	// merged are the merged rows MergedRows answers beside the topic's
+	// latest push.
+	merged []*frontendv1.RosterRow
+	// page answers MergedPage, and pages records every query it was asked.
+	page  func(sidebar.MergedPageQuery) (sidebar.MergedPage, error)
+	pages []sidebar.MergedPageQuery
 }
 
 func (f *fakeSidebar) AttachRecencyReach() (release func()) {
@@ -2367,7 +2373,20 @@ func (f *fakeSidebar) ReportRecencyReach(reach sidebar.RecencyReach) error {
 // heldRecencyReach answers the reach standing, and whether a stream stands.
 func (f *fakeSidebar) heldRecencyReach() (sidebar.RecencyReach, bool) { return f.recency.Get() }
 
-func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return &f.topic }
+func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.RosterPush] { return &f.topic }
+
+// MergedRows answers the fake's merged rows with the topic's latest push,
+// false before any push.
+func (f *fakeSidebar) MergedRows() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool) {
+	push, ok := f.topic.Latest()
+	return f.merged, push, ok
+}
+
+// MergedPage records Q and answers it through page.
+func (f *fakeSidebar) MergedPage(q sidebar.MergedPageQuery) (sidebar.MergedPage, error) {
+	f.pages = append(f.pages, q)
+	return f.page(q)
+}
 
 func (f *fakeSidebar) Revision() uint64 { return f.revision }
 

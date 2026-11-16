@@ -620,8 +620,8 @@ func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open the roster stream: %v", err)
 				}
-				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
-				if !stream.Receive() || stream.Msg().GetRoster() == nil {
+				h.Sidebar.topic.Publish(wholePush(1))
+				if !stream.Receive() || stream.Msg().GetStreams() == nil {
 					t.Fatalf("prove the roster subscription: %v", stream.Err())
 				}
 				return func() (bool, error) {
@@ -639,7 +639,7 @@ func TestAPlannedCloseEndsEachStandingStreamWithItsEndingFrame(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open the mentions stream: %v", err)
 				}
-				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
+				h.Sidebar.topic.Publish(wholePush(1))
 				if !stream.Receive() || stream.Msg().GetTargets() == nil {
 					t.Fatalf("prove the mentions subscription: %v", stream.Err())
 				}
@@ -1961,5 +1961,150 @@ func TestAHostStreamThatLeftStaysBrokenWhenThePageArrives(t *testing.T) {
 	// Assert.
 	if edge.Host || !edge.Web {
 		t.Fatalf("footer participant edge = %+v, want the gone editor's hop broken beside the live page", edge)
+	}
+}
+
+// ---- the roster's streams, sent per subscription ----
+
+// wholePush is a push at REVISION with every stream set, each its own
+// message.
+func wholePush(revision uint64) *frontendv1.RosterPush {
+	return &frontendv1.RosterPush{
+		Revision:       revision,
+		Workspaces:     &frontendv1.WorkspaceRoster{},
+		MergeQueue:     &frontendv1.RosterMergeQueueSection{},
+		RecentlyMerged: &frontendv1.RosterMergedSection{},
+		Closed:         &frontendv1.RosterClosedRows{},
+	}
+}
+
+// pushWith is a whole push at REVISION whose workspaces stream is ROSTER.
+func pushWith(roster *frontendv1.WorkspaceRoster, revision uint64) *frontendv1.RosterPush {
+	push := wholePush(revision)
+	push.Workspaces = roster
+	return push
+}
+
+// nextPush is BEFORE at the next revision with its workspaces stream a new
+// message and every other stream BEFORE's own, as the sidebar publishes a
+// change to the workspaces stream alone.
+func nextPush(before *frontendv1.RosterPush) *frontendv1.RosterPush {
+	return &frontendv1.RosterPush{Revision: before.GetRevision() + 1,
+		Workspaces: &frontendv1.WorkspaceRoster{Open: &frontendv1.RosterOpenSection{}}, MergeQueue: before.MergeQueue,
+		RecentlyMerged: before.RecentlyMerged, Closed: before.Closed}
+}
+
+// carried names the streams a wire push carries.
+func carried(push *frontendv1.RosterPush) []string {
+	var out []string
+	if push.Workspaces != nil {
+		out = append(out, "workspaces")
+	}
+	if push.MergeQueue != nil {
+		out = append(out, "merge_queue")
+	}
+	if push.RecentlyMerged != nil {
+		out = append(out, "recently_merged")
+	}
+	if push.Closed != nil {
+		out = append(out, "closed")
+	}
+	return out
+}
+
+var everyStream = []string{"workspaces", "merge_queue", "recently_merged", "closed"}
+
+func TestRosterStreamsSendOnlyWhatTheSubscriptionHasNotSeen(t *testing.T) {
+	first := wholePush(1)
+	second := nextPush(first)
+	third := &frontendv1.RosterPush{Revision: 3, Workspaces: second.Workspaces, MergeQueue: &frontendv1.RosterMergeQueueSection{},
+		RecentlyMerged: second.RecentlyMerged, Closed: second.Closed}
+	tests := []struct {
+		name   string
+		pushes []*frontendv1.RosterPush
+		want   []string
+	}{
+		{name: "the first frame carries every stream", pushes: []*frontendv1.RosterPush{first}, want: everyStream},
+		{name: "a later push carries only the stream that changed", pushes: []*frontendv1.RosterPush{first, second}, want: []string{"workspaces"}},
+		{name: "a push repeating what was sent carries none", pushes: []*frontendv1.RosterPush{first, first}, want: nil},
+		{name: "a subscriber that skipped a push is sent everything changed since its last", pushes: []*frontendv1.RosterPush{first, third}, want: []string{"workspaces", "merge_queue"}},
+		{name: "a late subscriber's first frame carries every stream", pushes: []*frontendv1.RosterPush{third}, want: everyStream},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			sent := &rosterStreams{}
+			var last *frontendv1.RosterPush
+
+			// Act.
+			for _, push := range tt.pushes {
+				last = sent.unsent(push)
+			}
+
+			// Assert.
+			if got := carried(last); !slices.Equal(got, tt.want) {
+				t.Fatalf("carried %v, want %v", got, tt.want)
+			}
+			if last.GetRevision() != tt.pushes[len(tt.pushes)-1].GetRevision() {
+				t.Fatalf("revision = %d, want the push's %d", last.GetRevision(), tt.pushes[len(tt.pushes)-1].GetRevision())
+			}
+		})
+	}
+}
+
+// receiveRosterPush reads STREAM's next frame's push, failing on anything
+// else.
+func receiveRosterPush(t *testing.T, stream *connect.ServerStreamForClient[agentreplv1.WatchWorkspaceRosterResponse]) *frontendv1.RosterPush {
+	t.Helper()
+	if !stream.Receive() {
+		t.Fatalf("the roster stream ended: %v", stream.Err())
+	}
+	push := stream.Msg().GetStreams()
+	if push == nil {
+		t.Fatalf("the roster frame carried no push: %v", stream.Msg())
+	}
+	return push
+}
+
+func TestWatchWorkspaceRosterSendsEachSubscriptionItsUnseenStreams(t *testing.T) {
+	// Arrange: one subscriber from the first push on.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	early, err := h.Client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+	if err != nil {
+		t.Fatalf("open the roster stream: %v", err)
+	}
+	first := wholePush(1)
+	h.Sidebar.topic.Publish(first)
+	firstFrame := receiveRosterPush(t, early)
+
+	// Act: the workspaces stream alone changes, then a second subscriber joins.
+	second := nextPush(first)
+	h.Sidebar.topic.Publish(second)
+	secondFrame := receiveRosterPush(t, early)
+	late, err := h.Client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+	if err != nil {
+		t.Fatalf("open the late roster stream: %v", err)
+	}
+	lateFrame := receiveRosterPush(t, late)
+
+	// Assert.
+	tests := []struct {
+		name  string
+		frame *frontendv1.RosterPush
+		rev   uint64
+		want  []string
+	}{
+		{name: "the first frame carries every stream", frame: firstFrame, rev: 1, want: everyStream},
+		{name: "a later change carries only its stream", frame: secondFrame, rev: 2, want: []string{"workspaces"}},
+		{name: "a late subscriber is sent every stream", frame: lateFrame, rev: 2, want: everyStream},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := carried(tt.frame); !slices.Equal(got, tt.want) || tt.frame.GetRevision() != tt.rev {
+				t.Fatalf("frame carried %v at %d, want %v at %d", got, tt.frame.GetRevision(), tt.want, tt.rev)
+			}
+		})
 	}
 }

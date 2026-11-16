@@ -32,22 +32,27 @@ func findRosterRow(ref *workspacev1.WorkspaceRef, status func(*frontendv1.Roster
 	return row
 }
 
-// findRoster is the roster the find harness publishes: the open workspace
-// drawn thinking in the open section, the landed one drawn done in the
-// recently merged band. OPENSTATUS overrides the open row's status, nil
-// drawing it with none.
-func findRoster(openStatus func(*frontendv1.RosterRow)) *frontendv1.WorkspaceRoster {
+// findRoster is the push the find harness publishes: the open workspace
+// drawn thinking in the open section. OPENSTATUS overrides the open row's
+// status, nil drawing it with none. The landed workspace is in no stream: its
+// row is the sidebar's merged rows' (landedRow).
+func findRoster(openStatus func(*frontendv1.RosterRow)) *frontendv1.RosterPush {
 	open := findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-open", Dir: "/src/open"}, openStatus)
-	landed := findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-landed", Dir: "/src/landed"}, func(r *frontendv1.RosterRow) {
+	return &frontendv1.RosterPush{
+		Revision: 7,
+		Workspaces: &frontendv1.WorkspaceRoster{Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
+			Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})}}}},
+		MergeQueue:     &frontendv1.RosterMergeQueueSection{},
+		RecentlyMerged: &frontendv1.RosterMergedSection{},
+		Closed:         &frontendv1.RosterClosedRows{},
+	}
+}
+
+// landedRow is the landed workspace's row as a merged page draws it: done.
+func landedRow() *frontendv1.RosterRow {
+	return findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-landed", Dir: "/src/landed"}, func(r *frontendv1.RosterRow) {
 		r.Status = &frontendv1.RosterRow_Done{Done: &frontendv1.RosterRowStatusDone{}}
 	})
-	return &frontendv1.WorkspaceRoster{
-		Revision: 7,
-		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
-			Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})}}},
-		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{{
-			MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: landed}}}}}},
-	}
 }
 
 // thinking draws a roster row with the thinking status.
@@ -71,6 +76,7 @@ func findHarness(t *testing.T, opts ...option) *harness {
 	}
 	h.DB.summaries = map[ids.WorkspaceID]string{"ws-open": "Fix the footer"}
 	h.Sidebar.topic.Publish(findRoster(thinking))
+	h.Sidebar.merged = []*frontendv1.RosterRow{landedRow()}
 	return h
 }
 
@@ -466,10 +472,13 @@ func TestFindWorkspacesFailsAndRecordsAnUnreadableRoster(t *testing.T) {
 		publish func(*harness)
 		cause   string
 	}{
-		{name: "no roster published yet", publish: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.WorkspaceRoster) bool { return true }) },
+		{name: "no roster published yet", publish: func(h *harness) { h.Sidebar.topic.ClearIf(func(*frontendv1.RosterPush) bool { return true }) },
 			cause: "read the roster: the daemon has published no roster yet"},
 		{name: "a row with no status arm", publish: func(h *harness) { h.Sidebar.topic.Publish(findRoster(nil)) },
 			cause: "workspacefind: the roster's open row of workspace ws-open sets no status arm"},
+		{name: "a merged row with no status arm", publish: func(h *harness) {
+			h.Sidebar.merged = []*frontendv1.RosterRow{findRosterRow(&workspacev1.WorkspaceRef{Id: "ws-landed", Dir: "/src/landed"}, nil)}
+		}, cause: "workspacefind: the roster's merged row of workspace ws-landed sets no status arm"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

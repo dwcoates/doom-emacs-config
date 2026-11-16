@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
@@ -1373,8 +1374,8 @@ func TestAPlannedCloseEndsAPageInOrder(t *testing.T) {
 			subscribe: func(t *testing.T, ctx context.Context, h *harness, stream *connect.ServerStreamForClient[agentreplv1.WatchPageResponse]) {
 				subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{Page: "page-1", Subscription: "roster-1",
 					Request: &agentreplv1.SubscribePageRequest_Roster{Roster: &agentreplv1.WatchWorkspaceRosterRequest{}}})
-				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
-				if !stream.Receive() || stream.Msg().GetPush().GetRoster().GetRoster() == nil {
+				h.Sidebar.topic.Publish(wholePush(1))
+				if !stream.Receive() || stream.Msg().GetPush().GetRoster().GetStreams() == nil {
 					t.Fatalf("prove the roster subscription: %v", stream.Err())
 				}
 			},
@@ -1546,5 +1547,38 @@ func TestAnyOtherRefusalFailsTheSubscriptionHandedNowhere(t *testing.T) {
 	// Assert.
 	if failed.HandedAway != nil {
 		t.Fatalf("handed_away = %+v, want unset", failed.GetHandedAway())
+	}
+}
+
+// TestAPageRosterSubscriptionSendsOnlyItsUnseenStreams pins the page-mux arm
+// of the roster: its first push carries every stream, and a change to one
+// stream carries that stream alone, as the dedicated rpc's do.
+func TestAPageRosterSubscriptionSendsOnlyItsUnseenStreams(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := attachPageStream(t, h, ctx, "page-1")
+	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{Page: "page-1", Subscription: "roster-1",
+		Request: &agentreplv1.SubscribePageRequest_Roster{Roster: &agentreplv1.WatchWorkspaceRosterRequest{}}})
+	first := wholePush(1)
+
+	// Act.
+	h.Sidebar.topic.Publish(first)
+	var frames [][]string
+	for _, push := range []*frontendv1.RosterPush{nil, nextPush(first)} {
+		if push != nil {
+			h.Sidebar.topic.Publish(push)
+		}
+		if !stream.Receive() {
+			t.Fatalf("the page's stream ended before the roster push: %v", stream.Err())
+		}
+		frames = append(frames, carried(stream.Msg().GetPush().GetRoster().GetStreams()))
+	}
+
+	// Assert.
+	want := [][]string{everyStream, {"workspaces"}}
+	if !slices.EqualFunc(frames, want, slices.Equal) {
+		t.Fatalf("frames carried %v, want %v", frames, want)
 	}
 }

@@ -377,7 +377,7 @@ func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
 	for _, step := range steps {
 		t.Run(step.name, func(t *testing.T) {
 			// Act.
-			set, changed := tracker.next(step.roster)
+			set, changed := tracker.next(&frontendv1.RosterPush{Workspaces: step.roster})
 
 			// Assert.
 			if changed != step.wantChanged {
@@ -515,18 +515,17 @@ func TestWatchWorkspaceMentionsPushesOnlyAChangedSet(t *testing.T) {
 	}
 	first := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("v", "viewer"), mentionRow("a", "alpha")})
 	sameTargets := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("v", "viewer"), mentionRow("a", "alpha")})
-	sameTargets.Revision = 2
 	changed := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
 
 	// Act.
-	h.Sidebar.topic.Publish(first)
+	h.Sidebar.topic.Publish(pushWith(first, 1))
 	var got [][]string
 	if !stream.Receive() {
 		t.Fatalf("receive the first set: %v", stream.Err())
 	}
 	got = append(got, targetNames(stream.Msg().GetTargets()))
-	h.Sidebar.topic.Publish(sameTargets)
-	h.Sidebar.topic.Publish(changed)
+	h.Sidebar.topic.Publish(pushWith(sameTargets, 2))
+	h.Sidebar.topic.Publish(pushWith(changed, 3))
 	if !stream.Receive() {
 		t.Fatalf("receive the changed set: %v", stream.Err())
 	}
@@ -578,7 +577,7 @@ func TestAPageCarriesItsWorkspaceMentions(t *testing.T) {
 			WorkspaceMentions: &agentreplv1.WatchWorkspaceMentionsRequest{Viewer: &workspacev1.WorkspaceRef{Id: "v"}},
 		},
 	})
-	h.Sidebar.topic.Publish(mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}))
+	h.Sidebar.topic.Publish(pushWith(mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}), 1))
 
 	// Assert.
 	if !stream.Receive() {
@@ -616,16 +615,15 @@ func TestTheHostStreamPushesOnlyAChangedSetOfMentionTargets(t *testing.T) {
 	viewer := string(testWorkspaceID)
 	first := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
 	sameTargets := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
-	sameTargets.Revision = 2
 	changed := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
-	h.Sidebar.topic.Publish(first)
+	h.Sidebar.topic.Publish(pushWith(first, 1))
 	stream := dialHostStream(t, h, ctx)
 
 	// Act.
 	var got [][]string
 	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
-	h.Sidebar.topic.Publish(sameTargets)
-	h.Sidebar.topic.Publish(changed)
+	h.Sidebar.topic.Publish(pushWith(sameTargets, 2))
+	h.Sidebar.topic.Publish(pushWith(changed, 3))
 	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
 
 	// Assert.
@@ -645,13 +643,13 @@ func TestTheComposerCompletesExactlyTheNamesThePageLinks(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	viewer := string(testWorkspaceID)
-	h.Sidebar.topic.Publish(mentionRoster(
+	h.Sidebar.topic.Publish(pushWith(mentionRoster(
 		[]*frontendv1.RosterOpenRow{
 			mentionRowIn(viewer, "viewer", "doom"), mentionRowIn("a", "fix", "doom"), mentionRowIn("b", "fix", "zettel"),
 			mentionRowIn("c", "gamma", "zettel"),
 		},
 		mentionRowIn("h", "hidden", "doom"),
-	))
+	), 1))
 	host := dialHostStream(t, h, ctx)
 	page, err := h.Client.WatchWorkspaceMentions(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceMentionsRequest{
 		Viewer: &workspacev1.WorkspaceRef{Id: viewer},

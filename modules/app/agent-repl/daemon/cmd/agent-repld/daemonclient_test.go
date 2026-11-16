@@ -99,7 +99,9 @@ type standingDaemon struct {
 
 func (d *standingDaemon) WatchWorkspaceRoster(ctx context.Context, _ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest], out *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
 	if err := out.Send(&agentreplv1.WatchWorkspaceRosterResponse{
-		Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: d.roster},
+		Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: &frontendv1.RosterPush{
+			Revision: 1, Workspaces: d.roster, MergeQueue: &frontendv1.RosterMergeQueueSection{},
+			RecentlyMerged: &frontendv1.RosterMergedSection{}, Closed: &frontendv1.RosterClosedRows{}}},
 	}); err != nil {
 		return err
 	}
@@ -112,7 +114,8 @@ func (d *standingDaemon) WatchWorkspaceRoster(ctx context.Context, _ *connect.Re
 // as the registry would.
 func (d *standingDaemon) LocateWorkspace(_ context.Context, req *connect.Request[agentreplv1.LocateWorkspaceRequest]) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
 	var refs []*workspacev1.WorkspaceRef
-	for _, row := range rosterwalk.AllRows(d.roster) {
+	for _, row := range rosterwalk.OpenRows(d.roster) {
+		row := row.GetRow()
 		if ref := row.GetWorkspace().GetWorkspace(); ref.GetDir() == req.Msg.GetAt().GetDir() {
 			refs = append(refs, ref)
 		}
@@ -189,7 +192,7 @@ func TestReadRosterReturnsFromAStandingRosterStream(t *testing.T) {
 	got, err := readRoster(ctx, newDaemonClient(address))
 
 	// Assert.
-	if err != nil || len(rosterwalk.AllRows(got)) != 1 || rosterwalk.AllRows(got)[0].GetWorkspace().GetWorkspace().GetDir() != dir {
+	if err != nil || len(rosterwalk.OpenRows(got)) != 1 || rosterwalk.OpenRows(got)[0].GetRow().GetWorkspace().GetWorkspace().GetDir() != dir {
 		t.Fatalf("readRoster = %v, %v; want the roster holding ws-1", got, err)
 	}
 	assertStreamEnded(t, daemon)
@@ -274,5 +277,19 @@ func TestEveryVerbOpensItsServerStreamsThroughOpenDaemonStream(t *testing.T) {
 	if len(direct) > 0 {
 		t.Fatalf("server streams opened by a direct call, so their Close can drain a standing stream; open them with openDaemonStream:\n%s",
 			strings.Join(direct, "\n"))
+	}
+}
+
+func TestReadRosterRefusesAFirstFrameWithNoWorkspacesStream(t *testing.T) {
+	// Arrange: the first frame leaves the workspaces stream out, which the
+	// contract forbids of a subscription's first push.
+	_, address := serveStandingDaemon(t, nil)
+
+	// Act.
+	got, err := readRoster(t.Context(), newDaemonClient(address))
+
+	// Assert.
+	if err == nil || got != nil || !strings.Contains(err.Error(), "carried no workspaces stream") {
+		t.Fatalf("readRoster = %v, %v; want a refusal naming the missing stream", got, err)
 	}
 }

@@ -342,7 +342,7 @@ type viewFixture struct {
 
 	topbarRows  <-chan *frontendv1.TopbarView
 	footerRows  <-chan *frontendv1.FooterView
-	sidebarRows <-chan *frontendv1.WorkspaceRoster
+	sidebarRows <-chan *frontendv1.RosterPush
 }
 
 // testColors is the repository's own render-colors table: every resolver
@@ -393,7 +393,7 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	// republication rather than about any of them.
 	top.Topic(ws).Publish(&frontendv1.TopbarView{})
 	foot.Topic(ws).Publish(&frontendv1.FooterView{})
-	roster.Topic().Publish(&frontendv1.WorkspaceRoster{})
+	roster.Topic().Publish(&frontendv1.RosterPush{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -429,7 +429,7 @@ func awaitFooter(t *testing.T, ch <-chan *frontendv1.FooterView) {
 	}
 }
 
-func awaitRoster(t *testing.T, ch <-chan *frontendv1.WorkspaceRoster) {
+func awaitRoster(t *testing.T, ch <-chan *frontendv1.RosterPush) {
 	t.Helper()
 	select {
 	case <-ch:
