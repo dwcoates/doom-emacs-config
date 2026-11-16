@@ -1261,8 +1261,13 @@ message AgentResponseFailureReason {
     // on a boundary the CALLER set rather than on the model's own ending —
     // which is why it is a stop rather than a success.
     AgentResponseStoppedAtStopSequence stop_sequence = 5;
+    // The vendor request carrying the response failed mid-arrival (the API
+    // could not be reached, or answered an error), and the turn ended on that
+    // failure: the prose is cut short.
+    AgentResponseRequestFailed request_failed = 6;
   }
 }
+message AgentResponseRequestFailed {}
 message AgentResponseStoppedAtStopSequence {}
 message AgentResponseStoppedAtMaxTokens {}
 // The refusal, with the vendor's own account.
