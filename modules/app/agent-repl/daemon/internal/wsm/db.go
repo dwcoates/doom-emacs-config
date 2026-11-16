@@ -706,6 +706,11 @@ type DB interface {
 	// MarkMediationPrompted records that the mediator was told of the
 	// mediation owed at OWED.
 	MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, at time.Time, turn TurnID) (bool, error)
+	// MarkMediationResumed records that the intake, whose turn on the
+	// mediation owed at OWED ended deciding nothing, is resumed in TURN;
+	// false when that mediation is no longer owed, was dispatched, or was
+	// resumed already.
+	MarkMediationResumed(ctx context.Context, repo RepoKey, owed time.Time, turn TurnID) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
 	// RecordMediationIntake records a chain's intake workspace on the

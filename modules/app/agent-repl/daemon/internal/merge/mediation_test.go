@@ -35,6 +35,8 @@ func checked(t *testing.T) *harness {
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
 	h.briefs[BriefDeployIntake] = []string{"deploy_started", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
+	h.briefs[BriefDeployEscalationUpdate] = []string{"repo_dir", "deploy_started", "summary", "problems", "recurred", "persisting"}
+	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
 	h.briefs[BriefDeployRemediation] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
@@ -137,6 +139,18 @@ func intakeSubmissions(h *harness) []promptqueue.Submission {
 	return out
 }
 
+// intakeTellings is every brief telling the intake of a deploy, the
+// resuming briefs of its undecided turns left out.
+func intakeTellings(h *harness) []promptqueue.Submission {
+	var out []promptqueue.Submission
+	for _, sub := range intakeSubmissions(h) {
+		if strings.HasPrefix(submittedText(sub), BriefDeployIntake+" ") {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
 // checkWorkspacesMade is every intake and remediation workspace made, the
 // escalations an undecided round ends in left out.
 func checkWorkspacesMade(h *harness) []string {
@@ -191,16 +205,13 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	if made := checkWorkspacesMade(h); len(made) != 1 || !strings.HasPrefix(made[0], "deploy-intake-") {
 		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
 	}
-	var origins []conversationv1.PromptOrigin
 	for _, sub := range intakeSubmissions(h) {
-		if sub.WS != "ws-intake" {
-			t.Fatalf("submitted to %s, want the intake", sub.WS)
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+			t.Fatalf("submitted %v to the intake, want no compaction", sub.Origin)
 		}
-		origins = append(origins, sub.Origin)
 	}
-	brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
-	if !slices.Equal(origins, []conversationv1.PromptOrigin{brief}) {
-		t.Fatalf("submitted %v, want one brief and no compaction", origins)
+	if told := intakeTellings(h); len(told) != 1 {
+		t.Fatalf("told the intake %d times, want one brief", len(told))
 	}
 }
 
@@ -241,12 +252,7 @@ func TestEachDeployOfTheChainIsToldToTheSameIntake(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	var intakeBriefs int
-	for _, sub := range h.queue.submissions {
-		if sub.WS == "ws-intake" {
-			intakeBriefs++
-		}
-	}
+	intakeBriefs := len(intakeTellings(h))
 	if made := checkWorkspacesMade(h); intakeBriefs != 2 || slices.Index(made, "deploy-intake-"+deployStarted.Format("20060102-150405")) < 0 || len(made) != 2 {
 		t.Fatalf("intake told %d times, made %v; want one intake told of both deploys, and one remediation made", intakeBriefs, h.checks.made)
 	}
@@ -305,7 +311,7 @@ func TestATurnThatDecidesNothingLetsTheQueueThroughTellsTheUserAndEndsTheChain(t
 		t.Fatal("the user was not told the intake decided nothing")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told"}); !ok {
+		Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told"}); !ok {
 		t.Fatalf("records = %v, want the undecided check at ERROR", h.logs.Records())
 	}
 	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
@@ -411,8 +417,8 @@ func TestACheckAlreadyToldIsReattachedToItsTurn(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if len(intakeSubmissions(h)) != tt.wantSubmitted || len(checkWorkspacesMade(h)) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
-				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(intakeSubmissions(h)), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
+			if len(intakeTellings(h)) != tt.wantSubmitted || len(checkWorkspacesMade(h)) != 0 || !slices.Contains(h.awaitedTurns, "turn-told") {
+				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(intakeTellings(h)), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
 			}
 		})
 	}
@@ -860,7 +866,7 @@ func TestARoundForAReplacedCheckNeverBlocksTheNewerChecksRound(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: the newer check's round ran, and told the intake.
-	if subs := intakeSubmissions(h); len(subs) != 1 {
+	if subs := intakeTellings(h); len(subs) != 1 {
 		t.Fatalf("submitted %+v, want the newer check told to the intake", h.queue.submissions)
 	}
 }
@@ -918,3 +924,142 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
+
+// resumingBriefs is every resuming brief the harness submitted to the intake.
+func resumingBriefs(h *harness) []promptqueue.Submission {
+	var out []promptqueue.Submission
+	for _, sub := range intakeSubmissions(h) {
+		if strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) {
+	tests := []struct {
+		name         string
+		decide       bool
+		wantReleased bool
+		wantEscalate bool
+		wantFault    bool
+	}{
+		{name: "the resumed turn decides", decide: true, wantReleased: true},
+		{name: "the resumed turn ends undecided again", wantReleased: true, wantEscalate: true, wantFault: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			if tt.decide {
+				h.queue.onSubmit = func(sub promptqueue.Submission) {
+					if sub.WS == "ws-intake" && strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+						if err := h.o.DecideMediation(context.Background(), sub.WS, Decision{Kind: MediationApprove, Summary: "nothing new"}); err != nil {
+							t.Errorf("DecideMediation: %v", err)
+						}
+					}
+				}
+			}
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if subs := resumingBriefs(h); len(subs) != 1 {
+				t.Fatalf("resumed the intake %d times, want once", len(subs))
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "warn", Operation: opMediation,
+				Message: "the intake's turn ended deciding nothing about the deploy; it is resumed once to decide it, the queue still held"}); !ok {
+				t.Fatalf("records = %v, want the resume at WARN", h.logs.Records())
+			}
+			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
+				t.Fatalf("released %v, want %v", released, tt.wantReleased)
+			}
+			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") })
+			if escalated != tt.wantEscalate {
+				t.Fatalf("made %v, want an escalation %v", h.checks.made, tt.wantEscalate)
+			}
+			_, fault := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+				Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told"})
+			if fault != tt.wantFault {
+				t.Fatalf("records = %v, want the intake's fault at ERROR %v", h.logs.Records(), tt.wantFault)
+			}
+		})
+	}
+}
+
+func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		message string
+	}{
+		{name: "a resume that cannot be recorded", message: "could not record that the undecided intake is resumed; the queue stays held",
+			arrange: func(h *harness) {
+				h.db.mu.Lock()
+				h.db.resumeMarkErr = errors.New("database is locked")
+				h.db.mu.Unlock()
+			}},
+		{name: "a resuming brief that cannot be composed", message: "the undecided intake's resuming brief could not be composed; the queue stays held",
+			arrange: func(h *harness) { delete(h.briefs, BriefDeployIntakeResumed) }},
+		{name: "a resuming brief that cannot be submitted", message: "the undecided intake's resuming brief could not be submitted; the queue stays held",
+			arrange: func(h *harness) {
+				h.queue.onSubmit = func(sub promptqueue.Submission) {
+					if !strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+						return
+					}
+					h.queue.mu.Lock()
+					h.queue.err = errors.New("queue closed")
+					h.queue.mu.Unlock()
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			tt.arrange(h)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if owedCheck(t, h) == nil {
+				t.Fatal("the check was released, want the queue held")
+			}
+			if slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") }) {
+				t.Fatalf("made %v, want no escalation", h.checks.made)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
+				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestAResumedIntakesTurnIsReattachedWithItsResumingBrief(t *testing.T) {
+	// Arrange: the intake was told, then resumed, and the daemon restarted
+	// before the resuming turn reached its session.
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	told(t, h, deployStarted, "turn-told")
+	if ok, err := h.db.MarkMediationResumed(context.Background(), mediationKey(h), deployStarted, "turn-resumed"); err != nil || !ok {
+		t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	subs := intakeSubmissions(h)
+	if len(subs) == 0 || subs[0].Turn != "turn-resumed" || !strings.HasPrefix(submittedText(subs[0]), BriefDeployIntakeResumed) {
+		t.Fatalf("submitted %+v, want the resuming brief resubmitted in its recorded turn", subs)
+	}
+	if len(resumingBriefs(h)) != 1 {
+		t.Fatalf("resumed the intake %d times, want the recorded resume only", len(resumingBriefs(h)))
+	}
+}
+

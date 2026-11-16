@@ -49,6 +49,9 @@ import (
 // only what the orchestrator actually calls: anything else would panic loudly
 // rather than quietly answering a zero value.
 type fakeDB struct {
+	// resumeMarkErr fails recording that an undecided intake is resumed.
+	resumeMarkErr error
+
 	// links are each workspace's stored links, and linksErr fails their read.
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	linksErr error
@@ -353,6 +356,16 @@ func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Tim
 
 func (f *fakeDB) MarkMediationPrompted(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
 	return f.checks.MarkMediationPrompted(ctx, repo, owed, at, turn)
+}
+
+func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owed time.Time, turn ids.TurnID) (bool, error) {
+	f.mu.Lock()
+	err := f.resumeMarkErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.MarkMediationResumed(ctx, repo, owed, turn)
 }
 
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {

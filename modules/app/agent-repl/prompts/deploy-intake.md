@@ -13,6 +13,8 @@ The last test gate's reuse, which the daemon judged by why its units ran:
 
 A NEW reuse fact is escalated, with the reuse line as its evidence.
 
+Escalating a problem an open escalation workspace owns sends it back to that workspace as an update, never to a new escalation, so escalate it like any other.
+
 Also read `~/.claude/skills/agent-repl-runtime/run.sh --doctor`: a fault it reports is dispatched or escalated unless its records are OWNED above.
 
 Decide this deploy in this turn, as your session's rules say: approve only when every group is OWNED, and otherwise dispatch or escalate every NEW, SEEN BEFORE and RECURRED group.

@@ -588,3 +588,126 @@ func TestAReplacedDispatchedMediationSaysWhetherItsDispatchCarriesOn(t *testing.
 		})
 	}
 }
+
+func TestAnIntakeIsResumedOnceOnTheMediationOwed(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, s *store, repo RepoKey)
+		owed    time.Time
+		want    bool
+	}{
+		{name: "the mediation owed, never resumed", owed: instant, want: true},
+		{name: "a mediation a newer deploy replaced", owed: instant.Add(-time.Minute)},
+		{name: "a mediation resumed already", owed: instant,
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				if ok, err := s.MarkMediationResumed(context.Background(), repo, instant, "turn-0"); err != nil || !ok {
+					t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
+				}
+			}},
+		{name: "a mediation a fix was dispatched for", owed: instant,
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				if ok, err := s.DispatchMediation(context.Background(), repo, instant, instant, "remedy"); err != nil || !ok {
+					t.Fatalf("DispatchMediation = (%v, %v)", ok, err)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			oweAt(t, s, repo, instant)
+			if tt.arrange != nil {
+				tt.arrange(t, s, repo)
+			}
+			before, err := s.MediationOf(ctx, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			marked, err := s.MarkMediationResumed(ctx, repo, tt.owed, "turn-2")
+
+			// Assert
+			m, rerr := s.MediationOf(ctx, repo)
+			if err != nil || rerr != nil || marked != tt.want {
+				t.Fatalf("MarkMediationResumed = (%v, %v), read %v; want %v", marked, err, rerr, tt.want)
+			}
+			if tt.want && (!m.Resumed || m.Turn != "turn-2") {
+				t.Fatalf("MediationOf = %+v, want it resumed in turn-2", m)
+			}
+			if !tt.want && (m.Resumed != before.Resumed || m.Turn != before.Turn) {
+				t.Fatalf("MediationOf = %+v, want it unchanged from %+v", m, before)
+			}
+		})
+	}
+}
+
+func TestAResumedMarkNeverReadsAsALaterMediations(t *testing.T) {
+	tests := []struct {
+		name  string
+		later func(t *testing.T, s *store, repo RepoKey)
+	}{
+		{name: "a newer deploy replaces the resumed mediation",
+			later: func(t *testing.T, s *store, repo RepoKey) { oweAt(t, s, repo, instant.Add(time.Minute)) }},
+		{name: "the resumed mediation is released and another owed",
+			later: func(t *testing.T, s *store, repo RepoKey) {
+				if _, err := s.ReleaseMediation(context.Background(), repo, instant); err != nil {
+					t.Fatal(err)
+				}
+				oweAt(t, s, repo, instant.Add(time.Minute))
+			}},
+		{name: "a build that knows no mark owes a newer deploy over it",
+			later: func(t *testing.T, s *store, repo RepoKey) {
+				key, err := normalizeRepoKey(repo)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.db().Exec(`UPDATE merge_queue_repos SET mediation_owed_at = ? WHERE repo_key = ?`, nanos(instant.Add(time.Minute)), key); err != nil {
+					t.Fatal(err)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			oweAt(t, s, repo, instant)
+			if ok, err := s.MarkMediationResumed(ctx, repo, instant, "turn-2"); err != nil || !ok {
+				t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
+			}
+
+			// Act
+			tt.later(t, s, repo)
+			m, err := s.MediationOf(ctx, repo)
+
+			// Assert
+			if err != nil || m == nil || m.Resumed {
+				t.Fatalf("MediationOf = (%+v, %v), want the later mediation not resumed", m, err)
+			}
+		})
+	}
+}
+
+func TestResumingAnIntakeInNoTurnIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	oweAt(t, s, repo, instant)
+
+	// Act
+	marked, err := s.MarkMediationResumed(ctx, repo, instant, "")
+
+	// Assert
+	m, rerr := s.MediationOf(ctx, repo)
+	if err == nil || marked || !loggedOperation(log, "daemon.wsm.mark_mediation_resumed", "error") {
+		t.Fatalf("MarkMediationResumed = (%v, %v), want a refusal recorded at ERROR: %v", marked, err, log.Records())
+	}
+	if rerr != nil || m.Resumed {
+		t.Fatalf("MediationOf = (%+v, %v), want it not resumed", m, rerr)
+	}
+}

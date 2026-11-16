@@ -80,7 +80,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	if err := o.briefRemediation(ctx, q.repository.Dir, remedy, m, d, fields); err != nil {
 		return err
 	}
-	o.ownProblems(ctx, q.key, remedy, d.Problems, nil, fields)
+	o.ownProblems(ctx, q.key, remedy, d.Problems, nil, "dispatched to the remediation", fields)
 	o.deps.Log.Global().Info(opMediation, "the intake dispatched the deploy's problems; the queue stays held for the remediation", fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
