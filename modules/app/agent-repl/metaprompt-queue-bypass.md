@@ -31,10 +31,14 @@
 - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-landed change.
 - Commit it on a branch: the workspace's own branch, or, in a repository's main workspace, a branch cut in its own worktree off the main branch.
 - Land it in this order:
-  1. Pause the queue (above).
-  2. If the main branch moved since the work began, rebase onto it and resolve every conflict.
-  3. Land it with `land-direct.sh` (below).
-  4. Resume the queue.
+  1. Wait until no deploy check is at work (below).
+  2. Pause the queue (above).
+  3. If the main branch moved since the work began, rebase onto it and resolve every conflict.
+  4. Land it with `land-direct.sh` (below).
+  5. Resume the queue.
+- Never interrupt a deploy check at work: a deploy rolling out, its intake assessing it, a remediation fixing it, or a remediation or escalation finishing.
+  - They typically run in tandem with a bypass session, and a direct landing's deploy cuts them: it replaces the check they are deciding, and its handover moves their sessions mid-turn.
+  - `agent-repld merge-queue status -repository here` shows the check: while its `advance` stands `mediating`, or a remediation or escalation workspace is landing its finish, wait for it to end and work the next change meanwhile.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch|none> "<changelog line>" <branch>`.
   - It lands one branch, and only through its gate: the branch checked out and committed in its worktree, rebased onto the main branch, and the full suite passing on it (`agent-repld test run -every-suite`, run by the script itself).
   - It then merges the branch into the main branch, writes the changelog line, and tags the next version.
