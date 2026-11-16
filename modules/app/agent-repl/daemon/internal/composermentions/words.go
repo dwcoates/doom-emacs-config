@@ -9,13 +9,13 @@ import (
 
 // The slash word's punctuation, as proto/vocab/slash-word.json spells it: a
 // slash word may follow OPENING in its whitespace-bounded run, and drops
-// CLOSING from its end. The test asserts both against the file and runs every
-// case it lists, which is what keeps the daemon, the composer
-// (lisp/command-completion.el) and the webapp (feed/rows/known-commands.ts) on
-// one rule.
+// CLOSING from its end. internal/vocab's slashword_test.go asserts both against
+// the file and runs every case it lists, which is what keeps the daemon, the
+// composer (lisp/command-completion.el) and the webapp
+// (feed/rows/known-commands.ts) on one rule.
 const (
-	opening = "([{<\"'`“‘"
-	closing = ")]}>\"'`.,;:!?”’…"
+	SlashOpening = "([{<\"'`“‘"
+	SlashClosing = ")]}>\"'`.,;:!?”’…"
 )
 
 // commandName is the shape of a name a slash word holds that could name a
@@ -31,11 +31,11 @@ func SlashWords(text string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for run := range strings.FieldsSeq(text) {
-		word := strings.TrimLeft(run, opening)
+		word := strings.TrimLeft(run, SlashOpening)
 		if !strings.HasPrefix(word, "/") {
 			continue
 		}
-		name := strings.TrimRight(word[1:], closing)
+		name := strings.TrimRight(word[1:], SlashClosing)
 		if name == "" || !commandName.MatchString(name) || seen[name] {
 			continue
 		}
