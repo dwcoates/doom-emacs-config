@@ -12,6 +12,7 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/buildid"
+	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
 )
@@ -167,6 +168,8 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   ` + service(buildreport.ServiceSidecar, src.Sidecar) + `
   ` + service(buildreport.ServiceZettel, "") + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
+  mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
+  printf 'harness\n' > "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources/source-sha256"
   for n in shim-store shim-claude-sidecar zettel shim-lock; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done
   done

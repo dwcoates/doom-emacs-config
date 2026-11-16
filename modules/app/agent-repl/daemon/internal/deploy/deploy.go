@@ -716,12 +716,16 @@ func (d *Deployer) end(committed bool) {
 // builds are the fresh builds of one deploy.
 type builds struct {
 	shim, webapp, daemon, store, sidecar, zettel, lock, elisp string
+	// wifi is the Wi-Fi helper's source hash (wifiSourceHash); empty where
+	// the platform has no helper (Live.WifiApp).
+	wifi string
 }
 
 func (b builds) fields() dlog.Context {
 	return dlog.Context{
 		"shim": b.shim, "webapp": b.webapp, "daemon": b.daemon,
 		"store": b.store, "sidecar": b.sidecar, "zettel": b.zettel, "lock": b.lock, "elisp": b.elisp,
+		"wifi": b.wifi,
 	}
 }
 
@@ -749,6 +753,9 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	step("zettel", &b.zettel, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceZettel)) })
 	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin(sessionlock.HolderBinary)) })
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
+	if d.deps.Live.WifiApp != "" {
+		step("wifi", &b.wifi, func() (string, error) { return wifiSourceHash(s.WifiApp()) })
+	}
 	return b, err
 }
 
@@ -823,6 +830,14 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
 		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp},
+	}
+	if live.WifiApp != "" {
+		// THE HELPER RIDES WITH THE DAEMON, its one user, as shim-lock rides
+		// with the shim: no process runs it standing, so nothing restarts.
+		artifacts = append(artifacts, artifact{component: ComponentDaemon, name: "wifi-helper", fresh: fresh.wifi,
+			installed: func() (string, error) { return wifiSourceHash(live.WifiApp) }, install: func() error {
+				return in.dir(s.WifiApp(), live.WifiApp)
+			}, writes: []string{live.WifiApp}, tree: true})
 	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}

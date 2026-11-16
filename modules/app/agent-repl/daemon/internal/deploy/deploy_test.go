@@ -1738,3 +1738,118 @@ func TestAFailedZettelRestartIsTheDeploysAnswer(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
 	}
 }
+
+// wifiHash reads the live Wi-Fi helper's source hash.
+func (h *harness) wifiHash(t *testing.T) string {
+	t.Helper()
+	hash, err := wifiSourceHash(h.live.WifiApp)
+	if err != nil {
+		t.Fatalf("the live Wi-Fi helper: %v", err)
+	}
+	return hash
+}
+
+func TestADeployInstallsAWifiHelperBuiltFromOtherSources(t *testing.T) {
+	// Arrange
+	h := newHarness(t, withWifiHelper(t))
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	if got := h.wifiHash(t); got != theFresh.wifi {
+		t.Fatalf("live helper sources = %q, want the fresh %q", got, theFresh.wifi)
+	}
+	if got := readFile(t, filepath.Join(h.live.WifiApp, "Contents", "_CodeSignature", "CodeResources")); got != "signed "+theFresh.wifi {
+		t.Fatalf("live helper signature = %q, want the fresh build's whole app", got)
+	}
+	installed := false
+	for _, r := range records(h.log, opInstall) {
+		installed = installed || (r.Message == "installed the fresh build" && r.Context["artifact"] == "wifi-helper")
+	}
+	if !installed {
+		t.Fatalf("records = %+v, want the helper's install recorded", records(h.log, opInstall))
+	}
+}
+
+func TestADeployLeavesAWifiHelperBuiltFromTheSameSources(t *testing.T) {
+	// Arrange: the live helper is built from the fresh sources but signed
+	// apart, as a rebuild would sign it.
+	h := newHarness(t, withWifiHelper(t))
+	writeWifiApp(t, h.live.WifiApp, theFresh.wifi)
+	signature := filepath.Join(h.live.WifiApp, "Contents", "_CodeSignature", "CodeResources")
+	writeFile(t, signature, "the signature macOS allowed")
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert: the allowed signature still stands.
+	if got := readFile(t, signature); got != "the signature macOS allowed" {
+		t.Fatalf("live helper signature = %q, want the allowed app untouched", got)
+	}
+}
+
+func TestAStagedWifiHelperNamingNoSourcesDeploysNothing(t *testing.T) {
+	// Arrange: the build staged no helper at all.
+	h := newHarness(t, withWifiHelper(t))
+	h.builder.build.wifi = ""
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "wifi" {
+		t.Fatalf("Deploy = %v, want the helper's step named", err)
+	}
+	if got := h.wifiHash(t); got != theOld.wifi {
+		t.Fatalf("live helper sources = %q, want the old %q untouched", got, theOld.wifi)
+	}
+	if got := readFile(t, h.live.ShimMain()); got != theOld.shim {
+		t.Fatalf("installed shim = %q, want nothing installed", got)
+	}
+	if !logged(h.log, "error", opDeploy, "a staged artifact could not be hashed; NOTHING WAS DEPLOYED") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+}
+
+func TestAPlatformWithNoWifiHelperNeitherHashesNorInstallsOne(t *testing.T) {
+	// Arrange: no live helper is named, and the build stages none.
+	h := newHarness(t)
+	h.builder.build.wifi = ""
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert
+	for _, r := range records(h.log, opInstall) {
+		if r.Context["artifact"] == "wifi-helper" {
+			t.Fatalf("record %+v: a platform with no helper installed one", r)
+		}
+	}
+}
+
+func TestAFailureAfterTheInstallPutsThePreviousWifiHelperBack(t *testing.T) {
+	// Arrange: the store restart fails after every artifact was installed.
+	h := newHarness(t, withWifiHelper(t))
+	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theOld.store))
+	h.services.storeErr = errors.New("launchctl refused")
+	h.services.recovers = true
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Deploy succeeded, want the store restart's failure")
+	}
+	if got := h.wifiHash(t); got != theOld.wifi {
+		t.Fatalf("live helper sources = %q, want the previous %q restored", got, theOld.wifi)
+	}
+}

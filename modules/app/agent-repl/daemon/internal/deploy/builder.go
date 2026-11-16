@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/outputtext"
+	"agent-repld/internal/persistentwifi"
 )
 
 const opBuild = "daemon.deploy.build"
@@ -56,9 +57,12 @@ type ScriptBuilder struct {
 	// <staging>` in place of every step: a harness's stand-in for the whole
 	// build, so no test ever regenerates protobufs or runs a real build.
 	Override string
-	Runner   Runner
-	Clock    Clock
-	Log      dlog.Logger
+	// WifiHelper builds agent-repl's Wi-Fi helper app (wifi-helper/build.sh)
+	// into staging, on the platform that has one (Live.WifiApp).
+	WifiHelper bool
+	Runner     Runner
+	Clock      Clock
+	Log        dlog.Logger
 }
 
 // buildStep is one command of a build.
@@ -113,6 +117,15 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
 		})
 	}
+	if b.WifiHelper {
+		// THE HELPER'S OWN BUILD, not a build-frontend target: build.sh is the
+		// one build of the app, which the installer runs too
+		// (bin/requirements.sh, install_app_build).
+		steps = append(steps, buildStep{
+			name: "wifi",
+			argv: []string{"bash", filepath.Join(b.ModuleRoot, "wifi-helper", "build.sh"), Staged{Dir: staging}.WifiApp()},
+		})
+	}
 	return steps
 }
 
@@ -138,6 +151,28 @@ func (s Staged) WebappDist() string { return filepath.Join(s.Dir, "webapp", "dis
 
 // DaemonBin is the staged daemon binary.
 func (s Staged) DaemonBin() string { return filepath.Join(s.Dir, "daemon", "bin", "agent-repld") }
+
+// WifiApp is the staged Wi-Fi helper app.
+func (s Staged) WifiApp() string {
+	return filepath.Join(s.Dir, "wifi-helper", persistentwifi.WifiAppName)
+}
+
+// wifiSourceHash names a Wi-Fi helper app by the hash of the sources it was
+// built from, which wifi-helper/build.sh writes inside it. The sources, not
+// the bytes, are its identity: a rebuild re-signs the app, and macOS may
+// forget the Location Services permission it gave the last signature, so an
+// app built from the same sources is never replaced.
+func wifiSourceHash(app string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "source-sha256"))
+	if err != nil {
+		return "", fmt.Errorf("read the Wi-Fi helper's source hash: %w", err)
+	}
+	hash := strings.TrimSpace(string(raw))
+	if hash == "" {
+		return "", fmt.Errorf("the Wi-Fi helper %s names no source hash", app)
+	}
+	return hash, nil
+}
 
 // CacheBin is a staged cache-bin artifact (shim-store, shim-claude-sidecar,
 // shim-lock).

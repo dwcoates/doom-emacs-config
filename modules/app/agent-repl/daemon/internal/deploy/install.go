@@ -27,6 +27,10 @@ type Live struct {
 	// checkout (--shim-main, --webapp-dist). A deploy installs where the
 	// daemon RUNS from, or its staleness judgement would never converge.
 	Shim, Webapp string
+	// WifiApp is the installed Wi-Fi helper app the failover launches
+	// (persistentwifi.WifiAppIn); empty on a platform with no helper, where a
+	// deploy neither builds nor installs one.
+	WifiApp string
 }
 
 // ShimMain is the installed shim bundle.
