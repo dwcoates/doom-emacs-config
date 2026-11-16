@@ -129,6 +129,16 @@ func (r *resolver) interimOnRetire(s *wsState, f *feedState, id, turn string, at
 func (r *resolver) republishInterim(s *wsState, addr feedid.Feed, id string) {
 	f := r.feed(s, addr)
 	existing, ok := f.rows[id]
+	if !ok && !f.interim[id] {
+		// THE ROW WAS RETIRED AFTER ITS FLAG CHANGED, before this deferred
+		// re-push ran: an outage card the same upsert's vendor recovery
+		// answered (settled first, deferred last). Its retirement cleared
+		// its mark and published its removal, so nothing is left to re-push.
+		r.logger(s.id).Debug("daemon.feed.interim_row_retired",
+			"a response whose interim flag changed was retired before its re-push; its removal was already published",
+			dlog.Context{"feed": f.key, "row": id})
+		return
+	}
 	if !ok {
 		r.logger(s.id).Error("daemon.feed.interim_row_missing",
 			"a response whose interim flag changed is not stored in its feed; it was not re-pushed",

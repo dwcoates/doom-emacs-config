@@ -305,10 +305,37 @@ func (c *client) runVia(ctx context.Context, operation, exe, dir string, extra [
 	}
 	if in.exitCode != 0 {
 		failure := in.fail()
+		if remoteUnreachable(in.stderr) {
+			// A REMOTE THE NETWORK CANNOT REACH is the machine offline or its
+			// resolver down, which this daemon expects and cannot fix; the
+			// caller still gets the failure, and the next attempt answers.
+			c.log.Global().Info(operation, "git could not reach the remote; the network is down or the host does not resolve", in.logContext())
+			return "", failure
+		}
 		c.log.Global().Error(operation, "git exited nonzero", in.logContext())
 		return "", failure
 	}
 	return strings.TrimRight(in.stdout, "\n"), nil
+}
+
+// unreachableRemote is what git's transports print when the network cannot
+// reach a remote at all, as opposed to a remote that answered with a refusal.
+var unreachableRemote = []string{
+	"Could not resolve hostname",
+	"Could not resolve host:",
+	"Network is unreachable",
+	"No route to host",
+}
+
+// remoteUnreachable reports whether STDERR says the remote could not be
+// reached over the network.
+func remoteUnreachable(stderr string) bool {
+	for _, s := range unreachableRemote {
+		if strings.Contains(stderr, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // runRaw invokes git and logs the ordinary path, leaving a nonzero exit for

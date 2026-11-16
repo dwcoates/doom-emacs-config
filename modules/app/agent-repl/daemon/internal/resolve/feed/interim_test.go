@@ -139,3 +139,39 @@ func TestProvingAResponseInterimRecordsTheEdgeAtInfo(t *testing.T) {
 		t.Fatal("proving a response interim recorded no INFO daemon.feed.response_interim")
 	}
 }
+
+func TestARePushOfAResponseRetiredSinceItsFlagChangedIsNoFault(t *testing.T) {
+	tests := []struct {
+		name        string
+		stillMarked bool
+		wantLevel   string
+		wantOp      string
+	}{
+		{name: "a row whose retirement cleared its mark is already gone from every reader", wantLevel: "debug", wantOp: "daemon.feed.interim_row_retired"},
+		{name: "a row still marked but not stored is a broken feed", stillMarked: true, wantLevel: "error", wantOp: "daemon.feed.interim_row_missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the row is gone, as an outage card the same upsert's
+			// vendor recovery retired before the deferred re-push ran.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "do the thing")
+			s := h.resolver.state(testWorkspace)
+			f := h.resolver.feed(s, rootFeed())
+			if tt.stillMarked {
+				f.interim["gone-row"] = true
+			}
+
+			// Act
+			h.resolver.republishInterim(s, rootFeed(), "gone-row")
+
+			// Assert
+			if !h.hasRecord(tt.wantLevel, tt.wantOp) {
+				t.Fatalf("records = %+v, want %s at %s", h.records(), tt.wantOp, tt.wantLevel)
+			}
+			if !tt.stillMarked && h.hasRecord("error", "daemon.feed.interim_row_missing") {
+				t.Fatalf("records = %+v, want no ERROR for a row its retirement already removed", h.records())
+			}
+		})
+	}
+}
