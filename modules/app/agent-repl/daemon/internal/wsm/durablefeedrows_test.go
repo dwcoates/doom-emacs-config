@@ -265,3 +265,34 @@ func TestTheMigrationAddsTheDurableFeedRowsTable(t *testing.T) {
 		t.Fatalf("durable_feed_rows exists %d times after the migration, want 1", got)
 	}
 }
+
+func TestDurableFeedRowRankAnswersWhereARowIsRecorded(t *testing.T) {
+	tests := []struct {
+		name      string
+		row       string
+		wantFound bool
+		wantKey   string
+	}{
+		{name: "a recorded row's plane and key", row: "row-1", wantFound: true, wantKey: "2.a"},
+		{name: "a row never recorded", row: "row-2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			stored := durableRow(ws.ID, "row-1", "2.a", "head")
+			if err := s.PutDurableFeedRow(context.Background(), stored); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			plane, key, found, err := s.DurableFeedRowRank(context.Background(), ws.ID, tt.row)
+
+			// Assert
+			if err != nil || found != tt.wantFound || key != tt.wantKey || (found && plane != stored.Plane) {
+				t.Fatalf("DurableFeedRowRank = (%d, %q, %v, %v), want key %q found %v", plane, key, found, err, tt.wantKey, tt.wantFound)
+			}
+		})
+	}
+}
