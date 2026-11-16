@@ -243,6 +243,20 @@ export interface Host {
  */
 export const IN_TURN_BOUND_MS = 10_000;
 
+/**
+ * How long a shown page's replacement may take to say it has drawn before it
+ * is shown as it is. A replacement is a handover's re-pointed page, so it
+ * draws only once the successor has adopted its workspace: what this bounds
+ * is that adoption and the draw after it, never a page's boot alone, so it is
+ * not `IN_TURN_BOUND_MS`. Emacs measured the adoption from each `reattach` to
+ * its `adopted` over the twelve handovers of 2026-11-14 and 2026-11-15 (p90
+ * 3.5 to 11.1s, the worst 13.6s; `agent-repl-host-adopt-timeout-seconds`),
+ * and the draw after it took 1.0s on the 2026-11-16 01:20 deploy, where the
+ * 10s in-turn bound fired on a shown page 1.1s before it drew (adopted after
+ * 10.6s). 30s is a little over twice the worst adoption and its draw.
+ */
+export const REPLACEMENT_BOUND_MS = 30_000;
+
 /** One lane of pages loaded in turn: its queue, oldest first, and the page in flight. */
 interface Lane {
   readonly name: string;
@@ -294,7 +308,7 @@ export function createHost(env: HostEnv): Host {
    * successor) loads in a hidden frame of its own, its replacement, and the
    * two change places when the replacement says it has drawn, so the person
    * looking at the page never sees it blank. Keyed by workspace id; the
-   * bound is `IN_TURN_BOUND_MS`, after which the replacement is shown drawn
+   * bound is `REPLACEMENT_BOUND_MS`, after which the replacement is shown drawn
    * or not, so a replacement that never draws cannot hold a dead page on
    * screen.
    */
@@ -783,9 +797,9 @@ export function createHost(env: HostEnv): Host {
         carryDesiredState(frame, fresh);
         fresh.pendingReloadStartedAtMs = reloadStartedAtMs;
         const bound = win.setTimeout(() => {
-          note("warn", `page ${id}'s replacement did not say it had drawn within ${IN_TURN_BOUND_MS}ms; it is shown as it is`);
+          note("warn", `page ${id}'s replacement did not say it had drawn within ${REPLACEMENT_BOUND_MS}ms; it is shown as it is`);
           swapIn(id);
-        }, IN_TURN_BOUND_MS);
+        }, REPLACEMENT_BOUND_MS);
         incoming.set(id, { fresh, bound });
         load(fresh);
         return answer("ensure", id, "replacing");
