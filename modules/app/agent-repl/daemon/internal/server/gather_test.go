@@ -15,6 +15,8 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -212,5 +214,49 @@ func TestGetGatherStatusSurfacesTheServicesFailure(t *testing.T) {
 	// Assert
 	if code := connectCode(t, err); code != connect.CodeInternal {
 		t.Fatalf("code = %v, want Internal", code)
+	}
+}
+
+func TestAgentSentPrompt(t *testing.T) {
+	tests := []struct {
+		name   string
+		asUser bool
+	}{
+		{name: "an agent's own send", asUser: false},
+		{name: "a send the user asked for", asUser: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			to := wsm.Workspace{ID: "w-to", Dir: "/tmp/w-to"}
+			sender := &workspacev1.WorkspaceRef{Id: "w-from", Dir: "/tmp/w-from"}
+
+			// Act
+			req := agentSentPrompt(to, sender, feed.SaidText("hello"), "k1", tt.asUser)
+
+			// Assert
+			if req.GetWorkspace().GetId() != "w-to" || req.GetWorkspace().GetDir() != "/tmp/w-to" {
+				t.Errorf("workspace = %v, want the recipient's ref", req.GetWorkspace())
+			}
+			if req.GetSentBy() != sender || req.GetIdempotencyKey() != "k1" || req.GetAsUser() != tt.asUser {
+				t.Errorf("sent by %v, key %q, as user %v; want the sender, k1, %v", req.GetSentBy(), req.GetIdempotencyKey(), req.GetAsUser(), tt.asUser)
+			}
+			if req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT {
+				t.Errorf("origin = %v, want agent-sent", req.GetOrigin())
+			}
+			if text := req.GetSaid().GetContent().GetBlocks()[0].GetText().GetText(); text != "hello" {
+				t.Errorf("said %q, want hello", text)
+			}
+		})
+	}
+}
+
+func TestAgentSentPromptIsTheOneAgentSentRequest(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT")
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "gather.go" {
+		t.Fatalf("an agent-sent SubmitPrompt request is built at %v, want only agentSentPrompt in gather.go", sites)
 	}
 }

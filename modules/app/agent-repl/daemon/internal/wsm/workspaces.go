@@ -403,8 +403,11 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			}
 			out.Hidden, out.HiddenAt = true, &out.CreatedAt
 		}
+		if facts.IntakeCard != nil && !facts.Intake {
+			return fmt.Errorf("wsm: register %s: an intake card is recorded only for an intake workspace", normalized)
+		}
 		if facts.Intake {
-			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt); err != nil {
+			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt, facts.IntakeCard); err != nil {
 				return err
 			}
 		}
@@ -1306,19 +1309,26 @@ func readSelection(ctx context.Context, tx *sql.Tx, id WorkspaceID, change curre
 func (s *store) Current(ctx context.Context) (*WorkspaceID, error) {
 	var out *WorkspaceID
 	err := s.read(ctx, "daemon.wsm.current", dlog.Context{}, func(ctx context.Context) error {
-		var id WorkspaceID
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT id FROM workspaces WHERE is_current = 1`).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
-			out = nil
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		out = &id
-		return nil
+		id, err := optionalWorkspaceID(ctx, s.q(ctx), `SELECT id FROM workspaces WHERE is_current = 1`)
+		out = id
+		return err
 	})
 	return out, err
+}
+
+// optionalWorkspaceID answers the one workspace id QUERY selects, nil when it
+// selects none. Every read of a workspace that may not exist scans through
+// it, so "none" is always nil and never a zero id.
+func optionalWorkspaceID(ctx context.Context, q connQuerier, query string, args ...any) (*WorkspaceID, error) {
+	var id WorkspaceID
+	err := q.QueryRowContext(ctx, query, args...).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 // deleteRepositoryRows deletes a repository's own records: its row, and the

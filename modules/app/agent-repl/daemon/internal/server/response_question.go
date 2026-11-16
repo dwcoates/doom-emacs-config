@@ -15,6 +15,8 @@ import (
 	"agent-repld/internal/publish"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 const opResponseQuestion = "daemon.server.response_question"
@@ -25,8 +27,8 @@ const opResponseQuestion = "daemon.server.response_question"
 // draws it (frontend.v1.FeedResponseQuestion), Emacs edits its composer on
 // each transition (HostWorkspaceResponseQuestion), and the prompt the user
 // sends while it stands is taken by it: handed, quoting the card, to an
-// ephemeral intake workspace created for it in the home repository
-// (submitQuestion).
+// ephemeral intake workspace created for it in the home repository, or to the
+// workspace already addressing that card's questions (submitQuestion).
 
 // responseQuestions is every workspace's held question: the asked card's
 // row, ABSENT for none.
@@ -201,9 +203,10 @@ func (s *server) responseQuestionTopic(ws ids.WorkspaceID) *publish.Topic[*front
 
 // submitQuestion is SubmitPrompt's body for a user prompt sent while a
 // question about ROW stood: the question has been taken, so it ends here
-// whatever happens, and the prompt, quoting the card, is handed to an
-// ephemeral intake workspace created for it in the home repository
-// (workspace.Verbs.AskQuestionIntake). No turn is minted in this workspace.
+// whatever happens, and the prompt, quoting the card, is handed to the
+// workspace already addressing the card's questions, or to an ephemeral intake
+// workspace created for it in the home repository
+// (workspace.Verbs.AskAboutCard). No turn is minted in this workspace.
 func (s *server) submitQuestion(
 	ctx context.Context,
 	subject resolved,
@@ -227,17 +230,40 @@ func (s *server) submitQuestion(
 		}))))
 	}
 	question := questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid()))
-	recipient, err := s.deps.Verbs.AskQuestionIntake(ctx, ws, question)
+	answer, err := s.deps.Verbs.AskAboutCard(ctx, wsm.IntakeCard{Asker: ws, Row: row.GetValue()}, question, s.cardQuestionSend(subject, req, question))
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
 	}
-	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; handed it to an intake workspace", dlog.Context{
+	recipient := answer.Recipient
+	if answer.Refused != nil {
+		// THE ADDRESSEE'S REFUSAL IS THE ASKER'S: the question was for it, so
+		// the composer keeps the text exactly as that refusal says.
+		resp.Result = &agentreplv1.SubmitPromptResponse_Error{Error: answer.Refused}
+		return connect.NewResponse(resp), nil
+	}
+	subject.Log.Info(opResponseQuestion, "the prompt asks about a card; handed it to the workspace addressing the card", dlog.Context{
 		"row": row.GetValue(), "card": card.Arm, "recipient": string(recipient.ID), "recipient_name": recipient.Name,
 	})
 	resp.Result = &agentreplv1.SubmitPromptResponse_Success{Success: &agentreplv1.SubmitPromptSuccess{
 		Outcome: &agentreplv1.SubmitPromptSuccess_QuestionSent{QuestionSent: &agentreplv1.SubmitPromptQuestionSent{Row: row, Recipient: recipient.Name}},
 	}}
 	return connect.NewResponse(resp), nil
+}
+
+// cardQuestionSend sends QUESTION, asked in REQ, to the workspace already
+// addressing its card, as an agent-sent prompt from the asker SUBJECT,
+// through SubmitPrompt itself, so the recipient meets exactly the refusals
+// `workspace prompt` meets and both feeds draw the send. The person pressed
+// `?`, so the send is the user's (as_user), and its key is derived from the
+// asker's, so a resent submission is not delivered twice.
+func (s *server) cardQuestionSend(subject resolved, req *agentreplv1.SubmitPromptRequest, question string) workspace.CardQuestionSend {
+	return func(ctx context.Context, to wsm.Workspace) (*agentreplv1.SubmitPromptError, error) {
+		resp, err := s.SubmitPrompt(ctx, connect.NewRequest(agentSentPrompt(to, subject.Record.Ref(), feed.SaidText(question), req.GetIdempotencyKey()+":card-question", true)))
+		if err != nil {
+			return nil, err
+		}
+		return resp.Msg.GetError(), nil
+	}
 }
 
 // questionPrompt is the question handed to the intake workspace for a question about

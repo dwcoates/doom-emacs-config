@@ -452,7 +452,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// transaction writes all three, so no roster publication between the
 		// registration and this create's return ever draws the row visible,
 		// unmarked or unsectioned.
-		Hidden: spec.Hidden || spec.Intake, Intake: spec.Intake, Placement: spec.registerPlacement(),
+		Hidden: spec.Hidden || spec.Intake, Intake: spec.Intake, IntakeCard: spec.IntakeCard, Placement: spec.registerPlacement(),
 	})
 	if err != nil {
 		if refusal, ok := placementRefusal(global, err); ok {
@@ -660,13 +660,14 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 	// AN INTAKE WORKSPACE IS ONLY EVER ASKED FOR BY CreateIntake, so a spec that
 	// contradicts itself is a defect in that caller: it is a named, prompted
 	// peer with a fresh context, and nothing lands from it.
-	if spec.Intake && (strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.InitialPrompt) == "" || spec.Parent != nil ||
-		spec.ForkFrom != nil || spec.MergeOf != nil || spec.OneShot) {
+	if (spec.Intake && (strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.InitialPrompt) == "" || spec.Parent != nil ||
+		spec.ForkFrom != nil || spec.MergeOf != nil || spec.OneShot)) || (spec.IntakeCard != nil && !spec.Intake) {
 		log.Error(opCreate, "an intake workspace's create spec contradicts itself", dlog.Context{
 			"name": spec.Name, "has_prompt": strings.TrimSpace(spec.InitialPrompt) != "", "parent": ids.Optional(spec.Parent),
 			"fork_from": ids.Optional(spec.ForkFrom), "merge": spec.MergeOf != nil, "one_shot": spec.OneShot,
+			"intake": spec.Intake, "intake_card": spec.IntakeCard != nil,
 		})
-		return fmt.Errorf("create: an intake workspace %q is a named, prompted peer with a fresh context, never a one-shot, a fork or a merge workspace", spec.Name)
+		return fmt.Errorf("create: an intake workspace %q is a named, prompted peer with a fresh context, never a one-shot, a fork or a merge workspace, and only an intake workspace records an intake card", spec.Name)
 	}
 	// ONLY A ONE-SHOT NAMES A CONTEXT WORKSPACE: the rpc carries it inside the
 	// one-shot arm, so a spec with one on any other form is a defect in its

@@ -248,6 +248,63 @@ func TestAPromptSentWhileAQuestionStandsIsHandedToAnIntakeWorkspace(t *testing.T
 	}
 }
 
+func TestAQuestionAboutAnAddressedCardIsSentToItsAddressee(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	withAskable(h)
+	work := wsm.Workspace{ID: "ws-work", Dir: "/tmp/ws-work", Name: "card-work"}
+	h.DB.workspaces[work.ID] = work
+	h.Verbs.cardAddressee = &work
+	ask(t, h, "row-1")
+
+	// Act.
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if sent := resp.Msg.GetSuccess().GetQuestionSent(); sent.GetRow().GetValue() != "row-1" || sent.GetRecipient() != "card-work" {
+		t.Fatalf("SubmitPrompt answered %v, want question_sent naming row-1 to card-work", resp.Msg)
+	}
+	if asked := h.Verbs.intakeQuestions; len(asked) != 1 || asked[0].asker != testWorkspaceID || asked[0].row != "row-1" {
+		t.Fatalf("card questions = %+v, want one about row-1 from %s", asked, testWorkspaceID)
+	}
+	if h.Prompts.submits != 1 || h.Prompts.lastWorkspace != work.ID {
+		t.Fatalf("submits = %d to %q, want one to the addressee %q", h.Prompts.submits, h.Prompts.lastWorkspace, work.ID)
+	}
+	if h.Prompts.lastOrigin != conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT || h.Prompts.lastSentBy == nil || *h.Prompts.lastSentBy != testWorkspaceID {
+		t.Fatalf("origin %v sent by %v, want an agent-sent prompt from the asker", h.Prompts.lastOrigin, h.Prompts.lastSentBy)
+	}
+	if text := h.Prompts.lastSaid.GetContent().GetBlocks()[0].GetText().GetText(); text != replyquote.QuestionText("1 🔎 the answer", "hello") {
+		t.Fatalf("sent %q, want the quoted card and the words", text)
+	}
+}
+
+func TestTheAddresseesRefusalOfAQuestionIsTheAskers(t *testing.T) {
+	// Arrange: the asker addresses its own card, so the send names the
+	// recipient as its own sender, which SubmitPrompt refuses.
+	h := newHarness(t)
+	withAskable(h)
+	asker := h.DB.workspaces[testWorkspaceID]
+	h.Verbs.cardAddressee = &asker
+	ask(t, h, "row-1")
+
+	// Act.
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownSender() == nil {
+		t.Fatalf("SubmitPrompt answered %v, want the addressee's unknown_sender refusal", resp.Msg)
+	}
+	if h.Prompts.submits != 0 {
+		t.Fatalf("the prompt handler took %d submissions, want none", h.Prompts.submits)
+	}
+}
+
 func TestAQuestionPromptQuotesTheAskedCardByItsKind(t *testing.T) {
 	tests := []struct {
 		name string

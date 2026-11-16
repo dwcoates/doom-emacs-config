@@ -328,6 +328,12 @@ type fakeDB struct {
 	// isIntakeErr fails the read.
 	intakes     map[ids.WorkspaceID]bool
 	isIntakeErr error
+	// intakeCards are the cards the intake workspaces were registered for;
+	// cardAddressees is what CardAddressees answers, and cardAddresseesErr
+	// fails that read.
+	intakeCards       map[ids.WorkspaceID]wsm.IntakeCard
+	cardAddressees    wsm.CardAddressees
+	cardAddresseesErr error
 	// refusePlacementErr is the registry's answer to RefusePlacement, and
 	// placementChecks records every placement it was asked about.
 	refusePlacementErr error
@@ -599,6 +605,7 @@ func newFakeDB() *fakeDB {
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},
 		intakes:     map[ids.WorkspaceID]bool{},
+		intakeCards: map[ids.WorkspaceID]wsm.IntakeCard{},
 		closures:    map[ids.WorkspaceID][]wsm.Closure{},
 		priorities:  map[ids.WorkspaceID]*wsm.Priority{},
 		attention:   map[ids.WorkspaceID]bool{},
@@ -712,6 +719,9 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	}
 	if facts.Intake {
 		d.intakes[id] = true
+	}
+	if facts.IntakeCard != nil {
+		d.intakeCards[id] = *facts.IntakeCard
 	}
 	if p := facts.Placement; p != nil {
 		sub := wsm.Subsection{ID: "sub-born", Repo: ws.Repo}
@@ -1066,6 +1076,11 @@ func (d *fakeDB) IsIntake(_ context.Context, id ids.WorkspaceID) (bool, error) {
 		return false, d.isIntakeErr
 	}
 	return d.intakes[id], nil
+}
+
+// CardAddressees answers the fake's addressees.
+func (d *fakeDB) CardAddressees(context.Context, wsm.IntakeCard) (wsm.CardAddressees, error) {
+	return d.cardAddressees, d.cardAddresseesErr
 }
 
 // TakeCloseWhenTurnEnds clears the fake's mark, answering whether one stood.
