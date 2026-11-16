@@ -6,6 +6,8 @@ package convert
 import (
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -109,6 +111,51 @@ func TestPersistentMonitorCarriesNoTimeout(t *testing.T) {
 	}
 	if start.GetDeadline() != nil {
 		t.Fatal("a persistent watch must carry no deadline: the vendor ignores it")
+	}
+}
+
+func TestMonitorStartReadsTheVendorsKeys(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string]any
+		want  *conversationv1.AgentMonitorStart
+	}{
+		{
+			name:  "a deadline is read from timeout_ms",
+			input: map[string]any{"description": "d", "command": "c", "timeout_ms": 30000.0},
+			want: &conversationv1.AgentMonitorStart{
+				Description: "d",
+				Lifetime:    &conversationv1.AgentMonitorStart_Deadline{Deadline: &conversationv1.AgentMonitorDeadline{TimeoutMs: 30000}},
+				Source:      &conversationv1.AgentMonitorStart_Command{Command: &conversationv1.AgentMonitorCommand{Command: "c"}},
+				StartedAtMs: 1000,
+			},
+		},
+		{
+			name:  "a websocket is read from ws.url",
+			input: map[string]any{"description": "d", "persistent": true, "ws": map[string]any{"url": "wss://x"}},
+			want: &conversationv1.AgentMonitorStart{
+				Description: "d",
+				Lifetime:    &conversationv1.AgentMonitorStart_Persistent{Persistent: &conversationv1.AgentMonitorPersistent{}},
+				Source:      &conversationv1.AgentMonitorStart_Websocket{Websocket: &conversationv1.AgentMonitorWebsocket{Url: "wss://x"}},
+				StartedAtMs: 1000,
+			},
+		},
+		{
+			name:  "a call stating no lifetime and no source leaves both unset",
+			input: map[string]any{"query": "select:Monitor"},
+			want:  &conversationv1.AgentMonitorStart{StartedAtMs: 1000},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := monitorStart(tt.input, 1000)
+
+			// Assert
+			if !proto.Equal(got, tt.want) {
+				t.Fatalf("monitorStart = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -342,26 +342,28 @@ func handbackReport(input map[string]any) *conversationv1.AgentSubagentHandbackR
 	return &conversationv1.AgentSubagentHandbackReport{Text: str(input["message"])}
 }
 
-// monitorStart reads a watcher's arming. The lifetime arms are exclusive by the
-// vendor's own rule: the timeout is ignored when the watch is persistent.
+// monitorStart reads a watcher's arming by the vendor's own keys
+// (`description`, `persistent`, `timeout_ms`, `command`, `ws.url`), exactly as
+// the shim's convert/tools/monitor.ts reads it: both planes restate one unit,
+// so they must restate the same call. The lifetime arms are exclusive by the
+// vendor's own rule: the timeout is ignored when the watch is persistent. A
+// call that states no lifetime or names no source leaves that arm unset.
 func monitorStart(input map[string]any, ts int64) *conversationv1.AgentMonitorStart {
 	start := &conversationv1.AgentMonitorStart{
-		Description: str(pick(input, "description", "summary")),
+		Description: str(input["description"]),
 		StartedAtMs: ts,
 	}
 	if boolean(input["persistent"]) {
 		start.Lifetime = &conversationv1.AgentMonitorStart_Persistent{Persistent: &conversationv1.AgentMonitorPersistent{}}
-	} else {
+	} else if timeout, stated := input["timeout_ms"]; stated {
 		start.Lifetime = &conversationv1.AgentMonitorStart_Deadline{Deadline: &conversationv1.AgentMonitorDeadline{
-			TimeoutMs: uint64(number(pick(input, "timeout", "timeoutMs"))),
+			TimeoutMs: uint64(number(timeout)),
 		}}
 	}
-	if url := str(input["url"]); url != "" {
+	if command, stated := input["command"].(string); stated {
+		start.Source = &conversationv1.AgentMonitorStart_Command{Command: &conversationv1.AgentMonitorCommand{Command: command}}
+	} else if url, stated := obj(input["ws"])["url"].(string); stated {
 		start.Source = &conversationv1.AgentMonitorStart_Websocket{Websocket: &conversationv1.AgentMonitorWebsocket{Url: url}}
-	} else {
-		start.Source = &conversationv1.AgentMonitorStart_Command{Command: &conversationv1.AgentMonitorCommand{
-			Command: str(input["command"]),
-		}}
 	}
 	return start
 }
