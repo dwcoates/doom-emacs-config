@@ -204,7 +204,7 @@ func TestAScanThatNamesNothingEndsTheDwellForTheQuietState(t *testing.T) {
 	h := newHarness(t).standing(pmsetOn, summary(true, "")).withLid(lidClosed)
 	h.c.quiet = true
 	h.c.hotspot = hotspotDwell{unknown: true}
-	h.sight(wifiScan{Authorization: "not_determined"})
+	h.sight(wifiScan{Authorization: "not_determined"}).launchesAuthorize()
 
 	// Act: the first check, then a long closed lid.
 	for d := time.Duration(0); d <= 10*hotspotCheckEvery; d += hotspotCheckEvery {

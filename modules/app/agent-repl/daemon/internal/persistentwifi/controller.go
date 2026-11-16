@@ -127,6 +127,9 @@ type Controller struct {
 	// scanCause is why the last Wi-Fi scan named no networks; empty while
 	// scans name them (recordStandingCause).
 	scanCause string
+	// authorizeAsked records that this daemon asked macOS for the helper's
+	// Location Services permission (askAuthorization).
+	authorizeAsked bool
 	// hotspot is the hotspot dwell: while the quiet state stands on the
 	// hotspot, when each known network was first seen (hotspotdwell.go).
 	hotspot hotspotDwell

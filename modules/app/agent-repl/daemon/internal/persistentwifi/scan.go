@@ -101,11 +101,50 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 		return scan, fmt.Errorf("the Wi-Fi helper's %s", scan.Error)
 	}
 	if !scan.authorized() {
+		if scan.Authorization == standingNotDetermined {
+			c.askAuthorization(ctx)
+		}
 		return scan, fmt.Errorf("%w (its standing: %s)", errScanUnauthorized, scan.Authorization)
 	}
 	c.log.Debug(opFailover, "scanned the visible Wi-Fi networks", dlog.Context{
 		"visible": len(scan.Visible), "joined_named": scan.Current != "", "took_ms": took.Milliseconds()})
 	return scan, nil
+}
+
+// standingNotDetermined is the helper's standing while the owner was never
+// asked: macOS shows its Location Services prompt only to an app that asks.
+const standingNotDetermined = "not_determined"
+
+// askAuthorization asks macOS, once per daemon, to show the owner the helper's
+// Location Services prompt, through the helper's authorize verb
+// (wifi-helper/main.swift).
+//
+// A STANDING NO ONE WAS ASKED FOR IS ASKED FOR HERE. The installer asks once
+// (bin/requirements.sh, install_location_permission), but macOS forgets an ad
+// hoc signed helper's answer when a rebuild re-signs it, and nothing asked
+// again: on 2026-11-16 every failover scan reported not_determined and no
+// prompt was ever shown. The verb waits for the owner's answer, unbounded, so
+// it is launched without -W and left running; the launch itself is bounded by
+// scanBound, which a scan's whole launch and scan fit inside. Asked once per
+// daemon, because a waiting prompt is not asked for twice. It runs OFF the
+// lock.
+func (c *Controller) askAuthorization(ctx context.Context) {
+	c.mu.Lock()
+	if c.authorizeAsked {
+		c.mu.Unlock()
+		return
+	}
+	c.authorizeAsked = true
+	out := filepath.Join(c.scanDir, fmt.Sprintf("agent-repl-wifi-authorize-%d.json", os.Getpid()))
+	c.mu.Unlock()
+	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
+	defer cancel()
+	fields := dlog.Context{"app": c.cfg.Tools.WifiApp, "answer": out}
+	if _, err := run(bounded, c.runner, c.cfg.Tools.Open, "-n", "-g", "-a", c.cfg.Tools.WifiApp, "--args", "authorize", "--out", out); err != nil {
+		c.log.Error(opFailover, "could not ask macOS for the Wi-Fi helper's Location Services permission", dlog.WithCause(fields, err))
+		return
+	}
+	c.log.Info(opFailover, "asked macOS for the Wi-Fi helper's Location Services permission; its prompt waits for the owner", fields)
 }
 
 // recordScanCauseLocked records a scan's failure once per distinct cause

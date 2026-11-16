@@ -122,3 +122,73 @@ func TestVisibleKnown(t *testing.T) {
 		t.Fatalf("visibleKnown = %v, want the known networks in sight in preference order", got)
 	}
 }
+
+// authorizeCalls answers every authorize launch, in order.
+func (h *harness) authorizeCalls() []string {
+	var out []string
+	for _, c := range h.r.ran() {
+		if strings.HasPrefix(c, argAuthorize) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func TestAScanOfAStandingNeverAskedForAsksOnce(t *testing.T) {
+	cases := []struct {
+		name      string
+		standing  string
+		scans     int
+		wantAsked int
+	}{
+		{name: "a standing never asked for is asked for", standing: "not_determined", scans: 1, wantAsked: 1},
+		{name: "a second scan asks no more", standing: "not_determined", scans: 2, wantAsked: 1},
+		{name: "a denied standing is the owner's answer and is not asked again", standing: "denied", scans: 1, wantAsked: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t).sight(wifiScan{Authorization: tc.standing}).launchesAuthorize()
+
+			// Act
+			for range tc.scans {
+				if _, err := h.c.scanWifi(context.Background()); !errors.Is(err, errScanUnauthorized) {
+					t.Fatalf("scanWifi error = %v, want the unauthorized standing", err)
+				}
+			}
+
+			// Assert
+			if got := h.authorizeCalls(); len(got) != tc.wantAsked {
+				t.Fatalf("authorize launches = %v, want %d", got, tc.wantAsked)
+			}
+			asked := h.failoverRecords("info", "asked macOS for the Wi-Fi helper's Location Services permission; its prompt waits for the owner")
+			if len(asked) != tc.wantAsked {
+				t.Fatalf("asked records = %+v, want %d", asked, tc.wantAsked)
+			}
+			if tc.wantAsked > 0 && asked[0]["app"] != "/t/AgentReplWifi.app" {
+				t.Fatalf("asked record = %+v, want the helper named", asked[0])
+			}
+		})
+	}
+}
+
+func TestAnAuthorizeLaunchThatFailsIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t).sight(wifiScan{Authorization: "not_determined"})
+	h.r.onPrefix(argAuthorize, func([]string) answer { return answer{out: "LSOpenURLsWithRole() failed", code: 1} })
+
+	// Act
+	_, err := h.c.scanWifi(context.Background())
+
+	// Assert
+	if !errors.Is(err, errScanUnauthorized) {
+		t.Fatalf("scanWifi error = %v, want the unauthorized standing still named", err)
+	}
+	errs := h.failoverRecords("error", "could not ask macOS for the Wi-Fi helper's Location Services permission")
+	if len(errs) != 1 || errs[0]["app"] != "/t/AgentReplWifi.app" || errs[0]["cause"] == nil {
+		t.Fatalf("error records = %+v, want one naming the helper and the cause", errs)
+	}
+	if asked := h.failoverRecords("info", "asked macOS for the Wi-Fi helper's Location Services permission; its prompt waits for the owner"); len(asked) != 0 {
+		t.Fatalf("asked records = %+v, want none for a launch that failed", asked)
+	}
+}
