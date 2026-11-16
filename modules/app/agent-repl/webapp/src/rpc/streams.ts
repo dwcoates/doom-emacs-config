@@ -58,6 +58,7 @@ import { daemonUnreachable, frameUndecodable, frameUndrawable, outageAnnounced, 
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
+import { workspaceMoved } from "./moved.js";
 import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
 import { errorCause } from "../error-cause.js";
@@ -381,6 +382,19 @@ export function watchStream<Res extends Message>(
       }
       opts.onEnd?.(end);
       if (cancelled) return;
+      // A CLOSE THAT NAMES THE SUCCESSOR IS THE HANDOVER, not an outage
+      // (2026-11-16: every stream of a page closed `transferring_away` and was
+      // filed as daemon_unreachable). It raises the page's move notice, which
+      // quiesces the page and cancels every stream, so nothing reopens here.
+      const successor = end.kind === "transport_failure" ? successorOf(end.error) : undefined;
+      if (successor !== undefined) {
+        log.info(`the ${opts.name} stream closed because the workspace moved to ${successor}`, {
+          operation: "rpc.stream-ended-moved",
+          context: { rpc: opts.name, address: successor },
+        });
+        workspaceMoved(successor);
+        return;
+      }
       // THE DAEMON MOVED UNDER THE RUN: however it ended, it was this end that
       // ended it, to dial the daemon now named. Nothing is filed and it
       // reopens at once.
@@ -455,6 +469,20 @@ export function watchStream<Res extends Message>(
  * HTTP. A producer that simply concluded gives neither, so the card reports
  * code 0 and says so in the reason rather than inventing evidence.
  */
+/** The daemon's metadata naming the successor a `transferring_away` close was handed to. */
+export const SUCCESSOR_HEADER = "Agent-Repl-Successor";
+
+/**
+ * The successor's address a stream close names, or undefined for any other
+ * end. The daemon sets it on every `transferring_away` refusal answered as an
+ * error (daemon internal/server/refuse.go, SuccessorHeader).
+ */
+export function successorOf(err: unknown): string | undefined {
+  if (!(err instanceof ConnectError)) return undefined;
+  const address = err.metadata.get(SUCCESSOR_HEADER);
+  return address === null || address === "" ? undefined : address;
+}
+
 function closeEvidence(end: StreamEnd): { closeCode: number; closeReason: string } {
   if (end.kind !== "transport_failure") {
     return { closeCode: 0, closeReason: "the stream concluded without an error" };
