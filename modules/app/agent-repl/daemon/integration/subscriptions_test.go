@@ -99,8 +99,14 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				})
 			},
 			// figures.Tokens(10_000) == "10k" (internal/figures/tokens.go).
+			// THE LID IS HEARD TOO: the daemon hears it on its own schedule
+			// and the topbar's wifi cell states it, so a first view taken
+			// before it was heard is replaced by one that is not the driven
+			// change (merge gate 2026-11-16: "Lid open." landed between the
+			// witness's first view and the late subscription).
 			isFirst: func(msg proto.Message) bool {
-				return msg.(*frontendv1.TopbarView).GetContext().GetText() == "10k"
+				v := msg.(*frontendv1.TopbarView)
+				return v.GetContext().GetText() == "10k" && v.GetPersistentWifi().GetLid() != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
