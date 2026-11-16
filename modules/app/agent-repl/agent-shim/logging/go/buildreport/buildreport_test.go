@@ -1,10 +1,15 @@
 package buildreport
 
 import (
+	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/recordlog"
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHashFile(t *testing.T) {
@@ -201,6 +206,51 @@ func TestResolveDir(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("ResolveDir = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnnounceWritesTheServicesReportOrRecordsWhyNot(t *testing.T) {
+	tests := []struct {
+		name      string
+		dir       func(t *testing.T) string
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a report written", dir: func(t *testing.T) string { return t.TempDir() },
+			wantLevel: "info", wantMsg: "tests reported its build"},
+		{name: "a report whose directory is a file", dir: func(t *testing.T) string {
+			path := filepath.Join(t.TempDir(), "not-a-dir")
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}, wantLevel: "error", wantMsg: "tests failed to write its build report"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			dir := tt.dir(t)
+			var sink bytes.Buffer
+			log := recordlog.New("tests", &sink, &bytes.Buffer{}, sharedlogging.FixedWindow(sharedlogging.LevelDebug), time.Now)
+			getenv := func(name string) string {
+				if name == DirEnv {
+					return dir
+				}
+				return ""
+			}
+
+			// Act
+			Announce("tests", "tests.buildreport", log, getenv)
+
+			// Assert
+			var rec map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(sink.Bytes()), &rec); err != nil {
+				t.Fatalf("record %q: %v", sink.String(), err)
+			}
+			if rec["level"] != tt.wantLevel || rec["message"] != tt.wantMsg || rec["operation"] != "tests.buildreport" {
+				t.Fatalf("record = %v, want %s %q", rec, tt.wantLevel, tt.wantMsg)
 			}
 		})
 	}

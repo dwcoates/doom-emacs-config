@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -145,4 +148,69 @@ func TestANewLoggerNamingNoRuntimeIsRefused(t *testing.T) {
 
 	// Act
 	New("", &bytes.Buffer{}, &bytes.Buffer{}, sharedlogging.FixedWindow(sharedlogging.LevelDebug), fixedClock)
+}
+
+func TestOpenWritesToARotatingFileAtTheChosenLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		level     string
+		until     string
+		wantDebug bool
+	}{
+		{name: "the default level drops a debug record", level: ""},
+		{name: "a debug level with an end keeps it", level: "debug", until: fmt.Sprint(fixedClock().Add(time.Minute).Unix()), wantDebug: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "log", "tests.log")
+			getenv := func(name string) string {
+				switch name {
+				case "AGENT_REPL_LOG_LEVEL":
+					return tt.level
+				case sharedlogging.UntilEnvironment:
+					return tt.until
+				}
+				return ""
+			}
+
+			// Act
+			log, closeFile, err := Open("tests", path, &bytes.Buffer{}, getenv, fixedClock)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			log.Debug("tests.test", "a debug record", nil)
+			log.Info("tests.test", "an info record", nil)
+			if err := closeFile(); err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), "an info record") || strings.Contains(string(body), "a debug record") != tt.wantDebug {
+				t.Fatalf("log = %q, want the info record and the debug record %v", body, tt.wantDebug)
+			}
+		})
+	}
+}
+
+func TestOpenRefusesALevelItCannotRead(t *testing.T) {
+	// Arrange
+	getenv := func(name string) string {
+		if name == "AGENT_REPL_LOG_LEVEL" {
+			return "loud"
+		}
+		return ""
+	}
+
+	// Act
+	_, _, err := Open("tests", filepath.Join(t.TempDir(), "tests.log"), &bytes.Buffer{}, getenv, fixedClock)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Open accepted a level it cannot read")
+	}
 }

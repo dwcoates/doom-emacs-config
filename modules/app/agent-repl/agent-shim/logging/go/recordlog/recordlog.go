@@ -12,6 +12,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -114,4 +115,27 @@ func (l *Logger) write(level, operation, message string, ctx Context) {
 	if _, err := l.sink.Write(line); err != nil {
 		fmt.Fprintf(l.terminal, "%s log sink refused a record (%v): %s", l.runtime, err, line)
 	}
+}
+
+// Open opens RUNTIME's log at PATH: a size-capped rotating file, its level
+// chosen by AGENT_REPL_LOG_LEVEL and sharedlogging.UntilEnvironment, records
+// the file refuses written to TERMINAL. The selection's note, when it has
+// one, is the first record. It answers the logger and the file's close.
+func Open(runtime, path string, terminal io.Writer, getenv func(string) string, clock func() time.Time) (*Logger, func() error, error) {
+	selection, err := sharedlogging.SelectLevel(getenv("AGENT_REPL_LOG_LEVEL"), getenv(sharedlogging.UntilEnvironment), clock())
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, nil, err
+	}
+	file, err := sharedlogging.OpenRotating(path, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
+	if err != nil {
+		return nil, nil, err
+	}
+	log := New(runtime, file, terminal, sharedlogging.NewWindow(selection, clock), clock)
+	if message, ok := selection.Note(); ok {
+		log.Info(runtime+".logging.level-window", message, Context(selection.Context()))
+	}
+	return log, file.Close, nil
 }

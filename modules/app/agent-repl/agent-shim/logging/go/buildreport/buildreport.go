@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"agentrepl/logging/recordlog"
 )
 
 // The services that report through this package, by the name their report
@@ -168,4 +170,26 @@ func validate(r Report) error {
 		return errors.New("buildreport: a report needs the build it runs")
 	}
 	return nil
+}
+
+// Announce writes SERVICE's own build report, so the daemon's deploy can tell
+// whether it runs the fresh build, and records each outcome under OP in LOG.
+// A failure is recorded and serving goes on: a missing report only makes the
+// deploy restart the service.
+func Announce(service, op string, log *recordlog.Logger, getenv func(string) string) {
+	r, err := Self()
+	if err != nil {
+		log.Error(op, service+" could not determine its own build", recordlog.Context{"cause": err.Error()})
+		return
+	}
+	dir, err := ResolveDir(getenv)
+	if err != nil {
+		log.Error(op, service+" could not resolve its build report directory", recordlog.Context{"cause": err.Error()})
+		return
+	}
+	if err := Write(dir, service, r); err != nil {
+		log.Error(op, service+" failed to write its build report", recordlog.Context{"cause": err.Error(), "dir": dir})
+		return
+	}
+	log.Info(op, service+" reported its build", recordlog.Context{"build": r.Build, "path": Path(dir, service)})
 }
