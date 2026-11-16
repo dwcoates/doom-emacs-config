@@ -149,6 +149,12 @@ type Deps struct {
 	// answers under, so a prompt is never sent to the shim the stand-down
 	// parks (see park).
 	Delivering func(ws ids.WorkspaceID) bool
+	// Bouncing reports whether the prompt queue has a bounce draining the
+	// workspace. REQUIRED: a stand-down asks it after taking its stand-down
+	// lease, and the queue reads the lease under the lock this answers
+	// under, so a park never takes a workspace a bounce is replacing the
+	// shim of (see park).
+	Bouncing func(ws ids.WorkspaceID) bool
 	// Announcer publishes the WatchDaemon pushes: the standing drain schedule,
 	// its cancellation, and the shutdown announcement.
 	Announcer Announcer
@@ -385,6 +391,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Delivering == nil {
 		return nil, errors.New("drain: a delivery answer is required")
+	}
+	if deps.Bouncing == nil {
+		return nil, errors.New("drain: a bounce answer is required")
 	}
 	if deps.Announcer == nil {
 		return nil, errors.New("drain: an announcer is required")

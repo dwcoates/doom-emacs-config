@@ -264,6 +264,53 @@ func TestSweepDefersASessionAPromptIsBeingDeliveredTo(t *testing.T) {
 	}
 }
 
+// TestSweepDefersASessionABounceIsReplacing pins the stand-down's half of the
+// bounce race: a bounce decided on the free workspace before the stand-down
+// took its lease owns it, and the stand-down, asking AFTER it holds the
+// lease, sees it and defers. No directive goes out, and the lease is released
+// for the bounce's restart hold.
+func TestSweepDefersASessionABounceIsReplacing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	var leaseHeldWhenAsked []bool
+	h.bouncing = func(asked ids.WorkspaceID) bool {
+		_, held, err := h.db.Lease(context.Background(), asked)
+		if err != nil {
+			t.Errorf("reading the lease while asked: %v", err)
+		}
+		leaseHeldWhenAsked = append(leaseHeldWhenAsked, held)
+		return true
+	}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	_, leaseAfter, err := h.db.Lease(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("reading the lease after: %v", err)
+	}
+	got := []any{len(hibernated), len(h.stand.hibernated), leaseHeldWhenAsked, leaseAfter}
+	want := []any{0, 0, []bool{true}, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("(hibernated, directives, lease held when asked, lease held after) = %v, want %v", got, want)
+	}
+	var logged bool
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opSweep && r.Context["workspace"] == string(ws) &&
+			r.Message == "a bounce is replacing the workspace's shim; deferring the park" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("no info record of the deferral under %s naming %s; want it logged", opSweep, ws)
+	}
+}
+
 // TestSweepHibernatesWithNoDeliveryUnderWay pins that the delivery check
 // passes a session nothing is being delivered to.
 func TestSweepHibernatesWithNoDeliveryUnderWay(t *testing.T) {

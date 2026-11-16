@@ -889,6 +889,16 @@ func (q *queue) Delivering(ws ids.WorkspaceID) bool {
 	return standing
 }
 
+// Bouncing is Queue.Bouncing. It answers under the delivery lock, so it
+// waits out a bounce decision being taken and sees the draining it decided.
+func (q *queue) Bouncing(ws ids.WorkspaceID) bool {
+	d := q.lockDelivery(ws)
+	defer d.unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return d.state.bounce != nil && d.state.bounce.draining
+}
+
 // isReviving reports whether a bring-up for a workspace is running or about to
 // run: either a background revival goroutine is in flight, or a revival call
 // itself is. Both mean the session is still coming up.

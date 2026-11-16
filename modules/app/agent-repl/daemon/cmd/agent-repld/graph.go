@@ -1364,6 +1364,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:     fleet.Freeness(),
 		Reviving:     queue.Reviving,
 		Delivering:   queue.Delivering,
+		Bouncing:     queue.Bouncing,
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
 		PublishHost:  relay.PublishHostWorkspace,

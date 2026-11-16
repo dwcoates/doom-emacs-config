@@ -1020,6 +1020,7 @@ func TestNewRefusesWithoutAMergeSuspension(t *testing.T) {
 		Freeness:   newFakeFreeness(),
 		Reviving:   newFakeReviving().Reviving,
 		Delivering: func(ids.WorkspaceID) bool { return false },
+		Bouncing:   func(ids.WorkspaceID) bool { return false },
 		Announcer:  &fakeAnnouncer{},
 		Exit:       func(context.Context) error { return nil },
 		Log:        dlog.NewTestSurfaces(),
@@ -1073,6 +1074,27 @@ func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "delivery") {
 		t.Fatalf("New = %v, want the missing delivery answer refused", err)
+	}
+}
+
+func TestNewRefusesAMissingBounceAnswer(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:         newHarness(t).db,
+		Stand:      newFakeStand(),
+		Spawns:     newFakeSpawns(),
+		Merges:     &fakeMerges{},
+		Freeness:   newFakeFreeness(),
+		Reviving:   newFakeReviving().Reviving,
+		Delivering: func(ids.WorkspaceID) bool { return false },
+		Announcer:  &fakeAnnouncer{},
+		Exit:       func(context.Context) error { return nil },
+		Log:        dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "bounce answer") {
+		t.Fatalf("New = %v, want the missing bounce answer refused", err)
 	}
 }
 
