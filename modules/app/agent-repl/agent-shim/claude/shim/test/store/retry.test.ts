@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { PersistenceError } from "../../src/store/persistence.js";
-import { isRetryableRead, readWithRetry } from "../../src/store/retry.js";
+import { isRetryableRead, READ_RETRY_POLICY, readWithRetry } from "../../src/store/retry.js";
 
 /** The schedule, shortened so the assertions are about behavior, not time. */
 const POLICY = { backoffMs: [1, 2], maxAttempts: 3 } as const;
@@ -218,5 +218,34 @@ describe("a read on the retry schedule", () => {
 
     // Assert.
     expect(slept).toEqual([50]);
+  });
+});
+
+describe("the read half's default schedule", () => {
+  it("backs off at least 2.5 times launchd's 10s relaunch throttle before giving up", async () => {
+    // Arrange: a store that never answers.
+    const { slept, sleep } = recorder();
+
+    // Act.
+    await expect(readWithRetry("a book", () => Promise.reject(busy()), { sleep })).rejects.toBeInstanceOf(PersistenceError);
+
+    // Assert.
+    expect(slept.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(25_000);
+    expect(slept).toHaveLength(READ_RETRY_POLICY.maxAttempts - 1);
+  });
+
+  it("rides out a store that comes back after 8s, as a throttled relaunch did", async () => {
+    // Arrange: the store refuses until 8s of backoff have passed.
+    let elapsed = 0;
+    const sleep = (ms: number): Promise<void> => {
+      elapsed += ms;
+      return Promise.resolve();
+    };
+
+    // Act.
+    const answer = await readWithRetry("a book", () => (elapsed >= 8_000 ? Promise.resolve("rows") : Promise.reject(busy())), { sleep });
+
+    // Assert.
+    expect(answer).toBe("rows");
   });
 });
