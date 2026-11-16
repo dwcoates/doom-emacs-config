@@ -2683,8 +2683,8 @@ func TestAMergePlacedBehindAMergeStillInTheQueueIsNeitherPickedNorAdmitted(t *te
 	if admitted || picking(h) || len(h.queue.submissions) != 0 {
 		t.Fatalf("admitted %v, picking %v, submissions %d; want the merge held behind the merge ahead", admitted, picking(h), len(h.queue.submissions))
 	}
-	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.merge.behind",
-		Message: "a merge waits for the merge it was placed behind to leave the queue; it is not admitted or picked before then"})
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind",
+		Message: "a merge in line is passed over: it waits for the merge it was placed behind to leave the queue, and the merges behind it are admitted past it"})
 	if !ok || record.Context["workspace"] != string(theMergeWorkspace) || record.Context["behind_name"] != "ahead-merge" {
 		t.Fatalf("hold record = %+v, %v; want it naming the held merge and the merge ahead", record, ok)
 	}
@@ -2774,7 +2774,7 @@ func TestARestartKeepsAMergeHeldBehindTheMergeItWasPlacedBehind(t *testing.T) {
 	if !picking(h) {
 		t.Fatal("the restarted daemon did not begin the pick once the merge ahead landed")
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.merge.behind"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.behind"}); !ok {
 		t.Fatalf("no hold record after the restart: %+v", h.logs.Records())
 	}
 }
@@ -3015,5 +3015,67 @@ func TestTwoDropsOfOneMergeAtOnceTakeItOffOnce(t *testing.T) {
 	}
 	if errs := dropRecords(h, "error"); len(errs) != 0 {
 		t.Fatalf("the drops recorded errors: %+v", errs)
+	}
+}
+
+func TestAPassedOverMergeIsRecordedOncePerReason(t *testing.T) {
+	held := wsm.MergeQueueEntry{Workspace: "ws-a", WaitsOn: "ws-x", WaitsOnName: "x"}
+	tests := []struct {
+		name   string
+		pumps  [][]passedOver
+		wantAt []passReason
+	}{
+		{name: "the first pass is recorded", pumps: [][]passedOver{{{entry: held, reason: passHeldBehind}}},
+			wantAt: []passReason{passHeldBehind}},
+		{name: "the same pass on a later pump is not recorded again",
+			pumps:  [][]passedOver{{{entry: held, reason: passHeldBehind}}, {{entry: held, reason: passHeldBehind}}},
+			wantAt: []passReason{passHeldBehind}},
+		{name: "a new reason is recorded",
+			pumps:  [][]passedOver{{{entry: held, reason: passHeldBehind}}, {{entry: held, reason: passServedElsewhere}}},
+			wantAt: []passReason{passHeldBehind, passServedElsewhere}},
+		{name: "a merge passed over again after it was not is recorded again",
+			pumps:  [][]passedOver{{{entry: held, reason: passHeldBehind}}, nil, {{entry: held, reason: passHeldBehind}}},
+			wantAt: []passReason{passHeldBehind, passHeldBehind}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			for _, passed := range tt.pumps {
+				h.o.notePassedOver(h.repoKey(), passed)
+			}
+
+			// Assert
+			var got []passReason
+			for _, r := range h.logs.Records() {
+				if r.Level == dlog.LevelInfo && strings.HasPrefix(r.Message, "a merge in line is passed over") {
+					got = append(got, passReason(r.Context["reason"].(string)))
+				}
+			}
+			if !slices.Equal(got, tt.wantAt) {
+				t.Fatalf("recorded %v, want %v", got, tt.wantAt)
+			}
+		})
+	}
+}
+
+func TestNextInLineNamesWhyEachMergeAheadWasPassedOver(t *testing.T) {
+	// Arrange
+	entries := []wsm.MergeQueueEntry{
+		{Workspace: "ws-held", State: wsm.MergeQueued, WaitsOn: "ws-x"},
+		{Workspace: "ws-elsewhere", State: wsm.MergeQueued},
+		{Workspace: "ws-next", State: wsm.MergeQueued},
+		{Workspace: "ws-after", State: wsm.MergeQueued},
+	}
+
+	// Act
+	front, found, passed := nextInLine(entries, func(ws ids.WorkspaceID) bool { return ws != "ws-elsewhere" })
+
+	// Assert
+	if !found || front.Workspace != "ws-next" || len(passed) != 2 ||
+		passed[0].reason != passHeldBehind || passed[1].reason != passServedElsewhere {
+		t.Fatalf("nextInLine = %v, %v, %+v; want ws-next past the held and the served-elsewhere merges", front.Workspace, found, passed)
 	}
 }

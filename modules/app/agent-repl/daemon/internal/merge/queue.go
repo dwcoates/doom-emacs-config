@@ -1543,21 +1543,16 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		o.failBehind(ctx, repo, failed)
 		return "", nil, false, nil
 	}
-	o.logHeldBehind(repo, entries)
 	// A MERGE WHOSE WORKSPACE THIS DAEMON DOES NOT SERVE IS PASSED OVER, at
 	// any place in line (owner ruling, 2026-11-15): an older daemon still
 	// serving it, or one it moved to and this daemon has not adopted yet, may
 	// hold it for as long as a turn runs there, and the merges behind it never
 	// wait on that. It keeps its place, and its adoption here kicks this pump,
 	// so it is the next admitted.
-	front, found := nextInLine(entries, func(ws ids.WorkspaceID) bool {
-		if o.movedAway(ws) || !o.deps.Standing.ServesWorkspace(ws) {
-			o.deps.Log.Global().Debug(op, "a merge in line whose workspace this daemon does not serve is passed over; it keeps its place and is admitted once its workspace is served here",
-				dlog.Context{"repo": string(repo), "workspace": string(ws)})
-			return false
-		}
-		return true
+	front, found, passed := nextInLine(entries, func(ws ids.WorkspaceID) bool {
+		return !o.movedAway(ws) && o.deps.Standing.ServesWorkspace(ws)
 	})
+	o.notePassedOver(repo, passed)
 	if !found {
 		return "", nil, false, nil
 	}
@@ -1753,16 +1748,80 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	return "", false, nil
 }
 
+// passReason is why the admission passed a merge waiting in line over.
+type passReason string
+
+const (
+	// passHeldBehind: it was placed behind a merge still standing in the
+	// queue, and is neither admitted nor picked until that merge leaves.
+	passHeldBehind passReason = "held_behind"
+	// passServedElsewhere: another daemon serves its workspace, or this one
+	// has not adopted it yet.
+	passServedElsewhere passReason = "served_elsewhere"
+)
+
+// passedOver is one merge waiting in line ahead of the one admitted, and why
+// it was passed over.
+type passedOver struct {
+	entry  wsm.MergeQueueEntry
+	reason passReason
+}
+
 // nextInLine answers the first entry of a queue that is waiting in line and
-// whose workspace SERVEDHERE says this daemon serves: a requested merge is in
-// nobody's line, and an admitted one is already running.
-func nextInLine(entries []wsm.MergeQueueEntry, servedHere func(ids.WorkspaceID) bool) (wsm.MergeQueueEntry, bool) {
+// whose workspace SERVEDHERE says this daemon serves, and every merge waiting
+// ahead of it that it passed over, with why: a requested merge is in nobody's
+// line, an admitted one is already running, and a merge whose merge ahead
+// failed is failed before this runs (failBehind).
+func nextInLine(entries []wsm.MergeQueueEntry, servedHere func(ids.WorkspaceID) bool) (wsm.MergeQueueEntry, bool, []passedOver) {
+	var passed []passedOver
 	for _, entry := range entries {
-		if entry.State == wsm.MergeQueued && !entry.HeldBehind() && !entry.AheadFailed() && servedHere(entry.Workspace) {
-			return entry, true
+		if entry.State != wsm.MergeQueued || entry.AheadFailed() {
+			continue
+		}
+		switch {
+		case entry.HeldBehind():
+			passed = append(passed, passedOver{entry: entry, reason: passHeldBehind})
+		case !servedHere(entry.Workspace):
+			passed = append(passed, passedOver{entry: entry, reason: passServedElsewhere})
+		default:
+			return entry, true, passed
 		}
 	}
-	return wsm.MergeQueueEntry{}, false
+	return wsm.MergeQueueEntry{}, false, passed
+}
+
+// notePassedOver records each merge the admission of REPO's queue passed
+// over, at INFO, once per reason: a merge passed over keeps its place, and
+// the record is why the merges behind it run first (2026-11-16: a head
+// passed over for hours left no record above DEBUG). A merge no longer
+// passed over is forgotten, so passing it over again is recorded again.
+func (o *orchestrator) notePassedOver(repo wsm.RepoKey, passed []passedOver) {
+	now := make(map[ids.WorkspaceID]passReason, len(passed))
+	var fresh []passedOver
+	o.mu.Lock()
+	before := o.passedOverOf[repo]
+	for _, p := range passed {
+		now[p.entry.Workspace] = p.reason
+		if before[p.entry.Workspace] != p.reason {
+			fresh = append(fresh, p)
+		}
+	}
+	if len(now) == 0 {
+		delete(o.passedOverOf, repo)
+	} else {
+		o.passedOverOf[repo] = now
+	}
+	o.mu.Unlock()
+	for _, p := range fresh {
+		fields := dlog.Context{"repo": string(repo), "workspace": string(p.entry.Workspace), "reason": string(p.reason)}
+		switch p.reason {
+		case passHeldBehind:
+			fields["behind"], fields["behind_name"] = string(p.entry.WaitsOn), p.entry.WaitsOnName
+			o.deps.Log.Global().Info("daemon.merge.behind", "a merge in line is passed over: it waits for the merge it was placed behind to leave the queue, and the merges behind it are admitted past it", fields)
+		case passServedElsewhere:
+			o.deps.Log.Global().Info("daemon.merge.admit", "a merge in line is passed over: this daemon does not serve its workspace yet, so it keeps its place and is admitted once its workspace is served here", fields)
+		}
+	}
 }
 
 // aheadFailed answers the first merge waiting in line whose merge ahead left
@@ -1774,19 +1833,6 @@ func aheadFailed(entries []wsm.MergeQueueEntry) (wsm.MergeQueueEntry, bool) {
 		}
 	}
 	return wsm.MergeQueueEntry{}, false
-}
-
-// logHeldBehind records each merge waiting in line that the admission passes
-// over because the merge it was placed behind still stands in the queue: it
-// is neither admitted nor, for a merge workspace, picked until that merge
-// leaves (nextInLine). The merges behind it are admitted past it.
-func (o *orchestrator) logHeldBehind(repo wsm.RepoKey, entries []wsm.MergeQueueEntry) {
-	for _, entry := range entries {
-		if entry.State == wsm.MergeQueued && entry.HeldBehind() {
-			o.deps.Log.Global().Debug("daemon.merge.behind", "a merge waits for the merge it was placed behind to leave the queue; it is not admitted or picked before then",
-				dlog.Context{"repo": string(repo), "workspace": string(entry.Workspace), "behind": string(entry.WaitsOn), "behind_name": entry.WaitsOnName})
-		}
-	}
 }
 
 // failBehind ends a merge waiting in line whose merge ahead left the queue
