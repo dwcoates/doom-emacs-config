@@ -90,6 +90,16 @@ test_stop_and_start_take_the_service_out_and_back() {
   else fail "stop and start" "$mac" "$linux"; fi
 }
 
+test_restart_restarts_the_held_service_in_place() {
+  local mac linux
+  reset darwin; service_restart com.x.svc; mac="$(transcript)"
+  reset linux; service_restart com.x.svc; linux="$(transcript)"
+  if [ "$mac" = "launchctl kickstart -k gui/$uid/com.x.svc" ] &&
+     [ "$linux" = "systemctl --user restart com.x.svc.service" ]; then
+    pass "a restart kickstarts the launchd service or restarts the unit"
+  else fail "restart" "$mac" "$linux"; fi
+}
+
 test_load_reads_the_new_definition_and_runs_it() {
   local mac held linux
   reset darwin; service_load com.x.svc; mac="$(transcript)"
