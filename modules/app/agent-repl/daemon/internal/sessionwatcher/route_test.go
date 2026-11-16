@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/shimclient"
@@ -4030,6 +4031,40 @@ func TestRetryOwedFollowsTheLatestVendorErrorRetryStatement(t *testing.T) {
 			// Assert.
 			if got := h.w.RetryOwed(); got != tt.want {
 				t.Fatalf("RetryOwed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLogUnmodeledRecordsAGapOncePerUnitAndNoGapForAToolNotOffered(t *testing.T) {
+	cases := []struct {
+		name      string
+		unmodeled *conversationv1.AgentUnmodeled
+		level     string
+		message   string
+	}{
+		{name: "a call to a tool the schema does not model warns at its start",
+			unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Start{Start: &conversationv1.AgentUnmodeledStart{ToolName: "StructuredOutput"}}},
+			level:     "warn", message: "an activity the schema does not model"},
+		{name: "a call to a tool the session does not offer is recorded at info",
+			unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Start{Start: &conversationv1.AgentUnmodeledStart{ToolName: "bash", NotOffered: true}}},
+			level:     "info", message: "the agent called a tool the session does not offer; the vendor refuses it"},
+		{name: "a later frame of the unit is recorded at debug",
+			unmodeled: &conversationv1.AgentUnmodeled{Result: &conversationv1.AgentUnmodeled_Failure{Failure: &conversationv1.AgentUnmodeledFailure{ToolName: "bash"}}},
+			level:     "debug", message: "a later frame of an activity the schema does not model"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+
+			// Act.
+			logUnmodeled(log, &conversationv1.AgentId{Value: "a1"}, tc.unmodeled)
+
+			// Assert.
+			records := log.Records()
+			if len(records) != 1 || records[0].Level != tc.level || records[0].Message != tc.message {
+				t.Fatalf("records = %+v, want one %s %q", records, tc.level, tc.message)
 			}
 		})
 	}
