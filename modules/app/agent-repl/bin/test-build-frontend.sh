@@ -1490,6 +1490,7 @@ ed_fixture() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/pkg" "$root/store/node_modules"
     echo '{"name":"pkg"}' > "$root/pkg/package.json"
+    echo '{"lockfileVersion":3,"packages":{}}' > "$root/pkg/package-lock.json"
     ed_complete_tree "$root/store/node_modules"
     cat > "$root/bin/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -1519,7 +1520,7 @@ ed_run() {
 
 # ed_entry ROOT — the store entry ROOT/pkg's manifest keys.
 ed_entry() {
-    echo "$1/nstore/pkg-$(store_key_of "$1/pkg/package.json")"
+    echo "$1/nstore/pkg-$(store_key_of "$1/pkg/package-lock.json")"
 }
 
 t_ensure_deps_leaves_a_satisfied_link_alone() {
@@ -1576,7 +1577,7 @@ t_ensure_deps_links_an_absent_tree_into_the_store() {
 
 t_ensure_deps_links_a_second_checkout_without_installing() {
     local root; root="$(ed_fixture)"
-    mkdir -p "$root/second/pkg" && cp "$root/pkg/package.json" "$root/second/pkg/"
+    mkdir -p "$root/second/pkg" && cp "$root/pkg/package.json" "$root/pkg/package-lock.json" "$root/second/pkg/"
     ed_run "$root"
     : > "$root/npm.log"
     ed_run "$root" "$root/second/pkg"
