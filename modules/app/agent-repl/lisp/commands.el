@@ -1519,8 +1519,9 @@ and the daemon gives it no number."
 THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A chord that walks
 or picks a workspace (`s-{', `s-[', `SPC p p', the jumps) may select one in a
 folded section or subsection: the section stays folded and the roster draws
-that workspace alone inside it until the user switches away.  The numeral chords stay on `agent-repl--drawn-tab-names',
-because a folded tab has no number.  A tab the user hid is a stop of neither."
+that workspace alone inside it until the user switches away.  The numeral
+chords stay on `agent-repl--drawn-tab-names', because a folded tab has no
+number.  A tab the user hid is a stop of neither."
   (and (fboundp 'agent-repl-roster-navigable-tab-order)
        (agent-repl-roster-navigable-tab-order)))
 

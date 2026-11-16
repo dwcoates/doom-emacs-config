@@ -374,8 +374,8 @@ func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
-	if specs != 3 || calls != 4 || byHand != 1 {
-		t.Fatalf("fold specs = %d, foldTabs calls = %d, stand-down loops = %d; want the repository's, the subsection's and the children's spec, each fold (and the refold) through foldTabs",
+	if specs != 3 || calls != 3 || byHand != 1 {
+		t.Fatalf("fold specs = %d, foldTabs calls = %d, stand-down loops = %d; want the repository's, the subsection's and the children's spec, each fold through foldTabs",
 			specs, calls, byHand)
 	}
 }
