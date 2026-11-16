@@ -172,6 +172,8 @@ func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
 		{name: "a failed worktree call", kind: kindWorktree, failed: true},
 		{name: "a failed cron call", kind: kindCron, failed: true},
 		{name: "a failed push", kind: kindPushNotification, failed: true},
+		{name: "a failed notifications read", kind: kindReadNotifications, failed: true},
+		{name: "a notifications read that answered", kind: kindReadNotifications},
 		{name: "a failed hand-back", kind: kindSubagentHandback, input: map[string]any{"message": "r"}, failed: true},
 		{name: "a failed wakeup", kind: kindScheduleWakeup, failed: true},
 		{name: "a failed monitor", kind: kindMonitor, failed: true},
@@ -417,5 +419,46 @@ func TestAReturnedBoardCallNamingNoSessionSettlesNothing(t *testing.T) {
 	// Assert.
 	if got != nil {
 		t.Fatalf("settled = %v, want nil so the caller stores the result as residue", got)
+	}
+}
+
+func TestANotificationsReadSettlesOnItsOwnArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		failed bool
+		check  func(*testing.T, *conversationv1.AgentReadNotifications)
+	}{
+		{
+			name: "a read that answered is the success arm carrying what it returned",
+			check: func(t *testing.T, got *conversationv1.AgentReadNotifications) {
+				if text := got.GetSuccess().GetReturnedText(); text != "No queued notifications." {
+					t.Fatalf("returned text = %q, want the vendor's sentence verbatim", text)
+				}
+			},
+		},
+		{
+			name:   "a read the vendor refused is the failure arm carrying its error",
+			failed: true,
+			check: func(t *testing.T, got *conversationv1.AgentReadNotifications) {
+				blocks := got.GetFailure().GetError().GetContent().GetBlocks()
+				if len(blocks) != 1 || blocks[0].GetText().GetText() != "No queued notifications." {
+					t.Fatalf("error content = %v, want the vendor's text", blocks)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			call := openCall{input: map[string]any{}, startedAt: 1000}
+			block := map[string]any{"content": "No queued notifications."}
+
+			// Act.
+			got := c.settledItem(kindReadNotifications, call, nil, block, tt.failed, 4000, Attribution{})
+
+			// Assert.
+			tt.check(t, got.GetReadNotifications())
+		})
 	}
 }

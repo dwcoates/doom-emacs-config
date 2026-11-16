@@ -298,6 +298,15 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		return item(&conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
 			State: &conversationv1.AgentPushNotification_Success{Success: pushSuccess(call, result, ts)},
 		}})
+	case kindReadNotifications:
+		if failed {
+			return item(&conversationv1.AgentActivity_ReadNotifications{ReadNotifications: &conversationv1.AgentReadNotifications{
+				Result: &conversationv1.AgentReadNotifications_Failure{Failure: &conversationv1.AgentReadNotificationsFailure{Error: failure}},
+			}})
+		}
+		return item(&conversationv1.AgentActivity_ReadNotifications{ReadNotifications: &conversationv1.AgentReadNotifications{
+			Result: &conversationv1.AgentReadNotifications_Success{Success: readNotificationsSuccess(call, block, ts)},
+		}})
 	default:
 		return nil
 	}

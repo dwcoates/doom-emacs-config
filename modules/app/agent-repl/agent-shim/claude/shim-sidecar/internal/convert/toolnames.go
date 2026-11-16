@@ -38,38 +38,40 @@ const (
 	kindWorktree
 	kindCron
 	kindPushNotification
+	kindReadNotifications
 	kindChessBoard
 )
 
 // builtinTools maps the vendor's tool names onto the unit kind each becomes.
 var builtinTools = map[string]toolKind{
-	"Read":             kindRead,
-	"Write":            kindWrite,
-	"Edit":             kindEdit,
-	"Grep":             kindGrep,
-	"Glob":             kindGlob,
-	"Bash":             kindBash,
-	"Agent":            kindSubagent,
-	"Task":             kindSubagent,
-	"Skill":            kindSkill,
-	"SendMessage":      kindSendMessage,
-	"SubagentHandback": kindSubagentHandback,
-	"TaskCreate":       kindTaskAct,
-	"TaskUpdate":       kindTaskAct,
-	"WebFetch":         kindWebFetch,
-	"WebSearch":        kindWebSearch,
-	"Monitor":          kindMonitor,
-	"ScheduleWakeup":   kindScheduleWakeup,
-	"Artifact":         kindArtifact,
-	"EnterPlanMode":    kindPlanMode,
-	"ExitPlanMode":     kindPlanMode,
-	"ReportFindings":   kindReportFindings,
-	"EnterWorktree":    kindWorktree,
-	"ExitWorktree":     kindWorktree,
-	"CronCreate":       kindCron,
-	"CronDelete":       kindCron,
-	"CronList":         kindCron,
-	"PushNotification": kindPushNotification,
+	"Read":              kindRead,
+	"Write":             kindWrite,
+	"Edit":              kindEdit,
+	"Grep":              kindGrep,
+	"Glob":              kindGlob,
+	"Bash":              kindBash,
+	"Agent":             kindSubagent,
+	"Task":              kindSubagent,
+	"Skill":             kindSkill,
+	"SendMessage":       kindSendMessage,
+	"SubagentHandback":  kindSubagentHandback,
+	"TaskCreate":        kindTaskAct,
+	"TaskUpdate":        kindTaskAct,
+	"WebFetch":          kindWebFetch,
+	"WebSearch":         kindWebSearch,
+	"Monitor":           kindMonitor,
+	"ScheduleWakeup":    kindScheduleWakeup,
+	"Artifact":          kindArtifact,
+	"EnterPlanMode":     kindPlanMode,
+	"ExitPlanMode":      kindPlanMode,
+	"ReportFindings":    kindReportFindings,
+	"EnterWorktree":     kindWorktree,
+	"ExitWorktree":      kindWorktree,
+	"CronCreate":        kindCron,
+	"CronDelete":        kindCron,
+	"CronList":          kindCron,
+	"PushNotification":  kindPushNotification,
+	"ReadNotifications": kindReadNotifications,
 }
 
 // showChessBoardToolName is agent-repl's OWN board tool, served by the shim's
