@@ -98,6 +98,9 @@ type Progress struct {
 	// Notes are the deferred-component notes, per workspace. A workspace not
 	// named has none.
 	Notes map[ids.WorkspaceID][]Note
+	// Unchanged states, on Updated, that the deploy changed nothing: every
+	// component it decided was up to date. False on every other phase.
+	Unchanged bool
 }
 
 // Sink is the ONE entry point a deploy's progress is published through. The

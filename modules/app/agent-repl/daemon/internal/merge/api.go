@@ -268,6 +268,10 @@ type Orchestrator interface {
 	// OweMediations records that the deploy that started AT owes a check in
 	// every repository that checks its deploys (mediation.go).
 	OweMediations(ctx context.Context, at time.Time) error
+	// ReleaseUnchangedDeploy releases, unchecked, the check the deploy that
+	// began AT owes in every repository that checks its deploys, when that
+	// deploy changed nothing and the check began its own chain.
+	ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.

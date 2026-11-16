@@ -18,6 +18,7 @@ func TestEdgesTellEachDeploysEdgesOnce(t *testing.T) {
 		{name: "a deploy that finishes here", phases: []*Progress{{Phase: Building}, {Phase: Building}, {Phase: Installing}, {Phase: Updated}}, want: []string{"began", "ended"}},
 		{name: "a deploy whose line is taken down", phases: []*Progress{{Phase: Building}, nil}, want: []string{"began", "ended"}},
 		{name: "a successor finishing a deploy it took over", phases: []*Progress{{Phase: Updated}}, want: []string{"ended"}},
+		{name: "a deploy that changed nothing", phases: []*Progress{{Phase: Building}, {Phase: Updated, Unchanged: true}}, want: []string{"began", "ended unchanged"}},
 		{name: "two deploys", phases: []*Progress{{Phase: Building}, {Phase: Updated}, {Phase: Building}, {Phase: Updated}}, want: []string{"began", "ended", "began", "ended"}},
 	}
 	for _, tt := range tests {
@@ -25,7 +26,13 @@ func TestEdgesTellEachDeploysEdgesOnce(t *testing.T) {
 			// Arrange
 			var got []string
 			inner := &recordingSink{}
-			e := NewEdges(inner, func() { got = append(got, "began") }, func() { got = append(got, "ended") })
+			e := NewEdges(inner, func() { got = append(got, "began") }, func(unchanged bool) {
+				if unchanged {
+					got = append(got, "ended unchanged")
+					return
+				}
+				got = append(got, "ended")
+			})
 
 			// Act
 			for _, p := range tt.phases {
@@ -49,5 +56,5 @@ func TestNewEdgesRefusesAMissingPart(t *testing.T) {
 	}()
 
 	// Act
-	NewEdges(nil, func() {}, func() {})
+	NewEdges(nil, func() {}, func(bool) {})
 }

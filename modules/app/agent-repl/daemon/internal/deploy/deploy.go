@@ -522,7 +522,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 		// THIS DAEMON STAYS, so it ends its own story. A daemon that moves
 		// leaves `updated` to its successor, whose streams are the ones left.
 		d.timePhase(restarttiming.DeployTotal, began, nil)
-		d.progress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferredNotes(result)})
+		d.progress(&deployprogress.Progress{Phase: deployprogress.Updated, Notes: deferredNotes(result), Unchanged: unchanged(result)})
 	}
 	return result, nil
 }
@@ -554,6 +554,17 @@ func movesDaemon(r Result) bool {
 		}
 	}
 	return false
+}
+
+// unchanged reports whether R changed nothing: every component it decided
+// was up to date.
+func unchanged(r Result) bool {
+	for _, o := range r.Outcomes {
+		if o.Kind != UpToDate {
+			return false
+		}
+	}
+	return len(r.Outcomes) > 0
 }
 
 // deferredNotes are the per-workspace notes a deploy that stays leaves: a

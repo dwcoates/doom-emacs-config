@@ -1113,3 +1113,77 @@ func TestEverySubmissionFilterGoesThroughSubmissionsTo(t *testing.T) {
 		}
 	}
 }
+
+func TestADeployThatChangedNothingIsReleasedUnchecked(t *testing.T) {
+	later := deployStarted.Add(time.Minute)
+	tests := []struct {
+		name         string
+		arrange      func(t *testing.T, h *harness)
+		release      time.Time
+		wantReleased bool
+		wantMessage  string
+	}{
+		{name: "a check that began its own chain", release: deployStarted, wantReleased: true,
+			wantMessage: "the deploy changed nothing; its check is released unchecked and the queue advances"},
+		{name: "a check carrying an earlier check's chain", release: later,
+			arrange: func(t *testing.T, h *harness) {
+				withIntake(t, h, deployStarted)
+				oweAt(t, h, later)
+			},
+			wantMessage: "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it"},
+		{name: "another deploy's check", release: later},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			if tt.arrange != nil {
+				tt.arrange(t, h)
+			}
+
+			// Act
+			err := h.o.ReleaseUnchangedDeploy(context.Background(), tt.release)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ReleaseUnchangedDeploy: %v", err)
+			}
+			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
+				t.Fatalf("released %v, want %v", released, tt.wantReleased)
+			}
+			if tt.wantMessage != "" {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: tt.wantMessage}); !ok {
+					t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+				}
+			}
+			if len(h.queue.submissions) != 0 || len(h.checks.made) != 0 {
+				t.Fatalf("submitted %v, made %v; want no intake told or made", h.queue.submissions, h.checks.made)
+			}
+		})
+	}
+}
+
+func TestAnUnchangedDeploysCheckThatCannotBeReadStaysOwed(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.mu.Lock()
+	h.db.mediationErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.ReleaseUnchangedDeploy(context.Background(), deployStarted)
+
+	// Assert
+	h.db.mu.Lock()
+	h.db.mediationErr = nil
+	h.db.mu.Unlock()
+	if err == nil || owedCheck(t, h) == nil {
+		t.Fatalf("ReleaseUnchangedDeploy = %v, want the failure answered and the check still owed", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read the check an unchanged deploy owes; it stays owed"}); !ok {
+		t.Fatalf("records = %v, want the failed read at ERROR", h.logs.Records())
+	}
+}

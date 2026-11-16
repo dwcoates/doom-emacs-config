@@ -135,6 +135,8 @@ const (
 	MediationUndecided = "undecided"
 	// MediationUnmediated: the repository checks its deploys no more.
 	MediationUnmediated = "unmediated"
+	// MediationUnchanged: the deploy changed nothing, so it was not checked.
+	MediationUnchanged = "unchanged"
 )
 
 // The outcomes a remediation's span ends in (Meter.ObserveRemediation): from
@@ -281,6 +283,53 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 			o.deps.Log.Global().Error(opMediation, "could not record that the deploy is the remediation's; the next daemon's pass records it", dlog.Context{"repo": string(q.key), "error": err.Error()})
 		}
 		o.republishMediation(ctx, q.key)
+	}
+	return errors.Join(errs...)
+}
+
+// ReleaseUnchangedDeploy implements Orchestrator: the deploy that began AT
+// changed nothing, every component up to date, so the check it owes is
+// released unchecked and its queue advances (2026-11-14: a deploy that
+// installed nothing held the queue for an intake's check). The logs it left
+// are not skipped: the next check's window starts where the last one read.
+// A check that carries an earlier check's chain (a fix dispatched or an
+// intake at work) stays owed for that chain's intake. A failure is recorded
+// at ERROR and answered: the check stays owed and its intake checks it.
+func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error {
+	queues, err := o.checkedQueues(ctx, opMediation)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not list the repositories an unchanged deploy owes checks in; its checks stay owed", dlog.Context{"error": err.Error()})
+		return err
+	}
+	var errs []error
+	for _, q := range queues {
+		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
+		m, err := o.deps.DB.MediationOf(ctx, q.key)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not read the check an unchanged deploy owes; it stays owed", withField(fields, "error", err.Error()))
+			errs = append(errs, err)
+			continue
+		}
+		if m == nil || !m.OwedAt.Equal(at) {
+			continue
+		}
+		if !m.ChainStartedAt.Equal(m.OwedAt) {
+			o.deps.Log.Global().Info(opMediation, "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it", withField(fields, "chain_started", m.ChainStartedAt.UTC().Format(time.RFC3339Nano)))
+			continue
+		}
+		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, at)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not release the check of a deploy that changed nothing; it stays owed", withField(fields, "error", err.Error()))
+			errs = append(errs, err)
+			continue
+		}
+		if !released {
+			continue
+		}
+		o.endChain(ctx, q.key, *m, MediationUnchanged)
+		o.deps.Log.Global().Info(opMediation, "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
+		o.republishMediation(ctx, q.key)
+		o.kick(q.key)
 	}
 	return errors.Join(errs...)
 }

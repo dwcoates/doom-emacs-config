@@ -1960,3 +1960,55 @@ func TestAFailureAfterTheInstallPutsThePreviousWifiHelperBack(t *testing.T) {
 		t.Fatalf("live helper sources = %q, want the previous %q restored", got, theOld.wifi)
 	}
 }
+
+func TestUpdatedSaysWhetherTheDeployChangedNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		want    bool
+	}{
+		{name: "every component up to date", want: true},
+		{name: "a stale shim bounced", arrange: func(h *harness) { h.rollout.stale["ws-a"] = true }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.arrange != nil {
+				tc.arrange(h)
+			}
+
+			// Act
+			result, err := h.d.Deploy(context.Background(), false)
+
+			// Assert
+			last := h.progress.last()
+			if err != nil || last.Phase != deployprogress.Updated || last.Unchanged != tc.want {
+				t.Fatalf("Deploy = (%+v, %v), last statement %+v; want updated with unchanged=%v", result, err, last, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnchangedIsEveryOutcomeUpToDate(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcomes []Outcome
+		want     bool
+	}{
+		{name: "every component up to date", outcomes: []Outcome{{Component: ComponentStore, Kind: UpToDate}, {Component: ComponentElisp, Kind: UpToDate}}, want: true},
+		{name: "one component restarted", outcomes: []Outcome{{Component: ComponentStore, Kind: UpToDate}, {Component: ComponentSidecar, Kind: Restarted}}},
+		{name: "no component decided"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := unchanged(Result{Outcomes: tc.outcomes})
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("unchanged = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

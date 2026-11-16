@@ -2693,7 +2693,7 @@ func settleThenMediate(settle func(ctx context.Context), mediation *mediationHoo
 	}
 	return func(ctx context.Context) {
 		settle(ctx)
-		mediation.ended()
+		mediation.rounds()
 	}
 }
 

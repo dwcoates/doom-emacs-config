@@ -6,12 +6,13 @@ import "sync"
 // edges of a deploy: Began on the edge INTO Building (the deploy committed:
 // it builds from here), and Ended on the edge that closes the deploy's
 // story -- Updated (it finished, here or in the successor that took over) or
-// the line taken down (it failed, or its rollout cannot finish). An edge is
-// told once per deploy, whatever progress repeats it.
+// the line taken down (it failed, or its rollout cannot finish), with
+// whether it changed nothing (Progress.Unchanged). An edge is told once per
+// deploy, whatever progress repeats it.
 type Edges struct {
 	inner Sink
 	began func()
-	ended func()
+	ended func(unchanged bool)
 
 	mu sync.Mutex
 	// open reports a deploy that began and has not ended.
@@ -19,7 +20,7 @@ type Edges struct {
 }
 
 // NewEdges wraps INNER, telling BEGAN and ENDED of each deploy's edges.
-func NewEdges(inner Sink, began, ended func()) *Edges {
+func NewEdges(inner Sink, began func(), ended func(unchanged bool)) *Edges {
 	if inner == nil || began == nil || ended == nil {
 		panic("deployprogress: NewEdges requires a sink and both edges")
 	}
@@ -43,6 +44,6 @@ func (e *Edges) SetDeployProgress(progress *Progress) {
 		e.began()
 	}
 	if ended {
-		e.ended()
+		e.ended(progress != nil && progress.Unchanged)
 	}
 }
