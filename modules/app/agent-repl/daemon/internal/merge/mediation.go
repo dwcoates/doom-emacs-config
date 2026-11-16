@@ -296,9 +296,21 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 // intake at work) stays owed for that chain's intake. A failure is recorded
 // at ERROR and answered: the check stays owed and its intake checks it.
 func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error {
+	// THE RELEASE RUNS INSIDE THE MEDIATION'S LIFETIME, as a pass does: the
+	// daemon's exit cuts it and waits for it before the state client
+	// closes, and a cut is recorded as one, never as a failure.
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"deploy_started": at.UTC().Format(time.RFC3339Nano)})
+		return nil
+	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
 	queues, err := o.checkedQueues(ctx, opMediation)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not list the repositories an unchanged deploy owes checks in; its checks stay owed", dlog.Context{"error": err.Error()})
+		o.mediationFailed(ctx, nil, "could not list the repositories an unchanged deploy owes checks in; its checks stay owed", err)
 		return err
 	}
 	var errs []error
@@ -306,8 +318,10 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
 		m, err := o.deps.DB.MediationOf(ctx, q.key)
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read the check an unchanged deploy owes; it stays owed", withField(fields, "error", err.Error()))
 			errs = append(errs, err)
+			if o.mediationFailed(ctx, fields, "could not read the check an unchanged deploy owes; it stays owed", err) {
+				break
+			}
 			continue
 		}
 		if !owes(m, at) {
@@ -319,8 +333,10 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		}
 		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnchanged)
 		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not release the check of a deploy that changed nothing; it stays owed", withField(fields, "error", err.Error()))
 			errs = append(errs, err)
+			if o.mediationFailed(ctx, fields, "could not release the check of a deploy that changed nothing; it stays owed", err) {
+				break
+			}
 			continue
 		}
 		if !released {
