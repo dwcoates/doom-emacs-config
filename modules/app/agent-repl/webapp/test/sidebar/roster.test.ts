@@ -1098,6 +1098,27 @@ describe("the Recently Merged section's header", () => {
   });
 });
 
+describe("a queue group's header with a deploy check", () => {
+  const groupHead = (drawn: HTMLElement): HTMLElement =>
+    pane(drawn).querySelector(".merge-queue-section .merged-group-head") as HTMLElement;
+  const order = (head: HTMLElement): string[] =>
+    Array.from(head.children).map((child) =>
+      child.classList.contains("sb-label") ? "repo" : child.classList.contains("sb-mq-mediation") ? "status" : child.classList.contains("sb-mq-status-tail") ? "tail" : child.textContent?.startsWith("(") ? "count" : "other",
+    );
+
+  it("puts the status after the count, followed by its own short rule", () => {
+    const band = mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), mediation: { standing: { case: "waiting", value: {} } } } })], false);
+    const drawn = drawWorkspaceRoster(roster({ mergeQueue: band }), sidebarContext());
+    expect(order(groupHead(drawn))).toEqual(["repo", "count", "status", "tail"]);
+  });
+
+  it("draws no tail rule without a deploy check", () => {
+    const band = mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], false);
+    const drawn = drawWorkspaceRoster(roster({ mergeQueue: band }), sidebarContext());
+    expect(order(groupHead(drawn))).toEqual(["repo", "count"]);
+  });
+});
+
 describe("the Merge Queue section's header", () => {
   const head = (drawn: HTMLElement): HTMLElement => pane(drawn).querySelector(".merge-queue-section > .repo-head") as HTMLElement;
   const queued = (paused: boolean, collapsed: boolean) =>

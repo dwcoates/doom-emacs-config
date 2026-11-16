@@ -604,12 +604,19 @@ the offer goes to input.el, and nothing claims there was nothing to do."
       '((:interrupt . (:response (:arm :success :value
                                   (:arm :nothing-running
                                    :value (:rollback (:arm :choose :value nil)))))))
-    (let ((offered nil))
+    (let ((offered nil)
+          (deferred nil))
       (cl-letf (((symbol-function 'agent-repl--input-rollback-offer)
-                 (lambda (ws offer) (push (list ws offer) offered))))
+                 (lambda (ws offer) (push (list ws offer) offered)))
+                ((symbol-function 'agent-repl--defer-to-main-thread)
+                 (lambda (thunk) (push thunk deferred))))
         ;; Act
-        (agent-repl-verb-interrupt "ws-one"))
-      ;; Assert
+        (agent-repl-verb-interrupt "ws-one")
+        ;; Assert: nothing is read inside the response callback; the offer
+        ;; runs once the command loop takes the deferred call.
+        (should-not offered)
+        (should (= (length deferred) 1))
+        (funcall (car deferred)))
       (should (equal offered '(("ws-one" (:arm :choose :value nil)))))
       (should-not (agent-repl-test-verbs--messaged-p "nothing to interrupt")))))
 

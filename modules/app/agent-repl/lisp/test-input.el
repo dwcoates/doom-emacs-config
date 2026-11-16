@@ -4057,6 +4057,26 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
                              agent-repl-test-input--asked))
     (should (agent-repl-test-input--roll-back-sent))))
 
+;; A QUIT IN THE PICKER IS THE READER CANCELLING (2026-11-16: escape in the
+;; picker surfaced as "error in process sentinel: quit").
+(ert-deftest agent-repl-test-input-rollback-offer-a-quit-in-the-picker-cancels-the-rollback ()
+  "A quit while picking is said, with its record as the detail, plans nothing, and is never raised."
+  (agent-repl-test-input--with-rollback
+      (agent-repl-test-input--plan-answer
+       (agent-repl-test-input--plan :target '(:chosen :named :excerpt "older" :prompts-dropped 2)))
+      t (agent-repl-test-input--done (agent-repl-test-input--said))
+    (let ((agent-repl-test-input--list-answer
+           (agent-repl-test-input--listed (agent-repl-test-input--entry "p1" "older")))
+          (said nil))
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (signal 'quit nil)))
+                ((symbol-function 'agent-repl--user-message)
+                 (lambda (ws fmt args &rest keys) (push (list ws (apply #'format fmt args) (plist-get keys :detail)) said))))
+        ;; Act
+        (agent-repl--input-rollback-offer "ws-one" '(:arm :choose :value nil)))
+      ;; Assert
+      (should (equal said '(("ws-one" "rollback cancelled" "elisp.input.rollback-dismissed ws=ws-one arm=:choose"))))
+      (should-not (assq :plan agent-repl-test-input--rollback-calls)))))
+
 (ert-deftest agent-repl-test-input-rollback-choose-offers-newest-first ()
   "The picker lists the prompts in the daemon's order, newest at the top."
   (agent-repl-test-input--with-rollback
