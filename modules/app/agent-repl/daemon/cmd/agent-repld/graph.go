@@ -1931,8 +1931,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	return &graph{
 		Server: server.Deps{
-			DeployConfig: deployConfig,
-			Notices:      p.Metrics,
+			AccountRootFor: accounts.ConfigDirFor,
+			DeployConfig:   deployConfig,
+			Notices:        p.Metrics,
 			// THE TEST BARRIER IS SERVED ONLY TO A HARNESS'S DAEMON: the harness
 			// sets the environment, and no real client can come to rely on it.
 			TestBarrier: os.Getenv(testBarrierEnv) == "1",

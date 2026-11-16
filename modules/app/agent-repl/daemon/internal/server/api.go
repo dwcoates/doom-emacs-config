@@ -127,6 +127,10 @@ type Deps struct {
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
+	// AccountRootFor answers the Claude config dir a directory is routed to
+	// (account.Resolver.ConfigDirFor): the login a repository belongs to,
+	// which FindWorkspacesRequest.login narrows by.
+	AccountRootFor func(dir string) string
 
 	// Ownership answers a workspace's SERVING STANDING, which is what every
 	// per-workspace rpc refuses on before it delegates.
@@ -608,6 +612,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a health reporter")
 	case deps.Login == nil:
 		return nil, missing("a login manager")
+	case deps.AccountRootFor == nil:
+		return nil, missing("an account router")
 	case deps.Ownership == nil:
 		return nil, missing("an ownership source")
 	case deps.SuccessorAddress == nil:
