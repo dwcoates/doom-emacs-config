@@ -1124,6 +1124,44 @@ describe("the turn stop", () => {
     expect(harness.refusalArms()).toEqual([]);
   });
 
+  it("draws the interrupted-revisions outcome as a note with its count", async () => {
+    // Arrange: the stop reached the workspace's response rewrites first.
+    await withFooter({ status: "working" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "interruptedRevisions", value: { count: 2n } } },
+        },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.$('.footer-stop-turn [data-stop-outcome="interruptedRevisions"]')?.textContent).toBe(
+      "stopped 2 response updates",
+    );
+  });
+
+  it("draws no refusal for an interrupted-revisions answer", async () => {
+    // Arrange
+    await withFooter({ status: "working" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "interruptedRevisions", value: { count: 1n } } },
+        },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
   it("never asks the turn stop to roll its prompt back", async () => {
     // Arrange: the footer holds no composer for a rolled-back prompt's words.
     await withFooter({ status: "working" });
@@ -1158,6 +1196,7 @@ describe("the turn stop", () => {
       "nothingRunning",
       "mergeQueueOffered",
       "rolledBackUnanswered",
+      "interruptedRevisions",
     ]);
   });
 });
