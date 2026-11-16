@@ -69,6 +69,7 @@
 (declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-repeated-string "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-optional-int64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-optional-uint64 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire--decode-repeated "agent-repl-wire-common" (message-name field object decoder))
