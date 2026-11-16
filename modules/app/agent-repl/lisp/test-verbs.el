@@ -106,10 +106,12 @@ A `:children' override is the row's family, recorded through
     (agent-repl-test--with-family row children)))
 
 (defun agent-repl-test-verbs--roster (rows &optional merged-rows sections hidden-rows)
-  "Return a decoded `WorkspaceRoster' carrying ROWS: the open ones in one repo section.
-A closed one of ROWS is listed in the closed list, as the daemon lists it.
-SECTIONS, when given, replace the one section.  HIDDEN-ROWS, when given,
-are the hidden section's rows."
+  "Return an assembled roster view carrying ROWS: the open ones in one repo section.
+A closed one of ROWS is listed in the closed stream, as the daemon lists it.
+MERGED-ROWS are only counted by the Recently Merged summary: a merged
+workspace is in no stream, and its row is paged
+\(`agent-repl-test-verbs--merged').  SECTIONS, when given, replace the one
+section.  HIDDEN-ROWS, when given, are the hidden section's rows."
   (list :repository
         (list :sections
               (agent-repl-test--number-tabs
@@ -120,13 +122,23 @@ are the hidden section's rows."
                                            (seq-remove #'agent-repl-roster-row-closed-p rows)))))))
         :hidden (list :header (list :label (list :text "Hidden"))
                       :hidden-rows (agent-repl-test--hidden-rows hidden-rows))
-        :recently-merged (list :header (list :label (list :text "Recently Merged"))
+        :recently-merged (list :header (list :label (list :text "Recently Merged")
+                                             :count (list :workspaces (length merged-rows)))
                                :groups (and merged-rows
                                             (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                                                         :header (list :label (list :text "repo-one"))
-                                                        :merged-rows (agent-repl-test--merged-rows merged-rows)))))
+                                                        :summary (list :count (list :merges (length merged-rows))))))
+                               :merged-revision (list :revision 1))
         :closed (agent-repl-test--closed-rows (seq-filter #'agent-repl-roster-row-closed-p rows))
         :current nil))
+
+(defvar agent-repl-test-verbs--merged nil
+  "The merged rows the stubbed daemon pages, in one last page.
+A merged workspace is in no roster stream, so a lookup reaches it only
+through `ListMergedWorkspaces'.")
+
+(defvar agent-repl-test-verbs--merged-pages-read nil
+  "How many merged pages were asked for under `agent-repl-test-verbs--with'.")
 
 (defmacro agent-repl-test-verbs--with (answers &rest body)
   "Run BODY with every verb rpc stubbed to answer from ANSWERS.
@@ -149,8 +161,17 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--selected nil)
          (agent-repl-test-verbs--restart-holds nil)
          (agent-repl-test-verbs--switch-requests nil)
+         (agent-repl-test-verbs--merged-pages-read 0)
          (agent-repl-test-verbs--answers ,answers))
-     (cl-letf* (((symbol-function 'agent-repl-host-request-switch)
+     (cl-letf* (((symbol-function 'agent-repl-rpc-list-merged-workspaces-sync)
+                 (lambda (_conn _request &optional _timeout)
+                   (cl-incf agent-repl-test-verbs--merged-pages-read)
+                   (list :arm :success
+                         :value (list :revision '(:revision 1)
+                                      :extent (list :arm :last
+                                                    :value (list :rows (agent-repl-test--merged-rows
+                                                                        agent-repl-test-verbs--merged)))))))
+                ((symbol-function 'agent-repl-host-request-switch)
                  (lambda (ws _trigger)
                    (setq agent-repl-test-verbs--switch-requests
                          (append agent-repl-test-verbs--switch-requests (list ws)))
@@ -2087,26 +2108,50 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
                  :name (list :text "kid") :closed (list :closed t)))
          (parent (agent-repl-test-verbs--row :children (list child)))
          (roster (agent-repl-test-verbs--roster (list parent))))
-    (should (equal (mapcar #'agent-repl-roster-row-name
-                           (agent-repl-verbs--closed-rows roster))
-                   '("kid")))))
+    (agent-repl-test-verbs--with nil
+      (should (equal (mapcar #'agent-repl-roster-row-name
+                             (agent-repl-verbs--closed-rows roster))
+                     '("kid"))))))
 
-(ert-deftest agent-repl-verbs-closed-rows-includes-recently-merged ()
-  "The recently-merged section is walked after the repo sections."
-  (let* ((merged (agent-repl-test-verbs--row
-                  :workspace (list :workspace (agent-repl-test-verbs--ref "m" "/tmp/m"))
-                  :name (list :text "merged-one") :closed (list :closed t)))
-         (roster (agent-repl-test-verbs--roster nil (list merged))))
-    (should (equal (mapcar #'agent-repl-roster-row-name
-                           (agent-repl-verbs--closed-rows roster))
-                   '("merged-one")))))
+(ert-deftest agent-repl-verbs-closed-rows-includes-the-merged-pages ()
+  "Every merged workspace is paged after the closed stream's rows: it reopens too."
+  (let* ((closed (agent-repl-test-verbs--row
+                  :workspace (list :workspace (agent-repl-test-verbs--ref "c" "/tmp/c"))
+                  :name (list :text "closed-one") :closed (list :closed t)))
+         (roster (agent-repl-test-verbs--roster (list closed)))
+         (agent-repl-test-verbs--merged
+          (list (agent-repl-test-verbs--row
+                 :workspace (list :workspace (agent-repl-test-verbs--ref "m" "/tmp/m"))
+                 :name (list :text "merged-one") :closed (list :closed t)))))
+    (agent-repl-test-verbs--with nil
+      (should (equal (mapcar #'agent-repl-roster-row-name
+                             (agent-repl-verbs--closed-rows roster))
+                     '("closed-one" "merged-one"))))))
+
+(ert-deftest agent-repl-verbs-open-command-surfaces-a-merged-page-it-could-not-read ()
+  "A merged page the daemon refuses fails the open picker loudly, sending nothing."
+  (let ((agent-repl-roster-view (agent-repl-test-verbs--roster nil))
+        (errors nil)
+        (asked nil))
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-rpc-list-merged-workspaces-sync)
+                 (lambda (&rest _) '(:arm :error :value (:cause (:arm :not-ready :value nil)))))
+                ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors))
+                ((symbol-function 'completing-read) (lambda (&rest _) (setq asked t) "x")))
+        (let ((err (should-error (agent-repl-open-workspace)
+                                 :type 'agent-repl-roster-merged-error)))
+          (should (equal (list (cdr err) asked errors (agent-repl-test-verbs--request :open))
+                         '((0 "error-arm :not-ready") nil
+                           ("elisp.roster.merged-page-failed: page=0 cause=error-arm :not-ready")
+                           nil))))))))
 
 ;;;; ---- The row walk ----
 
 (ert-deftest agent-repl-verbs-all-rows-is-the-roster-walk ()
   "The verbs walk the rows `agent-repl-roster-walk' walks, in its order.
 ONE WALK serves the tab bar and the verbs, so a hand-rolled verb walk that
-skipped a section the bar walks fails here rather than passing silently."
+skipped a section the bar walks fails here rather than passing silently.
+A merged workspace is in no stream, so the walk holds none."
   (let* ((kid (agent-repl-test-verbs--row
                :workspace (list :workspace (agent-repl-test-verbs--ref "kid" "/tmp/kid"))
                :name (list :text "kid")))
@@ -2120,7 +2165,7 @@ skipped a section the bar walks fails here rather than passing silently."
                            (agent-repl-roster-walk roster))))
     (should (equal (mapcar #'agent-repl-roster-row-name
                            (agent-repl-verbs--all-rows roster))
-                   '("row-one" "kid" "merged-one")))))
+                   '("row-one" "kid")))))
 
 (ert-deftest agent-repl-verbs-all-rows-defaults-to-the-live-roster ()
   "With no ROSTER the walk reads `agent-repl-roster-view'."
@@ -4627,6 +4672,32 @@ persp-mode perspective such as \"main\" appears in the registry."
                                         :closed '(:closed t)))))))
         (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
           (should (equal (agent-repl-verbs--ref "ws-one") '(:id "id-1" :dir "/tmp/ws-one"))))))))
+
+(ert-deftest agent-repl-verbs-a-closed-workspace-on-a-stream-asks-for-no-merged-page ()
+  "The streams answer first: a row they hold needs no merged page."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (let ((agent-repl-roster-view
+             (list :repository (list :sections nil)
+                   :closed (agent-repl-test--closed-rows
+                            (list (list :workspace (list :workspace '(:id "id-1" :dir "/tmp/ws-one"))
+                                        :name '(:text "ws-one")
+                                        :closed '(:closed t)))))))
+        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+          (agent-repl-verbs--ref "ws-one")
+          (should (= agent-repl-test-verbs--merged-pages-read 0)))))))
+
+(ert-deftest agent-repl-verbs-a-merged-workspace-is-addressed-by-its-merged-page-ref ()
+  "A workspace that merged is in no stream: its ref is found on the merged pages."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (let ((agent-repl-roster-view (list :repository (list :sections nil)))
+            (agent-repl-test-verbs--merged
+             (list (list :workspace (list :workspace '(:id "id-m" :dir "/tmp/ws-one"))
+                         :name '(:text "ws-one")
+                         :closed '(:closed t)))))
+        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+          (should (equal (agent-repl-verbs--ref "ws-one") '(:id "id-m" :dir "/tmp/ws-one"))))))))
 
 (ert-deftest agent-repl-verbs-a-roster-row-of-another-directory-is-no-ref ()
   "A row is matched by directory, never by a colliding name."

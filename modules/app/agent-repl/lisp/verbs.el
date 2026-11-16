@@ -149,6 +149,8 @@
 ;; Defined by roster.el.  Declared, never defined here.
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-merged-entries-sync "agent-repl-roster"
+                  (conn &optional max-pages))
 (declare-function agent-repl-roster-section-rows "agent-repl-roster" (section))
 (declare-function agent-repl-roster-flatten "agent-repl-roster" (rows))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
@@ -191,16 +193,24 @@ so a workspace without one cannot be addressed at all."
 
 (defun agent-repl-verbs--roster-ref (ws)
   "Return the ref of the roster row whose directory is WS\='s, or nil.
-Matched by DIRECTORY, never by name: names collide across repositories."
+Matched by DIRECTORY, never by name: names collide across repositories.
+THE STREAMS FIRST, THEN THE MERGED PAGES: a merged workspace is in no
+roster stream, so a workspace this Emacs once held that has since merged
+\(a tombstone, reopened by name) is found only on the merged pages, read
+only when the streams hold no row for it
+\(`agent-repl-verbs--merged-rows')."
   (let ((dir (agent-repl--ws-get ws :project-dir)))
     (when dir
       (let ((canonical (agent-repl--path-canonical dir)))
-        (cl-some (lambda (row)
-                   (let ((ref (agent-repl-roster-row-ref row)))
-                     (and (plist-get ref :dir)
-                          (string= canonical (agent-repl--path-canonical (plist-get ref :dir)))
-                          ref)))
-                 (agent-repl-verbs--all-rows))))))
+        (cl-flet ((ref-in (rows)
+                    (cl-some (lambda (row)
+                               (let ((ref (agent-repl-roster-row-ref row)))
+                                 (and (plist-get ref :dir)
+                                      (string= canonical (agent-repl--path-canonical (plist-get ref :dir)))
+                                      ref)))
+                             rows)))
+          (or (ref-in (agent-repl-verbs--all-rows))
+              (ref-in (agent-repl-verbs--merged-rows))))))))
 
 (defun agent-repl-verbs--registered-ws-names ()
   "Return the live registry entries that are really agent-repl workspaces.
@@ -550,15 +560,30 @@ last accepted push, and nil again before roster.el has loaded or pushed."
 (defun agent-repl-verbs--all-rows (&optional roster)
   "Return every row of ROSTER (default `agent-repl-roster-view'), in walk order.
 THE ONE WALK is `agent-repl-roster-walk' -- the tab bar's own -- so a verb
-can never look for a row in fewer sections than the bar draws tabs from."
+can never look for a row in fewer sections than the bar draws tabs from.
+It holds the streams\=' rows only: a merged workspace is in no stream
+\(`agent-repl-verbs--merged-rows')."
   (let ((roster (agent-repl-verbs--roster-or-view roster)))
     (mapcar (lambda (entry) (plist-get entry :row))
             (agent-repl-roster-walk roster))))
 
+(defun agent-repl-verbs--merged-rows ()
+  "Return every merged workspace\='s row, most recently merged first.
+Read from the daemon\='s merged pages, every one
+\(`agent-repl-roster-merged-entries-sync'), BLOCKING: only a lookup the
+streams could not answer asks.  A page that cannot be read is recorded and
+signalled, never answered as no merges."
+  (mapcar (lambda (entry) (plist-get entry :row))
+          (agent-repl-roster-merged-entries-sync (agent-repl-verbs--conn))))
+
 (defun agent-repl-verbs--closed-rows (&optional roster)
-  "Return the CLOSED rows of ROSTER -- exactly what OpenWorkspace can reopen."
-  (cl-remove-if-not #'agent-repl-roster-row-closed-p
-                    (agent-repl-verbs--all-rows roster)))
+  "Return the CLOSED rows -- exactly what OpenWorkspace can reopen.
+ROSTER\='s (default `agent-repl-roster-view') closed rows in walk order,
+then every merged workspace (`agent-repl-verbs--merged-rows'), which is
+closed too and reopens the same way."
+  (append (cl-remove-if-not #'agent-repl-roster-row-closed-p
+                            (agent-repl-verbs--all-rows roster))
+          (agent-repl-verbs--merged-rows)))
 
 (defun agent-repl-verbs--repo-sections (&optional roster)
   "Return ROSTER's repository sections, in the resolver's order."
