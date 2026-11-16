@@ -334,6 +334,52 @@ func TestAnOpenedWatchClosesOnlyItsRefusal(t *testing.T) {
 	}
 }
 
+// A LINK SERVING AGAIN IS THE RECOVERY EDGE OF ITS SEVERING, and of nothing
+// else (health/lifetime.go).
+func TestARestoredLinkClosesOnlyItsSevering(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   string
+		closes bool
+	}{
+		{"a severed link", health.KindLinkSevered, true},
+		{"a shim that died", health.KindShimDied, false},
+		{"a watch open the shim refused", health.KindWatchOpenRefused, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ws := wsm.WorkspaceID("ws-1")
+			reporter := &fakeReporter{standing: []wsm.Fault{{ID: "f-standing", Workspace: &ws, Kind: tt.kind}}}
+			sink := newDiagnosticsSink(t, reporter)
+
+			// Act
+			sink.OnLinkRestored("ws-1")
+
+			// Assert
+			closed := len(reporter.closed) == 1 && reporter.closed[0] == "f-standing"
+			if closed != tt.closes {
+				t.Fatalf("closed %v, want %s closed = %v", reporter.closed, tt.kind, tt.closes)
+			}
+		})
+	}
+}
+
+func TestARestoredLinkWithNoBoundReporterIsRecordedAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	sink := &lifecycleSink{health: &healthForwarder{}, log: log}
+
+	// Act
+	sink.OnLinkRestored("ws-1")
+
+	// Assert
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.cmd.lifecycle",
+		Message: "a link was restored before the health reporter existed; its severing fault was not closed"}); !ok {
+		t.Fatalf("records = %v, want the unbound reporter at ERROR", log.Records())
+	}
+}
+
 func TestADiagnosticsPushWithNoBoundReporterIsRecordedNotDropped(t *testing.T) {
 	// Arrange
 	builds := &rolloutForwarder{}

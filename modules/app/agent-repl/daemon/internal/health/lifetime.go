@@ -57,6 +57,10 @@ const (
 	// EdgeWatchOpened is a watch the shim had refused opening after all: the
 	// disagreement about what exists is over.
 	EdgeWatchOpened Edge = "watch_opened"
+	// EdgeLinkRestored is an agent watch opening again on a link the watcher
+	// recorded severed under a live shim: the open read the store through
+	// the shim, so the link serves again and the severing is over.
+	EdgeLinkRestored Edge = "link_restored"
 	// EdgeShimDiagnostics is a diagnostics push from the shim: the push is the
 	// WHOLE verdict, so it replaces every shim-reported fault standing.
 	EdgeShimDiagnostics Edge = "shim_diagnostics"
@@ -125,10 +129,13 @@ var faultLifetimes = map[string]Lifetime{
 	//
 	// A shim that would not come up, died, or lost its link ends at the next
 	// healthy attach; a severing also ends when the death it was a
-	// consequence of is recorded.
+	// consequence of is recorded, or when the link serves again under the
+	// same live shim (2026-11-16: a store restart severed live shims, their
+	// watches re-opened and served, and their rows stood severed while the
+	// workspaces worked).
 	KindShimStartFailed:  standing(EdgeHealthyAttach),
 	KindShimDied:         standing(EdgeHealthyAttach),
-	KindLinkSevered:      standing(EdgeHealthyAttach, EdgeShimDeathRecorded),
+	KindLinkSevered:      standing(EdgeHealthyAttach, EdgeShimDeathRecorded, EdgeLinkRestored),
 	KindWatchOpenRefused: standing(EdgeHealthyAttach, EdgeWatchOpened),
 	// A refused session start ends at the next session the shim serves.
 	KindResumeFailed:         standing(EdgeSessionStarted),

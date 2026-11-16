@@ -27,7 +27,7 @@ var wantStandingEdges = map[string][]Edge{
 	KindDeployFailed:          {EdgeDeployStepSucceeded, EdgeSuperseded, EdgeDaemonBoot},
 	KindShimStartFailed:       {EdgeHealthyAttach},
 	KindShimDied:              {EdgeHealthyAttach},
-	KindLinkSevered:           {EdgeHealthyAttach, EdgeShimDeathRecorded},
+	KindLinkSevered:           {EdgeHealthyAttach, EdgeShimDeathRecorded, EdgeLinkRestored},
 	KindWatchOpenRefused:      {EdgeHealthyAttach, EdgeWatchOpened},
 	KindResumeFailed:          {EdgeSessionStarted},
 	KindVendorStartRetrying:   {EdgeSessionStarted},

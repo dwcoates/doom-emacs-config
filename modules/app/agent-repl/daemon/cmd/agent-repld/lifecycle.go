@@ -303,6 +303,20 @@ func (s *lifecycleSink) OnWatchOpened(ws ids.WorkspaceID) {
 		health.EdgeScope{Workspace: &ws}, time.Now())
 }
 
+// OnLinkRestored closes the workspace's standing link severing: an agent
+// watch opened again under the same live shim, so the link serves again.
+func (s *lifecycleSink) OnLinkRestored(ws ids.WorkspaceID) {
+	reporter, ok := s.health.reporter()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a link was restored before the health reporter existed; its severing fault was not closed", dlog.Context{
+			"workspace": string(ws),
+		})
+		return
+	}
+	health.CloseOnEdge(context.Background(), health.ReporterFaults(reporter), s.log, health.EdgeLinkRestored,
+		health.EdgeScope{Workspace: &ws}, time.Now())
+}
+
 // recordSessionFault opens one workspace-scoped fault unless one of its kind
 // already stands. Every read and write failure is surfaced rather than
 // swallowed.

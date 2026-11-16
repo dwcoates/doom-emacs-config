@@ -1183,6 +1183,10 @@ func (s *lifecycleSink) OnWatchOpened(_ ids.WorkspaceID) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnWatchOpened"})
 }
 
+func (s *lifecycleSink) OnLinkRestored(_ ids.WorkspaceID) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnLinkRestored"})
+}
+
 func (s *lifecycleSink) OnSessionDiagnostics(_ ids.WorkspaceID, _ *conversationv1.SessionDiagnostics) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnSessionDiagnostics"})
 }

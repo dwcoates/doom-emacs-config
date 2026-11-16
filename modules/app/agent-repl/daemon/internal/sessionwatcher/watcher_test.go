@@ -4183,3 +4183,60 @@ func TestAReapedShimArmsNoPacedReopen(t *testing.T) {
 	// Assert
 	h.clock.noneArmed(t)
 }
+
+// TestALinkSeveredUnderALiveShimIsRestoredOnceAnAgentWatchOpensAgain covers
+// the severing's end (2026-11-16): a store restart severed live shims, the
+// paced re-open took, and their rows stood severed while the workspaces
+// worked. An agent watch opening again after the severing tells the
+// lifecycle the link serves again, which closes the severing's fault.
+func TestALinkSeveredUnderALiveShimIsRestoredOnceAnAgentWatchOpensAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.session.fail(errors.New("store unreachable"))
+	awaitLinkChanged(t, h, false)
+	h.clock.awaitArmed(t)
+
+	// Act
+	h.clock.fireLast()
+
+	// Assert
+	h.rec.until(t, "lifecycle.OnLinkRestored")
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.link_restored")
+}
+
+func TestAnAgentWatchOpeningRestoresNoLinkThatWasNotSevered(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{name: "a bring-up with no severing",
+			arrange: func(t *testing.T, h *harness) { h.quiet() }},
+		{name: "a paced re-open that did not take",
+			arrange: func(t *testing.T, h *harness) {
+				h.session.fail(errors.New("store unreachable"))
+				awaitLinkChanged(t, h, false)
+				h.clock.awaitArmed(t)
+				h.client.setAgentErr(errors.New("connect ENOENT store.sock"))
+				h.clock.fireLast()
+				h.clock.awaitArmed(t)
+				h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+
+			// Act
+			tt.arrange(t, h)
+
+			// Assert: the record is the restore's account, written beside every
+			// telling (linkRestoredLocked), so its absence is the telling's.
+			if h.hasRecord("info", "daemon.sessionwatcher.link_restored") {
+				t.Fatal("a link_restored record stands for a link that was not restored")
+			}
+		})
+	}
+}

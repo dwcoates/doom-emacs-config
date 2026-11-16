@@ -497,6 +497,11 @@ type LifecycleSink interface {
 	// OnWatchOpened reports a watch the shim had refused opening after all,
 	// which ends the disagreement OnWatchOpenRefused reported.
 	OnWatchOpened(ws ids.WorkspaceID)
+	// OnLinkRestored reports the link OnLinkFault reported severed serving
+	// again under the same live shim: an agent watch opened after the
+	// severing, its open reading the store through the shim. It ends the
+	// severing.
+	OnLinkRestored(ws ids.WorkspaceID)
 	// OnLinkChanged reports the shim link's attachment. The VIEWS take the
 	// link on their own sinks; this arm exists because the HOST view's
 	// `shim_attached` is composed by the server, which cannot see the edge.
