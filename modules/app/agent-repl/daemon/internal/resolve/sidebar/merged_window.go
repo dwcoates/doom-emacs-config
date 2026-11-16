@@ -117,7 +117,7 @@ func (r *resolver) partition() partition {
 		case ws.IsThread():
 			out.threads = append(out.threads, ws)
 		case ws.MergeHidden():
-		case isMerged(ws):
+		case ws.InMergedBand():
 			out.merged = append(out.merged, ws)
 		case ws.Closed:
 			out.closed = append(out.closed, ws)
@@ -126,13 +126,6 @@ func (r *resolver) partition() partition {
 		}
 	}
 	return out
-}
-
-// isMerged reports whether WS is in the merged set: closed with a merge
-// landed. The caller has already left out threads and hidden merge
-// workspaces, which are never merged rows.
-func isMerged(ws wsm.Workspace) bool {
-	return ws.Closed && ws.MergedAt != nil
 }
 
 // mergedSetOf is the set of merged workspaces' ids, in registry order.

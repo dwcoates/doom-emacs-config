@@ -45,7 +45,7 @@ func Locate(workspaces []wsm.Workspace, push *frontendv1.RosterPush, by LocateBy
 	var out []wsm.Workspace
 	var deepest *wsm.Workspace
 	for _, ws := range workspaces {
-		if ws.IsThread() || ws.Dir == "" || (ws.Closed && !drawn[ws.ID] && !merged(ws)) {
+		if ws.IsThread() || ws.Dir == "" || (ws.Closed && !drawn[ws.ID] && !ws.InMergedBand()) {
 			continue
 		}
 		dir := filepath.Clean(ws.Dir)
@@ -70,13 +70,6 @@ func Locate(workspaces []wsm.Workspace, push *frontendv1.RosterPush, by LocateBy
 		out = append(out, *deepest)
 	}
 	return out
-}
-
-// merged reports whether WS is in the sidebar's merged set: closed with its
-// merge landed, and no hidden merge workspace (which is drawn nowhere and is
-// open until it lands).
-func merged(ws wsm.Workspace) bool {
-	return ws.Closed && ws.MergedAt != nil && !ws.MergeHidden()
 }
 
 // deeper reports whether WS, at DIR, is a better containing match than BEST:
