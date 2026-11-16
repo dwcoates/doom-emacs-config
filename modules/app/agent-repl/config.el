@@ -273,6 +273,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; latency-report.el is the one path Emacs's measurements take to the
 ;; daemon's metrics; startup.el, stall.el and elisp-build.el queue into it.
 (agent-repl--load-module "latency-report")
+;; stale-sink.el asks the daemon whether a registered workspace whose
+;; directory is gone is still open, and warns only then.
+(agent-repl--load-module "stale-sink")
 ;; WHY: mutation-progress.el is the correlation seat the daemon-link's push
 ;; dispatch hands workspace-mutation progress to, and the create verb registers
 ;; its callbacks with; it needs only core.el, so it loads beside daemon-link.

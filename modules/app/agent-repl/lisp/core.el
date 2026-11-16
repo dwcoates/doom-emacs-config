@@ -1581,6 +1581,8 @@ rather than about whichever record happened to meet it."
      ((and (stringp dir) (not (file-directory-p dir))) 'stale-registration)
      (t 'no-durable-home))))
 
+(declare-function agent-repl-stale-sink-confirm "stale-sink" (ws dir))
+
 (defun agent-repl--claim-central-log-fallback (ws)
   "Claim the ONE announcement that WS's records go to the central sink.
 
@@ -1589,12 +1591,16 @@ nil thereafter.  The condition belongs to the WORKSPACE rather than to the
 record that met it: announcing it per record is what turned a single tab
 render into a screenful of identical lines.
 
-THE USER-VISIBLE WARNING IS RAISED ONLY FOR `stale-registration'.  A
-workspace that simply owns no durable sink, and a workspace whose departure
-the editor itself ordered, are ORDINARY conditions and get no popup at all —
-each is recorded, once, and that is the whole of it.  A REGISTERED directory
-that is MISSING with nothing having asked for it to go is not ordinary, so it
-keeps the popup.
+THE USER-VISIBLE WARNING IS RAISED ONLY FOR A `stale-registration' THE
+DAEMON CONFIRMS.  A workspace that simply owns no durable sink, and a
+workspace whose departure the editor itself ordered, are ORDINARY conditions
+and get no popup at all — each is recorded, once, and that is the whole of
+it.  A REGISTERED directory that is MISSING with nothing in Emacs having
+asked for it to go is usually the daemon's own landing or close removing the
+worktree before its roster push said so, so the daemon is asked
+(`agent-repl-stale-sink-confirm'), and it warns, with the popup, only when
+the daemon answers that the workspace is still open (owner ruling,
+2026-11-16).
 
 The record itself is built and written by `agent-repl--emit-log-record', the
 one builder and writer of records, which is also the only place that can do
@@ -1603,13 +1609,7 @@ so without re-entering the ladder it runs inside."
     (puthash ws t agent-repl--unroutable-log-workspaces)
     (let ((class (agent-repl--central-log-fallback-class ws)))
       (when (eq class 'stale-registration)
-        (display-warning
-         'agent-repl
-         (format "workspace %S cannot host a durable log sink (registered-dir=%s); its records are written centrally"
-                 ws
-                 (format "%s [MISSING]"
-                         (agent-repl--ws-get ws :project-dir)))
-         :warning))
+        (agent-repl-stale-sink-confirm ws (agent-repl--ws-get ws :project-dir)))
       class)))
 
 (defvar agent-repl--log-preregistration-workspace nil
@@ -2609,15 +2609,14 @@ formatted message and the display text are not built."
                  agent-repl--global-log-scope))
     (cl-return-from agent-repl--emit-log-record nil))
   (cl-flet
-      ;; Record, once per workspace, that its records go to the central sink.
-      ;; The level follows the class: a stale registry row is WARN, every
-      ;; other class INFO.  A local function so the one builder and the one
-      ;; writer stay this function's own.
+      ;; Record, once per workspace, that its records go to the central sink,
+      ;; at INFO whatever the class: a stale registry row is a WARN only once
+      ;; the daemon confirms the workspace is still open, which
+      ;; `agent-repl-stale-sink-confirm' records itself.  A local function so
+      ;; the one builder and the one writer stay this function's own.
       ((announce-central-fallback (unroutable reason)
          (when-let* ((class (agent-repl--claim-central-log-fallback unroutable))
-                     (fallback-level (if (eq class 'stale-registration)
-                                         "warn"
-                                       "info")))
+                     (fallback-level "info"))
            (when (and agent-repl-log-to-file
                       (agent-repl--log-record-persists-p fallback-level "normal"))
              (agent-repl--do-log-to-file
@@ -2636,9 +2635,8 @@ formatted message and the display text are not built."
       ;; here rather than handed to a rung: `agent-repl--emit-log-record' is the
       ;; one builder and the one writer, and re-entering a rung from inside it
       ;; would break that and strip the `unroutable_workspace' stamp this record
-      ;; exists to carry.  A stale registry row is a real inconsistency in
-      ;; durable state, so it is recorded at WARN; a workspace that simply has
-      ;; no durable home of its own is ordinary, so it is recorded at INFO.
+      ;; exists to carry.  Every class is recorded at INFO: a stale registry
+      ;; row is a WARN only once the daemon confirms it (stale-sink.el).
       (when unroutable-ws
 	(announce-central-fallback unroutable-ws (plist-get routing :reason)))
       (if routing-error

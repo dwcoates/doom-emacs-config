@@ -82,6 +82,7 @@
   (load (expand-file-name "test-roster.el" dir) nil t)
   (load (expand-file-name "test-startup.el" dir) nil t)
   (load (expand-file-name "test-latency-report.el" dir) nil t)
+  (load (expand-file-name "test-stale-sink.el" dir) nil t)
   (load (expand-file-name "test-stall.el" dir) nil t)
   (load (expand-file-name "test-open-tabs.el" dir) nil t)
   (load (expand-file-name "test-rpc.el" dir) nil t)
