@@ -382,6 +382,8 @@ type fakeDB struct {
 	// setVendorErr fails the resume-handle write, which the map cannot.
 	setVendorErr error
 	orphanReport wsm.OrphanReport
+	// orphanCtxErrs is the context's error each CloseOrphans ran under.
+	orphanCtxErrs []error
 	createdTasks []string
 	taskChanges  map[ids.TaskID]wsm.TaskChange
 	assignments  map[ids.WorkspaceID]*ids.TaskID
@@ -1652,7 +1654,8 @@ func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldP
 	return d.held[id], nil
 }
 
-func (d *fakeDB) CloseOrphans(context.Context, ids.WorkspaceID, time.Time, wsm.OrphanCut) (wsm.OrphanReport, error) {
+func (d *fakeDB) CloseOrphans(ctx context.Context, _ ids.WorkspaceID, _ time.Time, _ wsm.OrphanCut) (wsm.OrphanReport, error) {
+	d.orphanCtxErrs = append(d.orphanCtxErrs, ctx.Err())
 	return d.orphanReport, nil
 }
 

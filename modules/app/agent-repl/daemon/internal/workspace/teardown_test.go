@@ -827,3 +827,30 @@ func TestFinishOwedNukesSurfacesAnUnreadableRegistry(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
 	}
 }
+
+func TestKillClosesTheOrphansAndTheWorkspaceWhenItsSessionsEndCancelsTheRequest(t *testing.T) {
+	// Arrange: the kill was asked by the session it ends, so stopping that
+	// session cancels the request's context.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.fleet.onStop = cancel
+
+	// Act.
+	err := f.verbs.Kill(ctx, "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Kill = %v, want the kill to finish after its request was cancelled", err)
+	}
+	if len(f.db.orphanCtxErrs) != 1 || f.db.orphanCtxErrs[0] != nil {
+		t.Fatalf("CloseOrphans ran under %v, want once under a live context", f.db.orphanCtxErrs)
+	}
+	if terminal, ok := f.db.terminals["w1"]; !ok || terminal.Kind != "killed" {
+		t.Fatalf("session terminal = %+v, want a killed terminal", terminal)
+	}
+	if len(f.db.closures["w1"]) == 0 {
+		t.Fatalf("close records = %+v, want the kill's close", f.db.closures["w1"])
+	}
+}
