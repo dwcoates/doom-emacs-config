@@ -1688,13 +1688,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// does, under the prompt's own idempotency key, so a prompt this daemon
 	// (or its predecessor) already accepted is never delivered twice.
 	held, err := heldingress.New(heldingress.Deps{
-		Dir:            p.Layout.HeldPromptDir(),
-		WorkspaceByDir: p.DB.WorkspaceByDir,
-		Prompts:        handler,
-		Pending:        feedResolver,
-		PublishHost:    relay.PublishHostWorkspace,
-		Serves:         rolloutController.ServesIntake,
-		IntakeChanged:  rolloutController.IntakeChanged,
+		Dir:             p.Layout.HeldPromptDir(),
+		WorkspaceByDir:  p.DB.WorkspaceByDir,
+		Prompts:         handler,
+		Pending:         feedResolver,
+		PublishHost:     relay.PublishHostWorkspace,
+		Serves:          rolloutController.ServesIntake,
+		ServesWorkspace: rolloutController.ServesWorkspace,
+		IntakeChanged:   rolloutController.IntakeChanged,
 		FleetChanges: func(ctx context.Context) (<-chan struct{}, func()) {
 			return publish.Changes(ctx, sidebarResolver.Topic())
 		},

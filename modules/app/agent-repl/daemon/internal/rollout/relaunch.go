@@ -633,18 +633,18 @@ func (c *controller) ShimReported(ws ids.WorkspaceID, build string) {
 		c.log.Error(opStaleness, "the shim reported no build; it cannot be proven current, so it is judged stale",
 			dlog.Context{"workspace": string(ws)})
 	}
-	c.judgeStaleAsync(ws)
+	c.judgeStaleAsync(ws, judgedForShimReport)
 }
 
 // judgeStaleAsync runs the staleness judgement off the caller's goroutine,
 // joinable through staleChecks.
-func (c *controller) judgeStaleAsync(ws ids.WorkspaceID) {
+func (c *controller) judgeStaleAsync(ws ids.WorkspaceID, why staleTrigger) {
 	c.staleChecks.Add(1)
 	inflight.Go(func() {
 		defer c.staleChecks.Done()
 		ctx := c.lifetime(context.Background())
-		if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
-			c.log.Error(opStaleness, "the reported shim build could not be judged", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+		if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws), why); err != nil {
+			c.log.Error(opStaleness, "the reported shim build could not be judged", dlog.WithCause(dlog.Context{"workspace": string(ws), "judged_for": string(why)}, err))
 		}
 	})
 }
@@ -671,7 +671,7 @@ func (c *controller) takeoverForce(ws ids.WorkspaceID) bool {
 
 // CheckStaleness implements Controller.
 func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, force bool) (StaleCheck, error) {
-	return c.checkStale(ctx, ws, force)
+	return c.checkStale(ctx, ws, force, judgedForRequest)
 }
 
 // checkStale judges a workspace's last reported shim build against the
@@ -681,8 +681,8 @@ func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, for
 // shim's build the moment it attaches — before its adoption has finished — and
 // a bounce started then would race the adoption for the shim; the adoption's
 // own end re-runs this check.
-func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force bool) (StaleCheck, error) {
-	fields := dlog.Context{"workspace": string(ws), "force": force}
+func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force bool, why staleTrigger) (StaleCheck, error) {
+	fields := dlog.Context{"workspace": string(ws), "force": force, "judged_for": string(why)}
 	if standing := c.Standing(ws); standing != StandingOwned {
 		c.log.Debug(opStaleness, "the workspace is not this daemon's to bounce yet; its adoption re-checks it",
 			dlog.Merge(fields, dlog.Context{"standing": standing.String()}))
@@ -753,6 +753,20 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	return check, nil
 }
 
+// staleTrigger names what asked for a staleness judgement; each judgement's
+// records carry it as judged_for, so a reader tells a shim report's
+// judgement from a sweep's, which otherwise read alike.
+type staleTrigger string
+
+const (
+	judgedForShimReport    staleTrigger = "shim_report"
+	judgedForBounceSettled staleTrigger = "bounce_settled"
+	judgedForRequest       staleTrigger = "request"
+	judgedForAdoption      staleTrigger = "adoption"
+	judgedForSweep         staleTrigger = "sweep"
+	judgedForOrphan        staleTrigger = "orphan_adoption"
+)
+
 // The StaleCheck.Skipped reasons.
 const (
 	SkippedAlreadyBounced = "already_bounced_for_this_build"
@@ -814,7 +828,7 @@ func (c *controller) settleStaleBounce(ws ids.WorkspaceID, err error) {
 	}
 	c.unlock()
 	if err == nil {
-		c.judgeStaleAsync(ws)
+		c.judgeStaleAsync(ws, judgedForBounceSettled)
 	}
 }
 

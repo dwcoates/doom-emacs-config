@@ -133,7 +133,7 @@ func (c *controller) recoverOrphan(ctx context.Context, ws ids.WorkspaceID, fiel
 	c.log.Info(opOrphans, "adopted a shim a gone daemon left running", dlog.Merge(fields, dlog.Context{"shim_pid": client.PID()}))
 	// A GONE DAEMON'S SHIM IS JUDGED like every other adopted one: the
 	// takeover's own staleness pass ran before this adoption finished.
-	if _, err := c.checkStale(ctx, ws, false); err != nil {
+	if _, err := c.checkStale(ctx, ws, false, judgedForOrphan); err != nil {
 		c.log.Error(opStaleness, "an adopted orphan could not be judged against the installed build", dlog.WithCause(fields, err))
 	}
 }

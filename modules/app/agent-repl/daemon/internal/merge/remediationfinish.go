@@ -132,16 +132,7 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 		return err
 	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation finished; its gate runs", withField(fields, "gate_rounds", f.GateRounds))
-	// THE WORKSPACE STANDS BY THE MOMENT ITS FINISH IS ACCEPTED (owner
-	// requirement, 2026-11-16): its session ends before its turn can write a
-	// reply, and it leaves the working rows for its repository's
-	// `finishing reload` label. A stand-by that fails is recorded and the
-	// finish goes on: the fix still lands, with the workspace still drawn.
-	if err := o.deps.DeployChecks.StandBy(ctx, ws); err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace could not stand by; its session runs on and it stays among the working rows", withField(fields, "error", err.Error()))
-	}
-	o.republishMediation(ctx, repo)
-	o.startRemediationFinish(f)
+	o.startRemediationFinish(f, true)
 	return nil
 }
 
@@ -169,13 +160,14 @@ func (o *orchestrator) resumeRemediationFinishes(ctx context.Context) {
 		return
 	}
 	for _, f := range finishes {
-		o.startRemediationFinish(f)
+		o.startRemediationFinish(f, false)
 	}
 }
 
 // startRemediationFinish runs finish F from the step it stands at, inside
-// the mediation's lifetime, unless a run of it is already going here.
-func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish) {
+// the mediation's lifetime, unless a run of it is already going here. A
+// finish just accepted (STANDBY) first stands its workspace by.
+func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy bool) {
 	life, leave, entered := o.enterMediation()
 	if !entered {
 		o.deps.Log.Global().Info(opRemediationFinish, mediationNotRun, dlog.Context{"workspace": string(f.Workspace)})
@@ -199,6 +191,9 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish) {
 			delete(o.remediationRuns, f.Workspace)
 			o.mu.Unlock()
 		}()
+		if standBy {
+			o.standFinishedBy(life, f)
+		}
 		o.runRemediationFinish(life, f)
 	}
 	if !o.async {
@@ -206,6 +201,22 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish) {
 		return
 	}
 	inflight.Go(run)
+}
+
+// standFinishedBy stands the workspace of finish F by and republishes its
+// queue. THE WORKSPACE STANDS BY THE MOMENT ITS FINISH IS ACCEPTED (owner
+// requirement, 2026-11-16): its session ends before its turn can write a
+// reply, and it leaves the working rows for its repository's
+// `finishing reload` label. CTX IS THE MEDIATION'S LIFETIME, NEVER THE
+// FINISH REQUEST'S: the session the stand-by ends is the one that sent the
+// request, so ending it cancels the request's context mid-stand-by. A
+// stand-by that fails is recorded and the finish goes on: the fix still
+// lands, with the workspace still drawn.
+func (o *orchestrator) standFinishedBy(ctx context.Context, f wsm.RemediationFinish) {
+	if err := o.deps.DeployChecks.StandBy(ctx, f.Workspace); err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace could not stand by; its session runs on and it stays among the working rows", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "error": err.Error()})
+	}
+	o.republishMediation(ctx, f.Repo)
 }
 
 // runRemediationFinish carries finish F on from its step to the deploy.

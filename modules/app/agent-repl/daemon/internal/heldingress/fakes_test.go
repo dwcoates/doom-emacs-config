@@ -123,6 +123,8 @@ type world struct {
 	remove       func(string) error
 	// serves is what the ingress's serving answer says.
 	serves bool
+	// unserved names the workspaces this daemon does not serve yet.
+	unserved map[ids.WorkspaceID]bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -154,7 +156,10 @@ func (w *world) ingress() Ingress {
 			w.published = append(w.published, ws)
 			w.publishedSaw = append(w.publishedSaw, len(w.entries()))
 		},
-		Serves:        func() bool { return w.serves },
+		Serves: func() bool { return w.serves },
+		ServesWorkspace: func(ws ids.WorkspaceID) bool {
+			return !w.unserved[ws]
+		},
 		Log:           w.log,
 		Remove:        w.remove,
 		IntakeChanged: func() <-chan struct{} { return nil },

@@ -15,6 +15,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/kernelevent"
@@ -29,13 +30,14 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		w := newWorld(t)
 		return Deps{
-			Dir:            w.dir,
-			WorkspaceByDir: w.ingressLookup(),
-			Prompts:        w.handler,
-			Pending:        w.pending,
-			PublishHost:    func(ids.WorkspaceID) {},
-			Serves:         func() bool { return true },
-			Log:            w.log,
+			Dir:             w.dir,
+			WorkspaceByDir:  w.ingressLookup(),
+			Prompts:         w.handler,
+			Pending:         w.pending,
+			PublishHost:     func(ids.WorkspaceID) {},
+			Serves:          func() bool { return true },
+			ServesWorkspace: func(ids.WorkspaceID) bool { return true },
+			Log:             w.log,
 		}
 	}
 	tests := []struct {
@@ -49,6 +51,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "no host publisher", mutate: func(d *Deps) { d.PublishHost = nil }},
 		{name: "no log surfaces", mutate: func(d *Deps) { d.Log = nil }},
 		{name: "no serving answer", mutate: func(d *Deps) { d.Serves = nil }},
+		{name: "no workspace serving answer", mutate: func(d *Deps) { d.ServesWorkspace = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -515,12 +518,13 @@ func (r *runWorld) openIntake() {
 func (r *runWorld) run(t *testing.T) (cancel func(), done <-chan error) {
 	t.Helper()
 	in, err := New(Deps{
-		Dir:            r.dir,
-		WorkspaceByDir: r.ingressLookup(),
-		Prompts:        runHandler{w: r},
-		Pending:        nopPending{},
-		PublishHost:    func(ws ids.WorkspaceID) { r.published <- ws },
-		Serves:         r.serves.Load,
+		Dir:             r.dir,
+		WorkspaceByDir:  r.ingressLookup(),
+		Prompts:         runHandler{w: r},
+		Pending:         nopPending{},
+		PublishHost:     func(ws ids.WorkspaceID) { r.published <- ws },
+		Serves:          r.serves.Load,
+		ServesWorkspace: func(ids.WorkspaceID) bool { return true },
 		IntakeChanged: func() <-chan struct{} {
 			r.intakeMu.Lock()
 			defer r.intakeMu.Unlock()
@@ -726,6 +730,41 @@ func TestASweepTakesTheIntakeOnlyWhileThisDaemonServes(t *testing.T) {
 			}
 			if got := len(w.entries()); got != tc.wantLeft {
 				t.Fatalf("entries left = %d, want %d", got, tc.wantLeft)
+			}
+		})
+	}
+}
+
+func TestASweepLeavesAnEntryOfAWorkspaceThisDaemonDoesNotServeYet(t *testing.T) {
+	tests := []struct {
+		name      string
+		unserved  bool
+		wantCalls int
+		wantLeft  int
+	}{
+		{name: "a served workspace's entry is ingested", wantCalls: 1, wantLeft: 0},
+		{name: "an entry of a workspace not adopted yet stays on disk", unserved: true, wantCalls: 0, wantLeft: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the daemon serves the intake either way.
+			w := newWorld(t)
+			w.unserved = map[ids.WorkspaceID]bool{"ws-one": tc.unserved}
+			w.write("held_20260928T120001_a.json", "/work/one", "k-1", "first")
+
+			// Act
+			w.sweep(w.ingress())
+
+			// Assert
+			if got := len(w.handler.calls); got != tc.wantCalls {
+				t.Fatalf("submissions = %d, want %d", got, tc.wantCalls)
+			}
+			if got := len(w.entries()); got != tc.wantLeft {
+				t.Fatalf("entries left = %d, want %d", got, tc.wantLeft)
+			}
+			_, deferred := dlog.FindRecord(w.log.Records(), dlog.RecordQuery{Level: "info", Operation: opDefer, Message: "this daemon does not serve the entry's workspace yet; it waits for the workspace's adoption"})
+			if deferred != tc.unserved {
+				t.Fatalf("deferral recorded = %v, want %v; records %v", deferred, tc.unserved, w.log.Records())
 			}
 		})
 	}
