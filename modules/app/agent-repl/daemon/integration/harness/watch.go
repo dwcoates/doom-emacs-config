@@ -337,7 +337,7 @@ func (d *Daemon) OpenTabs(workspaces ...*agentreplv1.OpenTabsWorkspace) *Stream[
 }
 
 // WatchRoster opens the editor-global workspace roster stream.
-func (d *Daemon) WatchRoster() *Stream[*frontendv1.WorkspaceRoster] {
+func (d *Daemon) WatchRoster() *Stream[*frontendv1.RosterPush] {
 	d.t.Helper()
 	return d.WatchRosterOn(d.Client())
 }
@@ -348,18 +348,54 @@ type rosterClient interface {
 }
 
 // WatchRosterOn opens a roster stream on an explicit client, for the tests
-// whose subject is two independent subscribers. It SELECTS the `roster` arm:
-// the planned-ending frame a stand-down sends last is not a roster, and never
+// whose subject is two independent subscribers. It SELECTS the `streams` arm:
+// the planned-ending frame a stand-down sends last is not a push, and never
 // reaches this channel as a nil one.
-func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.WorkspaceRoster] {
+//
+// EACH VALUE IS THE WHOLE ROSTER AS OF ITS FRAME, as a client holds it: a
+// frame carries only the streams it changed, so every stream it leaves out
+// is the one an earlier frame carried (HoldRosterStreams). A frame that
+// carries no stream on a subscription's first frame is a contract break the
+// test fails on (the first frame carries every stream).
+func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.RosterPush] {
 	d.t.Helper()
+	held := &frontendv1.RosterPush{}
 	return runStreamSelecting(d.t, d.ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchWorkspaceRosterResponse], error) {
 			return client.WatchWorkspaceRoster(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
 		},
-		func(r *agentreplv1.WatchWorkspaceRosterResponse) (*frontendv1.WorkspaceRoster, bool) {
-			return r.GetRoster(), r.GetRoster() != nil
+		func(r *agentreplv1.WatchWorkspaceRosterResponse) (*frontendv1.RosterPush, bool) {
+			push := r.GetStreams()
+			if push == nil {
+				return nil, false
+			}
+			held = HoldRosterStreams(held, push)
+			if held.Workspaces == nil || held.MergeQueue == nil || held.RecentlyMerged == nil || held.Closed == nil {
+				d.t.Errorf("the roster stream's frames so far leave a stream unset (%v): the first frame carries every stream", held)
+			}
+			return held, true
 		})
+}
+
+// HoldRosterStreams answers the roster HELD with PUSH applied: its revision,
+// and each stream PUSH carries in place of the one held. HELD is not
+// changed, so a value an earlier frame yielded stays as it was.
+func HoldRosterStreams(held, push *frontendv1.RosterPush) *frontendv1.RosterPush {
+	out := &frontendv1.RosterPush{Revision: push.GetRevision(),
+		Workspaces: held.GetWorkspaces(), MergeQueue: held.GetMergeQueue(), RecentlyMerged: held.GetRecentlyMerged(), Closed: held.GetClosed()}
+	if push.Workspaces != nil {
+		out.Workspaces = push.Workspaces
+	}
+	if push.MergeQueue != nil {
+		out.MergeQueue = push.MergeQueue
+	}
+	if push.RecentlyMerged != nil {
+		out.RecentlyMerged = push.RecentlyMerged
+	}
+	if push.Closed != nil {
+		out.Closed = push.Closed
+	}
+	return out
 }
 
 // WatchChat opens a zettel chat thread's chat view stream, each push the

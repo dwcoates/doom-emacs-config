@@ -47,6 +47,18 @@ const (
 	MergedByCreation
 )
 
+// String names the order for a record.
+func (o MergedOrder) String() string {
+	switch o {
+	case MergedByMerge:
+		return "most_recently_merged"
+	case MergedByCreation:
+		return "most_recently_created"
+	default:
+		return fmt.Sprintf("merged_order(%d)", int(o))
+	}
+}
+
 // MergedPageQuery is one ListMergedWorkspaces request, as the resolver
 // answers it.
 type MergedPageQuery struct {

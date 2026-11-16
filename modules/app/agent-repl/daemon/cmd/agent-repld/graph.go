@@ -663,8 +663,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	mentions, err := composermentions.New(ctx, composermentions.Deps{
 		Store: p.DB,
 		WorkspaceNames: func() []string {
-			roster, _ := sidebarResolver.Topic().Latest()
-			return composermentions.RosterNames(roster)
+			push, _ := sidebarResolver.Topic().Latest()
+			return composermentions.RosterNames(push.GetWorkspaces())
 		},
 		Log: log,
 	})

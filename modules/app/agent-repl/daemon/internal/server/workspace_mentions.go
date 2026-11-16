@@ -51,15 +51,16 @@ func (s *server) watchWorkspaceMentions(
 	}
 	viewer := msg.GetViewer().GetId()
 	log := s.log.With(dlog.Context{"viewer": viewer})
+	targets := s.mentionTracker(viewer)
 	return serveTopic(s, ctx, rpc, log, s.deps.Sidebar.Topic(), &changedOnlySink[agentreplv1.WatchWorkspaceMentionsResponse, *agentreplv1.WatchWorkspaceMentionsResponse]{
 		out: out,
 		sent: func(m *agentreplv1.WatchWorkspaceMentionsResponse) {
 			log.Debug(rpc, "sent a changed set of workspace mention targets",
 				dlog.Context{"targets": len(m.GetTargets().GetTargets())})
 		},
-	}, func(roster *frontendRoster) *agentreplv1.WatchWorkspaceMentionsResponse {
+	}, func(push *frontendRoster) *agentreplv1.WatchWorkspaceMentionsResponse {
 		return &agentreplv1.WatchWorkspaceMentionsResponse{
-			Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(roster, viewer, s.now())},
+			Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: targets.targets(push)},
 		}
 	})
 }
@@ -69,30 +70,33 @@ func (s *server) watchWorkspaceMentions(
 // NOW less this window is a mention target, and a click on it reopens it.
 const RecentlyClosedMentionWindow = 5 * 24 * time.Hour
 
-// mentionTargets resolves VIEWER's workspace mention targets from ROSTER at
-// NOW: the one set the viewer's page links and the viewer's composer
-// completes (frontend.v1.WorkspaceMentionTargets), so the two cannot differ.
+// mentionTargets resolves VIEWER's workspace mention targets from PUSH, a
+// whole roster push, and MERGED, every merged workspace's row (which the
+// roster no longer carries), at NOW: the one set the viewer's page links and
+// the viewer's composer completes (frontend.v1.WorkspaceMentionTargets), so
+// the two cannot differ.
 //
-// Every workspace the roster carries that is not closed is a LIVE candidate:
-// the Open section's in its drawn order, then the hidden section's. Every
-// workspace closed within RecentlyClosedMentionWindow follows as a CLOSED
-// candidate: the recently merged, then the other closed, in the roster's
-// order; a closed row without a close record is none, since nothing vouches
-// for when it closed. A name only one candidate carries names it. A name
-// several carry names the one of them in the viewer's own repository when
-// exactly one is, and otherwise no one. A name a live candidate carries is
-// settled among the live ones alone, so a closed workspace whose name was
-// reused never costs the live one its link. The viewer's own workspace is
-// never a target, and a name it carries names no other workspace either, so
-// a word the reader's own workspace is called never switches somewhere else.
-func mentionTargets(roster *frontendRoster, viewer string, now time.Time) *frontendv1.WorkspaceMentionTargets {
+// Every workspace the workspaces stream carries is a LIVE candidate: the Open
+// section's in its drawn order, then the hidden section's. Every workspace
+// closed within RecentlyClosedMentionWindow follows as a CLOSED candidate:
+// the merged, then the closed stream's, in that order; a closed row without a
+// close record is none, since nothing vouches for when it closed. A name only
+// one candidate carries names it. A name several carry names the one of them
+// in the viewer's own repository when exactly one is, and otherwise no one. A
+// name a live candidate carries is settled among the live ones alone, so a
+// closed workspace whose name was reused never costs the live one its link.
+// The viewer's own workspace is never a target, and a name it carries names
+// no other workspace either, so a word the reader's own workspace is called
+// never switches somewhere else.
+func mentionTargets(push *frontendRoster, merged []*frontendv1.RosterRow, viewer string, now time.Time) *frontendv1.WorkspaceMentionTargets {
+	roster := push.GetWorkspaces()
 	var live, closed []*frontendv1.RosterRow
 	for _, open := range rosterwalk.OpenRows(roster) {
 		live = append(live, open.GetRow())
 	}
 	live = append(live, rosterwalk.HiddenRows(roster)...)
 	since := now.Add(-RecentlyClosedMentionWindow).UnixMilli()
-	for _, row := range append(rosterwalk.MergedRows(roster), rosterwalk.ClosedRows(roster)...) {
+	for _, row := range append(append([]*frontendv1.RosterRow(nil), merged...), rosterwalk.ClosedRows(push.GetClosed())...) {
 		if row.Closure != nil && row.GetClosure().GetAtMs() >= since {
 			closed = append(closed, row)
 		}
@@ -178,14 +182,43 @@ func mentionNamed(carriers []*frontendv1.RosterRow, viewerRepository string) *fr
 type mentionTargetsTracker struct {
 	viewer string
 	// now is the clock the recently closed window is measured against.
-	now  func() time.Time
-	last *frontendv1.WorkspaceMentionTargets
+	now func() time.Time
+	// mergedRows reads every merged workspace's row (sidebar.Resolver's
+	// MergedRows), which the roster no longer carries. It is read again
+	// only when a push's recently merged stream differs from the one merged
+	// was read for: the resolver reuses an unchanged stream's pointer, and
+	// a merged row read on every push would resolve the whole merged band
+	// for each viewer on every row change.
+	mergedRows func() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool)
+	mergedFor  *frontendv1.RosterMergedSection
+	merged     []*frontendv1.RosterRow
+	last       *frontendv1.WorkspaceMentionTargets
+}
+
+// targets resolves PUSH's targets, reading the merged rows again when PUSH's
+// recently merged stream is not the one they were read for.
+func (t *mentionTargetsTracker) targets(push *frontendRoster) *frontendv1.WorkspaceMentionTargets {
+	if section := push.GetRecentlyMerged(); t.mergedFor == nil || section != t.mergedFor {
+		rows, _, ok := t.mergedRows()
+		if !ok {
+			// The roster topic delivered PUSH, so the resolver has published.
+			panic("mention targets: the roster topic delivered a push the resolver says it never published")
+		}
+		t.mergedFor, t.merged = section, rows
+	}
+	return mentionTargets(push, t.merged, t.viewer, t.now())
+}
+
+// mentionTracker answers VIEWER's tracker, reading merged rows from
+// the sidebar and the window's clock from the server.
+func (s *server) mentionTracker(viewer string) *mentionTargetsTracker {
+	return &mentionTargetsTracker{viewer: viewer, now: s.now, mergedRows: s.deps.Sidebar.MergedRows}
 }
 
 // next resolves ROSTER's targets, and whether they differ from the last set
 // next answered (the first set always does).
 func (t *mentionTargetsTracker) next(roster *frontendRoster) (*frontendv1.WorkspaceMentionTargets, bool) {
-	set := mentionTargets(roster, t.viewer, t.now())
+	set := t.targets(roster)
 	if t.last != nil && proto.Equal(t.last, set) {
 		return set, false
 	}
