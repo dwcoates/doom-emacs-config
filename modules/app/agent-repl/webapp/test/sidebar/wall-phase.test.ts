@@ -88,6 +88,23 @@ describe("seeking animations to the wall clock", () => {
     expect(delayed.currentTime).toBe(500);
   });
 
+  // THE LOOPS RUN ON THE COMPOSITOR (src/sidebar/name-ink.ts): a breath is a
+  // resting copy fading out as a peak copy fades in, and a shimmer is a band
+  // box moving one way as the copies inside it move back. Each pair must
+  // land on one phase, or the crossfade's weights stop summing to one and
+  // the text slides while the band passes.
+  it("puts a name's paired copies on one phase each, a breath's two and a shimmer's three", () => {
+    // Arrange: ws-pulse-rest and ws-pulse at the 2s mark cycle, then
+    // ws-revive-shimmer and two ws-revive-counter at the 2.4s revive cycle.
+    const [rest, peak, band, restCounter, peakCounter] = [loop(2000), loop(2000), loop(2400), loop(2400), loop(2400)];
+
+    // Act
+    seekToWallClock([rest, peak, band, restCounter, peakCounter], 1_700_000_000_500);
+
+    // Assert
+    expect([rest, peak, band, restCounter, peakCounter].map((a) => a.currentTime)).toEqual([500, 500, 1300, 1300, 1300]);
+  });
+
   it("loops an alternating animation over two iterations", () => {
     // Arrange
     const alternating = loop(1000, { direction: "alternate" });

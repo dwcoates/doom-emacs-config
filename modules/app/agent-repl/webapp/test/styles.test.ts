@@ -1999,54 +1999,130 @@ describe("regression: the response/prompt bubble collapse model", () => {
 });
 
 /**
- * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The endless loop the rail's
- * wall-clock seek keeps in phase, the pan range that keeps the text filled, and the
- * reduced-motion stop all live only in the file.
+ * THE REVIVING SHIMMER'S STYLESHEET CONTRACT. The endless loops the rail's
+ * wall-clock seek keeps in phase, the band carried by a `transform` with the
+ * text held still under it, and the reduced-motion stop all live only in the
+ * file.
  */
 describe("the reviving shimmer's stylesheet contract", () => {
-  const selector = "#ws-sidebar .row .name.reviving";
+  const band = "#ws-sidebar .row .name.reviving > .name-ink";
+  const copies = ["#ws-sidebar .row .name.reviving > .name-ink::before", "#ws-sidebar .row .name.reviving > .name-ink::after"];
 
-  /** Every rule for the shimmer's selector, in source order. */
-  function shimmerRules(): string[] {
-    return rulesOf(stylesheet)
-      .filter((rule) => rule.selectors.includes(selector))
-      .map((rule) => rule.declarations);
+  /** The bodies of every `@media (QUERY)` block, matched brace by brace. */
+  function mediaBodies(query: string): string[] {
+    const bodies: string[] = [];
+    const head = `@media (${query})`;
+    for (let at = stylesheet.indexOf(head); at !== -1; at = stylesheet.indexOf(head, at + head.length)) {
+      const open = stylesheet.indexOf("{", at);
+      let depth = 0;
+      let cursor = open;
+      for (; cursor < stylesheet.length; cursor += 1) {
+        if (stylesheet[cursor] === "{") depth += 1;
+        if (stylesheet[cursor] === "}") depth -= 1;
+        if (depth === 0) break;
+      }
+      if (depth !== 0) throw new Error(`a ${head} block is never closed`);
+      bodies.push(stylesheet.slice(open + 1, cursor));
+    }
+    return bodies;
+  }
+
+  /** The declarations of the first rule whose selector list holds SELECTOR in CSS. */
+  function ruleIn(css: string, selector: string): string {
+    return rulesOf(css).find((rule) => rule.selectors.includes(selector))?.declarations ?? "";
+  }
+
+  /** A `translateX(N%)` stop's N, in the order the KEYFRAMES state them. */
+  function shifts(keyframes: string): number[] {
+    return [...keyframes.matchAll(/transform:\s*translateX\((-?\d+)%?\)/g)].map((m) => Number(m[1]));
+  }
+
+  /** A width declaration's percentage in DECLS. */
+  function widthPercent(decls: string): number {
+    return Number(/(?:^|;)\s*width:\s*(\d+)%/.exec(decls)?.[1]);
   }
 
   it("loops endlessly, so the rail's wall-clock seek keeps it in phase", () => {
     // Arrange / Act
-    const [base] = shimmerRules();
+    const decls = ruleIn(stylesheet, band);
 
     // Assert
-    expect(base).toContain("ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite");
+    expect(decls).toContain("ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite");
   });
 
-  it("pans only between 0% and 100%, so the gradient always covers the text", () => {
+  // THE BAND MOVES ON THE COMPOSITOR (2026-11-16): `transform`, never `mask-position`.
+  it("moves the band by transform alone", () => {
     // Arrange / Act
-    const keyframes = keyframesOf("ws-revive-shimmer");
-    const positions = [...keyframes.matchAll(/(?<!-webkit-)mask-position:\s*(-?\d+)%/g)].map((m) => Number(m[1]));
+    const keyframes = [keyframesOf("ws-revive-shimmer"), keyframesOf("ws-revive-counter")].join("\n");
 
     // Assert
-    expect(positions).toEqual([100, 0]);
+    expect([/mask-position/.test(keyframes), /transform:/.test(keyframes)]).toEqual([false, true]);
   });
 
-  it("stops the shimmer and its fill under prefers-reduced-motion", () => {
-    // Arrange / Act: the override is the LAST rule for the selector.
-    const rules = shimmerRules();
-    const override = rules[rules.length - 1] ?? "";
+  it("carries the band from 1.5 names left of the name to the name's left edge, so it always covers the text", () => {
+    // Arrange
+    const boxWidth = widthPercent(ruleIn(stylesheet, band)) / 100;
+
+    // Act: the box's shift is a share of its own width, which is the band's.
+    const travel = shifts(keyframesOf("ws-revive-shimmer")).map((shift) => (shift / 100) * boxWidth);
 
     // Assert
-    expect(rules.length).toBe(2);
-    expect(override).toMatch(/animation:\s*none/);
-    expect(override).toMatch(/(?<!-webkit-)mask-image:\s*none/);
+    expect([boxWidth, travel]).toEqual([2.5, [-1.5, 0]]);
+  });
+
+  it("moves the copies back by exactly the band's travel, so the text stands still", () => {
+    // Arrange
+    const boxWidth = widthPercent(ruleIn(stylesheet, band)) / 100;
+    const copyWidth = (widthPercent(ruleIn(stylesheet, copies[0] ?? "")) / 100) * boxWidth;
+
+    // Act: a copy's shift is a share of its own width, the name's.
+    const back = shifts(keyframesOf("ws-revive-counter")).map((shift) => (shift / 100) * copyWidth);
+    const travel = shifts(keyframesOf("ws-revive-shimmer")).map((shift) => (shift / 100) * boxWidth);
+
+    // Assert
+    expect([copyWidth, back.map((shift, i) => shift + (travel[i] ?? NaN))]).toEqual([1, [0, 0]]);
+  });
+
+  it.each([
+    "#ws-sidebar .row .name.reviving > .name-ink::before",
+    "#ws-sidebar .row .name.breathes.reviving > .name-ink::before",
+    "#ws-sidebar .row .name.breathes.reviving > .name-ink::after",
+  ])("moves %s back on the band's own timing", (selector) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
+
+    // Assert
+    expect(decls).toContain("ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite");
+  });
+
+  // Reduced motion drops the shimmer: every rule of it is drawn only under
+  // `no-preference`, so the name is drawn in plain ink.
+  it("draws every rule of the shimmer only under prefers-reduced-motion: no-preference", () => {
+    // Arrange
+    const shimmer = (css: string): number =>
+      rulesOf(css).filter((rule) => rule.selectors.some((sel) => sel.includes(".reviving > .name-ink"))).length;
+
+    // Act
+    const inside = mediaBodies("prefers-reduced-motion: no-preference").reduce((n, body) => n + shimmer(body), 0);
+
+    // Assert
+    expect([shimmer(stylesheet), inside]).toEqual([inside, 5]);
+  });
+
+  it("leaves nothing of the shimmer to undo under prefers-reduced-motion: reduce", () => {
+    // Arrange / Act
+    const named = mediaBodies("prefers-reduced-motion: reduce").filter((body) => body.includes(".reviving"));
+
+    // Assert
+    expect(named).toEqual([]);
   });
 
   it("draws the band as a mask's 40% alpha", () => {
     // Arrange / Act
-    const [base] = shimmerRules();
+    const decls = ruleIn(stylesheet, band);
 
     // Assert
-    expect(base).toMatch(/(?<!-webkit-)mask-image:\s*linear-gradient\(90deg,[^;]*rgb\(0 0 0 \/ 40%\) 50%/);
+    expect(decls).toMatch(/(?<!-webkit-)mask-image:\s*linear-gradient\(90deg,[^;]*rgb\(0 0 0 \/ 40%\) 50%/);
   });
 
   // WebKitGTK ended every page of the webhost when a gradient mixed
@@ -5200,12 +5276,58 @@ describe("the rail's search toggle", () => {
 });
 
 describe("the rail's marks", () => {
-  it("times the breath by the one mark cycle", () => {
+  it.each([
+    ["the peak copy", "#ws-sidebar .row .name.breathes > .name-ink::after", "ws-pulse"],
+    ["the resting copy", "#ws-sidebar .row .name.breathes > .name-ink::before", "ws-pulse-rest"],
+  ])("times %s's breath by the one mark cycle", (_copy, selector, keyframes) => {
     // Arrange / Act
-    const rule = declarationsOf("#ws-sidebar .row .name.breathes");
+    const rule = ownDeclarationsOf(selector);
 
     // Assert
-    expect(rule).toMatch(/animation:\s*ws-pulse\s+var\(--ws-mark-cycle\)\s+ease-in-out\s+infinite/);
+    expect(rule).toMatch(new RegExp(`animation:\\s*${keyframes}\\s+var\\(--ws-mark-cycle\\)\\s+ease-in-out\\s+infinite`));
+  });
+
+  // THE BREATH RUNS ON THE COMPOSITOR (2026-11-16): a breathing name's own
+  // text animates nothing, so the fade loop it outranks stops too.
+  it("animates nothing on a breathing name's own text, which rests in its rest ink", () => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf("#ws-sidebar .row .name.breathes") ?? "";
+
+    // Assert
+    expect([/animation:\s*none/.test(rule), /(?:^|;)\s*color:\s*var\(--name-rest\)/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("hides an animated name's own text and strike line while its copies draw them", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name.breathes") && r.selectors.includes("#ws-sidebar .row .name.reviving"))?.declarations ?? "";
+
+    // Assert
+    expect([/-webkit-text-fill-color:\s*transparent/.test(rule), /text-decoration-color:\s*transparent/.test(rule)]).toEqual([true, true]);
+  });
+
+  it("draws the copies' own ink and strike line in the copy's own color", () => {
+    // Arrange / Act
+    const rule =
+      rulesOf(stylesheet).find((r) => r.selectors.join(",") === "#ws-sidebar .row .name > .name-ink::before,#ws-sidebar .row .name > .name-ink::after")?.declarations ?? "";
+
+    // Assert
+    expect([
+      /content:\s*attr\(data-name\)/.test(rule),
+      /-webkit-text-fill-color:\s*currentColor/.test(rule),
+      /text-decoration-line:\s*inherit/.test(rule),
+      /text-decoration-color:\s*currentColor/.test(rule),
+      /text-overflow:\s*ellipsis/.test(rule),
+    ]).toEqual([true, true, true, true, true]);
+  });
+
+  // The peak copy is ADDED to the resting one in the ink box's own group, so
+  // their weights sum to one and the crossfade is the color mix it replaced.
+  it("adds the peak copy to the resting one inside the ink box's own group", () => {
+    // Arrange / Act
+    const [box, peak] = [ownDeclarationsOf("#ws-sidebar .row .name > .name-ink") ?? "", ownDeclarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after") ?? ""];
+
+    // Assert
+    expect([/isolation:\s*isolate/.test(box), /pointer-events:\s*none/.test(box), /mix-blend-mode:\s*plus-lighter/.test(peak)]).toEqual([true, true, true]);
   });
 
   // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
@@ -5222,13 +5344,16 @@ describe("the rail's marks", () => {
     expect(animated).toEqual([]);
   });
 
-  it("runs the shimmer and the breath together on a reviving name that breathes", () => {
+  it.each([
+    ["peak", "#ws-sidebar .row .name.breathes.reviving > .name-ink::after", "ws-pulse"],
+    ["resting", "#ws-sidebar .row .name.breathes.reviving > .name-ink::before", "ws-pulse-rest"],
+  ])("runs the shimmer and the breath together on a reviving name's %s copy", (_copy, selector, keyframes) => {
     // Arrange / Act
-    const rule = declarationsOf("#ws-sidebar .row .name.breathes.reviving");
+    const rule = ownDeclarationsOf(selector);
 
     // Assert
     expect(rule).toMatch(
-      /animation:\s*ws-revive-shimmer var\(--ws-revive-cycle\) ease-in-out infinite,\s*ws-pulse var\(--ws-mark-cycle\) ease-in-out infinite/,
+      new RegExp(`animation:\\s*ws-revive-counter var\\(--ws-revive-cycle\\) ease-in-out infinite,\\s*${keyframes} var\\(--ws-mark-cycle\\) ease-in-out infinite`),
     );
   });
 
@@ -5252,12 +5377,17 @@ describe("the rail's marks", () => {
 
   it("swings a breathing name between its resting ink and its peak, never dimmer (owner request, 2026-10-29)", () => {
     // Arrange
-    const keyframes = keyframesOf("ws-pulse");
-    const at = (stop: string): string => new RegExp(`${stop}\\s*\\{[^}]*color:\\s*([^;]+);`).exec(keyframes)?.[1] ?? "";
-    // Act
-    const [rest, peak] = [at("0%, 100%"), at("50%")];
+    const at = (name: string, stop: string): string =>
+      new RegExp(`${stop}\\s*\\{[^}]*opacity:\\s*([^;]+);`).exec(keyframesOf(name))?.[1] ?? "";
+
+    // Act: the peak copy's and the resting copy's weights at rest and at the peak.
+    const weights = ["0%, 100%", "50%"].map((stop) => [at("ws-pulse", stop), at("ws-pulse-rest", stop)]);
+
     // Assert
-    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--name-rest)", "var(--name-peak)", false]);
+    expect([weights, ownDeclarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after")?.match(/(?:^|;)\s*color:\s*([^;]+);/)?.[1]]).toEqual([
+      [["0", "1"], ["1", "0"]],
+      "var(--name-peak)",
+    ]);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
@@ -5280,11 +5410,11 @@ describe("the rail's marks", () => {
 
   it("shares the one shimmer period between the reviving rules", () => {
     // Arrange / Act
-    const shimmers = rulesOf(stylesheet).filter((r) => /ws-revive-shimmer\s/.test(r.declarations));
+    const shimmers = rulesOf(stylesheet).filter((r) => /ws-revive-(?:shimmer|counter)\s/.test(r.declarations));
 
     // Assert
     expect(shimmers.length).toBeGreaterThan(1);
-    for (const r of shimmers) expect(r.declarations).toMatch(/ws-revive-shimmer var\(--ws-revive-cycle\)/);
+    for (const r of shimmers) expect(r.declarations).toMatch(/ws-revive-(?:shimmer|counter) var\(--ws-revive-cycle\)/);
   });
 
   it("sizes a glyph's box at the dot's size", () => {
@@ -6773,15 +6903,14 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
   it("breathes a colored name both darker and brighter about its tone", () => {
     // Arrange
     const tinted = ruleFor("#ws-sidebar .row .name.tinted");
-    const keyframes = keyframesOf("ws-pulse-tone").replace(/\s+/g, " ");
 
-    // Act / Assert
+    // Act / Assert: the name rests dark, and its peak copy is bright.
     expect([
       ruleFor("#ws-sidebar .row .name.tinted.breathes"),
+      ruleFor("#ws-sidebar .row .name.tinted.breathes > .name-ink::after"),
       tinted.includes("--name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));"),
       tinted.includes("--name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));"),
-      /0%, 100% \{ color: var\(--name-dark\); \}\s*50% \{ color: var\(--name-bright\); \}/.test(keyframes),
-    ]).toEqual([expect.stringContaining("ws-pulse-tone"), true, true, true]);
+    ]).toEqual([expect.stringMatching(/color:\s*var\(--name-dark\)/), expect.stringMatching(/color:\s*var\(--name-bright\)/), true, true]);
   });
 });
 

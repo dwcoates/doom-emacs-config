@@ -270,6 +270,32 @@ describe("the breathing name", () => {
   it("never breathes the mark of a breathing row", () => {
     expect(dotOf(drawArm("thinking")).classList.contains("breathes")).toBe(false);
   });
+
+  // THE LOOPS RUN ON THE COMPOSITOR (2026-11-16): the breath crossfades
+  // copies of the name in its ink box (name-ink.ts).
+  it("draws a breathing name's ink box with the name's text, hidden from the accessibility tree", () => {
+    // Arrange / Act
+    const ink = nameOf(drawArm("thinking")).querySelector(":scope > .name-ink");
+
+    // Assert
+    expect([ink?.getAttribute("data-name"), ink?.getAttribute("aria-hidden")]).toEqual(["ws-1", "true"]);
+  });
+
+  it("keeps a breathing name's text the name alone", () => {
+    // Arrange / Act
+    const name = nameOf(drawArm("thinking"));
+
+    // Assert
+    expect(name.textContent).toBe("ws-1");
+  });
+
+  it("draws no ink box on a still name", () => {
+    // Arrange / Act
+    const name = nameOf(drawArm("waiting"));
+
+    // Assert
+    expect(name.querySelector(".name-ink")).toBeNull();
+  });
 });
 
 
@@ -2578,6 +2604,15 @@ describe("the reviving shimmer", () => {
     // Assert.
     const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
     expect(name.classList.contains("reviving")).toBe(true);
+  });
+
+  it("draws a reviving name's ink box, which carries the band", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.querySelectorAll(":scope > .name-ink")).toHaveLength(1);
   });
 
   it("leaves the NAME still once the marker is gone", () => {

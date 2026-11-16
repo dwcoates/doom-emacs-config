@@ -21,10 +21,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 /** A wall-clock instant mid-cycle for every rail loop. */
 const NOW = 1_700_000_000_500;
 
-/** The rail's animated names: two breathing names and a reviving one. The marks stand still. */
-const RAIL = `<nav id="ws-sidebar"><div class="row"><span class="st tone-red" data-glyph="dot"></span><span class="name breathes">a</span></div>
-<div class="row"><span class="st st-glyph tone-purple" data-glyph="merge"></span><span class="name breathes">b</span></div>
-<div class="row"><span class="st tone-green" data-glyph="dot"></span><span class="name reviving">c</span></div></nav>`;
+/** A name's ink box, as name-ink.ts draws it: the copies its loops move. */
+const ink = (name: string): string => `<span class="name-ink" aria-hidden="true" data-name="${name}"></span>`;
+
+/**
+ * The rail's animated names: two breathing names and a reviving one, each
+ * with its ink box, whose copies (pseudo-elements) carry the loops. The marks
+ * stand still.
+ */
+const RAIL = `<nav id="ws-sidebar"><div class="row"><span class="st tone-red" data-glyph="dot"></span><span class="name breathes">a${ink("a")}</span></div>
+<div class="row"><span class="st st-glyph tone-purple" data-glyph="merge"></span><span class="name breathes">b${ink("b")}</span></div>
+<div class="row"><span class="st tone-green" data-glyph="dot"></span><span class="name reviving">c${ink("c")}</span></div></nav>`;
 
 /** What the seek left on one animated element. */
 interface Sought {
@@ -69,22 +76,31 @@ describe("the rail's loops on the wall clock in WebKit", () => {
     await browser.close();
   });
 
-  it("finds the two breathing names and the reviving shimmer", async () => {
+  // The copies are pseudo-elements, which `getAnimations({ subtree: true })`
+  // must include for the seek to reach them.
+  it("finds both copies of the two breathing names and the reviving shimmer's band and copy", async () => {
     // Arrange / Act
     const sought = await seekRail(page);
 
     // Assert
-    expect(sought.map((s) => s.name).sort()).toEqual(["ws-pulse", "ws-pulse", "ws-revive-shimmer"]);
+    expect(sought.map((s) => s.name).sort()).toEqual([
+      "ws-pulse",
+      "ws-pulse",
+      "ws-pulse-rest",
+      "ws-pulse-rest",
+      "ws-revive-counter",
+      "ws-revive-shimmer",
+    ]);
   });
 
   // ONE ANIMATION (owner ruling, 2026-10-13): every breathing name breathes
   // with the same parameters.
   it("breathes every name alike", async () => {
     // Arrange / Act
-    const breaths = (await seekRail(page)).filter((s) => s.name === "ws-pulse");
+    const breaths = (await seekRail(page)).filter((s) => s.name === "ws-pulse" || s.name === "ws-pulse-rest");
 
     // Assert
-    expect(breaths.map((s) => s.duration)).toEqual([breaths[0]?.duration, breaths[0]?.duration]);
+    expect(breaths.map((s) => s.duration)).toEqual(breaths.map(() => breaths[0]?.duration));
     expect(breaths[0]?.duration).toBeGreaterThan(0);
   });
 

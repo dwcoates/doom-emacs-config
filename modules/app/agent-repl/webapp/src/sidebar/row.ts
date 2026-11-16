@@ -86,6 +86,7 @@ import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.j
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
+import { drawNameInk } from "./name-ink.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import type { Rect } from "../topbar/clamp.js";
 import { placeBeside, viewportOf } from "../placement.js";
@@ -356,6 +357,9 @@ export function drawRosterRow(
         : undefined;
     applyNameTint(label, nameTint(shown.case, endedMs, mark.toneClass, mode === "partial", sc.ctx.ticker.now()));
   }
+  // THE LOOPS RUN ON THE COMPOSITOR (2026-11-16): the breath and the shimmer
+  // move copies of the name (`name-ink.ts`), never its color or its mask.
+  drawNameInk(label, name);
   if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
 

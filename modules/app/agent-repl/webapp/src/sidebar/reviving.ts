@@ -10,8 +10,9 @@
  *
  * SUBTLE ON PURPOSE (owner ruling, 2026-09-19): a soft band of reduced ink
  * ripples across the name's text and rests off the text between passes. The
- * `ws-revive-shimmer` keyframes in styles.css paint it; reduced motion stops
- * it outright, leaving the name drawn plainly.
+ * `ws-revive-shimmer` keyframes in styles.css paint it, moving the name's ink
+ * box (`name-ink.ts`) by `transform` so the band keeps moving while the page is
+ * busy; reduced motion stops it outright, leaving the name drawn plainly.
  *
  * PHASE CONTINUITY. The sidebar redraws every row on every roster push, and a
  * fresh element restarts its animation at 0%, which mid-pass reads as the band
