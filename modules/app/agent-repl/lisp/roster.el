@@ -210,6 +210,12 @@ The tab order is these less the tabs still held for their open (open-tabs.el).")
 (defvar agent-repl-roster--walked-hidden nil
   "The last reconcile's collapsed-repository tab names.")
 
+(defvar agent-repl-roster--walked-folded nil
+  "The last reconcile's tab names a collapsed section folds off the bar.
+Not the hidden ones: a hidden tab is withheld by the user's hide, a folded
+one only by the section, so navigation may still reach it
+\(`agent-repl-roster-navigable-tab-order').")
+
 (defvar agent-repl-roster--tab-order nil
   "Workspace names in roster walk order — every workspace with a tab.
 No local ordering exists: the resolver orders the roster (priority
@@ -1000,6 +1006,8 @@ A row that fails to reconcile is contained rather than fatal; see
          (numbers nil)
          ;; The tabs of rows whose repository the daemon holds collapsed.
          (hidden nil)
+         ;; Those of them a collapsed section folds, not the user's hide.
+         (folded nil)
          ;; Every reconciled row, for the opens (open-tabs.el).
          (rows nil))
     (dolist (want desired)
@@ -1019,7 +1027,11 @@ A row that fails to reconcile is contained rather than fatal; see
             ;; A THREAD IS NEVER DRAWN, but its page loads: it is hidden
             ;; from the bar while open-tabs asks for it like any shown tab.
             (when (or (plist-get want :collapsed) (plist-get want :thread))
-              (push name hidden)))
+              (push name hidden))
+            (when (and (plist-get want :collapsed)
+                       (not (plist-get want :hidden))
+                       (not (plist-get want :thread)))
+              (push name folded)))
           ;; A row that FAILED opened no tab, so it does not count towards
           ;; the bring-up.
           (when (and fresh name)
@@ -1040,6 +1052,7 @@ A row that fails to reconcile is contained rather than fatal; see
               name (error-message-string err)))))))
     (setq agent-repl-roster--walked (nreverse names)
           agent-repl-roster--walked-hidden hidden
+          agent-repl-roster--walked-folded folded
           agent-repl-roster--tab-numbers (nreverse numbers))
     ;; THE OPENS, once the walk has made every row's workspace and BEFORE
     ;; the order is set: each one owed an open is asked for, its page loaded
@@ -1216,6 +1229,17 @@ Every tab but those of a repository the daemon holds collapsed
 \(`agent-repl-roster--hidden-tabs').  The bar's numbering and its
 navigation index THIS list, so a hidden tab takes no number and no stop."
   (cl-remove-if (lambda (name) (member name agent-repl-roster--hidden-tabs))
+                agent-repl-roster--tab-order))
+
+(defun agent-repl-roster-navigable-tab-order ()
+  "Return the tab names navigation may land on, in roster walk order.
+The drawn tabs plus the tabs a collapsed section folds: a chord or a picker
+may select a workspace in a folded section, which stays folded and draws only
+that workspace while it is selected.  A tab the user hid
+\(the hidden section) is still no stop."
+  (cl-remove-if (lambda (name)
+                  (and (member name agent-repl-roster--hidden-tabs)
+                       (not (member name agent-repl-roster--walked-folded))))
                 agent-repl-roster--tab-order))
 
 (defun agent-repl-roster-tab-number-of (name)

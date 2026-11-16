@@ -482,9 +482,12 @@ type Verbs interface {
 	// quiet, at its running turn's end otherwise. The pull request watcher
 	// calls it on each owned pull request's merge.
 	CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error
-	// UnfoldSubsectionForWork expands the collapsed subsection a workspace
-	// sits in, when its turn starts (SubsectionUnfolds calls it).
-	UnfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID) error
+	// SurfaceForWork marks a workspace whose turn starts under a fold as drawn
+	// inside it (WorkSurfacings calls it).
+	SurfaceForWork(ctx context.Context, ws ids.WorkspaceID) error
+	// EndSurfacing takes that mark off when the turn ends (WorkSurfacingEnds
+	// calls it).
+	EndSurfacing(ctx context.Context, ws ids.WorkspaceID) error
 	// LetQueueThroughAfterBypassTurn resumes the merge queue of the
 	// repository whose queue bypass mode WS holds, when the pause standing on
 	// it is WS's own, at the end of each of WS's turns (BypassTurnEnds calls

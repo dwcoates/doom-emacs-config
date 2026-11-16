@@ -96,6 +96,7 @@
 (declare-function agent-repl-roster-thread-p "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-roster-navigable-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-numbered-tab "agent-repl-roster" (number))
 (declare-function agent-repl-roster-tab-number-of "agent-repl-roster" (name))
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
@@ -1444,7 +1445,7 @@ switched to here."
 (defun agent-repl--jump-to-ranked-workspace (rank-fn instant-fn slug none-message)
   "Request the switch to the drawn tab RANK-FN picks, standing elsewhere.
 The ONE body of the turn-recency jumps.  RANK-FN answers the best of the
-DRAWN tabs (`agent-repl--drawn-tab-names') less the workspace shown: the
+navigable tabs (`agent-repl--navigable-tab-names') less the workspace shown: the
 change the user is answering is the one the bar showed them, and switching
 to where they stand is no switch.  INSTANT-FN reads the ranking instant of
 the target for the record.  SLUG names the gesture in its records
@@ -1453,7 +1454,7 @@ request's trigger.  No candidate is a reported, logged no-op saying
 NONE-MESSAGE.  The target is REQUESTED of the daemon, never switched to here."
   (let* ((shown (agent-repl--ws-current-name))
          (log-ws (agent-repl--jump-log-ws shown))
-         (names (remove shown (agent-repl--drawn-tab-names)))
+         (names (remove shown (agent-repl--navigable-tab-names)))
          (target (funcall rank-fn names)))
     (if (null target)
         (progn
@@ -1512,6 +1513,17 @@ and the daemon gives it no number."
   (and (fboundp 'agent-repl-roster-drawn-tab-order)
        (agent-repl-roster-drawn-tab-order)))
 
+(defun agent-repl--navigable-tab-names ()
+  "Return the workspace names a navigation gesture may land on, in tab order.
+
+THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A chord that walks
+or picks a workspace (`s-{', `s-[', `SPC p p', the jumps) may select one in a
+folded section or subsection: the section stays folded and the roster draws
+that workspace alone inside it until the user switches away.  The numeral chords stay on `agent-repl--drawn-tab-names',
+because a folded tab has no number.  A tab the user hid is a stop of neither."
+  (and (fboundp 'agent-repl-roster-navigable-tab-order)
+       (agent-repl-roster-navigable-tab-order)))
+
 (defun agent-repl--cycle-target (all drawn current n)
   "Return the DRAWN tab N steps from CURRENT along ALL, or nil.
 ALL is every tab in walk order and DRAWN its drawn subset.  The walk
@@ -1558,7 +1570,7 @@ the user made left nothing on disk: realtest 4 drove four real chords, every
 one switched correctly, and not one could be read back afterwards.  A routine
 action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
-  (let* ((names (agent-repl--drawn-tab-names))
+  (let* ((names (agent-repl--navigable-tab-names))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
          (all (funcall ring-fn current))
@@ -1633,12 +1645,12 @@ start from."
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl--recency-ring (current)
-  "Return the DRAWN tabs, and CURRENT, most recently selected first.
+  "Return the navigable tabs, and CURRENT, most recently selected first.
 The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
-over the tabs the bar draws, so `s-[' and `s-]' reach exactly the tabs
-`s-{' and `s-}' do.  CURRENT joins the ring when its tab is not drawn (its
-repository is collapsed), so it still has a place to step from."
-  (let ((drawn (agent-repl--drawn-tab-names)))
+over the tabs navigation reaches (`agent-repl--navigable-tab-names'), so
+`s-[' and `s-]' reach exactly the tabs `s-{' and `s-}' do.  CURRENT joins the
+ring when it is not among them, so it still has a place to step from."
+  (let ((drawn (agent-repl--navigable-tab-names)))
     (agent-repl-roster-selection-recency-order
      (if (or (null current) (member current drawn))
          drawn
@@ -1695,9 +1707,10 @@ slot 0 is Doom's own `main', so `M-1' landed on the splash screen and
 every numeral was off by one against the bar.  A tab still opening is
 NOT SELECTABLE, as its sidebar row is not: the press is a reported no-op.
 
-Called interactively with no prefix argument, completes over the DRAWN
-NAMES and switches to the chosen one -- the same set the numerals reach,
-so the picker cannot offer a target a chord could not.
+Called interactively with no prefix argument, completes over the
+NAVIGABLE NAMES (`agent-repl--navigable-tab-names') and switches to the
+chosen one: the drawn tabs and those a collapsed section folds, the same set
+the walking chords reach.
 
 An empty bar and a slot the bar does not draw are REPORTED no-ops rather
 than errors: the numerals are a glance-and-press gesture, and a press
@@ -1716,7 +1729,7 @@ afterwards is a logging defect."
       (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
       (message "[agent-repl] No workspace tabs on the bar"))
      ((null index)
-      (let ((choice (completing-read "Switch to workspace: " names nil t)))
+      (let ((choice (completing-read "Switch to workspace: " (agent-repl--navigable-tab-names) nil t)))
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
         (agent-repl-host-request-switch choice 'picker)))
      ((null tab)

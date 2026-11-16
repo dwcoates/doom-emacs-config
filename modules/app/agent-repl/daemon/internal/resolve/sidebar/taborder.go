@@ -100,6 +100,10 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 	var members []wsm.Workspace
 	for _, ws := range reg.Workspaces {
 		if placed[ws.ID] {
+			// THE SELECTION IS REG.CURRENT's, whatever the row's own flag says
+			// (the resolver takes a switch between registry installs), and it
+			// is what a fold draws inside itself (DrawnInsideFold).
+			ws.Current = reg.Current != nil && *reg.Current == ws.ID
 			members = append(members, ws)
 		}
 	}
@@ -148,10 +152,13 @@ func openNodes(tree forest, order blockOrder, list []wsm.Workspace) []openNode {
 // each before its family (its own-repository children, then its blocks'),
 // saying whether the tab is FOLDED: FOLDED is the region's own fold, and a
 // workspace whose children are folded folds every tab below it, block rows
-// included (childrenFolded).
+// included (childrenFolded). A workspace the fold draws inside itself
+// (wsm.Workspace.DrawnInsideFold: its turn started under the fold and is
+// running, or the user is on it) is the one exception: its own tab is drawn,
+// and the fold still covers its family.
 func walkOpen(nodes []openNode, folded bool, visit func(ws wsm.Workspace, folded bool)) {
 	for _, node := range nodes {
-		visit(node.ws, folded)
+		visit(node.ws, folded && !node.ws.DrawnInsideFold())
 		walkOpen(flatten(node.children, node.blocks), childrenFolded(node, folded), visit)
 	}
 }
@@ -176,6 +183,13 @@ type Tab struct {
 // workspace lands the user on the neighbour the bar actually draws.
 func Tabs(reg Registry, log dlog.Logger) []Tab {
 	repos, _ := openTree(reg, log)
+	return tabsOf(repos)
+}
+
+// tabsOf is Tabs over an Open tree already built (openTree), so the roster
+// asks the tab bar's reading of the tree it is drawing rather than building
+// the tree twice.
+func tabsOf(repos []openRepo) []Tab {
 	var out []Tab
 	for _, repo := range repos {
 		for _, region := range repo.regions {

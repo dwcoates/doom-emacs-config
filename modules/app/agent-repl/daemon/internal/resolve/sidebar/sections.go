@@ -42,8 +42,11 @@ const OpenSectionLabel = "Open"
 // last workspace left would make the grouping flicker (and leave an empty
 // subsection nowhere to drag a workspace into).
 func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
-	repos, orphans := openTree(r.state.reg, log)
+	reg := r.state.reg
+	reg.Current = r.state.selected
+	repos, orphans := openTree(reg, log)
 	current := r.selectedWorkspace()
+	tabs := tabsOf(repos)
 	out := &frontendv1.RosterRepositoryView{}
 	numbers := &tabNumberer{}
 	shown := 0
@@ -73,12 +76,12 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 				Header:   sectionHeader(region.subsection.Name, regionCount),
 				OpenRows: rows,
 			}
-			setSubsectionFold(sub, region.subsection.Folded, wsm.SubsectionMembers(region.subsection.ID).HoldsCurrent(current))
+			setSubsectionFold(sub, region.subsection.Folded, holdsCurrent(tabs, current, wsm.SubsectionMembers(region.subsection.ID)))
 			section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}})
 		}
 		shown += count
 		section.Header = sectionHeader(placed.repo.Name, count)
-		setRepoFold(section, placed.repo.Folded, wsm.RepositoryMembers(placed.repo.ID).HoldsCurrent(current))
+		setRepoFold(section, placed.repo.Folded, holdsCurrent(tabs, current, wsm.RepositoryMembers(placed.repo.ID)))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
@@ -475,7 +478,8 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 // same order, so a block's rows take their tabs after the own-repository
 // children's.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
-	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
+	surfaced := folded && node.ws.DrawnInsideFold()
+	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded && !surfaced), Surfaced: surfaced}
 	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
 	// repository block's rows alike (frontend.v1.RosterOpenRow.children_fold).
 	if len(node.children) > 0 || len(node.blocks) > 0 {
@@ -551,10 +555,25 @@ func repoKey(repo wsm.Repository) *frontendv1.RosterRepoKey {
 		Repository: &workspacev1.RepositoryRef{Id: string(repo.ID), Dir: repo.Dir}}
 }
 
+// holdsCurrent reports whether a collapse of the section MEMBERS names must be
+// refused: it holds the current workspace AND no other drawn tab remains to
+// land the user on (LandingTarget). A collapse of a section holding the
+// current workspace is otherwise allowed, and the daemon's fold verb moves the
+// selection to that landing, asking LandingTarget the same question by the
+// same membership (wsm.FoldMembers).
+func holdsCurrent(tabs []Tab, current *wsm.Workspace, members wsm.FoldMembers) bool {
+	if !members.HoldsCurrent(current) {
+		return false
+	}
+	_, _, lands := LandingTarget(tabs, current.ID, members)
+	return !lands
+}
+
 // setRepoFold states the repository's fold on its section: the ONE arm the
 // sidebar and the Emacs tab bar both draw from. An expanded section says
-// whether a collapse may be asked: never while it HOLDS_CURRENT, which the
-// daemon's fold verb refuses by the same membership (wsm.FoldMembers).
+// whether a collapse may be asked: never while it HOLDS_CURRENT, the current
+// workspace with nowhere else to land (holdsCurrent), which the daemon's fold
+// verb refuses too.
 func setRepoFold(section *frontendv1.RosterRepoSection, folded, holdsCurrent bool) {
 	if folded {
 		section.Fold = &frontendv1.RosterRepoSection_Collapsed{Collapsed: &frontendv1.RosterRepoSectionCollapsed{}}

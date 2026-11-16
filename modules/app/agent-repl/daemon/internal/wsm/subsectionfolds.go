@@ -36,9 +36,8 @@ func (s *store) SetSubsectionFolded(ctx context.Context, id SubsectionID, folded
 // expandSubsection expands, within TX, subsection ID when it is collapsed,
 // answering whether it was. It is THE ONE EXPANSION of a subsection the
 // daemon makes on its own: a workspace placed in a subsection
-// (placeFamilies, MoveWorkspace) and a workspace starting work or being
-// selected (expandSubsectionHolding) all come here, so a workspace is never
-// put or left hidden inside a collapsed subsection.
+// (placeFamilies, MoveWorkspace) comes here, so a workspace is never put
+// inside a collapsed subsection.
 func expandSubsection(ctx context.Context, tx *sql.Tx, id SubsectionID) (bool, error) {
 	res, err := tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = ?`, id)
 	if err != nil {

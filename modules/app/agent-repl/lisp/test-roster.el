@@ -143,6 +143,7 @@ whose calls are the observation."
            (agent-repl-roster-view nil)
            (agent-repl-roster--tab-order nil)
            (agent-repl-roster--hidden-tabs nil)
+           (agent-repl-roster--walked-folded nil)
            (agent-repl-roster--rows-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--status-by-id (make-hash-table :test 'equal))
            (agent-repl-roster--viewed-by-id (make-hash-table :test 'equal))
@@ -3601,6 +3602,35 @@ Its own fold is EXPANDED here: that fold is the sidebar's, never the bar's."
        (agent-repl-test-roster--roster
         :sections (list (agent-repl-test-roster--section "repo" (list one two)))))
       (should (equal (agent-repl-roster-drawn-tab-order) '("one" "two"))))))
+
+(ert-deftest agent-repl-test-roster-navigable-order-holds-a-folded-tab-and-not-a-hidden-one ()
+  "Navigation reaches a collapsed section's tab but not the user's hidden one."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
+                      (agent-repl-test-roster--section
+                       "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t))
+      :hidden (list (agent-repl-test-roster--row "w3" "three" :ready))))
+    (should (equal (agent-repl-roster-tab-order) '("one" "two" "three")))
+    (should (equal (agent-repl-roster-drawn-tab-order) '("one")))
+    (should (equal (agent-repl-roster-navigable-tab-order) '("one" "two")))))
+
+(ert-deftest agent-repl-test-roster-navigable-order-draws-a-folded-tab-again-once-expanded ()
+  "The push that expands the section leaves its tab in the navigable order."
+  (agent-repl-test-roster--with-editor
+    (let ((push (lambda (collapsed)
+                  (agent-repl-roster-reconcile
+                   (agent-repl-test-roster--roster
+                    :sections (list (agent-repl-test-roster--section
+                                     "shut" (list (agent-repl-test-roster--row "w2" "two" :ready))
+                                     collapsed)))))))
+      (funcall push t)
+      (should (equal (agent-repl-roster-navigable-tab-order) '("two")))
+      (funcall push nil)
+      (should (equal (agent-repl-roster-navigable-tab-order) '("two")))
+      (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
 
 ;;;; ---- One row, indexed ahead of the next push ----
 

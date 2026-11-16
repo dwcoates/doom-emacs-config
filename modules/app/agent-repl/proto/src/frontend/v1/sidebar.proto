@@ -455,6 +455,15 @@ message RosterOpenRow {
   // block holds at least one row. Their tabs follow `children`'s, block by
   // block. Empty when every child is of the row's own repository.
   repeated RosterOpenRowRepositoryBlock repository_blocks = 6;
+  // WHETHER A FOLD COVERS THE ROW AND THE ROW IS DRAWN ANYWAY. DAEMON-HELD:
+  // the workspace started a turn while a fold hid it (its repository's, its
+  // subsection's, or an ancestor's `children_fold`) and the turn is still
+  // running, or it is the workspace the user is on. The fold stays collapsed
+  // and hides every other row under it; this one is drawn, and its `tab` is
+  // numbered, not folded. It ends with the turn, when the user switches away
+  // from it, and when the user folds the section again. False on a row no
+  // fold covers and on a row the fold hides.
+  bool surfaced = 7;
 }
 
 // A row's children's fold, as a subsection's is drawn
@@ -1510,16 +1519,21 @@ message RosterSubsectionExpanded {
   reserved 3;
   reserved "never_collapses";
   // WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
-  // of the workspaces the subsection holds and hides their tabs, so the
-  // subsection holding the CURRENT workspace never collapses: the daemon
-  // refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
-  // the sidebar's fold gesture asks nothing while this arm says so. The
-  // daemon resolves the arm on every push from its own selection, so it
-  // follows every switch. Never unset on a wire subsection.
+  // of the workspaces the subsection holds and hides their tabs, and a
+  // collapse of the subsection holding the CURRENT workspace moves the
+  // selection to the workspace selected before, among the open sections. Only
+  // when no other open workspace is drawn outside the subsection does it
+  // never collapse: the daemon refuses the ask
+  // (agentrepl.v1.UpdateSidebarViewError.holds_current), and the sidebar's
+  // fold gesture asks nothing while this arm says so. The daemon resolves the
+  // arm on every push from its own selection, so it follows every switch.
+  // Never unset on a wire subsection.
   oneof collapse {
-    // No current workspace sits in the subsection: the gesture collapses it.
+    // The gesture collapses the subsection: no current workspace sits in it,
+    // or one does and the collapse has another open workspace to land on.
     RosterSubsectionCollapsible collapsible = 1;
-    // The current workspace sits in the subsection: the gesture does nothing.
+    // The current workspace sits in the subsection with nowhere else to
+    // land: the gesture does nothing.
     RosterSubsectionHoldsCurrent holds_current = 2;
   }
 }
@@ -1528,8 +1542,8 @@ message RosterSubsectionExpanded {
 // the arm is the fact.
 message RosterSubsectionCollapsible {}
 
-// An expanded subsection holding the current workspace, which the fold
-// gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+// An expanded subsection holding the current workspace with nowhere else to
+// land, which the fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
 message RosterSubsectionHoldsCurrent {}
 
 // A collapsed subsection. DELIBERATELY EMPTY: the arm is the fact.
@@ -1552,17 +1566,21 @@ message RosterSubsectionKey {
 // collapse it.
 message RosterRepoSectionExpanded {
   // WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
-  // of the repository's open workspaces and hides their tabs, so the
-  // repository holding the CURRENT workspace never collapses: the daemon
-  // refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
-  // the sidebar's fold gesture asks nothing while this arm says so. The
-  // daemon resolves the arm on every push from its own selection, so it
-  // follows every switch. Never unset on a wire section.
+  // of the repository's open workspaces and hides their tabs, and a collapse
+  // of the repository holding the CURRENT workspace moves the selection to
+  // the workspace selected before, among the open sections. Only when no
+  // other open workspace is drawn outside the repository does it never
+  // collapse: the daemon refuses the ask
+  // (agentrepl.v1.UpdateSidebarViewError.holds_current), and the sidebar's
+  // fold gesture asks nothing while this arm says so. The daemon resolves the
+  // arm on every push from its own selection, so it follows every switch.
+  // Never unset on a wire section.
   oneof collapse {
-    // No current workspace sits in the repository: the gesture collapses it.
+    // The gesture collapses the repository: no current workspace sits in it,
+    // or one does and the collapse has another open workspace to land on.
     RosterRepoSectionCollapsible collapsible = 1;
-    // The current workspace sits in the repository, in a subsection or not:
-    // the gesture does nothing.
+    // The current workspace sits in the repository, in a subsection or not,
+    // with nowhere else to land: the gesture does nothing.
     RosterRepoSectionHoldsCurrent holds_current = 2;
   }
 }
@@ -1571,8 +1589,8 @@ message RosterRepoSectionExpanded {
 // EMPTY: the arm is the fact.
 message RosterRepoSectionCollapsible {}
 
-// An expanded repository section holding the current workspace, which the
-// fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+// An expanded repository section holding the current workspace with nowhere
+// else to land, which the fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
 message RosterRepoSectionHoldsCurrent {}
 
 // A collapsed repository section. DELIBERATELY EMPTY: the arm is the fact.

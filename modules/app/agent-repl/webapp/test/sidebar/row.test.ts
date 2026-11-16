@@ -48,6 +48,7 @@ import {
   DIVIDER_MAIN_WORKSPACE_ATTRIBUTE,
   REPOSITORY_BLOCK_ATTRIBUTE,
   REPOSITORY_BLOCK_CLASS,
+  SURFACED_ROW_CLASS,
   REPOSITORY_DIVIDER_CLASS,
   drawRosterOpenRowRepositoryBlock,
   drawRosterOpenRowRepositoryDivider,
@@ -954,6 +955,27 @@ describe("the family", () => {
     // The daemon lists each state on its own, so a row it nests is drawn.
     const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2", closed: true })] })), sidebarContext(), "R");
     expect(drawn.querySelector(".kids [data-roster-row='ws-2']")).not.toBeNull();
+  });
+
+  it("marks a surfaced row so the stylesheet draws it inside its fold", () => {
+    const surfaced = openRow(row({ id: "ws-1" }));
+    surfaced.surfaced = true;
+    const drawn = drawRosterFamily(surfaced, sidebarContext(), "R");
+    expect(drawn.classList.contains(SURFACED_ROW_CLASS)).toBe(true);
+  });
+
+  it("marks no row surfaced unless the wire says so", () => {
+    const drawn = drawRosterFamily(openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] })), sidebarContext(), "R");
+    expect(drawn.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
+    expect(drawn.querySelector(`.${SURFACED_ROW_CLASS}`)).toBeNull();
+  });
+
+  it("marks a surfaced child and none of its siblings", () => {
+    const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] }));
+    family.children[1]!.surfaced = true;
+    const drawn = drawRosterFamily(family, sidebarContext(), "R");
+    expect(drawn.querySelector("[data-roster-row='ws-3']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(true);
+    expect(drawn.querySelector("[data-roster-row='ws-2']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
   });
 
   it("refuses a list row naming no row as a malformed view", () => {

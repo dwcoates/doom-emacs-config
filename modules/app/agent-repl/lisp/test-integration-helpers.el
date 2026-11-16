@@ -1106,6 +1106,7 @@ signals."
                 (agent-repl-roster--hidden-tabs nil)
                 (agent-repl-roster--walked nil)
                 (agent-repl-roster--walked-hidden nil)
+                (agent-repl-roster--walked-folded nil)
                 (agent-repl-itest--real-ws-put
                  (symbol-function 'agent-repl--ws-put))
                 (process-environment
