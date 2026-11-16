@@ -80,8 +80,10 @@ var feedKinds = map[protoreflect.Name]feedKind{
 	"worktree":          {step: stepExecuting},
 	"cron":              {step: stepExecuting},
 	"push_notification": {step: stepExecuting},
-	"mcp_tool_call":     {step: stepExecuting},
-	"subagent_handback": {step: stepExecuting},
+	// The agent reading its own notification queue is a read.
+	"read_notifications": {step: stepReading},
+	"mcp_tool_call":      {step: stepExecuting},
+	"subagent_handback":  {step: stepExecuting},
 }
 
 // itemPhase is where one frame puts its item.

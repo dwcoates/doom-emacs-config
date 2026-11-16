@@ -325,3 +325,23 @@ func TestRegisterPeerMessages(t *testing.T) {
 		}
 	})
 }
+
+// scraperTimeout is metrics/scrape.yml's scrape_timeout. The gate's sandbox
+// refuses reads outside this package, so the file cannot be read here.
+const scraperTimeout = 10 * time.Second
+
+// TestThePeerMessageCountBoundFitsTheScrape pins the count's bound against the
+// scraper's own scrape_timeout: a bound sized to the scrape's measured stalls
+// must still leave the scrape room to answer.
+func TestThePeerMessageCountBoundFitsTheScrape(t *testing.T) {
+	// Arrange
+	limit := scraperTimeout / 10
+
+	// Act
+	bound := peerMessagesTimeout
+
+	// Assert
+	if bound > limit {
+		t.Fatalf("peerMessagesTimeout %v exceeds a tenth of the %v scrape_timeout", bound, scraperTimeout)
+	}
+}

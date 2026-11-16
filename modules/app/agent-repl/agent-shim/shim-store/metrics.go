@@ -47,12 +47,17 @@ func metricsRecord(log *logging.Logger) metrics.Record {
 const peerMessagesName = "agentrepl_peer_messages"
 
 // peerMessagesTimeout bounds one scrape's count of the delivery index's ends.
-// MEASURED 2026-11-15 on the owner's store (270MB, 77,586 entry rows, 4
-// peer_delivery rows) at load average 13 (two full test runs): the statement
-// took at most 1ms and the whole sqlite3 process that opened the database,
-// read its WAL and ran it at most 10ms, over 35 runs. 25ms is 2.5 times that
-// whole-process worst case, which covers the in-process pool path.
-const peerMessagesTimeout = 25 * time.Millisecond
+// The count runs inside the store's scrape, so it shares every stall the
+// scrape meets on a loaded host (the merge queue's full test runs), and its
+// healthy worst case is the scrape's, not the statement's: the statement alone
+// took at most 1.8ms in-process, even on a fresh read connection (300 runs,
+// load average 9, 2026-11-16), yet a 25ms bound sized from it ran out three
+// times in an hour of full test runs.
+// MEASURED 2026-11-16 from the metrics store's scrape_duration_seconds for the
+// store over 3 days and 12 runs: the whole scrape's 99.9th percentile was at
+// most 266ms (two runs whose scrapes hung 23-31s, a suspended host, excluded).
+// 650ms is 2.5 times that, well inside the scraper's 10s scrape_timeout.
+const peerMessagesTimeout = 650 * time.Millisecond
 
 // peerMessageEnds is the store's count of each end of the cross-session
 // messages it indexed (db.DB.PeerMessageEnds).

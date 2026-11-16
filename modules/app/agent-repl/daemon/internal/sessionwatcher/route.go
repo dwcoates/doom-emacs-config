@@ -2172,6 +2172,8 @@ func ActivityToolName(act *conversationv1.AgentActivity) string {
 		return "Cron"
 	case *conversationv1.AgentActivity_PushNotification:
 		return "PushNotification"
+	case *conversationv1.AgentActivity_ReadNotifications:
+		return "ReadNotifications"
 	case *conversationv1.AgentActivity_McpToolCall:
 		return mcpToolName(item.McpToolCall)
 	case *conversationv1.AgentActivity_Unmodeled:

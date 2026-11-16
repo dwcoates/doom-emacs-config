@@ -2532,6 +2532,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // fold, so the ask's settlement lands ahead of the rows that proved it.
       gate.noteVendorMessage(message);
       const output = deps.fold.onSdkMessage(message, foldContext(attribution, verdict.turn));
+      const stopped = message.type === "result" && !attribution.keepalive ? stopCommand?.turn : undefined;
       if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
       if (converterDefectThisMessage) {
         LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
@@ -2541,6 +2542,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       shellRunStarts.note(entries);
       if (entries.length > 0) deps.persistence.write(entries);
       serveSessionUpdates(entries);
+      // AFTER THE STOPPED TURN'S TERMINAL IS WRITTEN, its join takes the slot.
+      if (stopped !== undefined) openJoinBehindStoppedTurn(stopped);
       // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
       // rewind itself refuses everything that is not an assistant record of the
       // open real turn (see engine/keepalive.ts).
@@ -3465,13 +3468,48 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       sends.forget(turn.id.value, "its turn left the slot");
       // THE JOIN THE TURN NEVER FOLDED IS THE VENDOR'S NEXT TURN, and it takes
       // the slot in the same step the turn leaves it, so nothing -- a beat, a
-      // StartTurn -- can come between them.
-      if (joins[0]?.into === turn) openJoinAsOwnTurn("the turn it waited to join left the send slot");
+      // StartTurn -- can come between them. A STOPPED turn leaves the slot
+      // before its stop result arrives (engine/turn.ts), so its join waits for
+      // that result instead ({@link openJoinBehindStoppedTurn}): opened here,
+      // the join's own rows and terminal would come ahead of the stopped
+      // turn's, and the turn it joined would stand in flight under a join that
+      // already ended (merge-queue-stall-triage, 2026-11-16).
+      if (joins[0]?.into === turn) {
+        if (stopResultOwed(turn)) {
+          LOGGER.debug(
+            { turn_id: joins[0].turn.id.value, joined_turn: turn.id.value },
+            "the turn a prompt waits to join was stopped; the join waits for its stop result",
+          );
+        } else {
+          openJoinAsOwnTurn("the turn it waited to join left the send slot");
+        }
+      }
     } else {
       if (adopted === turn) adopted = undefined;
       sends.forget(turn.id.value, "its turn left the slot");
     }
     if (open === undefined && adopted === undefined) cadence?.resume();
+  }
+
+  /**
+   * Whether `turn` was stopped and its stop result is still owed: the vendor
+   * answers a stop on a live query with that result, and with no query none
+   * can come.
+   */
+  function stopResultOwed(turn: OpenTurn): boolean {
+    return query !== undefined && stopCommand?.turn.value === turn.id.value;
+  }
+
+  /**
+   * The join waiting on the STOPPED turn `stopped` takes the send slot, once
+   * that turn's stop result is folded and written: the join then runs after
+   * the turn it joined ended, exactly as it does behind a turn that ended on
+   * its own. Nothing happens when no join waits on it (none did, or the
+   * vendor folded it in), or when another turn already holds the slot.
+   */
+  function openJoinBehindStoppedTurn(stopped: conversationv1.TurnId): void {
+    if (joins[0]?.into.id.value !== stopped.value || open !== undefined) return;
+    openJoinAsOwnTurn("the turn it waited to join was stopped and its stop result was folded");
   }
 
   /**

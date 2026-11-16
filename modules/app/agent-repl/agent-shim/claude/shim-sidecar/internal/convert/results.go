@@ -919,6 +919,19 @@ func pushSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 	return success
 }
 
+// readNotificationsSuccess carries what the read returned VERBATIM. The vendor
+// states its queue only as prose ("No queued notifications." when it is
+// empty), so the text is never parsed: an empty queue is an answer, and a
+// reworded sentence must not become a different claim. A result with no text
+// leaves it unset.
+func readNotificationsSuccess(call openCall, block map[string]any, ts int64) *conversationv1.AgentReadNotificationsSuccess {
+	success := &conversationv1.AgentReadNotificationsSuccess{SettledAt: settledAt(ts, call.startedAt)}
+	if text := resultText(block["content"]); text != "" {
+		success.ReturnedText = &text
+	}
+	return success
+}
+
 // sentAtMs reads the vendor's send instant. It is an ISO string on the wire,
 // and genuinely absent sometimes — resumed sessions replay pre-`sentAt` outputs
 // verbatim — so the field stays UNSET rather than falling back to the settle

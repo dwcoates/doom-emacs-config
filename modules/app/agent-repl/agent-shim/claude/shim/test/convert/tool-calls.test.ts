@@ -665,6 +665,7 @@ describe("disposition", () => {
       "CronDelete",
       "CronList",
       "PushNotification",
+      "ReadNotifications",
       ...EXEMPT_TOOLS,
       ...ENGINE_OWNED_TOOLS,
     ];

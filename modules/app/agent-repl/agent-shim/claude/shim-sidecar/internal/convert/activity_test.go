@@ -41,6 +41,7 @@ func TestRecognizedBuiltinsReachTheirOwnArm(t *testing.T) {
 		{tool: "CronDelete", input: `{"job_id":"j"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetCron() != nil }},
 		{tool: "CronList", input: `{}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetCron() != nil }},
 		{tool: "PushNotification", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetPushNotification() != nil }},
+		{tool: "ReadNotifications", input: `{}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetReadNotifications() != nil }},
 		{tool: "SubagentHandback", input: `{"message":"m"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetSubagentHandback() != nil }},
 		{tool: showChessBoardToolName, input: `{"session_id":"agent-a","game_id":"g-1"}`, arm: func(a *conversationv1.AgentActivity) bool { return a.GetChessBoard() != nil }},
 	}
