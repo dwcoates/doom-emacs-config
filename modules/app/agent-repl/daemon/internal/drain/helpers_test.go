@@ -549,11 +549,11 @@ type harness struct {
 	delivering func(ws ids.WorkspaceID) bool
 	// bouncing answers Deps.Bouncing: nil answers false.
 	bouncing func(ws ids.WorkspaceID) bool
-	stand      *fakeStand
-	spawns     *fakeSpawns
-	merges     *fakeMerges
-	log        *dlog.TestSurfaces
-	exits      chan struct{}
+	stand    *fakeStand
+	spawns   *fakeSpawns
+	merges   *fakeMerges
+	log      *dlog.TestSurfaces
+	exits    chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
