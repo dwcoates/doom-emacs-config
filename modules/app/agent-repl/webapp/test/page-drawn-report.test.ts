@@ -39,7 +39,7 @@ function refused(cause: "unknownPage" | "unknownWorkspace"): ReportPageDrawnResp
 }
 
 /** A context whose client records ReportPageDrawn and whose stream attaches on demand. */
-function context(): AppContext {
+function context(quiesced = false): AppContext {
   const client = {
     reportPageDrawn: async (request: ReportPageDrawnRequest) => {
       sent.push(request);
@@ -58,7 +58,7 @@ function context(): AppContext {
       };
     },
   } as unknown as PageStreams;
-  return createAppContext({
+  const ctx = createAppContext({
     webappBuild: "test-webapp-build",
     client,
     workspace: workspaceRef("ws-1", "/w"),
@@ -69,6 +69,8 @@ function context(): AppContext {
     page: "page-7",
     streams,
   });
+  if (quiesced) ctx.quiesce();
+  return ctx;
 }
 
 async function flush(): Promise<void> {
@@ -183,5 +185,19 @@ describe("installPageDrawnReport", () => {
 
     // Assert
     expect((await forwardedRecord(capture, "page.drawn-reported")).level.case).toBe("info");
+  });
+
+  it("records a report a quiesced page could not send at info", async () => {
+    // Arrange
+    report = installPageDrawnReport(context(true), document);
+
+    // Act
+    document.documentElement.setAttribute(CONVERSATION_DRAWN_ATTRIBUTE, "page");
+    await flush();
+
+    // Assert
+    expect(sent).toEqual([]);
+    expect((await forwardedRecord(capture, "page.drawn-report-unsent")).level.case).toBe("info");
+    expect((await forwardedRecord(capture, "rpc.unary-quiesced")).level.case).toBe("info");
   });
 });

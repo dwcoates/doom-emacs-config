@@ -72,10 +72,11 @@ export function installPageDrawnReport(ctx: AppContext, doc: Document): PageDraw
         context: { cause, refusal: String(refusal) },
       });
     } catch (err) {
-      // callUnary has already recorded the transport failure; the next attach
-      // reports again.
+      // callUnary owns the failure's record, at the level its cause deserves
+      // (error for a transport failure, info for a quiesced handover or an
+      // announced outage); this record only notes the retry on the next attach.
       reportedThisAttach = false;
-      log.warn(`the drawn report did not reach the daemon: ${String(err)}`, {
+      log.info(`the drawn report did not reach the daemon; the next attach reports again: ${String(err)}`, {
         operation: "page.drawn-report-unsent",
         context: { cause },
       });

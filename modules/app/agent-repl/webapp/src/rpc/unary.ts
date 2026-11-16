@@ -59,11 +59,12 @@ export async function callUnary<Res extends Message>(
   schema: DescMessage,
 ): Promise<Res> {
   if (ctx.isQuiesced()) {
-    // REFUSED LOCALLY, and loudly. The workspace has moved; sending anyway
-    // would spend a round trip to be told the same thing by a daemon that has
-    // already released it.
+    // REFUSED LOCALLY. The workspace has moved; sending anyway would spend a
+    // round trip to be told the same thing by a daemon that has already
+    // released it. A deploy handover is expected and the successor page
+    // carries on, so the refusal is INFO; the caller renders its own refusal.
     const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
-    log.warn(`${name} was not sent: ${QUIESCED_MESSAGE}`, {
+    log.info(`${name} was not sent: ${QUIESCED_MESSAGE}`, {
       operation: "rpc.unary-quiesced",
       context: { rpc: name },
     });
