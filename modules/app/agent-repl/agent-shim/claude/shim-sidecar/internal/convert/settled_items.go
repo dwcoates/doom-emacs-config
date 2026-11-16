@@ -200,7 +200,13 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindMonitor:
 		if failed {
 			return item(&conversationv1.AgentActivity_Monitor{Monitor: &conversationv1.AgentMonitor{
-				Result: &conversationv1.AgentMonitor_Failure{Failure: &conversationv1.AgentMonitorFailure{Failure: failure}},
+				// THE CALL IS RESTATED through the start's own reader: this
+				// failure upserts over the start, and over the stream plane's
+				// restating failure, so a replay draws the card from it alone.
+				Result: &conversationv1.AgentMonitor_Failure{Failure: &conversationv1.AgentMonitorFailure{
+					Failure: failure,
+					Call:    monitorStart(call.input, call.startedAt),
+				}},
 			}})
 		}
 		// A monitor is ALWAYS DETACHED — arming it does not end it. The result
