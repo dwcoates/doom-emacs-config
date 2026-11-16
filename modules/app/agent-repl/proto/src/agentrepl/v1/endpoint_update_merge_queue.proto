@@ -254,6 +254,10 @@ message UpdateMergeQueueError {
     // A dispatch once the chain has deployed as many remediations in a row as
     // its repository allows: only an escalation is accepted now.
     UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
+    // An approval while the check's window holds a warning or error no one
+    // owns: a NEW one, an old one nobody owns, or one that came back after
+    // its fix deployed. Dispatch or escalate them instead.
+    UpdateMergeQueueProblemsUnowned problems_unowned = 19;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -285,6 +289,12 @@ message UpdateMergeQueueNotMediator {}
 message UpdateMergeQueueNoMediationOwed {}
 // The nothing-to-restore refusal. No fields: the chain has no remediation.
 message UpdateMergeQueueNoRemediationToRestore {}
+// The unowned-problems refusal.
+message UpdateMergeQueueProblemsUnowned {
+  // Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's
+  // order.
+  repeated string groups = 1;
+}
 // The bound refusal.
 message UpdateMergeQueueRemediationBoundReached {
   // The repository's bound, which the chain has reached
