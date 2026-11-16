@@ -437,6 +437,38 @@ describe("tool calls", () => {
     expect(activityOf(output.entries[0])?.item.case).toBe("unmodeled");
   });
 
+  describe("a call to a tool the session does not offer", () => {
+    /** The vendor's init naming the session's tools. */
+    const initOffering = (tools: readonly string[]): SdkMessage =>
+      ({ type: "system", subtype: "init", uuid: "uuid-init", session_id: "session-1", tools }) as unknown as SdkMessage;
+
+    /** Whether folding `messages` then a call to `name` marks the call not offered. */
+    function notOffered(messages: readonly SdkMessage[], name: string): boolean | undefined {
+      const fold = createFold();
+      const context = foldContext();
+      for (const message of messages) fold.onSdkMessage(message, context);
+      const output = fold.onSdkMessage(assistant("msg-call", [{ type: "tool_use", id: "toolu_c", name, input: {} }]), context);
+      const item = activityOf(output.entries[0])?.item;
+      return item?.case === "unmodeled" && item.value.result.case === "start" ? item.value.result.value.notOffered : undefined;
+    }
+
+    it("marks a name the init never offered", () => {
+      expect(notOffered([initOffering(["Bash", "Read"])], "bash")).toBe(true);
+    });
+
+    it("does not mark an unmodeled tool the init offered", () => {
+      expect(notOffered([initOffering(["Bash", "StructuredOutput"])], "StructuredOutput")).toBe(false);
+    });
+
+    it("does not mark a call before any init named the tools", () => {
+      expect(notOffered([], "bash")).toBe(false);
+    });
+
+    it("does not mark a call after an init that named no tool list", () => {
+      expect(notOffered([{ type: "system", subtype: "init", uuid: "u", session_id: "s" } as unknown as SdkMessage], "bash")).toBe(false);
+    });
+  });
+
   it("makes an MCP server's tool an ordinary MCP tool call, never unmodeled", () => {
     const fold = createFold();
 

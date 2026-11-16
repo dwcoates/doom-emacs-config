@@ -536,9 +536,25 @@ function convertSystemMessage(
         state.compaction,
       );
       const all = superseded.length === 0 ? entries : [...superseded, ...entries];
-      return message.subtype === "init" ? [...all, ...settleClear(message, context, state)] : all;
+      if (message.subtype !== "init") return all;
+      offerSessionTools(message, state.calls);
+      return [...all, ...settleClear(message, context, state)];
     }
   }
+}
+
+/**
+ * Record the tools the vendor's init says the session offers, so a call
+ * naming any other is known for one to a tool that does not exist
+ * (convertToolUse). An init that names no tool list records nothing.
+ */
+function offerSessionTools(message: SdkMessage, calls: CallRegistry): void {
+  const tools = (message as unknown as { readonly tools?: unknown }).tools;
+  if (!Array.isArray(tools)) {
+    LOGGER.debug({}, "the init named no tool list; the session's offered tools stay unknown");
+    return;
+  }
+  calls.offer(tools.filter((tool): tool is string => typeof tool === "string"));
 }
 
 /**
