@@ -110,9 +110,9 @@ OVERRIDES replaces top-level entries (notably `current')."
                          (collapsed . ()))))))
 
 (defun agent-repl-itest-roster--merged-group (rows)
-  "Return a RosterMergedRepoGroup protojson alist of the fixture repository.
+  "Return a RosterMergedRepoGroup fixture of the fixture repository.
 ROWS is a vector of RosterRow alists, which `agent-repl-itest--listed'
-lists as the group's `mergedRows'."
+counts into the group's summary: a merged workspace is in no stream."
   `((key . ((repository . ((id . "repo-itest")
                            (dir . ,agent-repl-itest-roster--repo-dir)))))
     (header . ((label . ((text . "itest-repo")))))
@@ -120,7 +120,7 @@ lists as the group's `mergedRows'."
 
 (defun agent-repl-itest-roster--push (daemon roster)
   "Push ROSTER on DAEMON's roster stream."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--listed roster)))))
+  (agent-repl-itest--push daemon "roster" `((streams . ,(agent-repl-itest--streams roster)))))
 
 (defmacro agent-repl-itest-roster--with-subscription (daemon &rest body)
   "Subscribe the roster consumer to DAEMON, run BODY, then tear it down."
@@ -347,10 +347,11 @@ this pins that no such arm exists on the wire to be handled — the retired
                      (json-serialize
                       `((stream . "roster")
                         (message
-                         . ((roster
-                             . ,(agent-repl-itest-roster--roster
-                                 (list (agent-repl-itest-roster--row
-                                        "ws-h" "ws-h" 'hibernated)))))))))))
+                         . ((streams
+                             . ,(agent-repl-itest--streams
+                                 (agent-repl-itest-roster--roster
+                                  (list (agent-repl-itest-roster--row
+                                         "ws-h" "ws-h" 'hibernated))))))))))))
         ;; Assert.
         (should (equal (car result) 400))))))
 
@@ -758,10 +759,9 @@ out of order would tuck a child under the wrong sibling's tab."
         (should (equal (agent-repl-roster-tab-order)
                        '("ws-parent" "ws-child" "ws-sibling")))))))
 
-(ert-deftest agent-repl-itest-roster-recently-merged-rows-walk-after-every-repo-section ()
-  "A `recently_merged' row is walked AFTER every repo section's rows, and has no tab.
-A merged workspace is never open (OPEN BEATS MERGED: one reopened is listed
-in the Open section), so only the repo section's row is on the bar."
+(ert-deftest agent-repl-itest-roster-a-merged-workspace-is-in-no-stream-and-has-no-tab ()
+  "A merged workspace is in no stream: the summary counts it, the walk holds
+the repo section's row alone, and only that row is on the bar."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -780,9 +780,13 @@ in the Open section), so only the repo section's row is on the bar."
         (agent-repl-itest--wait-until
          (lambda () (equal (agent-repl-roster-tab-order) '("ws-repo")))
          nil "the repo section's row alone on the bar")
-        (should (equal (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row)))
-                               (agent-repl-roster-walk agent-repl-roster-view))
-                       '("ws-repo" "ws-merged")))))))
+        (should (equal (list (mapcar (lambda (entry) (agent-repl-roster-row-id (plist-get entry :row)))
+                                     (agent-repl-roster-walk agent-repl-roster-view))
+                             (plist-get (plist-get (plist-get (plist-get agent-repl-roster-view :recently-merged)
+                                                              :header)
+                                                   :count)
+                                        :workspaces))
+                       '(("ws-repo") 1)))))))
 
 (ert-deftest agent-repl-itest-roster-two-repo-sections-walk-in-the-resolver-order ()
   "Two repository sections walk in the resolver's order, A before B.
@@ -1033,8 +1037,9 @@ never a silently-empty view."
       (should (agent-repl-itest-roster--push-invalid-carries-raw
                daemon "merge queue")))))
 
-(ert-deftest agent-repl-itest-roster-roster-missing-recently-merged-is-refused ()
-  "A `WorkspaceRoster' with no `recentlyMerged' field at all: ERROR, dropped."
+(ert-deftest agent-repl-itest-roster-a-first-push-without-recently-merged-is-refused ()
+  "A subscription's first push missing the Recently Merged stream: ERROR, refused
+whole, no tab opened."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1045,10 +1050,9 @@ never a silently-empty view."
                       "ws-no-merged-marker" "ws-no-merged-marker" 'ready))
                'recentlyMerged))
       ;; Assert.
-      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
-      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      (should (agent-repl-itest-roster--push-invalid-carries-raw
-               daemon "ws-no-merged-marker")))))
+      (agent-repl-itest--await-log daemon "elisp.roster.push" "error")
+      (should (equal (list agent-repl-roster-view (agent-repl--ws-by-ref-id "ws-no-merged-marker"))
+                     '(nil nil))))))
 
 ;;;; ---- Scenario 11: the finish edge ----
 
@@ -1638,7 +1642,9 @@ pinned directly."
   ;; Arrange / Act / Assert.
   (should-error
    (agent-repl-wire-decode-watch-workspace-roster-response
-    `((roster
+    `((streams
+       . ((revision . "1")
+          (workspaces
        . ((repository
            . ((sections
                . [((key . ((repository . ((id . "repo-itest")
@@ -1655,9 +1661,7 @@ pinned directly."
                             (when . ((noTurnRunning . ())))
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
-          (open . ((label . ((text . "Open"))) (expanded . ())))
-          (recentlyMerged . ((header . ((label . ((text . "merge queue")))))
-                             (groups . [])))))))
+          (open . ((label . ((text . "Open"))) (expanded . ())))))))))
    :type 'agent-repl-wire-error))
 
 (defun agent-repl-itest-roster--host-live (composer)
@@ -1679,7 +1683,7 @@ the composer gate alone."
 Stored and replayed to the next subscriber, which is how a reconnect's
 re-pull is staged without driving the real link/reconnect machinery that
 test-integration-link.el owns."
-  (agent-repl-itest--push daemon "roster" `((roster . ,(agent-repl-itest--listed roster))) nil t))
+  (agent-repl-itest--push daemon "roster" `((streams . ,(agent-repl-itest--streams roster))) nil t))
 
 ;; audit-3 #33
 (ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()

@@ -1407,7 +1407,7 @@ app shown, no thread, and no queue."
                           (rows . [])))))))
 
 (defun agent-repl-itest--listed (roster)
-  "Return the protojson ROSTER as the daemon lists it on the wire.
+  "Return the protojson ROSTER as the daemon lists it, its streams side by side.
 A fixture states its rows the way a test reads them: plain `RosterRow's in
 each section's (and subsection's) `rows', a section's subsections after
 its own rows, in the hidden section's and each
@@ -1415,11 +1415,14 @@ merged group's `rows', a row's family under its own `children'.  The wire
 lists them as the daemon does (`frontend.v1.WorkspaceRoster'): each list's
 own row type -- an open row with its tab, numbered in the Open section's
 walk or folded under a collapsed repository or subsection; a hidden row
-nesting its family; a merged row alone -- the family taken off the shared
-row, and every closed row of a section moved to the `closed' list.  A
-ROSTER already in that shape (it carries `closed') is handed back as it
+nesting its family -- the family taken off the shared row, and every
+closed row of a section moved to the `closed' list.  A merged group\='s
+rows are in no stream: the group carries their SUMMARY (its count), and
+the Recently Merged header their count, beside the merged set\='s token.
+A ROSTER already in that shape (it carries `closed') is handed back as it
 is.  It also carries the app sections every roster does
-(`agent-repl-itest--with-apps')."
+\(`agent-repl-itest--with-apps').  `agent-repl-itest--streams' splits the
+answer into the push\='s streams."
   (setq roster (agent-repl-itest--with-apps roster))
   (if (assq 'closed roster)
       roster
@@ -1469,16 +1472,41 @@ is.  It also carries the app sections every roster does
           (append
            `((repository . ,(cons (cons 'sections sections) (assq-delete-all 'sections (copy-alist repository))))
              (hidden . ,(relist hidden 'hiddenRows `((rows . ,(vconcat (seq-map #'hidden-row (or (rows-of hidden) [])))))))
-             (recentlyMerged
-              . ,(cons (cons 'groups
-                             (vconcat (seq-map (lambda (group)
-                                                 (relist group 'mergedRows
-                                                         `((rows . ,(vconcat (seq-map (lambda (row) `((row . ,(bare row))))
-                                                                                      (or (rows-of group) [])))))))
-                                               (or (alist-get 'groups merged) []))))
-                       (assq-delete-all 'groups (copy-alist merged))))
              (closed . ((rows . ,(vconcat (nreverse closed))))))
+           (when merged
+             (let* ((groups (or (alist-get 'groups merged) []))
+                    (count (apply #'+ 0 (seq-map (lambda (group) (length (or (rows-of group) []))) groups)))
+                    (header (alist-get 'header merged)))
+               `((recentlyMerged
+                  . ((header . ((label . ,(alist-get 'label header))
+                                (count . ((workspaces . ,count)))))
+                     (groups
+                      . ,(vconcat
+                          (seq-map (lambda (group)
+                                     `((key . ,(alist-get 'key group))
+                                       (header . ,(alist-get 'header group))
+                                       (summary . ((count . ((merges . ,(length (or (rows-of group) [])))))
+                                                   (latest . ((mergedAtMs . "1")))))))
+                                   groups)))
+                     (mergedRevision . ((revision . "1")))
+                     ,@(seq-filter (lambda (entry) (memq (car entry) '(expanded collapsed))) merged))))))
            (seq-remove (lambda (entry) (memq (car entry) '(repository hidden recentlyMerged))) roster)))))))
+
+(defun agent-repl-itest--streams (roster &optional revision)
+  "Return the protojson `RosterPush' at REVISION carrying ROSTER\='s streams.
+ROSTER is a fixture `agent-repl-itest--listed' lists; its workspaces
+stream is every member but the other three streams\=', each of which rides
+the push beside it.  A stream the fixture leaves out is left out of the
+push, which a first push must not do.  REVISION defaults to 1."
+  (let ((listed (agent-repl-itest--listed roster)))
+    (append
+     `((revision . ,(number-to-string (or revision 1)))
+       (workspaces . ,(seq-remove (lambda (entry)
+                                    (memq (car entry) '(recentlyMerged mergeQueue closed revision)))
+                                  listed)))
+     (seq-filter #'identity
+                 (mapcar (lambda (key) (assq key listed))
+                         '(mergeQueue recentlyMerged closed))))))
 
 (provide 'test-integration-helpers)
 
