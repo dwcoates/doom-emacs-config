@@ -690,7 +690,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// only after the release below, which is the durable edge proving it was
 	// written. A restart carries too: its replacement's boot reads the carry
 	// once this process has exited.
-	move, err := c.seal(ctx, ws.ID, fields)
+	move, err := c.seal(ctx, ws.ID, lease, fields)
 	if err != nil {
 		return failedTransfer(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
 	}

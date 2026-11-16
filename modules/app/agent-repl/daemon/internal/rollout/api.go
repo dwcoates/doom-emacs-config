@@ -641,8 +641,10 @@ type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) (ids.LeaseID, err
 type LeaseChangedFunc func(ws ids.WorkspaceID)
 
 // DrainIntakeFunc releases a quiesced workspace's held intake IN ORDER, on the
-// daemon that now owns it.
-type DrainIntakeFunc func(ctx context.Context, ws ids.WorkspaceID) error
+// daemon that now owns it. hold is the lease the incumbent's quiesce took, as
+// its carry names it (Carry.Hold): empty when it took none, nil when the
+// incumbent predates the field.
+type DrainIntakeFunc func(ctx context.Context, ws ids.WorkspaceID, hold *ids.LeaseID) error
 
 // PublishViewsFunc republishes one workspace's whole views after adoption, so
 // the re-attaching clients land on fresh state rather than on nothing.

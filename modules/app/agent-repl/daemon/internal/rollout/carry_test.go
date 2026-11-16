@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"testing"
@@ -1645,4 +1646,97 @@ func TestAnAdoptionWithNoCarriedPointersResumesNothing(t *testing.T) {
 	if got, resumed := h.fleet.ResumedFrom(ws); resumed {
 		t.Fatalf("resumed from %+v, want nothing: the incumbent carried no pointers", got)
 	}
+}
+
+func TestASealCarriesTheHoldItsQuiesceTook(t *testing.T) {
+	tests := []struct {
+		name string
+		// mergeHeld has a merge's lease hold the intake before the quiesce.
+		mergeHeld bool
+		// wantTaken is whether the carried hold is the restart lease the
+		// quiesce took, rather than empty.
+		wantTaken bool
+	}{
+		{name: "an unheld workspace carries the hold its quiesce took", wantTaken: true},
+		{name: "a workspace a merge held carries an empty hold", mergeHeld: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if tc.mergeHeld {
+				if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyHold); err != nil {
+					t.Fatalf("AcquireLease: %v", err)
+				}
+			}
+
+			// Act
+			handOverUntilWindow(t, h)
+
+			// Assert
+			hold := sealedCarry(t, h, ws).Hold
+			if hold == nil {
+				t.Fatalf("the carry names no hold, want the quiesce's (empty when it took none)")
+			}
+			lease, held, err := h.db.Lease(context.Background(), ws)
+			if err != nil || !held {
+				t.Fatalf("Lease = (%+v, %v, %v), want the workspace held", lease, held, err)
+			}
+			if tc.wantTaken && (lease.Holder != wsm.HolderRestart || *hold != lease.ID) {
+				t.Fatalf("carried hold = %q, want the quiesce's restart lease %q (holder %s)", *hold, lease.ID, lease.Holder)
+			}
+			if !tc.wantTaken && *hold != "" {
+				t.Fatalf("carried hold = %q, want empty: the merge's lease is not the handover's", *hold)
+			}
+		})
+	}
+}
+
+func TestAnAdoptionDrainsExactlyTheHoldTheIncumbentCarried(t *testing.T) {
+	taken := ids.LeaseID("abe49b83e6aa4b00")
+	none := ids.LeaseID("")
+	tests := []struct {
+		name string
+		// carry is the carry written for the workspace, nil for none.
+		carry *Carry
+		// want is the hold the drain must be handed, nil for "not named".
+		want *ids.LeaseID
+	}{
+		{name: "a carried hold is drained by its identity", carry: &Carry{Hold: &taken}, want: &taken},
+		{name: "a carried empty hold drains nothing of the handover's", carry: &Carry{Hold: &none}, want: &none},
+		{name: "a carry predating the field names no hold", carry: &Carry{}, want: nil},
+		{name: "no carry means the incumbent's quiesce took no hold", carry: nil, want: &none},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			if tc.carry != nil {
+				carryFor(t, h, ws, *tc.carry)
+			}
+
+			// Act
+			arm(t, h, ws, Participants{})
+
+			// Assert
+			holds := h.DrainedHolds()
+			if len(holds) != 1 {
+				t.Fatalf("drains = %d, want exactly one", len(holds))
+			}
+			got := holds[0]
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("drained hold = %v, want %v", deref(got), deref(tc.want))
+			}
+		})
+	}
+}
+
+// deref renders a possibly-nil hold for a failure message.
+func deref(hold *ids.LeaseID) string {
+	if hold == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%q", *hold)
 }

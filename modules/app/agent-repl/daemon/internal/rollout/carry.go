@@ -87,6 +87,12 @@ type Carry struct {
 	// served when the move was sealed. Nil when the incumbent never watched
 	// the workspace, or predates the field.
 	Pointers *CarriedPointers `json:"pointers,omitempty"`
+	// Hold is the lease the transfer's quiesce took, which the successor's
+	// drain releases by this identity and no other: empty when another
+	// holder's lease already held the intake and the quiesce took none. Nil
+	// from an incumbent that predates the field, which leaves the successor
+	// finding the hold by its holder as before.
+	Hold *ids.LeaseID `json:"hold,omitempty"`
 }
 
 // CarriedPointers is the incumbent's watch pointers, each a protojson
@@ -377,8 +383,10 @@ type sealedMove struct {
 }
 
 // seal takes a running transfer's queue memory and writes the workspace's
-// carry. A seal that cannot be carried is put back before it fails.
-func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (*sealedMove, error) {
+// carry, naming hold, the lease the transfer's quiesce took (empty when it
+// took none), as the one the successor's drain releases. A seal that cannot
+// be carried is put back before it fails.
+func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, hold ids.LeaseID, fields dlog.Context) (*sealedMove, error) {
 	handoff, carried, err := c.deps.Bounces.SealMove(ctx, ws)
 	if err != nil {
 		c.log.Error(opTransfer, "could not seal the workspace's queue for its move", dlog.WithCause(fields, err))
@@ -392,6 +400,7 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 		Daemon:       c.deps.Instance,
 		Queue:        handoff,
 		Participants: &CarriedParticipants{Host: live.Host, Web: live.Web},
+		Hold:         &hold,
 	}
 	// NO FREENESS SOURCE IS READ AS WORK IN FLIGHT: the successor then
 	// waits for the adopted facts, which costs nothing when there is no work.

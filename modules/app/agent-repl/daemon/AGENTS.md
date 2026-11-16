@@ -1595,6 +1595,14 @@ refused every prompt (`elisp.input.gate-refused gate=:restarting`) for hours.
   the hold it handed over is gone. Ending it at the claim let the incumbent
   exit mid-adoption, and its handle's close released the hold under the
   successor's drain (`handover: drain ...: release the hold: wsm: not found`).
+- **The successor drains the handover hold by its identity.** The transfer's
+  quiesce lease rides the carry (`rollout.Carry.Hold`, empty when another
+  holder's lease already held the intake), and `handover.Intake.DrainIntake`
+  releases exactly that lease. A shim relaunch's restart-pending hold is a
+  lease of the same holder, so a drain that took any restart lease it found
+  released a relaunch the successor began during the adoption under it
+  (2026-11-16, `could not release the restart-pending hold`). Only a carry
+  from an incumbent predating the field falls to the drain by holder.
 - **An expired adoption window reclaims.** The incumbent takes the workspace
   back: claim, re-adopt the detached shim (a handed-over client leaves the
   fleet's session map with its detach, so `Adopt` really dials), release the

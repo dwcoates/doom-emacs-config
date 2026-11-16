@@ -1072,7 +1072,7 @@ func TestAnAdoptionOutLivesTheCallerThatCompletedIt(t *testing.T) {
 	release := make(chan struct{})
 	var seen error
 	h := newHarness(t, func(deps *Deps) {
-		deps.DrainIntake = func(ctx context.Context, _ ids.WorkspaceID) error {
+		deps.DrainIntake = func(ctx context.Context, _ ids.WorkspaceID, _ *ids.LeaseID) error {
 			close(entered)
 			<-release
 			seen = ctx.Err()
