@@ -878,6 +878,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			topbarResolver.SetNextKeepalive(ws, next)
 		},
 		Stat: os.Stat,
+		// THE OBSERVED STATE CLIENT, so every undelivered keep-alive's fault
+		// reaches the footer (health.ObserveFaults above).
+		Faults: p.DB,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)

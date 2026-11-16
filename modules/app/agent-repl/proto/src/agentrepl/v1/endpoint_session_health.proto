@@ -81,6 +81,9 @@ message SessionFault {
     SessionFaultVendorStartRejected vendor_start_rejected = 17;
     // The vendor kept failing to start for the whole retry window.
     SessionFaultVendorStartFailed vendor_start_failed = 18;
+    // A keep-alive that was due could not be armed or sent, or was not sent
+    // before the cache lapsed: the cache keeper failed this workspace.
+    SessionFaultKeepaliveUndelivered keepalive_undelivered = 19;
   }
 }
 message SessionFaultShimStartFailed {
@@ -258,6 +261,20 @@ message SessionFaultVendorStartRejected {
 // window (ten minutes of wall time from the first failure of the run), so the
 // daemon stopped retrying. Prompts sent meanwhile stay held. It stands until a
 // start succeeds; restarting the workspace begins a fresh run.
+// A KEEP-ALIVE THE CACHE KEEPER OWED AND DID NOT DELIVER (2026-11-11: the
+// keeper sat in a boot loop, sent next to no keep-alives for hours, and
+// nothing said so while the caches lapsed). It stands until a keep-alive goes
+// out for the workspace or its next turn starts; a later failure supersedes
+// it. The session itself serves, so the fault never escalates the status.
+message SessionFaultKeepaliveUndelivered {
+  // What failed, in the keeper's own words: the read that could not arm the
+  // keep-alive, the submission or call that could not send it, or the lapse
+  // that came before it went out.
+  string cause = 1;
+  // When the keep-alive was due, in epoch milliseconds; 0 when the keeper
+  // could not read enough to time it.
+  int64 due_at_ms = 2;
+}
 message SessionFaultVendorStartFailed {
   // How many attempts failed before the window ran out.
   uint32 failed_attempts = 1;

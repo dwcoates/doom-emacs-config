@@ -3,6 +3,7 @@ package health
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -30,6 +31,10 @@ const (
 	// KindDeployFailed is a deploy whose build, install or service restart
 	// did not go through. Its evidence is a DeployFailure's.
 	KindDeployFailed = "deploy_failed"
+	// KindKeepaliveDriveStopped is the cache keeper's loop ending before the
+	// daemon did (cachelapse.Keeper.Run): no keep-alive goes out for any
+	// workspace. Evidence: cause.
+	KindKeepaliveDriveStopped = "keepalive_drive_stopped"
 )
 
 // The SESSION-scope fault kinds, spelled exactly as SessionFault's kind oneof
@@ -107,6 +112,12 @@ const (
 	// breath so the per-session accounting survives without polluting the
 	// open fault set.
 	KindBounceDisposition = "bounce_disposition"
+	// KindKeepaliveUndelivered is a keep-alive the cache keeper owed a
+	// workspace and did not deliver: it could not be armed or sent, or the
+	// cache lapsed after it came due and before it went out
+	// (cachelapse.Keeper). Evidence: cause, due_at_ms (0 when it could not be
+	// timed).
+	KindKeepaliveUndelivered = "keepalive_undelivered"
 )
 
 // armlessSessionKinds are the recorded fault kinds the SessionFault / HostFault
@@ -175,6 +186,10 @@ func daemonFault(f wsm.Fault) *agentreplv1.DaemonFault {
 	case KindDeployFailed:
 		if arm := DeployFailureOf(f).arm(); arm != nil {
 			out.Kind = &agentreplv1.DaemonFault_DeployFailed{DeployFailed: arm}
+		}
+	case KindKeepaliveDriveStopped:
+		out.Kind = &agentreplv1.DaemonFault_KeepaliveDriveStopped{
+			KeepaliveDriveStopped: &agentreplv1.DaemonFaultKeepaliveDriveStopped{Cause: evidenceCause(f)},
 		}
 	}
 	return out
@@ -267,6 +282,8 @@ func sessionFault(f wsm.Fault) (*agentreplv1.SessionFault, bool) {
 		out.Kind = &agentreplv1.SessionFault_VendorStartRejected{VendorStartRejected: VendorStartRejectedArm(f)}
 	case KindVendorStartFailed:
 		out.Kind = &agentreplv1.SessionFault_VendorStartFailed{VendorStartFailed: VendorStartFailedArm(f)}
+	case KindKeepaliveUndelivered:
+		out.Kind = &agentreplv1.SessionFault_KeepaliveUndelivered{KeepaliveUndelivered: KeepaliveUndeliveredArm(f)}
 	default:
 		return nil, false
 	}
@@ -449,4 +466,26 @@ func selfCheckFault(err error) *agentreplv1.DaemonFault {
 			DaemonStateUnreadable: &agentreplv1.DaemonFaultDaemonStateUnreadable{Cause: err.Error()},
 		},
 	}
+}
+
+// EvidenceDueAtMs is when an undelivered keep-alive was due, in epoch ms; 0
+// when the keeper could not time it.
+const EvidenceDueAtMs = "due_at_ms"
+
+// KeepaliveUndeliveredArm renders a `keepalive_undelivered` fault's evidence
+// as its arm, for SessionFault and HostFault alike: the ONE reading of the
+// evidence KeepaliveUndeliveredEvidence writes.
+func KeepaliveUndeliveredArm(f wsm.Fault) *agentreplv1.SessionFaultKeepaliveUndelivered {
+	return &agentreplv1.SessionFaultKeepaliveUndelivered{Cause: evidenceCause(f), DueAtMs: evidenceInt64(f, EvidenceDueAtMs)}
+}
+
+// KeepaliveUndeliveredEvidence is the evidence a `keepalive_undelivered`
+// fault records: the cause, and when the keep-alive was due (the zero time
+// when it could not be timed).
+func KeepaliveUndeliveredEvidence(cause string, due time.Time) map[string]string {
+	at := int64(0)
+	if !due.IsZero() {
+		at = due.UnixMilli()
+	}
+	return map[string]string{EvidenceCause: cause, EvidenceDueAtMs: strconv.FormatInt(at, 10)}
 }

@@ -6,7 +6,8 @@
  * context whose last several exchanges are keep-alives — the model reads them,
  * the user paid for them, and nothing on any surface says they are there.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import {
@@ -17,6 +18,8 @@ import {
   KEEPALIVE_PROMPT_MARKER,
   KeepaliveCadence,
   KeepaliveRewind,
+  anchorLapsesAtMs,
+  transcriptCacheAnchor,
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
@@ -538,7 +541,7 @@ function cadenceAt(nowMs: number): {
 }
 
 /** The 1-hour cache the conversation's last request bought at {@link TURN_AT}. */
-const HOUR_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 0 };
+const HOUR_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 };
 
 describe("the cadence, anchored to the conversation's last request", () => {
   it("schedules a restart 5 minutes after a turn at turn + 52 minutes, not restart + 52", () => {
@@ -580,7 +583,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
   it("schedules NO beat for a 5-minute cache, which a 52-minute cadence cannot keep warm", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
 
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0, cachedTokens: 0 }, "restart");
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -619,7 +622,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     scheduler.fireTimeout();
     clock.now += 4000;
 
-    cadence.noteRequest(undefined, 0);
+    cadence.noteRequest({ writtenTtlMs: undefined, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
@@ -654,7 +657,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.pause();
     clock.now += 1000;
 
-    cadence.noteRequest(undefined, 0);
+    cadence.noteRequest({ writtenTtlMs: undefined, contextTokens: 0, cachedTokens: 0 });
     cadence.resume();
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
@@ -676,7 +679,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.pause();
     clock.now = TURN_AT + 30 * MINUTE;
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
     clock.now = TURN_AT + 31 * MINUTE;
 
     cadence.resume();
@@ -688,25 +691,25 @@ describe("the cadence, anchored to the conversation's last request", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + 61 * MINUTE);
     cadence.start(HOUR_CACHE, "restart");
 
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
 
   it("keeps the cache's tier across a request that wrote nothing", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0, cachedTokens: 0 }, "restart");
 
-    cadence.noteRequest(undefined, 0);
+    cadence.noteRequest({ writtenTtlMs: undefined, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
 
   it("takes the tier a request bought", () => {
     const { cadence, scheduler } = cadenceAt(TURN_AT + MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0, cachedTokens: 0 }, "restart");
 
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
   });
@@ -726,7 +729,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.pause();
 
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -754,7 +757,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
     cadence.start(HOUR_CACHE, "restart");
     cadence.stop();
 
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     expect(scheduler.pendingTimeout()).toBeUndefined();
   });
@@ -807,7 +810,7 @@ describe("the cadence, anchored to the conversation's last request", () => {
 });
 
 /** The 1-hour cache, above the cold gate's floor. */
-const HELD_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 120_000 };
+const HELD_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 120_000, cachedTokens: 120_000 };
 
 /** A background shell a real turn left running. */
 const WATCHER: DetachedWorkItem = {
@@ -870,7 +873,7 @@ describe("the cadence spares live detached work", () => {
     cadence.detachedWorkChanged();
 
     // Act
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     // Assert
     expect(scheduler.pendingTimeout()).toBeUndefined();
@@ -989,8 +992,8 @@ describe("the cadence spares live detached work", () => {
 
     // Act
     cadence.detachedWorkChanged();
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
-    cadence.noteRequest(CACHE_TTL_1H_MS, 0);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
 
     // Assert
     expect(logRecordsSince(mark).filter((entry) => entry.message === SPARED)).toHaveLength(1);
@@ -1065,7 +1068,7 @@ describe("the cadence held while the workspace is hidden", () => {
     cadence.hold();
 
     // Act
-    cadence.noteRequest(CACHE_TTL_1H_MS, 130_000);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 130_000, cachedTokens: 130_000 });
 
     // Assert
     expect(lapses.at(-1)).toEqual({ lapsesAtMs: clock.now + CACHE_TTL_1H_MS, contextTokens: 130_000 });
@@ -1078,7 +1081,7 @@ describe("the cadence held while the workspace is hidden", () => {
     cadence.hold();
 
     // Act
-    cadence.noteRequest(CACHE_TTL_1H_MS, 130_000);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 130_000, cachedTokens: 130_000 });
 
     // Assert
     expect(scheduler.pendingTimeout()).toBeUndefined();
@@ -1235,7 +1238,7 @@ describe("the cadence's last round, when the workspace is closed", () => {
     scheduler.fireTimeout();
 
     // Act
-    cadence.noteRequest(CACHE_TTL_1H_MS, 121_000);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 121_000, cachedTokens: 121_000 });
 
     // Assert
     expect({ lapse: lapses.at(-1), pending: scheduler.pendingTimeout() }).toEqual({
@@ -1262,7 +1265,7 @@ describe("the cadence's last round, when the workspace is closed", () => {
   it("holds at once, projecting the lapse, for a tier no beat can keep warm", () => {
     // Arrange
     const { cadence, lapses } = cadenceAt(TURN_AT + MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 9_000 }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 9_000, cachedTokens: 9_000 }, "restart");
 
     // Act
     cadence.lastRound();
@@ -1309,7 +1312,7 @@ describe("the cadence's last round, when the workspace is closed", () => {
     cadence.lastRound();
     clock.now = TURN_AT + 52 * MINUTE;
     scheduler.fireTimeout();
-    cadence.noteRequest(CACHE_TTL_1H_MS, 121_000);
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 121_000, cachedTokens: 121_000 });
 
     // Act
     cadence.run();
@@ -1399,7 +1402,7 @@ describe("a keep-alive asked for (SendKeepalive)", () => {
   it("allows one into a short-tier cache the scheduled beat would leave alone", () => {
     // Arrange
     const { cadence } = cadenceAt(TURN_AT + 2 * MINUTE);
-    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0 }, "restart");
+    cadence.start({ atMs: TURN_AT, ttlMs: CACHE_TTL_5M_MS, contextTokens: 0, cachedTokens: 0 }, "restart");
 
     // Act
     const refusal = cadence.askedBeat();
@@ -1477,6 +1480,122 @@ describe("a keep-alive asked for (SendKeepalive)", () => {
 
     // Act, Assert
     expect(() => cadence.askedBeat()).toThrow(/never started or has stopped/);
+  });
+});
+
+// THE INCIDENT'S SHAPE (torch-human-cancel-hang, 2026-11-11): a request that
+// sent ~950k tokens, of which only a 35,089-token prefix was cached.
+const UNCACHED_REQUEST = { writtenTtlMs: undefined, contextTokens: 951_544, cachedTokens: 35_089 };
+const UNCACHED_CACHE = { atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 951_544, cachedTokens: 35_089 };
+
+describe("a cache whose last request left its context uncached", () => {
+  it("lapses AT the anchoring request, whatever its tier", () => {
+    expect(anchorLapsesAtMs(UNCACHED_CACHE)).toBe(TURN_AT);
+  });
+
+  it("lapses a tier after a cached request", () => {
+    expect(anchorLapsesAtMs({ ...UNCACHED_CACHE, cachedTokens: 951_544 })).toBe(TURN_AT + CACHE_TTL_1H_MS);
+  });
+
+  it("lapses at the anchor when no tier is stated", () => {
+    expect(anchorLapsesAtMs({ ...UNCACHED_CACHE, ttlMs: undefined, cachedTokens: 951_544 })).toBe(TURN_AT);
+  });
+
+  it("refuses the asked keep-alive as lapsed at the anchoring request, inside the tier", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(UNCACHED_CACHE, "restart");
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toEqual({ kind: "cacheLapsed", lapsedAtMs: TURN_AT });
+  });
+
+  it("records the refusal with the coverage that decided it", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 52 * MINUTE);
+    cadence.start(UNCACHED_CACHE, "restart");
+    const before = logSinkMark();
+
+    // Act
+    cadence.askedBeat();
+
+    // Assert
+    const record = logRecordsSince(before).find((r) => r.message.includes("the asked keep-alive is refused as lapsed"));
+    expect([record?.level, record?.context.context_tokens, record?.context.cached_tokens, record?.context.uncached_tokens, record?.context.context_cached]).toEqual([
+      "info",
+      951_544,
+      35_089,
+      916_455,
+      false,
+    ]);
+  });
+
+  it("refuses the asked keep-alive once a live request leaves the context uncached", () => {
+    // Arrange
+    const { cadence, clock } = cadenceAt(TURN_AT);
+    cadence.start(HOUR_CACHE, "restart");
+    clock.now = TURN_AT + 5 * MINUTE;
+    cadence.noteRequest(UNCACHED_REQUEST);
+    clock.now = TURN_AT + 57 * MINUTE;
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toEqual({ kind: "cacheLapsed", lapsedAtMs: TURN_AT + 5 * MINUTE });
+  });
+
+  it("records the uncaching request with its coverage when it is noted", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT);
+    cadence.start(HOUR_CACHE, "restart");
+    const before = logSinkMark();
+
+    // Act
+    cadence.noteRequest(UNCACHED_REQUEST);
+
+    // Assert
+    const record = logRecordsSince(before).find((r) => r.message.includes("left the conversation's context uncached"));
+    expect([record?.level, record?.context.uncached_tokens]).toEqual(["info", 916_455]);
+  });
+
+  it("allows the asked keep-alive again once a later request caches the context", () => {
+    // Arrange
+    const { cadence } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(UNCACHED_CACHE, "restart");
+    cadence.noteRequest({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 951_600, cachedTokens: 951_598 });
+
+    // Act
+    const refusal = cadence.askedBeat();
+
+    // Assert
+    expect(refusal).toBeUndefined();
+  });
+
+  it("projects a held lapse at the anchoring request", () => {
+    // Arrange
+    const { cadence, lapses } = cadenceAt(TURN_AT + 5 * MINUTE);
+    cadence.start(UNCACHED_CACHE, "restart");
+
+    // Act
+    cadence.hold();
+
+    // Assert
+    expect(lapses).toEqual([{ lapsesAtMs: TURN_AT, contextTokens: 951_544 }]);
+  });
+
+  it("schedules no beat of its own", () => {
+    // Arrange
+    const { cadence, scheduler } = cadenceAt(TURN_AT + 5 * MINUTE);
+
+    // Act
+    cadence.start(UNCACHED_CACHE, "restart");
+
+    // Assert
+    expect(scheduler.pendingTimeout()).toBeUndefined();
   });
 });
 
@@ -2221,5 +2340,25 @@ describe("conversationRecordUuid", () => {
     expect(noteSendSites).toHaveLength(1);
     expect(source).toMatch(/function noteConversationRecord\([^)]*\): void \{\n\s+rewind\.noteRecord\(/);
     expect(source).toMatch(/function noteSendRecord\([^)]*\): void \{\n\s+rewind\.noteSend\(/);
+  });
+});
+
+describe("the anchor a transcript's last request states", () => {
+  const FACTS = { contextTokens: 951_544, cachedTokens: 35_089, sawUsage: true, lastRequestAtMs: TURN_AT, cacheTtlMs: CACHE_TTL_1H_MS, prompts: 3 };
+
+  it("anchors at the last request, with its tier and its coverage", () => {
+    expect(transcriptCacheAnchor(FACTS)).toEqual({ atMs: TURN_AT, ttlMs: CACHE_TTL_1H_MS, contextTokens: 951_544, cachedTokens: 35_089 });
+  });
+
+  it("is the one reading of a transcript as an anchor: no other engine source builds one from the facts", () => {
+    // Arrange: every engine source but the helper's own.
+    const dir = path.join(path.dirname(new URL(import.meta.url).pathname), "../../src/engine");
+    const sources = readdirSync(dir).filter((name) => name.endsWith(".ts") && name !== "keepalive.ts");
+
+    // Act: the sources that read the facts' tier into an anchor by hand.
+    const handRolled = sources.filter((name) => /ttlMs:\s*facts\.cacheTtlMs|facts\.lastRequestAtMs\s*\+\s*facts\.cacheTtlMs/.test(readFileSync(path.join(dir, name), "utf8")));
+
+    // Assert
+    expect(handRolled).toEqual([]);
   });
 });

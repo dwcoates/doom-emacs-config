@@ -41,6 +41,8 @@ var wantStandingEdges = map[string][]Edge{
 	KindClassifierFailed:      {EdgeTurnStarted},
 	KindConversationAbandoned: {EdgeTurnStarted},
 	KindFinalAnswerUnresolved: {EdgeAnswerArrived, EdgeTurnStarted, EdgeSuperseded, EdgeFeedReset},
+	KindKeepaliveDriveStopped: {EdgeDaemonBoot},
+	KindKeepaliveUndelivered:  {EdgeKeepaliveSent, EdgeTurnStarted, EdgeSuperseded},
 }
 
 // wantMomentary is every kind the plan declares momentary.

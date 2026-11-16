@@ -72,6 +72,9 @@ const (
 	// process recorded about its OWN build, handle or sinks is over, and no
 	// strip of the new process draws it.
 	EdgeDaemonBoot Edge = "daemon_boot"
+	// EdgeKeepaliveSent is a keep-alive going out for the workspace: the
+	// cache keeper delivers to it again.
+	EdgeKeepaliveSent Edge = "keepalive_sent"
 )
 
 // Lifetime is how long one fault kind stands.
@@ -114,6 +117,9 @@ var faultLifetimes = map[string]Lifetime{
 	// or fails it again (the new fault supersedes it), or at the next boot,
 	// whose process draws no fault an earlier one opened.
 	KindDeployFailed: standing(EdgeDeployStepSucceeded, EdgeSuperseded, EdgeDaemonBoot),
+	// A cache keeper that stopped is this PROCESS's; the next process runs
+	// its own.
+	KindKeepaliveDriveStopped: standing(EdgeDaemonBoot),
 
 	// SESSION scope.
 	//
@@ -156,6 +162,10 @@ var faultLifetimes = map[string]Lifetime{
 	// turn starts, a later final-answer fault supersedes it, or the feed is
 	// reset to another conversation.
 	KindFinalAnswerUnresolved: standing(EdgeAnswerArrived, EdgeTurnStarted, EdgeSuperseded, EdgeFeedReset),
+	// An undelivered keep-alive ends when one goes out for the workspace, or
+	// its next turn starts (the turn writes the cache itself), or a later
+	// failure supersedes it.
+	KindKeepaliveUndelivered: standing(EdgeKeepaliveSent, EdgeTurnStarted, EdgeSuperseded),
 	// The reporter's OWN observations, derived per answer and never recorded:
 	// they cannot stand, because there is no record to stand.
 	KindSessionAbsent:   momentary,

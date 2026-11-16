@@ -3224,6 +3224,7 @@ type HostFault struct {
 	//	*HostFault_VendorStartRetrying
 	//	*HostFault_VendorStartRejected
 	//	*HostFault_VendorStartFailed
+	//	*HostFault_KeepaliveUndelivered
 	Kind          isHostFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3433,6 +3434,15 @@ func (x *HostFault) GetVendorStartFailed() *SessionFaultVendorStartFailed {
 	return nil
 }
 
+func (x *HostFault) GetKeepaliveUndelivered() *SessionFaultKeepaliveUndelivered {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_KeepaliveUndelivered); ok {
+			return x.KeepaliveUndelivered
+		}
+	}
+	return nil
+}
+
 type isHostFault_Kind interface {
 	isHostFault_Kind()
 }
@@ -3523,6 +3533,12 @@ type HostFault_VendorStartFailed struct {
 	VendorStartFailed *SessionFaultVendorStartFailed `protobuf:"bytes,19,opt,name=vendor_start_failed,json=vendorStartFailed,proto3,oneof"`
 }
 
+type HostFault_KeepaliveUndelivered struct {
+	// A keep-alive that was due could not be armed or sent, or was not sent
+	// before the cache lapsed.
+	KeepaliveUndelivered *SessionFaultKeepaliveUndelivered `protobuf:"bytes,20,opt,name=keepalive_undelivered,json=keepaliveUndelivered,proto3,oneof"`
+}
+
 func (*HostFault_ShimStartFailed) isHostFault_Kind() {}
 
 func (*HostFault_ShimDied) isHostFault_Kind() {}
@@ -3556,6 +3572,8 @@ func (*HostFault_VendorStartRetrying) isHostFault_Kind() {}
 func (*HostFault_VendorStartRejected) isHostFault_Kind() {}
 
 func (*HostFault_VendorStartFailed) isHostFault_Kind() {}
+
+func (*HostFault_KeepaliveUndelivered) isHostFault_Kind() {}
 
 // What the workspace's feed has selected, as Emacs needs it: which kind of
 // row, and the selected bubble's text, never the row, because Emacs never names
@@ -4132,7 +4150,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x10HostComposerOpen\"\x15\n" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
-	"\x16HostComposerRestarting\"\xcb\f\n" +
+	"\x16HostComposerRestarting\"\xb2\r\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
 	"\fopened_at_ms\x18\x02 \x01(\x03R\n" +
@@ -4155,7 +4173,8 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x17final_answer_unresolved\x18\x10 \x01(\v2/.agentrepl.v1.SessionFaultFinalAnswerUnresolvedH\x00R\x15finalAnswerUnresolved\x12c\n" +
 	"\x15vendor_start_retrying\x18\x11 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRetryingH\x00R\x13vendorStartRetrying\x12c\n" +
 	"\x15vendor_start_rejected\x18\x12 \x01(\v2-.agentrepl.v1.SessionFaultVendorStartRejectedH\x00R\x13vendorStartRejected\x12]\n" +
-	"\x13vendor_start_failed\x18\x13 \x01(\v2+.agentrepl.v1.SessionFaultVendorStartFailedH\x00R\x11vendorStartFailedB\x06\n" +
+	"\x13vendor_start_failed\x18\x13 \x01(\v2+.agentrepl.v1.SessionFaultVendorStartFailedH\x00R\x11vendorStartFailed\x12e\n" +
+	"\x15keepalive_undelivered\x18\x14 \x01(\v2..agentrepl.v1.SessionFaultKeepaliveUndeliveredH\x00R\x14keepaliveUndeliveredB\x06\n" +
 	"\x04kind\"\xbd\x02\n" +
 	"\x16HostWorkspaceSelection\x12>\n" +
 	"\x04none\x18\x01 \x01(\v2(.agentrepl.v1.HostWorkspaceSelectionNoneH\x00R\x04none\x12J\n" +
@@ -4273,6 +4292,7 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*SessionFaultVendorStartRetrying)(nil),        // 78: agentrepl.v1.SessionFaultVendorStartRetrying
 	(*SessionFaultVendorStartRejected)(nil),        // 79: agentrepl.v1.SessionFaultVendorStartRejected
 	(*SessionFaultVendorStartFailed)(nil),          // 80: agentrepl.v1.SessionFaultVendorStartFailed
+	(*SessionFaultKeepaliveUndelivered)(nil),       // 81: agentrepl.v1.SessionFaultKeepaliveUndelivered
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	56, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -4351,18 +4371,19 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	78, // 73: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
 	79, // 74: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
 	80, // 75: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
-	50, // 76: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
-	51, // 77: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
-	52, // 78: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
-	53, // 79: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
-	55, // 80: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	55, // 81: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	55, // 82: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	83, // [83:83] is the sub-list for method output_type
-	83, // [83:83] is the sub-list for method input_type
-	83, // [83:83] is the sub-list for extension type_name
-	83, // [83:83] is the sub-list for extension extendee
-	0,  // [0:83] is the sub-list for field type_name
+	81, // 76: agentrepl.v1.HostFault.keepalive_undelivered:type_name -> agentrepl.v1.SessionFaultKeepaliveUndelivered
+	50, // 77: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
+	51, // 78: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
+	52, // 79: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
+	53, // 80: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
+	55, // 81: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	55, // 82: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	55, // 83: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	84, // [84:84] is the sub-list for method output_type
+	84, // [84:84] is the sub-list for method input_type
+	84, // [84:84] is the sub-list for extension type_name
+	84, // [84:84] is the sub-list for extension extendee
+	0,  // [0:84] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -4456,6 +4477,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostFault_VendorStartRetrying)(nil),
 		(*HostFault_VendorStartRejected)(nil),
 		(*HostFault_VendorStartFailed)(nil),
+		(*HostFault_KeepaliveUndelivered)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[49].OneofWrappers = []any{
 		(*HostWorkspaceSelection_None)(nil),

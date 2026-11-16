@@ -41,6 +41,7 @@ func TestFaultFooterCellPartitionsEverySessionKind(t *testing.T) {
 		{"a bounce disposition needing a human", KindBounceUnknown, FaultCell{FaultStatusNone, ""}},
 		{"a conversation a fresh bring-up left behind", KindConversationAbandoned, FaultCell{FaultStatusNone, ""}},
 		{"a turn whose answer did not land", KindFinalAnswerUnresolved, FaultCell{FaultStatusNone, ""}},
+		{"a keep-alive the keeper did not deliver", KindKeepaliveUndelivered, FaultCell{FaultStatusNone, ""}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -101,6 +102,18 @@ func TestFaultFooterCellLeavesTheStatusToAFailedDeploy(t *testing.T) {
 	}
 	if got != (FaultCell{}) {
 		t.Fatalf("FaultFooterCell(%q, daemon) = %+v, want the non-escalating cell", KindDeployFailed, got)
+	}
+}
+
+// TestFaultFooterCellLeavesTheStatusToAStoppedKeeper: every session serves,
+// so a keeper that stopped claims the activity line alone.
+func TestFaultFooterCellLeavesTheStatusToAStoppedKeeper(t *testing.T) {
+	// Arrange, Act
+	got, ok := FaultFooterCell(KindKeepaliveDriveStopped, true)
+
+	// Assert
+	if !ok || got != (FaultCell{}) {
+		t.Fatalf("FaultFooterCell(%q, daemon) = %+v, %v; want the non-escalating cell", KindKeepaliveDriveStopped, got, ok)
 	}
 }
 

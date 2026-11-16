@@ -1150,6 +1150,21 @@ The vendor failed every attempt for the whole retry window; the daemon gave up."
            :failing-since-ms (agent-repl-wire--decode-int64
                               "SessionFaultVendorStartFailed" 'failingSinceMs object)))))
 
+(defun agent-repl-wire-decode-session-fault-keepalive-undelivered (value)
+  "Decode VALUE as `SessionFaultKeepaliveUndelivered', a plist
+(`:cause' `:due-at-ms').
+A keep-alive the cache keeper owed the workspace and did not deliver: it
+could not be armed or sent, or the cache lapsed after it came due.
+`:due-at-ms' is 0 when the keeper could not time it."
+  (let ((object (agent-repl-wire--object "SessionFaultKeepaliveUndelivered" value)))
+    (agent-repl-wire--check-keys "SessionFaultKeepaliveUndelivered" object '(cause dueAtMs))
+    (agent-repl-wire--decoded
+     "SessionFaultKeepaliveUndelivered"
+     (list :cause (agent-repl-wire--decode-string
+                   "SessionFaultKeepaliveUndelivered" 'cause object)
+           :due-at-ms (agent-repl-wire--decode-int64
+                       "SessionFaultKeepaliveUndelivered" 'dueAtMs object)))))
+
 ;;;; ---- conversation.v1.LockHolderFailure ----
 
 (defun agent-repl-wire-decode-lock-holder-spawn-failed (value)

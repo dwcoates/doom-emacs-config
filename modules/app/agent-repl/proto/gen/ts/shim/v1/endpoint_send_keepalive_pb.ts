@@ -267,6 +267,13 @@ export const SendKeepaliveSkippedDetachedWorkLiveSchema: GenMessage<SendKeepaliv
  * cold read the cold gate exists to make the user decide on, so the cold
  * gate owns the next request.
  *
+ * A CACHE IS LAPSED WHEN ITS LAST REQUEST LEFT THE CONTEXT UNCACHED, whatever
+ * its tier (2026-11-11, torch-human-cancel-hang: a vendor-error retry sent
+ * ~916k tokens uncached and wrote nothing, and the keep-alive after it
+ * rewrote the whole context). Warmth is judged from what the vendor's usage
+ * block says it cached, never from when the request happened; the cache then
+ * lapsed at that request.
+ *
  * @generated from message shim.v1.SendKeepaliveSkippedCacheLapsed
  */
 export type SendKeepaliveSkippedCacheLapsed = Message<"shim.v1.SendKeepaliveSkippedCacheLapsed"> & {

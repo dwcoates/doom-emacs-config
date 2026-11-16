@@ -3773,6 +3773,14 @@ at."
                    '(:detail "" :kind (:arm :vendor-start-failed
                                        :value (:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-session-fault-keepalive-undelivered-kind ()
+  "SessionFault's `keepalive_undelivered' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"keepaliveUndelivered\":{\"cause\":\"submit failed\",\"dueAtMs\":\"2000\"}}"))
+                   '(:detail "" :kind (:arm :keepalive-undelivered
+                                       :value (:cause "submit failed" :due-at-ms 2000)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-session-fault-shim-died-kind ()
   "SessionFault's `shim_died' kind decodes with everything it carries."
   (agent-repl-test-wire-verbs--with-common
@@ -3878,11 +3886,11 @@ carries: the turn, the unit, and the `why' that IS this kind's substatus."
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-session-fault-kind-arms-pinned ()
-  "SessionFault's kind oneof has exactly the seventeen arms decoded here."
+  "SessionFault's kind oneof has exactly the eighteen arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_session_health.pb.go" "SessionFault")
                        #'string<)
-                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed")
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported" "conversationAbandoned" "sessionAbsent" "watchOpenRefused" "daemonStateUnreadable" "adoptionWindowExpired" "finalAnswerUnresolved" "vendorStartRetrying" "vendorStartRejected" "vendorStartFailed" "keepaliveUndelivered")
                        #'string<))))
 
 ;;;; ---- DaemonFault kinds (landing 4) ------------------------------------
@@ -3941,6 +3949,13 @@ carries."
     (should (equal (agent-repl-wire-decode-daemon-fault
                     (agent-repl-test-wire-verbs--parse "{\"daemonStateUnreadable\":{\"cause\":\"state client refused\"}}"))
                    '(:detail "" :kind (:arm :daemon-state-unreadable :value (:cause "state client refused")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-keepalive-drive-stopped-kind ()
+  "DaemonFault's `keepalive_drive_stopped' kind carries why the keeper stopped."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"keepaliveDriveStopped\":{\"cause\":\"disk I/O error\"}}"))
+                   '(:detail "" :kind (:arm :keepalive-drive-stopped :value (:cause "disk I/O error")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-failed-kind ()
   "DaemonFault's `deploy_failed' kind decodes each failed step with the very
@@ -4002,11 +4017,11 @@ here."
                  (sort (list "build" "install" "restartServices" "rollback") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
-  "DaemonFault's kind oneof has exactly the seven arms decoded here."
+  "DaemonFault's kind oneof has exactly the eight arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
                        #'string<)
-                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable" "deployFailed")
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly" "daemonStateUnreadable" "deployFailed" "keepaliveDriveStopped")
                        #'string<))))
 
 ;;;; ---- Interrupt -------------------------------------------------------
