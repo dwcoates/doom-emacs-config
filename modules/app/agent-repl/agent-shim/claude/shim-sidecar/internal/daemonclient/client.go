@@ -357,7 +357,10 @@ func (c *Client) resolveWorkspace(
 		_ = stream.Close()
 	}()
 	// The roster topic replays its current, COMPLETE snapshot to every fresh
-	// subscriber as the first streamed message (see the daemon's serveTopic).
+	// subscriber as the first streamed message, every stream of the push set
+	// (see the daemon's watchWorkspaceRoster). A MERGED workspace is in no
+	// stream (agentrepl.v1.ListMergedWorkspaces pages it), so its dir is
+	// absent here like any other dir the roster does not carry.
 	// So the first delivered roster is authoritative for "which workspaces
 	// exist right now": if it does not name this dir, the dir is not a real
 	// workspace -- a temp-root, or an unknown path -- and it will never appear.
@@ -367,7 +370,7 @@ func (c *Client) resolveWorkspace(
 	// errored or never connected), which stays a transport failure below.
 	if stream.Receive() {
 		switch stream.Msg().GetPush().(type) {
-		case *agentreplv1.WatchWorkspaceRosterResponse_Roster:
+		case *agentreplv1.WatchWorkspaceRosterResponse_Streams:
 		case *agentreplv1.WatchWorkspaceRosterResponse_Ending:
 			// THE DAEMON IS STANDING DOWN BEFORE IT DELIVERED A ROSTER: a
 			// planned exit, not an answer. It says nothing about whether the
@@ -381,7 +384,7 @@ func (c *Client) resolveWorkspace(
 			return nil, fmt.Errorf("WatchWorkspaceRoster at %s delivered a frame with no push arm this client reads (%T), not a roster for workspace %q",
 				address, stream.Msg().GetPush(), wanted)
 		}
-		ref, err := workspaceRefInRoster(stream.Msg().GetRoster(), wanted)
+		ref, err := workspaceRefInRoster(stream.Msg().GetStreams(), wanted)
 		if err != nil {
 			return nil, fmt.Errorf("resolve workspace ref from roster at %s: %w", address, err)
 		}
@@ -425,7 +428,10 @@ func normalizeWorkspaceDir(dir string) (string, error) {
 	}
 }
 
-func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) (*workspacev1.WorkspaceRef, error) {
+// workspaceRefInRoster answers the ref of the row at WANTEDDIR in PUSH, a
+// subscription's first push, which carries every stream: the open, hidden
+// and closed rows. Nil when none is there.
+func workspaceRefInRoster(push *frontendv1.RosterPush, wantedDir string) (*workspacev1.WorkspaceRef, error) {
 	var found *workspacev1.WorkspaceRef
 	visit := func(ref *workspacev1.WorkspaceRef) error {
 		if ref == nil || filepath.Clean(ref.GetDir()) != wantedDir {
@@ -440,7 +446,7 @@ func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) 
 		found = ref
 		return nil
 	}
-	for _, row := range rosterwalk.AllRows(roster) {
+	for _, row := range rosterwalk.AllRows(push) {
 		if err := visit(row.GetWorkspace().GetWorkspace()); err != nil {
 			return nil, err
 		}

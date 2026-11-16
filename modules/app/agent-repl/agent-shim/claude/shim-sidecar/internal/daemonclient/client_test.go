@@ -428,13 +428,13 @@ func TestForwardTakesTransportPathWhenRosterStreamErrors(t *testing.T) {
 }
 
 func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
-	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: firstPush(&frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Entries: rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: &frontendv1.RosterRow{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
 			}}}),
 		}}},
-	}}}
+	})}}
 }
 
 func TestAddressLineTakesTheFirstLineOfTheAdvertisement(t *testing.T) {
@@ -950,11 +950,11 @@ func rosterResponseFor(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorks
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
 		}})
 	}
-	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: firstPush(&frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Entries: rosterwalk.RowEntries(rows),
 		}}},
-	}}}
+	})}}
 }
 
 // tempWorkspaceDir is a directory spelled the way the roster spells it, so a
@@ -1189,5 +1189,63 @@ func TestForwardStatesNoReplacementWhenARereadConfirmsTheSameRef(t *testing.T) {
 	// Assert.
 	if replacements != 0 {
 		t.Fatalf("ref-replaced observations = %d, want none for an unchanged ref", replacements)
+	}
+}
+
+// firstPush is a subscription's first roster push: every stream set, the
+// workspaces stream ROSTER.
+func firstPush(roster *frontendv1.WorkspaceRoster) *frontendv1.RosterPush {
+	return &frontendv1.RosterPush{Revision: 1, Workspaces: roster, MergeQueue: &frontendv1.RosterMergeQueueSection{},
+		RecentlyMerged: &frontendv1.RosterMergedSection{}, Closed: &frontendv1.RosterClosedRows{}}
+}
+
+func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
+	row := func(id, dir string) *frontendv1.RosterRow {
+		return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: dir}}}
+	}
+	push := func(open, hidden, closed *frontendv1.RosterRow) *frontendv1.RosterPush {
+		out := firstPush(&frontendv1.WorkspaceRoster{
+			Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{}}},
+			Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{}},
+		})
+		if open != nil {
+			out.Workspaces.Repository.Sections[0].Entries = rosterwalk.RowEntries([]*frontendv1.RosterOpenRow{{Row: open}})
+		}
+		if hidden != nil {
+			out.Workspaces.Hidden.HiddenRows.Rows = []*frontendv1.RosterHiddenRow{{Row: hidden}}
+		}
+		if closed != nil {
+			out.Closed.Rows = []*frontendv1.RosterClosedRow{{Row: closed}}
+		}
+		return out
+	}
+	tests := []struct {
+		name    string
+		push    *frontendv1.RosterPush
+		wantID  string
+		wantErr string
+	}{
+		{name: "an open row", push: push(row("ws-o", "/w/x"), nil, nil), wantID: "ws-o"},
+		{name: "a hidden row", push: push(nil, row("ws-h", "/w/x"), nil), wantID: "ws-h"},
+		{name: "a closed row, on the closed stream", push: push(nil, nil, row("ws-c", "/w/x")), wantID: "ws-c"},
+		{name: "a dir no stream carries", push: push(row("ws-o", "/w/other"), nil, nil)},
+		{name: "a dir two workspaces claim", push: push(row("ws-o", "/w/x"), nil, row("ws-c", "/w/x")), wantErr: "appears under both"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := workspaceRefInRoster(tt.push, "/w/x")
+
+			// Assert.
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got.GetId() != tt.wantID {
+				t.Fatalf("workspaceRefInRoster = %v, %v; want %q", got, err, tt.wantID)
+			}
+		})
 	}
 }

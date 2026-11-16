@@ -181,11 +181,11 @@ func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRos
 			Workspace: &frontendv1.RosterRowWorkspace{Workspace: ref},
 		}})
 	}
-	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Roster{Roster: &frontendv1.WorkspaceRoster{
+	return &agentreplv1.WatchWorkspaceRosterResponse{Push: &agentreplv1.WatchWorkspaceRosterResponse_Streams{Streams: firstPush(&frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
 			Entries: rosterwalk.RowEntries(rows),
 		}}},
-	}}}
+	})}}
 }
 
 func (f *fakeClientLog) handle(
@@ -267,4 +267,11 @@ func (f *fakeClientLog) awaitRequest(ctx context.Context, match func(*agentreplv
 			f.t.Fatalf("no matching ClientLog request before the deadline; requests=%s", encoded)
 		}
 	}
+}
+
+// firstPush is a subscription's first roster push: every stream set, the
+// workspaces stream ROSTER.
+func firstPush(roster *frontendv1.WorkspaceRoster) *frontendv1.RosterPush {
+	return &frontendv1.RosterPush{Revision: 1, Workspaces: roster, MergeQueue: &frontendv1.RosterMergeQueueSection{},
+		RecentlyMerged: &frontendv1.RosterMergedSection{}, Closed: &frontendv1.RosterClosedRows{}}
 }
