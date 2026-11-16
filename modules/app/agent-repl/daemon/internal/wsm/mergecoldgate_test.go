@@ -231,10 +231,11 @@ func TestClearMergeColdGatedAnswersNoChangeForAnUnmarkedMerge(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repo := RepoKey(t.TempDir())
-	first, second, third := threeInLine(t, s, repo)
+	first, second, _ := threeInLine(t, s, repo)
 	if err := s.AdmitMerge(context.Background(), repo, second); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	before := queueOrder(t, s, repo)
 
 	// Act
 	changed, err := s.ClearMergeColdGated(context.Background(), repo, first, []WorkspaceID{second})
@@ -243,8 +244,8 @@ func TestClearMergeColdGatedAnswersNoChangeForAnUnmarkedMerge(t *testing.T) {
 	if err != nil || changed {
 		t.Fatalf("ClearMergeColdGated = %v, %v; want no change", changed, err)
 	}
-	if got := queueOrder(t, s, repo); !slices.Equal(got, []WorkspaceID{first, second, third}) {
-		t.Fatalf("queue = %v, want an unmarked merge never moved", got)
+	if got := queueOrder(t, s, repo); !slices.Equal(got, before) {
+		t.Fatalf("queue = %v, want an unmarked merge never moved from %v", got, before)
 	}
 }
 
