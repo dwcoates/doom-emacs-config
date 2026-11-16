@@ -120,7 +120,7 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	// Arrange: a gate whose FIRST run holds -- the daemon's exit cuts it --
 	// and whose every later run passes.
 	repo := harness.NewRepo(t)
-	env, started := firstRunHoldsGate(t)
+	env, started, hold := firstRunHoldsGate(t)
 	repo.DeploysAsAgentRepl()
 	// A merge-spanning wait chains dozens of subprocesses; see harness.MergeChainTimeout.
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.MergeChainTimeout, ExtraEnv: env})
@@ -148,10 +148,11 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 		ExtraEnv: append(env, "AGENT_REPL_LOCK_DIR="+d.LockDir)})
 	f.d = d2
 
-	// Assert: the stop cut the gate and said so, the restart resumed the merge
-	// at its tests under the lease it already held, and it landed.
-	d.AwaitLogRecord(d.RunLogPath(), "the gate's cut", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.merge.drain" && strings.Contains(r.Message, "runs it again from its start")
+	// Assert: the stop left the gate's run going and said so, the restart
+	// resumed the merge at its tests under the lease it already held, watched
+	// that run to its end, and landed.
+	d.AwaitLogRecord(d.RunLogPath(), "the gate's run left going", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.drain" && strings.Contains(r.Message, "the resumed merge watches it again")
 	})
 	resumed := d2.AwaitLogRecord(d2.RunLogPath(), "the merge's resume", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.merge.recover" && strings.Contains(r.Message, "resumes at the step it recorded")
@@ -159,6 +160,7 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	if resumed.Context["step"] != "tests" || resumed.Context["lease"] != lease {
 		t.Fatalf("the resume record is %v, want step tests under lease %s", resumed.Context, lease)
 	}
+	releaseHold(t, hold)
 	d2.AwaitLandingDeployed()
 	for _, record := range daemonErrorRecords(t, d2) {
 		if strings.HasPrefix(record.Operation, "daemon.merge.") {
@@ -167,15 +169,17 @@ func TestAMergeStoppedInItsTestGateResumesAfterARestartAndLands(t *testing.T) {
 	}
 }
 
-// firstRunHoldsGate writes a test gate whose FIRST run holds on a pipe nobody
-// writes -- whatever stops the merge cuts it -- and whose every later run
-// passes. It answers the daemon environment naming the gate and the file the
-// first run creates as it begins holding.
-func firstRunHoldsGate(t *testing.T) (env []string, started string) {
+// firstRunHoldsGate writes a test gate whose FIRST run holds on a pipe until
+// the test releases it (releaseHold on HOLD), and whose every later run
+// passes. The run goes on on the test service through any stop of the merge,
+// and the resumed merge watches it. It answers the daemon environment naming
+// the gate, the file the first run creates as it begins holding, and the
+// pipe.
+func firstRunHoldsGate(t *testing.T) (env []string, started, hold string) {
 	t.Helper()
 	gateDir := t.TempDir()
 	started = filepath.Join(gateDir, "first-run")
-	hold := filepath.Join(gateDir, "hold")
+	hold = filepath.Join(gateDir, "hold")
 	if err := syscall.Mkfifo(hold, 0o600); err != nil {
 		t.Fatalf("making the gate's pipe: %v", err)
 	}
@@ -193,7 +197,7 @@ func firstRunHoldsGate(t *testing.T) (env []string, started string) {
 	if err := os.WriteFile(gate, []byte(body), 0o755); err != nil {
 		t.Fatalf("writing the gate: %v", err)
 	}
-	return []string{harness.TestAllScriptEnv(gate)}, started
+	return []string{harness.TestAllScriptEnv(gate)}, started, hold
 }
 
 // releaseHold gives a reader blocked on the pipe at path its EOF, and does
@@ -222,7 +226,7 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	t.Parallel()
 	// Arrange: a merge held inside its test gate.
 	repo := harness.NewRepo(t)
-	env, started := firstRunHoldsGate(t)
+	env, started, hold := firstRunHoldsGate(t)
 	repo.DeploysAsAgentRepl()
 	// The handover chains a second real daemon's boot onto this one's context.
 	d := harness.StartDaemon(t, harness.Opts{DurableState: true, Timeout: harness.HandoverChainTimeout, ExtraEnv: env})
@@ -282,6 +286,7 @@ func TestAMergeRunningThroughAHandoverResumesInTheSuccessorAndLands(t *testing.T
 	if resumed.Context["step"] != "tests" || resumed.Context["lease"] != lease {
 		t.Fatalf("the successor's resume record is %v, want step tests under lease %s", resumed.Context, lease)
 	}
+	releaseHold(t, hold)
 	d.AwaitRunLogRecordFromAnyProcess("the successor's landing", func(r harness.LogRecord) bool {
 		return r.PID != d.PID() && harness.IsLandingDeployed(r)
 	})
