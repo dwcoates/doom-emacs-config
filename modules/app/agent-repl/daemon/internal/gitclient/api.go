@@ -171,6 +171,10 @@ type Git interface {
 	// AbortRebase ends the rebase standing in dir's checkout, putting the
 	// branch back where it stood before the rebase began.
 	AbortRebase(ctx context.Context, dir string) error
+	// RestoreBranchHead puts the branch checked out in dir back at HEAD, a
+	// commit it stood at before, keeping nothing uncommitted it would lose
+	// (`git reset --keep`).
+	RestoreBranchHead(ctx context.Context, dir, head string) error
 	// AddWorktree checks an existing branch out at worktreeDir.
 	AddWorktree(ctx context.Context, repoDir, worktreeDir, branch string) error
 	// FetchBranch fetches one branch of remote into the daemon's private ref

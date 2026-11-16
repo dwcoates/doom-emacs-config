@@ -2865,3 +2865,61 @@ func TestEveryCommitBriefTakesTheBranchItsWorktreeAndTheTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestARebaseThatDropsEveryCommitPutsTheBranchBackAndFailsTheMerge(t *testing.T) {
+	tests := []struct {
+		name       string
+		restoreErr error
+		wantRecord string
+	}{
+		{name: "the branch is put back where it stood", wantRecord: "the rebase dropped every commit of the branch; the branch is put back where it stood before the rebase and the merge fails"},
+		{name: "a branch that cannot be put back is recorded", restoreErr: errors.New("reset refused"),
+			wantRecord: "the rebase dropped every commit of the branch, and the branch could not be put back where it stood"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the branch's head before the rebase, and a rebase that
+			// drops both of its commits.
+			h := newHarness(t)
+			landing(h, 2)
+			h.git.mu.Lock()
+			h.git.refSeqs["feature"] = []string{"beforehead0001"}
+			h.git.dropsEveryCommit, h.git.restoreErr = true, tt.restoreErr
+			h.git.mu.Unlock()
+
+			// Act
+			admitted(t, h)
+
+			// Assert
+			h.git.mu.Lock()
+			restored := slices.Clone(h.git.restoredHeads)
+			h.git.mu.Unlock()
+			if !slices.Equal(restored, []string{"beforehead0001"}) {
+				t.Fatalf("restored heads = %v, want the branch put back at its head before the rebase", restored)
+			}
+			if got := h.footer.last(); got.State != StateFailed {
+				t.Fatalf("facts = %+v, want the merge failed", got)
+			}
+			if h.git.seen("fast_forward") || h.git.seen("merge_no_ff") {
+				t.Fatalf("git was asked %v, want nothing landed", h.git.calls)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.rebase", Message: tt.wantRecord}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", h.logs.Records(), tt.wantRecord)
+			}
+		})
+	}
+}
+
+func TestARebaseThatKeepsItsCommitsRestoresNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 2)
+
+	// Act
+	admitted(t, h)
+
+	// Assert
+	if h.git.seen("restore_branch_head") {
+		t.Fatalf("git was asked %v, want no branch restored", h.git.calls)
+	}
+}
