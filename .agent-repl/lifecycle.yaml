@@ -42,7 +42,8 @@ queue_drained:
 # docs/investigations/2026-11-14-deploy-intake-plan.md). Each chain of
 # deploys has a hidden intake (sonnet, low effort) that approves, escalates,
 # or dispatches what the deploy broke to a visible remediation workspace
-# (opus, medium effort), whose finish gates, lands directly and deploys. After
+# (opus, low effort), whose finish gates, lands directly and deploys; an
+# escalation is a visible workspace (opus, medium effort). After
 # 4 remediations in a row the intake may only escalate.
 deploy_checks:
   remediations_before_escalation: 4

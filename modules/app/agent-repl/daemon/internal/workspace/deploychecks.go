@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/lifecycleconfig"
+	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
 
@@ -24,15 +25,31 @@ import (
 // under.
 const opDeployChecks = "daemon.workspace.deploy_checks"
 
-// The models and efforts the owner ruled (2026-11-14): the intake states
-// problems and decides, on sonnet at low effort; the remediation researches,
-// designs and fixes, on opus at medium effort.
+// The models and efforts the owner ruled: the intake states problems and
+// decides, on sonnet at low effort (2026-11-14); the remediation fixes what
+// it is dispatched, on opus at low effort, and the escalation settles a
+// deploy with the user, on opus at medium effort (2026-11-16).
 const (
 	intakeModel       = WorkDefaultLaunchModel
 	intakeEffort      = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
 	remediationModel  = DefaultLaunchModel
-	remediationEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM
+	remediationEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
+	escalationEffort  = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM
 )
+
+// deployCheckEffort is ROLE's effort. A role outside the three is a
+// caller's defect and panics.
+func deployCheckEffort(role merge.DeployCheckRole) conversationv1.AgentEffortLevel {
+	switch role {
+	case merge.DeployCheckIntake:
+		return intakeEffort
+	case merge.DeployCheckRemediation:
+		return remediationEffort
+	case merge.DeployCheckEscalation:
+		return escalationEffort
+	}
+	panic(fmt.Sprintf("workspace: no effort for deploy check role %v", role))
+}
 
 // deployCheckSpec is the create of the deploy check workspace NAME of the
 // repository at REPODIR on MODEL: hidden when HIDDEN, with no initial prompt.
@@ -74,15 +91,12 @@ func (v *verbs) createDeployCheck(ctx context.Context, role string, spec CreateS
 	return made, nil
 }
 
-// SetDeployCheckEffort implements Verbs: sets WS to its role's effort, the
-// intake's when INTAKE and the remediation's otherwise. A sessionless
-// workspace's shim starts for it, so its role is recorded before.
-func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, intake bool) error {
-	role, effort := "remediation", remediationEffort
-	if intake {
-		role, effort = "intake", intakeEffort
-	}
-	fields := dlog.Context{"workspace": string(ws), "role": role, "effort": effort.String()}
+// SetDeployCheckEffort implements Verbs: sets WS to ROLE's effort
+// (deployCheckEffort). A sessionless workspace's shim starts for it, so its
+// role is recorded before.
+func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, role merge.DeployCheckRole) error {
+	effort := deployCheckEffort(role)
+	fields := dlog.Context{"workspace": string(ws), "role": role.String(), "effort": effort.String()}
 	// A WORKSPACE WITH NO SESSION YET SERVES NO EFFORT SELECTOR, so its level
 	// is picked rather than set: the session the role's brief starts comes up
 	// at the pick (Fleet.reapplyEffort). Setting it through the selector

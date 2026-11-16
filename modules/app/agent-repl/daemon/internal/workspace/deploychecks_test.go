@@ -7,6 +7,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/merge"
 )
 
 func TestTheDeployCheckWorkspacesAreMadeOnTheirModelsWithNoPrompt(t *testing.T) {
@@ -72,22 +73,23 @@ func TestADeployCheckWorkspaceIsMadeUnpromptedWithNoSession(t *testing.T) {
 
 func TestADeployCheckWorkspaceIsSetToItsRolesEffort(t *testing.T) {
 	tests := []struct {
-		name   string
-		intake bool
-		want   conversationv1.AgentEffortLevel
+		name string
+		role merge.DeployCheckRole
+		want conversationv1.AgentEffortLevel
 	}{
-		{name: "the intake at low effort", intake: true, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW},
-		{name: "the remediation at medium effort", want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM},
+		{name: "the intake at low effort", role: merge.DeployCheckIntake, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW},
+		{name: "the remediation at low effort", role: merge.DeployCheckRemediation, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW},
+		{name: "the escalation at medium effort", role: merge.DeployCheckEscalation, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
 			ws := f.workspace("w1", t.TempDir()).ID
-			f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{intakeEffort, remediationEffort}, true
+			f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{intakeEffort, remediationEffort, escalationEffort}, true
 
 			// Act
-			err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, tt.intake)
+			err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, tt.role)
 
 			// Assert
 			if err != nil || len(f.fleet.efforts) != 1 || f.fleet.efforts[0].Level != tt.want {
@@ -103,7 +105,7 @@ func TestASessionlessDeployCheckWorkspaceHasItsEffortPickedForItsStart(t *testin
 	ws := f.workspace("w1", t.TempDir()).ID
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, true)
+	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, merge.DeployCheckIntake)
 
 	// Assert
 	if err != nil || f.topbarPicked != intakeEffort || len(f.fleet.efforts) != 0 {
@@ -121,7 +123,7 @@ func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
 	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{remediationEffort}, true
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, true)
+	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, merge.DeployCheckIntake)
 
 	// Assert
 	if err == nil {

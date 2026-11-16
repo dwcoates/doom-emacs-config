@@ -4467,24 +4467,20 @@ type fakeDeployChecks struct {
 	// and closeErr fail them.
 	reopened, closed    []ids.WorkspaceID
 	reopenErr, closeErr error
-	// efforts records each effort set, "intake:WS" or "remediation:WS", and
+	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
 	effortErr error
 }
 
-func (f *fakeDeployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error {
+func (f *fakeDeployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, deployRole DeployCheckRole) error {
 	role, err := f.db.MediationRoleOf(ctx, ws)
 	if err != nil {
 		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	kind := "remediation"
-	if intake {
-		kind = "intake"
-	}
-	f.efforts = append(f.efforts, fmt.Sprintf("%s:%s:recorded=%v", kind, ws, role != nil))
+	f.efforts = append(f.efforts, fmt.Sprintf("%s:%s:recorded=%v", deployRole, ws, role != nil))
 	return f.effortErr
 }
 
